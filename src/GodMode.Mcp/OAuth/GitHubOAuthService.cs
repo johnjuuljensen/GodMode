@@ -20,7 +20,7 @@ public class GitHubOAuthService
 
     public string GetAuthorizationUrl(string state, string redirectUri)
     {
-        var scopes = "repo,read:user";
+        var scopes = "codespace,read:user";
         return $"https://github.com/login/oauth/authorize?client_id={_clientId}&redirect_uri={Uri.EscapeDataString(redirectUri)}&scope={scopes}&state={state}";
     }
 

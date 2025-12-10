@@ -287,7 +287,8 @@ public static class OAuthEndpoints
             AccessToken = token.AccessToken,
             TokenType = "Bearer",
             ExpiresIn = 3600,
-            Scope = "repo read:user"
+            RefreshToken = token.AccessToken, // Claude requires this field
+            Scope = "codespace read:user"
         });
     }
 
