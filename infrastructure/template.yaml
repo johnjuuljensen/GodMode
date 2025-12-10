@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: GodMode MCP Server - GitHub integration for Claude
+
+Parameters:
+  GitHubClientId:
+    Type: String
+    Description: GitHub OAuth App Client ID
+  GitHubClientSecret:
+    Type: String
+    Description: GitHub OAuth App Client Secret
+    NoEcho: true
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+
+Resources:
+  McpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: GodMode.Mcp
+      Runtime: dotnet8
+      CodeUri: ../src/GodMode.Mcp/
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          GitHub__ClientId: !Ref GitHubClientId
+          GitHub__ClientSecret: !Ref GitHubClientSecret
+          DynamoDB__TableName: !Ref McpTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref McpTable
+      Events:
+        ProxyApi:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+        RootApi:
+          Type: HttpApi
+          Properties:
+            Path: /
+            Method: ANY
+
+  McpTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: GodModeMcp
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: TTL
+        Enabled: true
+
+Outputs:
+  McpEndpoint:
+    Description: MCP Server URL (add to Claude)
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/mcp"
+  OAuthMetadataUrl:
+    Description: OAuth Authorization Server Metadata URL
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/.well-known/oauth-authorization-server"
