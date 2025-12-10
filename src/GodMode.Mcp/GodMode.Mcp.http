@@ -1,0 +1,49 @@
+@host = http://localhost:56360
+
+### Append output to agent (triggers resource notification)
+POST {{host}}/agent/test-agent/output
+Content-Type: application/json
+
+{
+  "line": "Hello from Claude!"
+}
+
+### Append another line
+POST {{host}}/agent/test-agent/output
+Content-Type: application/json
+
+{
+  "line": "Working on your task..."
+}
+
+### Append to a different agent
+POST {{host}}/agent/project-alpha/output
+Content-Type: application/json
+
+{
+  "line": "Starting build process"
+}
+
+### Simulate multi-line output
+POST {{host}}/agent/test-agent/output
+Content-Type: application/json
+
+{
+  "line": "$ npm install"
+}
+
+###
+POST {{host}}/agent/test-agent/output
+Content-Type: application/json
+
+{
+  "line": "added 150 packages in 3s"
+}
+
+###
+POST {{host}}/agent/test-agent/output
+Content-Type: application/json
+
+{
+  "line": "✓ Dependencies installed successfully"
+}
