@@ -1,6 +1,7 @@
 using Amazon.DynamoDBv2;
 using GodMode.Mcp.Auth;
 using GodMode.Mcp.OAuth;
+using GodMode.Mcp.Resources;
 using GodMode.Mcp.Tools;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -31,7 +32,8 @@ builder.Services.AddHttpContextAccessor();
 // MCP Server
 builder.Services.AddMcpServer()
     .WithHttpTransport()
-    .WithTools<CodespacesTools>();
+    .WithTools<CodespacesTools>()
+    .WithResources<ConfigResources>();
 
 var app = builder.Build();
 

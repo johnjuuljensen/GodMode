@@ -15,6 +15,7 @@ public interface IOAuthStore
 
     Task<TokenRecord> CreateTokenAsync(string clientId, string gitHubUserId, string gitHubAccessToken);
     Task<TokenRecord?> GetTokenAsync(string accessToken);
+    Task<TokenRecord?> GetTokenByRefreshTokenAsync(string refreshToken);
     Task DeleteTokenAsync(string accessToken);
 
     Task StoreGitHubStateAsync(string state, string clientId, string redirectUri, string codeChallenge, string codeChallengeMethod);

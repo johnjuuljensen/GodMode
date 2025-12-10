@@ -8,6 +8,7 @@ public class InMemoryOAuthStore : IOAuthStore
     private readonly ConcurrentDictionary<string, OAuthClient> _clients = new();
     private readonly ConcurrentDictionary<string, AuthorizationCode> _authCodes = new();
     private readonly ConcurrentDictionary<string, TokenRecord> _tokens = new();
+    private readonly ConcurrentDictionary<string, string> _refreshTokens = new(); // refreshToken -> accessToken
     private readonly ConcurrentDictionary<string, (string ClientId, string RedirectUri, string CodeChallenge, string CodeChallengeMethod)> _gitHubStates = new();
 
     public Task<OAuthClient> CreateClientAsync(ClientRegistrationRequest request)
@@ -69,8 +70,10 @@ public class InMemoryOAuthStore : IOAuthStore
     public Task<TokenRecord> CreateTokenAsync(string clientId, string gitHubUserId, string gitHubAccessToken)
     {
         var accessToken = GenerateSecureToken();
+        var refreshToken = GenerateSecureToken();
         var token = new TokenRecord(
             accessToken,
+            refreshToken,
             clientId,
             gitHubUserId,
             gitHubAccessToken,
@@ -78,6 +81,7 @@ public class InMemoryOAuthStore : IOAuthStore
         );
 
         _tokens[accessToken] = token;
+        _refreshTokens[refreshToken] = accessToken;
         return Task.FromResult(token);
     }
 
@@ -89,15 +93,30 @@ public class InMemoryOAuthStore : IOAuthStore
         if (token.ExpiresAt < DateTime.UtcNow)
         {
             _tokens.TryRemove(accessToken, out _);
+            _refreshTokens.TryRemove(token.RefreshToken, out _);
             return Task.FromResult<TokenRecord?>(null);
         }
 
         return Task.FromResult<TokenRecord?>(token);
     }
 
+    public Task<TokenRecord?> GetTokenByRefreshTokenAsync(string refreshToken)
+    {
+        if (!_refreshTokens.TryGetValue(refreshToken, out var accessToken))
+            return Task.FromResult<TokenRecord?>(null);
+
+        if (!_tokens.TryGetValue(accessToken, out var token))
+            return Task.FromResult<TokenRecord?>(null);
+
+        return Task.FromResult<TokenRecord?>(token);
+    }
+
     public Task DeleteTokenAsync(string accessToken)
     {
-        _tokens.TryRemove(accessToken, out _);
+        if (_tokens.TryRemove(accessToken, out var token))
+        {
+            _refreshTokens.TryRemove(token.RefreshToken, out _);
+        }
         return Task.CompletedTask;
     }
 

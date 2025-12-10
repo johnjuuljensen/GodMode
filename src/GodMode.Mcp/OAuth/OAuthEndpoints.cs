@@ -26,10 +26,10 @@ public static class OAuthEndpoints
             TokenEndpoint = $"{baseUrl}/token",
             RegistrationEndpoint = $"{baseUrl}/register",
             ResponseTypesSupported = ["code"],
-            GrantTypesSupported = ["authorization_code"],
+            GrantTypesSupported = ["authorization_code", "refresh_token"],
             TokenEndpointAuthMethodsSupported = ["none", "client_secret_post"],
             CodeChallengeMethodsSupported = ["S256"],
-            ScopesSupported = ["repo", "read:user"]
+            ScopesSupported = ["codespace", "read:user"]
         };
     }
 
@@ -211,19 +211,24 @@ public static class OAuthEndpoints
         var form = await request.ReadFormAsync();
 
         var grantType = form["grant_type"].ToString();
-        var code = form["code"].ToString();
-        var redirectUri = form["redirect_uri"].ToString();
-        var clientId = form["client_id"].ToString();
-        var codeVerifier = form["code_verifier"].ToString();
+
+        if (grantType == "refresh_token")
+        {
+            return await HandleRefreshToken(form, store);
+        }
 
         if (grantType != "authorization_code")
         {
             return Results.BadRequest(new OAuthError
             {
                 Error = "unsupported_grant_type",
-                ErrorDescription = "Only authorization_code grant type is supported"
+                ErrorDescription = "Supported grant types: authorization_code, refresh_token"
             });
         }
+
+        var code = form["code"].ToString();
+        var redirectUri = form["redirect_uri"].ToString();
+        var codeVerifier = form["code_verifier"].ToString();
 
         if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(codeVerifier))
         {
@@ -287,7 +292,50 @@ public static class OAuthEndpoints
             AccessToken = token.AccessToken,
             TokenType = "Bearer",
             ExpiresIn = 3600,
-            RefreshToken = token.AccessToken, // Claude requires this field
+            RefreshToken = token.RefreshToken,
+            Scope = "codespace read:user"
+        });
+    }
+
+    private static async Task<IResult> HandleRefreshToken(IFormCollection form, IOAuthStore store)
+    {
+        var refreshToken = form["refresh_token"].ToString();
+
+        if (string.IsNullOrEmpty(refreshToken))
+        {
+            return Results.BadRequest(new OAuthError
+            {
+                Error = "invalid_request",
+                ErrorDescription = "refresh_token is required"
+            });
+        }
+
+        // Get the existing token by refresh token
+        var existingToken = await store.GetTokenByRefreshTokenAsync(refreshToken);
+        if (existingToken == null)
+        {
+            return Results.BadRequest(new OAuthError
+            {
+                Error = "invalid_grant",
+                ErrorDescription = "Invalid refresh token"
+            });
+        }
+
+        // Delete the old token
+        await store.DeleteTokenAsync(existingToken.AccessToken);
+
+        // Create a new token with the same GitHub credentials
+        var newToken = await store.CreateTokenAsync(
+            existingToken.ClientId,
+            existingToken.GitHubUserId,
+            existingToken.GitHubAccessToken);
+
+        return Results.Json(new TokenResponse
+        {
+            AccessToken = newToken.AccessToken,
+            TokenType = "Bearer",
+            ExpiresIn = 3600,
+            RefreshToken = newToken.RefreshToken,
             Scope = "codespace read:user"
         });
     }

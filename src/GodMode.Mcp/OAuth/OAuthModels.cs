@@ -22,6 +22,7 @@ public record AuthorizationCode(
 
 public record TokenRecord(
     string AccessToken,
+    string RefreshToken,
     string ClientId,
     string GitHubUserId,
     string GitHubAccessToken,

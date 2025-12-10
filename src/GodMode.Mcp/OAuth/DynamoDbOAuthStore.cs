@@ -148,10 +148,12 @@ public class DynamoDbOAuthStore : IOAuthStore
     public async Task<TokenRecord> CreateTokenAsync(string clientId, string gitHubUserId, string gitHubAccessToken)
     {
         var accessToken = GenerateSecureToken();
+        var refreshToken = GenerateSecureToken();
         var expiresAt = DateTime.UtcNow.AddHours(1);
 
-        var token = new TokenRecord(accessToken, clientId, gitHubUserId, gitHubAccessToken, expiresAt);
+        var token = new TokenRecord(accessToken, refreshToken, clientId, gitHubUserId, gitHubAccessToken, expiresAt);
 
+        // Store access token
         await _dynamoDb.PutItemAsync(new PutItemRequest
         {
             TableName = _tableName,
@@ -159,11 +161,25 @@ public class DynamoDbOAuthStore : IOAuthStore
             {
                 ["PK"] = new AttributeValue { S = $"TOKEN#{accessToken}" },
                 ["SK"] = new AttributeValue { S = "META" },
+                ["RefreshToken"] = new AttributeValue { S = refreshToken },
                 ["ClientId"] = new AttributeValue { S = clientId },
                 ["GitHubUserId"] = new AttributeValue { S = gitHubUserId },
                 ["GitHubAccessToken"] = new AttributeValue { S = gitHubAccessToken },
                 ["ExpiresAt"] = new AttributeValue { S = expiresAt.ToString("O") },
-                ["TTL"] = new AttributeValue { N = expiresAt.ToUnixTimeSeconds().ToString() }
+                ["TTL"] = new AttributeValue { N = expiresAt.AddDays(30).ToUnixTimeSeconds().ToString() }
+            }
+        });
+
+        // Store refresh token mapping (long-lived, 30 days)
+        await _dynamoDb.PutItemAsync(new PutItemRequest
+        {
+            TableName = _tableName,
+            Item = new Dictionary<string, AttributeValue>
+            {
+                ["PK"] = new AttributeValue { S = $"REFRESH#{refreshToken}" },
+                ["SK"] = new AttributeValue { S = "META" },
+                ["AccessToken"] = new AttributeValue { S = accessToken },
+                ["TTL"] = new AttributeValue { N = DateTime.UtcNow.AddDays(30).ToUnixTimeSeconds().ToString() }
             }
         });
 
@@ -188,6 +204,7 @@ public class DynamoDbOAuthStore : IOAuthStore
         var item = response.Item;
         var token = new TokenRecord(
             accessToken,
+            item["RefreshToken"].S,
             item["ClientId"].S,
             item["GitHubUserId"].S,
             item["GitHubAccessToken"].S,
@@ -200,8 +217,78 @@ public class DynamoDbOAuthStore : IOAuthStore
         return token;
     }
 
+    public async Task<TokenRecord?> GetTokenByRefreshTokenAsync(string refreshToken)
+    {
+        var response = await _dynamoDb.GetItemAsync(new GetItemRequest
+        {
+            TableName = _tableName,
+            Key = new Dictionary<string, AttributeValue>
+            {
+                ["PK"] = new AttributeValue { S = $"REFRESH#{refreshToken}" },
+                ["SK"] = new AttributeValue { S = "META" }
+            }
+        });
+
+        if (!response.IsItemSet)
+            return null;
+
+        var accessToken = response.Item["AccessToken"].S;
+
+        // Get the full token record
+        var tokenResponse = await _dynamoDb.GetItemAsync(new GetItemRequest
+        {
+            TableName = _tableName,
+            Key = new Dictionary<string, AttributeValue>
+            {
+                ["PK"] = new AttributeValue { S = $"TOKEN#{accessToken}" },
+                ["SK"] = new AttributeValue { S = "META" }
+            }
+        });
+
+        if (!tokenResponse.IsItemSet)
+            return null;
+
+        var item = tokenResponse.Item;
+        return new TokenRecord(
+            accessToken,
+            item["RefreshToken"].S,
+            item["ClientId"].S,
+            item["GitHubUserId"].S,
+            item["GitHubAccessToken"].S,
+            DateTime.Parse(item["ExpiresAt"].S)
+        );
+    }
+
     public async Task DeleteTokenAsync(string accessToken)
     {
+        // Get the token first to find the refresh token
+        var response = await _dynamoDb.GetItemAsync(new GetItemRequest
+        {
+            TableName = _tableName,
+            Key = new Dictionary<string, AttributeValue>
+            {
+                ["PK"] = new AttributeValue { S = $"TOKEN#{accessToken}" },
+                ["SK"] = new AttributeValue { S = "META" }
+            }
+        });
+
+        if (response.IsItemSet)
+        {
+            var refreshToken = response.Item["RefreshToken"].S;
+
+            // Delete refresh token mapping
+            await _dynamoDb.DeleteItemAsync(new DeleteItemRequest
+            {
+                TableName = _tableName,
+                Key = new Dictionary<string, AttributeValue>
+                {
+                    ["PK"] = new AttributeValue { S = $"REFRESH#{refreshToken}" },
+                    ["SK"] = new AttributeValue { S = "META" }
+                }
+            });
+        }
+
+        // Delete access token
         await _dynamoDb.DeleteItemAsync(new DeleteItemRequest
         {
             TableName = _tableName,

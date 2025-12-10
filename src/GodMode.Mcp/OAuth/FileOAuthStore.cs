@@ -96,8 +96,10 @@ public class FileOAuthStore : IOAuthStore
     public Task<TokenRecord> CreateTokenAsync(string clientId, string gitHubUserId, string gitHubAccessToken)
     {
         var accessToken = GenerateSecureToken();
+        var refreshToken = GenerateSecureToken();
         var token = new TokenRecord(
             accessToken,
+            refreshToken,
             clientId,
             gitHubUserId,
             gitHubAccessToken,
@@ -108,6 +110,7 @@ public class FileOAuthStore : IOAuthStore
         {
             CleanExpired();
             _data.Tokens[accessToken] = token;
+            _data.RefreshTokens[refreshToken] = accessToken;
             Save();
         }
 
@@ -124,6 +127,7 @@ public class FileOAuthStore : IOAuthStore
             if (token.ExpiresAt < DateTime.UtcNow)
             {
                 _data.Tokens.Remove(accessToken);
+                _data.RefreshTokens.Remove(token.RefreshToken);
                 Save();
                 return Task.FromResult<TokenRecord?>(null);
             }
@@ -132,10 +136,29 @@ public class FileOAuthStore : IOAuthStore
         }
     }
 
+    public Task<TokenRecord?> GetTokenByRefreshTokenAsync(string refreshToken)
+    {
+        lock (_lock)
+        {
+            if (!_data.RefreshTokens.TryGetValue(refreshToken, out var accessToken))
+                return Task.FromResult<TokenRecord?>(null);
+
+            if (!_data.Tokens.TryGetValue(accessToken, out var token))
+                return Task.FromResult<TokenRecord?>(null);
+
+            // Refresh tokens don't expire with the access token - they're long-lived
+            return Task.FromResult<TokenRecord?>(token);
+        }
+    }
+
     public Task DeleteTokenAsync(string accessToken)
     {
         lock (_lock)
         {
+            if (_data.Tokens.TryGetValue(accessToken, out var token))
+            {
+                _data.RefreshTokens.Remove(token.RefreshToken);
+            }
             _data.Tokens.Remove(accessToken);
             Save();
         }
@@ -227,6 +250,7 @@ public class FileOAuthStore : IOAuthStore
         public Dictionary<string, OAuthClient> Clients { get; set; } = new();
         public Dictionary<string, AuthorizationCode> AuthCodes { get; set; } = new();
         public Dictionary<string, TokenRecord> Tokens { get; set; } = new();
+        public Dictionary<string, string> RefreshTokens { get; set; } = new();
         public Dictionary<string, GitHubStateRecord> GitHubStates { get; set; } = new();
     }
 
