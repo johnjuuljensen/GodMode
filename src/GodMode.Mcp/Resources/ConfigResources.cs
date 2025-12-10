@@ -15,7 +15,7 @@ public class ConfigResources
     }
 
     [McpServerResource(UriTemplate = "config://default")]
-    [Description("Returns the default configuration for this MCP server, including default owner and repo if configured via URL parameters")]
+    [Description("Returns the default configuration for this MCP server, including default owner, repo, and devcontainer configurations")]
     public string GetDefaultConfig()
     {
         var query = _httpContextAccessor.HttpContext?.Request.Query;
@@ -25,7 +25,12 @@ public class ConfigResources
         {
             defaultOwner = config.DefaultOwner,
             defaultRepo = config.DefaultRepo,
-            hasDefaults = config.DefaultOwner != null && config.DefaultRepo != null
+            hasDefaults = config.DefaultOwner != null && config.DefaultRepo != null,
+            devcontainers = config.Devcontainers.Select(dc => new
+            {
+                name = dc,
+                path = config.GetDevcontainerPath(dc)
+            }).ToList()
         });
     }
 }

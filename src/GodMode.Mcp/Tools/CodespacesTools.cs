@@ -87,39 +87,6 @@ public class CodespacesTools
     }
 
     [McpServerTool]
-    [Description("Lists available devcontainer configurations for a repository")]
-    public async Task<ListDevcontainersResult> ListDevcontainers(
-        [Description("Repository owner (user or organization). Optional if default_repo configured.")] string? owner = null,
-        [Description("Repository name. Optional if default_repo configured.")] string? repo = null,
-        [Description("Maximum number of results to return (1-100)")] int? perPage = 30,
-        [Description("Page number for pagination")] int? page = 1)
-    {
-        var config = GetUserConfig();
-        owner ??= config.DefaultOwner ?? throw new ArgumentException("owner is required (or configure default_repo)");
-        repo ??= config.DefaultRepo ?? throw new ArgumentException("repo is required (or configure default_repo)");
-
-        var request = CreateRequest(HttpMethod.Get,
-            $"https://api.github.com/repos/{owner}/{repo}/codespaces/devcontainers?per_page={Math.Clamp(perPage ?? 30, 1, 100)}&page={page ?? 1}");
-
-        var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
-        var json = await response.Content.ReadAsStringAsync();
-        var result = JsonSerializer.Deserialize<GitHubDevcontainersResponse>(json)!;
-
-        return new ListDevcontainersResult
-        {
-            Devcontainers = result.Devcontainers.Select(d => new DevcontainerInfo
-            {
-                Path = d.Path,
-                Name = d.Name,
-                DisplayName = d.DisplayName
-            }).ToList(),
-            TotalCount = result.TotalCount
-        };
-    }
-
-    [McpServerTool]
     [Description("Lists available machine types that an existing codespace can transition to")]
     public async Task<ListMachinesResult> ListMachinesForCodespace(
         [Description("The name of the codespace (e.g., 'urban-space-barnacle-9xqjqqxg4rf7r99')")] string codespaceName)
@@ -183,19 +150,6 @@ public class CodespaceInfo
     public string? CreatedAt { get; set; }
     public string? UpdatedAt { get; set; }
     public string? WebUrl { get; set; }
-}
-
-public class ListDevcontainersResult
-{
-    public required List<DevcontainerInfo> Devcontainers { get; set; }
-    public int TotalCount { get; set; }
-}
-
-public class DevcontainerInfo
-{
-    public string? Path { get; set; }
-    public string? Name { get; set; }
-    public string? DisplayName { get; set; }
 }
 
 public class ListMachinesResult
@@ -283,27 +237,6 @@ internal class GitHubMachine
     public long StorageInBytes { get; set; }
 }
 
-internal class GitHubDevcontainersResponse
-{
-    [JsonPropertyName("total_count")]
-    public int TotalCount { get; set; }
-
-    [JsonPropertyName("devcontainers")]
-    public List<GitHubDevcontainer> Devcontainers { get; set; } = [];
-}
-
-internal class GitHubDevcontainer
-{
-    [JsonPropertyName("path")]
-    public string? Path { get; set; }
-
-    [JsonPropertyName("name")]
-    public string? Name { get; set; }
-
-    [JsonPropertyName("display_name")]
-    public string? DisplayName { get; set; }
-}
-
 internal class GitHubMachinesResponse
 {
     [JsonPropertyName("total_count")]
@@ -312,3 +245,4 @@ internal class GitHubMachinesResponse
     [JsonPropertyName("machines")]
     public List<GitHubMachine> Machines { get; set; } = [];
 }
+
