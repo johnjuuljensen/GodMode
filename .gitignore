@@ -43,3 +43,4 @@ appsettings.*.json
 .env.*
 /log.jsonl
 /nul
+/src/MauiDemo
