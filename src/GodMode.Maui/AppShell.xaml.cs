@@ -11,5 +11,7 @@ public partial class AppShell : Shell
 		// Register routes for navigation
 		Routing.RegisterRoute("host", typeof(HostPage));
 		Routing.RegisterRoute("project", typeof(ProjectPage));
+		Routing.RegisterRoute("addProfile", typeof(AddProfilePage));
+		Routing.RegisterRoute("createProject", typeof(CreateProjectPage));
 	}
 }

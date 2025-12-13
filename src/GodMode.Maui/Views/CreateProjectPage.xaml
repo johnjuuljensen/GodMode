@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:GodMode.Maui.ViewModels"
+             x:Class="GodMode.Maui.Views.CreateProjectPage"
+             x:DataType="viewmodels:CreateProjectViewModel"
+             Title="Create Project">
+
+    <ScrollView Padding="20">
+        <VerticalStackLayout Spacing="15">
+
+            <!-- Project Name -->
+            <VerticalStackLayout Spacing="5">
+                <Label Text="Project Name" FontAttributes="Bold" />
+                <Entry Text="{Binding ProjectName}" Placeholder="Enter project name" />
+            </VerticalStackLayout>
+
+            <!-- Repository URL (optional) -->
+            <VerticalStackLayout Spacing="5">
+                <Label Text="Repository URL (optional)" FontAttributes="Bold" />
+                <Entry Text="{Binding RepoUrl}" Placeholder="https://github.com/user/repo" />
+                <Label Text="Leave empty to create an empty project"
+                       FontSize="12"
+                       TextColor="Gray" />
+            </VerticalStackLayout>
+
+            <!-- Initial Prompt -->
+            <VerticalStackLayout Spacing="5">
+                <Label Text="Initial Prompt" FontAttributes="Bold" />
+                <Editor Text="{Binding InitialPrompt}"
+                        Placeholder="Enter the initial task or prompt for Claude..."
+                        HeightRequest="150" />
+            </VerticalStackLayout>
+
+            <!-- Buttons -->
+            <Grid ColumnDefinitions="*,*" Margin="0,20,0,0">
+                <Button Grid.Column="0"
+                        Text="Cancel"
+                        Command="{Binding CancelCommand}"
+                        BackgroundColor="Gray"
+                        Margin="0,0,5,0" />
+                <Button Grid.Column="1"
+                        Text="Create"
+                        Command="{Binding CreateCommand}"
+                        Margin="5,0,0,0" />
+            </Grid>
+
+            <!-- Error Message -->
+            <Label Text="{Binding ErrorMessage}"
+                   IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
+                   TextColor="Red"
+                   HorizontalTextAlignment="Center" />
+
+            <!-- Loading Indicator -->
+            <ActivityIndicator IsRunning="{Binding IsCreating}"
+                             IsVisible="{Binding IsCreating}"
+                             HorizontalOptions="Center" />
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>
