@@ -76,7 +76,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
         // Start the process
         var command = Cli.Wrap("claude")
-            .WithArguments(new[] { "--output-format", "stream-json", "--session-id", sessionId, initialPrompt })
+            .WithArguments(["--print", "--verbose", " --dangerously-skip-permissions", "--output-format=stream-json", "--session-id", sessionId, initialPrompt])
             .WithWorkingDirectory(project.WorkPath)
             .WithStandardInputPipe(inputPipe)
             .WithStandardOutputPipe(outputPipe)
