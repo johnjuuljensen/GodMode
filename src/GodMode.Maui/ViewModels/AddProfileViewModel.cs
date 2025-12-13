@@ -58,10 +58,14 @@ public partial class AddProfileViewModel : ObservableObject
     {
         // FolderPicker requires CommunityToolkit.Maui
         // For now, show a message to enter the path manually
-        await Application.Current!.MainPage!.DisplayAlert(
-            "Browse Folder",
-            "Please enter the folder path manually in the text field.",
-            "OK");
+        var page = Application.Current?.Windows[0]?.Page;
+        if (page != null)
+        {
+            await page.DisplayAlertAsync(
+                "Browse Folder",
+                "Please enter the folder path manually in the text field.",
+                "OK");
+        }
     }
 
     [RelayCommand]
@@ -130,7 +134,7 @@ public partial class AddProfileViewModel : ObservableObject
             };
 
             await _profileService.SaveProfileAsync(profile);
-            await Shell.Current.GoToAsync("..");
+            await Shell.Current!.GoToAsync("..");
         }
         catch (Exception ex)
         {
@@ -145,6 +149,6 @@ public partial class AddProfileViewModel : ObservableObject
     [RelayCommand]
     private async Task CancelAsync()
     {
-        await Shell.Current.GoToAsync("..");
+        await Shell.Current!.GoToAsync("..");
     }
 }

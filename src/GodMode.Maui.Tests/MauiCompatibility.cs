@@ -26,17 +26,27 @@ public class ShellStub
 }
 
 /// <summary>
+/// Stub for MAUI Window
+/// </summary>
+public class Window
+{
+    public Page? Page { get; set; }
+}
+
+/// <summary>
 /// Stub for MAUI Application
 /// </summary>
 public class Application
 {
     public static Application? Current { get; set; }
     public Page? MainPage { get; set; }
+    public IList<Window> Windows { get; } = new List<Window> { new Window() };
 }
 
 public class Page
 {
     public Task DisplayAlert(string title, string message, string cancel) => Task.CompletedTask;
+    public Task DisplayAlertAsync(string title, string message, string cancel) => Task.CompletedTask;
 }
 
 /// <summary>

@@ -151,7 +151,7 @@ public partial class HostViewModel : ObservableObject
     private async Task CreateProjectAsync()
     {
         // Navigate to create project page
-        await Shell.Current.GoToAsync($"createProject?profileName={ProfileName}&hostId={HostId}");
+        await Shell.Current!.GoToAsync($"createProject?profileName={ProfileName}&hostId={HostId}");
     }
 
     [RelayCommand]
@@ -162,7 +162,7 @@ public partial class HostViewModel : ObservableObject
         // Clear badge for this project
         _notificationService.ClearBadgeCountForProject(ProfileName, HostId, project.Id);
 
-        await Shell.Current.GoToAsync($"project?profileName={ProfileName}&hostId={HostId}&projectId={project.Id}");
+        await Shell.Current!.GoToAsync($"project?profileName={ProfileName}&hostId={HostId}&projectId={project.Id}");
     }
 
     private async Task LoadHostStatusAsync()

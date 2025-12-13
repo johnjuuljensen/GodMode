@@ -69,7 +69,7 @@ public partial class CreateProjectViewModel : ObservableObject
                 InitialPrompt);
 
             // Navigate to the new project
-            await Shell.Current.GoToAsync($"..?projectId={detail.Status.Id}");
+            await Shell.Current!.GoToAsync($"..?projectId={detail.Status.Id}");
         }
         catch (Exception ex)
         {
@@ -84,6 +84,6 @@ public partial class CreateProjectViewModel : ObservableObject
     [RelayCommand]
     private async Task CancelAsync()
     {
-        await Shell.Current.GoToAsync("..");
+        await Shell.Current!.GoToAsync("..");
     }
 }

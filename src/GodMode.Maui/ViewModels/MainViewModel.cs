@@ -107,14 +107,14 @@ public partial class MainViewModel : ObservableObject
         if (SelectedProfile == null || host == null) return;
 
         // Navigate to host page (this would be handled by the shell navigation)
-        await Shell.Current.GoToAsync($"host?profileName={SelectedProfile.Name}&hostId={host.Id}");
+        await Shell.Current!.GoToAsync($"host?profileName={SelectedProfile.Name}&hostId={host.Id}");
     }
 
     [RelayCommand]
     private async Task AddProfileAsync()
     {
         // Navigate to add profile page
-        await Shell.Current.GoToAsync("addProfile");
+        await Shell.Current!.GoToAsync("addProfile");
     }
 
     partial void OnSelectedProfileChanged(Profile? value)

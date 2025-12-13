@@ -243,7 +243,7 @@ public class MainViewModelTests : TestBase
     #region Property Change Notification Tests
 
     [Fact]
-    public void SelectedProfile_WhenChanged_ShouldTriggerHostsLoad()
+    public async Task SelectedProfile_WhenChanged_ShouldTriggerHostsLoad()
     {
         // Arrange
         var vm = CreateViewModel();
@@ -255,8 +255,8 @@ public class MainViewModelTests : TestBase
         vm.SelectedProfile = profile;
 
         // Assert - Give async operation time to complete
-        Task.Delay(100).Wait();
-        HostConnectionService.Received().ListAllHostsAsync("TestProfile");
+        await Task.Delay(100);
+        await HostConnectionService.Received().ListAllHostsAsync("TestProfile");
     }
 
     #endregion
