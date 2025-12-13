@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:GodMode.Maui.ViewModels"
+             xmlns:models="clr-namespace:GodMode.Shared.Models;assembly=GodMode.Shared"
+             x:Class="GodMode.Maui.Views.HostPage"
+             x:DataType="viewmodels:HostViewModel"
+             Title="{Binding HostStatus.Name}">
+
+    <Grid RowDefinitions="Auto,*" Padding="10">
+
+        <!-- Host Status Bar -->
+        <Frame Grid.Row="0" Padding="15" Margin="5" BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#2C2C2C}">
+            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                <Label Grid.Column="0" Grid.Row="0"
+                      Text="{Binding HostStatus.Name}"
+                      FontSize="20"
+                      FontAttributes="Bold" />
+
+                <Label Grid.Column="0" Grid.Row="1"
+                      Text="{Binding HostStatus.State}"
+                      FontSize="16"
+                      TextColor="Gray" />
+
+                <Label Grid.Column="0" Grid.Row="2"
+                      FontSize="14">
+                    <Label.FormattedText>
+                        <FormattedString>
+                            <Span Text="Active Projects: " />
+                            <Span Text="{Binding HostStatus.ProjectCount}" FontAttributes="Bold" />
+                        </FormattedString>
+                    </Label.FormattedText>
+                </Label>
+
+                <HorizontalStackLayout Grid.Column="1" Grid.Row="0" Grid.RowSpan="3" Spacing="10" VerticalOptions="Center">
+                    <Button Text="Start"
+                           Command="{Binding StartHostCommand}"
+                           IsVisible="{Binding HostStatus.State, Converter={StaticResource StateToStartVisibilityConverter}}"
+                           WidthRequest="80" />
+
+                    <Button Text="Stop"
+                           Command="{Binding StopHostCommand}"
+                           IsVisible="{Binding HostStatus.State, Converter={StaticResource StateToStopVisibilityConverter}}"
+                           WidthRequest="80" />
+
+                    <Button Text="Refresh"
+                           Command="{Binding RefreshCommand}"
+                           WidthRequest="80" />
+                </HorizontalStackLayout>
+
+                <!-- Connection Status Indicator -->
+                <Border Grid.Column="1" Grid.Row="2"
+                       WidthRequest="12"
+                       HeightRequest="12"
+                       StrokeThickness="0"
+                       HorizontalOptions="End"
+                       Margin="0,5,0,0">
+                    <Border.StrokeShape>
+                        <Ellipse />
+                    </Border.StrokeShape>
+                    <Border.BackgroundColor>
+                        <Binding Path="IsConnected">
+                            <Binding.Converter>
+                                <StaticResource Key="BoolToColorConverter" />
+                            </Binding.Converter>
+                        </Binding>
+                    </Border.BackgroundColor>
+                </Border>
+            </Grid>
+        </Frame>
+
+        <!-- Projects List -->
+        <Grid Grid.Row="1">
+            <Grid RowDefinitions="Auto,*">
+                <Button Grid.Row="0"
+                       Text="+ New Project"
+                       Command="{Binding CreateProjectCommand}"
+                       Margin="5"
+                       HorizontalOptions="End" />
+
+                <RefreshView Grid.Row="1"
+                           IsRefreshing="{Binding IsLoading}"
+                           Command="{Binding RefreshCommand}">
+                    <CollectionView ItemsSource="{Binding Projects}"
+                                  SelectionMode="Single">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="models:ProjectSummary">
+                                <Frame Padding="15"
+                                      Margin="5"
+                                      BorderColor="{AppThemeBinding Light=LightGray, Dark=DarkGray}"
+                                      CornerRadius="8">
+                                    <Frame.GestureRecognizers>
+                                        <TapGestureRecognizer
+                                            Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:HostViewModel}}, Path=NavigateToProjectCommand}"
+                                            CommandParameter="{Binding .}" />
+                                    </Frame.GestureRecognizers>
+
+                                    <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                                        <Label Grid.Column="0" Grid.Row="0"
+                                              Text="{Binding Name}"
+                                              FontSize="18"
+                                              FontAttributes="Bold" />
+
+                                        <Label Grid.Column="0" Grid.Row="1"
+                                              Text="{Binding State}"
+                                              FontSize="14"
+                                              TextColor="Gray" />
+
+                                        <Label Grid.Column="0" Grid.Row="2"
+                                              Text="{Binding CurrentQuestion}"
+                                              FontSize="12"
+                                              TextColor="Orange"
+                                              IsVisible="{Binding CurrentQuestion, Converter={StaticResource IsNotNullConverter}}"
+                                              LineBreakMode="TailTruncation"
+                                              MaxLines="2" />
+
+                                        <Label Grid.Column="1" Grid.Row="0"
+                                              Text="{Binding UpdatedAt, StringFormat='{0:HH:mm}'}"
+                                              FontSize="12"
+                                              TextColor="Gray"
+                                              VerticalOptions="Start" />
+
+                                        <!-- State indicator badge -->
+                                        <Border Grid.Column="1" Grid.Row="1"
+                                               Padding="8,4"
+                                               BackgroundColor="{Binding State, Converter={StaticResource StateToColorConverter}}"
+                                               StrokeThickness="0"
+                                               VerticalOptions="Center"
+                                               HorizontalOptions="End">
+                                            <Border.StrokeShape>
+                                                <RoundRectangle CornerRadius="12" />
+                                            </Border.StrokeShape>
+                                            <Label Text="{Binding State}"
+                                                  TextColor="White"
+                                                  FontSize="10" />
+                                        </Border>
+                                    </Grid>
+                                </Frame>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+
+                        <CollectionView.EmptyView>
+                            <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Center">
+                                <Label Text="No projects yet"
+                                      FontSize="18"
+                                      TextColor="Gray"
+                                      HorizontalTextAlignment="Center" />
+                                <Label Text="Create a new project to get started"
+                                      FontSize="14"
+                                      TextColor="Gray"
+                                      HorizontalTextAlignment="Center"
+                                      Margin="0,10,0,0" />
+                            </VerticalStackLayout>
+                        </CollectionView.EmptyView>
+                    </CollectionView>
+                </RefreshView>
+
+                <!-- Loading Indicator -->
+                <ActivityIndicator Grid.Row="1"
+                                 IsRunning="{Binding IsLoading}"
+                                 IsVisible="{Binding IsLoading}"
+                                 HorizontalOptions="Center"
+                                 VerticalOptions="Center" />
+            </Grid>
+        </Grid>
+
+        <!-- Error Message -->
+        <Label Grid.Row="1"
+              Text="{Binding ErrorMessage}"
+              IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
+              TextColor="Red"
+              Padding="10"
+              VerticalOptions="End"
+              HorizontalOptions="Center" />
+    </Grid>
+
+</ContentPage>

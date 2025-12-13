@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:GodMode.Maui.ViewModels"
+             xmlns:models="clr-namespace:GodMode.Shared.Models;assembly=GodMode.Shared"
+             x:Class="GodMode.Maui.Views.ProjectPage"
+             x:DataType="viewmodels:ProjectViewModel"
+             Title="{Binding Status.Name}">
+
+    <Grid RowDefinitions="Auto,*,Auto" Padding="10">
+
+        <!-- Status Board -->
+        <Frame Grid.Row="0" Padding="15" Margin="5" BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#2C2C2C}">
+            <Grid ColumnDefinitions="*,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+
+                <!-- State -->
+                <Label Grid.Column="0" Grid.Row="0"
+                      Text="{Binding Status.State}"
+                      FontSize="20"
+                      FontAttributes="Bold" />
+
+                <!-- Metrics -->
+                <VerticalStackLayout Grid.Column="0" Grid.Row="1" Spacing="5" Margin="0,10,0,0">
+                    <Label FontSize="12">
+                        <Label.FormattedText>
+                            <FormattedString>
+                                <Span Text="Tokens: " />
+                                <Span Text="{Binding Status.Metrics.InputTokens}" FontAttributes="Bold" />
+                                <Span Text=" / " />
+                                <Span Text="{Binding Status.Metrics.OutputTokens}" FontAttributes="Bold" />
+                            </FormattedString>
+                        </Label.FormattedText>
+                    </Label>
+                    <Label FontSize="12">
+                        <Label.FormattedText>
+                            <FormattedString>
+                                <Span Text="Cost: $" />
+                                <Span Text="{Binding Status.Metrics.CostEstimate, StringFormat='{0:F2}'}" FontAttributes="Bold" />
+                            </FormattedString>
+                        </Label.FormattedText>
+                    </Label>
+                    <Label FontSize="12">
+                        <Label.FormattedText>
+                            <FormattedString>
+                                <Span Text="Duration: " />
+                                <Span Text="{Binding Status.Metrics.Duration}" FontAttributes="Bold" />
+                            </FormattedString>
+                        </Label.FormattedText>
+                    </Label>
+                </VerticalStackLayout>
+
+                <!-- Git Status -->
+                <VerticalStackLayout Grid.Column="1" Grid.Row="1" Spacing="5" Margin="0,10,0,0" IsVisible="{Binding Status.Git, Converter={StaticResource IsNotNullConverter}}">
+                    <Label Text="Git Status" FontSize="14" FontAttributes="Bold" />
+                    <Label FontSize="12">
+                        <Label.FormattedText>
+                            <FormattedString>
+                                <Span Text="Branch: " />
+                                <Span Text="{Binding Status.Git.Branch}" FontAttributes="Bold" />
+                            </FormattedString>
+                        </Label.FormattedText>
+                    </Label>
+                    <Label FontSize="12">
+                        <Label.FormattedText>
+                            <FormattedString>
+                                <Span Text="Changes: " />
+                                <Span Text="{Binding Status.Git.UncommittedChanges}" FontAttributes="Bold" />
+                            </FormattedString>
+                        </Label.FormattedText>
+                    </Label>
+                </VerticalStackLayout>
+
+                <!-- Test Status -->
+                <VerticalStackLayout Grid.Column="0" Grid.Row="2" Grid.ColumnSpan="2" Spacing="5" Margin="0,10,0,0" IsVisible="{Binding Status.Tests, Converter={StaticResource IsNotNullConverter}}">
+                    <Label Text="Tests" FontSize="14" FontAttributes="Bold" />
+                    <Label FontSize="12">
+                        <Label.FormattedText>
+                            <FormattedString>
+                                <Span Text="Passed: " />
+                                <Span Text="{Binding Status.Tests.Passed}" FontAttributes="Bold" TextColor="Green" />
+                                <Span Text=" / Failed: " />
+                                <Span Text="{Binding Status.Tests.Failed}" FontAttributes="Bold" TextColor="Red" />
+                                <Span Text=" / Total: " />
+                                <Span Text="{Binding Status.Tests.Total}" FontAttributes="Bold" />
+                            </FormattedString>
+                        </Label.FormattedText>
+                    </Label>
+                </VerticalStackLayout>
+
+                <!-- Current Question -->
+                <Frame Grid.Column="0" Grid.Row="3" Grid.ColumnSpan="2"
+                      Padding="10"
+                      Margin="0,10,0,0"
+                      BackgroundColor="Orange"
+                      IsVisible="{Binding Status.CurrentQuestion, Converter={StaticResource IsNotNullConverter}}">
+                    <Label Text="{Binding Status.CurrentQuestion}"
+                          TextColor="White"
+                          FontSize="12" />
+                </Frame>
+
+                <!-- Actions -->
+                <VerticalStackLayout Grid.Column="2" Grid.Row="0" Grid.RowSpan="4" Spacing="10" VerticalOptions="Center">
+                    <Button Text="Refresh"
+                           Command="{Binding RefreshCommand}"
+                           WidthRequest="100" />
+                    <Button Text="Stop"
+                           Command="{Binding StopProjectCommand}"
+                           WidthRequest="100" />
+                    <Button Text="Metrics"
+                           Command="{Binding LoadMetricsCommand}"
+                           WidthRequest="100" />
+                </VerticalStackLayout>
+            </Grid>
+        </Frame>
+
+        <!-- Chat Interface / Output Log -->
+        <Frame Grid.Row="1" Padding="0" Margin="5">
+            <CollectionView x:Name="OutputCollectionView"
+                          ItemsSource="{Binding OutputEvents}">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="models:OutputEvent">
+                        <Frame Padding="10"
+                              Margin="5"
+                              BackgroundColor="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}"
+                              CornerRadius="8">
+                            <Grid RowDefinitions="Auto,Auto">
+                                <Label Grid.Row="0"
+                                      Text="{Binding Type}"
+                                      FontSize="10"
+                                      TextColor="Gray" />
+                                <Label Grid.Row="1"
+                                      Text="{Binding Content}"
+                                      FontSize="14"
+                                      LineBreakMode="WordWrap" />
+                            </Grid>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+
+                <CollectionView.EmptyView>
+                    <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Center">
+                        <Label Text="No output yet"
+                              FontSize="18"
+                              TextColor="Gray"
+                              HorizontalTextAlignment="Center" />
+                    </VerticalStackLayout>
+                </CollectionView.EmptyView>
+            </CollectionView>
+        </Frame>
+
+        <!-- Input Area -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Padding="5">
+            <Border Grid.Column="0"
+                   StrokeThickness="1"
+                   Stroke="{AppThemeBinding Light=LightGray, Dark=DarkGray}"
+                   Padding="10">
+                <Border.StrokeShape>
+                    <RoundRectangle CornerRadius="8" />
+                </Border.StrokeShape>
+                <Editor Text="{Binding InputText}"
+                       Placeholder="Type your response..."
+                       HeightRequest="80"
+                       IsEnabled="{Binding CanSendInput}" />
+            </Border>
+
+            <Button Grid.Column="1"
+                   Text="Send"
+                   Command="{Binding SendInputCommand}"
+                   IsEnabled="{Binding CanSendInput}"
+                   VerticalOptions="End"
+                   HeightRequest="80"
+                   Margin="5,0,0,0"
+                   WidthRequest="80" />
+        </Grid>
+
+        <!-- Loading Indicator -->
+        <ActivityIndicator Grid.Row="1"
+                         IsRunning="{Binding IsLoading}"
+                         IsVisible="{Binding IsLoading}"
+                         HorizontalOptions="Center"
+                         VerticalOptions="Center" />
+
+        <!-- Error Message -->
+        <Label Grid.Row="1"
+              Text="{Binding ErrorMessage}"
+              IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
+              TextColor="Red"
+              Padding="10"
+              VerticalOptions="End"
+              HorizontalOptions="Center" />
+    </Grid>
+
+</ContentPage>

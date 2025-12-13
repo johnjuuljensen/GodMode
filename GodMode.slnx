@@ -1,3 +1,9 @@
 <Solution>
-  <Project Path="src/GodMode.Mcp/GodMode.Mcp.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/GodMode.Shared/GodMode.Shared.csproj" />
+    <Project Path="src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj" />
+    <Project Path="src/GodMode.Server/GodMode.Server.csproj" />
+    <Project Path="src/GodMode.Maui/GodMode.Maui.csproj" />
+    <Project Path="src/GodMode.Mcp/GodMode.Mcp.csproj" />
+  </Folder>
 </Solution>
