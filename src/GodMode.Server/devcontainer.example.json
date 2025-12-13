@@ -1,0 +1,31 @@
+{
+  "name": "GodMode Server",
+  "image": "mcr.microsoft.com/devcontainers/dotnet:9.0",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "dotnet restore",
+  "postStartCommand": "cd /workspaces/GodMode/src/GodMode.Server && nohup dotnet run > /tmp/godmode-server.log 2>&1 &",
+  "forwardPorts": [5000],
+  "portsAttributes": {
+    "5000": {
+      "label": "GodMode Server",
+      "protocol": "http",
+      "visibility": "private",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csharp",
+        "ms-dotnettools.csdevkit"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "remoteUser": "vscode"
+}
