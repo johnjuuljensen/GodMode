@@ -16,7 +16,7 @@
                     ItemsSource="{Binding Profiles}"
                     SelectedItem="{Binding SelectedProfile}"
                     ItemDisplayBinding="{Binding Name}"
-                    HorizontalOptions="FillAndExpand" />
+                    HorizontalOptions="Fill" />
 
             <Button Grid.Column="1"
                     Text="+"
@@ -33,15 +33,18 @@
                                SelectionMode="Single">
                     <CollectionView.ItemTemplate>
                         <DataTemplate x:DataType="models:HostInfo">
-                            <Frame Padding="15"
-                                  Margin="5"
-                                  BorderColor="{AppThemeBinding Light=LightGray, Dark=DarkGray}"
-                                  CornerRadius="8">
-                                <Frame.GestureRecognizers>
+                            <Border Padding="15"
+                                   Margin="5"
+                                   Stroke="{AppThemeBinding Light=LightGray, Dark=DarkGray}"
+                                   StrokeThickness="1">
+                                <Border.StrokeShape>
+                                    <RoundRectangle CornerRadius="8" />
+                                </Border.StrokeShape>
+                                <Border.GestureRecognizers>
                                     <TapGestureRecognizer
                                         Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MainViewModel}}, Path=NavigateToHostCommand}"
                                         CommandParameter="{Binding .}" />
-                                </Frame.GestureRecognizers>
+                                </Border.GestureRecognizers>
 
                                 <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
                                     <Label Grid.Column="0" Grid.Row="0"
@@ -63,7 +66,7 @@
                                           VerticalOptions="Center"
                                           HorizontalOptions="End" />
                                 </Grid>
-                            </Frame>
+                            </Border>
                         </DataTemplate>
                     </CollectionView.ItemTemplate>
 

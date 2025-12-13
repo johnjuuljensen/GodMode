@@ -10,7 +10,7 @@
     <Grid RowDefinitions="Auto,*,Auto" Padding="10">
 
         <!-- Status Board -->
-        <Frame Grid.Row="0" Padding="15" Margin="5" BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#2C2C2C}">
+        <Border Grid.Row="0" Padding="15" Margin="5" BackgroundColor="{AppThemeBinding Light=#F5F5F5, Dark=#2C2C2C}" StrokeThickness="0">
             <Grid ColumnDefinitions="*,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
 
                 <!-- State -->
@@ -88,15 +88,16 @@
                 </VerticalStackLayout>
 
                 <!-- Current Question -->
-                <Frame Grid.Column="0" Grid.Row="3" Grid.ColumnSpan="2"
-                      Padding="10"
-                      Margin="0,10,0,0"
-                      BackgroundColor="Orange"
-                      IsVisible="{Binding Status.CurrentQuestion, Converter={StaticResource IsNotNullConverter}}">
+                <Border Grid.Column="0" Grid.Row="3" Grid.ColumnSpan="2"
+                       Padding="10"
+                       Margin="0,10,0,0"
+                       BackgroundColor="Orange"
+                       StrokeThickness="0"
+                       IsVisible="{Binding Status.CurrentQuestion, Converter={StaticResource IsNotNullConverter}}">
                     <Label Text="{Binding Status.CurrentQuestion}"
                           TextColor="White"
                           FontSize="12" />
-                </Frame>
+                </Border>
 
                 <!-- Actions -->
                 <VerticalStackLayout Grid.Column="2" Grid.Row="0" Grid.RowSpan="4" Spacing="10" VerticalOptions="Center">
@@ -111,18 +112,21 @@
                            WidthRequest="100" />
                 </VerticalStackLayout>
             </Grid>
-        </Frame>
+        </Border>
 
         <!-- Chat Interface / Output Log -->
-        <Frame Grid.Row="1" Padding="0" Margin="5">
+        <Border Grid.Row="1" Padding="0" Margin="5" StrokeThickness="0">
             <CollectionView x:Name="OutputCollectionView"
                           ItemsSource="{Binding OutputEvents}">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="models:OutputEvent">
-                        <Frame Padding="10"
-                              Margin="5"
-                              BackgroundColor="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}"
-                              CornerRadius="8">
+                        <Border Padding="10"
+                               Margin="5"
+                               BackgroundColor="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}"
+                               StrokeThickness="0">
+                            <Border.StrokeShape>
+                                <RoundRectangle CornerRadius="8" />
+                            </Border.StrokeShape>
                             <Grid RowDefinitions="Auto,Auto">
                                 <Label Grid.Row="0"
                                       Text="{Binding Type}"
@@ -133,7 +137,7 @@
                                       FontSize="14"
                                       LineBreakMode="WordWrap" />
                             </Grid>
-                        </Frame>
+                        </Border>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
 
@@ -146,7 +150,7 @@
                     </VerticalStackLayout>
                 </CollectionView.EmptyView>
             </CollectionView>
-        </Frame>
+        </Border>
 
         <!-- Input Area -->
         <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Padding="5">

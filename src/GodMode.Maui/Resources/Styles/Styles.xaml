@@ -187,9 +187,8 @@
         <Setter Property="HorizontalTextAlignment" Value="Center" />
     </Style>
 
-    <Style TargetType="ListView">
-        <Setter Property="SeparatorColor" Value="{AppThemeBinding Light={StaticResource Gray200}, Dark={StaticResource Gray500}}" />
-        <Setter Property="RefreshControlColor" Value="{AppThemeBinding Light={StaticResource Gray900}, Dark={StaticResource Gray200}}" />
+    <Style TargetType="CollectionView">
+        <Setter Property="BackgroundColor" Value="Transparent" />
     </Style>
 
     <Style TargetType="Picker">
