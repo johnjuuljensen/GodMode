@@ -197,17 +197,213 @@ Note: Android requires Android SDK installation.
 
 ## Testing
 
-Run tests with:
+The MAUI app has a companion test project (`GodMode.Maui.Tests`) with comprehensive ViewModel unit tests.
+
+### Running Tests
 
 ```bash
-dotnet test
+# Run all tests
+dotnet test src/GodMode.Maui.Tests/GodMode.Maui.Tests.csproj
+
+# Run with verbose output
+dotnet test src/GodMode.Maui.Tests/GodMode.Maui.Tests.csproj --logger "console;verbosity=detailed"
+
+# Run specific test class
+dotnet test src/GodMode.Maui.Tests/GodMode.Maui.Tests.csproj --filter "FullyQualifiedName~MainViewModelTests"
 ```
+
+### Test Structure
+
+```
+GodMode.Maui.Tests/
+├── GlobalUsings.cs           # Global usings (xUnit, MAUI stubs)
+├── MauiCompatibility.cs      # MAUI type stubs for test environment
+├── TestBase.cs               # Base class with mocked services
+└── ViewModels/
+    ├── MainViewModelTests.cs         # 10 tests
+    ├── HostViewModelTests.cs         # 13 tests
+    ├── ProjectViewModelTests.cs      # 17 tests
+    ├── AddProfileViewModelTests.cs   # 15 tests
+    └── CreateProjectViewModelTests.cs # 16 tests
+```
+
+### Testing Architecture
+
+The test project uses:
+- **xUnit**: Test framework
+- **NSubstitute**: Mocking framework
+- **FluentAssertions**: Assertion library
+- **Linked Source Files**: ViewModels are compiled directly in the test project
+
+Key approach:
+1. **Interface-based DI**: Services implement interfaces (`IProfileService`, `IHostConnectionService`, etc.) for easy mocking
+2. **MAUI Stubs**: `MauiCompatibility.cs` provides stub implementations of MAUI types (`Shell`, `Application`, `MainThread`, etc.)
+3. **TestBase**: Base class provides pre-configured mocks for all services
+
+### Adding Tests for New ViewModels
+
+When adding a new ViewModel to the MAUI app, follow these steps:
+
+#### 1. Ensure the ViewModel uses Interface Dependencies
+
+```csharp
+// Good - testable
+public partial class MyNewViewModel : ObservableObject
+{
+    private readonly IMyService _myService;
+
+    public MyNewViewModel(IMyService myService)
+    {
+        _myService = myService;
+    }
+}
+
+// Bad - not testable
+public partial class MyNewViewModel : ObservableObject
+{
+    private readonly MyService _myService = new();
+}
+```
+
+#### 2. Create the Test Class
+
+Create a new file `ViewModels/MyNewViewModelTests.cs`:
+
+```csharp
+using FluentAssertions;
+using NSubstitute;
+using NSubstitute.ExceptionExtensions;
+using GodMode.Maui.ViewModels;
+using GodMode.Shared.Models;
+
+namespace GodMode.Maui.Tests.ViewModels;
+
+public class MyNewViewModelTests : TestBase
+{
+    private MyNewViewModel CreateViewModel() =>
+        new(ProfileService, /* other services */);
+
+    #region Initial State Tests
+
+    [Fact]
+    public void Constructor_ShouldInitializeWithDefaultValues()
+    {
+        // Act
+        var vm = CreateViewModel();
+
+        // Assert
+        vm.SomeProperty.Should().BeNull();
+        vm.IsLoading.Should().BeFalse();
+    }
+
+    #endregion
+
+    #region Command Tests
+
+    [Fact]
+    public async Task SomeCommand_WhenValid_ShouldPerformAction()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        ProfileService.SomeMethodAsync().Returns(Task.FromResult("result"));
+
+        // Act
+        await vm.SomeCommand.ExecuteAsync(null);
+
+        // Assert
+        await ProfileService.Received(1).SomeMethodAsync();
+        vm.SomeProperty.Should().Be("result");
+    }
+
+    [Fact]
+    public async Task SomeCommand_WhenExceptionThrown_ShouldSetErrorMessage()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        ProfileService.SomeMethodAsync().ThrowsAsync(new Exception("Test error"));
+
+        // Act
+        await vm.SomeCommand.ExecuteAsync(null);
+
+        // Assert
+        vm.ErrorMessage.Should().Contain("Test error");
+        vm.IsLoading.Should().BeFalse();
+    }
+
+    #endregion
+}
+```
+
+#### 3. Add New Service Interfaces to TestBase (if needed)
+
+If your ViewModel needs a new service, add its mock to `TestBase.cs`:
+
+```csharp
+public abstract class TestBase
+{
+    protected IProfileService ProfileService { get; }
+    protected IMyNewService MyNewService { get; }  // Add new service
+    // ...
+
+    protected TestBase()
+    {
+        ProfileService = Substitute.For<IProfileService>();
+        MyNewService = Substitute.For<IMyNewService>();  // Initialize mock
+        // ...
+    }
+}
+```
+
+#### 4. Handle Shell Navigation in Tests
+
+Shell navigation will throw `NullReferenceException` in tests since `Shell.Current` is null. Wrap navigation-triggering code in try-catch and verify behavior before the exception:
+
+```csharp
+[Fact]
+public async Task NavigateCommand_ShouldNavigateToPage()
+{
+    // Arrange
+    var vm = CreateViewModel();
+
+    // Act & Assert - Shell.Current is null in tests
+    try
+    {
+        await vm.NavigateCommand.ExecuteAsync(null);
+    }
+    catch (NullReferenceException)
+    {
+        // Expected - Shell.Current is null in tests
+    }
+
+    // Assert the work that happens before navigation
+    SomeService.Received(1).SomeMethod();
+}
+```
+
+### Test Categories
+
+Organize tests into regions:
+
+- **Initial State Tests**: Verify constructor sets defaults correctly
+- **Command Tests**: Test `[RelayCommand]` async/sync methods
+- **Property Change Tests**: Verify `PropertyChanged` events fire correctly
+- **Error Handling Tests**: Verify exceptions are caught and `ErrorMessage` is set
+- **Validation Tests**: Test input validation logic
+- **Loading State Tests**: Verify `IsLoading` is true during async operations
+
+### Tips
+
+1. **Use `Task.FromResult` for async mocks**: NSubstitute's `Returns()` needs explicit `Task.FromResult<T>()` for async methods
+2. **Use `ThrowsAsync` for exceptions**: Import `NSubstitute.ExceptionExtensions` for `ThrowsAsync`
+3. **Test PropertyChanged events**: Subscribe to `PropertyChanged` before the action and collect values in a list
+4. **Avoid testing MAUI UI directly**: The test project cannot reference MAUI assemblies - test ViewModels only
 
 ## Contributing
 
 When adding new features:
 1. Follow MVVM pattern
-2. Use dependency injection
+2. Use dependency injection with interfaces
 3. Add value converters for complex XAML bindings
 4. Document public APIs
 5. Handle errors gracefully with user feedback
+6. **Add unit tests for all new ViewModels** (see Testing section above)

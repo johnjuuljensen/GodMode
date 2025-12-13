@@ -15,8 +15,8 @@ namespace GodMode.Maui.ViewModels;
 [QueryProperty(nameof(ProjectId), "projectId")]
 public partial class ProjectViewModel : ObservableObject, IDisposable
 {
-    private readonly ProjectService _projectService;
-    private readonly NotificationService _notificationService;
+    private readonly IProjectService _projectService;
+    private readonly INotificationService _notificationService;
     private IDisposable? _outputSubscription;
 
     [ObservableProperty]
@@ -53,8 +53,8 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     private string? _metricsHtml;
 
     public ProjectViewModel(
-        ProjectService projectService,
-        NotificationService notificationService)
+        IProjectService projectService,
+        INotificationService notificationService)
     {
         _projectService = projectService;
         _notificationService = notificationService;

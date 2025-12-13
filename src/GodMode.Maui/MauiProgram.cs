@@ -23,10 +23,10 @@ public static class MauiProgram
 #endif
 
 		// Register Services
-		builder.Services.AddSingleton<ProfileService>();
-		builder.Services.AddSingleton<HostConnectionService>();
-		builder.Services.AddSingleton<ProjectService>();
-		builder.Services.AddSingleton<NotificationService>();
+		builder.Services.AddSingleton<IProfileService, ProfileService>();
+		builder.Services.AddSingleton<IHostConnectionService, HostConnectionService>();
+		builder.Services.AddSingleton<IProjectService, ProjectService>();
+		builder.Services.AddSingleton<INotificationService, NotificationService>();
 
 		// Register ViewModels
 		builder.Services.AddTransient<MainViewModel>();

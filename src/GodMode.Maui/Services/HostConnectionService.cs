@@ -8,14 +8,14 @@ namespace GodMode.Maui.Services;
 /// <summary>
 /// Manages connections to hosts and tracks their status
 /// </summary>
-public class HostConnectionService
+public class HostConnectionService : IHostConnectionService
 {
-    private readonly ProfileService _profileService;
+    private readonly IProfileService _profileService;
     private readonly Dictionary<string, IHostProvider> _providers = new();
     private readonly Dictionary<string, IProjectConnection> _activeConnections = new();
     private readonly Dictionary<string, DateTime> _lastConnectionAttempt = new();
 
-    public HostConnectionService(ProfileService profileService)
+    public HostConnectionService(IProfileService profileService)
     {
         _profileService = profileService;
     }

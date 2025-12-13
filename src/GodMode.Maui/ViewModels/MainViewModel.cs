@@ -13,9 +13,9 @@ namespace GodMode.Maui.ViewModels;
 /// </summary>
 public partial class MainViewModel : ObservableObject
 {
-    private readonly ProfileService _profileService;
-    private readonly HostConnectionService _hostConnectionService;
-    private readonly NotificationService _notificationService;
+    private readonly IProfileService _profileService;
+    private readonly IHostConnectionService _hostConnectionService;
+    private readonly INotificationService _notificationService;
 
     [ObservableProperty]
     private ObservableCollection<Profile> _profiles = new();
@@ -33,9 +33,9 @@ public partial class MainViewModel : ObservableObject
     private string? _errorMessage;
 
     public MainViewModel(
-        ProfileService profileService,
-        HostConnectionService hostConnectionService,
-        NotificationService notificationService)
+        IProfileService profileService,
+        IHostConnectionService hostConnectionService,
+        INotificationService notificationService)
     {
         _profileService = profileService;
         _hostConnectionService = hostConnectionService;

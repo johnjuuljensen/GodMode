@@ -3,7 +3,7 @@ namespace GodMode.Maui.Services;
 /// <summary>
 /// Handles system notifications for project events
 /// </summary>
-public class NotificationService
+public class NotificationService : INotificationService
 {
     private readonly Dictionary<string, int> _badgeCounts = new();
 

@@ -10,7 +10,7 @@ namespace GodMode.Maui.ViewModels;
 /// </summary>
 public partial class AddProfileViewModel : ObservableObject
 {
-    private readonly ProfileService _profileService;
+    private readonly IProfileService _profileService;
 
     [ObservableProperty]
     private string _profileName = string.Empty;
@@ -42,7 +42,7 @@ public partial class AddProfileViewModel : ObservableObject
     public bool IsGitHubAccount => SelectedAccountType == "GitHub Codespaces";
     public bool IsLocalAccount => SelectedAccountType == "Local Folder";
 
-    public AddProfileViewModel(ProfileService profileService)
+    public AddProfileViewModel(IProfileService profileService)
     {
         _profileService = profileService;
     }

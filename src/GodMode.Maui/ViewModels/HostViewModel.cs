@@ -14,9 +14,9 @@ namespace GodMode.Maui.ViewModels;
 [QueryProperty(nameof(HostId), "hostId")]
 public partial class HostViewModel : ObservableObject
 {
-    private readonly HostConnectionService _hostConnectionService;
-    private readonly ProjectService _projectService;
-    private readonly NotificationService _notificationService;
+    private readonly IHostConnectionService _hostConnectionService;
+    private readonly IProjectService _projectService;
+    private readonly INotificationService _notificationService;
 
     [ObservableProperty]
     private string _profileName = string.Empty;
@@ -40,9 +40,9 @@ public partial class HostViewModel : ObservableObject
     private bool _isConnected;
 
     public HostViewModel(
-        HostConnectionService hostConnectionService,
-        ProjectService projectService,
-        NotificationService notificationService)
+        IHostConnectionService hostConnectionService,
+        IProjectService projectService,
+        INotificationService notificationService)
     {
         _hostConnectionService = hostConnectionService;
         _projectService = projectService;

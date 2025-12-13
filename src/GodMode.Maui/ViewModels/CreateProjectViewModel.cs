@@ -11,7 +11,7 @@ namespace GodMode.Maui.ViewModels;
 [QueryProperty(nameof(HostId), "hostId")]
 public partial class CreateProjectViewModel : ObservableObject
 {
-    private readonly ProjectService _projectService;
+    private readonly IProjectService _projectService;
 
     [ObservableProperty]
     private string _profileName = string.Empty;
@@ -34,7 +34,7 @@ public partial class CreateProjectViewModel : ObservableObject
     [ObservableProperty]
     private string? _errorMessage;
 
-    public CreateProjectViewModel(ProjectService projectService)
+    public CreateProjectViewModel(IProjectService projectService)
     {
         _projectService = projectService;
     }

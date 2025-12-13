@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="6.0.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+    <PackageReference Include="FluentAssertions" Version="7.0.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="System.Reactive" Version="6.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- Link source files from MAUI project for testing without MAUI dependencies -->
+  <ItemGroup>
+    <Compile Include="..\GodMode.Maui\ViewModels\*.cs" Link="ViewModels\%(Filename)%(Extension)" />
+    <Compile Include="..\GodMode.Maui\Services\I*.cs" Link="Services\%(Filename)%(Extension)" />
+    <Compile Include="..\GodMode.Maui\Services\NotificationService.cs" Link="Services\NotificationService.cs" />
+    <Compile Include="..\GodMode.Maui\Services\Models\*.cs" Link="Services\Models\%(Filename)%(Extension)" />
+    <Compile Include="..\GodMode.Maui\Abstractions\*.cs" Link="Abstractions\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

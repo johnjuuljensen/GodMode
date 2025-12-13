@@ -8,14 +8,14 @@ namespace GodMode.Maui.Services;
 /// <summary>
 /// High-level service for project operations with caching
 /// </summary>
-public class ProjectService
+public class ProjectService : IProjectService
 {
-    private readonly HostConnectionService _hostConnectionService;
+    private readonly IHostConnectionService _hostConnectionService;
     private readonly ConcurrentDictionary<string, ProjectStatus> _statusCache = new();
     private readonly ConcurrentDictionary<string, DateTime> _lastStatusUpdate = new();
     private readonly TimeSpan _cacheExpiration = TimeSpan.FromSeconds(30);
 
-    public ProjectService(HostConnectionService hostConnectionService)
+    public ProjectService(IHostConnectionService hostConnectionService)
     {
         _hostConnectionService = hostConnectionService;
     }

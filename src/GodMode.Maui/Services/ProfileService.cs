@@ -8,7 +8,7 @@ namespace GodMode.Maui.Services;
 /// <summary>
 /// Manages user profiles and account configurations
 /// </summary>
-public class ProfileService
+public class ProfileService : IProfileService
 {
     private const string ProfilesFileName = "profiles.json";
     private readonly string _profilesPath;
