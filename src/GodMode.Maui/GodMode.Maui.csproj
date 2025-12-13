@@ -22,6 +22,8 @@
 		<SingleProject>true</SingleProject>
 		<ImplicitUsings>enable</ImplicitUsings>
         <MauiXamlInflator>SourceGen</MauiXamlInflator>
+        <Nullable>enable</Nullable>
+		<MauiEnableXamlCBindingWithSourceCompilation>true</MauiEnableXamlCBindingWithSourceCompilation>
 
         <!-- Display name -->
 		<ApplicationTitle>GodMode - Claude Control</ApplicationTitle>
@@ -64,7 +66,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.9" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
 		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.0" />
 		<PackageReference Include="Octokit" Version="13.0.1" />
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />

@@ -1,7 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-using GodMode.Maui.Services;
-using GodMode.Maui.ViewModels;
-using GodMode.Maui.Views;
+using Microsoft.Extensions.Logging;
 
 namespace GodMode.Maui;
 
@@ -20,6 +17,7 @@ public static class MauiProgram
 
 #if DEBUG
 		builder.Logging.AddDebug();
+		builder.Services.AddLogging(configure => configure.AddDebug());
 #endif
 
 		// Register Services
