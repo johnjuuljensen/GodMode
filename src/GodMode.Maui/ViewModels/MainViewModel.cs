@@ -113,8 +113,14 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task AddProfileAsync()
     {
-        // Navigate to add profile page
         await Shell.Current!.GoToAsync("addProfile");
+    }
+
+    [RelayCommand]
+    private async Task AddAccountAsync()
+    {
+        if (SelectedProfile == null) return;
+        await Shell.Current!.GoToAsync($"addAccount?profileName={SelectedProfile.Name}");
     }
 
     partial void OnSelectedProfileChanged(Profile? value)

@@ -7,58 +7,15 @@
              Title="Add Profile">
 
     <ScrollView Padding="20">
-        <VerticalStackLayout Spacing="15">
+        <VerticalStackLayout Spacing="15" MaximumWidthRequest="400" HorizontalOptions="Center">
 
             <!-- Profile Name -->
             <VerticalStackLayout Spacing="5">
                 <Label Text="Profile Name" FontAttributes="Bold" />
                 <Entry Text="{Binding ProfileName}" Placeholder="Enter profile name" />
-            </VerticalStackLayout>
-
-            <!-- Account Type Selection -->
-            <VerticalStackLayout Spacing="5">
-                <Label Text="Account Type" FontAttributes="Bold" />
-                <Picker ItemsSource="{Binding AccountTypes}"
-                        SelectedItem="{Binding SelectedAccountType}" />
-            </VerticalStackLayout>
-
-            <!-- GitHub Account Fields -->
-            <VerticalStackLayout Spacing="10" IsVisible="{Binding IsGitHubAccount}">
-                <VerticalStackLayout Spacing="5">
-                    <Label Text="GitHub Username" FontAttributes="Bold" />
-                    <Entry Text="{Binding GitHubUsername}" Placeholder="Enter GitHub username" />
-                </VerticalStackLayout>
-
-                <VerticalStackLayout Spacing="5">
-                    <Label Text="GitHub Token" FontAttributes="Bold" />
-                    <Entry Text="{Binding GitHubToken}"
-                           Placeholder="Enter personal access token"
-                           IsPassword="True" />
-                    <Label Text="Token needs 'codespace' scope for Codespaces access"
-                           FontSize="12"
-                           TextColor="Gray" />
-                </VerticalStackLayout>
-            </VerticalStackLayout>
-
-            <!-- Local Folder Fields -->
-            <VerticalStackLayout Spacing="10" IsVisible="{Binding IsLocalAccount}">
-                <VerticalStackLayout Spacing="5">
-                    <Label Text="Projects Folder Path" FontAttributes="Bold" />
-                    <Grid ColumnDefinitions="*,Auto">
-                        <Entry Grid.Column="0"
-                               Text="{Binding LocalPath}"
-                               Placeholder="Enter folder path" />
-                        <Button Grid.Column="1"
-                                Text="Browse"
-                                Command="{Binding BrowseFolderCommand}"
-                                Margin="5,0,0,0" />
-                    </Grid>
-                </VerticalStackLayout>
-
-                <VerticalStackLayout Spacing="5">
-                    <Label Text="Display Name (optional)" FontAttributes="Bold" />
-                    <Entry Text="{Binding LocalDisplayName}" Placeholder="Enter display name" />
-                </VerticalStackLayout>
+                <Label Text="A profile groups multiple accounts (GitHub, local folders) together"
+                       FontSize="12"
+                       TextColor="Gray" />
             </VerticalStackLayout>
 
             <!-- Buttons -->
@@ -69,7 +26,7 @@
                         BackgroundColor="Gray"
                         Margin="0,0,5,0" />
                 <Button Grid.Column="1"
-                        Text="Save"
+                        Text="Create"
                         Command="{Binding SaveCommand}"
                         Margin="5,0,0,0" />
             </Grid>

@@ -10,7 +10,7 @@
     <Grid RowDefinitions="Auto,*" Padding="10">
 
         <!-- Profile Selector -->
-        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Padding="10" Margin="0,0,0,10">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Padding="10" Margin="0,0,0,10">
             <Picker Grid.Column="0"
                     Title="Select Profile"
                     ItemsSource="{Binding Profiles}"
@@ -19,10 +19,15 @@
                     HorizontalOptions="Fill" />
 
             <Button Grid.Column="1"
-                    Text="+"
+                    Text="+ Account"
+                    Command="{Binding AddAccountCommand}"
+                    Margin="10,0,0,0"
+                    IsVisible="{Binding SelectedProfile, Converter={StaticResource IsNotNullConverter}}" />
+
+            <Button Grid.Column="2"
+                    Text="+ Profile"
                     Command="{Binding AddProfileCommand}"
-                    WidthRequest="50"
-                    Margin="10,0,0,0" />
+                    Margin="5,0,0,0" />
         </Grid>
 
         <!-- Hosts List -->
