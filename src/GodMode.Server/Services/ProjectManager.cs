@@ -5,11 +5,13 @@ using Microsoft.AspNetCore.SignalR;
 using GodMode.Server.Hubs;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using ProjectFiles = GodMode.ProjectFiles;
 
 namespace GodMode.Server.Services;
 
 /// <summary>
 /// Manages project folders, lifecycle, and state.
+/// Uses GodMode.ProjectFiles.ProjectManager for project file operations.
 /// </summary>
 public class ProjectManager : IProjectManager
 {
@@ -17,7 +19,7 @@ public class ProjectManager : IProjectManager
     private readonly IStatusUpdater _statusUpdater;
     private readonly IHubContext<ProjectHub> _hubContext;
     private readonly ILogger<ProjectManager> _logger;
-    private readonly string _projectsRoot;
+    private readonly ProjectFiles.ProjectManager _projectFiles;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
     public ProjectManager(
@@ -31,10 +33,26 @@ public class ProjectManager : IProjectManager
         _statusUpdater = statusUpdater;
         _hubContext = hubContext;
         _logger = logger;
-        _projectsRoot = configuration["ProjectsPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "projects");
 
-        // Ensure projects directory exists
-        Directory.CreateDirectory(_projectsRoot);
+        // Load project roots from configuration
+        var projectRoots = configuration.GetSection("ProjectRoots").Get<Dictionary<string, string>>();
+
+        if (projectRoots == null || projectRoots.Count == 0)
+        {
+            // Fall back to legacy single path configuration
+            var legacyPath = configuration["ProjectsPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "projects");
+            projectRoots = new Dictionary<string, string> { ["default"] = legacyPath };
+        }
+
+        _projectFiles = new ProjectFiles.ProjectManager(projectRoots);
+
+        _logger.LogInformation("Initialized with project roots: {Roots}",
+            string.Join(", ", projectRoots.Select(kvp => $"{kvp.Key}={kvp.Value}")));
+    }
+
+    public Task<ProjectRoot[]> ListProjectRootsAsync()
+    {
+        return Task.FromResult(_projectFiles.ListProjectRoots());
     }
 
     public async Task<ProjectSummary[]> ListProjectsAsync()
@@ -79,20 +97,23 @@ public class ProjectManager : IProjectManager
 
     public async Task<ProjectDetail> CreateProjectAsync(CreateProjectRequest request)
     {
-        var projectId = Guid.NewGuid().ToString("N")[..8];
-        var projectPath = Path.Combine(_projectsRoot, projectId);
-        var workPath = Path.Combine(projectPath, "work");
+        _logger.LogInformation("Creating project '{Name}' of type {Type} in root '{Root}'",
+            request.Name, request.ProjectType, request.ProjectRootName);
 
-        _logger.LogInformation("Creating project {ProjectId} at {Path}", projectId, projectPath);
+        // Use ProjectFiles to create the project structure
+        var (projectFolder, projectId) = _projectFiles.CreateProject(
+            request.ProjectRootName,
+            request.Name,
+            request.ProjectType,
+            request.RepoUrl);
 
-        // Create directory structure
-        Directory.CreateDirectory(workPath);
+        var workPath = projectFolder.WorkPath;
 
         var project = new ProjectInfo
         {
             Id = projectId,
             Name = request.Name,
-            ProjectPath = projectPath,
+            ProjectPath = projectFolder.ProjectPath,
             WorkPath = workPath,
             RepoUrl = request.RepoUrl,
             State = ProjectState.Running,
@@ -100,15 +121,15 @@ public class ProjectManager : IProjectManager
             UpdatedAt = DateTime.UtcNow
         };
 
-        // Clone repo if URL provided
-        if (!string.IsNullOrEmpty(request.RepoUrl))
+        // Handle git operations based on project type
+        if (request.ProjectType == ProjectType.GitHubRepo && !string.IsNullOrEmpty(request.RepoUrl))
         {
             await CloneRepositoryAsync(request.RepoUrl, workPath);
         }
-
-        // Initialize files
-        await File.WriteAllTextAsync(Path.Combine(projectPath, "input.jsonl"), "");
-        await File.WriteAllTextAsync(Path.Combine(projectPath, "output.jsonl"), "");
+        else if (request.ProjectType == ProjectType.GitHubWorktree && !string.IsNullOrEmpty(request.RepoUrl))
+        {
+            await SetupWorktreeAsync(request.ProjectRootName, request.Name, request.RepoUrl, workPath);
+        }
 
         // Save initial status
         await _statusUpdater.SaveStatusAsync(project);
@@ -227,18 +248,13 @@ public class ProjectManager : IProjectManager
 
     public async Task RecoverProjectsAsync()
     {
-        _logger.LogInformation("Recovering projects from {Path}", _projectsRoot);
+        _logger.LogInformation("Recovering projects from all project roots");
 
-        if (!Directory.Exists(_projectsRoot))
-        {
-            return;
-        }
-
-        foreach (var projectDir in Directory.GetDirectories(_projectsRoot))
+        foreach (var projectPath in _projectFiles.ListProjectPaths())
         {
             try
             {
-                var statusPath = Path.Combine(projectDir, "status.json");
+                var statusPath = Path.Combine(projectPath, "status.json");
                 if (!File.Exists(statusPath))
                 {
                     continue;
@@ -256,8 +272,8 @@ public class ProjectManager : IProjectManager
                 {
                     Id = status.Id,
                     Name = status.Name,
-                    ProjectPath = projectDir,
-                    WorkPath = Path.Combine(projectDir, "work"),
+                    ProjectPath = projectPath,
+                    WorkPath = Path.Combine(projectPath, "work"),
                     RepoUrl = status.RepoUrl,
                     State = status.State == ProjectState.Running || status.State == ProjectState.WaitingInput
                         ? ProjectState.Stopped
@@ -272,7 +288,7 @@ public class ProjectManager : IProjectManager
                 };
 
                 // Load session ID if exists
-                var sessionIdPath = Path.Combine(projectDir, "session-id");
+                var sessionIdPath = Path.Combine(projectPath, "session-id");
                 if (File.Exists(sessionIdPath))
                 {
                     project.SessionId = await File.ReadAllTextAsync(sessionIdPath);
@@ -290,7 +306,7 @@ public class ProjectManager : IProjectManager
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to recover project from {Path}", projectDir);
+                _logger.LogError(ex, "Failed to recover project from {Path}", projectPath);
             }
         }
     }
@@ -444,6 +460,116 @@ public class ProjectManager : IProjectManager
         {
             var error = await process.StandardError.ReadToEndAsync();
             throw new Exception($"Failed to clone repository: {error}");
+        }
+    }
+
+    private async Task SetupWorktreeAsync(string rootName, string branchName, string repoUrl, string workPath)
+    {
+        var rootPath = _projectFiles.GetProjectRootPath(rootName);
+        var bareRepoPath = ProjectFiles.ProjectManager.GetBareRepoPath(rootPath, repoUrl);
+
+        _logger.LogInformation("Setting up worktree for branch '{Branch}' from {RepoUrl}", branchName, repoUrl);
+
+        // Check if bare repo exists, if not clone it
+        if (!Directory.Exists(bareRepoPath))
+        {
+            _logger.LogInformation("Cloning bare repository to {BareRepoPath}", bareRepoPath);
+
+            var cloneProcess = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "git",
+                    Arguments = $"clone --bare {repoUrl} \"{bareRepoPath}\"",
+                    WorkingDirectory = rootPath,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+
+            cloneProcess.Start();
+            await cloneProcess.WaitForExitAsync();
+
+            if (cloneProcess.ExitCode != 0)
+            {
+                var error = await cloneProcess.StandardError.ReadToEndAsync();
+                throw new Exception($"Failed to clone bare repository: {error}");
+            }
+        }
+
+        // Fetch latest changes
+        var fetchProcess = new System.Diagnostics.Process
+        {
+            StartInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = "fetch --all",
+                WorkingDirectory = bareRepoPath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        fetchProcess.Start();
+        await fetchProcess.WaitForExitAsync();
+
+        // Create worktree for the branch
+        _logger.LogInformation("Creating worktree at {WorkPath} for branch {Branch}", workPath, branchName);
+
+        var worktreeProcess = new System.Diagnostics.Process
+        {
+            StartInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "git",
+                Arguments = $"worktree add -b {branchName} \"{workPath}\" origin/main",
+                WorkingDirectory = bareRepoPath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        worktreeProcess.Start();
+        await worktreeProcess.WaitForExitAsync();
+
+        if (worktreeProcess.ExitCode != 0)
+        {
+            var error = await worktreeProcess.StandardError.ReadToEndAsync();
+            // If branch already exists, try to add worktree without creating branch
+            if (error.Contains("already exists"))
+            {
+                worktreeProcess = new System.Diagnostics.Process
+                {
+                    StartInfo = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "git",
+                        Arguments = $"worktree add \"{workPath}\" {branchName}",
+                        WorkingDirectory = bareRepoPath,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+
+                worktreeProcess.Start();
+                await worktreeProcess.WaitForExitAsync();
+
+                if (worktreeProcess.ExitCode != 0)
+                {
+                    error = await worktreeProcess.StandardError.ReadToEndAsync();
+                    throw new Exception($"Failed to create worktree: {error}");
+                }
+            }
+            else
+            {
+                throw new Exception($"Failed to create worktree: {error}");
+            }
         }
     }
 

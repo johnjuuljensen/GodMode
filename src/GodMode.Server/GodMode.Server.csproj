@@ -10,6 +10,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\GodMode.ProjectFiles\GodMode.ProjectFiles.csproj" />
     <ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
   </ItemGroup>
 

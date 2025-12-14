@@ -1,3 +1,4 @@
+using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using GodMode.Server.Services;
 using Microsoft.AspNetCore.SignalR;
@@ -19,6 +20,15 @@ public class ProjectHub : Hub
     }
 
     /// <summary>
+    /// Lists all available project roots.
+    /// </summary>
+    public async Task<ProjectRoot[]> ListProjectRoots()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested project roots", Context.ConnectionId);
+        return await _projectManager.ListProjectRootsAsync();
+    }
+
+    /// <summary>
     /// Lists all projects.
     /// </summary>
     public async Task<ProjectSummary[]> ListProjects()
@@ -32,7 +42,7 @@ public class ProjectHub : Hub
     /// </summary>
     public async Task<ProjectStatus> GetStatus(string projectId)
     {
-        _logger.LogInformation("Client {ConnectionId} requested status for project {ProjectId}", 
+        _logger.LogInformation("Client {ConnectionId} requested status for project {ProjectId}",
             Context.ConnectionId, projectId);
         return await _projectManager.GetStatusAsync(projectId);
     }
@@ -40,16 +50,22 @@ public class ProjectHub : Hub
     /// <summary>
     /// Creates a new project.
     /// </summary>
-    public async Task<ProjectDetail> CreateProject(string name, string? repoUrl, string initialPrompt)
+    public async Task<ProjectDetail> CreateProject(
+        string name,
+        string projectRootName,
+        ProjectType projectType,
+        string? repoUrl,
+        string initialPrompt)
     {
-        _logger.LogInformation("Client {ConnectionId} creating project {Name}", Context.ConnectionId, name);
-        
-        var request = new CreateProjectRequest(name, repoUrl, initialPrompt);
+        _logger.LogInformation("Client {ConnectionId} creating project '{Name}' of type {Type} in root '{Root}'",
+            Context.ConnectionId, name, projectType, projectRootName);
+
+        var request = new CreateProjectRequest(name, projectRootName, projectType, repoUrl, initialPrompt);
         var project = await _projectManager.CreateProjectAsync(request);
-        
+
         // Notify all clients about the new project
         await Clients.All.SendAsync("ProjectCreated", project.Status);
-        
+
         return project;
     }
 

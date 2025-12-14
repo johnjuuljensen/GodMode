@@ -7,14 +7,58 @@ namespace GodMode.Server.Services;
 /// </summary>
 public interface IProjectManager
 {
+    /// <summary>
+    /// Lists all available project roots.
+    /// </summary>
+    Task<ProjectRoot[]> ListProjectRootsAsync();
+
+    /// <summary>
+    /// Lists all projects across all project roots.
+    /// </summary>
     Task<ProjectSummary[]> ListProjectsAsync();
+
+    /// <summary>
+    /// Gets the status of a specific project.
+    /// </summary>
     Task<ProjectStatus> GetStatusAsync(string projectId);
+
+    /// <summary>
+    /// Creates a new project.
+    /// </summary>
     Task<ProjectDetail> CreateProjectAsync(CreateProjectRequest request);
+
+    /// <summary>
+    /// Sends input to a running project.
+    /// </summary>
     Task SendInputAsync(string projectId, string input);
+
+    /// <summary>
+    /// Stops a running project.
+    /// </summary>
     Task StopProjectAsync(string projectId);
+
+    /// <summary>
+    /// Subscribes a client connection to project output.
+    /// </summary>
     Task SubscribeProjectAsync(string projectId, long outputOffset, string connectionId);
+
+    /// <summary>
+    /// Unsubscribes a client connection from project output.
+    /// </summary>
     Task UnsubscribeProjectAsync(string projectId, string connectionId);
+
+    /// <summary>
+    /// Gets the metrics HTML for a project.
+    /// </summary>
     Task<string> GetMetricsHtmlAsync(string projectId);
+
+    /// <summary>
+    /// Cleans up resources for a disconnected client.
+    /// </summary>
     Task CleanupConnectionAsync(string connectionId);
+
+    /// <summary>
+    /// Recovers projects from disk on startup.
+    /// </summary>
     Task RecoverProjectsAsync();
 }
