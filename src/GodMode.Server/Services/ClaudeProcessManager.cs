@@ -27,6 +27,8 @@ public class ClaudeProcessManager : IClaudeProcessManager
     private readonly string? _claudeConfigDir;
     private readonly ConcurrentDictionary<string, Process> _processes = new();
 
+    public event OutputReceivedHandler? OnOutputReceived;
+
     public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger, IConfiguration configuration)
     {
         _logger = logger;
@@ -177,7 +179,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         };
 
         // Handle stdout data received
-        process.OutputDataReceived += (sender, e) =>
+        process.OutputDataReceived += async (sender, e) =>
         {
             if (e.Data == null) return;
 
@@ -188,6 +190,19 @@ public class ClaudeProcessManager : IClaudeProcessManager
                 _logger.LogInformation("Claude output [{ProjectId}]: {Output}",
                     project.Id,
                     e.Data.Length > 200 ? e.Data[..200] + "..." : e.Data);
+
+                // Raise event to notify listeners
+                if (OnOutputReceived != null)
+                {
+                    try
+                    {
+                        await OnOutputReceived(project, e.Data);
+                    }
+                    catch (Exception eventEx)
+                    {
+                        _logger.LogError(eventEx, "Error in OnOutputReceived handler for project {ProjectId}", project.Id);
+                    }
+                }
             }
             catch (Exception ex)
             {

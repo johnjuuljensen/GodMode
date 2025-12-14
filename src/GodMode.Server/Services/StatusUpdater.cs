@@ -52,9 +52,10 @@ public class StatusUpdater : IStatusUpdater
         // Parse Claude output events to update state
         switch (outputEvent.Type)
         {
-            case OutputEventType.AssistantOutput:
+            case OutputEventType.Assistant:
                 // Check if it's asking a question (simple heuristic)
-                if (outputEvent.Content.Contains("?") && outputEvent.Content.Length < 500)
+                if (!string.IsNullOrEmpty(outputEvent.Content) &&
+                    outputEvent.Content.Contains("?") && outputEvent.Content.Length < 500)
                 {
                     project.State = ProjectState.WaitingInput;
                     project.CurrentQuestion = outputEvent.Content;
@@ -67,32 +68,15 @@ public class StatusUpdater : IStatusUpdater
                 stateChanged = true;
                 break;
 
-            case OutputEventType.System:
-                // Check for completion or input request signals
+            case OutputEventType.Result:
+                // Result indicates the turn is complete
+                project.State = ProjectState.Idle;
+                project.CurrentQuestion = null;
+                stateChanged = true;
+
+                // Update metrics from result metadata
                 if (outputEvent.Metadata != null)
                 {
-                    if (outputEvent.Metadata.TryGetValue("event", out var eventType))
-                    {
-                        var eventStr = eventType?.ToString() ?? "";
-
-                        if (eventStr == "input_request")
-                        {
-                            project.State = ProjectState.WaitingInput;
-                            if (outputEvent.Metadata.TryGetValue("question", out var question))
-                            {
-                                project.CurrentQuestion = question?.ToString();
-                            }
-                            stateChanged = true;
-                        }
-                        else if (eventStr == "complete")
-                        {
-                            project.State = ProjectState.Idle;
-                            project.CurrentQuestion = null;
-                            stateChanged = true;
-                        }
-                    }
-
-                    // Update metrics from metadata
                     if (outputEvent.Metadata.TryGetValue("input_tokens", out var inputTokens))
                     {
                         if (long.TryParse(inputTokens?.ToString(), out var tokens))
@@ -111,11 +95,10 @@ public class StatusUpdater : IStatusUpdater
                 }
                 break;
 
-            case OutputEventType.ToolUse:
-                project.Metrics = project.Metrics with
-                {
-                    ToolCalls = project.Metrics.ToolCalls + 1
-                };
+            case OutputEventType.System:
+                // System init event - project is running
+                project.State = ProjectState.Running;
+                stateChanged = true;
                 break;
         }
 

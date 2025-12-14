@@ -261,7 +261,7 @@ public class ProjectViewModelTests : TestBase
         await ProjectService.Received(1).SendInputAsync("TestProfile", "host1", "proj1", "User response");
         vm.InputText.Should().BeEmpty(); // Input should be cleared
         vm.OutputEvents.Should().HaveCount(1);
-        vm.OutputEvents[0].Type.Should().Be(OutputEventType.UserInput);
+        vm.OutputEvents[0].Type.Should().Be(OutputEventType.User);
         vm.OutputEvents[0].Content.Should().Be("User response");
     }
 

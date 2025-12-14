@@ -36,6 +36,9 @@ public class ProjectManager : IProjectManager
         _hubContext = hubContext;
         _logger = logger;
 
+        // Subscribe to output events from Claude processes
+        _processManager.OnOutputReceived += HandleOutputReceivedAsync;
+
         // Load project roots from configuration
         IReadOnlyDictionary<string, string> projectRoots = configuration.GetSection("ProjectRoots").Get<IReadOnlyDictionary<string, string>>() ?? FrozenDictionary<string,string>.Empty;
 
@@ -374,6 +377,9 @@ public class ProjectManager : IProjectManager
     {
         var godModePath = Path.Combine(project.ProjectPath, ".godmode");
 
+        _logger.LogInformation("Setting up FileSystemWatcher for project {ProjectId} at {Path}",
+            project.Id, godModePath);
+
         project.OutputWatcher?.Dispose();
         project.OutputWatcher = new FileSystemWatcher(godModePath, "output.jsonl")
         {
@@ -383,8 +389,18 @@ public class ProjectManager : IProjectManager
 
         project.OutputWatcher.Changed += async (sender, e) =>
         {
+            _logger.LogInformation("FileSystemWatcher triggered for project {ProjectId}, ChangeType: {ChangeType}",
+                project.Id, e.ChangeType);
             await OnOutputFileChangedAsync(project);
         };
+
+        project.OutputWatcher.Error += (sender, e) =>
+        {
+            _logger.LogError(e.GetException(), "FileSystemWatcher error for project {ProjectId}", project.Id);
+        };
+
+        _logger.LogInformation("FileSystemWatcher setup complete for project {ProjectId}, EnableRaisingEvents: {Enabled}",
+            project.Id, project.OutputWatcher.EnableRaisingEvents);
     }
 
     private async Task OnOutputFileChangedAsync(ProjectInfo project)
@@ -393,20 +409,33 @@ public class ProjectManager : IProjectManager
         {
             var outputPath = Path.Combine(project.ProjectPath, ".godmode", "output.jsonl");
 
+            _logger.LogInformation("OnOutputFileChangedAsync called for project {ProjectId}, checking {Path}",
+                project.Id, outputPath);
+
             if (!File.Exists(outputPath))
             {
+                _logger.LogWarning("Output file does not exist for project {ProjectId}: {Path}",
+                    project.Id, outputPath);
                 return;
             }
 
             using var stream = new FileStream(outputPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             stream.Seek(project.OutputOffset, SeekOrigin.Begin);
 
+            _logger.LogInformation("Reading output from offset {Offset} for project {ProjectId}",
+                project.OutputOffset, project.Id);
+
             using var reader = new StreamReader(stream);
 
             string? line;
+            var lineCount = 0;
             while ((line = await reader.ReadLineAsync()) != null)
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
+
+                lineCount++;
+                _logger.LogInformation("Processing output line {LineNum} for project {ProjectId}: {Line}",
+                    lineCount, project.Id, line.Length > 100 ? line[..100] + "..." : line);
 
                 try
                 {
@@ -417,12 +446,21 @@ public class ProjectManager : IProjectManager
 
                     if (outputEvent != null)
                     {
+                        _logger.LogInformation("Sending OutputReceived to group 'project-{ProjectId}', Type: {Type}",
+                            project.Id, outputEvent.Type);
+
                         // Send to subscribed clients
                         await _hubContext.Clients.Group($"project-{project.Id}")
                             .OutputReceived(project.Id, outputEvent);
 
+                        _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", project.Id);
+
                         // Update status based on event
                         await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Deserialized OutputEvent is null for project {ProjectId}", project.Id);
                     }
                 }
                 catch (JsonException ex)
@@ -433,6 +471,9 @@ public class ProjectManager : IProjectManager
                 project.OutputOffset = stream.Position;
             }
 
+            _logger.LogInformation("Processed {LineCount} lines for project {ProjectId}, new offset: {Offset}",
+                lineCount, project.Id, project.OutputOffset);
+
             // Save updated offset
             await _statusUpdater.SaveStatusAsync(project);
         }
@@ -442,12 +483,63 @@ public class ProjectManager : IProjectManager
         }
     }
 
+    /// <summary>
+    /// Handles output received directly from the Claude process manager.
+    /// This bypasses the FileSystemWatcher for more reliable real-time updates.
+    /// </summary>
+    private async Task HandleOutputReceivedAsync(ProjectInfo project, string jsonLine)
+    {
+        if (string.IsNullOrWhiteSpace(jsonLine)) return;
+
+        _logger.LogInformation("HandleOutputReceivedAsync for project {ProjectId}: {Line}",
+            project.Id, jsonLine.Length > 100 ? jsonLine[..100] + "..." : jsonLine);
+
+        try
+        {
+            var outputEvent = JsonSerializer.Deserialize<OutputEvent>(jsonLine, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+
+            if (outputEvent != null)
+            {
+                _logger.LogInformation("Sending OutputReceived to group 'project-{ProjectId}', Type: {Type}",
+                    project.Id, outputEvent.Type);
+
+                // Send to subscribed clients
+                await _hubContext.Clients.Group($"project-{project.Id}")
+                    .OutputReceived(project.Id, outputEvent);
+
+                _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", project.Id);
+
+                // Update status based on event
+                await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
+            }
+            else
+            {
+                _logger.LogWarning("Deserialized OutputEvent is null for project {ProjectId}", project.Id);
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse output line in HandleOutputReceivedAsync: {Line}", jsonLine);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in HandleOutputReceivedAsync for project {ProjectId}", project.Id);
+        }
+    }
+
     private async Task SendOutputFromOffsetAsync(ProjectInfo project, long offset, string connectionId)
     {
         var outputPath = Path.Combine(project.ProjectPath, ".godmode", "output.jsonl");
 
+        _logger.LogInformation("SendOutputFromOffsetAsync called for project {ProjectId}, offset: {Offset}, connectionId: {ConnectionId}",
+            project.Id, offset, connectionId);
+
         if (!File.Exists(outputPath))
         {
+            _logger.LogInformation("No output file exists yet for project {ProjectId}", project.Id);
             return;
         }
 
@@ -459,10 +551,12 @@ public class ProjectManager : IProjectManager
             using var reader = new StreamReader(stream);
 
             string? line;
+            var lineCount = 0;
             while ((line = await reader.ReadLineAsync()) != null)
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
+                lineCount++;
                 try
                 {
                     var outputEvent = JsonSerializer.Deserialize<OutputEvent>(line, new JsonSerializerOptions
@@ -472,6 +566,9 @@ public class ProjectManager : IProjectManager
 
                     if (outputEvent != null)
                     {
+                        _logger.LogInformation("Sending existing output line {LineNum} to client {ConnectionId} for project {ProjectId}, Type: {Type}",
+                            lineCount, connectionId, project.Id, outputEvent.Type);
+
                         await _hubContext.Clients.Client(connectionId)
                             .OutputReceived(project.Id, outputEvent);
                     }
@@ -481,6 +578,9 @@ public class ProjectManager : IProjectManager
                     _logger.LogWarning(ex, "Failed to parse output line: {Line}", line);
                 }
             }
+
+            _logger.LogInformation("Sent {LineCount} existing output lines to client {ConnectionId} for project {ProjectId}",
+                lineCount, connectionId, project.Id);
         }
         catch (Exception ex)
         {

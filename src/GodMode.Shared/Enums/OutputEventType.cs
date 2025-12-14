@@ -1,42 +1,42 @@
+using System.Text.Json.Serialization;
+
 namespace GodMode.Shared.Enums;
 
 /// <summary>
 /// Represents the type of output event from the Claude agent.
+/// These map directly to the "type" field in Claude's stream-json output.
+/// Values use JsonStringEnumMemberName for proper case-insensitive serialization.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<OutputEventType>))]
 public enum OutputEventType
 {
     /// <summary>
-    /// User input text.
+    /// System initialization or system message.
     /// </summary>
-    UserInput,
+    [JsonStringEnumMemberName("system")]
+    System,
 
     /// <summary>
-    /// Assistant's text response.
+    /// User input/prompt.
     /// </summary>
-    AssistantOutput,
+    [JsonStringEnumMemberName("user")]
+    User,
 
     /// <summary>
-    /// Assistant's thinking process.
+    /// Assistant's response.
     /// </summary>
-    Thinking,
+    [JsonStringEnumMemberName("assistant")]
+    Assistant,
 
     /// <summary>
-    /// Tool usage by the assistant.
+    /// Final result of a conversation turn.
     /// </summary>
-    ToolUse,
-
-    /// <summary>
-    /// Result from tool execution.
-    /// </summary>
-    ToolResult,
+    [JsonStringEnumMemberName("result")]
+    Result,
 
     /// <summary>
     /// Error message.
     /// </summary>
-    Error,
-
-    /// <summary>
-    /// System message.
-    /// </summary>
-    System
+    [JsonStringEnumMemberName("error")]
+    Error
 }

@@ -126,7 +126,7 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
             // Add to output immediately for UI feedback
             OutputEvents.Add(new OutputEvent(
                 DateTime.UtcNow,
-                OutputEventType.UserInput,
+                OutputEventType.User,
                 input
             ));
 
