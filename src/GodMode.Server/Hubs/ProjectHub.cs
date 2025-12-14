@@ -1,4 +1,5 @@
 using GodMode.Shared.Enums;
+using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using GodMode.Server.Services;
 using Microsoft.AspNetCore.SignalR;
@@ -8,7 +9,7 @@ namespace GodMode.Server.Hubs;
 /// <summary>
 /// SignalR hub for real-time project communication.
 /// </summary>
-public class ProjectHub : Hub
+public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
 {
     private readonly IProjectManager _projectManager;
     private readonly ILogger<ProjectHub> _logger;
@@ -64,7 +65,7 @@ public class ProjectHub : Hub
         var project = await _projectManager.CreateProjectAsync(request);
 
         // Notify all clients about the new project
-        await Clients.All.SendAsync("ProjectCreated", project.Status);
+        await Clients.All.ProjectCreated(project.Status);
 
         return project;
     }

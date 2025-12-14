@@ -1,18 +1,22 @@
 using GodMode.Maui.Abstractions;
+using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
 using Microsoft.AspNetCore.SignalR.Client;
 using System.Reactive.Subjects;
 using System.Reactive.Linq;
+using TypedSignalR.Client;
 
 namespace GodMode.Maui.Providers;
 
 /// <summary>
 /// Implementation of IProjectConnection that uses SignalR to connect to a remote server
 /// </summary>
-public class SignalRProjectConnection : IProjectConnection
+public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
 {
     private readonly HubConnection _hubConnection;
+    private readonly IProjectHub _hubProxy;
+    private readonly IDisposable _clientRegistration;
     private readonly Dictionary<string, Subject<OutputEvent>> _outputSubscriptions = new();
     private bool _disposed;
 
@@ -37,9 +41,11 @@ public class SignalRProjectConnection : IProjectConnection
 
         _hubConnection = builder.Build();
 
-        // Register server-to-client handlers
-        _hubConnection.On<string, OutputEvent>("OutputReceived", OnOutputReceived);
-        _hubConnection.On<string, ProjectStatus>("StatusChanged", OnStatusChanged);
+        // Create strongly-typed hub proxy for server calls
+        _hubProxy = _hubConnection.CreateHubProxy<IProjectHub>();
+
+        // Register strongly-typed client handlers for server-to-client calls
+        _clientRegistration = _hubConnection.Register<IProjectHubClient>(this);
     }
 
     public async Task ConnectAsync()
@@ -52,17 +58,17 @@ public class SignalRProjectConnection : IProjectConnection
 
     public async Task<IEnumerable<ProjectRoot>> ListProjectRootsAsync()
     {
-        return await _hubConnection.InvokeAsync<IEnumerable<ProjectRoot>>("ListProjectRoots");
+        return await _hubProxy.ListProjectRoots();
     }
 
     public async Task<IEnumerable<ProjectSummary>> ListProjectsAsync()
     {
-        return await _hubConnection.InvokeAsync<IEnumerable<ProjectSummary>>("ListProjects");
+        return await _hubProxy.ListProjects();
     }
 
     public async Task<ProjectStatus> GetStatusAsync(string projectId)
     {
-        return await _hubConnection.InvokeAsync<ProjectStatus>("GetStatus", projectId);
+        return await _hubProxy.GetStatus(projectId);
     }
 
     public async Task<ProjectDetail> CreateProjectAsync(
@@ -72,28 +78,22 @@ public class SignalRProjectConnection : IProjectConnection
         string? repoUrl,
         string initialPrompt)
     {
-        return await _hubConnection.InvokeAsync<ProjectDetail>(
-            "CreateProject",
-            name,
-            projectRootName,
-            projectType,
-            repoUrl,
-            initialPrompt);
+        return await _hubProxy.CreateProject(name, projectRootName, projectType, repoUrl, initialPrompt);
     }
 
     public async Task SendInputAsync(string projectId, string input)
     {
-        await _hubConnection.InvokeAsync("SendInput", projectId, input);
+        await _hubProxy.SendInput(projectId, input);
     }
 
     public async Task StopProjectAsync(string projectId)
     {
-        await _hubConnection.InvokeAsync("StopProject", projectId);
+        await _hubProxy.StopProject(projectId);
     }
 
     public async Task ResumeProjectAsync(string projectId)
     {
-        await _hubConnection.InvokeAsync("ResumeProject", projectId);
+        await _hubProxy.ResumeProject(projectId);
     }
 
     public IObservable<OutputEvent> SubscribeOutput(string projectId, long fromOffset = 0)
@@ -103,7 +103,7 @@ public class SignalRProjectConnection : IProjectConnection
             _outputSubscriptions[projectId] = new Subject<OutputEvent>();
 
             // Subscribe on the server
-            _hubConnection.InvokeAsync("SubscribeProject", projectId, fromOffset).ConfigureAwait(false);
+            _hubProxy.SubscribeProject(projectId, fromOffset).ConfigureAwait(false);
         }
 
         return _outputSubscriptions[projectId].AsObservable();
@@ -111,7 +111,7 @@ public class SignalRProjectConnection : IProjectConnection
 
     public async Task<string> GetMetricsHtmlAsync(string projectId)
     {
-        return await _hubConnection.InvokeAsync<string>("GetMetricsHtml", projectId);
+        return await _hubProxy.GetMetricsHtml(projectId);
     }
 
     public void Disconnect()
@@ -119,24 +119,39 @@ public class SignalRProjectConnection : IProjectConnection
         _hubConnection.StopAsync().ConfigureAwait(false);
     }
 
-    private void OnOutputReceived(string projectId, OutputEvent outputEvent)
+    #region IProjectHubClient Implementation
+
+    Task IProjectHubClient.OutputReceived(string projectId, OutputEvent outputEvent)
     {
         if (_outputSubscriptions.TryGetValue(projectId, out var subject))
         {
             subject.OnNext(outputEvent);
         }
+        return Task.CompletedTask;
     }
 
-    private void OnStatusChanged(string projectId, ProjectStatus status)
+    Task IProjectHubClient.StatusChanged(string projectId, ProjectStatus status)
     {
         // This could be used to update local cache or trigger UI updates
         // For now, we'll leave it as a placeholder
+        return Task.CompletedTask;
     }
+
+    Task IProjectHubClient.ProjectCreated(ProjectStatus status)
+    {
+        // This could be used to refresh project lists
+        // For now, we'll leave it as a placeholder
+        return Task.CompletedTask;
+    }
+
+    #endregion
 
     public void Dispose()
     {
         if (!_disposed)
         {
+            _clientRegistration.Dispose();
+
             foreach (var subject in _outputSubscriptions.Values)
             {
                 subject.Dispose();

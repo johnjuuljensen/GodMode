@@ -1,5 +1,4 @@
 using CliWrap;
-using CliWrap.Buffered;
 using GodMode.Server.Models;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -37,62 +36,11 @@ public class ClaudeProcessManager : IClaudeProcessManager
             cancellationToken
         );
 
-        var inputPath = Path.Combine(godModePath, "input.jsonl");
-        var outputPath = Path.Combine(godModePath, "output.jsonl");
-
-        // Create input pipe
-        var inputPipe = PipeSource.Create(async (stream, ct) =>
-        {
-            var writer = new StreamWriter(stream, Encoding.UTF8, leaveOpen: true);
-            _inputStreams[project.Id] = writer;
-
-            // Send initial prompt
-            await writer.WriteLineAsync(initialPrompt.AsMemory(), ct);
-            await writer.FlushAsync(ct);
-
-            // Log input
-            await LogInputAsync(inputPath, initialPrompt, ct);
-
-            // Keep stream open for future input
-            await Task.Delay(Timeout.Infinite, ct);
-        });
-
-        // Create output pipe
-        var outputPipe = PipeTarget.Create(async (stream, ct) =>
-        {
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            using var fileStream = new FileStream(outputPath, FileMode.Append, FileAccess.Write, FileShare.Read);
-            using var fileWriter = new StreamWriter(fileStream, Encoding.UTF8);
-
-            while (!ct.IsCancellationRequested)
-            {
-                var line = await reader.ReadLineAsync(ct);
-                if (line == null) break;
-
-                // Write to output.jsonl
-                await fileWriter.WriteLineAsync(line.AsMemory(), ct);
-                await fileWriter.FlushAsync(ct);
-
-                _logger.LogDebug("Claude output: {Output}", line.Length > 100 ? line.Substring(0, 100) + "..." : line);
-            }
-        });
-
-        // Start the process
-        var command = Cli.Wrap("claude")
-            .WithArguments(["--print", "--verbose", " --dangerously-skip-permissions", "--output-format=stream-json", "--session-id", sessionId, initialPrompt])
-            .WithWorkingDirectory(project.WorkPath)
-            .WithStandardInputPipe(inputPipe)
-            .WithStandardOutputPipe(outputPipe)
-            .WithValidation(CommandResultValidation.None);
-
-        var commandTask = command.ExecuteAsync(cancellationToken);
-        
-        // Note: We can't easily get the process ID from CliWrap, so we'll use 0 as a placeholder
-        // The cancellation token is used to stop the process
-        return 0;
+        var args = new[] { "--print", "--verbose", "--dangerously-skip-permissions", "--output-format=stream-json", "--session-id", sessionId, initialPrompt };
+        return await RunClaudeProcessAsync(project, args, initialPrompt, cancellationToken);
     }
 
-    public async Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken)
+    public Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
             project.Id, project.SessionId);
@@ -102,6 +50,12 @@ public class ClaudeProcessManager : IClaudeProcessManager
             throw new InvalidOperationException($"Cannot resume project {project.Id}: no session ID found");
         }
 
+        var args = new[] { "--print", "--verbose", "--dangerously-skip-permissions", "--output-format=stream-json", "--resume", project.SessionId };
+        return RunClaudeProcessAsync(project, args, initialPrompt: null, cancellationToken);
+    }
+
+    private Task<int> RunClaudeProcessAsync(ProjectInfo project, string[] args, string? initialPrompt, CancellationToken cancellationToken)
+    {
         var godModePath = Path.Combine(project.ProjectPath, ".godmode");
         var inputPath = Path.Combine(godModePath, "input.jsonl");
         var outputPath = Path.Combine(godModePath, "output.jsonl");
@@ -112,6 +66,14 @@ public class ClaudeProcessManager : IClaudeProcessManager
             var writer = new StreamWriter(stream, Encoding.UTF8, leaveOpen: true);
             _inputStreams[project.Id] = writer;
 
+            // Send initial prompt if provided (new session only)
+            if (initialPrompt != null)
+            {
+                await writer.WriteLineAsync(initialPrompt.AsMemory(), ct);
+                await writer.FlushAsync(ct);
+                await LogInputAsync(inputPath, initialPrompt, ct);
+            }
+
             // Keep stream open for future input
             await Task.Delay(Timeout.Infinite, ct);
         });
@@ -128,25 +90,25 @@ public class ClaudeProcessManager : IClaudeProcessManager
                 var line = await reader.ReadLineAsync(ct);
                 if (line == null) break;
 
-                // Write to output.jsonl
                 await fileWriter.WriteLineAsync(line.AsMemory(), ct);
                 await fileWriter.FlushAsync(ct);
 
-                _logger.LogDebug("Claude output: {Output}", line.Length > 100 ? line.Substring(0, 100) + "..." : line);
+                _logger.LogDebug("Claude output: {Output}", line.Length > 100 ? line[..100] + "..." : line);
             }
         });
 
-        // Start the process with --resume flag (uses existing session)
         var command = Cli.Wrap("claude")
-            .WithArguments(["--print", "--verbose", "--dangerously-skip-permissions", "--output-format=stream-json", "--resume", project.SessionId])
+            .WithArguments(args)
             .WithWorkingDirectory(project.WorkPath)
             .WithStandardInputPipe(inputPipe)
             .WithStandardOutputPipe(outputPipe)
             .WithValidation(CommandResultValidation.None);
 
-        var commandTask = command.ExecuteAsync(cancellationToken);
+        _ = command.ExecuteAsync(cancellationToken);
 
-        return 0;
+        // Note: We can't easily get the process ID from CliWrap, so we'll use 0 as a placeholder
+        // The cancellation token is used to stop the process
+        return Task.FromResult(0);
     }
 
     public async Task SendInputAsync(ProjectInfo project, string input)

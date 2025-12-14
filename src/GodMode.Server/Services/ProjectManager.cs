@@ -1,5 +1,6 @@
 using GodMode.Server.Models;
 using GodMode.Shared.Enums;
+using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR;
 using GodMode.Server.Hubs;
@@ -18,7 +19,7 @@ public class ProjectManager : IProjectManager
 {
     private readonly IClaudeProcessManager _processManager;
     private readonly IStatusUpdater _statusUpdater;
-    private readonly IHubContext<ProjectHub> _hubContext;
+    private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ProjectFiles.ProjectManager _projectFiles;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
@@ -26,7 +27,7 @@ public class ProjectManager : IProjectManager
     public ProjectManager(
         IClaudeProcessManager processManager,
         IStatusUpdater statusUpdater,
-        IHubContext<ProjectHub> hubContext,
+        IHubContext<ProjectHub, IProjectHubClient> hubContext,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -394,7 +395,7 @@ public class ProjectManager : IProjectManager
                     {
                         // Send to subscribed clients
                         await _hubContext.Clients.Group($"project-{project.Id}")
-                            .SendAsync("OutputReceived", project.Id, outputEvent);
+                            .OutputReceived(project.Id, outputEvent);
 
                         // Update status based on event
                         await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
@@ -448,7 +449,7 @@ public class ProjectManager : IProjectManager
                     if (outputEvent != null)
                     {
                         await _hubContext.Clients.Client(connectionId)
-                            .SendAsync("OutputReceived", project.Id, outputEvent);
+                            .OutputReceived(project.Id, outputEvent);
                     }
                 }
                 catch (JsonException ex)
@@ -466,7 +467,7 @@ public class ProjectManager : IProjectManager
     private async Task NotifyStatusChanged(ProjectInfo project)
     {
         var status = await GetStatusAsync(project.Id);
-        await _hubContext.Clients.All.SendAsync("StatusChanged", project.Id, status);
+        await _hubContext.Clients.All.StatusChanged(project.Id, status);
     }
 
     private async Task CloneRepositoryAsync(string repoUrl, string workPath)
