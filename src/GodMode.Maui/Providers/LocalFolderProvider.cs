@@ -28,10 +28,10 @@ public class LocalFolderProvider : IHostProvider
         _hostName = hostName ?? "Local Server";
     }
 
-    public Task<IEnumerable<HostInfo>> ListHostsAsync()
+    public async Task<IEnumerable<HostInfo>> ListHostsAsync()
     {
-        // Check if server is reachable
-        var state = IsServerReachable() ? HostState.Running : HostState.Stopped;
+        // Check if server is reachable (async to avoid blocking UI)
+        var state = await IsServerReachableAsync() ? HostState.Running : HostState.Stopped;
 
         var hosts = new List<HostInfo>
         {
@@ -44,17 +44,17 @@ public class LocalFolderProvider : IHostProvider
             )
         };
 
-        return Task.FromResult<IEnumerable<HostInfo>>(hosts);
+        return hosts;
     }
 
-    public Task<HostStatus> GetHostStatusAsync(string hostId)
+    public async Task<HostStatus> GetHostStatusAsync(string hostId)
     {
         if (hostId != _hostId)
         {
             throw new ArgumentException($"Unknown host: {hostId}");
         }
 
-        var state = IsServerReachable() ? HostState.Running : HostState.Stopped;
+        var state = await IsServerReachableAsync() ? HostState.Running : HostState.Stopped;
 
         var status = new HostStatus(
             _hostId,
@@ -66,7 +66,7 @@ public class LocalFolderProvider : IHostProvider
             DateTime.UtcNow
         );
 
-        return Task.FromResult(status);
+        return status;
     }
 
     public Task StartHostAsync(string hostId)
@@ -106,12 +106,12 @@ public class LocalFolderProvider : IHostProvider
         }
     }
 
-    private bool IsServerReachable()
+    private async Task<bool> IsServerReachableAsync()
     {
         try
         {
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-            var response = client.GetAsync($"{_serverUrl}/health").Result;
+            var response = await client.GetAsync($"{_serverUrl}/health");
             return response.IsSuccessStatusCode;
         }
         catch
