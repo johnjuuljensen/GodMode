@@ -6,6 +6,7 @@ using GodMode.Server.Hubs;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using ProjectFiles = GodMode.ProjectFiles;
+using System.Collections.Frozen;
 
 namespace GodMode.Server.Services;
 
@@ -35,14 +36,7 @@ public class ProjectManager : IProjectManager
         _logger = logger;
 
         // Load project roots from configuration
-        var projectRoots = configuration.GetSection("ProjectRoots").Get<Dictionary<string, string>>();
-
-        if (projectRoots == null || projectRoots.Count == 0)
-        {
-            // Fall back to legacy single path configuration
-            var legacyPath = configuration["ProjectsPath"] ?? Path.Combine(Directory.GetCurrentDirectory(), "projects");
-            projectRoots = new Dictionary<string, string> { ["default"] = legacyPath };
-        }
+        IReadOnlyDictionary<string, string> projectRoots = configuration.GetSection("ProjectRoots").Get<IReadOnlyDictionary<string, string>>() ?? FrozenDictionary<string,string>.Empty;
 
         _projectFiles = new ProjectFiles.ProjectManager(projectRoots);
 

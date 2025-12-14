@@ -20,7 +20,7 @@ public sealed class ProjectManager
     /// </summary>
     /// <param name="projectRoots">Dictionary of named project roots (name -> path).</param>
     /// <exception cref="ArgumentException">Thrown when projectRoots is null or empty.</exception>
-    public ProjectManager(Dictionary<string, string> projectRoots)
+    public ProjectManager(IReadOnlyDictionary<string, string> projectRoots)
     {
         if (projectRoots == null || projectRoots.Count == 0)
             throw new ArgumentException("At least one project root must be specified.", nameof(projectRoots));

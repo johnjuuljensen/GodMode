@@ -12,12 +12,14 @@ public class GitHubCodespaceProvider : IHostProvider
 {
     private readonly GitHubClient _client;
     private readonly string _username;
+    private readonly string _token;
 
     public string Type => "github";
 
     public GitHubCodespaceProvider(string token, string username)
     {
         _username = username;
+        _token = token;
         _client = new GitHubClient(new ProductHeaderValue("GodMode"))
         {
             Credentials = new Credentials(token)
@@ -99,9 +101,10 @@ public class GitHubCodespaceProvider : IHostProvider
         }
 
         // Construct SignalR server URL (assuming standard port 5000)
-        var serverUrl = $"{codespace.WebUrl}:5000/projecthub";
+        var serverUrl = $"{codespace.WebUrl}:5000/hubs/projects";
 
-        var connection = new SignalRProjectConnection(serverUrl);
+        // Pass the GitHub token for authentication
+        var connection = new SignalRProjectConnection(serverUrl, _token);
         await connection.ConnectAsync();
 
         return connection;

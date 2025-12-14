@@ -18,12 +18,24 @@ public class SignalRProjectConnection : IProjectConnection
 
     public bool IsConnected => _hubConnection.State == HubConnectionState.Connected;
 
-    public SignalRProjectConnection(string serverUrl)
+    /// <summary>
+    /// Creates a new SignalR connection to a project server.
+    /// </summary>
+    /// <param name="serverUrl">The SignalR hub URL.</param>
+    /// <param name="accessToken">Optional access token for authentication (e.g., GitHub PAT for Codespaces).</param>
+    public SignalRProjectConnection(string serverUrl, string? accessToken = null)
     {
-        _hubConnection = new HubConnectionBuilder()
-            .WithUrl(serverUrl)
-            .WithAutomaticReconnect()
-            .Build();
+        var builder = new HubConnectionBuilder()
+            .WithUrl(serverUrl, options =>
+            {
+                if (!string.IsNullOrEmpty(accessToken))
+                {
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(accessToken);
+                }
+            })
+            .WithAutomaticReconnect();
+
+        _hubConnection = builder.Build();
 
         // Register server-to-client handlers
         _hubConnection.On<string, OutputEvent>("OutputReceived", OnOutputReceived);
