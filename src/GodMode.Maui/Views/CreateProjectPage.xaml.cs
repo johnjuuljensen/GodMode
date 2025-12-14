@@ -9,4 +9,14 @@ public partial class CreateProjectPage : ContentPage
         InitializeComponent();
         BindingContext = viewModel;
     }
+
+    protected override async void OnAppearing()
+    {
+        base.OnAppearing();
+
+        if (BindingContext is CreateProjectViewModel viewModel)
+        {
+            await viewModel.LoadCommand.ExecuteAsync(null);
+        }
+    }
 }
