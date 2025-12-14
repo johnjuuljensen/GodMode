@@ -15,10 +15,12 @@ public class ClaudeProcessManager : IClaudeProcessManager
     private static readonly string[] DefaultArgs =
     [
         "--print",
+        "--debug",
+        "--replay-user-messages",
         "--verbose",
         "--dangerously-skip-permissions",
         "--output-format=stream-json",
-        //"--input-format=stream-json"
+        "--input-format=stream-json"
     ];
 
     private readonly ILogger<ClaudeProcessManager> _logger;
@@ -151,7 +153,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         var process = new Process
         {
             StartInfo = startInfo,
-            EnableRaisingEvents = true
+            EnableRaisingEvents = true,
         };
 
         var exitedTcs = new TaskCompletionSource<int>();
@@ -223,17 +225,6 @@ public class ClaudeProcessManager : IClaudeProcessManager
         _logger.LogInformation("Claude process started for project {ProjectId} with PID {ProcessId}",
             project.Id, process.Id);
 
-        // Send initial prompt via stdin if provided
-        if (!string.IsNullOrEmpty(initialPrompt))
-        {
-            _logger.LogInformation("Sending initial prompt to project {ProjectId}: {Prompt}",
-                project.Id,
-                initialPrompt.Length > 100 ? initialPrompt[..100] + "..." : initialPrompt);
-
-            await process.StandardInput.WriteLineAsync(initialPrompt);
-            await process.StandardInput.FlushAsync();
-        }
-
         // Handle cancellation
         cancellationToken.Register(() =>
         {
@@ -264,6 +255,13 @@ public class ClaudeProcessManager : IClaudeProcessManager
             }
         }
 
+
+        // Send initial prompt via stdin if provided
+        if ( !string.IsNullOrEmpty( initialPrompt ) ) {
+            await SendInputAsync( project, initialPrompt );
+        }
+
+
         return process.Id;
     }
 
@@ -278,8 +276,23 @@ public class ClaudeProcessManager : IClaudeProcessManager
             project.Id,
             input.Length > 50 ? input[..50] + "..." : input);
 
-        // Send plain text input
-        await process.StandardInput.WriteLineAsync(input);
+        // Send json input: {"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}
+        var inputMessage = new
+        {
+            type = "user",
+            message = new
+            {
+                role = "user",
+                content = new object[]
+                {
+                    new { type = "text", text = input }
+                }
+            }
+        };
+        var json = JsonSerializer.Serialize(inputMessage);
+        _logger.LogDebug("Sending JSON to stdin: {Json}", json);
+
+        await process.StandardInput.WriteLineAsync(json);
         await process.StandardInput.FlushAsync();
 
         // Log input
