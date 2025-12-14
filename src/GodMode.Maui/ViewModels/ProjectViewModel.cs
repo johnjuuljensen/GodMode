@@ -217,8 +217,8 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
 
     private void UpdateCanSendInput()
     {
-        CanSendInput = Status?.State == ProjectState.WaitingInput;
-        CanResume = Status?.State == ProjectState.Stopped || Status?.State == ProjectState.Idle;
+        CanSendInput = Status?.State is ProjectState.WaitingInput or ProjectState.Running;
+        CanResume = Status?.State is ProjectState.Stopped or ProjectState.Idle;
     }
 
     private async Task SubscribeToOutputAsync()

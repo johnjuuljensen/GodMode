@@ -1,4 +1,5 @@
 using GodMode.Server.Models;
+using Microsoft.Extensions.Configuration;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
@@ -16,15 +17,23 @@ public class ClaudeProcessManager : IClaudeProcessManager
         "--print",
         "--verbose",
         "--dangerously-skip-permissions",
-        "--output-format=stream-json"
+        "--output-format=stream-json",
+        "--input-format=stream-json"
     ];
 
     private readonly ILogger<ClaudeProcessManager> _logger;
+    private readonly string? _claudeConfigDir;
     private readonly ConcurrentDictionary<string, Process> _processes = new();
 
-    public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger)
+    public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _claudeConfigDir = configuration["ClaudeConfigDir"];
+
+        if (!string.IsNullOrEmpty(_claudeConfigDir))
+        {
+            _logger.LogInformation("Using Claude config directory: {ConfigDir}", _claudeConfigDir);
+        }
     }
 
     public async Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken)
@@ -47,7 +56,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         return await RunClaudeProcessAsync(project, args, cancellationToken);
     }
 
-    public Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken)
+    public async Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
             project.Id, project.SessionId);
@@ -57,13 +66,50 @@ public class ClaudeProcessManager : IClaudeProcessManager
             throw new InvalidOperationException($"Cannot resume project {project.Id}: no session ID found");
         }
 
+        // Try --resume first, with session validation callback
         var args = BuildArgs(["--resume", project.SessionId]);
-        return RunClaudeProcessAsync(project, args, cancellationToken);
+        var sessionNotFound = false;
+
+        var processId = await RunClaudeProcessAsync(project, args, cancellationToken, stderrLine =>
+        {
+            // Check for session not found error
+            if (stderrLine.Contains("No conversation found with session ID:"))
+            {
+                sessionNotFound = true;
+            }
+        });
+
+        // If session wasn't found, the process will have exited - start fresh
+        if (sessionNotFound)
+        {
+            _logger.LogWarning("Resume failed for project {ProjectId}, session {SessionId} not found. Starting fresh session.",
+                project.Id, project.SessionId);
+
+            var godModePath = Path.Combine(project.ProjectPath, ".godmode");
+            await File.WriteAllTextAsync(
+                Path.Combine(godModePath, "session-id"),
+                project.SessionId,
+                cancellationToken
+            );
+
+            // Start with new session - use a continuation prompt
+            var freshArgs = BuildArgs(["--session-id", project.SessionId, "Continue from where we left off. Review the codebase and previous work."]);
+            return await RunClaudeProcessAsync(project, freshArgs, cancellationToken);
+        }
+
+        return processId;
     }
 
     private static string[] BuildArgs(string[] additionalArgs) => [..DefaultArgs, ..additionalArgs];
 
-    private async Task<int> RunClaudeProcessAsync(ProjectInfo project, string[] args, CancellationToken cancellationToken)
+    private Task<int> RunClaudeProcessAsync(ProjectInfo project, string[] args, CancellationToken cancellationToken)
+        => RunClaudeProcessAsync(project, args, cancellationToken, onStderrLine: null);
+
+    private async Task<int> RunClaudeProcessAsync(
+        ProjectInfo project,
+        string[] args,
+        CancellationToken cancellationToken,
+        Action<string>? onStderrLine)
     {
         var godModePath = Path.Combine(project.ProjectPath, ".godmode");
         var outputPath = Path.Combine(godModePath, "output.jsonl");
@@ -76,10 +122,17 @@ public class ClaudeProcessManager : IClaudeProcessManager
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true,
+            CreateNoWindow = false,
+            WindowStyle = ProcessWindowStyle.Normal,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
+
+        // Set CLAUDE_CONFIG_DIR if configured
+        if (!string.IsNullOrEmpty(_claudeConfigDir))
+        {
+            startInfo.Environment["CLAUDE_CONFIG_DIR"] = _claudeConfigDir;
+        }
 
         foreach (var arg in args)
         {
@@ -94,7 +147,13 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
         _processes[project.Id] = process;
 
+        _logger.LogInformation("Starting Claude process for project {ProjectId} with args: {Args}",
+            project.Id, string.Join(" ", args));
+
         process.Start();
+
+        _logger.LogInformation("Claude process started for project {ProjectId} with PID {ProcessId}",
+            project.Id, process.Id);
 
         // Handle cancellation
         cancellationToken.Register(() =>
@@ -103,6 +162,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             {
                 if (!process.HasExited)
                 {
+                    _logger.LogInformation("Cancellation requested, killing process for project {ProjectId}", project.Id);
                     process.Kill(entireProcessTree: true);
                 }
             }
@@ -112,9 +172,30 @@ public class ClaudeProcessManager : IClaudeProcessManager
             }
         });
 
+        // Monitor process exit
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await process.WaitForExitAsync();
+                _logger.LogInformation(
+                    "Claude process exited for project {ProjectId} with exit code {ExitCode} (PID {ProcessId})",
+                    project.Id, process.ExitCode, process.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error waiting for process exit for project {ProjectId}", project.Id);
+            }
+            finally
+            {
+                _processes.TryRemove(project.Id, out _);
+            }
+        }, CancellationToken.None); // Don't cancel this task - we want to know when process exits
+
         // Read stdout in background and write to output.jsonl
         _ = Task.Run(async () =>
         {
+            _logger.LogInformation("Starting stdout reader for project {ProjectId}", project.Id);
             try
             {
                 await using var fileStream = new FileStream(outputPath, FileMode.Append, FileAccess.Write, FileShare.Read);
@@ -126,12 +207,16 @@ public class ClaudeProcessManager : IClaudeProcessManager
                     await fileWriter.WriteLineAsync(line.AsMemory(), cancellationToken);
                     await fileWriter.FlushAsync(cancellationToken);
 
-                    _logger.LogDebug("Claude output: {Output}", line.Length > 100 ? line[..100] + "..." : line);
+                    _logger.LogInformation("Claude output [{ProjectId}]: {Output}",
+                        project.Id,
+                        line.Length > 200 ? line[..200] + "..." : line);
                 }
+
+                _logger.LogInformation("Claude stdout stream ended for project {ProjectId}", project.Id);
             }
             catch (OperationCanceledException)
             {
-                // Expected when cancellation is requested
+                _logger.LogInformation("Claude stdout reading cancelled for project {ProjectId}", project.Id);
             }
             catch (Exception ex)
             {
@@ -139,26 +224,45 @@ public class ClaudeProcessManager : IClaudeProcessManager
             }
         }, cancellationToken);
 
-        // Read stderr in background
-        _ = Task.Run(async () =>
+        // Read stderr in background, with optional callback for each line
+        var stderrTask = Task.Run(async () =>
         {
+            _logger.LogInformation("Starting stderr reader for project {ProjectId}", project.Id);
             try
             {
                 string? line;
                 while ((line = await process.StandardError.ReadLineAsync(cancellationToken)) != null)
                 {
                     _logger.LogWarning("Claude stderr [{ProjectId}]: {Error}", project.Id, line);
+                    onStderrLine?.Invoke(line);
                 }
+
+                _logger.LogInformation("Claude stderr stream ended for project {ProjectId}", project.Id);
             }
             catch (OperationCanceledException)
             {
-                // Expected when cancellation is requested
+                _logger.LogInformation("Claude stderr reading cancelled for project {ProjectId}", project.Id);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error reading stderr for project {ProjectId}", project.Id);
             }
         }, cancellationToken);
+
+        // If we have a stderr callback, wait for the process to exit quickly (for validation)
+        // This allows us to detect immediate failures like "session not found"
+        if (onStderrLine != null)
+        {
+            // Wait for either process exit or a short timeout
+            var exitTask = process.WaitForExitAsync(cancellationToken);
+            var completed = await Task.WhenAny(exitTask, Task.Delay(1000, cancellationToken));
+
+            if (completed == exitTask)
+            {
+                // Process exited quickly - wait for stderr to finish reading
+                await stderrTask;
+            }
+        }
 
         return process.Id;
     }
@@ -174,7 +278,17 @@ public class ClaudeProcessManager : IClaudeProcessManager
             project.Id,
             input.Length > 50 ? input[..50] + "..." : input);
 
-        await process.StandardInput.WriteLineAsync(input);
+        // Format as stream-json input message
+        var inputMessage = new
+        {
+            type = "user_input",
+            content = input
+        };
+        var json = JsonSerializer.Serialize(inputMessage);
+
+        _logger.LogDebug("Sending JSON to stdin: {Json}", json);
+
+        await process.StandardInput.WriteLineAsync(json);
         await process.StandardInput.FlushAsync();
 
         // Log input

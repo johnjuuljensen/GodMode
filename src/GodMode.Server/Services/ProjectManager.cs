@@ -198,9 +198,33 @@ public class ProjectManager : IProjectManager
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        if (project.State != ProjectState.Stopped && project.State != ProjectState.Idle)
+        // Check if already running
+        if (project.State is ProjectState.Running or ProjectState.WaitingInput)
         {
-            throw new InvalidOperationException($"Project {projectId} is not stopped (current state: {project.State})");
+            // Check if process is actually still running
+            if (project.ProcessId != 0 && _processManager.IsProcessRunning(project.ProcessId))
+            {
+                _logger.LogInformation("Project {ProjectId} is already running with PID {ProcessId}",
+                    projectId, project.ProcessId);
+                return;
+            }
+
+            // Process died but state wasn't updated - fix state
+            _logger.LogWarning("Project {ProjectId} was marked as {State} but process is not running, resetting state",
+                projectId, project.State);
+            project.State = ProjectState.Stopped;
+        }
+
+        if (project.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
+        {
+            throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {project.State})");
+        }
+
+        // Stop any existing process/cancellation token
+        if (project.ProcessCancellation != null)
+        {
+            await project.ProcessCancellation.CancelAsync();
+            project.ProcessCancellation.Dispose();
         }
 
         _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}",
