@@ -46,6 +46,7 @@ public partial class ServerGroupViewModel : ObservableObject
     private string? _errorMessage;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ProjectCountDisplay))]
     private ObservableCollection<ProjectSummary> _projects = new();
 
     /// <summary>

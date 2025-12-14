@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/.build/">
+    <File Path=".gitignore" />
+    <File Path="CLAUDE.md" />
     <File Path="src/Directory.Build.props" />
   </Folder>
   <Folder Name="/src/">

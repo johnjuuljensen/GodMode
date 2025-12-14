@@ -321,9 +321,6 @@ public partial class MainViewModel : ObservableObject
 
             var projects = await connection.ListProjectsAsync();
             server.Projects = new ObservableCollection<ProjectSummary>(projects);
-
-            // Notify property changed for computed properties
-            OnPropertyChanged(nameof(server.ProjectCountDisplay));
         }
         catch (Exception ex)
         {
