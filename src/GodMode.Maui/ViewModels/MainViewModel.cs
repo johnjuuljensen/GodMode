@@ -3,13 +3,16 @@ using CommunityToolkit.Mvvm.Input;
 using GodMode.Maui.Services;
 using GodMode.Maui.Services.Models;
 using GodMode.Shared.Enums;
+using GodMode.Shared.Models;
 using System.Collections.ObjectModel;
-using HostInfo = GodMode.Shared.Models.HostInfo;
+
+// Resolve ambiguous Profile type
+using Profile = GodMode.Maui.Services.Models.Profile;
 
 namespace GodMode.Maui.ViewModels;
 
 /// <summary>
-/// ViewModel for the main page showing profiles and hosts
+/// ViewModel for the main page showing servers grouped with their projects
 /// </summary>
 public partial class MainViewModel : ObservableObject
 {
@@ -17,14 +20,19 @@ public partial class MainViewModel : ObservableObject
     private readonly IHostConnectionService _hostConnectionService;
     private readonly INotificationService _notificationService;
 
-    [ObservableProperty]
-    private ObservableCollection<Profile> _profiles = new();
+    /// <summary>
+    /// Special profile option representing "All" profiles
+    /// </summary>
+    public static readonly Profile AllProfilesOption = new() { Name = "All" };
 
     [ObservableProperty]
-    private Profile? _selectedProfile;
+    private ObservableCollection<Profile> _profileOptions = new();
 
     [ObservableProperty]
-    private ObservableCollection<HostInfo> _hosts = new();
+    private Profile? _selectedProfileOption;
+
+    [ObservableProperty]
+    private ObservableCollection<ServerGroupViewModel> _servers = new();
 
     [ObservableProperty]
     private bool _isLoading;
@@ -42,6 +50,16 @@ public partial class MainViewModel : ObservableObject
         _notificationService = notificationService;
     }
 
+    /// <summary>
+    /// Gets whether "All" profiles is selected.
+    /// </summary>
+    public bool IsAllProfilesSelected => SelectedProfileOption == AllProfilesOption;
+
+    /// <summary>
+    /// Gets the actual selected profile (null if "All" is selected).
+    /// </summary>
+    public Profile? SelectedProfile => IsAllProfilesSelected ? null : SelectedProfileOption;
+
     [RelayCommand]
     private async Task LoadAsync()
     {
@@ -51,13 +69,24 @@ public partial class MainViewModel : ObservableObject
         try
         {
             var profiles = await _profileService.GetProfilesAsync();
-            Profiles = new ObservableCollection<Profile>(profiles);
 
-            if (Profiles.Any())
+            // Build profile options with "All" at the top
+            var options = new List<Profile> { AllProfilesOption };
+            options.AddRange(profiles);
+            ProfileOptions = new ObservableCollection<Profile>(options);
+
+            // Try to restore selected profile, default to "All"
+            var selectedName = await _profileService.GetSelectedProfileAsync();
+            if (selectedName != null)
             {
-                SelectedProfile = await _profileService.GetSelectedProfileAsync() ?? Profiles.First();
-                await LoadHostsAsync();
+                SelectedProfileOption = ProfileOptions.FirstOrDefault(p => p.Name == selectedName.Name) ?? AllProfilesOption;
             }
+            else
+            {
+                SelectedProfileOption = AllProfilesOption;
+            }
+
+            await LoadServersAsync();
         }
         catch (Exception ex)
         {
@@ -70,20 +99,18 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task RefreshHostsAsync()
+    private async Task RefreshAsync()
     {
-        if (SelectedProfile == null) return;
-
         IsLoading = true;
         ErrorMessage = null;
 
         try
         {
-            await LoadHostsAsync();
+            await LoadServersAsync();
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Error refreshing hosts: {ex.Message}";
+            ErrorMessage = $"Error refreshing: {ex.Message}";
         }
         finally
         {
@@ -92,22 +119,31 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task SelectProfileAsync(Profile profile)
+    private async Task ToggleServerExpandedAsync(ServerGroupViewModel server)
     {
-        if (profile == null) return;
+        server.IsExpanded = !server.IsExpanded;
 
-        SelectedProfile = profile;
-        await _profileService.SetSelectedProfileAsync(profile.Name);
-        await LoadHostsAsync();
+        // Load projects if expanding and not yet loaded
+        if (server.IsExpanded && server.Projects.Count == 0 && server.CanConnect)
+        {
+            await LoadServerProjectsAsync(server);
+        }
     }
 
     [RelayCommand]
-    private async Task NavigateToHostAsync(HostInfo host)
+    private async Task NavigateToProjectAsync(ProjectSummary project)
     {
-        if (SelectedProfile == null || host == null) return;
+        // Find the server this project belongs to
+        var server = Servers.FirstOrDefault(s => s.Projects.Contains(project));
+        if (server == null) return;
 
-        // Navigate to host page (this would be handled by the shell navigation)
-        await Shell.Current!.GoToAsync($"host?profileName={SelectedProfile.Name}&hostId={host.Id}");
+        await Shell.Current!.GoToAsync($"project?profileName={server.ProfileName}&hostId={server.Id}&projectId={project.Id}");
+    }
+
+    [RelayCommand]
+    private async Task CreateProjectAsync(ServerGroupViewModel server)
+    {
+        await Shell.Current!.GoToAsync($"createProject?profileName={server.ProfileName}&hostId={server.Id}");
     }
 
     [RelayCommand]
@@ -119,29 +155,167 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task AddServerAsync()
     {
-        if (SelectedProfile == null) return;
-        await Shell.Current!.GoToAsync($"addServer?profileName={SelectedProfile.Name}");
-    }
-
-    partial void OnSelectedProfileChanged(Profile? value)
-    {
-        if (value != null)
+        // If a specific profile is selected, add to it; otherwise, let user choose
+        if (SelectedProfile != null)
         {
-            _ = LoadHostsAsync();
+            await Shell.Current!.GoToAsync($"addServer?profileName={SelectedProfile.Name}");
+        }
+        else if (ProfileOptions.Count > 1) // Has profiles beyond "All"
+        {
+            // Navigate to add server with first real profile as default
+            var firstProfile = ProfileOptions.FirstOrDefault(p => p != AllProfilesOption);
+            if (firstProfile != null)
+            {
+                await Shell.Current!.GoToAsync($"addServer?profileName={firstProfile.Name}");
+            }
+        }
+        else
+        {
+            // No profiles exist, prompt to create one first
+            ErrorMessage = "Create a profile first before adding servers";
         }
     }
 
-    private async Task LoadHostsAsync()
+    [RelayCommand]
+    private async Task StartServerAsync(ServerGroupViewModel server)
     {
-        if (SelectedProfile == null) return;
+        try
+        {
+            server.State = HostState.Starting;
+            var providers = await _hostConnectionService.GetProvidersForProfileAsync(server.ProfileName);
+            var provider = providers.FirstOrDefault(p => p.Type == server.Type);
 
-        var hosts = await _hostConnectionService.ListAllHostsAsync(SelectedProfile.Name);
-        Hosts = new ObservableCollection<HostInfo>(hosts);
+            if (provider != null)
+            {
+                await provider.StartHostAsync(server.Id);
+                server.State = HostState.Running;
+
+                // Load projects now that server is running
+                await LoadServerProjectsAsync(server);
+            }
+        }
+        catch (Exception ex)
+        {
+            server.State = HostState.Unknown;
+            server.ErrorMessage = ex.Message;
+        }
     }
 
-    public int GetBadgeCount(string hostId)
+    [RelayCommand]
+    private async Task StopServerAsync(ServerGroupViewModel server)
     {
-        if (SelectedProfile == null) return 0;
-        return _notificationService.GetBadgeCount(SelectedProfile.Name, hostId);
+        try
+        {
+            server.State = HostState.Stopping;
+            var providers = await _hostConnectionService.GetProvidersForProfileAsync(server.ProfileName);
+            var provider = providers.FirstOrDefault(p => p.Type == server.Type);
+
+            if (provider != null)
+            {
+                await provider.StopHostAsync(server.Id);
+                server.State = HostState.Stopped;
+                server.Projects.Clear();
+                server.IsConnected = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            server.State = HostState.Unknown;
+            server.ErrorMessage = ex.Message;
+        }
+    }
+
+    partial void OnSelectedProfileOptionChanged(Profile? value)
+    {
+        if (value != null)
+        {
+            // Save selection (but not "All" as a real profile name)
+            if (value != AllProfilesOption)
+            {
+                _ = _profileService.SetSelectedProfileAsync(value.Name);
+            }
+
+            _ = LoadServersAsync();
+        }
+    }
+
+    private async Task LoadServersAsync()
+    {
+        var serverList = new List<ServerGroupViewModel>();
+
+        try
+        {
+            if (IsAllProfilesSelected)
+            {
+                // Load servers from all profiles
+                foreach (var profile in ProfileOptions.Where(p => p != AllProfilesOption))
+                {
+                    var hosts = await _hostConnectionService.ListAllHostsAsync(profile.Name);
+                    foreach (var host in hosts)
+                    {
+                        var server = ServerGroupViewModel.FromHostInfo(host, profile.Name);
+                        server.IsConnected = _hostConnectionService.IsConnected(profile.Name, host.Id);
+                        serverList.Add(server);
+                    }
+                }
+            }
+            else if (SelectedProfile != null)
+            {
+                // Load servers from selected profile only
+                var hosts = await _hostConnectionService.ListAllHostsAsync(SelectedProfile.Name);
+                foreach (var host in hosts)
+                {
+                    var server = ServerGroupViewModel.FromHostInfo(host, SelectedProfile.Name);
+                    server.IsConnected = _hostConnectionService.IsConnected(SelectedProfile.Name, host.Id);
+                    serverList.Add(server);
+                }
+            }
+
+            Servers = new ObservableCollection<ServerGroupViewModel>(serverList);
+
+            // Auto-load projects for running servers
+            foreach (var server in Servers.Where(s => s.CanConnect))
+            {
+                _ = LoadServerProjectsAsync(server);
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading servers: {ex.Message}";
+        }
+    }
+
+    private async Task LoadServerProjectsAsync(ServerGroupViewModel server)
+    {
+        if (!server.CanConnect) return;
+
+        server.IsLoadingProjects = true;
+        server.ErrorMessage = null;
+
+        try
+        {
+            var connection = await _hostConnectionService.ConnectToHostAsync(server.ProfileName, server.Id);
+            server.IsConnected = true;
+
+            var projects = await connection.ListProjectsAsync();
+            server.Projects = new ObservableCollection<ProjectSummary>(projects);
+
+            // Notify property changed for computed properties
+            OnPropertyChanged(nameof(server.ProjectCountDisplay));
+        }
+        catch (Exception ex)
+        {
+            server.ErrorMessage = $"Failed to load projects: {ex.Message}";
+            server.IsConnected = false;
+        }
+        finally
+        {
+            server.IsLoadingProjects = false;
+        }
+    }
+
+    public int GetBadgeCount(string profileName, string hostId)
+    {
+        return _notificationService.GetBadgeCount(profileName, hostId);
     }
 }
