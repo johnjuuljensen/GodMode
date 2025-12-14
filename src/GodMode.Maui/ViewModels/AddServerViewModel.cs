@@ -31,7 +31,7 @@ public partial class AddServerViewModel : ObservableObject
 
     // Local server fields
     [ObservableProperty]
-    private string _serverUrl = "http://localhost:5000";
+    private string _serverUrl = "http://localhost:31337";
 
     [ObservableProperty]
     private string _serverDisplayName = string.Empty;

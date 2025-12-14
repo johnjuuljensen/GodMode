@@ -35,7 +35,7 @@ public class Account
     public string? Token { get; set; }
 
     /// <summary>
-    /// Server URL for local accounts (e.g., "http://localhost:5000").
+    /// Server URL for local accounts (e.g., "http://localhost:31337").
     /// Legacy file paths are converted to default localhost URL.
     /// </summary>
     public string? Path { get; set; }

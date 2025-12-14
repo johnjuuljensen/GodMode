@@ -32,10 +32,10 @@ COPY --from=build /app/publish .
 RUN mkdir -p /app/projects
 
 # Expose port
-EXPOSE 5000
+EXPOSE 31337
 
 # Set environment variables
-ENV ASPNETCORE_URLS=http://+:5000
+ENV ASPNETCORE_URLS=http://+:31337
 ENV ProjectsPath=/app/projects
 
 ENTRYPOINT ["dotnet", "GodMode.Server.dll"]

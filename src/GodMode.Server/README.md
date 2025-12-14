@@ -40,7 +40,7 @@ Configuration is in `appsettings.json`:
 ```json
 {
   "ProjectsPath": "projects",    // Root folder for projects
-  "Urls": "http://0.0.0.0:5000"  // Server URL
+  "Urls": "http://0.0.0.0:31337"  // Server URL
 }
 ```
 
@@ -125,9 +125,9 @@ Add to `.devcontainer/devcontainer.json`:
 ```json
 {
   "postStartCommand": "cd /workspaces/GodMode/src/GodMode.Server && dotnet run &",
-  "forwardPorts": [5000],
+  "forwardPorts": [31337],
   "portsAttributes": {
-    "5000": {
+    "31337": {
       "label": "GodMode Server",
       "visibility": "private"
     }
@@ -193,7 +193,7 @@ Returns:
 ### SignalR Connection Failures
 
 - Verify CORS settings allow client origin
-- Check firewall rules for port 5000
+- Check firewall rules for port 31337
 - Enable detailed SignalR logging
 
 ## License

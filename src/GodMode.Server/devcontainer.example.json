@@ -7,9 +7,9 @@
   },
   "postCreateCommand": "dotnet restore",
   "postStartCommand": "cd /workspaces/GodMode/src/GodMode.Server && nohup dotnet run > /tmp/godmode-server.log 2>&1 &",
-  "forwardPorts": [5000],
+  "forwardPorts": [31337],
   "portsAttributes": {
-    "5000": {
+    "31337": {
       "label": "GodMode Server",
       "protocol": "http",
       "visibility": "private",

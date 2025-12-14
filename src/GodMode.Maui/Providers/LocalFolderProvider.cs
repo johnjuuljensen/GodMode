@@ -19,9 +19,9 @@ public class LocalFolderProvider : IHostProvider
     /// <summary>
     /// Creates a new LocalFolderProvider that connects to a local GodMode.Server instance.
     /// </summary>
-    /// <param name="serverUrl">The server URL (e.g., "http://localhost:5000").</param>
+    /// <param name="serverUrl">The server URL (e.g., "http://localhost:31337").</param>
     /// <param name="hostName">Optional display name for the host.</param>
-    public LocalFolderProvider(string serverUrl = "http://localhost:5000", string? hostName = null)
+    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? hostName = null)
     {
         _serverUrl = serverUrl;
         _hostId = "local-server";

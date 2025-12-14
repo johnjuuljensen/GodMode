@@ -23,7 +23,7 @@ public class AddServerViewModelTests : TestBase
         vm.SelectedServerType.Should().Be("Local Server");
         vm.GitHubUsername.Should().BeEmpty();
         vm.GitHubToken.Should().BeEmpty();
-        vm.ServerUrl.Should().Be("http://localhost:5000");
+        vm.ServerUrl.Should().Be("http://localhost:31337");
         vm.ServerDisplayName.Should().BeEmpty();
         vm.IsSaving.Should().BeFalse();
         vm.ErrorMessage.Should().BeNull();
@@ -223,7 +223,7 @@ public class AddServerViewModelTests : TestBase
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
         vm.SelectedServerType = "Local Server";
-        vm.ServerUrl = "http://localhost:5000";
+        vm.ServerUrl = "http://localhost:31337";
 
         var profile = new Profile { Name = "TestProfile", Accounts = [] };
         ProfileService.GetProfileAsync("TestProfile")
@@ -247,7 +247,7 @@ public class AddServerViewModelTests : TestBase
         savedProfile.Should().NotBeNull();
         savedProfile!.Accounts.Should().HaveCount(1);
         savedProfile.Accounts[0].Type.Should().Be("local");
-        savedProfile.Accounts[0].Path.Should().Be("http://localhost:5000");
+        savedProfile.Accounts[0].Path.Should().Be("http://localhost:31337");
     }
 
     [Fact]
@@ -257,7 +257,7 @@ public class AddServerViewModelTests : TestBase
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
         vm.SelectedServerType = "Local Server";
-        vm.ServerUrl = "http://localhost:5000";
+        vm.ServerUrl = "http://localhost:31337";
         vm.ServerDisplayName = "My Server";
 
         var profile = new Profile { Name = "TestProfile", Accounts = [] };
