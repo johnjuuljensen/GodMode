@@ -4,44 +4,117 @@ using GodMode.Shared.Models;
 namespace GodMode.ProjectFiles;
 
 /// <summary>
-/// Manager for discovering and managing multiple project folders.
+/// Manager for discovering and managing multiple project folders across named project roots.
 /// </summary>
 public sealed class ProjectManager
 {
-    private readonly string _rootPath;
+    private readonly Dictionary<string, string> _projectRoots;
 
     /// <summary>
-    /// Gets the root path where project folders are stored.
+    /// Gets the named project roots.
     /// </summary>
-    public string RootPath => _rootPath;
+    public IReadOnlyDictionary<string, string> ProjectRoots => _projectRoots;
 
     /// <summary>
-    /// Creates a new ProjectManager for the specified root path.
+    /// Creates a new ProjectManager with the specified named project roots.
+    /// </summary>
+    /// <param name="projectRoots">Dictionary of named project roots (name -> path).</param>
+    /// <exception cref="ArgumentException">Thrown when projectRoots is null or empty.</exception>
+    public ProjectManager(Dictionary<string, string> projectRoots)
+    {
+        if (projectRoots == null || projectRoots.Count == 0)
+            throw new ArgumentException("At least one project root must be specified.", nameof(projectRoots));
+
+        _projectRoots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, path) in projectRoots)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Project root name cannot be empty.", nameof(projectRoots));
+
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException($"Project root path for '{name}' cannot be empty.", nameof(projectRoots));
+
+            var fullPath = Path.GetFullPath(path);
+
+            // Ensure root directory exists
+            if (!Directory.Exists(fullPath))
+                Directory.CreateDirectory(fullPath);
+
+            _projectRoots[name] = fullPath;
+        }
+    }
+
+    /// <summary>
+    /// Creates a new ProjectManager for a single root path (backward compatibility).
     /// </summary>
     /// <param name="rootPath">Root directory where project folders are stored.</param>
     /// <exception cref="ArgumentException">Thrown when rootPath is invalid.</exception>
     public ProjectManager(string rootPath)
+        : this(new Dictionary<string, string> { ["default"] = rootPath })
     {
-        if (string.IsNullOrWhiteSpace(rootPath))
-            throw new ArgumentException("Root path cannot be empty.", nameof(rootPath));
-
-        _rootPath = Path.GetFullPath(rootPath);
-
-        // Ensure root directory exists
-        if (!Directory.Exists(_rootPath))
-            Directory.CreateDirectory(_rootPath);
     }
 
     /// <summary>
-    /// Lists all project folders in the root directory.
+    /// Lists all project roots.
+    /// </summary>
+    /// <returns>Array of project roots.</returns>
+    public ProjectRoot[] ListProjectRoots()
+    {
+        return _projectRoots
+            .Select(kvp => new ProjectRoot(kvp.Key, kvp.Value))
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Gets the path for a named project root.
+    /// </summary>
+    /// <param name="rootName">The name of the project root.</param>
+    /// <returns>The full path to the project root.</returns>
+    /// <exception cref="KeyNotFoundException">Thrown when root name is not found.</exception>
+    public string GetProjectRootPath(string rootName)
+    {
+        if (!_projectRoots.TryGetValue(rootName, out var path))
+            throw new KeyNotFoundException($"Project root '{rootName}' not found.");
+
+        return path;
+    }
+
+    /// <summary>
+    /// Lists all project folders across all project roots.
     /// </summary>
     /// <returns>Array of project folder paths.</returns>
     public string[] ListProjectPaths()
     {
-        if (!Directory.Exists(_rootPath))
+        var paths = new List<string>();
+
+        foreach (var rootPath in _projectRoots.Values)
+        {
+            if (!Directory.Exists(rootPath))
+                continue;
+
+            paths.AddRange(
+                Directory.GetDirectories(rootPath)
+                    .Where(IsValidProjectFolder)
+            );
+        }
+
+        return paths.ToArray();
+    }
+
+    /// <summary>
+    /// Lists all project folders in a specific project root.
+    /// </summary>
+    /// <param name="rootName">The name of the project root.</param>
+    /// <returns>Array of project folder paths.</returns>
+    public string[] ListProjectPaths(string rootName)
+    {
+        var rootPath = GetProjectRootPath(rootName);
+
+        if (!Directory.Exists(rootPath))
             return Array.Empty<string>();
 
-        return Directory.GetDirectories(_rootPath)
+        return Directory.GetDirectories(rootPath)
             .Where(IsValidProjectFolder)
             .ToArray();
     }
@@ -116,19 +189,138 @@ public sealed class ProjectManager
     }
 
     /// <summary>
-    /// Creates a new project.
+    /// Creates a new project in the specified project root.
     /// </summary>
-    /// <param name="projectId">Unique project identifier.</param>
-    /// <param name="name">Human-readable project name.</param>
-    /// <param name="repoUrl">Optional repository URL.</param>
-    /// <returns>A new ProjectFolder instance.</returns>
-    public ProjectFolder CreateProject(string projectId, string name, string? repoUrl = null)
+    /// <param name="rootName">The name of the project root.</param>
+    /// <param name="name">Human-readable project name. For worktree projects, this is also the branch name.</param>
+    /// <param name="projectType">The type of project to create.</param>
+    /// <param name="repoUrl">Repository URL (required for GitHubRepo and GitHubWorktree types).</param>
+    /// <returns>A new ProjectFolder instance and the project ID.</returns>
+    /// <exception cref="ArgumentException">Thrown when required parameters are missing.</exception>
+    public (ProjectFolder Folder, string ProjectId) CreateProject(
+        string rootName,
+        string name,
+        ProjectType projectType,
+        string? repoUrl = null)
     {
-        return ProjectFolder.Create(_rootPath, projectId, name, repoUrl);
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Project name cannot be empty.", nameof(name));
+
+        var rootPath = GetProjectRootPath(rootName);
+
+        // Validate repo URL for GitHub project types
+        if (projectType is ProjectType.GitHubRepo or ProjectType.GitHubWorktree)
+        {
+            if (string.IsNullOrWhiteSpace(repoUrl))
+                throw new ArgumentException($"Repository URL is required for {projectType} projects.", nameof(repoUrl));
+        }
+
+        // Convert name to path-safe project ID using the convention: space -> underscore
+        var projectId = ConvertNameToPath(name);
+
+        return projectType switch
+        {
+            ProjectType.RawFolder => CreateRawFolderProject(rootPath, projectId, name),
+            ProjectType.GitHubRepo => CreateGitHubRepoProject(rootPath, projectId, name, repoUrl!),
+            ProjectType.GitHubWorktree => CreateWorktreeProject(rootPath, projectId, name, repoUrl!),
+            _ => throw new ArgumentException($"Unknown project type: {projectType}", nameof(projectType))
+        };
     }
 
     /// <summary>
-    /// Opens an existing project by ID.
+    /// Creates a raw folder project.
+    /// </summary>
+    private (ProjectFolder Folder, string ProjectId) CreateRawFolderProject(
+        string rootPath,
+        string projectId,
+        string name)
+    {
+        var folder = ProjectFolder.Create(rootPath, projectId, name, repoUrl: null);
+        return (folder, projectId);
+    }
+
+    /// <summary>
+    /// Creates a GitHub repo project by cloning the repository.
+    /// Note: Actual cloning is performed by the caller (Server) after creation.
+    /// </summary>
+    private (ProjectFolder Folder, string ProjectId) CreateGitHubRepoProject(
+        string rootPath,
+        string projectId,
+        string name,
+        string repoUrl)
+    {
+        var folder = ProjectFolder.Create(rootPath, projectId, name, repoUrl);
+        return (folder, projectId);
+    }
+
+    /// <summary>
+    /// Creates a worktree project.
+    /// The project name is used as the branch name.
+    /// The bare repo is stored at .{repoName}_bare if not existing.
+    /// Note: Actual git operations are performed by the caller (Server) after creation.
+    /// </summary>
+    private (ProjectFolder Folder, string ProjectId) CreateWorktreeProject(
+        string rootPath,
+        string projectId,
+        string name,
+        string repoUrl)
+    {
+        // For worktree projects, the project ID is the branch name
+        var folder = ProjectFolder.Create(rootPath, projectId, name, repoUrl);
+        return (folder, projectId);
+    }
+
+    /// <summary>
+    /// Converts a display name to a path-safe project ID.
+    /// Convention: spaces become underscores.
+    /// </summary>
+    public static string ConvertNameToPath(string name)
+    {
+        return name.Replace(' ', '_');
+    }
+
+    /// <summary>
+    /// Converts a path-safe project ID back to a display name.
+    /// Convention: underscores become spaces.
+    /// </summary>
+    public static string ConvertPathToName(string path)
+    {
+        return path.Replace('_', ' ');
+    }
+
+    /// <summary>
+    /// Gets the bare repository path for a worktree project.
+    /// </summary>
+    /// <param name="rootPath">The project root path.</param>
+    /// <param name="repoUrl">The repository URL.</param>
+    /// <returns>The path to the bare repository.</returns>
+    public static string GetBareRepoPath(string rootPath, string repoUrl)
+    {
+        var repoName = GetRepoNameFromUrl(repoUrl);
+        return Path.Combine(rootPath, $".{repoName}_bare");
+    }
+
+    /// <summary>
+    /// Extracts the repository name from a Git URL.
+    /// </summary>
+    private static string GetRepoNameFromUrl(string repoUrl)
+    {
+        // Handle both HTTPS and SSH URLs
+        // https://github.com/user/repo.git -> repo
+        // git@github.com:user/repo.git -> repo
+        var uri = repoUrl.TrimEnd('/');
+        if (uri.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+            uri = uri[..^4];
+
+        var lastSlash = uri.LastIndexOf('/');
+        var lastColon = uri.LastIndexOf(':');
+        var lastSeparator = Math.Max(lastSlash, lastColon);
+
+        return lastSeparator >= 0 ? uri[(lastSeparator + 1)..] : uri;
+    }
+
+    /// <summary>
+    /// Opens an existing project by ID, searching across all project roots.
     /// </summary>
     /// <param name="projectId">The project ID.</param>
     /// <returns>A ProjectFolder instance.</returns>
@@ -138,12 +330,32 @@ public sealed class ProjectManager
         if (string.IsNullOrWhiteSpace(projectId))
             throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
 
-        var projectPath = Path.Combine(_rootPath, projectId);
+        var projectPath = FindProjectPath(projectId);
+        if (projectPath == null)
+            throw new DirectoryNotFoundException($"Project '{projectId}' not found in any project root.");
+
         return ProjectFolder.Open(projectPath);
     }
 
     /// <summary>
-    /// Checks if a project exists.
+    /// Opens an existing project by ID in a specific project root.
+    /// </summary>
+    /// <param name="rootName">The name of the project root.</param>
+    /// <param name="projectId">The project ID.</param>
+    /// <returns>A ProjectFolder instance.</returns>
+    /// <exception cref="DirectoryNotFoundException">Thrown when project doesn't exist.</exception>
+    public ProjectFolder OpenProject(string rootName, string projectId)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
+
+        var rootPath = GetProjectRootPath(rootName);
+        var projectPath = Path.Combine(rootPath, projectId);
+        return ProjectFolder.Open(projectPath);
+    }
+
+    /// <summary>
+    /// Checks if a project exists in any project root.
     /// </summary>
     /// <param name="projectId">The project ID.</param>
     /// <returns>True if project exists and is valid.</returns>
@@ -152,8 +364,24 @@ public sealed class ProjectManager
         if (string.IsNullOrWhiteSpace(projectId))
             return false;
 
-        var projectPath = Path.Combine(_rootPath, projectId);
-        return IsValidProjectFolder(projectPath);
+        return FindProjectPath(projectId) != null;
+    }
+
+    /// <summary>
+    /// Finds the full path to a project by searching all project roots.
+    /// </summary>
+    /// <param name="projectId">The project ID.</param>
+    /// <returns>The full path to the project, or null if not found.</returns>
+    public string? FindProjectPath(string projectId)
+    {
+        foreach (var rootPath in _projectRoots.Values)
+        {
+            var projectPath = Path.Combine(rootPath, projectId);
+            if (IsValidProjectFolder(projectPath))
+                return projectPath;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -167,9 +395,8 @@ public sealed class ProjectManager
         if (string.IsNullOrWhiteSpace(projectId))
             throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
 
-        var projectPath = Path.Combine(_rootPath, projectId);
-
-        if (!Directory.Exists(projectPath))
+        var projectPath = FindProjectPath(projectId);
+        if (projectPath == null)
             return;
 
         if (!force)
@@ -205,9 +432,8 @@ public sealed class ProjectManager
         if (string.IsNullOrWhiteSpace(projectId))
             throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
 
-        var projectPath = Path.Combine(_rootPath, projectId);
-
-        if (!Directory.Exists(projectPath))
+        var projectPath = FindProjectPath(projectId);
+        if (projectPath == null)
             return;
 
         if (!force)
@@ -233,16 +459,18 @@ public sealed class ProjectManager
     }
 
     /// <summary>
-    /// Gets the full path for a project ID.
+    /// Gets the full path for a project ID by searching all project roots.
     /// </summary>
     /// <param name="projectId">The project ID.</param>
     /// <returns>Full path to the project folder.</returns>
+    /// <exception cref="DirectoryNotFoundException">Thrown when project is not found.</exception>
     public string GetProjectPath(string projectId)
     {
         if (string.IsNullOrWhiteSpace(projectId))
             throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
 
-        return Path.Combine(_rootPath, projectId);
+        return FindProjectPath(projectId)
+            ?? throw new DirectoryNotFoundException($"Project '{projectId}' not found in any project root.");
     }
 
     private static bool IsValidProjectFolder(string path)
