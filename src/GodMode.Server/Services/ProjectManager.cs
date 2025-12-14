@@ -496,15 +496,12 @@ public class ProjectManager : IProjectManager
 
         try
         {
-            var outputEvent = JsonSerializer.Deserialize<OutputEvent>(jsonLine, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
+            var outputEvent = ParseClaudeOutput(jsonLine);
 
             if (outputEvent != null)
             {
-                _logger.LogInformation("Sending OutputReceived to group 'project-{ProjectId}', Type: {Type}",
-                    project.Id, outputEvent.Type);
+                _logger.LogInformation("Sending OutputReceived to group 'project-{ProjectId}', Type: {Type}, Content: {Content}",
+                    project.Id, outputEvent.Type, outputEvent.Content?.Length > 50 ? outputEvent.Content[..50] + "..." : outputEvent.Content);
 
                 // Send to subscribed clients
                 await _hubContext.Clients.Group($"project-{project.Id}")
@@ -517,7 +514,7 @@ public class ProjectManager : IProjectManager
             }
             else
             {
-                _logger.LogWarning("Deserialized OutputEvent is null for project {ProjectId}", project.Id);
+                _logger.LogWarning("Parsed OutputEvent is null for project {ProjectId}", project.Id);
             }
         }
         catch (JsonException ex)
@@ -528,6 +525,114 @@ public class ProjectManager : IProjectManager
         {
             _logger.LogError(ex, "Error in HandleOutputReceivedAsync for project {ProjectId}", project.Id);
         }
+    }
+
+    /// <summary>
+    /// Parses Claude's raw JSON output into an OutputEvent with properly extracted content.
+    /// </summary>
+    private OutputEvent? ParseClaudeOutput(string jsonLine)
+    {
+        using var doc = JsonDocument.Parse(jsonLine);
+        var root = doc.RootElement;
+
+        if (!root.TryGetProperty("type", out var typeElement))
+            return null;
+
+        var typeStr = typeElement.GetString();
+        if (!Enum.TryParse<OutputEventType>(typeStr, ignoreCase: true, out var eventType))
+            return null;
+
+        var content = ExtractContent(root, eventType);
+        var metadata = ExtractMetadata(root);
+
+        return new OutputEvent(DateTime.UtcNow, eventType, content, metadata);
+    }
+
+    /// <summary>
+    /// Extracts the content from Claude's JSON based on event type.
+    /// </summary>
+    private static string ExtractContent(JsonElement root, OutputEventType eventType)
+    {
+        return eventType switch
+        {
+            OutputEventType.User => ExtractMessageContent(root),
+            OutputEventType.Assistant => ExtractMessageContent(root),
+            OutputEventType.Result => ExtractResultContent(root),
+            OutputEventType.System => ExtractSystemContent(root),
+            OutputEventType.Error => root.TryGetProperty("error", out var err) ? err.GetString() ?? "" : "",
+            _ => ""
+        };
+    }
+
+    /// <summary>
+    /// Extracts content from user/assistant message format: message.content[0].text
+    /// </summary>
+    private static string ExtractMessageContent(JsonElement root)
+    {
+        if (!root.TryGetProperty("message", out var message))
+            return "";
+
+        if (!message.TryGetProperty("content", out var content))
+            return "";
+
+        if (content.ValueKind != JsonValueKind.Array || content.GetArrayLength() == 0)
+            return "";
+
+        var firstContent = content[0];
+        if (firstContent.TryGetProperty("text", out var text))
+            return text.GetString() ?? "";
+
+        return "";
+    }
+
+    /// <summary>
+    /// Extracts content from result format: result field
+    /// </summary>
+    private static string ExtractResultContent(JsonElement root)
+    {
+        if (root.TryGetProperty("result", out var result))
+            return result.GetString() ?? "";
+
+        return "";
+    }
+
+    /// <summary>
+    /// Extracts content from system format: subtype or summary
+    /// </summary>
+    private static string ExtractSystemContent(JsonElement root)
+    {
+        if (root.TryGetProperty("subtype", out var subtype))
+        {
+            var subtypeStr = subtype.GetString() ?? "";
+            if (root.TryGetProperty("session_id", out var sessionId))
+                return $"{subtypeStr} (session: {sessionId.GetString()?[..8]}...)";
+            return subtypeStr;
+        }
+        return "system";
+    }
+
+    /// <summary>
+    /// Extracts metadata from the JSON for metrics tracking.
+    /// </summary>
+    private static Dictionary<string, object>? ExtractMetadata(JsonElement root)
+    {
+        var metadata = new Dictionary<string, object>();
+
+        if (root.TryGetProperty("usage", out var usage))
+        {
+            if (usage.TryGetProperty("input_tokens", out var inputTokens))
+                metadata["input_tokens"] = inputTokens.GetInt64();
+            if (usage.TryGetProperty("output_tokens", out var outputTokens))
+                metadata["output_tokens"] = outputTokens.GetInt64();
+        }
+
+        if (root.TryGetProperty("total_cost_usd", out var cost))
+            metadata["cost_usd"] = cost.GetDouble();
+
+        if (root.TryGetProperty("duration_ms", out var duration))
+            metadata["duration_ms"] = duration.GetInt64();
+
+        return metadata.Count > 0 ? metadata : null;
     }
 
     private async Task SendOutputFromOffsetAsync(ProjectInfo project, long offset, string connectionId)

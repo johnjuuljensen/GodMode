@@ -19,6 +19,7 @@
             <converters:BoolToChevronConverter x:Key="BoolToChevronConverter" />
             <converters:StateToColorConverter x:Key="StateToColorConverter" />
             <converters:OutputTypeToColorConverter x:Key="OutputTypeToColorConverter" />
+            <converters:OutputTypeToAlignmentConverter x:Key="OutputTypeToAlignmentConverter" />
             <converters:StateToStartVisibilityConverter x:Key="StateToStartVisibilityConverter" />
             <converters:StateToStopVisibilityConverter x:Key="StateToStopVisibilityConverter" />
         </ResourceDictionary>

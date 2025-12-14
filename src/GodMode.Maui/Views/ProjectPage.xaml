@@ -127,8 +127,11 @@
                     <DataTemplate x:DataType="models:OutputEvent">
                         <Border Padding="10"
                                Margin="5"
-                               BackgroundColor="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}"
-                               StrokeThickness="0">
+                               MaximumWidthRequest="600"
+                               HorizontalOptions="{Binding Type, Converter={StaticResource OutputTypeToAlignmentConverter}}"
+                               BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#1E1E1E}"
+                               Stroke="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}"
+                               StrokeThickness="2">
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
@@ -136,10 +139,12 @@
                                 <Label Grid.Row="0"
                                       Text="{Binding Type}"
                                       FontSize="10"
-                                      TextColor="Gray" />
+                                      FontAttributes="Bold"
+                                      TextColor="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}" />
                                 <Label Grid.Row="1"
                                       Text="{Binding Content}"
                                       FontSize="14"
+                                      TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
                                       LineBreakMode="WordWrap" />
                             </Grid>
                         </Border>
