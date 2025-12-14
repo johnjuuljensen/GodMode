@@ -190,6 +190,45 @@ public class ProjectManager : IProjectManager
         await NotifyStatusChanged(project);
     }
 
+    public async Task ResumeProjectAsync(string projectId)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+        {
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        }
+
+        if (project.State != ProjectState.Stopped && project.State != ProjectState.Idle)
+        {
+            throw new InvalidOperationException($"Project {projectId} is not stopped (current state: {project.State})");
+        }
+
+        _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}",
+            projectId, project.SessionId);
+
+        project.State = ProjectState.Running;
+        project.UpdatedAt = DateTime.UtcNow;
+        project.ProcessCancellation = new CancellationTokenSource();
+
+        try
+        {
+            var processId = await _processManager.ResumeClaudeProcessAsync(
+                project,
+                project.ProcessCancellation.Token
+            );
+            project.ProcessId = processId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to resume Claude process for project {ProjectId}", projectId);
+            project.State = ProjectState.Error;
+            await _statusUpdater.SaveStatusAsync(project);
+            throw;
+        }
+
+        await _statusUpdater.SaveStatusAsync(project);
+        await NotifyStatusChanged(project);
+    }
+
     public async Task SubscribeProjectAsync(string projectId, long outputOffset, string connectionId)
     {
         if (!_projects.TryGetValue(projectId, out var project))

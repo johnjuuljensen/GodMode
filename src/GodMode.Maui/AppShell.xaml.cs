@@ -13,6 +13,7 @@ public partial class AppShell : Shell
 		Routing.RegisterRoute("project", typeof(ProjectPage));
 		Routing.RegisterRoute("addProfile", typeof(AddProfilePage));
 		Routing.RegisterRoute("addServer", typeof(AddServerPage));
+		Routing.RegisterRoute("editServer", typeof(EditServerPage));
 		Routing.RegisterRoute("createProject", typeof(CreateProjectPage));
 	}
 }

@@ -29,9 +29,14 @@ public partial class ServerGroupViewModel : ObservableObject
     private string _profileName = string.Empty;
 
     [ObservableProperty]
+    private int _accountIndex;
+
+    [ObservableProperty]
     private bool _isExpanded = true;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusDisplay))]
+    [NotifyPropertyChangedFor(nameof(CanConnect))]
     private bool _isConnected;
 
     [ObservableProperty]
@@ -46,7 +51,7 @@ public partial class ServerGroupViewModel : ObservableObject
     /// <summary>
     /// Gets a display string for the server status.
     /// </summary>
-    public string StatusDisplay => State switch
+    public string StatusDisplay => IsConnected ? "Online" : State switch
     {
         HostState.Running => "Online",
         HostState.Stopped => "Offline",
@@ -57,9 +62,9 @@ public partial class ServerGroupViewModel : ObservableObject
     };
 
     /// <summary>
-    /// Gets whether the server can be connected to (is running).
+    /// Gets whether the server can be connected to (is running or already connected).
     /// </summary>
-    public bool CanConnect => State == HostState.Running;
+    public bool CanConnect => IsConnected || State == HostState.Running;
 
     /// <summary>
     /// Gets a display label showing project count.
@@ -74,7 +79,7 @@ public partial class ServerGroupViewModel : ObservableObject
     /// <summary>
     /// Creates a ServerGroupViewModel from a HostInfo.
     /// </summary>
-    public static ServerGroupViewModel FromHostInfo(HostInfo host, string profileName)
+    public static ServerGroupViewModel FromHostInfo(HostInfo host, string profileName, int accountIndex)
     {
         return new ServerGroupViewModel
         {
@@ -83,7 +88,8 @@ public partial class ServerGroupViewModel : ObservableObject
             Type = host.Type,
             State = host.State,
             Url = host.Url,
-            ProfileName = profileName
+            ProfileName = profileName,
+            AccountIndex = accountIndex
         };
     }
 }

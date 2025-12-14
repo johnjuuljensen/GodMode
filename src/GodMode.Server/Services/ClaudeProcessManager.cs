@@ -1,6 +1,7 @@
 using CliWrap;
 using CliWrap.Buffered;
 using GodMode.Server.Models;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -13,7 +14,7 @@ namespace GodMode.Server.Services;
 public class ClaudeProcessManager : IClaudeProcessManager
 {
     private readonly ILogger<ClaudeProcessManager> _logger;
-    private readonly Dictionary<string, StreamWriter> _inputStreams = new();
+    private readonly ConcurrentDictionary<string, StreamWriter> _inputStreams = new();
 
     public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger)
     {
@@ -91,6 +92,63 @@ public class ClaudeProcessManager : IClaudeProcessManager
         return 0;
     }
 
+    public async Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
+            project.Id, project.SessionId);
+
+        if (string.IsNullOrEmpty(project.SessionId))
+        {
+            throw new InvalidOperationException($"Cannot resume project {project.Id}: no session ID found");
+        }
+
+        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
+        var inputPath = Path.Combine(godModePath, "input.jsonl");
+        var outputPath = Path.Combine(godModePath, "output.jsonl");
+
+        // Create input pipe
+        var inputPipe = PipeSource.Create(async (stream, ct) =>
+        {
+            var writer = new StreamWriter(stream, Encoding.UTF8, leaveOpen: true);
+            _inputStreams[project.Id] = writer;
+
+            // Keep stream open for future input
+            await Task.Delay(Timeout.Infinite, ct);
+        });
+
+        // Create output pipe
+        var outputPipe = PipeTarget.Create(async (stream, ct) =>
+        {
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            using var fileStream = new FileStream(outputPath, FileMode.Append, FileAccess.Write, FileShare.Read);
+            using var fileWriter = new StreamWriter(fileStream, Encoding.UTF8);
+
+            while (!ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct);
+                if (line == null) break;
+
+                // Write to output.jsonl
+                await fileWriter.WriteLineAsync(line.AsMemory(), ct);
+                await fileWriter.FlushAsync(ct);
+
+                _logger.LogDebug("Claude output: {Output}", line.Length > 100 ? line.Substring(0, 100) + "..." : line);
+            }
+        });
+
+        // Start the process with --resume flag (uses existing session)
+        var command = Cli.Wrap("claude")
+            .WithArguments(["--print", "--verbose", "--dangerously-skip-permissions", "--output-format=stream-json", "--resume", project.SessionId])
+            .WithWorkingDirectory(project.WorkPath)
+            .WithStandardInputPipe(inputPipe)
+            .WithStandardOutputPipe(outputPipe)
+            .WithValidation(CommandResultValidation.None);
+
+        var commandTask = command.ExecuteAsync(cancellationToken);
+
+        return 0;
+    }
+
     public async Task SendInputAsync(ProjectInfo project, string input)
     {
         if (!_inputStreams.TryGetValue(project.Id, out var writer))
@@ -121,10 +179,16 @@ public class ClaudeProcessManager : IClaudeProcessManager
             project.ProcessCancellation = null;
         }
 
-        if (_inputStreams.TryGetValue(project.Id, out var writer))
+        if (_inputStreams.TryRemove(project.Id, out var writer))
         {
-            await writer.DisposeAsync();
-            _inputStreams.Remove(project.Id);
+            try
+            {
+                await writer.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error disposing input stream for project {ProjectId}", project.Id);
+            }
         }
 
         project.ProcessId = 0;

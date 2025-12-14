@@ -147,6 +147,12 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task EditServerAsync(ServerGroupViewModel server)
+    {
+        await Shell.Current!.GoToAsync($"editServer?profileName={server.ProfileName}&accountIndex={server.AccountIndex}");
+    }
+
+    [RelayCommand]
     private async Task AddProfileAsync()
     {
         await Shell.Current!.GoToAsync("addProfile");
@@ -250,25 +256,13 @@ public partial class MainViewModel : ObservableObject
                 // Load servers from all profiles
                 foreach (var profile in ProfileOptions.Where(p => p != AllProfilesOption))
                 {
-                    var hosts = await _hostConnectionService.ListAllHostsAsync(profile.Name);
-                    foreach (var host in hosts)
-                    {
-                        var server = ServerGroupViewModel.FromHostInfo(host, profile.Name);
-                        server.IsConnected = _hostConnectionService.IsConnected(profile.Name, host.Id);
-                        serverList.Add(server);
-                    }
+                    await LoadServersFromProfileAsync(profile, serverList);
                 }
             }
             else if (SelectedProfile != null)
             {
                 // Load servers from selected profile only
-                var hosts = await _hostConnectionService.ListAllHostsAsync(SelectedProfile.Name);
-                foreach (var host in hosts)
-                {
-                    var server = ServerGroupViewModel.FromHostInfo(host, SelectedProfile.Name);
-                    server.IsConnected = _hostConnectionService.IsConnected(SelectedProfile.Name, host.Id);
-                    serverList.Add(server);
-                }
+                await LoadServersFromProfileAsync(SelectedProfile, serverList);
             }
 
             Servers = new ObservableCollection<ServerGroupViewModel>(serverList);
@@ -282,6 +276,34 @@ public partial class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             ErrorMessage = $"Error loading servers: {ex.Message}";
+        }
+    }
+
+    private async Task LoadServersFromProfileAsync(Profile profile, List<ServerGroupViewModel> serverList)
+    {
+        // Get providers for this profile - each account creates a provider
+        var providers = await _hostConnectionService.GetProvidersForProfileAsync(profile.Name);
+        var providersList = providers.ToList();
+
+        // Track account index - providers are created in same order as accounts
+        for (int accountIndex = 0; accountIndex < providersList.Count; accountIndex++)
+        {
+            var provider = providersList[accountIndex];
+            try
+            {
+                var hosts = await provider.ListHostsAsync();
+                foreach (var host in hosts)
+                {
+                    var server = ServerGroupViewModel.FromHostInfo(host, profile.Name, accountIndex);
+                    server.IsConnected = _hostConnectionService.IsConnected(profile.Name, host.Id);
+                    serverList.Add(server);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Log error but continue with other providers
+                System.Diagnostics.Debug.WriteLine($"Error loading hosts from provider: {ex.Message}");
+            }
         }
     }
 

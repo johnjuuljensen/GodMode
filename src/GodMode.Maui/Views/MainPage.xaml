@@ -141,6 +141,14 @@
                                                WidthRequest="32"
                                                Padding="0"
                                                FontSize="16" />
+
+                                        <!-- Edit Button -->
+                                        <Button Text="Edit"
+                                               Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:MainViewModel}}, Path=EditServerCommand}"
+                                               CommandParameter="{Binding .}"
+                                               HeightRequest="32"
+                                               Padding="10,0"
+                                               FontSize="12" />
                                     </HorizontalStackLayout>
                                 </Grid>
                             </Border>

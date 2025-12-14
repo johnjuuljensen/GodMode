@@ -84,9 +84,19 @@ public class ProjectHub : Hub
     /// </summary>
     public async Task StopProject(string projectId)
     {
-        _logger.LogInformation("Client {ConnectionId} stopping project {ProjectId}", 
+        _logger.LogInformation("Client {ConnectionId} stopping project {ProjectId}",
             Context.ConnectionId, projectId);
         await _projectManager.StopProjectAsync(projectId);
+    }
+
+    /// <summary>
+    /// Resumes a stopped project using its existing session.
+    /// </summary>
+    public async Task ResumeProject(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} resuming project {ProjectId}",
+            Context.ConnectionId, projectId);
+        await _projectManager.ResumeProjectAsync(projectId);
     }
 
     /// <summary>

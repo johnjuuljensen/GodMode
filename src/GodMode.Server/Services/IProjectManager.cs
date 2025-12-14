@@ -38,6 +38,11 @@ public interface IProjectManager
     Task StopProjectAsync(string projectId);
 
     /// <summary>
+    /// Resumes a stopped project using its existing session.
+    /// </summary>
+    Task ResumeProjectAsync(string projectId);
+
+    /// <summary>
     /// Subscribes a client connection to project output.
     /// </summary>
     Task SubscribeProjectAsync(string projectId, long outputOffset, string connectionId);

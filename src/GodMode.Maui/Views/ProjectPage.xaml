@@ -104,8 +104,13 @@
                     <Button Text="Refresh"
                            Command="{Binding RefreshCommand}"
                            WidthRequest="100" />
+                    <Button Text="Resume"
+                           Command="{Binding ResumeProjectCommand}"
+                           IsVisible="{Binding CanResume}"
+                           WidthRequest="100" />
                     <Button Text="Stop"
                            Command="{Binding StopProjectCommand}"
+                           IsVisible="{Binding CanResume, Converter={StaticResource InverseBoolConverter}}"
                            WidthRequest="100" />
                     <Button Text="Metrics"
                            Command="{Binding LoadMetricsCommand}"

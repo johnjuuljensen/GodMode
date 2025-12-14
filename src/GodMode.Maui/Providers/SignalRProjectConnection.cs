@@ -91,6 +91,11 @@ public class SignalRProjectConnection : IProjectConnection
         await _hubConnection.InvokeAsync("StopProject", projectId);
     }
 
+    public async Task ResumeProjectAsync(string projectId)
+    {
+        await _hubConnection.InvokeAsync("ResumeProject", projectId);
+    }
+
     public IObservable<OutputEvent> SubscribeOutput(string projectId, long fromOffset = 0)
     {
         if (!_outputSubscriptions.ContainsKey(projectId))

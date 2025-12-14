@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:GodMode.Maui.ViewModels"
+             x:Class="GodMode.Maui.Views.EditServerPage"
+             x:DataType="viewmodels:EditServerViewModel"
+             Title="Edit Server">
+
+    <ScrollView Padding="20">
+        <VerticalStackLayout Spacing="15" MaximumWidthRequest="500" HorizontalOptions="Center">
+
+            <!-- Loading Indicator -->
+            <ActivityIndicator IsRunning="{Binding IsLoading}"
+                             IsVisible="{Binding IsLoading}"
+                             HorizontalOptions="Center" />
+
+            <!-- Profile Info -->
+            <Border Padding="10"
+                   BackgroundColor="{AppThemeBinding Light=#F0F0F0, Dark=#2C2C2C}"
+                   StrokeThickness="0"
+                   IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <HorizontalStackLayout Spacing="10">
+                    <Label Text="Profile:" VerticalOptions="Center" />
+                    <Label Text="{Binding ProfileName}" FontAttributes="Bold" VerticalOptions="Center" />
+                </HorizontalStackLayout>
+            </Border>
+
+            <!-- Server Type (read-only for edit) -->
+            <VerticalStackLayout Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <Label Text="Server Type" FontAttributes="Bold" />
+                <Label Text="{Binding SelectedServerType}"
+                      FontSize="16"
+                      TextColor="Gray" />
+            </VerticalStackLayout>
+
+            <!-- GitHub Codespaces Fields -->
+            <VerticalStackLayout Spacing="10" IsVisible="{Binding IsGitHubCodespaces}">
+                <VerticalStackLayout Spacing="5">
+                    <Label Text="GitHub Username" FontAttributes="Bold" />
+                    <Entry Text="{Binding GitHubUsername}" Placeholder="Enter GitHub username" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="5">
+                    <Label Text="GitHub Token" FontAttributes="Bold" />
+                    <Entry Text="{Binding GitHubToken}"
+                           Placeholder="Enter personal access token"
+                           IsPassword="True" />
+                    <Label Text="Leave as ******** to keep existing token, or enter a new one"
+                           FontSize="12"
+                           TextColor="Gray" />
+                </VerticalStackLayout>
+            </VerticalStackLayout>
+
+            <!-- Local Server Fields -->
+            <VerticalStackLayout Spacing="10" IsVisible="{Binding IsLocalServer}">
+                <VerticalStackLayout Spacing="5">
+                    <Label Text="Server URL" FontAttributes="Bold" />
+                    <Entry Text="{Binding ServerUrl}"
+                           Placeholder="http://localhost:31337" />
+                    <Label Text="URL of the GodMode.Server instance"
+                           FontSize="12"
+                           TextColor="Gray" />
+                </VerticalStackLayout>
+
+                <VerticalStackLayout Spacing="5">
+                    <Label Text="Display Name (optional)" FontAttributes="Bold" />
+                    <Entry Text="{Binding ServerDisplayName}" Placeholder="Enter display name" />
+                </VerticalStackLayout>
+            </VerticalStackLayout>
+
+            <!-- Buttons -->
+            <Grid ColumnDefinitions="*,*,*" Margin="0,20,0,0" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <Button Grid.Column="0"
+                        Text="Cancel"
+                        Command="{Binding CancelCommand}"
+                        Style="{StaticResource CancelButton}"
+                        Margin="0,0,5,0" />
+                <Button Grid.Column="1"
+                        Text="Delete"
+                        Command="{Binding DeleteCommand}"
+                        BackgroundColor="#DC3545"
+                        TextColor="White"
+                        Margin="5,0" />
+                <Button Grid.Column="2"
+                        Text="Save"
+                        Command="{Binding SaveCommand}"
+                        Margin="5,0,0,0" />
+            </Grid>
+
+            <!-- Error Message -->
+            <Label Text="{Binding ErrorMessage}"
+                   IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
+                   TextColor="Red"
+                   HorizontalTextAlignment="Center" />
+
+            <!-- Saving Indicator -->
+            <ActivityIndicator IsRunning="{Binding IsSaving}"
+                             IsVisible="{Binding IsSaving}"
+                             HorizontalOptions="Center" />
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

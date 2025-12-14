@@ -91,6 +91,17 @@ public class ProjectService : IProjectService
         _lastStatusUpdate.TryRemove(cacheKey, out _);
     }
 
+    public async Task ResumeProjectAsync(string profileName, string hostId, string projectId)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        await connection.ResumeProjectAsync(projectId);
+
+        // Invalidate cache
+        var cacheKey = $"{profileName}:{hostId}:{projectId}";
+        _statusCache.TryRemove(cacheKey, out _);
+        _lastStatusUpdate.TryRemove(cacheKey, out _);
+    }
+
     public async Task<IObservable<OutputEvent>> SubscribeOutputAsync(
         string profileName,
         string hostId,

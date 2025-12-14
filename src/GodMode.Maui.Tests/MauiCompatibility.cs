@@ -23,6 +23,7 @@ public static class Shell
 public class ShellStub
 {
     public Task GoToAsync(string route) => Task.CompletedTask;
+    public Task<bool> DisplayAlertAsync(string title, string message, string accept, string cancel) => Task.FromResult(false);
 }
 
 /// <summary>

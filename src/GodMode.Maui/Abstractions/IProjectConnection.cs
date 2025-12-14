@@ -54,6 +54,11 @@ public interface IProjectConnection : IDisposable
     Task StopProjectAsync(string projectId);
 
     /// <summary>
+    /// Resumes a stopped project using its existing session
+    /// </summary>
+    Task ResumeProjectAsync(string projectId);
+
+    /// <summary>
     /// Subscribes to output events from a project, starting from a specific offset
     /// </summary>
     IObservable<OutputEvent> SubscribeOutput(string projectId, long fromOffset = 0);

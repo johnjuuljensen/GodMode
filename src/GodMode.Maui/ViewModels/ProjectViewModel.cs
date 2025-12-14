@@ -47,6 +47,9 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     private bool _canSendInput;
 
     [ObservableProperty]
+    private bool _canResume;
+
+    [ObservableProperty]
     private bool _showMetrics;
 
     [ObservableProperty]
@@ -157,6 +160,26 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private async Task ResumeProjectAsync()
+    {
+        try
+        {
+            IsLoading = true;
+            ErrorMessage = null;
+            await _projectService.ResumeProjectAsync(ProfileName, HostId, ProjectId);
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error resuming project: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    [RelayCommand]
     private async Task LoadMetricsAsync()
     {
         try
@@ -195,6 +218,7 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     private void UpdateCanSendInput()
     {
         CanSendInput = Status?.State == ProjectState.WaitingInput;
+        CanResume = Status?.State == ProjectState.Stopped || Status?.State == ProjectState.Idle;
     }
 
     private async Task SubscribeToOutputAsync()
