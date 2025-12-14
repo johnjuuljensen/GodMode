@@ -1,8 +1,8 @@
 namespace GodMode.Maui.Views;
 
-public partial class AddAccountPage : ContentPage
+public partial class AddServerPage : ContentPage
 {
-    public AddAccountPage(AddAccountViewModel viewModel)
+    public AddServerPage(AddServerViewModel viewModel)
     {
         InitializeComponent();
         BindingContext = viewModel;

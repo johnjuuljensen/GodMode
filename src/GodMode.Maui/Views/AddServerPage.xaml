@@ -2,9 +2,9 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:viewmodels="clr-namespace:GodMode.Maui.ViewModels"
-             x:Class="GodMode.Maui.Views.AddAccountPage"
-             x:DataType="viewmodels:AddAccountViewModel"
-             Title="Add Account">
+             x:Class="GodMode.Maui.Views.AddServerPage"
+             x:DataType="viewmodels:AddServerViewModel"
+             Title="Add Server">
 
     <ScrollView Padding="20">
         <VerticalStackLayout Spacing="15" MaximumWidthRequest="500" HorizontalOptions="Center">
@@ -12,20 +12,20 @@
             <!-- Profile Info -->
             <Border Padding="10" BackgroundColor="{AppThemeBinding Light=#F0F0F0, Dark=#2C2C2C}" StrokeThickness="0">
                 <HorizontalStackLayout Spacing="10">
-                    <Label Text="Adding account to:" VerticalOptions="Center" />
+                    <Label Text="Adding server to:" VerticalOptions="Center" />
                     <Label Text="{Binding ProfileName}" FontAttributes="Bold" VerticalOptions="Center" />
                 </HorizontalStackLayout>
             </Border>
 
-            <!-- Account Type Selection -->
+            <!-- Server Type Selection -->
             <VerticalStackLayout Spacing="5">
-                <Label Text="Account Type" FontAttributes="Bold" />
-                <Picker ItemsSource="{Binding AccountTypes}"
-                        SelectedItem="{Binding SelectedAccountType}" />
+                <Label Text="Server Type" FontAttributes="Bold" />
+                <Picker ItemsSource="{Binding ServerTypes}"
+                        SelectedItem="{Binding SelectedServerType}" />
             </VerticalStackLayout>
 
-            <!-- GitHub Account Fields -->
-            <VerticalStackLayout Spacing="10" IsVisible="{Binding IsGitHubAccount}">
+            <!-- GitHub Codespaces Fields -->
+            <VerticalStackLayout Spacing="10" IsVisible="{Binding IsGitHubCodespaces}">
                 <VerticalStackLayout Spacing="5">
                     <Label Text="GitHub Username" FontAttributes="Bold" />
                     <Entry Text="{Binding GitHubUsername}" Placeholder="Enter GitHub username" />
@@ -67,7 +67,7 @@
                         BackgroundColor="Gray"
                         Margin="0,0,5,0" />
                 <Button Grid.Column="1"
-                        Text="Add Account"
+                        Text="Add Server"
                         Command="{Binding SaveCommand}"
                         Margin="5,0,0,0" />
             </Grid>

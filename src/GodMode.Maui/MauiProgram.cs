@@ -31,7 +31,7 @@ public static class MauiProgram
 		builder.Services.AddTransient<HostViewModel>();
 		builder.Services.AddTransient<ProjectViewModel>();
 		builder.Services.AddTransient<AddProfileViewModel>();
-		builder.Services.AddTransient<AddAccountViewModel>();
+		builder.Services.AddTransient<AddServerViewModel>();
 		builder.Services.AddTransient<CreateProjectViewModel>();
 
 		// Register Views
@@ -39,7 +39,7 @@ public static class MauiProgram
 		builder.Services.AddTransient<HostPage>();
 		builder.Services.AddTransient<ProjectPage>();
 		builder.Services.AddTransient<AddProfilePage>();
-		builder.Services.AddTransient<AddAccountPage>();
+		builder.Services.AddTransient<AddServerPage>();
 		builder.Services.AddTransient<CreateProjectPage>();
 
 		return builder.Build();

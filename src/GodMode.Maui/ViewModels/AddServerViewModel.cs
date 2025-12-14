@@ -5,11 +5,11 @@ using GodMode.Maui.Services.Models;
 namespace GodMode.Maui.ViewModels;
 
 /// <summary>
-/// ViewModel for adding an account to a profile.
-/// Accounts define how to connect to servers that host projects.
+/// ViewModel for adding a server to a profile.
+/// Servers define how to connect to hosts that run projects.
 /// </summary>
 [QueryProperty(nameof(ProfileName), "profileName")]
-public partial class AddAccountViewModel : ObservableObject
+public partial class AddServerViewModel : ObservableObject
 {
     private readonly IProfileService _profileService;
 
@@ -17,19 +17,19 @@ public partial class AddAccountViewModel : ObservableObject
     private string _profileName = string.Empty;
 
     [ObservableProperty]
-    private string[] _accountTypes = ["GitHub Codespaces", "Local Server"];
+    private string[] _serverTypes = ["GitHub Codespaces", "Local Server"];
 
     [ObservableProperty]
-    private string _selectedAccountType = "Local Server";
+    private string _selectedServerType = "Local Server";
 
-    // GitHub Codespaces account fields
+    // GitHub Codespaces fields
     [ObservableProperty]
     private string _gitHubUsername = string.Empty;
 
     [ObservableProperty]
     private string _gitHubToken = string.Empty;
 
-    // Local server account fields
+    // Local server fields
     [ObservableProperty]
     private string _serverUrl = "http://localhost:5000";
 
@@ -42,17 +42,17 @@ public partial class AddAccountViewModel : ObservableObject
     [ObservableProperty]
     private string? _errorMessage;
 
-    public bool IsGitHubAccount => SelectedAccountType == "GitHub Codespaces";
-    public bool IsLocalServer => SelectedAccountType == "Local Server";
+    public bool IsGitHubCodespaces => SelectedServerType == "GitHub Codespaces";
+    public bool IsLocalServer => SelectedServerType == "Local Server";
 
-    public AddAccountViewModel(IProfileService profileService)
+    public AddServerViewModel(IProfileService profileService)
     {
         _profileService = profileService;
     }
 
-    partial void OnSelectedAccountTypeChanged(string value)
+    partial void OnSelectedServerTypeChanged(string value)
     {
-        OnPropertyChanged(nameof(IsGitHubAccount));
+        OnPropertyChanged(nameof(IsGitHubCodespaces));
         OnPropertyChanged(nameof(IsLocalServer));
     }
 
@@ -67,7 +67,7 @@ public partial class AddAccountViewModel : ObservableObject
             return;
         }
 
-        if (IsGitHubAccount)
+        if (IsGitHubCodespaces)
         {
             if (string.IsNullOrWhiteSpace(GitHubUsername))
             {
@@ -105,7 +105,7 @@ public partial class AddAccountViewModel : ObservableObject
                 return;
             }
 
-            var account = IsGitHubAccount
+            var account = IsGitHubCodespaces
                 ? new Account
                 {
                     Type = "github",
@@ -127,7 +127,7 @@ public partial class AddAccountViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Error adding account: {ex.Message}";
+            ErrorMessage = $"Error adding server: {ex.Message}";
         }
         finally
         {

@@ -5,9 +5,9 @@ using GodMode.Maui.ViewModels;
 
 namespace GodMode.Maui.Tests.ViewModels;
 
-public class AddAccountViewModelTests : TestBase
+public class AddServerViewModelTests : TestBase
 {
-    private AddAccountViewModel CreateViewModel() =>
+    private AddServerViewModel CreateViewModel() =>
         new(ProfileService);
 
     #region Initial State Tests
@@ -20,28 +20,28 @@ public class AddAccountViewModelTests : TestBase
 
         // Assert
         vm.ProfileName.Should().BeEmpty();
-        vm.SelectedAccountType.Should().Be("Local Server");
+        vm.SelectedServerType.Should().Be("Local Server");
         vm.GitHubUsername.Should().BeEmpty();
         vm.GitHubToken.Should().BeEmpty();
         vm.ServerUrl.Should().Be("http://localhost:5000");
         vm.ServerDisplayName.Should().BeEmpty();
         vm.IsSaving.Should().BeFalse();
         vm.ErrorMessage.Should().BeNull();
-        vm.AccountTypes.Should().Contain("GitHub Codespaces");
-        vm.AccountTypes.Should().Contain("Local Server");
+        vm.ServerTypes.Should().Contain("GitHub Codespaces");
+        vm.ServerTypes.Should().Contain("Local Server");
     }
 
     [Fact]
-    public void IsGitHubAccount_WhenSelectedTypeIsGitHub_ShouldReturnTrue()
+    public void IsGitHubCodespaces_WhenSelectedTypeIsGitHub_ShouldReturnTrue()
     {
         // Arrange
         var vm = CreateViewModel();
 
         // Act
-        vm.SelectedAccountType = "GitHub Codespaces";
+        vm.SelectedServerType = "GitHub Codespaces";
 
         // Assert
-        vm.IsGitHubAccount.Should().BeTrue();
+        vm.IsGitHubCodespaces.Should().BeTrue();
         vm.IsLocalServer.Should().BeFalse();
     }
 
@@ -52,11 +52,11 @@ public class AddAccountViewModelTests : TestBase
         var vm = CreateViewModel();
 
         // Act
-        vm.SelectedAccountType = "Local Server";
+        vm.SelectedServerType = "Local Server";
 
         // Assert
         vm.IsLocalServer.Should().BeTrue();
-        vm.IsGitHubAccount.Should().BeFalse();
+        vm.IsGitHubCodespaces.Should().BeFalse();
     }
 
     #endregion
@@ -80,15 +80,15 @@ public class AddAccountViewModelTests : TestBase
 
     #endregion
 
-    #region SaveAsync Validation Tests - GitHub Account
+    #region SaveAsync Validation Tests - GitHub Codespaces
 
     [Fact]
-    public async Task SaveCommand_GitHubAccount_WhenUsernameEmpty_ShouldSetErrorMessage()
+    public async Task SaveCommand_GitHubCodespaces_WhenUsernameEmpty_ShouldSetErrorMessage()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "GitHub Codespaces";
+        vm.SelectedServerType = "GitHub Codespaces";
         vm.GitHubUsername = "";
         vm.GitHubToken = "some-token";
 
@@ -100,12 +100,12 @@ public class AddAccountViewModelTests : TestBase
     }
 
     [Fact]
-    public async Task SaveCommand_GitHubAccount_WhenTokenEmpty_ShouldSetErrorMessage()
+    public async Task SaveCommand_GitHubCodespaces_WhenTokenEmpty_ShouldSetErrorMessage()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "GitHub Codespaces";
+        vm.SelectedServerType = "GitHub Codespaces";
         vm.GitHubUsername = "testuser";
         vm.GitHubToken = "";
 
@@ -126,7 +126,7 @@ public class AddAccountViewModelTests : TestBase
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "Local Server";
+        vm.SelectedServerType = "Local Server";
         vm.ServerUrl = "";
 
         // Act
@@ -142,7 +142,7 @@ public class AddAccountViewModelTests : TestBase
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "Local Server";
+        vm.SelectedServerType = "Local Server";
         vm.ServerUrl = "not-a-url";
 
         // Act
@@ -162,7 +162,7 @@ public class AddAccountViewModelTests : TestBase
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "NonExistentProfile";
-        vm.SelectedAccountType = "GitHub Codespaces";
+        vm.SelectedServerType = "GitHub Codespaces";
         vm.GitHubUsername = "testuser";
         vm.GitHubToken = "testtoken";
 
@@ -181,12 +181,12 @@ public class AddAccountViewModelTests : TestBase
     #region SaveAsync Success Tests
 
     [Fact]
-    public async Task SaveCommand_GitHubAccount_WhenValid_ShouldAddAccountToProfile()
+    public async Task SaveCommand_GitHubCodespaces_WhenValid_ShouldAddAccountToProfile()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "GitHub Codespaces";
+        vm.SelectedServerType = "GitHub Codespaces";
         vm.GitHubUsername = "testuser";
         vm.GitHubToken = "testtoken";
 
@@ -222,7 +222,7 @@ public class AddAccountViewModelTests : TestBase
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "Local Server";
+        vm.SelectedServerType = "Local Server";
         vm.ServerUrl = "http://localhost:5000";
 
         var profile = new Profile { Name = "TestProfile", Accounts = [] };
@@ -256,7 +256,7 @@ public class AddAccountViewModelTests : TestBase
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "Local Server";
+        vm.SelectedServerType = "Local Server";
         vm.ServerUrl = "http://localhost:5000";
         vm.ServerDisplayName = "My Server";
 
@@ -295,7 +295,7 @@ public class AddAccountViewModelTests : TestBase
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "GitHub Codespaces";
+        vm.SelectedServerType = "GitHub Codespaces";
         vm.GitHubUsername = "testuser";
         vm.GitHubToken = "testtoken";
 
@@ -323,14 +323,14 @@ public class AddAccountViewModelTests : TestBase
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "GitHub Codespaces";
+        vm.SelectedServerType = "GitHub Codespaces";
         vm.GitHubUsername = "testuser";
         vm.GitHubToken = "testtoken";
 
         var savingStates = new List<bool>();
         vm.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(AddAccountViewModel.IsSaving))
+            if (e.PropertyName == nameof(AddServerViewModel.IsSaving))
                 savingStates.Add(vm.IsSaving);
         };
 

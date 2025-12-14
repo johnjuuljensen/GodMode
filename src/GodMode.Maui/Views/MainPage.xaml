@@ -19,8 +19,8 @@
                     HorizontalOptions="Fill" />
 
             <Button Grid.Column="1"
-                    Text="+ Account"
-                    Command="{Binding AddAccountCommand}"
+                    Text="+ Server"
+                    Command="{Binding AddServerCommand}"
                     Margin="10,0,0,0"
                     IsVisible="{Binding SelectedProfile, Converter={StaticResource IsNotNullConverter}}" />
 
@@ -81,7 +81,7 @@
                                   FontSize="18"
                                   TextColor="Gray"
                                   HorizontalTextAlignment="Center" />
-                            <Label Text="Add an account to your profile to get started"
+                            <Label Text="Add a server to your profile to get started"
                                   FontSize="14"
                                   TextColor="Gray"
                                   HorizontalTextAlignment="Center"

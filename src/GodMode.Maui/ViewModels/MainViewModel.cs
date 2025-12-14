@@ -117,10 +117,10 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task AddAccountAsync()
+    private async Task AddServerAsync()
     {
         if (SelectedProfile == null) return;
-        await Shell.Current!.GoToAsync($"addAccount?profileName={SelectedProfile.Name}");
+        await Shell.Current!.GoToAsync($"addServer?profileName={SelectedProfile.Name}");
     }
 
     partial void OnSelectedProfileChanged(Profile? value)
