@@ -21,7 +21,7 @@ public class StatusUpdater : IStatusUpdater
 
     public async Task SaveStatusAsync(ProjectInfo project)
     {
-        var statusPath = Path.Combine(project.ProjectPath, "status.json");
+        var statusPath = Path.Combine(project.ProjectPath, ".godmode", "status.json");
 
         var status = new ProjectStatus(
             project.Id,

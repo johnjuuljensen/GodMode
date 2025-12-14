@@ -220,7 +220,7 @@ public class ProjectManager : IProjectManager
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        var metricsPath = Path.Combine(project.ProjectPath, "metrics.html");
+        var metricsPath = Path.Combine(project.ProjectPath, ".godmode", "metrics.html");
 
         if (File.Exists(metricsPath))
         {
@@ -248,7 +248,8 @@ public class ProjectManager : IProjectManager
         {
             try
             {
-                var statusPath = Path.Combine(projectPath, "status.json");
+                var godModePath = Path.Combine(projectPath, ".godmode");
+                var statusPath = Path.Combine(godModePath, "status.json");
                 if (!File.Exists(statusPath))
                 {
                     continue;
@@ -282,7 +283,7 @@ public class ProjectManager : IProjectManager
                 };
 
                 // Load session ID if exists
-                var sessionIdPath = Path.Combine(projectPath, "session-id");
+                var sessionIdPath = Path.Combine(godModePath, "session-id");
                 if (File.Exists(sessionIdPath))
                 {
                     project.SessionId = await File.ReadAllTextAsync(sessionIdPath);
@@ -307,10 +308,10 @@ public class ProjectManager : IProjectManager
 
     private void SetupOutputWatcher(ProjectInfo project)
     {
-        var outputPath = Path.Combine(project.ProjectPath, "output.jsonl");
+        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
 
         project.OutputWatcher?.Dispose();
-        project.OutputWatcher = new FileSystemWatcher(project.ProjectPath, "output.jsonl")
+        project.OutputWatcher = new FileSystemWatcher(godModePath, "output.jsonl")
         {
             NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
             EnableRaisingEvents = true
@@ -326,7 +327,7 @@ public class ProjectManager : IProjectManager
     {
         try
         {
-            var outputPath = Path.Combine(project.ProjectPath, "output.jsonl");
+            var outputPath = Path.Combine(project.ProjectPath, ".godmode", "output.jsonl");
 
             if (!File.Exists(outputPath))
             {
@@ -379,7 +380,7 @@ public class ProjectManager : IProjectManager
 
     private async Task SendOutputFromOffsetAsync(ProjectInfo project, long offset, string connectionId)
     {
-        var outputPath = Path.Combine(project.ProjectPath, "output.jsonl");
+        var outputPath = Path.Combine(project.ProjectPath, ".godmode", "output.jsonl");
 
         if (!File.Exists(outputPath))
         {

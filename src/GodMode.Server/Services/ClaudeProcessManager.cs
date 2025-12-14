@@ -27,15 +27,17 @@ public class ClaudeProcessManager : IClaudeProcessManager
         var sessionId = project.SessionId ?? Guid.NewGuid().ToString();
         project.SessionId = sessionId;
 
+        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
+
         // Save session ID to file
         await File.WriteAllTextAsync(
-            Path.Combine(project.ProjectPath, "session-id"),
+            Path.Combine(godModePath, "session-id"),
             sessionId,
             cancellationToken
         );
 
-        var inputPath = Path.Combine(project.ProjectPath, "input.jsonl");
-        var outputPath = Path.Combine(project.ProjectPath, "output.jsonl");
+        var inputPath = Path.Combine(godModePath, "input.jsonl");
+        var outputPath = Path.Combine(godModePath, "output.jsonl");
 
         // Create input pipe
         var inputPipe = PipeSource.Create(async (stream, ct) =>
@@ -104,7 +106,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         await writer.FlushAsync();
 
         // Log input
-        var inputPath = Path.Combine(project.ProjectPath, "input.jsonl");
+        var inputPath = Path.Combine(project.ProjectPath, ".godmode", "input.jsonl");
         await LogInputAsync(inputPath, input, CancellationToken.None);
     }
 

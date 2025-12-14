@@ -10,12 +10,14 @@ namespace GodMode.ProjectFiles;
 /// </summary>
 public sealed class ProjectFolder : IDisposable
 {
+    private const string GodModeDirectoryName = ".godmode";
     private const string StatusFileName = "status.json";
     private const string InputFileName = "input.jsonl";
     private const string OutputFileName = "output.jsonl";
     private const string SessionIdFileName = "session-id";
     private const string MetricsFileName = "metrics.html";
     private const string WorkDirectoryName = "work";
+    private const string GitIgnoreFileName = ".gitignore";
 
     private readonly string _projectPath;
     private readonly JsonlWriter _inputWriter;
@@ -34,29 +36,34 @@ public sealed class ProjectFolder : IDisposable
     public string ProjectId => Path.GetFileName(_projectPath);
 
     /// <summary>
+    /// Gets the path to the .godmode directory where all state files are stored.
+    /// </summary>
+    public string GodModePath => Path.Combine(_projectPath, GodModeDirectoryName);
+
+    /// <summary>
     /// Gets the path to the status.json file.
     /// </summary>
-    public string StatusFilePath => Path.Combine(_projectPath, StatusFileName);
+    public string StatusFilePath => Path.Combine(GodModePath, StatusFileName);
 
     /// <summary>
     /// Gets the path to the input.jsonl file.
     /// </summary>
-    public string InputFilePath => Path.Combine(_projectPath, InputFileName);
+    public string InputFilePath => Path.Combine(GodModePath, InputFileName);
 
     /// <summary>
     /// Gets the path to the output.jsonl file.
     /// </summary>
-    public string OutputFilePath => Path.Combine(_projectPath, OutputFileName);
+    public string OutputFilePath => Path.Combine(GodModePath, OutputFileName);
 
     /// <summary>
     /// Gets the path to the session-id file.
     /// </summary>
-    public string SessionIdFilePath => Path.Combine(_projectPath, SessionIdFileName);
+    public string SessionIdFilePath => Path.Combine(GodModePath, SessionIdFileName);
 
     /// <summary>
     /// Gets the path to the metrics.html file.
     /// </summary>
-    public string MetricsFilePath => Path.Combine(_projectPath, MetricsFileName);
+    public string MetricsFilePath => Path.Combine(GodModePath, MetricsFileName);
 
     /// <summary>
     /// Gets the path to the work directory.
@@ -104,6 +111,14 @@ public sealed class ProjectFolder : IDisposable
         Directory.CreateDirectory(projectPath);
         Directory.CreateDirectory(Path.Combine(projectPath, WorkDirectoryName));
 
+        // Create .godmode directory for all state files
+        var godModePath = Path.Combine(projectPath, GodModeDirectoryName);
+        Directory.CreateDirectory(godModePath);
+
+        // Create .gitignore in .godmode to exclude all state files from git
+        var gitIgnorePath = Path.Combine(godModePath, GitIgnoreFileName);
+        File.WriteAllText(gitIgnorePath, "# Exclude all GodMode state files\n*\n", Encoding.UTF8);
+
         // Create initial status
         var now = DateTime.UtcNow;
         var initialStatus = new ProjectStatus(
@@ -120,13 +135,13 @@ public sealed class ProjectFolder : IDisposable
             OutputOffset: 0
         );
 
-        var statusPath = Path.Combine(projectPath, StatusFileName);
+        var statusPath = Path.Combine(godModePath, StatusFileName);
         var statusJson = JsonSerializer.Serialize(initialStatus, ProjectJsonContext.Default.ProjectStatus);
         File.WriteAllText(statusPath, statusJson, Encoding.UTF8);
 
-        // Create empty JSONL files
-        File.WriteAllText(Path.Combine(projectPath, InputFileName), string.Empty);
-        File.WriteAllText(Path.Combine(projectPath, OutputFileName), string.Empty);
+        // Create empty JSONL files in .godmode
+        File.WriteAllText(Path.Combine(godModePath, InputFileName), string.Empty);
+        File.WriteAllText(Path.Combine(godModePath, OutputFileName), string.Empty);
 
         return new ProjectFolder(projectPath);
     }
@@ -146,7 +161,8 @@ public sealed class ProjectFolder : IDisposable
         if (!Directory.Exists(projectPath))
             throw new DirectoryNotFoundException($"Project folder not found: {projectPath}");
 
-        var statusPath = Path.Combine(projectPath, StatusFileName);
+        var godModePath = Path.Combine(projectPath, GodModeDirectoryName);
+        var statusPath = Path.Combine(godModePath, StatusFileName);
         if (!File.Exists(statusPath))
             throw new FileNotFoundException($"Status file not found: {statusPath}");
 

@@ -478,8 +478,8 @@ public sealed class ProjectManager
         if (!Directory.Exists(path))
             return false;
 
-        // Check for required files
-        var statusFile = Path.Combine(path, "status.json");
+        // Check for required files in .godmode subfolder
+        var statusFile = Path.Combine(path, ".godmode", "status.json");
         return File.Exists(statusFile);
     }
 }
