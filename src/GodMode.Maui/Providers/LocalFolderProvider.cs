@@ -5,38 +5,42 @@ using GodMode.Shared.Enums;
 namespace GodMode.Maui.Providers;
 
 /// <summary>
-/// Host provider for local folder-based projects
+/// Host provider for local server connections.
+/// All project operations go through the GodMode.Server via SignalR.
 /// </summary>
 public class LocalFolderProvider : IHostProvider
 {
-    private readonly string _rootPath;
+    private readonly string _serverUrl;
     private readonly string _hostId;
     private readonly string _hostName;
 
     public string Type => "local";
 
-    public LocalFolderProvider(string rootPath, string? hostName = null)
+    /// <summary>
+    /// Creates a new LocalFolderProvider that connects to a local GodMode.Server instance.
+    /// </summary>
+    /// <param name="serverUrl">The server URL (e.g., "http://localhost:5000").</param>
+    /// <param name="hostName">Optional display name for the host.</param>
+    public LocalFolderProvider(string serverUrl = "http://localhost:5000", string? hostName = null)
     {
-        _rootPath = rootPath;
-        _hostId = Path.GetFileName(rootPath) ?? "local";
-        _hostName = hostName ?? _hostId;
-
-        if (!Directory.Exists(_rootPath))
-        {
-            Directory.CreateDirectory(_rootPath);
-        }
+        _serverUrl = serverUrl;
+        _hostId = "local-server";
+        _hostName = hostName ?? "Local Server";
     }
 
     public Task<IEnumerable<HostInfo>> ListHostsAsync()
     {
+        // Check if server is reachable
+        var state = IsServerReachable() ? HostState.Running : HostState.Stopped;
+
         var hosts = new List<HostInfo>
         {
             new HostInfo(
                 _hostId,
                 _hostName,
                 "local",
-                Directory.Exists(_rootPath) ? HostState.Running : HostState.Stopped,
-                _rootPath
+                state,
+                _serverUrl
             )
         };
 
@@ -50,22 +54,15 @@ public class LocalFolderProvider : IHostProvider
             throw new ArgumentException($"Unknown host: {hostId}");
         }
 
-        var projectsPath = _rootPath;
-        var activeProjects = 0;
-
-        if (Directory.Exists(projectsPath))
-        {
-            activeProjects = Directory.GetDirectories(projectsPath)
-                .Count(dir => File.Exists(Path.Combine(dir, "status.json")));
-        }
+        var state = IsServerReachable() ? HostState.Running : HostState.Stopped;
 
         var status = new HostStatus(
             _hostId,
             _hostName,
             "local",
-            Directory.Exists(_rootPath) ? HostState.Running : HostState.Stopped,
-            _rootPath,
-            activeProjects,
+            state,
+            _serverUrl,
+            0, // Active projects - would need to query server
             DateTime.UtcNow
         );
 
@@ -74,50 +71,52 @@ public class LocalFolderProvider : IHostProvider
 
     public Task StartHostAsync(string hostId)
     {
-        // Local hosts are always "running" - nothing to start
+        // Local server must be started externally (e.g., via command line)
+        // This could potentially launch the server process in the future
         return Task.CompletedTask;
     }
 
     public Task StopHostAsync(string hostId)
     {
-        // Local hosts can't be stopped from the UI
+        // Local server can't be stopped from the UI
         return Task.CompletedTask;
     }
 
-    public Task<IProjectConnection> ConnectAsync(string hostId)
+    public async Task<IProjectConnection> ConnectAsync(string hostId)
     {
         if (hostId != _hostId)
         {
             throw new ArgumentException($"Unknown host: {hostId}");
         }
 
-        // Try to connect via SignalR first (if a local server is running)
-        // Fall back to direct file access if not available
-        var connection = TryConnectSignalR() ?? new LocalProjectConnection(_rootPath);
+        var hubUrl = $"{_serverUrl.TrimEnd('/')}/hubs/projects";
+        var connection = new SignalRProjectConnection(hubUrl);
 
-        return Task.FromResult(connection);
+        try
+        {
+            await connection.ConnectAsync();
+            return connection;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"Failed to connect to local server at {_serverUrl}. " +
+                "Make sure GodMode.Server is running.",
+                ex);
+        }
     }
 
-    private IProjectConnection? TryConnectSignalR()
+    private bool IsServerReachable()
     {
         try
         {
-            // Try to connect to local SignalR server on default port
-            var serverUrl = "http://localhost:5000/projecthub";
-            var connection = new SignalRProjectConnection(serverUrl);
-
-            // Try to connect with a timeout
-            var connectTask = connection.ConnectAsync();
-            if (connectTask.Wait(TimeSpan.FromSeconds(2)))
-            {
-                return connection;
-            }
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            var response = client.GetAsync($"{_serverUrl}/health").Result;
+            return response.IsSuccessStatusCode;
         }
         catch
         {
-            // SignalR not available, fall back to local file access
+            return false;
         }
-
-        return null;
     }
 }

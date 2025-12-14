@@ -203,12 +203,21 @@ public class HostConnectionService : IHostConnectionService
 
     private IHostProvider? CreateLocalProvider(Models.Account account)
     {
-        if (string.IsNullOrEmpty(account.Path))
+        // Local accounts now specify a server URL (e.g., "http://localhost:5000")
+        // For backward compatibility, if Path looks like a file path, use default server URL
+        var serverUrl = account.Path;
+
+        if (string.IsNullOrEmpty(serverUrl))
         {
-            return null;
+            serverUrl = "http://localhost:5000";
+        }
+        else if (!serverUrl.StartsWith("http://") && !serverUrl.StartsWith("https://"))
+        {
+            // Legacy file path - use default server URL
+            serverUrl = "http://localhost:5000";
         }
 
-        var hostName = account.Metadata?.GetValueOrDefault("name") ?? Path.GetFileName(account.Path);
-        return new LocalFolderProvider(account.Path, hostName);
+        var hostName = account.Metadata?.GetValueOrDefault("name") ?? "Local Server";
+        return new LocalFolderProvider(serverUrl, hostName);
     }
 }

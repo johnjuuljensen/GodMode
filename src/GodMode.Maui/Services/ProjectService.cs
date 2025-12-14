@@ -20,6 +20,12 @@ public class ProjectService : IProjectService
         _hostConnectionService = hostConnectionService;
     }
 
+    public async Task<IEnumerable<ProjectRoot>> ListProjectRootsAsync(string profileName, string hostId)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        return await connection.ListProjectRootsAsync();
+    }
+
     public async Task<IEnumerable<ProjectSummary>> ListProjectsAsync(string profileName, string hostId)
     {
         var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
@@ -54,11 +60,13 @@ public class ProjectService : IProjectService
         string profileName,
         string hostId,
         string name,
+        string projectRootName,
+        ProjectType projectType,
         string? repoUrl,
         string initialPrompt)
     {
         var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
-        return await connection.CreateProjectAsync(name, repoUrl, initialPrompt);
+        return await connection.CreateProjectAsync(name, projectRootName, projectType, repoUrl, initialPrompt);
     }
 
     public async Task SendInputAsync(string profileName, string hostId, string projectId, string input)

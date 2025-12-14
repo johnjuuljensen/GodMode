@@ -14,6 +14,11 @@ public interface IProjectConnection : IDisposable
     bool IsConnected { get; }
 
     /// <summary>
+    /// Lists all available project roots on the server
+    /// </summary>
+    Task<IEnumerable<ProjectRoot>> ListProjectRootsAsync();
+
+    /// <summary>
     /// Lists all projects on the connected host
     /// </summary>
     Task<IEnumerable<ProjectSummary>> ListProjectsAsync();
@@ -26,7 +31,17 @@ public interface IProjectConnection : IDisposable
     /// <summary>
     /// Creates a new project with the specified parameters
     /// </summary>
-    Task<ProjectDetail> CreateProjectAsync(string name, string? repoUrl, string initialPrompt);
+    /// <param name="name">Project name. For worktree projects, this is also the branch name.</param>
+    /// <param name="projectRootName">Name of the project root where the project will be created.</param>
+    /// <param name="projectType">Type of project to create.</param>
+    /// <param name="repoUrl">Repository URL (required for GitHubRepo and GitHubWorktree types).</param>
+    /// <param name="initialPrompt">Initial prompt to send to Claude.</param>
+    Task<ProjectDetail> CreateProjectAsync(
+        string name,
+        string projectRootName,
+        ProjectType projectType,
+        string? repoUrl,
+        string initialPrompt);
 
     /// <summary>
     /// Sends user input to a project waiting for input

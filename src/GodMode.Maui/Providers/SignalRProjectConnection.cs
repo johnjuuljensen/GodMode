@@ -38,6 +38,11 @@ public class SignalRProjectConnection : IProjectConnection
         }
     }
 
+    public async Task<IEnumerable<ProjectRoot>> ListProjectRootsAsync()
+    {
+        return await _hubConnection.InvokeAsync<IEnumerable<ProjectRoot>>("ListProjectRoots");
+    }
+
     public async Task<IEnumerable<ProjectSummary>> ListProjectsAsync()
     {
         return await _hubConnection.InvokeAsync<IEnumerable<ProjectSummary>>("ListProjects");
@@ -48,10 +53,20 @@ public class SignalRProjectConnection : IProjectConnection
         return await _hubConnection.InvokeAsync<ProjectStatus>("GetStatus", projectId);
     }
 
-    public async Task<ProjectDetail> CreateProjectAsync(string name, string? repoUrl, string initialPrompt)
+    public async Task<ProjectDetail> CreateProjectAsync(
+        string name,
+        string projectRootName,
+        ProjectType projectType,
+        string? repoUrl,
+        string initialPrompt)
     {
-        var request = new CreateProjectRequest(name, repoUrl, initialPrompt);
-        return await _hubConnection.InvokeAsync<ProjectDetail>("CreateProject", request);
+        return await _hubConnection.InvokeAsync<ProjectDetail>(
+            "CreateProject",
+            name,
+            projectRootName,
+            projectType,
+            repoUrl,
+            initialPrompt);
     }
 
     public async Task SendInputAsync(string projectId, string input)

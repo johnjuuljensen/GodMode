@@ -1,6 +1,9 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GodMode.Maui.Services;
+using GodMode.Shared.Enums;
+using GodMode.Shared.Models;
+using System.Collections.ObjectModel;
 
 namespace GodMode.Maui.ViewModels;
 
@@ -32,11 +35,62 @@ public partial class CreateProjectViewModel : ObservableObject
     private bool _isCreating;
 
     [ObservableProperty]
+    private bool _isLoading;
+
+    [ObservableProperty]
     private string? _errorMessage;
+
+    [ObservableProperty]
+    private ObservableCollection<ProjectRoot> _projectRoots = [];
+
+    [ObservableProperty]
+    private ProjectRoot? _selectedProjectRoot;
+
+    [ObservableProperty]
+    private ProjectType[] _projectTypes = [ProjectType.RawFolder, ProjectType.GitHubRepo, ProjectType.GitHubWorktree];
+
+    [ObservableProperty]
+    private ProjectType _selectedProjectType = ProjectType.RawFolder;
+
+    public bool RequiresRepoUrl => SelectedProjectType is ProjectType.GitHubRepo or ProjectType.GitHubWorktree;
 
     public CreateProjectViewModel(IProjectService projectService)
     {
         _projectService = projectService;
+    }
+
+    partial void OnSelectedProjectTypeChanged(ProjectType value)
+    {
+        OnPropertyChanged(nameof(RequiresRepoUrl));
+    }
+
+    [RelayCommand]
+    private async Task LoadAsync()
+    {
+        if (string.IsNullOrEmpty(ProfileName) || string.IsNullOrEmpty(HostId))
+            return;
+
+        IsLoading = true;
+        ErrorMessage = null;
+
+        try
+        {
+            var roots = await _projectService.ListProjectRootsAsync(ProfileName, HostId);
+            ProjectRoots = new ObservableCollection<ProjectRoot>(roots);
+
+            if (ProjectRoots.Count > 0)
+            {
+                SelectedProjectRoot = ProjectRoots[0];
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error loading project roots: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     [RelayCommand]
@@ -48,6 +102,18 @@ public partial class CreateProjectViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(ProjectName))
         {
             ErrorMessage = "Please enter a project name";
+            return;
+        }
+
+        if (SelectedProjectRoot == null)
+        {
+            ErrorMessage = "Please select a project root";
+            return;
+        }
+
+        if (RequiresRepoUrl && string.IsNullOrWhiteSpace(RepoUrl))
+        {
+            ErrorMessage = "Please enter a repository URL";
             return;
         }
 
@@ -65,6 +131,8 @@ public partial class CreateProjectViewModel : ObservableObject
                 ProfileName,
                 HostId,
                 ProjectName,
+                SelectedProjectRoot.Name,
+                SelectedProjectType,
                 string.IsNullOrWhiteSpace(RepoUrl) ? null : RepoUrl,
                 InitialPrompt);
 
