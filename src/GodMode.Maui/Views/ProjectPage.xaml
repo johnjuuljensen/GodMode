@@ -120,14 +120,18 @@
         </Border>
 
         <!-- Chat Interface / Output Log -->
-        <Border Grid.Row="1" Padding="0" Margin="5" StrokeThickness="0">
-            <CollectionView x:Name="OutputCollectionView"
-                          ItemsSource="{Binding OutputEvents}">
-                <CollectionView.ItemTemplate>
-                    <DataTemplate x:DataType="models:OutputEvent">
+        <CollectionView Grid.Row="1"
+                       x:Name="OutputCollectionView"
+                       ItemsSource="{Binding OutputEvents}"
+                       Margin="5">
+            <CollectionView.ItemsLayout>
+                <LinearItemsLayout Orientation="Vertical" ItemSpacing="5" />
+            </CollectionView.ItemsLayout>
+            <CollectionView.ItemTemplate>
+                <DataTemplate x:DataType="models:OutputEvent">
+                    <Grid>
                         <Border Padding="10"
-                               Margin="5"
-                               MaximumWidthRequest="600"
+                               MaximumWidthRequest="700"
                                HorizontalOptions="{Binding Type, Converter={StaticResource OutputTypeToAlignmentConverter}}"
                                BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#1E1E1E}"
                                Stroke="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}"
@@ -135,32 +139,30 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
-                            <Grid RowDefinitions="Auto,Auto">
-                                <Label Grid.Row="0"
-                                      Text="{Binding Type}"
+                            <VerticalStackLayout Spacing="2">
+                                <Label Text="{Binding Type}"
                                       FontSize="10"
                                       FontAttributes="Bold"
                                       TextColor="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}" />
-                                <Label Grid.Row="1"
-                                      Text="{Binding Content}"
+                                <Label Text="{Binding Content}"
                                       FontSize="14"
                                       TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
                                       LineBreakMode="WordWrap" />
-                            </Grid>
+                            </VerticalStackLayout>
                         </Border>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
+                    </Grid>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
 
-                <CollectionView.EmptyView>
-                    <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Center">
-                        <Label Text="No output yet"
-                              FontSize="18"
-                              TextColor="Gray"
-                              HorizontalTextAlignment="Center" />
-                    </VerticalStackLayout>
-                </CollectionView.EmptyView>
-            </CollectionView>
-        </Border>
+            <CollectionView.EmptyView>
+                <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Center">
+                    <Label Text="No output yet"
+                          FontSize="18"
+                          TextColor="Gray"
+                          HorizontalTextAlignment="Center" />
+                </VerticalStackLayout>
+            </CollectionView.EmptyView>
+        </CollectionView>
 
         <!-- Input Area -->
         <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Padding="5">
