@@ -20,15 +20,15 @@ public class AddAccountViewModelTests : TestBase
 
         // Assert
         vm.ProfileName.Should().BeEmpty();
-        vm.SelectedAccountType.Should().Be("Local Folder");
+        vm.SelectedAccountType.Should().Be("Local Server");
         vm.GitHubUsername.Should().BeEmpty();
         vm.GitHubToken.Should().BeEmpty();
-        vm.LocalPath.Should().BeEmpty();
-        vm.LocalDisplayName.Should().BeEmpty();
+        vm.ServerUrl.Should().Be("http://localhost:5000");
+        vm.ServerDisplayName.Should().BeEmpty();
         vm.IsSaving.Should().BeFalse();
         vm.ErrorMessage.Should().BeNull();
         vm.AccountTypes.Should().Contain("GitHub Codespaces");
-        vm.AccountTypes.Should().Contain("Local Folder");
+        vm.AccountTypes.Should().Contain("Local Server");
     }
 
     [Fact]
@@ -42,20 +42,20 @@ public class AddAccountViewModelTests : TestBase
 
         // Assert
         vm.IsGitHubAccount.Should().BeTrue();
-        vm.IsLocalAccount.Should().BeFalse();
+        vm.IsLocalServer.Should().BeFalse();
     }
 
     [Fact]
-    public void IsLocalAccount_WhenSelectedTypeIsLocal_ShouldReturnTrue()
+    public void IsLocalServer_WhenSelectedTypeIsLocal_ShouldReturnTrue()
     {
         // Arrange
         var vm = CreateViewModel();
 
         // Act
-        vm.SelectedAccountType = "Local Folder";
+        vm.SelectedAccountType = "Local Server";
 
         // Assert
-        vm.IsLocalAccount.Should().BeTrue();
+        vm.IsLocalServer.Should().BeTrue();
         vm.IsGitHubAccount.Should().BeFalse();
     }
 
@@ -113,43 +113,43 @@ public class AddAccountViewModelTests : TestBase
         await vm.SaveCommand.ExecuteAsync(null);
 
         // Assert
-        vm.ErrorMessage.Should().Be("Please enter your GitHub token");
+        vm.ErrorMessage.Should().Be("Please enter your GitHub personal access token");
     }
 
     #endregion
 
-    #region SaveAsync Validation Tests - Local Account
+    #region SaveAsync Validation Tests - Local Server
 
     [Fact]
-    public async Task SaveCommand_LocalAccount_WhenPathEmpty_ShouldSetErrorMessage()
+    public async Task SaveCommand_LocalServer_WhenUrlEmpty_ShouldSetErrorMessage()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "Local Folder";
-        vm.LocalPath = "";
+        vm.SelectedAccountType = "Local Server";
+        vm.ServerUrl = "";
 
         // Act
         await vm.SaveCommand.ExecuteAsync(null);
 
         // Assert
-        vm.ErrorMessage.Should().Be("Please enter a folder path");
+        vm.ErrorMessage.Should().Be("Please enter a server URL");
     }
 
     [Fact]
-    public async Task SaveCommand_LocalAccount_WhenPathDoesNotExist_ShouldSetErrorMessage()
+    public async Task SaveCommand_LocalServer_WhenUrlInvalid_ShouldSetErrorMessage()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "Local Folder";
-        vm.LocalPath = @"C:\NonExistent\Path\That\Does\Not\Exist";
+        vm.SelectedAccountType = "Local Server";
+        vm.ServerUrl = "not-a-url";
 
         // Act
         await vm.SaveCommand.ExecuteAsync(null);
 
         // Assert
-        vm.ErrorMessage.Should().Be("The specified folder does not exist");
+        vm.ErrorMessage.Should().Be("Server URL must start with http:// or https://");
     }
 
     #endregion
@@ -217,13 +217,13 @@ public class AddAccountViewModelTests : TestBase
     }
 
     [Fact]
-    public async Task SaveCommand_LocalAccount_WhenValid_ShouldAddAccountToProfile()
+    public async Task SaveCommand_LocalServer_WhenValid_ShouldAddAccountToProfile()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "Local Folder";
-        vm.LocalPath = Path.GetTempPath(); // Use temp path which should exist
+        vm.SelectedAccountType = "Local Server";
+        vm.ServerUrl = "http://localhost:5000";
 
         var profile = new Profile { Name = "TestProfile", Accounts = [] };
         ProfileService.GetProfileAsync("TestProfile")
@@ -247,18 +247,18 @@ public class AddAccountViewModelTests : TestBase
         savedProfile.Should().NotBeNull();
         savedProfile!.Accounts.Should().HaveCount(1);
         savedProfile.Accounts[0].Type.Should().Be("local");
-        savedProfile.Accounts[0].Path.Should().Be(Path.GetTempPath());
+        savedProfile.Accounts[0].Path.Should().Be("http://localhost:5000");
     }
 
     [Fact]
-    public async Task SaveCommand_LocalAccount_WithDisplayName_ShouldIncludeMetadata()
+    public async Task SaveCommand_LocalServer_WithDisplayName_ShouldIncludeMetadata()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
-        vm.SelectedAccountType = "Local Folder";
-        vm.LocalPath = Path.GetTempPath();
-        vm.LocalDisplayName = "My Projects";
+        vm.SelectedAccountType = "Local Server";
+        vm.ServerUrl = "http://localhost:5000";
+        vm.ServerDisplayName = "My Server";
 
         var profile = new Profile { Name = "TestProfile", Accounts = [] };
         ProfileService.GetProfileAsync("TestProfile")
@@ -282,7 +282,7 @@ public class AddAccountViewModelTests : TestBase
         savedProfile.Should().NotBeNull();
         savedProfile!.Accounts.Should().HaveCount(1);
         savedProfile.Accounts[0].Metadata.Should().ContainKey("name");
-        savedProfile.Accounts[0].Metadata!["name"].Should().Be("My Projects");
+        savedProfile.Accounts[0].Metadata!["name"].Should().Be("My Server");
     }
 
     #endregion

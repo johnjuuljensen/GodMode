@@ -5,7 +5,8 @@ using GodMode.Maui.Services.Models;
 namespace GodMode.Maui.ViewModels;
 
 /// <summary>
-/// ViewModel for adding an account to a profile
+/// ViewModel for adding an account to a profile.
+/// Accounts define how to connect to servers that host projects.
 /// </summary>
 [QueryProperty(nameof(ProfileName), "profileName")]
 public partial class AddAccountViewModel : ObservableObject
@@ -16,22 +17,24 @@ public partial class AddAccountViewModel : ObservableObject
     private string _profileName = string.Empty;
 
     [ObservableProperty]
-    private string[] _accountTypes = ["GitHub Codespaces", "Local Folder"];
+    private string[] _accountTypes = ["GitHub Codespaces", "Local Server"];
 
     [ObservableProperty]
-    private string _selectedAccountType = "Local Folder";
+    private string _selectedAccountType = "Local Server";
 
+    // GitHub Codespaces account fields
     [ObservableProperty]
     private string _gitHubUsername = string.Empty;
 
     [ObservableProperty]
     private string _gitHubToken = string.Empty;
 
+    // Local server account fields
     [ObservableProperty]
-    private string _localPath = string.Empty;
+    private string _serverUrl = "http://localhost:5000";
 
     [ObservableProperty]
-    private string _localDisplayName = string.Empty;
+    private string _serverDisplayName = string.Empty;
 
     [ObservableProperty]
     private bool _isSaving;
@@ -40,7 +43,7 @@ public partial class AddAccountViewModel : ObservableObject
     private string? _errorMessage;
 
     public bool IsGitHubAccount => SelectedAccountType == "GitHub Codespaces";
-    public bool IsLocalAccount => SelectedAccountType == "Local Folder";
+    public bool IsLocalServer => SelectedAccountType == "Local Server";
 
     public AddAccountViewModel(IProfileService profileService)
     {
@@ -50,20 +53,7 @@ public partial class AddAccountViewModel : ObservableObject
     partial void OnSelectedAccountTypeChanged(string value)
     {
         OnPropertyChanged(nameof(IsGitHubAccount));
-        OnPropertyChanged(nameof(IsLocalAccount));
-    }
-
-    [RelayCommand]
-    private async Task BrowseFolderAsync()
-    {
-        var page = Application.Current?.Windows[0]?.Page;
-        if (page != null)
-        {
-            await page.DisplayAlertAsync(
-                "Browse Folder",
-                "Please enter the folder path manually in the text field.",
-                "OK");
-        }
+        OnPropertyChanged(nameof(IsLocalServer));
     }
 
     [RelayCommand]
@@ -86,20 +76,20 @@ public partial class AddAccountViewModel : ObservableObject
             }
             if (string.IsNullOrWhiteSpace(GitHubToken))
             {
-                ErrorMessage = "Please enter your GitHub token";
+                ErrorMessage = "Please enter your GitHub personal access token";
                 return;
             }
         }
-        else if (IsLocalAccount)
+        else if (IsLocalServer)
         {
-            if (string.IsNullOrWhiteSpace(LocalPath))
+            if (string.IsNullOrWhiteSpace(ServerUrl))
             {
-                ErrorMessage = "Please enter a folder path";
+                ErrorMessage = "Please enter a server URL";
                 return;
             }
-            if (!Directory.Exists(LocalPath))
+            if (!ServerUrl.StartsWith("http://") && !ServerUrl.StartsWith("https://"))
             {
-                ErrorMessage = "The specified folder does not exist";
+                ErrorMessage = "Server URL must start with http:// or https://";
                 return;
             }
         }
@@ -125,9 +115,9 @@ public partial class AddAccountViewModel : ObservableObject
                 : new Account
                 {
                     Type = "local",
-                    Path = LocalPath,
-                    Metadata = !string.IsNullOrWhiteSpace(LocalDisplayName)
-                        ? new Dictionary<string, string> { ["name"] = LocalDisplayName }
+                    Path = ServerUrl,
+                    Metadata = !string.IsNullOrWhiteSpace(ServerDisplayName)
+                        ? new Dictionary<string, string> { ["name"] = ServerDisplayName }
                         : null
                 };
 

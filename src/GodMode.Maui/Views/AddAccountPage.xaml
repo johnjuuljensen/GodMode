@@ -42,27 +42,20 @@
                 </VerticalStackLayout>
             </VerticalStackLayout>
 
-            <!-- Local Folder Fields -->
-            <VerticalStackLayout Spacing="10" IsVisible="{Binding IsLocalAccount}">
+            <!-- Local Server Fields -->
+            <VerticalStackLayout Spacing="10" IsVisible="{Binding IsLocalServer}">
                 <VerticalStackLayout Spacing="5">
-                    <Label Text="Projects Folder Path" FontAttributes="Bold" />
-                    <Grid ColumnDefinitions="*,Auto">
-                        <Entry Grid.Column="0"
-                               Text="{Binding LocalPath}"
-                               Placeholder="Enter folder path (e.g., C:\Projects)" />
-                        <Button Grid.Column="1"
-                                Text="Browse"
-                                Command="{Binding BrowseFolderCommand}"
-                                Margin="5,0,0,0" />
-                    </Grid>
-                    <Label Text="This folder will be scanned for Claude projects"
+                    <Label Text="Server URL" FontAttributes="Bold" />
+                    <Entry Text="{Binding ServerUrl}"
+                           Placeholder="http://localhost:5000" />
+                    <Label Text="URL of the GodMode.Server instance"
                            FontSize="12"
                            TextColor="Gray" />
                 </VerticalStackLayout>
 
                 <VerticalStackLayout Spacing="5">
                     <Label Text="Display Name (optional)" FontAttributes="Bold" />
-                    <Entry Text="{Binding LocalDisplayName}" Placeholder="Enter display name" />
+                    <Entry Text="{Binding ServerDisplayName}" Placeholder="Enter display name" />
                 </VerticalStackLayout>
             </VerticalStackLayout>
 
