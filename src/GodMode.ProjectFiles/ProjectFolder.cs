@@ -16,7 +16,6 @@ public sealed class ProjectFolder : IDisposable
     private const string OutputFileName = "output.jsonl";
     private const string SessionIdFileName = "session-id";
     private const string MetricsFileName = "metrics.html";
-    private const string WorkDirectoryName = "work";
     private const string GitIgnoreFileName = ".gitignore";
 
     private readonly string _projectPath;
@@ -65,11 +64,6 @@ public sealed class ProjectFolder : IDisposable
     /// </summary>
     public string MetricsFilePath => Path.Combine(GodModePath, MetricsFileName);
 
-    /// <summary>
-    /// Gets the path to the work directory.
-    /// </summary>
-    public string WorkPath => Path.Combine(_projectPath, WorkDirectoryName);
-
     private ProjectFolder(string projectPath)
     {
         _projectPath = projectPath;
@@ -107,13 +101,18 @@ public sealed class ProjectFolder : IDisposable
         if (Directory.Exists(projectPath))
             throw new IOException($"Project folder already exists: {projectPath}");
 
-        // Create directory structure
+        // Create project directory (this IS the work directory)
         Directory.CreateDirectory(projectPath);
-        Directory.CreateDirectory(Path.Combine(projectPath, WorkDirectoryName));
 
         // Create .godmode directory for all state files
         var godModePath = Path.Combine(projectPath, GodModeDirectoryName);
         Directory.CreateDirectory(godModePath);
+
+        // Make .godmode a hidden folder on Windows
+        if (OperatingSystem.IsWindows())
+        {
+            File.SetAttributes(godModePath, File.GetAttributes(godModePath) | FileAttributes.Hidden);
+        }
 
         // Create .gitignore in .godmode to exclude all state files from git
         var gitIgnorePath = Path.Combine(godModePath, GitIgnoreFileName);

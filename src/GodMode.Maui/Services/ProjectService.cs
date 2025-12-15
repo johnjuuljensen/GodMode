@@ -102,7 +102,7 @@ public class ProjectService : IProjectService
         _lastStatusUpdate.TryRemove(cacheKey, out _);
     }
 
-    public async Task<IObservable<OutputEvent>> SubscribeOutputAsync(
+    public async Task<IObservable<ClaudeMessage>> SubscribeOutputAsync(
         string profileName,
         string hostId,
         string projectId,

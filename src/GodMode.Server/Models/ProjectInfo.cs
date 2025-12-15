@@ -10,8 +10,10 @@ public class ProjectInfo
 {
     public required string Id { get; init; }
     public required string Name { get; init; }
+    /// <summary>
+    /// The project directory path. This is also the working directory for Claude.
+    /// </summary>
     public required string ProjectPath { get; init; }
-    public required string WorkPath { get; init; }
     public string? RepoUrl { get; set; }
     public string? SessionId { get; set; }
     

@@ -2,7 +2,7 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:viewmodels="clr-namespace:GodMode.Maui.ViewModels"
-             xmlns:models="clr-namespace:GodMode.Shared.Models;assembly=GodMode.Shared"
+             xmlns:sharedmodels="clr-namespace:GodMode.Shared.Models;assembly=GodMode.Shared"
              x:Class="GodMode.Maui.Views.ProjectPage"
              x:DataType="viewmodels:ProjectViewModel"
              Title="{Binding Status.Name}">
@@ -122,32 +122,42 @@
         <!-- Chat Interface / Output Log -->
         <CollectionView Grid.Row="1"
                        x:Name="OutputCollectionView"
-                       ItemsSource="{Binding OutputEvents}"
+                       ItemsSource="{Binding OutputMessages}"
                        Margin="5">
             <CollectionView.ItemsLayout>
                 <LinearItemsLayout Orientation="Vertical" ItemSpacing="5" />
             </CollectionView.ItemsLayout>
             <CollectionView.ItemTemplate>
-                <DataTemplate x:DataType="models:OutputEvent">
+                <DataTemplate x:DataType="sharedmodels:ClaudeMessage">
                     <Grid>
                         <Border Padding="10"
-                               MaximumWidthRequest="700"
-                               HorizontalOptions="{Binding Type, Converter={StaticResource OutputTypeToAlignmentConverter}}"
+                               MinimumWidthRequest="80"
+                               MaximumWidthRequest="800"
+                               HorizontalOptions="{Binding IsUserMessage, Converter={StaticResource IsUserToAlignmentConverter}}"
                                BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#1E1E1E}"
-                               Stroke="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}"
+                               Stroke="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}"
                                StrokeThickness="2">
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
                             <VerticalStackLayout Spacing="2">
+                                <!-- Type header -->
                                 <Label Text="{Binding Type}"
                                       FontSize="10"
                                       FontAttributes="Bold"
-                                      TextColor="{Binding Type, Converter={StaticResource OutputTypeToColorConverter}}" />
-                                <Label Text="{Binding Content}"
-                                      FontSize="14"
-                                      TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
-                                      LineBreakMode="WordWrap" />
+                                      TextColor="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}" />
+                                <!-- Properties rendered recursively -->
+                                <VerticalStackLayout BindableLayout.ItemsSource="{Binding Properties}">
+                                    <BindableLayout.ItemTemplate>
+                                        <DataTemplate x:DataType="sharedmodels:ClaudeMessageProperty">
+                                            <Label FontSize="12"
+                                                  FontFamily="Consolas"
+                                                  TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
+                                                  LineBreakMode="WordWrap"
+                                                  Text="{Binding Display}" />
+                                        </DataTemplate>
+                                    </BindableLayout.ItemTemplate>
+                                </VerticalStackLayout>
                             </VerticalStackLayout>
                         </Border>
                     </Grid>
@@ -173,7 +183,8 @@
                 <Border.StrokeShape>
                     <RoundRectangle CornerRadius="8" />
                 </Border.StrokeShape>
-                <Editor Text="{Binding InputText}"
+                <Editor x:Name="InputEditor"
+                       Text="{Binding InputText}"
                        Placeholder="Type your response..."
                        HeightRequest="80"
                        IsEnabled="{Binding CanSendInput}" />

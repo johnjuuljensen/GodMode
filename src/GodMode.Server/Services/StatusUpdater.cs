@@ -121,7 +121,7 @@ public class StatusUpdater : IStatusUpdater
 
     public async Task UpdateGitStatusAsync(ProjectInfo project)
     {
-        if (!Directory.Exists(Path.Combine(project.WorkPath, ".git")))
+        if (!Directory.Exists(Path.Combine(project.ProjectPath, ".git")))
         {
             return;
         }
@@ -129,13 +129,13 @@ public class StatusUpdater : IStatusUpdater
         try
         {
             // Get current branch
-            var branch = await RunGitCommandAsync(project.WorkPath, "rev-parse --abbrev-ref HEAD");
+            var branch = await RunGitCommandAsync(project.ProjectPath, "rev-parse --abbrev-ref HEAD");
 
             // Get last commit
-            var lastCommit = await RunGitCommandAsync(project.WorkPath, "log -1 --format=%H");
+            var lastCommit = await RunGitCommandAsync(project.ProjectPath, "log -1 --format=%H");
 
             // Get status
-            var statusOutput = await RunGitCommandAsync(project.WorkPath, "status --porcelain");
+            var statusOutput = await RunGitCommandAsync(project.ProjectPath, "status --porcelain");
             var lines = statusOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
             var uncommittedChanges = 0;

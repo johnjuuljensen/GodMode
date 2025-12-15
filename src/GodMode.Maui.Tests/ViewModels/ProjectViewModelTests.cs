@@ -27,7 +27,7 @@ public class ProjectViewModelTests : TestBase
         vm.HostId.Should().BeEmpty();
         vm.ProjectId.Should().BeEmpty();
         vm.Status.Should().BeNull();
-        vm.OutputEvents.Should().BeEmpty();
+        vm.OutputMessages.Should().BeEmpty();
         vm.InputText.Should().BeEmpty();
         vm.IsLoading.Should().BeFalse();
         vm.ErrorMessage.Should().BeNull();
@@ -106,7 +106,7 @@ public class ProjectViewModelTests : TestBase
             new ProjectMetrics(100, 200, 5, TimeSpan.FromMinutes(1), 0.05m),
             null, null, 0);
 
-        var outputSubject = new Subject<OutputEvent>();
+        var outputSubject = new Subject<ClaudeMessage>();
 
         ProjectService.GetStatusAsync("TestProfile", "host1", "proj1", false).Returns(Task.FromResult(status));
         ProjectService.SubscribeOutputAsync("TestProfile", "host1", "proj1", 0)
@@ -138,7 +138,7 @@ public class ProjectViewModelTests : TestBase
             new ProjectMetrics(100, 200, 5, TimeSpan.FromMinutes(1), 0.05m),
             null, null, 0);
 
-        var outputSubject = new Subject<OutputEvent>();
+        var outputSubject = new Subject<ClaudeMessage>();
 
         ProjectService.GetStatusAsync("TestProfile", "host1", "proj1", false).Returns(Task.FromResult(status));
         ProjectService.SubscribeOutputAsync("TestProfile", "host1", "proj1", 0)
@@ -260,9 +260,9 @@ public class ProjectViewModelTests : TestBase
         // Assert
         await ProjectService.Received(1).SendInputAsync("TestProfile", "host1", "proj1", "User response");
         vm.InputText.Should().BeEmpty(); // Input should be cleared
-        vm.OutputEvents.Should().HaveCount(1);
-        vm.OutputEvents[0].Type.Should().Be(OutputEventType.User);
-        vm.OutputEvents[0].Content.Should().Be("User response");
+        vm.OutputMessages.Should().HaveCount(1);
+        vm.OutputMessages[0].Type.Should().Be("user");
+        vm.OutputMessages[0].Properties.Should().Contain(p => p.Value.Contains("User response"));
     }
 
     [Fact]
@@ -402,7 +402,7 @@ public class ProjectViewModelTests : TestBase
     }
 
     [Fact]
-    public void OnStatusChanged_WhenRunning_ShouldDisableInput()
+    public void OnStatusChanged_WhenRunning_ShouldEnableInput()
     {
         // Arrange
         var vm = CreateViewModel();
@@ -414,8 +414,8 @@ public class ProjectViewModelTests : TestBase
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0),
             null, null, 0);
 
-        // Assert
-        vm.CanSendInput.Should().BeFalse();
+        // Assert (Running allows input for interrupts)
+        vm.CanSendInput.Should().BeTrue();
     }
 
     #endregion

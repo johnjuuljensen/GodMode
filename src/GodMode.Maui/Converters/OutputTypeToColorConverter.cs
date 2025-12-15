@@ -1,26 +1,25 @@
-using GodMode.Shared.Enums;
 using System.Globalization;
 
 namespace GodMode.Maui.Converters;
 
 /// <summary>
-/// Converts OutputEventType to accent colors for borders and labels.
+/// Converts Claude message type string to accent colors for borders and labels.
 /// These are vibrant colors that work well as accents in both light and dark themes.
 /// </summary>
-public class OutputTypeToColorConverter : IValueConverter
+public class MessageTypeToColorConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        if (value is OutputEventType type)
+        if (value is string type)
         {
-            return type switch
+            return type.ToLowerInvariant() switch
             {
-                OutputEventType.User => Color.FromArgb("#2196F3"),      // Blue
-                OutputEventType.Assistant => Color.FromArgb("#4CAF50"), // Green
-                OutputEventType.Result => Color.FromArgb("#009688"),    // Teal
-                OutputEventType.Error => Color.FromArgb("#F44336"),     // Red
-                OutputEventType.System => Color.FromArgb("#9C27B0"),    // Purple
-                _ => Color.FromArgb("#757575")                          // Gray
+                "user" => Color.FromArgb("#2196F3"),      // Blue
+                "assistant" => Color.FromArgb("#4CAF50"), // Green
+                "result" => Color.FromArgb("#009688"),    // Teal
+                "error" => Color.FromArgb("#F44336"),     // Red
+                "system" => Color.FromArgb("#9C27B0"),    // Purple
+                _ => Color.FromArgb("#757575")            // Gray
             };
         }
         return Color.FromArgb("#757575");
@@ -33,20 +32,16 @@ public class OutputTypeToColorConverter : IValueConverter
 }
 
 /// <summary>
-/// Converts OutputEventType to HorizontalOptions for chat bubble alignment.
+/// Converts IsUserMessage bool to HorizontalOptions for chat bubble alignment.
 /// User messages align to Start (left), others align to End (right).
 /// </summary>
-public class OutputTypeToAlignmentConverter : IValueConverter
+public class IsUserToAlignmentConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        if (value is OutputEventType type)
+        if (value is bool isUser)
         {
-            return type switch
-            {
-                OutputEventType.User => LayoutOptions.Start,  // User messages on left
-                _ => LayoutOptions.End                        // System/assistant messages on right
-            };
+            return isUser ? LayoutOptions.Start : LayoutOptions.End;
         }
         return LayoutOptions.Fill;
     }

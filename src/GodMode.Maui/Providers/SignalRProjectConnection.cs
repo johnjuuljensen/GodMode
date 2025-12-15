@@ -17,7 +17,7 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
     private readonly HubConnection _hubConnection;
     private readonly IProjectHub _hubProxy;
     private readonly IDisposable _clientRegistration;
-    private readonly Dictionary<string, Subject<OutputEvent>> _outputSubscriptions = new();
+    private readonly Dictionary<string, Subject<ClaudeMessage>> _outputSubscriptions = new();
     private bool _disposed;
 
     public bool IsConnected => _hubConnection.State == HubConnectionState.Connected;
@@ -96,11 +96,11 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         await _hubProxy.ResumeProject(projectId);
     }
 
-    public IObservable<OutputEvent> SubscribeOutput(string projectId, long fromOffset = 0)
+    public IObservable<ClaudeMessage> SubscribeOutput(string projectId, long fromOffset = 0)
     {
         if (!_outputSubscriptions.ContainsKey(projectId))
         {
-            _outputSubscriptions[projectId] = new Subject<OutputEvent>();
+            _outputSubscriptions[projectId] = new Subject<ClaudeMessage>();
 
             // Subscribe on the server
             _hubProxy.SubscribeProject(projectId, fromOffset).ConfigureAwait(false);
@@ -121,11 +121,12 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
 
     #region IProjectHubClient Implementation
 
-    Task IProjectHubClient.OutputReceived(string projectId, OutputEvent outputEvent)
+    Task IProjectHubClient.OutputReceived(string projectId, string rawJson)
     {
         if (_outputSubscriptions.TryGetValue(projectId, out var subject))
         {
-            subject.OnNext(outputEvent);
+            var message = new ClaudeMessage(rawJson);
+            subject.OnNext(message);
         }
         return Task.CompletedTask;
     }

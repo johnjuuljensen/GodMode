@@ -10,8 +10,9 @@ public interface IProjectHubClient
 {
     /// <summary>
     /// Called when output is received from a project's Claude process.
+    /// The rawJson is the raw JSON line from Claude's --output-format stream-json.
     /// </summary>
-    Task OutputReceived(string projectId, OutputEvent outputEvent);
+    Task OutputReceived(string projectId, string rawJson);
 
     /// <summary>
     /// Called when a project's status changes.

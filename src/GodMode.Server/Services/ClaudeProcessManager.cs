@@ -124,7 +124,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         var startInfo = new ProcessStartInfo
         {
             FileName = "claude",
-            WorkingDirectory = project.WorkPath,
+            WorkingDirectory = project.ProjectPath,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,

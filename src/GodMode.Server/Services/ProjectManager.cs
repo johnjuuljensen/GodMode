@@ -105,28 +105,25 @@ public class ProjectManager : IProjectManager
             request.ProjectType,
             request.RepoUrl);
 
-        var workPath = projectFolder.WorkPath;
-
         var project = new ProjectInfo
         {
             Id = projectId,
             Name = request.Name,
             ProjectPath = projectFolder.ProjectPath,
-            WorkPath = workPath,
             RepoUrl = request.RepoUrl,
             State = ProjectState.Running,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
-        // Handle git operations based on project type
+        // Handle git operations based on project type (clone/worktree into project directory)
         if (request.ProjectType == ProjectType.GitHubRepo && !string.IsNullOrEmpty(request.RepoUrl))
         {
-            await CloneRepositoryAsync(request.RepoUrl, workPath);
+            await CloneRepositoryAsync(request.RepoUrl, projectFolder.ProjectPath);
         }
         else if (request.ProjectType == ProjectType.GitHubWorktree && !string.IsNullOrEmpty(request.RepoUrl))
         {
-            await SetupWorktreeAsync(request.ProjectRootName, request.Name, request.RepoUrl, workPath);
+            await SetupWorktreeAsync(request.ProjectRootName, request.Name, request.RepoUrl, projectFolder.ProjectPath);
         }
 
         // Save initial status
@@ -335,7 +332,6 @@ public class ProjectManager : IProjectManager
                     Id = status.Id,
                     Name = status.Name,
                     ProjectPath = projectPath,
-                    WorkPath = Path.Combine(projectPath, "work"),
                     RepoUrl = status.RepoUrl,
                     State = status.State == ProjectState.Running || status.State == ProjectState.WaitingInput
                         ? ProjectState.Stopped
@@ -439,28 +435,24 @@ public class ProjectManager : IProjectManager
 
                 try
                 {
-                    var outputEvent = JsonSerializer.Deserialize<OutputEvent>(line, new JsonSerializerOptions
+                    var eventType = ExtractEventType(line);
+                    _logger.LogInformation("Sending raw JSON to group 'project-{ProjectId}', Type: {Type}",
+                        project.Id, eventType);
+
+                    // Send raw JSON to subscribed clients
+                    await _hubContext.Clients.Group($"project-{project.Id}")
+                        .OutputReceived(project.Id, line);
+
+                    _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", project.Id);
+
+                    // Update status based on event
+                    if (eventType != null)
                     {
-                        PropertyNameCaseInsensitive = true
-                    });
-
-                    if (outputEvent != null)
-                    {
-                        _logger.LogInformation("Sending OutputReceived to group 'project-{ProjectId}', Type: {Type}",
-                            project.Id, outputEvent.Type);
-
-                        // Send to subscribed clients
-                        await _hubContext.Clients.Group($"project-{project.Id}")
-                            .OutputReceived(project.Id, outputEvent);
-
-                        _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", project.Id);
-
-                        // Update status based on event
-                        await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Deserialized OutputEvent is null for project {ProjectId}", project.Id);
+                        var outputEvent = ParseClaudeOutput(line);
+                        if (outputEvent != null)
+                        {
+                            await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
+                        }
                     }
                 }
                 catch (JsonException ex)
@@ -486,6 +478,7 @@ public class ProjectManager : IProjectManager
     /// <summary>
     /// Handles output received directly from the Claude process manager.
     /// This bypasses the FileSystemWatcher for more reliable real-time updates.
+    /// Sends raw JSON to clients for UI parsing/rendering.
     /// </summary>
     private async Task HandleOutputReceivedAsync(ProjectInfo project, string jsonLine)
     {
@@ -496,25 +489,26 @@ public class ProjectManager : IProjectManager
 
         try
         {
-            var outputEvent = ParseClaudeOutput(jsonLine);
+            // Extract type for logging and status updates
+            var eventType = ExtractEventType(jsonLine);
 
-            if (outputEvent != null)
+            _logger.LogInformation("Sending raw JSON to group 'project-{ProjectId}', Type: {Type}",
+                project.Id, eventType);
+
+            // Send raw JSON to subscribed clients - UI will parse and render
+            await _hubContext.Clients.Group($"project-{project.Id}")
+                .OutputReceived(project.Id, jsonLine);
+
+            _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", project.Id);
+
+            // Update status based on event (still need to parse for status updates)
+            if (eventType != null)
             {
-                _logger.LogInformation("Sending OutputReceived to group 'project-{ProjectId}', Type: {Type}, Content: {Content}",
-                    project.Id, outputEvent.Type, outputEvent.Content?.Length > 50 ? outputEvent.Content[..50] + "..." : outputEvent.Content);
-
-                // Send to subscribed clients
-                await _hubContext.Clients.Group($"project-{project.Id}")
-                    .OutputReceived(project.Id, outputEvent);
-
-                _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", project.Id);
-
-                // Update status based on event
-                await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
-            }
-            else
-            {
-                _logger.LogWarning("Parsed OutputEvent is null for project {ProjectId}", project.Id);
+                var outputEvent = ParseClaudeOutput(jsonLine);
+                if (outputEvent != null)
+                {
+                    await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
+                }
             }
         }
         catch (JsonException ex)
@@ -525,6 +519,23 @@ public class ProjectManager : IProjectManager
         {
             _logger.LogError(ex, "Error in HandleOutputReceivedAsync for project {ProjectId}", project.Id);
         }
+    }
+
+    /// <summary>
+    /// Extracts the event type from raw JSON for logging purposes.
+    /// </summary>
+    private static string? ExtractEventType(string jsonLine)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(jsonLine);
+            if (doc.RootElement.TryGetProperty("type", out var typeElement))
+            {
+                return typeElement.GetString();
+            }
+        }
+        catch { }
+        return null;
     }
 
     /// <summary>
@@ -662,25 +673,14 @@ public class ProjectManager : IProjectManager
                 if (string.IsNullOrWhiteSpace(line)) continue;
 
                 lineCount++;
-                try
-                {
-                    // Parse raw Claude JSON output using same method as real-time events
-                    var outputEvent = ParseClaudeOutput(line);
 
-                    if (outputEvent != null)
-                    {
-                        _logger.LogInformation("Sending existing output line {LineNum} to client {ConnectionId} for project {ProjectId}, Type: {Type}, Content: {Content}",
-                            lineCount, connectionId, project.Id, outputEvent.Type,
-                            outputEvent.Content?.Length > 50 ? outputEvent.Content[..50] + "..." : outputEvent.Content);
+                var eventType = ExtractEventType(line);
+                _logger.LogInformation("Sending existing output line {LineNum} to client {ConnectionId} for project {ProjectId}, Type: {Type}",
+                    lineCount, connectionId, project.Id, eventType);
 
-                        await _hubContext.Clients.Client(connectionId)
-                            .OutputReceived(project.Id, outputEvent);
-                    }
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogWarning(ex, "Failed to parse output line: {Line}", line);
-                }
+                // Send raw JSON to client - UI will parse and render
+                await _hubContext.Clients.Client(connectionId)
+                    .OutputReceived(project.Id, line);
             }
 
             _logger.LogInformation("Sent {LineCount} existing output lines to client {ConnectionId} for project {ProjectId}",

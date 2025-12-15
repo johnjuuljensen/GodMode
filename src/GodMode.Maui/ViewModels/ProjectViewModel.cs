@@ -32,7 +32,7 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     private ProjectStatus? _status;
 
     [ObservableProperty]
-    private ObservableCollection<OutputEvent> _outputEvents = new();
+    private ObservableCollection<ClaudeMessage> _outputMessages = new();
 
     [ObservableProperty]
     private string _inputText = string.Empty;
@@ -124,11 +124,17 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
             await _projectService.SendInputAsync(ProfileName, HostId, ProjectId, input);
 
             // Add to output immediately for UI feedback
-            OutputEvents.Add(new OutputEvent(
-                DateTime.UtcNow,
-                OutputEventType.User,
-                input
-            ));
+            // Create a simple user message JSON
+            var userJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                type = "user",
+                message = new
+                {
+                    role = "user",
+                    content = new[] { new { type = "text", text = input } }
+                }
+            });
+            OutputMessages.Add(new ClaudeMessage(userJson));
 
             // Refresh status
             await RefreshAsync();
@@ -231,11 +237,11 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
             var observable = await _projectService.SubscribeOutputAsync(ProfileName, HostId, ProjectId, outputOffset);
 
             _outputSubscription = observable.Subscribe(
-                onNext: outputEvent =>
+                onNext: message =>
                 {
                     MainThread.BeginInvokeOnMainThread(() =>
                     {
-                        OutputEvents.Add(outputEvent);
+                        OutputMessages.Add(message);
 
                         // Auto-scroll would be handled by the view
                     });

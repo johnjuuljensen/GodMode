@@ -70,11 +70,12 @@ await WaitForResult(clientHandler1, TimeSpan.FromSeconds(60));
 var phase2EventCount = clientHandler1.EventCount;
 Console.WriteLine($"\n[INFO] Received {phase2EventCount} events in Phase 2");
 Console.WriteLine("[INFO] Events received:");
-foreach (var evt in clientHandler1.ReceivedEvents)
+foreach (var msg in clientHandler1.ReceivedMessages)
 {
-    var contentPreview = string.IsNullOrEmpty(evt.Content) ? "(empty)" :
-        evt.Content.Length > 60 ? evt.Content[..60] + "..." : evt.Content;
-    Console.WriteLine($"  [{evt.Type}] {contentPreview}");
+    var textProp = msg.Properties.FirstOrDefault(p => p.Name == "text" || p.Name == "result" || p.Name == "subtype");
+    var contentPreview = textProp?.Value ?? "(structured)";
+    if (contentPreview.Length > 60) contentPreview = contentPreview[..60] + "...";
+    Console.WriteLine($"  [{msg.Type}] {contentPreview}");
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -154,11 +155,12 @@ if (historyEventCount == 0)
 else
 {
     Console.WriteLine("[INFO] History events received:");
-    foreach (var evt in clientHandler2.ReceivedEvents)
+    foreach (var msg in clientHandler2.ReceivedMessages)
     {
-        var contentPreview = string.IsNullOrEmpty(evt.Content) ? "(empty)" :
-            evt.Content.Length > 60 ? evt.Content[..60] + "..." : evt.Content;
-        Console.WriteLine($"  [{evt.Type}] {contentPreview}");
+        var textProp = msg.Properties.FirstOrDefault(p => p.Name == "text" || p.Name == "result" || p.Name == "subtype");
+        var contentPreview = textProp?.Value ?? "(structured)";
+        if (contentPreview.Length > 60) contentPreview = contentPreview[..60] + "...";
+        Console.WriteLine($"  [{msg.Type}] {contentPreview}");
     }
 
     // Verify history matches original
@@ -171,15 +173,15 @@ else
         Console.WriteLine($"\n[RESULT] ⚠️ History count ({historyEventCount}) differs from original ({phase2EventCount})");
     }
 
-    // Check for content
-    var eventsWithContent = clientHandler2.ReceivedEvents.Count(e => !string.IsNullOrEmpty(e.Content));
-    if (eventsWithContent == 0)
+    // Check for content (messages with any properties beyond type)
+    var messagesWithContent = clientHandler2.ReceivedMessages.Count(m => m.Properties.Count > 1);
+    if (messagesWithContent == 0)
     {
-        Console.WriteLine("[ERROR] ❌ ALL HISTORY EVENTS HAVE EMPTY CONTENT - PARSING BUG!");
+        Console.WriteLine("[ERROR] ❌ ALL HISTORY EVENTS HAVE NO CONTENT - PARSING BUG!");
     }
     else
     {
-        Console.WriteLine($"[RESULT] ✅ {eventsWithContent} events have content");
+        Console.WriteLine($"[RESULT] ✅ {messagesWithContent} messages have content");
     }
 }
 
@@ -217,11 +219,12 @@ Console.WriteLine($"\n[RESULT] Received {newEvents} new events after follow-up")
 if (newEvents > 0)
 {
     Console.WriteLine("[INFO] New events:");
-    foreach (var evt in clientHandler2.ReceivedEvents.Skip(eventCountBeforeInput))
+    foreach (var msg in clientHandler2.ReceivedMessages.Skip(eventCountBeforeInput))
     {
-        var contentPreview = string.IsNullOrEmpty(evt.Content) ? "(empty)" :
-            evt.Content.Length > 60 ? evt.Content[..60] + "..." : evt.Content;
-        Console.WriteLine($"  [{evt.Type}] {contentPreview}");
+        var textProp = msg.Properties.FirstOrDefault(p => p.Name == "text" || p.Name == "result" || p.Name == "subtype");
+        var contentPreview = textProp?.Value ?? "(structured)";
+        if (contentPreview.Length > 60) contentPreview = contentPreview[..60] + "...";
+        Console.WriteLine($"  [{msg.Type}] {contentPreview}");
     }
     Console.WriteLine($"\n[RESULT] ✅ Responses arrived after reconnect!");
 }
@@ -258,7 +261,7 @@ Console.WriteLine($"║ Phase 7 Events (after resume): {newEvents,-28} ║");
 Console.WriteLine("╠══════════════════════════════════════════════════════════════╣");
 
 var allPassed = historyEventCount > 0 &&
-                clientHandler2.ReceivedEvents.Any(e => !string.IsNullOrEmpty(e.Content)) &&
+                clientHandler2.ReceivedMessages.Any(m => m.Properties.Count > 1) &&
                 newEvents > 0;
 
 if (allPassed)
@@ -320,24 +323,29 @@ static async Task WaitForResult(ProjectHubClientHandler handler, TimeSpan timeou
 // Client handler implementation
 class ProjectHubClientHandler : IProjectHubClient
 {
-    private readonly List<OutputEvent> _events = [];
+    private readonly List<ClaudeMessage> _messages = [];
 
     public bool ReceivedResult { get; private set; }
-    public int EventCount => _events.Count;
-    public IReadOnlyList<OutputEvent> ReceivedEvents => _events;
+    public int EventCount => _messages.Count;
+    public IReadOnlyList<ClaudeMessage> ReceivedMessages => _messages;
 
     public void ResetResultFlag() => ReceivedResult = false;
 
-    public Task OutputReceived(string projectId, OutputEvent outputEvent)
+    public Task OutputReceived(string projectId, string rawJson)
     {
-        _events.Add(outputEvent);
+        var message = new ClaudeMessage(rawJson);
+        _messages.Add(message);
 
-        var contentPreview = string.IsNullOrEmpty(outputEvent.Content) ? "(empty)" :
-            outputEvent.Content.Length > 50 ? outputEvent.Content[..50] + "..." : outputEvent.Content;
+        // Extract a preview from the first text property
+        var textProp = message.Properties.FirstOrDefault(p =>
+            p.Name == "text" || p.Name == "result" || p.Name == "subtype");
+        var contentPreview = textProp != null
+            ? (textProp.Value.Length > 50 ? textProp.Value[..50] + "..." : textProp.Value)
+            : "(structured)";
 
-        Console.WriteLine($"  >> [{outputEvent.Type}] {contentPreview}");
+        Console.WriteLine($"  >> [{message.Type}] {contentPreview}");
 
-        if (outputEvent.Type == OutputEventType.Result)
+        if (message.Type == "result")
         {
             ReceivedResult = true;
         }

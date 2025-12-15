@@ -59,9 +59,10 @@ public interface IProjectConnection : IDisposable
     Task ResumeProjectAsync(string projectId);
 
     /// <summary>
-    /// Subscribes to output events from a project, starting from a specific offset
+    /// Subscribes to output messages from a project, starting from a specific offset.
+    /// Returns raw Claude JSON messages wrapped in ClaudeMessage for UI rendering.
     /// </summary>
-    IObservable<OutputEvent> SubscribeOutput(string projectId, long fromOffset = 0);
+    IObservable<ClaudeMessage> SubscribeOutput(string projectId, long fromOffset = 0);
 
     /// <summary>
     /// Gets the metrics HTML for a project
