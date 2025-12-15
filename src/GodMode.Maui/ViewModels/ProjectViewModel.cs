@@ -55,6 +55,9 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string? _metricsHtml;
 
+    [ObservableProperty]
+    private bool _isSimpleMode = true;
+
     public ProjectViewModel(
         IProjectService projectService,
         INotificationService notificationService)
@@ -208,6 +211,12 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     private void CloseMetrics()
     {
         ShowMetrics = false;
+    }
+
+    [RelayCommand]
+    private void ToggleViewMode()
+    {
+        IsSimpleMode = !IsSimpleMode;
     }
 
     [RelayCommand]

@@ -22,6 +22,10 @@
             <converters:IsUserToAlignmentConverter x:Key="IsUserToAlignmentConverter" />
             <converters:StateToStartVisibilityConverter x:Key="StateToStartVisibilityConverter" />
             <converters:StateToStopVisibilityConverter x:Key="StateToStopVisibilityConverter" />
+            <converters:BoolToViewModeConverter x:Key="BoolToViewModeConverter" />
+            <converters:SimpleModeMultiConverter x:Key="SimpleModeMultiConverter" />
+            <converters:BoolToToggleColorConverter x:Key="BoolToToggleColorConverter" />
+            <converters:BoolToToggleTextColorConverter x:Key="BoolToToggleTextColorConverter" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

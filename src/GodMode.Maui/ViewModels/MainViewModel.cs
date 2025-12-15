@@ -267,9 +267,10 @@ public partial class MainViewModel : ObservableObject
 
             Servers = new ObservableCollection<ServerGroupViewModel>(serverList);
 
-            // Auto-load projects for running servers
-            foreach (var server in Servers.Where(s => s.CanConnect))
+            // Auto-connect to all servers on startup
+            foreach (var server in Servers)
             {
+                // Attempt connection - will fail gracefully for stopped servers
                 _ = LoadServerProjectsAsync(server);
             }
         }
@@ -309,8 +310,6 @@ public partial class MainViewModel : ObservableObject
 
     private async Task LoadServerProjectsAsync(ServerGroupViewModel server)
     {
-        if (!server.CanConnect) return;
-
         server.IsLoadingProjects = true;
         server.ErrorMessage = null;
 
@@ -324,7 +323,11 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            server.ErrorMessage = $"Failed to load projects: {ex.Message}";
+            // Connection failed - server may be offline, log but don't show error for offline servers
+            if (server.State != HostState.Stopped)
+            {
+                server.ErrorMessage = $"Failed to connect: {ex.Message}";
+            }
             server.IsConnected = false;
         }
         finally

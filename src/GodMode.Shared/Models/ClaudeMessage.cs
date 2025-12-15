@@ -26,9 +26,32 @@ public sealed class ClaudeMessage
     public string Type { get; }
 
     /// <summary>
+    /// The subtype extracted from the "subtype" field (e.g., tool_use, tool_result).
+    /// </summary>
+    public string? Subtype { get; }
+
+    /// <summary>
+    /// Combined type and subtype for display (e.g., "assistant:tool_use").
+    /// </summary>
+    public string TypeDisplay => Subtype != null ? $"{Type}:{Subtype}" : Type;
+
+    /// <summary>
     /// Whether this is a user message (for alignment purposes).
     /// </summary>
     public bool IsUserMessage => Type == "user";
+
+    /// <summary>
+    /// Simple content for display in simple mode.
+    /// Extracts result content or message.content of type text.
+    /// </summary>
+    public string? SimpleContent => _simpleContent ??= ExtractSimpleContent();
+    private string? _simpleContent;
+
+    /// <summary>
+    /// Whether this message should be shown in simple mode.
+    /// Only result types and messages with text content are shown.
+    /// </summary>
+    public bool ShowInSimpleMode => !string.IsNullOrEmpty(SimpleContent);
 
     /// <summary>
     /// Gets all properties for UI binding. Caches the result.
@@ -49,12 +72,52 @@ public sealed class ClaudeMessage
             Type = Document.RootElement.TryGetProperty("type", out var typeElement)
                 ? typeElement.GetString() ?? "unknown"
                 : "unknown";
+            Subtype = Document.RootElement.TryGetProperty("subtype", out var subtypeElement)
+                ? subtypeElement.GetString()
+                : null;
         }
         catch
         {
             Document = null;
             Type = "error";
+            Subtype = null;
         }
+    }
+
+    /// <summary>
+    /// Extracts simple content from result or message.content text.
+    /// </summary>
+    private string? ExtractSimpleContent()
+    {
+        if (Document == null) return null;
+
+        var root = Document.RootElement;
+
+        // For "result" type, extract the result text
+        if (Type == "result" && root.TryGetProperty("result", out var resultElement))
+        {
+            return resultElement.GetString();
+        }
+
+        // For user/assistant types, look for message.content with type=text
+        if ((Type == "user" || Type == "assistant") && root.TryGetProperty("message", out var messageElement))
+        {
+            if (messageElement.TryGetProperty("content", out var contentElement) &&
+                contentElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in contentElement.EnumerateArray())
+                {
+                    if (item.TryGetProperty("type", out var itemType) &&
+                        itemType.GetString() == "text" &&
+                        item.TryGetProperty("text", out var textElement))
+                    {
+                        return textElement.GetString();
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
