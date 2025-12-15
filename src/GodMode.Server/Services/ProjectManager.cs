@@ -664,15 +664,14 @@ public class ProjectManager : IProjectManager
                 lineCount++;
                 try
                 {
-                    var outputEvent = JsonSerializer.Deserialize<OutputEvent>(line, new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    });
+                    // Parse raw Claude JSON output using same method as real-time events
+                    var outputEvent = ParseClaudeOutput(line);
 
                     if (outputEvent != null)
                     {
-                        _logger.LogInformation("Sending existing output line {LineNum} to client {ConnectionId} for project {ProjectId}, Type: {Type}",
-                            lineCount, connectionId, project.Id, outputEvent.Type);
+                        _logger.LogInformation("Sending existing output line {LineNum} to client {ConnectionId} for project {ProjectId}, Type: {Type}, Content: {Content}",
+                            lineCount, connectionId, project.Id, outputEvent.Type,
+                            outputEvent.Content?.Length > 50 ? outputEvent.Content[..50] + "..." : outputEvent.Content);
 
                         await _hubContext.Clients.Client(connectionId)
                             .OutputReceived(project.Id, outputEvent);

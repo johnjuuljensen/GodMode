@@ -6,68 +6,42 @@ using TypedSignalR.Client;
 
 /// <summary>
 /// Test client for GodMode SignalR server.
-/// Creates a project and observes output.
+/// Tests full project lifecycle including reconnection and history.
 /// </summary>
 
 var serverUrl = "http://localhost:31337/hubs/projects";
 
-Console.WriteLine("=== SIGNALR TEST CLIENT ===");
-Console.WriteLine($"Connecting to: {serverUrl}");
+Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
+Console.WriteLine("║         SIGNALR FULL LIFECYCLE TEST CLIENT                   ║");
+Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
+Console.WriteLine($"Server: {serverUrl}");
 Console.WriteLine();
 
-// Build connection
-var connection = new HubConnectionBuilder()
-    .WithUrl(serverUrl)
-    .WithAutomaticReconnect()
-    .Build();
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 1: Initial Connection and Project Creation
+// ═══════════════════════════════════════════════════════════════════
+Console.WriteLine("┌────────────────────────────────────────────────────────────────┐");
+Console.WriteLine("│ PHASE 1: Initial Connection and Project Creation              │");
+Console.WriteLine("└────────────────────────────────────────────────────────────────┘");
 
-// Create typed hub proxy
-var hub = connection.CreateHubProxy<IProjectHub>();
-
-// Register client handlers
-var clientHandler = new ProjectHubClientHandler();
-var registration = connection.Register<IProjectHubClient>(clientHandler);
-
-// Connect
-await connection.StartAsync();
-Console.WriteLine($"Connected! State: {connection.State}");
-Console.WriteLine();
+var (connection1, hub1, clientHandler1, registration1) = await CreateConnection(serverUrl);
 
 // List project roots
-Console.WriteLine("=== PROJECT ROOTS ===");
-var roots = await hub.ListProjectRoots();
+Console.WriteLine("\n[INFO] Available project roots:");
+var roots = await hub1.ListProjectRoots();
 foreach (var root in roots)
 {
     Console.WriteLine($"  - {root.Name}: {root.Path}");
 }
-Console.WriteLine();
-
-// List existing projects
-Console.WriteLine("=== EXISTING PROJECTS ===");
-var projects = await hub.ListProjects();
-if (projects.Length == 0)
-{
-    Console.WriteLine("  (none)");
-}
-else
-{
-    foreach (var p in projects)
-    {
-        Console.WriteLine($"  - {p.Id}: {p.Name} ({p.State})");
-    }
-}
-Console.WriteLine();
 
 // Create a new project
-var projectName = $"test_{DateTime.Now:HHmmss}";
-var initialPrompt = "Just say hi back. Keep it very short.";
+var projectName = $"lifecycle_test_{DateTime.Now:HHmmss}";
+var initialPrompt = "Just say 'Hello from Claude!' and nothing else.";
 
-Console.WriteLine("=== CREATING PROJECT ===");
-Console.WriteLine($"Name: {projectName}");
-Console.WriteLine($"Prompt: {initialPrompt}");
-Console.WriteLine();
+Console.WriteLine($"\n[ACTION] Creating project: {projectName}");
+Console.WriteLine($"[ACTION] Initial prompt: {initialPrompt}");
 
-var detail = await hub.CreateProject(
+var detail = await hub1.CreateProject(
     name: projectName,
     projectRootName: "default",
     projectType: ProjectType.RawFolder,
@@ -75,74 +49,294 @@ var detail = await hub.CreateProject(
     initialPrompt: initialPrompt
 );
 
-Console.WriteLine($"Created project: {detail.Status.Id}");
-Console.WriteLine($"Session ID: {detail.SessionId}");
-Console.WriteLine($"State: {detail.Status.State}");
-Console.WriteLine();
+var projectId = detail.Status.Id;
+Console.WriteLine($"[SUCCESS] Created project: {projectId}");
+Console.WriteLine($"[INFO] Session ID: {detail.SessionId}");
 
-// Subscribe to output
-Console.WriteLine("=== SUBSCRIBING TO OUTPUT ===");
-await hub.SubscribeProject(detail.Status.Id, 0);
-Console.WriteLine("Subscribed. Waiting for output events...");
-Console.WriteLine();
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 2: Subscribe and Interact
+// ═══════════════════════════════════════════════════════════════════
+Console.WriteLine("\n┌────────────────────────────────────────────────────────────────┐");
+Console.WriteLine("│ PHASE 2: Subscribe and Interact                               │");
+Console.WriteLine("└────────────────────────────────────────────────────────────────┘");
 
-// Wait for output (timeout after 30 seconds)
-var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-try
+Console.WriteLine("\n[ACTION] Subscribing to project output (offset 0)...");
+await hub1.SubscribeProject(projectId, 0);
+Console.WriteLine("[SUCCESS] Subscribed");
+
+Console.WriteLine("\n[WAITING] Waiting for Claude's initial response...");
+await WaitForResult(clientHandler1, TimeSpan.FromSeconds(60));
+
+var phase2EventCount = clientHandler1.EventCount;
+Console.WriteLine($"\n[INFO] Received {phase2EventCount} events in Phase 2");
+Console.WriteLine("[INFO] Events received:");
+foreach (var evt in clientHandler1.ReceivedEvents)
 {
-    while (!cts.Token.IsCancellationRequested)
-    {
-        await Task.Delay(500, cts.Token);
+    var contentPreview = string.IsNullOrEmpty(evt.Content) ? "(empty)" :
+        evt.Content.Length > 60 ? evt.Content[..60] + "..." : evt.Content;
+    Console.WriteLine($"  [{evt.Type}] {contentPreview}");
+}
 
-        // Check if we got a result
-        if (clientHandler.ReceivedResult)
-        {
-            Console.WriteLine();
-            Console.WriteLine("Got result event - stopping.");
-            break;
-        }
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 3: Stop Project
+// ═══════════════════════════════════════════════════════════════════
+Console.WriteLine("\n┌────────────────────────────────────────────────────────────────┐");
+Console.WriteLine("│ PHASE 3: Stop Project                                         │");
+Console.WriteLine("└────────────────────────────────────────────────────────────────┘");
+
+Console.WriteLine("\n[ACTION] Stopping project...");
+await hub1.StopProject(projectId);
+Console.WriteLine("[SUCCESS] Project stopped");
+
+var status = await hub1.GetStatus(projectId);
+Console.WriteLine($"[INFO] Project state: {status.State}");
+
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 4: Disconnect from Server
+// ═══════════════════════════════════════════════════════════════════
+Console.WriteLine("\n┌────────────────────────────────────────────────────────────────┐");
+Console.WriteLine("│ PHASE 4: Disconnect from Server                               │");
+Console.WriteLine("└────────────────────────────────────────────────────────────────┘");
+
+Console.WriteLine("\n[ACTION] Unsubscribing from project...");
+await hub1.UnsubscribeProject(projectId);
+Console.WriteLine("[SUCCESS] Unsubscribed");
+
+Console.WriteLine("[ACTION] Disconnecting from server...");
+registration1.Dispose();
+await connection1.StopAsync();
+Console.WriteLine("[SUCCESS] Disconnected");
+
+Console.WriteLine("\n[INFO] Simulating disconnection period (2 seconds)...");
+await Task.Delay(2000);
+
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 5: Reconnect to Server
+// ═══════════════════════════════════════════════════════════════════
+Console.WriteLine("\n┌────────────────────────────────────────────────────────────────┐");
+Console.WriteLine("│ PHASE 5: Reconnect to Server (NEW connection)                 │");
+Console.WriteLine("└────────────────────────────────────────────────────────────────┘");
+
+var (connection2, hub2, clientHandler2, registration2) = await CreateConnection(serverUrl);
+
+// List projects to find our project
+Console.WriteLine("\n[ACTION] Listing existing projects...");
+var projects = await hub2.ListProjects();
+Console.WriteLine($"[INFO] Found {projects.Length} project(s):");
+foreach (var p in projects)
+{
+    var marker = p.Id == projectId ? " <-- OUR PROJECT" : "";
+    Console.WriteLine($"  - {p.Id}: {p.Name} ({p.State}){marker}");
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 6: Subscribe to Existing Project (History Test)
+// ═══════════════════════════════════════════════════════════════════
+Console.WriteLine("\n┌────────────────────────────────────────────────────────────────┐");
+Console.WriteLine("│ PHASE 6: Subscribe to Existing Project (History Test)         │");
+Console.WriteLine("└────────────────────────────────────────────────────────────────┘");
+
+Console.WriteLine("\n[ACTION] Subscribing to existing project (offset 0 = full history)...");
+await hub2.SubscribeProject(projectId, 0);
+Console.WriteLine("[SUCCESS] Subscribed");
+
+// Wait a moment for history to be sent
+Console.WriteLine("[WAITING] Waiting for history events...");
+await Task.Delay(2000);
+
+var historyEventCount = clientHandler2.EventCount;
+Console.WriteLine($"\n[RESULT] Received {historyEventCount} events from history");
+
+if (historyEventCount == 0)
+{
+    Console.WriteLine("[ERROR] ❌ NO HISTORY EVENTS RECEIVED - THIS IS THE BUG!");
+}
+else
+{
+    Console.WriteLine("[INFO] History events received:");
+    foreach (var evt in clientHandler2.ReceivedEvents)
+    {
+        var contentPreview = string.IsNullOrEmpty(evt.Content) ? "(empty)" :
+            evt.Content.Length > 60 ? evt.Content[..60] + "..." : evt.Content;
+        Console.WriteLine($"  [{evt.Type}] {contentPreview}");
+    }
+
+    // Verify history matches original
+    if (historyEventCount == phase2EventCount)
+    {
+        Console.WriteLine($"\n[RESULT] ✅ History event count matches original ({historyEventCount})");
+    }
+    else
+    {
+        Console.WriteLine($"\n[RESULT] ⚠️ History count ({historyEventCount}) differs from original ({phase2EventCount})");
+    }
+
+    // Check for content
+    var eventsWithContent = clientHandler2.ReceivedEvents.Count(e => !string.IsNullOrEmpty(e.Content));
+    if (eventsWithContent == 0)
+    {
+        Console.WriteLine("[ERROR] ❌ ALL HISTORY EVENTS HAVE EMPTY CONTENT - PARSING BUG!");
+    }
+    else
+    {
+        Console.WriteLine($"[RESULT] ✅ {eventsWithContent} events have content");
     }
 }
-catch (OperationCanceledException)
+
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 7: Resume Project and Interact
+// ═══════════════════════════════════════════════════════════════════
+Console.WriteLine("\n┌────────────────────────────────────────────────────────────────┐");
+Console.WriteLine("│ PHASE 7: Resume Project and Interact                          │");
+Console.WriteLine("└────────────────────────────────────────────────────────────────┘");
+
+Console.WriteLine("\n[ACTION] Resuming project...");
+await hub2.ResumeProject(projectId);
+Console.WriteLine("[SUCCESS] Project resumed");
+
+status = await hub2.GetStatus(projectId);
+Console.WriteLine($"[INFO] Project state: {status.State}");
+
+// Wait for project to be ready
+await Task.Delay(2000);
+
+// Send new input
+var followUpInput = "Now say 'Goodbye!'";
+Console.WriteLine($"\n[ACTION] Sending follow-up input: {followUpInput}");
+var eventCountBeforeInput = clientHandler2.EventCount;
+await hub2.SendInput(projectId, followUpInput);
+Console.WriteLine("[SUCCESS] Input sent");
+
+Console.WriteLine("\n[WAITING] Waiting for Claude's response to follow-up...");
+clientHandler2.ResetResultFlag();
+await WaitForResult(clientHandler2, TimeSpan.FromSeconds(60));
+
+var newEvents = clientHandler2.EventCount - eventCountBeforeInput;
+Console.WriteLine($"\n[RESULT] Received {newEvents} new events after follow-up");
+
+if (newEvents > 0)
 {
-    Console.WriteLine();
-    Console.WriteLine("Timeout waiting for events.");
+    Console.WriteLine("[INFO] New events:");
+    foreach (var evt in clientHandler2.ReceivedEvents.Skip(eventCountBeforeInput))
+    {
+        var contentPreview = string.IsNullOrEmpty(evt.Content) ? "(empty)" :
+            evt.Content.Length > 60 ? evt.Content[..60] + "..." : evt.Content;
+        Console.WriteLine($"  [{evt.Type}] {contentPreview}");
+    }
+    Console.WriteLine($"\n[RESULT] ✅ Responses arrived after reconnect!");
+}
+else
+{
+    Console.WriteLine("[ERROR] ❌ NO NEW EVENTS AFTER FOLLOW-UP INPUT");
 }
 
-// Get final status
-Console.WriteLine();
-Console.WriteLine("=== FINAL STATUS ===");
-var status = await hub.GetStatus(detail.Status.Id);
-Console.WriteLine($"State: {status.State}");
-Console.WriteLine($"Current Question: {status.CurrentQuestion ?? "(none)"}");
-Console.WriteLine();
+// ═══════════════════════════════════════════════════════════════════
+// CLEANUP
+// ═══════════════════════════════════════════════════════════════════
+Console.WriteLine("\n┌────────────────────────────────────────────────────────────────┐");
+Console.WriteLine("│ CLEANUP                                                        │");
+Console.WriteLine("└────────────────────────────────────────────────────────────────┘");
 
-// Cleanup
-await hub.UnsubscribeProject(detail.Status.Id);
-registration.Dispose();
-await connection.StopAsync();
+Console.WriteLine("\n[ACTION] Stopping project...");
+await hub2.StopProject(projectId);
+Console.WriteLine("[ACTION] Unsubscribing...");
+await hub2.UnsubscribeProject(projectId);
+Console.WriteLine("[ACTION] Disconnecting...");
+registration2.Dispose();
+await connection2.StopAsync();
 
-Console.WriteLine("Done.");
+// ═══════════════════════════════════════════════════════════════════
+// FINAL SUMMARY
+// ═══════════════════════════════════════════════════════════════════
+Console.WriteLine("\n╔══════════════════════════════════════════════════════════════╗");
+Console.WriteLine("║                     TEST SUMMARY                             ║");
+Console.WriteLine("╠══════════════════════════════════════════════════════════════╣");
+Console.WriteLine($"║ Project ID: {projectId,-47} ║");
+Console.WriteLine($"║ Phase 2 Events (initial): {phase2EventCount,-33} ║");
+Console.WriteLine($"║ Phase 6 Events (history): {historyEventCount,-33} ║");
+Console.WriteLine($"║ Phase 7 Events (after resume): {newEvents,-28} ║");
+Console.WriteLine("╠══════════════════════════════════════════════════════════════╣");
+
+var allPassed = historyEventCount > 0 &&
+                clientHandler2.ReceivedEvents.Any(e => !string.IsNullOrEmpty(e.Content)) &&
+                newEvents > 0;
+
+if (allPassed)
+{
+    Console.WriteLine("║ RESULT: ✅ ALL TESTS PASSED                                  ║");
+}
+else
+{
+    Console.WriteLine("║ RESULT: ❌ SOME TESTS FAILED                                 ║");
+}
+Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
+
+return allPassed ? 0 : 1;
+
+// ═══════════════════════════════════════════════════════════════════
+// HELPER METHODS
+// ═══════════════════════════════════════════════════════════════════
+
+static async Task<(HubConnection, IProjectHub, ProjectHubClientHandler, IDisposable)> CreateConnection(string serverUrl)
+{
+    Console.WriteLine($"\n[ACTION] Connecting to server...");
+
+    var connection = new HubConnectionBuilder()
+        .WithUrl(serverUrl)
+        .WithAutomaticReconnect()
+        .Build();
+
+    var hub = connection.CreateHubProxy<IProjectHub>();
+    var clientHandler = new ProjectHubClientHandler();
+    var registration = connection.Register<IProjectHubClient>(clientHandler);
+
+    await connection.StartAsync();
+    Console.WriteLine($"[SUCCESS] Connected! State: {connection.State}");
+
+    return (connection, hub, clientHandler, registration);
+}
+
+static async Task WaitForResult(ProjectHubClientHandler handler, TimeSpan timeout)
+{
+    var cts = new CancellationTokenSource(timeout);
+    try
+    {
+        while (!cts.Token.IsCancellationRequested)
+        {
+            await Task.Delay(500, cts.Token);
+            if (handler.ReceivedResult)
+            {
+                Console.WriteLine("[INFO] Got result event");
+                break;
+            }
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine("[WARN] Timeout waiting for result");
+    }
+}
 
 // Client handler implementation
 class ProjectHubClientHandler : IProjectHubClient
 {
+    private readonly List<OutputEvent> _events = [];
+
     public bool ReceivedResult { get; private set; }
+    public int EventCount => _events.Count;
+    public IReadOnlyList<OutputEvent> ReceivedEvents => _events;
+
+    public void ResetResultFlag() => ReceivedResult = false;
 
     public Task OutputReceived(string projectId, OutputEvent outputEvent)
     {
-        Console.WriteLine($"[OUTPUT] Project: {projectId}");
-        Console.WriteLine($"         Type: {outputEvent.Type}");
+        _events.Add(outputEvent);
 
-        if (!string.IsNullOrEmpty(outputEvent.Content))
-        {
-            var content = outputEvent.Content.Length > 200
-                ? outputEvent.Content[..200] + "..."
-                : outputEvent.Content;
-            Console.WriteLine($"         Content: {content}");
-        }
+        var contentPreview = string.IsNullOrEmpty(outputEvent.Content) ? "(empty)" :
+            outputEvent.Content.Length > 50 ? outputEvent.Content[..50] + "..." : outputEvent.Content;
 
-        // Check for result event which indicates completion
+        Console.WriteLine($"  >> [{outputEvent.Type}] {contentPreview}");
+
         if (outputEvent.Type == OutputEventType.Result)
         {
             ReceivedResult = true;
@@ -153,13 +347,13 @@ class ProjectHubClientHandler : IProjectHubClient
 
     public Task StatusChanged(string projectId, ProjectStatus status)
     {
-        Console.WriteLine($"[STATUS] Project: {projectId} -> {status.State}");
+        Console.WriteLine($"  >> [STATUS] {projectId} -> {status.State}");
         return Task.CompletedTask;
     }
 
     public Task ProjectCreated(ProjectStatus status)
     {
-        Console.WriteLine($"[CREATED] Project: {status.Id} ({status.Name})");
+        Console.WriteLine($"  >> [CREATED] {status.Id} ({status.Name})");
         return Task.CompletedTask;
     }
 }
