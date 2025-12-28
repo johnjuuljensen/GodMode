@@ -1,7 +1,7 @@
-using GodMode.Maui.Abstractions;
+using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Models;
 
-namespace GodMode.Maui.Services;
+namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// Interface for host connection management service

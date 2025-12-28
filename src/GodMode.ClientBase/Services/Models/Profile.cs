@@ -1,4 +1,4 @@
-namespace GodMode.Maui.Services.Models;
+namespace GodMode.ClientBase.Services.Models;
 
 /// <summary>
 /// Represents a user profile containing account configurations

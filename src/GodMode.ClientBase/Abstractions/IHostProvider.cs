@@ -1,7 +1,6 @@
 using GodMode.Shared.Models;
-using GodMode.Shared.Enums;
 
-namespace GodMode.Maui.Abstractions;
+namespace GodMode.ClientBase.Abstractions;
 
 /// <summary>
 /// Provides access to host environments where projects can run

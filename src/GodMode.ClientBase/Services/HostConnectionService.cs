@@ -1,9 +1,11 @@
-using GodMode.Maui.Abstractions;
-using GodMode.Maui.Providers;
+using GodMode.ClientBase.Abstractions;
+using GodMode.ClientBase.Providers;
+using GodMode.ClientBase.Services.Models;
 using GodMode.Shared.Models;
-using GodMode.Shared.Enums;
 
-namespace GodMode.Maui.Services;
+using Account = GodMode.ClientBase.Services.Models.Account;
+
+namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// Manages connections to hosts and tracks their status
@@ -180,7 +182,7 @@ public class HostConnectionService : IHostConnectionService
             lastException);
     }
 
-    private IHostProvider? CreateProvider(Models.Account account)
+    private IHostProvider? CreateProvider(Account account)
     {
         return account.Type switch
         {
@@ -190,7 +192,7 @@ public class HostConnectionService : IHostConnectionService
         };
     }
 
-    private IHostProvider? CreateGitHubProvider(Models.Account account)
+    private IHostProvider? CreateGitHubProvider(Account account)
     {
         if (string.IsNullOrEmpty(account.Token) || string.IsNullOrEmpty(account.Username))
         {
@@ -201,7 +203,7 @@ public class HostConnectionService : IHostConnectionService
         return new GitHubCodespaceProvider(decryptedToken, account.Username);
     }
 
-    private IHostProvider? CreateLocalProvider(Models.Account account)
+    private IHostProvider? CreateLocalProvider(Account account)
     {
         // Local accounts now specify a server URL (e.g., "http://localhost:31337")
         // For backward compatibility, if Path looks like a file path, use default server URL

@@ -1,7 +1,7 @@
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
 
-namespace GodMode.Maui.Abstractions;
+namespace GodMode.ClientBase.Abstractions;
 
 /// <summary>
 /// Represents a connection to a host for managing projects

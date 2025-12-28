@@ -1,6 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using GodMode.Maui.Services;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using System.Collections.ObjectModel;

@@ -2,7 +2,7 @@ using FluentAssertions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using GodMode.Maui.ViewModels;
-using GodMode.Maui.Abstractions;
+using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
 

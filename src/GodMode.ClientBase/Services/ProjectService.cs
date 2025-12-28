@@ -1,9 +1,9 @@
-using GodMode.Maui.Abstractions;
+using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
 using System.Collections.Concurrent;
 
-namespace GodMode.Maui.Services;
+namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// High-level service for project operations with caching

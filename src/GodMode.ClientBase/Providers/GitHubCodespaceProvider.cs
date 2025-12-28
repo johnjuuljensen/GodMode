@@ -1,9 +1,9 @@
-using GodMode.Maui.Abstractions;
-using GodMode.Shared.Models;
+using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Enums;
+using GodMode.Shared.Models;
 using Octokit;
 
-namespace GodMode.Maui.Providers;
+namespace GodMode.ClientBase.Providers;
 
 /// <summary>
 /// Host provider for GitHub Codespaces

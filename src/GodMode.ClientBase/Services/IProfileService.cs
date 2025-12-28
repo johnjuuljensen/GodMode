@@ -1,6 +1,6 @@
-using GodMode.Maui.Services.Models;
+using GodMode.ClientBase.Services.Models;
 
-namespace GodMode.Maui.Services;
+namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// Interface for profile management service

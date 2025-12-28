@@ -1,4 +1,4 @@
-namespace GodMode.Maui.Services;
+namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// Interface for notification service

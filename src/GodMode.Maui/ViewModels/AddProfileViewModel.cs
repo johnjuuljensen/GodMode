@@ -47,7 +47,7 @@ public partial class AddProfileViewModel : ObservableObject
 
         try
         {
-            var profile = new Services.Models.Profile
+            var profile = new Profile
             {
                 Name = ProfileName,
                 Accounts = []

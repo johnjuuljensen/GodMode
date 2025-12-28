@@ -1,9 +1,8 @@
-using GodMode.Maui.Services.Models;
+using GodMode.ClientBase.Services.Models;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
-namespace GodMode.Maui.Services;
+namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// Manages user profiles and account configurations
@@ -12,12 +11,17 @@ public class ProfileService : IProfileService
 {
     private const string ProfilesFileName = "profiles.json";
     private readonly string _profilesPath;
+    private readonly string _appDataPath;
     private ProfilesConfig? _cachedConfig;
     private readonly byte[] _encryptionKey;
 
-    public ProfileService()
+    /// <summary>
+    /// Creates a new ProfileService with the specified app data directory.
+    /// </summary>
+    /// <param name="appDataPath">The directory path where profile data will be stored.</param>
+    public ProfileService(string appDataPath)
     {
-        var appDataPath = FileSystem.AppDataDirectory;
+        _appDataPath = appDataPath;
         _profilesPath = Path.Combine(appDataPath, ProfilesFileName);
 
         // Generate or load encryption key (in production, use secure key storage)
@@ -193,7 +197,7 @@ public class ProfileService : IProfileService
 
     private byte[] GetOrCreateEncryptionKey()
     {
-        var keyPath = Path.Combine(FileSystem.AppDataDirectory, ".encryption_key");
+        var keyPath = Path.Combine(_appDataPath, ".encryption_key");
 
         if (File.Exists(keyPath))
         {

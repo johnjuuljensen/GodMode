@@ -77,7 +77,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
+		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
 	</ItemGroup>
 
 </Project>

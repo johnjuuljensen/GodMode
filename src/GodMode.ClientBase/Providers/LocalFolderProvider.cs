@@ -1,8 +1,8 @@
-using GodMode.Maui.Abstractions;
-using GodMode.Shared.Models;
+using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Enums;
+using GodMode.Shared.Models;
 
-namespace GodMode.Maui.Providers;
+namespace GodMode.ClientBase.Providers;
 
 /// <summary>
 /// Host provider for local server connections.

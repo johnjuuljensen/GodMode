@@ -4,7 +4,7 @@ using NSubstitute.ExceptionExtensions;
 using GodMode.Maui.ViewModels;
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
-using Profile = GodMode.Maui.Services.Models.Profile;
+using Profile = GodMode.ClientBase.Services.Models.Profile;
 
 namespace GodMode.Maui.Tests.ViewModels;
 

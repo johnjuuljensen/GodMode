@@ -1,7 +1,7 @@
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 
-namespace GodMode.Maui.Services;
+namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// Interface for project management service

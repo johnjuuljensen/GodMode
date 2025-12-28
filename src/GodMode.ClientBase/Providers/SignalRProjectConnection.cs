@@ -1,4 +1,4 @@
-using GodMode.Maui.Abstractions;
+using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
@@ -7,7 +7,7 @@ using System.Reactive.Subjects;
 using System.Reactive.Linq;
 using TypedSignalR.Client;
 
-namespace GodMode.Maui.Providers;
+namespace GodMode.ClientBase.Providers;
 
 /// <summary>
 /// Implementation of IProjectConnection that uses SignalR to connect to a remote server

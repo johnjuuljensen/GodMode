@@ -1,13 +1,12 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using GodMode.Maui.Services;
-using GodMode.Maui.Services.Models;
+using GodMode.ClientBase.Services.Models;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using System.Collections.ObjectModel;
 
 // Resolve ambiguous Profile type
-using Profile = GodMode.Maui.Services.Models.Profile;
+using Profile = GodMode.ClientBase.Services.Models.Profile;
 
 namespace GodMode.Maui.ViewModels;
 

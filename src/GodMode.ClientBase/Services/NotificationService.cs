@@ -1,4 +1,4 @@
-namespace GodMode.Maui.Services;
+namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// Handles system notifications for project events

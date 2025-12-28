@@ -5,6 +5,7 @@
     <File Path="src/Directory.Build.props" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/GodMode.ClientBase/GodMode.ClientBase.csproj" />
     <Project Path="src/GodMode.Maui/GodMode.Maui.csproj" />
     <Project Path="src/GodMode.Mcp/GodMode.Mcp.csproj" />
     <Project Path="src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj" />

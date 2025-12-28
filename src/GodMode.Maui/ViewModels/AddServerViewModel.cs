@@ -1,6 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using GodMode.Maui.Services.Models;
 
 namespace GodMode.Maui.ViewModels;
 

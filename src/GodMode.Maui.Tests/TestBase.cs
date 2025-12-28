@@ -1,5 +1,5 @@
 using NSubstitute;
-using GodMode.Maui.Services;
+using GodMode.ClientBase.Services;
 
 namespace GodMode.Maui.Tests;
 

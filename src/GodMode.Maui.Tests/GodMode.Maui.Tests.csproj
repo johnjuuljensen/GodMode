@@ -26,16 +26,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
     <ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
   </ItemGroup>
 
   <!-- Link source files from MAUI project for testing without MAUI dependencies -->
   <ItemGroup>
     <Compile Include="..\GodMode.Maui\ViewModels\*.cs" Link="ViewModels\%(Filename)%(Extension)" />
-    <Compile Include="..\GodMode.Maui\Services\I*.cs" Link="Services\%(Filename)%(Extension)" />
-    <Compile Include="..\GodMode.Maui\Services\NotificationService.cs" Link="Services\NotificationService.cs" />
-    <Compile Include="..\GodMode.Maui\Services\Models\*.cs" Link="Services\Models\%(Filename)%(Extension)" />
-    <Compile Include="..\GodMode.Maui\Abstractions\*.cs" Link="Abstractions\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>
