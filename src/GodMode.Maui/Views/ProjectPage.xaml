@@ -141,55 +141,26 @@
                                       IsVisible="{Binding HasContentItems, Converter={StaticResource InverseBoolConverter}}" />
                             </Grid>
 
-                            <!-- Collapsed View: Content Items (for user/assistant messages) -->
-                            <VerticalStackLayout IsVisible="{Binding IsExpanded, Converter={StaticResource InverseBoolConverter}}"
-                                                Spacing="2"
-                                                Margin="20,4,0,0">
-                                <BindableLayout.ItemsSource>
-                                    <Binding Path="ContentItems" />
-                                </BindableLayout.ItemsSource>
-                                <BindableLayout.ItemTemplate>
-                                    <DataTemplate x:DataType="sharedmodels:ClaudeContentItem">
-                                        <Grid ColumnDefinitions="Auto,*" Margin="0,2">
-                                            <!-- Content Type Badge -->
-                                            <Border Grid.Column="0"
-                                                   Padding="4,1"
-                                                   BackgroundColor="{Binding Type, Converter={StaticResource ContentTypeToColorConverter}}"
-                                                   StrokeThickness="0"
-                                                   VerticalOptions="Start"
-                                                   Margin="0,0,6,0">
-                                                <Border.StrokeShape>
-                                                    <RoundRectangle CornerRadius="2" />
-                                                </Border.StrokeShape>
-                                                <Label Text="{Binding Type}"
-                                                      FontSize="9"
-                                                      TextColor="White" />
-                                            </Border>
-
-                                            <!-- Content Summary -->
-                                            <Label Grid.Column="1"
-                                                  Text="{Binding Summary}"
-                                                  FontSize="11"
-                                                  FontFamily="Consolas"
-                                                  TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
-                                                  LineBreakMode="TailTruncation"
-                                                  MaxLines="2" />
-                                        </Grid>
-                                    </DataTemplate>
-                                </BindableLayout.ItemTemplate>
-                            </VerticalStackLayout>
+                            <!-- Collapsed View: Content Summary (simple text, no nested layouts) -->
+                            <Label IsVisible="{Binding IsExpanded, Converter={StaticResource InverseBoolConverter}}"
+                                  Text="{Binding ContentSummary}"
+                                  FontSize="11"
+                                  FontFamily="Consolas"
+                                  TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
+                                  LineBreakMode="TailTruncation"
+                                  MaxLines="4"
+                                  Margin="20,4,0,0" />
 
                             <!-- Expanded View: Formatted JSON -->
                             <ScrollView IsVisible="{Binding IsExpanded}"
                                        MaximumHeightRequest="400"
                                        Margin="0,4,0,0">
-                                <Editor Text="{Binding FormattedJson, Mode=OneWay}"
-                                       FontSize="10"
-                                       FontFamily="Consolas"
-                                       TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
-                                       BackgroundColor="{AppThemeBinding Light=#F8F8F8, Dark=#0D0D0D}"
-                                       IsReadOnly="True"
-                                       AutoSize="TextChanges" />
+                                <Label Text="{Binding FormattedJson}"
+                                      FontSize="10"
+                                      FontFamily="Consolas"
+                                      TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
+                                      BackgroundColor="{AppThemeBinding Light=#F8F8F8, Dark=#0D0D0D}"
+                                      Padding="8" />
                             </ScrollView>
                             </VerticalStackLayout>
                         </Border>

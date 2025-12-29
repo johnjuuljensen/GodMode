@@ -5,6 +5,8 @@ namespace GodMode.Maui.Views;
 
 public partial class ProjectPage : ContentPage
 {
+    private CancellationTokenSource? _scrollDebounce;
+
     public ProjectPage(ProjectViewModel viewModel)
     {
         InitializeComponent();
@@ -18,14 +20,26 @@ public partial class ProjectPage : ContentPage
     {
         if (e.Action == NotifyCollectionChangedAction.Add && BindingContext is ProjectViewModel vm)
         {
-            // Scroll to the last item
+            // Debounce scroll - cancel previous pending scroll and schedule a new one
+            _scrollDebounce?.Cancel();
+            _scrollDebounce = new CancellationTokenSource();
+            var token = _scrollDebounce.Token;
+
             MainThread.BeginInvokeOnMainThread(async () =>
             {
-                // Small delay to let the UI render the new item
-                await Task.Delay(50);
-                if (vm.OutputMessages.Count > 0)
+                try
                 {
-                    OutputCollectionView.ScrollTo(vm.OutputMessages.Count - 1, position: ScrollToPosition.End, animate: false);
+                    // Wait for more messages to arrive before scrolling
+                    await Task.Delay(100, token);
+
+                    if (!token.IsCancellationRequested && vm.OutputMessages.Count > 0)
+                    {
+                        OutputCollectionView.ScrollTo(vm.OutputMessages.Count - 1, position: ScrollToPosition.End, animate: false);
+                    }
+                }
+                catch (TaskCanceledException)
+                {
+                    // Expected when debouncing - a new scroll was scheduled
                 }
             });
         }
@@ -44,6 +58,9 @@ public partial class ProjectPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+
+        _scrollDebounce?.Cancel();
+        _scrollDebounce?.Dispose();
 
         if (BindingContext is ProjectViewModel viewModel)
         {

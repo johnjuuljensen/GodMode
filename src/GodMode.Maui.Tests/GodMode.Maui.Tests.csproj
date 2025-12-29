@@ -33,6 +33,7 @@
   <!-- Link source files from MAUI project for testing without MAUI dependencies -->
   <ItemGroup>
     <Compile Include="..\GodMode.Maui\ViewModels\*.cs" Link="ViewModels\%(Filename)%(Extension)" />
+    <Compile Include="..\GodMode.Maui\Collections\*.cs" Link="Collections\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

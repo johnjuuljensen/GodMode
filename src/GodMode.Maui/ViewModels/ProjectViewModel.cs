@@ -1,8 +1,9 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using GodMode.Maui.Collections;
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
-using System.Collections.ObjectModel;
+using System.Reactive.Linq;
 
 namespace GodMode.Maui.ViewModels;
 
@@ -31,7 +32,7 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     private ProjectStatus? _status;
 
     [ObservableProperty]
-    private ObservableCollection<ClaudeMessage> _outputMessages = new();
+    private ObservableRangeCollection<ClaudeMessage> _outputMessages = new();
 
     [ObservableProperty]
     private string _inputText = string.Empty;
@@ -242,24 +243,27 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
             // The UI starts with empty OutputMessages collection, so no duplicates
             var observable = await _projectService.SubscribeOutputAsync(ProfileName, HostId, ProjectId, fromOffset: 0);
 
-            _outputSubscription = observable.Subscribe(
-                onNext: message =>
-                {
-                    MainThread.BeginInvokeOnMainThread(() =>
+            // Buffer messages to avoid UI thrashing during bulk loads
+            // Collect messages for 100ms, then add them all at once
+            _outputSubscription = observable
+                .Buffer(TimeSpan.FromMilliseconds(100))
+                .Where(batch => batch.Count > 0)
+                .Subscribe(
+                    onNext: batch =>
                     {
-                        OutputMessages.Add(message);
-
-                        // Auto-scroll would be handled by the view
-                    });
-                },
-                onError: error =>
-                {
-                    MainThread.BeginInvokeOnMainThread(() =>
+                        MainThread.BeginInvokeOnMainThread(() =>
+                        {
+                            OutputMessages.AddRange(batch);
+                        });
+                    },
+                    onError: error =>
                     {
-                        ErrorMessage = $"Output stream error: {error.Message}";
-                    });
-                }
-            );
+                        MainThread.BeginInvokeOnMainThread(() =>
+                        {
+                            ErrorMessage = $"Output stream error: {error.Message}";
+                        });
+                    }
+                );
         }
         catch (Exception ex)
         {
