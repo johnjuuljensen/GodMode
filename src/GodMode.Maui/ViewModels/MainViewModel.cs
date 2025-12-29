@@ -316,18 +316,26 @@ public partial class MainViewModel : ObservableObject
         {
             var connection = await _hostConnectionService.ConnectToHostAsync(server.ProfileName, server.Id);
             server.IsConnected = true;
+            // Sync State with connection status - server is running if we connected
+            server.State = HostState.Running;
 
             var projects = await connection.ListProjectsAsync();
             server.Projects = new ObservableCollection<ProjectSummary>(projects);
         }
         catch (Exception ex)
         {
-            // Connection failed - server may be offline, log but don't show error for offline servers
+            // Connection failed - server may be offline
+            server.IsConnected = false;
+            // Update state to reflect actual server status
+            if (server.State == HostState.Running || server.State == HostState.Unknown)
+            {
+                server.State = HostState.Stopped;
+            }
+            // Only show error if we expected server to be running
             if (server.State != HostState.Stopped)
             {
                 server.ErrorMessage = $"Failed to connect: {ex.Message}";
             }
-            server.IsConnected = false;
         }
         finally
         {

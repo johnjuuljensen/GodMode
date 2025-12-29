@@ -198,18 +198,32 @@ public class ProjectManager : IProjectManager
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        // Check if already running
-        if (project.State is ProjectState.Running or ProjectState.WaitingInput)
+        // Check if process is actually still running (regardless of reported state)
+        // This handles cases where state becomes Idle/Stopped but process hasn't exited
+        if (project.ProcessId != 0 && _processManager.IsProcessRunning(project.ProcessId))
         {
-            // Check if process is actually still running
-            if (project.ProcessId != 0 && _processManager.IsProcessRunning(project.ProcessId))
+            _logger.LogInformation("Project {ProjectId} already has a running process with PID {ProcessId} (state: {State})",
+                projectId, project.ProcessId, project.State);
+
+            // For Idle state with running process, just send a continue prompt
+            if (project.State == ProjectState.Idle)
             {
-                _logger.LogInformation("Project {ProjectId} is already running with PID {ProcessId}",
-                    projectId, project.ProcessId);
+                _logger.LogInformation("Project {ProjectId} is idle with running process, sending continue prompt", projectId);
+                await _processManager.SendInputAsync(project, "Continue");
+                project.State = ProjectState.Running;
+                project.UpdatedAt = DateTime.UtcNow;
+                await _statusUpdater.SaveStatusAsync(project);
+                await NotifyStatusChanged(project);
                 return;
             }
 
-            // Process died but state wasn't updated - fix state
+            // For Running/WaitingInput, nothing to do
+            return;
+        }
+
+        // Process is not running - check if state needs correction
+        if (project.State is ProjectState.Running or ProjectState.WaitingInput)
+        {
             _logger.LogWarning("Project {ProjectId} was marked as {State} but process is not running, resetting state",
                 projectId, project.State);
             project.State = ProjectState.Stopped;
