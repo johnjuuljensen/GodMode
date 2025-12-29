@@ -32,5 +32,4 @@ public class ProjectInfo
     public CancellationTokenSource? ProcessCancellation { get; set; }
     
     public HashSet<string> SubscribedConnections { get; } = new();
-    public FileSystemWatcher? OutputWatcher { get; set; }
 }

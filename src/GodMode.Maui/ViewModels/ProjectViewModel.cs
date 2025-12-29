@@ -238,8 +238,9 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
 
         try
         {
-            var outputOffset = Status?.OutputOffset ?? 0;
-            var observable = await _projectService.SubscribeOutputAsync(ProfileName, HostId, ProjectId, outputOffset);
+            // Always start from offset 0 to get full transcript on initial load
+            // The UI starts with empty OutputMessages collection, so no duplicates
+            var observable = await _projectService.SubscribeOutputAsync(ProfileName, HostId, ProjectId, fromOffset: 0);
 
             _outputSubscription = observable.Subscribe(
                 onNext: message =>

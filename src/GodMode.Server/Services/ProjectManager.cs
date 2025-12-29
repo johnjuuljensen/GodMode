@@ -132,9 +132,6 @@ public class ProjectManager : IProjectManager
         // Add to tracking
         _projects[projectId] = project;
 
-        // Setup file watcher for output.jsonl
-        SetupOutputWatcher(project);
-
         // Start Claude process
         project.ProcessCancellation = new CancellationTokenSource();
         try
@@ -368,9 +365,6 @@ public class ProjectManager : IProjectManager
 
                 _projects[project.Id] = project;
 
-                // Setup file watcher
-                SetupOutputWatcher(project);
-
                 // Update status to reflect recovery
                 await _statusUpdater.SaveStatusAsync(project);
 
@@ -383,115 +377,8 @@ public class ProjectManager : IProjectManager
         }
     }
 
-    private void SetupOutputWatcher(ProjectInfo project)
-    {
-        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
-
-        _logger.LogInformation("Setting up FileSystemWatcher for project {ProjectId} at {Path}",
-            project.Id, godModePath);
-
-        project.OutputWatcher?.Dispose();
-        project.OutputWatcher = new FileSystemWatcher(godModePath, "output.jsonl")
-        {
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size,
-            EnableRaisingEvents = true
-        };
-
-        project.OutputWatcher.Changed += async (sender, e) =>
-        {
-            _logger.LogInformation("FileSystemWatcher triggered for project {ProjectId}, ChangeType: {ChangeType}",
-                project.Id, e.ChangeType);
-            await OnOutputFileChangedAsync(project);
-        };
-
-        project.OutputWatcher.Error += (sender, e) =>
-        {
-            _logger.LogError(e.GetException(), "FileSystemWatcher error for project {ProjectId}", project.Id);
-        };
-
-        _logger.LogInformation("FileSystemWatcher setup complete for project {ProjectId}, EnableRaisingEvents: {Enabled}",
-            project.Id, project.OutputWatcher.EnableRaisingEvents);
-    }
-
-    private async Task OnOutputFileChangedAsync(ProjectInfo project)
-    {
-        try
-        {
-            var outputPath = Path.Combine(project.ProjectPath, ".godmode", "output.jsonl");
-
-            _logger.LogInformation("OnOutputFileChangedAsync called for project {ProjectId}, checking {Path}",
-                project.Id, outputPath);
-
-            if (!File.Exists(outputPath))
-            {
-                _logger.LogWarning("Output file does not exist for project {ProjectId}: {Path}",
-                    project.Id, outputPath);
-                return;
-            }
-
-            using var stream = new FileStream(outputPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            stream.Seek(project.OutputOffset, SeekOrigin.Begin);
-
-            _logger.LogInformation("Reading output from offset {Offset} for project {ProjectId}",
-                project.OutputOffset, project.Id);
-
-            using var reader = new StreamReader(stream);
-
-            string? line;
-            var lineCount = 0;
-            while ((line = await reader.ReadLineAsync()) != null)
-            {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-
-                lineCount++;
-                _logger.LogInformation("Processing output line {LineNum} for project {ProjectId}: {Line}",
-                    lineCount, project.Id, line.Length > 100 ? line[..100] + "..." : line);
-
-                try
-                {
-                    var eventType = ExtractEventType(line);
-                    _logger.LogInformation("Sending raw JSON to group 'project-{ProjectId}', Type: {Type}",
-                        project.Id, eventType);
-
-                    // Send raw JSON to subscribed clients
-                    await _hubContext.Clients.Group($"project-{project.Id}")
-                        .OutputReceived(project.Id, line);
-
-                    _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", project.Id);
-
-                    // Update status based on event
-                    if (eventType != null)
-                    {
-                        var outputEvent = ParseClaudeOutput(line);
-                        if (outputEvent != null)
-                        {
-                            await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
-                        }
-                    }
-                }
-                catch (JsonException ex)
-                {
-                    _logger.LogWarning(ex, "Failed to parse output line: {Line}", line);
-                }
-
-                project.OutputOffset = stream.Position;
-            }
-
-            _logger.LogInformation("Processed {LineCount} lines for project {ProjectId}, new offset: {Offset}",
-                lineCount, project.Id, project.OutputOffset);
-
-            // Save updated offset
-            await _statusUpdater.SaveStatusAsync(project);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error processing output file changes for project {ProjectId}", project.Id);
-        }
-    }
-
     /// <summary>
     /// Handles output received directly from the Claude process manager.
-    /// This bypasses the FileSystemWatcher for more reliable real-time updates.
     /// Sends raw JSON to clients for UI parsing/rendering.
     /// </summary>
     private async Task HandleOutputReceivedAsync(ProjectInfo project, string jsonLine)
