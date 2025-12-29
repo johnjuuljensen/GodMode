@@ -151,3 +151,29 @@ public class BoolToToggleTextColorConverter : IValueConverter
         throw new NotImplementedException();
     }
 }
+
+/// <summary>
+/// Converts content item type to accent colors.
+/// </summary>
+public class ContentTypeToColorConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        if (value is string type)
+        {
+            return type.ToLowerInvariant() switch
+            {
+                "text" => Color.FromArgb("#607D8B"),        // Blue-gray
+                "tool_use" => Color.FromArgb("#FF9800"),    // Orange
+                "tool_result" => Color.FromArgb("#795548"), // Brown
+                _ => Color.FromArgb("#757575")              // Gray
+            };
+        }
+        return Color.FromArgb("#757575");
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        throw new NotImplementedException();
+    }
+}

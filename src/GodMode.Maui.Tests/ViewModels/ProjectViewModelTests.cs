@@ -262,7 +262,7 @@ public class ProjectViewModelTests : TestBase
         vm.InputText.Should().BeEmpty(); // Input should be cleared
         vm.OutputMessages.Should().HaveCount(1);
         vm.OutputMessages[0].Type.Should().Be("user");
-        vm.OutputMessages[0].Properties.Should().Contain(p => p.Value.Contains("User response"));
+        vm.OutputMessages[0].ContentItems.Should().Contain(c => c.Type == "text" && c.Summary.Contains("User response"));
     }
 
     [Fact]

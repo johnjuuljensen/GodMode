@@ -54,9 +54,6 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string? _metricsHtml;
 
-    [ObservableProperty]
-    private bool _isSimpleMode = true;
-
     public ProjectViewModel(
         IProjectService projectService,
         INotificationService notificationService)
@@ -213,9 +210,9 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void ToggleViewMode()
+    private void ToggleMessageExpanded(ClaudeMessage message)
     {
-        IsSimpleMode = !IsSimpleMode;
+        message.IsExpanded = !message.IsExpanded;
     }
 
     [RelayCommand]

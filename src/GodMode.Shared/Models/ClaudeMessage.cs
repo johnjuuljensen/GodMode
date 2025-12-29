@@ -1,14 +1,37 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace GodMode.Shared.Models;
 
 /// <summary>
-/// Represents a raw Claude output message with light parsing for UI display.
-/// The raw JSON is preserved for full rendering in the UI.
+/// Represents a raw Claude output message with structured content parsing.
 /// </summary>
-public sealed class ClaudeMessage
+public sealed class ClaudeMessage : INotifyPropertyChanged
 {
-    private const int MaxStringLength = 300;
+    private const int MaxSummaryLength = 200;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+    /// <summary>
+    /// Whether this message is expanded to show full JSON.
+    /// </summary>
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set
+        {
+            if (_isExpanded != value)
+            {
+                _isExpanded = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+    private bool _isExpanded;
 
     /// <summary>
     /// The raw JSON string from Claude's stream-json output.
@@ -21,17 +44,17 @@ public sealed class ClaudeMessage
     public JsonDocument? Document { get; }
 
     /// <summary>
-    /// The message type extracted from the "type" field (system, user, assistant, result, error).
+    /// The message type (system, user, assistant, result, error).
     /// </summary>
     public string Type { get; }
 
     /// <summary>
-    /// The subtype extracted from the "subtype" field (e.g., tool_use, tool_result).
+    /// The subtype if present (e.g., "init" for system, "success" for result).
     /// </summary>
     public string? Subtype { get; }
 
     /// <summary>
-    /// Combined type and subtype for display (e.g., "assistant:tool_use").
+    /// Combined type and subtype for display.
     /// </summary>
     public string TypeDisplay => Subtype != null ? $"{Type}:{Subtype}" : Type;
 
@@ -41,23 +64,21 @@ public sealed class ClaudeMessage
     public bool IsUserMessage => Type == "user";
 
     /// <summary>
-    /// Simple content for display in simple mode.
-    /// Extracts result content or message.content of type text.
+    /// The simplified summary for this message.
     /// </summary>
-    public string? SimpleContent => _simpleContent ??= ExtractSimpleContent();
-    private string? _simpleContent;
+    public string Summary { get; }
 
     /// <summary>
-    /// Whether this message should be shown in simple mode.
-    /// Only result types and messages with text content are shown.
+    /// Nested content items extracted from message.content array.
+    /// Empty for types without nested content (system, result).
     /// </summary>
-    public bool ShowInSimpleMode => !string.IsNullOrEmpty(SimpleContent);
+    public IReadOnlyList<ClaudeContentItem> ContentItems => _contentItems ??= ExtractContentItems().ToList();
+    private IReadOnlyList<ClaudeContentItem>? _contentItems;
 
     /// <summary>
-    /// Gets all properties for UI binding. Caches the result.
+    /// Whether this message has nested content items.
     /// </summary>
-    public IReadOnlyList<ClaudeMessageProperty> Properties => _properties ??= GetProperties().ToList();
-    private IReadOnlyList<ClaudeMessageProperty>? _properties;
+    public bool HasContentItems => ContentItems.Count > 0;
 
     /// <summary>
     /// Creates a new ClaudeMessage from raw JSON.
@@ -75,140 +96,249 @@ public sealed class ClaudeMessage
             Subtype = Document.RootElement.TryGetProperty("subtype", out var subtypeElement)
                 ? subtypeElement.GetString()
                 : null;
+            Summary = ExtractSummary();
         }
         catch
         {
             Document = null;
             Type = "error";
             Subtype = null;
+            Summary = rawJson.Length > MaxSummaryLength ? rawJson[..MaxSummaryLength] + "..." : rawJson;
         }
     }
 
     /// <summary>
-    /// Extracts simple content from result or message.content text.
+    /// Extracts a simplified summary for the message based on its type.
     /// </summary>
-    private string? ExtractSimpleContent()
+    private string ExtractSummary()
     {
-        if (Document == null) return null;
+        if (Document == null) return "";
 
         var root = Document.RootElement;
 
-        // For "result" type, extract the result text
-        if (Type == "result" && root.TryGetProperty("result", out var resultElement))
+        return Type switch
         {
-            return resultElement.GetString();
+            "system" => ExtractSystemSummary(root),
+            "result" => ExtractResultSummary(root),
+            "user" or "assistant" => "", // These use ContentItems instead
+            _ => ""
+        };
+    }
+
+    private string ExtractSystemSummary(JsonElement root)
+    {
+        var parts = new List<string>();
+
+        if (Subtype != null)
+            parts.Add(Subtype);
+
+        if (root.TryGetProperty("session_id", out var sessionId))
+        {
+            var sid = sessionId.GetString() ?? "";
+            if (sid.Length > 8)
+                parts.Add($"session: {sid[..8]}...");
         }
 
-        // For user/assistant types, look for message.content with type=text
-        if ((Type == "user" || Type == "assistant") && root.TryGetProperty("message", out var messageElement))
-        {
-            if (messageElement.TryGetProperty("content", out var contentElement) &&
-                contentElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in contentElement.EnumerateArray())
-                {
-                    if (item.TryGetProperty("type", out var itemType) &&
-                        itemType.GetString() == "text" &&
-                        item.TryGetProperty("text", out var textElement))
-                    {
-                        return textElement.GetString();
-                    }
-                }
-            }
-        }
+        if (root.TryGetProperty("model", out var model))
+            parts.Add(model.GetString() ?? "");
 
-        return null;
+        return string.Join(" | ", parts);
+    }
+
+    private string ExtractResultSummary(JsonElement root)
+    {
+        if (root.TryGetProperty("result", out var result))
+        {
+            var text = result.GetString() ?? "";
+            return text.Length > MaxSummaryLength ? text[..MaxSummaryLength] + "..." : text;
+        }
+        return "";
     }
 
     /// <summary>
-    /// Gets the properties of the root object for rendering.
+    /// Extracts content items from message.content array.
     /// </summary>
-    public IEnumerable<ClaudeMessageProperty> GetProperties()
+    private IEnumerable<ClaudeContentItem> ExtractContentItems()
     {
-        if (Document == null)
-        {
-            yield return new ClaudeMessageProperty("raw", RawJson, 0);
-            yield break;
-        }
+        if (Document == null) yield break;
+        if (Type is not ("user" or "assistant")) yield break;
 
-        foreach (var property in Document.RootElement.EnumerateObject())
+        var root = Document.RootElement;
+        if (!root.TryGetProperty("message", out var message)) yield break;
+        if (!message.TryGetProperty("content", out var content)) yield break;
+        if (content.ValueKind != JsonValueKind.Array) yield break;
+
+        foreach (var item in content.EnumerateArray())
         {
-            foreach (var rendered in RenderProperty(property.Name, property.Value, 0))
-            {
-                yield return rendered;
-            }
+            var contentItem = ClaudeContentItem.FromJsonElement(item);
+            if (contentItem != null)
+                yield return contentItem;
         }
     }
 
-    private static IEnumerable<ClaudeMessageProperty> RenderProperty(string name, JsonElement element, int depth)
+    /// <summary>
+    /// Pretty-printed JSON for expanded view.
+    /// </summary>
+    public string FormattedJson => _formattedJson ??= FormatJson();
+    private string? _formattedJson;
+
+    private string FormatJson()
     {
-        switch (element.ValueKind)
+        if (Document == null) return RawJson;
+
+        try
         {
-            case JsonValueKind.String:
-                var str = element.GetString() ?? "";
-                var truncated = str.Length > MaxStringLength ? str[..MaxStringLength] + "..." : str;
-                yield return new ClaudeMessageProperty(name, truncated, depth);
-                break;
-
-            case JsonValueKind.Number:
-                yield return new ClaudeMessageProperty(name, element.GetRawText(), depth);
-                break;
-
-            case JsonValueKind.True:
-            case JsonValueKind.False:
-                yield return new ClaudeMessageProperty(name, element.GetBoolean().ToString().ToLower(), depth);
-                break;
-
-            case JsonValueKind.Null:
-                yield return new ClaudeMessageProperty(name, "null", depth);
-                break;
-
-            case JsonValueKind.Array:
-                yield return new ClaudeMessageProperty(name, $"[{element.GetArrayLength()} items]", depth, true);
-                var index = 0;
-                foreach (var item in element.EnumerateArray())
-                {
-                    foreach (var rendered in RenderProperty($"[{index}]", item, depth + 1))
-                    {
-                        yield return rendered;
-                    }
-                    index++;
-                }
-                break;
-
-            case JsonValueKind.Object:
-                yield return new ClaudeMessageProperty(name, "{...}", depth, true);
-                foreach (var prop in element.EnumerateObject())
-                {
-                    foreach (var rendered in RenderProperty(prop.Name, prop.Value, depth + 1))
-                    {
-                        yield return rendered;
-                    }
-                }
-                break;
+            return JsonSerializer.Serialize(Document, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return RawJson;
         }
     }
 }
 
 /// <summary>
-/// A single property from a ClaudeMessage for display.
+/// Represents a single content item within a message.content array.
 /// </summary>
-public record ClaudeMessageProperty(
-    string Name,
-    string Value,
-    int Depth,
-    bool IsContainer = false
-)
+public sealed class ClaudeContentItem : INotifyPropertyChanged
 {
-    /// <summary>
-    /// Indentation string based on depth.
-    /// </summary>
-    public string Indent => new(' ', Depth * 2);
+    private const int MaxSummaryLength = 300;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     /// <summary>
-    /// Formatted display string.
+    /// Whether this content item is expanded to show full JSON.
     /// </summary>
-    public string Display => IsContainer
-        ? $"{Indent}{Name}: {Value}"
-        : $"{Indent}{Name}: {Value}";
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set
+        {
+            if (_isExpanded != value)
+            {
+                _isExpanded = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+    private bool _isExpanded;
+
+    /// <summary>
+    /// The content type (text, tool_use, tool_result).
+    /// </summary>
+    public string Type { get; }
+
+    /// <summary>
+    /// Simplified summary of the content.
+    /// </summary>
+    public string Summary { get; }
+
+    /// <summary>
+    /// The raw JSON element for expanded view.
+    /// </summary>
+    public string RawJson { get; }
+
+    private ClaudeContentItem(string type, string summary, string rawJson)
+    {
+        Type = type;
+        Summary = summary;
+        RawJson = rawJson;
+    }
+
+    /// <summary>
+    /// Creates a ClaudeContentItem from a JSON element.
+    /// </summary>
+    public static ClaudeContentItem? FromJsonElement(JsonElement element)
+    {
+        if (!element.TryGetProperty("type", out var typeElement))
+            return null;
+
+        var type = typeElement.GetString() ?? "unknown";
+        var rawJson = element.GetRawText();
+        var summary = type switch
+        {
+            "text" => ExtractTextSummary(element),
+            "tool_use" => ExtractToolUseSummary(element),
+            "tool_result" => ExtractToolResultSummary(element),
+            _ => type
+        };
+
+        return new ClaudeContentItem(type, summary, rawJson);
+    }
+
+    private static string ExtractTextSummary(JsonElement element)
+    {
+        if (element.TryGetProperty("text", out var text))
+        {
+            var str = text.GetString() ?? "";
+            return str.Length > MaxSummaryLength ? str[..MaxSummaryLength] + "..." : str;
+        }
+        return "";
+    }
+
+    private static string ExtractToolUseSummary(JsonElement element)
+    {
+        var parts = new List<string>();
+
+        if (element.TryGetProperty("name", out var name))
+            parts.Add(name.GetString() ?? "");
+
+        // Try to get a description from input if available
+        if (element.TryGetProperty("input", out var input))
+        {
+            // For common tools, extract meaningful info
+            if (input.TryGetProperty("file_path", out var filePath))
+                parts.Add(filePath.GetString() ?? "");
+            else if (input.TryGetProperty("pattern", out var pattern))
+                parts.Add($"pattern: {pattern.GetString()}");
+            else if (input.TryGetProperty("command", out var command))
+            {
+                var cmd = command.GetString() ?? "";
+                if (cmd.Length > 50) cmd = cmd[..50] + "...";
+                parts.Add(cmd);
+            }
+            else if (input.TryGetProperty("query", out var query))
+            {
+                var q = query.GetString() ?? "";
+                if (q.Length > 50) q = q[..50] + "...";
+                parts.Add(q);
+            }
+        }
+
+        return string.Join(" → ", parts);
+    }
+
+    private static string ExtractToolResultSummary(JsonElement element)
+    {
+        if (element.TryGetProperty("content", out var content))
+        {
+            var str = content.GetString() ?? "";
+            // Take first line or first N chars
+            var firstLine = str.Split('\n')[0];
+            return firstLine.Length > MaxSummaryLength ? firstLine[..MaxSummaryLength] + "..." : firstLine;
+        }
+        return "";
+    }
+
+    /// <summary>
+    /// Pretty-printed JSON for expanded view.
+    /// </summary>
+    public string FormattedJson => _formattedJson ??= FormatJson();
+    private string? _formattedJson;
+
+    private string FormatJson()
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(RawJson);
+            return JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return RawJson;
+        }
+    }
 }

@@ -26,6 +26,7 @@
             <converters:SimpleModeMultiConverter x:Key="SimpleModeMultiConverter" />
             <converters:BoolToToggleColorConverter x:Key="BoolToToggleColorConverter" />
             <converters:BoolToToggleTextColorConverter x:Key="BoolToToggleTextColorConverter" />
+            <converters:ContentTypeToColorConverter x:Key="ContentTypeToColorConverter" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

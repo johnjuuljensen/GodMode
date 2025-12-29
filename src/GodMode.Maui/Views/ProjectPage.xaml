@@ -51,46 +51,6 @@
 
                 <!-- Action Buttons Row -->
                 <HorizontalStackLayout Grid.Column="3" Spacing="5">
-                    <!-- Simple/Advanced Toggle -->
-                    <Border Padding="2"
-                           StrokeThickness="1"
-                           Stroke="{AppThemeBinding Light=#CCCCCC, Dark=#555555}"
-                           HeightRequest="30">
-                        <Border.StrokeShape>
-                            <RoundRectangle CornerRadius="4" />
-                        </Border.StrokeShape>
-                        <Border.GestureRecognizers>
-                            <TapGestureRecognizer Command="{Binding ToggleViewModeCommand}" />
-                        </Border.GestureRecognizers>
-                        <Grid ColumnDefinitions="*,*">
-                            <Border Grid.Column="0"
-                                   Padding="6,2"
-                                   BackgroundColor="{Binding IsSimpleMode, Converter={StaticResource BoolToToggleColorConverter}, ConverterParameter=simple}"
-                                   StrokeThickness="0">
-                                <Border.StrokeShape>
-                                    <RoundRectangle CornerRadius="3" />
-                                </Border.StrokeShape>
-                                <Label Text="Simple"
-                                      FontSize="10"
-                                      VerticalOptions="Center"
-                                      HorizontalOptions="Center"
-                                      TextColor="{Binding IsSimpleMode, Converter={StaticResource BoolToToggleTextColorConverter}, ConverterParameter=simple}" />
-                            </Border>
-                            <Border Grid.Column="1"
-                                   Padding="6,2"
-                                   BackgroundColor="{Binding IsSimpleMode, Converter={StaticResource BoolToToggleColorConverter}, ConverterParameter=advanced}"
-                                   StrokeThickness="0">
-                                <Border.StrokeShape>
-                                    <RoundRectangle CornerRadius="3" />
-                                </Border.StrokeShape>
-                                <Label Text="Advanced"
-                                      FontSize="10"
-                                      VerticalOptions="Center"
-                                      HorizontalOptions="Center"
-                                      TextColor="{Binding IsSimpleMode, Converter={StaticResource BoolToToggleTextColorConverter}, ConverterParameter=advanced}" />
-                            </Border>
-                        </Grid>
-                    </Border>
                     <Button Text="Refresh"
                            Command="{Binding RefreshCommand}"
                            FontSize="11"
@@ -128,9 +88,9 @@
             <CollectionView.ItemTemplate>
                 <DataTemplate x:DataType="sharedmodels:ClaudeMessage">
                     <Grid>
-                        <Border Padding="10"
+                        <Border Padding="8"
                                MinimumWidthRequest="80"
-                               MaximumWidthRequest="800"
+                               MaximumWidthRequest="900"
                                HorizontalOptions="{Binding IsUserMessage, Converter={StaticResource IsUserToAlignmentConverter}}"
                                BackgroundColor="{AppThemeBinding Light=#FFFFFF, Dark=#1E1E1E}"
                                Stroke="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}"
@@ -138,49 +98,99 @@
                             <Border.StrokeShape>
                                 <RoundRectangle CornerRadius="8" />
                             </Border.StrokeShape>
-                            <VerticalStackLayout Spacing="2">
-                                <!-- Type header with subtype -->
-                                <Label Text="{Binding TypeDisplay}"
-                                      FontSize="10"
-                                      FontAttributes="Bold"
-                                      TextColor="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}" />
+                        <VerticalStackLayout Spacing="4">
+                            <!-- Header: Chevron + Type badge + Type Display -->
+                            <Grid ColumnDefinitions="Auto,Auto,*">
+                                <Grid.GestureRecognizers>
+                                    <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:ProjectViewModel}}, Path=ToggleMessageExpandedCommand}"
+                                                          CommandParameter="{Binding .}" />
+                                </Grid.GestureRecognizers>
 
-                                <!-- Simple mode: just the content (only when VM.IsSimpleMode AND message.ShowInSimpleMode) -->
-                                <Editor FontSize="12"
+                                <!-- Expand Chevron -->
+                                <Label Grid.Column="0"
+                                      Text="{Binding IsExpanded, Converter={StaticResource BoolToChevronConverter}}"
+                                      FontSize="12"
+                                      VerticalOptions="Center"
+                                      TextColor="{AppThemeBinding Light=#666666, Dark=#AAAAAA}"
+                                      Margin="0,0,6,0" />
+
+                                <!-- Type Badge -->
+                                <Border Grid.Column="1"
+                                       Padding="6,2"
+                                       BackgroundColor="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}"
+                                       StrokeThickness="0"
+                                       VerticalOptions="Center"
+                                       Margin="0,0,8,0">
+                                    <Border.StrokeShape>
+                                        <RoundRectangle CornerRadius="3" />
+                                    </Border.StrokeShape>
+                                    <Label Text="{Binding TypeDisplay}"
+                                          FontSize="10"
+                                          FontAttributes="Bold"
+                                          TextColor="White" />
+                                </Border>
+
+                                <!-- Summary text for non-content-item messages (system, result) -->
+                                <Label Grid.Column="2"
+                                      Text="{Binding Summary}"
+                                      FontSize="11"
+                                      TextColor="{AppThemeBinding Light=#333333, Dark=#CCCCCC}"
+                                      LineBreakMode="TailTruncation"
+                                      MaxLines="1"
+                                      VerticalOptions="Center"
+                                      IsVisible="{Binding HasContentItems, Converter={StaticResource InverseBoolConverter}}" />
+                            </Grid>
+
+                            <!-- Collapsed View: Content Items (for user/assistant messages) -->
+                            <VerticalStackLayout IsVisible="{Binding IsExpanded, Converter={StaticResource InverseBoolConverter}}"
+                                                Spacing="2"
+                                                Margin="20,4,0,0">
+                                <BindableLayout.ItemsSource>
+                                    <Binding Path="ContentItems" />
+                                </BindableLayout.ItemsSource>
+                                <BindableLayout.ItemTemplate>
+                                    <DataTemplate x:DataType="sharedmodels:ClaudeContentItem">
+                                        <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                                            <!-- Content Type Badge -->
+                                            <Border Grid.Column="0"
+                                                   Padding="4,1"
+                                                   BackgroundColor="{Binding Type, Converter={StaticResource ContentTypeToColorConverter}}"
+                                                   StrokeThickness="0"
+                                                   VerticalOptions="Start"
+                                                   Margin="0,0,6,0">
+                                                <Border.StrokeShape>
+                                                    <RoundRectangle CornerRadius="2" />
+                                                </Border.StrokeShape>
+                                                <Label Text="{Binding Type}"
+                                                      FontSize="9"
+                                                      TextColor="White" />
+                                            </Border>
+
+                                            <!-- Content Summary -->
+                                            <Label Grid.Column="1"
+                                                  Text="{Binding Summary}"
+                                                  FontSize="11"
+                                                  FontFamily="Consolas"
+                                                  TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
+                                                  LineBreakMode="TailTruncation"
+                                                  MaxLines="2" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </BindableLayout.ItemTemplate>
+                            </VerticalStackLayout>
+
+                            <!-- Expanded View: Formatted JSON -->
+                            <ScrollView IsVisible="{Binding IsExpanded}"
+                                       MaximumHeightRequest="400"
+                                       Margin="0,4,0,0">
+                                <Editor Text="{Binding FormattedJson, Mode=OneWay}"
+                                       FontSize="10"
                                        FontFamily="Consolas"
                                        TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
-                                       BackgroundColor="Transparent"
+                                       BackgroundColor="{AppThemeBinding Light=#F8F8F8, Dark=#0D0D0D}"
                                        IsReadOnly="True"
-                                       AutoSize="TextChanges"
-                                       Text="{Binding SimpleContent, Mode=OneWay}">
-                                    <Editor.IsVisible>
-                                        <MultiBinding Converter="{StaticResource SimpleModeMultiConverter}" ConverterParameter="simple">
-                                            <Binding Path="IsSimpleMode" Source="{RelativeSource AncestorType={x:Type viewmodels:ProjectViewModel}}" />
-                                            <Binding Path="ShowInSimpleMode" />
-                                        </MultiBinding>
-                                    </Editor.IsVisible>
-                                </Editor>
-
-                                <!-- Advanced mode: properties rendered when !VM.IsSimpleMode OR !message.ShowInSimpleMode -->
-                                <VerticalStackLayout BindableLayout.ItemsSource="{Binding Properties}">
-                                    <VerticalStackLayout.IsVisible>
-                                        <MultiBinding Converter="{StaticResource SimpleModeMultiConverter}" ConverterParameter="advanced">
-                                            <Binding Path="IsSimpleMode" Source="{RelativeSource AncestorType={x:Type viewmodels:ProjectViewModel}}" />
-                                            <Binding Path="ShowInSimpleMode" />
-                                        </MultiBinding>
-                                    </VerticalStackLayout.IsVisible>
-                                    <BindableLayout.ItemTemplate>
-                                        <DataTemplate x:DataType="sharedmodels:ClaudeMessageProperty">
-                                            <Editor FontSize="12"
-                                                   FontFamily="Consolas"
-                                                   TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
-                                                   BackgroundColor="Transparent"
-                                                   IsReadOnly="True"
-                                                   AutoSize="TextChanges"
-                                                   Text="{Binding Display, Mode=OneWay}" />
-                                        </DataTemplate>
-                                    </BindableLayout.ItemTemplate>
-                                </VerticalStackLayout>
+                                       AutoSize="TextChanges" />
+                            </ScrollView>
                             </VerticalStackLayout>
                         </Border>
                     </Grid>
