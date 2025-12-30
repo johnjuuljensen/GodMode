@@ -165,13 +165,13 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
     {
         if (ContentItems.Count == 0) return "";
 
-        // Build a simple text summary of all content items
-        var parts = ContentItems.Select(item => $"[{item.Type}] {item.Summary}");
-        var combined = string.Join("\n", parts);
+        // Build a summary of all content items
+        // Text items show full content without prefix, tool items get prefixed for clarity
+        var parts = ContentItems.Select(item => item.Type == "text"
+            ? item.Summary
+            : $"[{item.Type}] {item.Summary}");
 
-        // Truncate if too long
-        const int maxLength = 500;
-        return combined.Length > maxLength ? combined[..maxLength] + "..." : combined;
+        return string.Join("\n", parts);
     }
 
     private List<ClaudeContentItem> ExtractContentItems(JsonElement root)
@@ -282,8 +282,7 @@ public sealed class ClaudeContentItem : INotifyPropertyChanged
     {
         if (element.TryGetProperty("text", out var text))
         {
-            var str = text.GetString() ?? "";
-            return str.Length > MaxSummaryLength ? str[..MaxSummaryLength] + "..." : str;
+            return text.GetString() ?? "";
         }
         return "";
     }

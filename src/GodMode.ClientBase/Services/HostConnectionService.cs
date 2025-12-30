@@ -15,7 +15,6 @@ public class HostConnectionService : IHostConnectionService
     private readonly IProfileService _profileService;
     private readonly Dictionary<string, IHostProvider> _providers = new();
     private readonly Dictionary<string, IProjectConnection> _activeConnections = new();
-    private readonly Dictionary<string, DateTime> _lastConnectionAttempt = new();
 
     public HostConnectionService(IProfileService profileService)
     {
@@ -146,23 +145,12 @@ public class HostConnectionService : IHostConnectionService
         string connectionKey,
         int maxRetries = 3)
     {
-        // Check if we recently attempted to connect (throttle rapid retries)
-        if (_lastConnectionAttempt.TryGetValue(connectionKey, out var lastAttempt))
-        {
-            var timeSinceLastAttempt = DateTime.UtcNow - lastAttempt;
-            if (timeSinceLastAttempt < TimeSpan.FromSeconds(5))
-            {
-                await Task.Delay(TimeSpan.FromSeconds(5) - timeSinceLastAttempt);
-            }
-        }
-
         Exception? lastException = null;
 
         for (int i = 0; i < maxRetries; i++)
         {
             try
             {
-                _lastConnectionAttempt[connectionKey] = DateTime.UtcNow;
                 return await provider.ConnectAsync(hostId);
             }
             catch (Exception ex)
@@ -172,7 +160,8 @@ public class HostConnectionService : IHostConnectionService
 
                 if (i < maxRetries - 1)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, i))); // Exponential backoff
+                    // Exponential backoff: 1s, 2s between retries
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, i)));
                 }
             }
         }

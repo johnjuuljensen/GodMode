@@ -81,6 +81,7 @@
         <CollectionView Grid.Row="1"
                        x:Name="OutputCollectionView"
                        ItemsSource="{Binding OutputMessages}"
+                       ItemsUpdatingScrollMode="KeepLastItemInView"
                        Margin="5">
             <CollectionView.ItemsLayout>
                 <LinearItemsLayout Orientation="Vertical" ItemSpacing="5" />
@@ -147,8 +148,7 @@
                                   FontSize="11"
                                   FontFamily="Consolas"
                                   TextColor="{AppThemeBinding Light=#1E1E1E, Dark=#E0E0E0}"
-                                  LineBreakMode="TailTruncation"
-                                  MaxLines="4"
+                                  LineBreakMode="WordWrap"
                                   Margin="20,4,0,0" />
 
                             <!-- Expanded View: Formatted JSON -->

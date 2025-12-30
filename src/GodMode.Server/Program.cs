@@ -49,8 +49,21 @@ app.MapGet("/", () => new
 
 app.MapGet("/health", () => new { status = "healthy" });
 
-// Recover existing projects on startup
+// Recover existing projects AFTER server starts (non-blocking)
 var projectManager = app.Services.GetRequiredService<IProjectManager>();
-await projectManager.RecoverProjectsAsync();
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            await projectManager.RecoverProjectsAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error recovering projects: {ex.Message}");
+        }
+    });
+});
 
 app.Run();

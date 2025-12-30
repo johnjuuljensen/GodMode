@@ -1,30 +1,47 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.ComponentModel;
 
 namespace GodMode.Maui.Collections;
 
 /// <summary>
 /// ObservableCollection with AddRange support for bulk operations.
-/// Raises a single Reset notification instead of one per item.
+/// Uses individual Add for small batches (smooth UI) and Reset for large batches (performance).
 /// </summary>
 public class ObservableRangeCollection<T> : ObservableCollection<T>
 {
+    // Threshold for switching between individual Add and bulk Reset
+    private const int BulkThreshold = 5;
+
     /// <summary>
-    /// Adds a range of items and raises a single collection changed notification.
+    /// Adds a range of items intelligently:
+    /// - Small batches (≤5): individual Add notifications for smooth UI
+    /// - Large batches (>5): single Reset notification for performance
     /// </summary>
     public void AddRange(IEnumerable<T> items)
     {
         var itemList = items as IList<T> ?? items.ToList();
         if (itemList.Count == 0) return;
 
-        CheckReentrancy();
-
-        foreach (var item in itemList)
+        if (itemList.Count <= BulkThreshold)
         {
-            Items.Add(item);
+            // Small batch - individual adds are smooth
+            foreach (var item in itemList)
+            {
+                Add(item);
+            }
         }
-
-        OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        else
+        {
+            // Large batch - use Reset to avoid UI thrashing
+            CheckReentrancy();
+            foreach (var item in itemList)
+            {
+                Items.Add(item);
+            }
+            OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
+            OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
+        }
     }
 
     /// <summary>
@@ -40,6 +57,7 @@ public class ObservableRangeCollection<T> : ObservableCollection<T>
             Items.Add(item);
         }
 
+        OnPropertyChanged(new PropertyChangedEventArgs(nameof(Count)));
         OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Reset));
     }
 }

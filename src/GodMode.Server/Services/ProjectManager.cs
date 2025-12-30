@@ -315,11 +315,16 @@ public class ProjectManager : IProjectManager
         await Task.CompletedTask;
     }
 
+    private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
+
     public async Task RecoverProjectsAsync()
     {
         _logger.LogInformation("Recovering projects from all project roots");
 
-        foreach (var projectPath in _projectFiles.ListProjectPaths())
+        var projectPaths = _projectFiles.ListProjectPaths().ToList();
+
+        // Process all projects in parallel for faster startup
+        await Parallel.ForEachAsync(projectPaths, async (projectPath, ct) =>
         {
             try
             {
@@ -327,16 +332,16 @@ public class ProjectManager : IProjectManager
                 var statusPath = Path.Combine(godModePath, "status.json");
                 if (!File.Exists(statusPath))
                 {
-                    continue;
+                    return;
                 }
 
-                var json = await File.ReadAllTextAsync(statusPath);
-                var status = JsonSerializer.Deserialize<ProjectStatus>(json, new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true
-                });
+                var json = await File.ReadAllTextAsync(statusPath, ct);
+                var status = JsonSerializer.Deserialize<ProjectStatus>(json, CaseInsensitiveOptions);
 
-                if (status == null) continue;
+                if (status == null) return;
+
+                // Check if state needs to be corrected (was running when server stopped)
+                var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput;
 
                 var project = new ProjectInfo
                 {
@@ -344,11 +349,9 @@ public class ProjectManager : IProjectManager
                     Name = status.Name,
                     ProjectPath = projectPath,
                     RepoUrl = status.RepoUrl,
-                    State = status.State == ProjectState.Running || status.State == ProjectState.WaitingInput
-                        ? ProjectState.Stopped
-                        : status.State,
+                    State = stateChanged ? ProjectState.Stopped : status.State,
                     CreatedAt = status.CreatedAt,
-                    UpdatedAt = DateTime.UtcNow,
+                    UpdatedAt = stateChanged ? DateTime.UtcNow : status.UpdatedAt,
                     CurrentQuestion = status.CurrentQuestion,
                     Metrics = status.Metrics,
                     Git = status.Git,
@@ -360,13 +363,16 @@ public class ProjectManager : IProjectManager
                 var sessionIdPath = Path.Combine(godModePath, "session-id");
                 if (File.Exists(sessionIdPath))
                 {
-                    project.SessionId = await File.ReadAllTextAsync(sessionIdPath);
+                    project.SessionId = await File.ReadAllTextAsync(sessionIdPath, ct);
                 }
 
                 _projects[project.Id] = project;
 
-                // Update status to reflect recovery
-                await _statusUpdater.SaveStatusAsync(project);
+                // Only save if state changed
+                if (stateChanged)
+                {
+                    await _statusUpdater.SaveStatusAsync(project);
+                }
 
                 _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Id, project.Name);
             }
@@ -374,7 +380,7 @@ public class ProjectManager : IProjectManager
             {
                 _logger.LogError(ex, "Failed to recover project from {Path}", projectPath);
             }
-        }
+        });
     }
 
     /// <summary>

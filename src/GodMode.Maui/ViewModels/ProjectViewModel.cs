@@ -239,8 +239,9 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
 
         try
         {
-            // Always start from offset 0 to get full transcript on initial load
-            // The UI starts with empty OutputMessages collection, so no duplicates
+            // Clear existing messages and start fresh from offset 0
+            OutputMessages.Clear();
+
             var observable = await _projectService.SubscribeOutputAsync(ProfileName, HostId, ProjectId, fromOffset: 0);
 
             // Buffer messages to avoid UI thrashing during bulk loads

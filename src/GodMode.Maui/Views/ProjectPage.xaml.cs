@@ -5,44 +5,53 @@ namespace GodMode.Maui.Views;
 
 public partial class ProjectPage : ContentPage
 {
-    private CancellationTokenSource? _scrollDebounce;
+    private bool _isInitialLoad = true;
+    private int _lastKnownCount;
 
     public ProjectPage(ProjectViewModel viewModel)
     {
         InitializeComponent();
         BindingContext = viewModel;
 
-        // Subscribe to collection changes to auto-scroll to bottom
         viewModel.OutputMessages.CollectionChanged += OnOutputMessagesChanged;
     }
 
     private void OnOutputMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action == NotifyCollectionChangedAction.Add && BindingContext is ProjectViewModel vm)
+        if (BindingContext is not ProjectViewModel vm) return;
+
+        var currentCount = vm.OutputMessages.Count;
+
+        switch (e.Action)
         {
-            // Debounce scroll - cancel previous pending scroll and schedule a new one
-            _scrollDebounce?.Cancel();
-            _scrollDebounce = new CancellationTokenSource();
-            var token = _scrollDebounce.Token;
+            case NotifyCollectionChangedAction.Reset when currentCount == 0:
+                // Collection was cleared - next batch is initial load
+                _isInitialLoad = true;
+                break;
 
-            MainThread.BeginInvokeOnMainThread(async () =>
-            {
-                try
-                {
-                    // Wait for more messages to arrive before scrolling
-                    await Task.Delay(100, token);
+            case NotifyCollectionChangedAction.Reset when _isInitialLoad && currentCount > 0:
+            case NotifyCollectionChangedAction.Add when _isInitialLoad:
+                // First batch after clear - scroll to bottom once
+                _isInitialLoad = false;
+                ScrollToBottomAsync(vm);
+                break;
 
-                    if (!token.IsCancellationRequested && vm.OutputMessages.Count > 0)
-                    {
-                        OutputCollectionView.ScrollTo(vm.OutputMessages.Count - 1, position: ScrollToPosition.End, animate: false);
-                    }
-                }
-                catch (TaskCanceledException)
-                {
-                    // Expected when debouncing - a new scroll was scheduled
-                }
-            });
+            // Subsequent adds/resets: ItemsUpdatingScrollMode handles scroll
         }
+
+        _lastKnownCount = currentCount;
+    }
+
+    private void ScrollToBottomAsync(ProjectViewModel vm)
+    {
+        MainThread.BeginInvokeOnMainThread(async () =>
+        {
+            await Task.Delay(50); // Let render complete
+            if (vm.OutputMessages.Count > 0)
+            {
+                OutputCollectionView.ScrollTo(vm.OutputMessages.Count - 1, position: ScrollToPosition.End, animate: false);
+            }
+        });
     }
 
     protected override async void OnAppearing()
@@ -58,9 +67,6 @@ public partial class ProjectPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
-
-        _scrollDebounce?.Cancel();
-        _scrollDebounce?.Dispose();
 
         if (BindingContext is ProjectViewModel viewModel)
         {
