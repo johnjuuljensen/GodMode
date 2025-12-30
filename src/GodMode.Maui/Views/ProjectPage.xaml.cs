@@ -6,6 +6,7 @@ namespace GodMode.Maui.Views;
 public partial class ProjectPage : ContentPage
 {
     private bool _isInitialLoad = true;
+    private bool _isAtBottom = true;
 
     public ProjectPage(ProjectViewModel viewModel)
     {
@@ -13,33 +14,45 @@ public partial class ProjectPage : ContentPage
         BindingContext = viewModel;
 
         viewModel.OutputMessages.CollectionChanged += OnOutputMessagesChanged;
+        OutputScrollView.Scrolled += OnScrolled;
+    }
+
+    private void OnScrolled(object? sender, ScrolledEventArgs e)
+    {
+        // Check if user is at or near bottom (within 50 pixels)
+        var scrollView = OutputScrollView;
+        var distanceFromBottom = scrollView.ContentSize.Height - scrollView.ScrollY - scrollView.Height;
+        _isAtBottom = distanceFromBottom < 50;
     }
 
     private void OnOutputMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (BindingContext is not ProjectViewModel vm) return;
 
-        switch (e.Action)
+        if (e.Action == NotifyCollectionChangedAction.Reset)
         {
-            case NotifyCollectionChangedAction.Reset:
-                // Collection was cleared - next add is initial load
-                _isInitialLoad = true;
-                break;
+            _isInitialLoad = true;
+            _isAtBottom = true;
+            return;
+        }
 
-            case NotifyCollectionChangedAction.Add when _isInitialLoad:
-                // First message after clear - scroll to bottom once
-                _isInitialLoad = false;
+        if (e.Action == NotifyCollectionChangedAction.Add)
+        {
+            // Auto-scroll if at bottom or during initial load
+            if (_isAtBottom || _isInitialLoad)
+            {
+                if (_isInitialLoad && vm.OutputMessages.Count > 5)
+                {
+                    _isInitialLoad = false;
+                }
+
                 MainThread.BeginInvokeOnMainThread(async () =>
                 {
-                    await Task.Delay(50);
-                    if (vm.OutputMessages.Count > 0)
-                    {
-                        OutputCollectionView.ScrollTo(vm.OutputMessages.Count - 1, position: ScrollToPosition.End, animate: false);
-                    }
+                    await Task.Delay(50); // Let layout complete
+                    await OutputScrollView.ScrollToAsync(0, double.MaxValue, false);
                 });
-                break;
+            }
         }
-        // ItemsUpdatingScrollMode="KeepLastItemInView" handles subsequent adds
     }
 
     protected override async void OnAppearing()
@@ -55,6 +68,8 @@ public partial class ProjectPage : ContentPage
     protected override void OnDisappearing()
     {
         base.OnDisappearing();
+
+        OutputScrollView.Scrolled -= OnScrolled;
 
         if (BindingContext is ProjectViewModel viewModel)
         {
