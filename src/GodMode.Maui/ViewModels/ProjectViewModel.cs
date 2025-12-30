@@ -3,7 +3,6 @@ using CommunityToolkit.Mvvm.Input;
 using GodMode.Maui.Collections;
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
-using System.Reactive.Linq;
 
 namespace GodMode.Maui.ViewModels;
 
@@ -244,17 +243,13 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
 
             var observable = await _projectService.SubscribeOutputAsync(ProfileName, HostId, ProjectId, fromOffset: 0);
 
-            // Buffer messages to avoid UI thrashing during bulk loads
-            // Collect messages for 100ms, then add them all at once
             _outputSubscription = observable
-                .Buffer(TimeSpan.FromMilliseconds(100))
-                .Where(batch => batch.Count > 0)
                 .Subscribe(
-                    onNext: batch =>
+                    onNext: message =>
                     {
                         MainThread.BeginInvokeOnMainThread(() =>
                         {
-                            OutputMessages.AddRange(batch);
+                            OutputMessages.Add(message);
                         });
                     },
                     onError: error =>

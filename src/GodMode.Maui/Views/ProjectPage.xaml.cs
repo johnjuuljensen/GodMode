@@ -6,7 +6,6 @@ namespace GodMode.Maui.Views;
 public partial class ProjectPage : ContentPage
 {
     private bool _isInitialLoad = true;
-    private int _lastKnownCount;
 
     public ProjectPage(ProjectViewModel viewModel)
     {
@@ -20,38 +19,27 @@ public partial class ProjectPage : ContentPage
     {
         if (BindingContext is not ProjectViewModel vm) return;
 
-        var currentCount = vm.OutputMessages.Count;
-
         switch (e.Action)
         {
-            case NotifyCollectionChangedAction.Reset when currentCount == 0:
-                // Collection was cleared - next batch is initial load
+            case NotifyCollectionChangedAction.Reset:
+                // Collection was cleared - next add is initial load
                 _isInitialLoad = true;
                 break;
 
-            case NotifyCollectionChangedAction.Reset when _isInitialLoad && currentCount > 0:
             case NotifyCollectionChangedAction.Add when _isInitialLoad:
-                // First batch after clear - scroll to bottom once
+                // First message after clear - scroll to bottom once
                 _isInitialLoad = false;
-                ScrollToBottomAsync(vm);
+                MainThread.BeginInvokeOnMainThread(async () =>
+                {
+                    await Task.Delay(50);
+                    if (vm.OutputMessages.Count > 0)
+                    {
+                        OutputCollectionView.ScrollTo(vm.OutputMessages.Count - 1, position: ScrollToPosition.End, animate: false);
+                    }
+                });
                 break;
-
-            // Subsequent adds/resets: ItemsUpdatingScrollMode handles scroll
         }
-
-        _lastKnownCount = currentCount;
-    }
-
-    private void ScrollToBottomAsync(ProjectViewModel vm)
-    {
-        MainThread.BeginInvokeOnMainThread(async () =>
-        {
-            await Task.Delay(50); // Let render complete
-            if (vm.OutputMessages.Count > 0)
-            {
-                OutputCollectionView.ScrollTo(vm.OutputMessages.Count - 1, position: ScrollToPosition.End, animate: false);
-            }
-        });
+        // ItemsUpdatingScrollMode="KeepLastItemInView" handles subsequent adds
     }
 
     protected override async void OnAppearing()
