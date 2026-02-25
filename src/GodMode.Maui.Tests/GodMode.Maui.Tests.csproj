@@ -35,5 +35,8 @@
     <Compile Include="..\GodMode.Maui\ViewModels\*.cs" Link="ViewModels\%(Filename)%(Extension)" />
     <Compile Include="..\GodMode.Maui\Collections\*.cs" Link="Collections\%(Filename)%(Extension)" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="..\GodMode.Maui\Collections\ObservableRangeCollection.cs" />
+  </ItemGroup>
 
 </Project>

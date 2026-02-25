@@ -468,6 +468,20 @@ User runs server manually or via system service. Projects folder is configurable
 - Integration with GitHub Issues (link projects to issues)
 - Cost tracking and budgets
 - Scheduled tasks (run Claude at specific times)
+- Drop MAUI in favor of os local uis. MAUI is annyoing and slow
+
+Maybe use SSH.Net:
+```
+client.Connect();
+
+// Get a raw stream to remote-target:443 through the SSH connection
+var stream = client.CreateShellStream(...); // or use:
+// SshClient doesn't expose this directly, but you can use:
+
+using var portForward = new ForwardedPortLocal(IPAddress.Loopback.ToString(), 0, "target", 443);
+// Port 0 = ephemeral port assignment
+```
+Or possibly: https://learn.microsoft.com/en-us/dotnet/api/system.net.security.sslstream?view=net-10.0
 
 ---
 
@@ -482,3 +496,5 @@ User runs server manually or via system service. Projects folder is configurable
 7. **Integration** - Dev container setup, end-to-end flow
 8. **Polish** - Notifications, reconnection, metrics visualization
 9. **Android** - Platform-specific adaptations, background service
+
+

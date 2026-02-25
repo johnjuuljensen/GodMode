@@ -1,8 +1,8 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using GodMode.Maui.Collections;
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
+using System.Collections.ObjectModel;
 
 namespace GodMode.Maui.ViewModels;
 
@@ -31,7 +31,7 @@ public partial class ProjectViewModel : ObservableObject, IDisposable
     private ProjectStatus? _status;
 
     [ObservableProperty]
-    private ObservableRangeCollection<ClaudeMessage> _outputMessages = new();
+    private ObservableCollection<ClaudeMessage> _outputMessages = new();
 
     [ObservableProperty]
     private string _inputText = string.Empty;
