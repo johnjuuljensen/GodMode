@@ -117,3 +117,9 @@ Tests use linked source files from MAUI project to avoid MAUI assembly dependenc
 - `TestBase.cs` provides pre-configured NSubstitute mocks for all services
 - `FormFieldTemplateSelector.cs` is excluded from test project (MAUI-only types)
 - Shell navigation throws `NullReferenceException` in tests (expected)
+
+## GodMode Workflow
+
+When doing work initiated by GodMode, indicated by the presence of a `.godmode` folder:
+- Commit and push at regular/relevant intervals.
+- Create a PR when work is completed.

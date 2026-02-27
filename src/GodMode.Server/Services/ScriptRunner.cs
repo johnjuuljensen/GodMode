@@ -31,82 +31,130 @@ public class ScriptRunner : IScriptRunner
         string workingDirectory,
         Dictionary<string, string> environment,
         Func<string, Task> onProgress,
+        string? logFilePath = null,
         CancellationToken cancellationToken = default)
     {
-        foreach (var script in scripts)
+        StreamWriter? logWriter = null;
+        if (logFilePath != null)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            var logDir = Path.GetDirectoryName(logFilePath);
+            if (logDir != null)
+                Directory.CreateDirectory(logDir);
+            logWriter = new StreamWriter(logFilePath, append: true, Encoding.UTF8) { AutoFlush = true };
+        }
 
-            var scriptPath = ResolveScriptPath(script, rootPath);
-
-            _logger.LogInformation("Running script: {Script}", scriptPath);
-            await onProgress($"Running: {Path.GetFileName(scriptPath)}");
-
-            var (fileName, args) = GetShellCommand(scriptPath);
-
-            var startInfo = new ProcessStartInfo
+        try
+        {
+            foreach (var script in scripts)
             {
-                FileName = fileName,
-                Arguments = args,
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            };
-
-            foreach (var (key, value) in environment)
-            {
-                startInfo.Environment[key] = value;
+                cancellationToken.ThrowIfCancellationRequested();
+                await RunScriptAsync(script, rootPath, workingDirectory, environment, onProgress, logWriter, cancellationToken);
             }
+        }
+        finally
+        {
+            if (logWriter != null)
+                await logWriter.DisposeAsync();
+        }
+    }
 
-            using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            var exitTcs = new TaskCompletionSource<int>();
+    private async Task RunScriptAsync(
+        string script,
+        string rootPath,
+        string workingDirectory,
+        Dictionary<string, string> environment,
+        Func<string, Task> onProgress,
+        StreamWriter? logWriter,
+        CancellationToken cancellationToken)
+    {
+        var scriptPath = ResolveScriptPath(script, rootPath);
 
-            process.Exited += (_, _) => exitTcs.TrySetResult(process.ExitCode);
+        _logger.LogInformation("Running script: {Script}", scriptPath);
+        await onProgress($"Running: {Path.GetFileName(scriptPath)}");
+        await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] === Running: {scriptPath} ===");
+        await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Working directory: {workingDirectory}");
 
-            process.OutputDataReceived += async (_, e) =>
+        var (fileName, args) = GetShellCommand(scriptPath);
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = args,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        foreach (var (key, value) in environment)
+        {
+            startInfo.Environment[key] = value;
+        }
+
+        using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        var exitTcs = new TaskCompletionSource<int>();
+
+        process.Exited += (_, _) => exitTcs.TrySetResult(process.ExitCode);
+
+        process.OutputDataReceived += async (_, e) =>
+        {
+            if (e.Data != null)
             {
-                if (e.Data != null)
-                {
-                    try { await onProgress(e.Data); }
-                    catch { /* swallow callback errors */ }
-                }
-            };
-
-            var stderrLines = new List<string>();
-            process.ErrorDataReceived += (_, e) =>
-            {
-                if (e.Data != null)
-                    stderrLines.Add(e.Data);
-            };
-
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            using var reg = cancellationToken.Register(() =>
-            {
-                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-                catch { /* best effort */ }
-            });
-
-            var exitCode = await exitTcs.Task;
-
-            if (exitCode != 0)
-            {
-                var stderr = string.Join(Environment.NewLine, stderrLines);
-                var message = $"Script '{script}' exited with code {exitCode}";
-                if (!string.IsNullOrEmpty(stderr))
-                    message += $": {stderr}";
-
-                _logger.LogError("{Message}", message);
-                throw new InvalidOperationException(message);
+                await LogLineAsync(logWriter, $"[stdout] {e.Data}");
+                try { await onProgress(e.Data); }
+                catch { /* swallow callback errors */ }
             }
+        };
 
-            _logger.LogInformation("Script completed: {Script}", scriptPath);
+        var stderrLines = new List<string>();
+        process.ErrorDataReceived += async (_, e) =>
+        {
+            if (e.Data != null)
+            {
+                stderrLines.Add(e.Data);
+                await LogLineAsync(logWriter, $"[stderr] {e.Data}");
+            }
+        };
+
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        using var reg = cancellationToken.Register(() =>
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch { /* best effort */ }
+        });
+
+        var exitCode = await exitTcs.Task;
+
+        await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Exit code: {exitCode}");
+
+        if (exitCode != 0)
+        {
+            var stderr = string.Join(Environment.NewLine, stderrLines);
+            var message = $"Script '{script}' exited with code {exitCode}";
+            if (!string.IsNullOrEmpty(stderr))
+                message += $": {stderr}";
+
+            _logger.LogError("{Message}", message);
+            await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] FAILED: {message}");
+            throw new InvalidOperationException(message);
+        }
+
+        _logger.LogInformation("Script completed: {Script}", scriptPath);
+        await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Completed: {scriptPath}");
+    }
+
+    private static async Task LogLineAsync(StreamWriter? writer, string line)
+    {
+        if (writer != null)
+        {
+            try { await writer.WriteLineAsync(line); }
+            catch { /* best effort — don't fail scripts over log I/O */ }
         }
     }
 

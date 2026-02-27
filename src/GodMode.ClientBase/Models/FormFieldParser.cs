@@ -114,6 +114,20 @@ public static class FormFieldParser
         ];
     }
 
+    /// <summary>
+    /// Copies user-entered values from old fields to new fields that share the same key.
+    /// Only preserves non-empty values so new defaults are used for untouched fields.
+    /// </summary>
+    public static void PreserveUserValues(IEnumerable<FormField> oldFields, IList<FormField> newFields)
+    {
+        var oldValues = oldFields.ToDictionary(f => f.Key, f => f.Value);
+        foreach (var field in newFields)
+        {
+            if (oldValues.TryGetValue(field.Key, out var oldValue) && !string.IsNullOrEmpty(oldValue))
+                field.Value = oldValue;
+        }
+    }
+
     private static string? GetStringProp(JsonElement element, string name)
     {
         if (element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String)

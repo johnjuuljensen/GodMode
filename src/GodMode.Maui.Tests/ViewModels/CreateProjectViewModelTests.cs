@@ -96,6 +96,54 @@ public class CreateProjectViewModelTests : TestBase
     }
 
     [Fact]
+    public void SwitchingProjectRoot_ShouldPreserveUserEnteredValues()
+    {
+        // Arrange
+        var vm = CreateViewModel();
+        vm.SelectedProjectRoot = CreateDefaultRoot(); // default fields: name + prompt
+        vm.FormFields[0].Value = "MyProject";
+        vm.FormFields[1].Value = "Do the thing";
+
+        // Act - switch to a different root that also has default fields
+        vm.SelectedProjectRoot = CreateDefaultRoot("other");
+
+        // Assert - user-entered values should be preserved
+        vm.FormFields.Should().HaveCount(2);
+        vm.FormFields[0].Value.Should().Be("MyProject");
+        vm.FormFields[1].Value.Should().Be("Do the thing");
+    }
+
+    [Fact]
+    public void SwitchingProjectRoot_ShouldNotPreserveEmptyValues()
+    {
+        // Arrange - start with default fields, enter only one value
+        var vm = CreateViewModel();
+        vm.SelectedProjectRoot = CreateDefaultRoot();
+        vm.FormFields[0].Value = "MyProject";
+        // FormFields[1] (prompt) left empty
+
+        // Switch to a root with a default value for prompt
+        var schemaJson = """
+        {
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "title": "Project Name" },
+                "prompt": { "type": "string", "title": "Prompt", "default": "Default prompt" }
+            },
+            "required": ["name"]
+        }
+        """;
+        var schema = JsonSerializer.Deserialize<JsonElement>(schemaJson);
+
+        // Act
+        vm.SelectedProjectRoot = CreateDefaultRoot("other", schema);
+
+        // Assert - name preserved, prompt gets new default since it was empty
+        vm.FormFields[0].Value.Should().Be("MyProject");
+        vm.FormFields[1].Value.Should().Be("Default prompt");
+    }
+
+    [Fact]
     public void SelectingProjectRoot_WithNull_ShouldClearFields()
     {
         // Arrange
