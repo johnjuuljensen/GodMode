@@ -5,15 +5,19 @@
     <File Path="src/Directory.Build.props" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/GodMode.Avalonia/GodMode.Avalonia.csproj" />
     <Project Path="src/GodMode.ClientBase/GodMode.ClientBase.csproj" />
     <Project Path="src/GodMode.Maui/GodMode.Maui.csproj" />
     <Project Path="src/GodMode.Mcp/GodMode.Mcp.csproj" />
     <Project Path="src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj" />
     <Project Path="src/GodMode.Server/GodMode.Server.csproj" />
     <Project Path="src/GodMode.Shared/GodMode.Shared.csproj" />
-    <Project Path="src/GodMode.Avalonia/GodMode.Avalonia.csproj" />
-    <Project Path="src/GodMode.Voice/GodMode.Voice.csproj" />
-    <Project Path="src/GodMode.Voice.Windows/GodMode.Voice.Windows.csproj" />
+    <Project Path="src/GodMode.Voice.Windows/GodMode.Voice.Windows.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
+    <Project Path="src/GodMode.Voice/GodMode.Voice.csproj">
+      <Build Solution="Debug|*" Project="false" />
+    </Project>
   </Folder>
   <Folder Name="/tests/">
     <Project Path="src/GodMode.Maui.Tests/GodMode.Maui.Tests.csproj" />
