@@ -2,167 +2,240 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:GodMode.Avalonia.ViewModels"
              xmlns:models="using:GodMode.Shared.Models"
+             xmlns:controls="using:GodMode.Avalonia.Controls"
              x:Class="GodMode.Avalonia.Views.ProjectView"
              x:DataType="vm:ProjectViewModel">
 
-    <Grid RowDefinitions="Auto,*,Auto" Margin="16">
+    <Grid RowDefinitions="44,*,Auto,Auto">
 
-        <!-- Header Bar -->
-        <Border Grid.Row="0" Padding="12" Margin="0,0,0,8"
-                Background="{StaticResource CardBrush}"
-                CornerRadius="{StaticResource CornerMedium}">
+        <!-- Project Header -->
+        <Border Grid.Row="0"
+                Padding="16,0"
+                Background="{DynamicResource BgSidebarBrush}"
+                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="Auto,Auto,*,Auto">
 
-                <!-- State Badge -->
-                <Border Grid.Column="0"
-                        Padding="10,5"
-                        Background="{Binding Status.State, Converter={StaticResource StateToColorConverter}}"
-                        CornerRadius="{StaticResource CornerSmall}">
-                    <TextBlock Text="{Binding Status.State}"
-                               FontSize="{StaticResource FontSizeSmall}" FontWeight="SemiBold"
-                               Foreground="{StaticResource TextOnAccentBrush}" />
-                </Border>
+                <TextBlock Grid.Column="0"
+                           Text="{Binding Status.Name, FallbackValue='Project'}"
+                           FontSize="14" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TextPrimaryBrush}"
+                           VerticalAlignment="Center" />
 
-                <!-- Quick Stats -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="16"
-                            Margin="16,0,0,0" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Spacing="2">
-                        <TextBlock Text="$" FontSize="{StaticResource FontSizeCaption}"
-                                   Foreground="{StaticResource TextMutedBrush}" />
-                        <TextBlock Text="{Binding Status.Metrics.CostEstimate, StringFormat='{}{0:F2}'}"
-                                   FontSize="{StaticResource FontSizeCaption}"
-                                   Foreground="{StaticResource TextMutedBrush}" FontWeight="SemiBold" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Spacing="2">
-                        <TextBlock Text="{Binding Status.Metrics.InputTokens}"
-                                   FontSize="{StaticResource FontSizeCaption}"
-                                   Foreground="{StaticResource TextMutedBrush}" />
-                        <TextBlock Text="/"
-                                   FontSize="{StaticResource FontSizeCaption}"
-                                   Foreground="{StaticResource TextSubtleBrush}" />
-                        <TextBlock Text="{Binding Status.Metrics.OutputTokens}"
-                                   FontSize="{StaticResource FontSizeCaption}"
-                                   Foreground="{StaticResource TextMutedBrush}" />
-                        <TextBlock Text=" tok"
-                                   FontSize="{StaticResource FontSizeCaption}"
-                                   Foreground="{StaticResource TextSubtleBrush}" />
-                    </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6"
+                            Margin="12,0,0,0" VerticalAlignment="Center">
+                    <Ellipse Width="6" Height="6"
+                             Fill="{Binding Status.State, Converter={StaticResource StateToColorConverter}}" />
+                    <TextBlock Text="{Binding Status.State}"
+                               FontSize="11"
+                               Foreground="{Binding Status.State, Converter={StaticResource StateToColorConverter}}" />
                 </StackPanel>
 
-                <!-- Action Buttons -->
-                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4">
-                    <Button Content="Back"
-                            Command="{Binding GoBackCommand}"
-                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
-                    <Button Content="Refresh"
-                            Command="{Binding RefreshCommand}"
-                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
-                    <Button Content="Resume"
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8"
+                            Margin="16,0,0,0" VerticalAlignment="Center">
+                    <Border Padding="6,2" CornerRadius="4"
+                            Background="{DynamicResource BgSurfaceBrush}">
+                        <TextBlock FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}">
+                            <TextBlock.Text>
+                                <Binding Path="Status.Metrics.CostEstimate" StringFormat="{}${0:F4}" FallbackValue="$0.0000" />
+                            </TextBlock.Text>
+                        </TextBlock>
+                    </Border>
+                    <Border Padding="6,2" CornerRadius="4"
+                            Background="{DynamicResource BgSurfaceBrush}">
+                        <TextBlock FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}">
+                            <TextBlock.Text>
+                                <MultiBinding StringFormat="{}{0}/{1} tok">
+                                    <Binding Path="Status.Metrics.InputTokens" FallbackValue="0" />
+                                    <Binding Path="Status.Metrics.OutputTokens" FallbackValue="0" />
+                                </MultiBinding>
+                            </TextBlock.Text>
+                        </TextBlock>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="6">
+                    <Button IsVisible="{Binding CanResume}"
                             Command="{Binding ResumeProjectCommand}"
-                            IsVisible="{Binding CanResume}"
-                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
-                    <Button Content="Stop"
+                            Padding="8,4" FontSize="11"
+                            Background="Transparent"
+                            Foreground="{DynamicResource StateRunningBrush}">
+                        <TextBlock Text="Resume" />
+                    </Button>
+                    <Button IsVisible="{Binding CanResume, Converter={StaticResource InverseBoolConverter}}"
                             Command="{Binding StopProjectCommand}"
-                            IsVisible="{Binding CanResume, Converter={StaticResource InverseBoolConverter}}"
-                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
-                    <Button Content="Metrics"
-                            Command="{Binding LoadMetricsCommand}"
-                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
+                            Padding="8,4" FontSize="11"
+                            Background="Transparent"
+                            Foreground="{DynamicResource StateErrorBrush}">
+                        <TextBlock Text="Stop" />
+                    </Button>
+                    <Button Command="{Binding RefreshCommand}"
+                            Padding="8,4" FontSize="11"
+                            Background="Transparent"
+                            Foreground="{DynamicResource TextTertiaryBrush}">
+                        <TextBlock Text="Refresh" />
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- Chat Output -->
-        <ScrollViewer Grid.Row="1" x:Name="OutputScrollViewer">
-            <ItemsControl ItemsSource="{Binding OutputMessages}">
+        <ScrollViewer Grid.Row="1" x:Name="OutputScrollViewer" Padding="16,8,16,0">
+            <ItemsControl ItemsSource="{Binding OutputMessages}" x:Name="OutputItemsControl" Margin="0,0,0,16">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="models:ClaudeMessage">
-                        <Border Padding="10"
-                                Margin="0,2"
-                                MinWidth="80"
-                                MaxWidth="900"
-                                Background="{StaticResource CardInsetBrush}"
-                                BorderBrush="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}"
-                                BorderThickness="0,0,0,2"
-                                CornerRadius="{StaticResource CornerMedium}">
-                            <StackPanel Spacing="4">
-                                <!-- Header: Chevron + Type Badge + Summary -->
-                                <Grid ColumnDefinitions="Auto,Auto,*">
-                                    <TextBlock Grid.Column="0"
-                                               Text="{Binding IsExpanded, Converter={StaticResource BoolToChevronConverter}}"
-                                               FontSize="{StaticResource FontSizeSmall}" VerticalAlignment="Center"
-                                               Foreground="{StaticResource TextSubtleBrush}" Margin="0,0,6,0"
-                                               Cursor="Hand" />
+                        <Panel Margin="0,3">
 
-                                    <Border Grid.Column="1"
-                                            Padding="6,2"
-                                            Background="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}"
-                                            CornerRadius="{StaticResource CornerSmall}"
-                                            VerticalAlignment="Center" Margin="0,0,8,0">
-                                        <TextBlock Text="{Binding TypeDisplay}"
-                                                   FontSize="10" FontWeight="SemiBold"
-                                                   Foreground="{StaticResource TextOnAccentBrush}" />
+                            <!-- Non-user message: avatar + glass bubble, left-aligned, 80% width -->
+                            <Grid ColumnDefinitions="4*,*"
+                                  IsVisible="{Binding !IsUserMessage}">
+                                <Grid Grid.Column="0" ColumnDefinitions="Auto,*">
+
+                                    <!-- Avatar circle with gradient -->
+                                    <Border Grid.Column="0"
+                                            Width="28" Height="28"
+                                            CornerRadius="14"
+                                            VerticalAlignment="Top"
+                                            Margin="0,2,10,0"
+                                            Background="{Binding Type, Converter={StaticResource MessageTypeToGradientConverter}}">
+                                        <TextBlock Text="{Binding TypeInitial}"
+                                                   FontSize="11" FontWeight="Bold"
+                                                   Foreground="White"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
                                     </Border>
 
-                                    <TextBlock Grid.Column="2"
-                                               Text="{Binding Summary}"
-                                               FontSize="{StaticResource FontSizeCaption}"
-                                               Foreground="{StaticResource TextMutedBrush}"
-                                               TextTrimming="CharacterEllipsis"
-                                               MaxLines="1" VerticalAlignment="Center"
-                                               IsVisible="{Binding HasContentItems, Converter={StaticResource InverseBoolConverter}}" />
+                                    <!-- Bubble with per-type colors -->
+                                    <Border Grid.Column="1"
+                                            Padding="10,8"
+                                            Background="{Binding Type, Converter={StaticResource MessageTypeToBgBrushConverter}}"
+                                            BorderBrush="{Binding Type, Converter={StaticResource MessageTypeToBorderBrushConverter}}"
+                                            BorderThickness="1"
+                                            CornerRadius="4,14,14,14"
+                                            HorizontalAlignment="Left">
+                                        <StackPanel Spacing="2">
+                                            <!-- Type + summary header -->
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="{Binding TypeDisplay}"
+                                                           FontSize="10" FontWeight="Bold"
+                                                           Foreground="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}" />
+                                                <TextBlock Text="{Binding Summary}"
+                                                           FontSize="10"
+                                                           Foreground="{DynamicResource TextTertiaryBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MaxLines="1"
+                                                           IsVisible="{Binding HasContentItems, Converter={StaticResource InverseBoolConverter}}" />
+                                            </StackPanel>
+
+                                            <!-- Message content -->
+                                            <TextBlock Text="{Binding ContentSummary}"
+                                                       IsVisible="{Binding !IsExpanded}"
+                                                       FontSize="11.5"
+                                                       LineHeight="17"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                                       TextWrapping="Wrap" />
+
+                                            <!-- Expanded JSON -->
+                                            <ScrollViewer IsVisible="{Binding IsExpanded}"
+                                                          MaxHeight="400" Margin="0,4,0,0">
+                                                <TextBlock Text="{Binding FormattedJson}"
+                                                           FontSize="10" FontFamily="Menlo, Consolas, monospace"
+                                                           Foreground="{DynamicResource TextSecondaryBrush}"
+                                                           Background="{DynamicResource BgCodeBrush}"
+                                                           Padding="8"
+                                                           TextWrapping="Wrap" />
+                                            </ScrollViewer>
+                                        </StackPanel>
+                                    </Border>
                                 </Grid>
+                            </Grid>
 
-                                <!-- Collapsed: Content Summary -->
-                                <TextBlock IsVisible="{Binding !IsExpanded}"
-                                           Text="{Binding ContentSummary}"
-                                           FontSize="{StaticResource FontSizeCaption}" FontFamily="Consolas,Courier New"
-                                           Foreground="#E0E0E0"
-                                           TextWrapping="Wrap"
-                                           Margin="20,4,0,0" />
+                            <!-- User message: accent bubble, right-aligned, 80% width -->
+                            <Grid ColumnDefinitions="*,4*"
+                                  IsVisible="{Binding IsUserMessage}">
+                                <Border Grid.Column="1"
+                                        Padding="10,8"
+                                        Background="{DynamicResource BubbleUserBgBrush}"
+                                        BorderBrush="{DynamicResource BubbleUserBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="14,14,4,14"
+                                        HorizontalAlignment="Right">
+                                    <StackPanel Spacing="2">
+                                        <!-- Message content -->
+                                        <TextBlock Text="{Binding ContentSummary}"
+                                                   IsVisible="{Binding !IsExpanded}"
+                                                   FontSize="11.5"
+                                                   LineHeight="17"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   TextWrapping="Wrap" />
 
-                                <!-- Expanded: Formatted JSON -->
-                                <ScrollViewer IsVisible="{Binding IsExpanded}"
-                                              MaxHeight="400" Margin="0,4,0,0">
-                                    <TextBlock Text="{Binding FormattedJson}"
-                                               FontSize="10" FontFamily="Consolas,Courier New"
-                                               Foreground="#E0E0E0"
-                                               Background="{StaticResource CodeBlockBrush}"
-                                               Padding="10"
-                                               TextWrapping="Wrap" />
-                                </ScrollViewer>
-                            </StackPanel>
-                        </Border>
+                                        <!-- Expanded JSON -->
+                                        <ScrollViewer IsVisible="{Binding IsExpanded}"
+                                                      MaxHeight="400" Margin="0,4,0,0">
+                                            <TextBlock Text="{Binding FormattedJson}"
+                                                       FontSize="10" FontFamily="Menlo, Consolas, monospace"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                                       Background="{DynamicResource BgCodeBrush}"
+                                                       Padding="8"
+                                                       TextWrapping="Wrap" />
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                        </Panel>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
 
-        <!-- Input Area -->
-        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,8,0,0">
-            <Border Grid.Column="0"
-                    BorderThickness="1"
-                    BorderBrush="{StaticResource BorderSubtleBrush}"
-                    CornerRadius="{StaticResource CornerMedium}"
-                    Padding="8">
-                <TextBox x:Name="InputEditor"
-                         Text="{Binding InputText}"
-                         Watermark="Type your response..."
-                         Height="80"
-                         AcceptsReturn="True"
-                         TextWrapping="Wrap"
-                         IsEnabled="{Binding CanSendInput}" />
-            </Border>
+        <!-- Question Prompt (visible when LLM asks a question) -->
+        <controls:QuestionPromptView x:Name="QuestionPrompt"
+            Grid.Row="2"
+            IsVisible="{Binding IsQuestionActive}"
+            Margin="16,0" />
 
-            <Button Grid.Column="1"
-                    Content="Send"
-                    Command="{Binding SendInputCommand}"
-                    IsEnabled="{Binding CanSendInput}"
-                    VerticalAlignment="Bottom"
-                    Height="80" Width="80"
-                    Margin="8,0,0,0"
-                    FontSize="{StaticResource FontSizeBody}" />
-        </Grid>
+        <!-- Input Area -->
+        <Border Grid.Row="3" Padding="16,8"
+                Background="{DynamicResource BgBaseBrush}"
+                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="*,Auto">
+                <Border Grid.Column="0"
+                        Background="{DynamicResource BgInputBrush}"
+                        BorderBrush="{DynamicResource BorderDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="12,8">
+                    <TextBox x:Name="InputEditor"
+                             Text="{Binding InputText}"
+                             Watermark="{Binding InputWatermark}"
+                             MinHeight="36"
+                             MaxHeight="120"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             IsEnabled="{Binding CanSendInput}"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Foreground="{DynamicResource TextPrimaryBrush}"
+                             FontSize="13" />
+                </Border>
+
+                <Button Grid.Column="1"
+                        Command="{Binding SendInputCommand}"
+                        IsEnabled="{Binding CanSendInput}"
+                        VerticalAlignment="Bottom"
+                        Width="32" Height="32"
+                        CornerRadius="16"
+                        Padding="0"
+                        Margin="8,0,0,0"
+                        Background="{DynamicResource AccentBrush}"
+                        Foreground="White">
+                    <TextBlock Text="↑" FontSize="16" FontWeight="Bold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Button>
+            </Grid>
+        </Border>
 
         <!-- Loading Overlay -->
         <ProgressBar Grid.Row="1"
@@ -175,7 +248,8 @@
         <TextBlock Grid.Row="1"
                    Text="{Binding ErrorMessage}"
                    IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
-                   Foreground="{StaticResource DangerBrush}" Margin="16"
+                   Foreground="{DynamicResource StateErrorBrush}"
+                   FontSize="11" Margin="16"
                    VerticalAlignment="Bottom" HorizontalAlignment="Center" />
     </Grid>
 </UserControl>

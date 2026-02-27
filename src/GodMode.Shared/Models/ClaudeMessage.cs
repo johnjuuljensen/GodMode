@@ -56,6 +56,11 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
     public bool IsUserMessage { get; }
 
     /// <summary>
+    /// Single-character initial for avatar display.
+    /// </summary>
+    public string TypeInitial { get; }
+
+    /// <summary>
     /// The simplified summary for this message.
     /// </summary>
     public string Summary { get; }
@@ -82,6 +87,26 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
     public string FormattedJson { get; }
 
     /// <summary>
+    /// Whether this message is a question/permission prompt requiring user input.
+    /// </summary>
+    public bool IsQuestion { get; }
+
+    /// <summary>
+    /// The question text if this is a question message.
+    /// </summary>
+    public string? QuestionText { get; }
+
+    /// <summary>
+    /// Available options for question messages.
+    /// </summary>
+    public IReadOnlyList<QuestionOptionData> QuestionOptions { get; }
+
+    /// <summary>
+    /// Short header/category label from the question (e.g., "Auth method", "Library").
+    /// </summary>
+    public string? QuestionHeader { get; }
+
+    /// <summary>
     /// Creates a new ClaudeMessage from raw JSON.
     /// All parsing is done eagerly for UI performance.
     /// </summary>
@@ -100,11 +125,21 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
                 : null;
             TypeDisplay = Subtype != null ? $"{Type}:{Subtype}" : Type;
             IsUserMessage = Type == "user";
+            TypeInitial = Type switch
+            {
+                "system" => "S",
+                "user" => "U",
+                "assistant" => "A",
+                "result" => "R",
+                "error" => "!",
+                _ => "?"
+            };
             Summary = ExtractSummary(root);
             ContentItems = ExtractContentItems(root);
             HasContentItems = ContentItems.Count > 0;
             ContentSummary = BuildContentSummary();
             FormattedJson = JsonSerializer.Serialize(document, IndentedOptions);
+            (IsQuestion, QuestionText, QuestionOptions, QuestionHeader) = ExtractQuestionData(root);
         }
         catch
         {
@@ -112,12 +147,59 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             Subtype = null;
             TypeDisplay = "error";
             IsUserMessage = false;
+            TypeInitial = "!";
             Summary = rawJson.Length > MaxSummaryLength ? rawJson[..MaxSummaryLength] + "..." : rawJson;
             ContentItems = [];
             HasContentItems = false;
             ContentSummary = "";
             FormattedJson = rawJson;
+            IsQuestion = false;
+            QuestionText = null;
+            QuestionOptions = [];
+            QuestionHeader = null;
         }
+    }
+
+    private static (bool isQuestion, string? text, IReadOnlyList<QuestionOptionData> options, string? header) ExtractQuestionData(JsonElement root)
+    {
+        // Claude Code question prompts come as assistant messages with specific patterns
+        // Check for tool_use with AskUserQuestion or permission prompts
+        if (!root.TryGetProperty("message", out var message)) return (false, null, [], null);
+        if (!message.TryGetProperty("content", out var content)) return (false, null, [], null);
+        if (content.ValueKind != JsonValueKind.Array) return (false, null, [], null);
+
+        foreach (var item in content.EnumerateArray())
+        {
+            if (!item.TryGetProperty("type", out var type)) continue;
+            if (type.GetString() != "tool_use") continue;
+            if (!item.TryGetProperty("name", out var name)) continue;
+
+            var toolName = name.GetString();
+            if (toolName == "AskUserQuestion" && item.TryGetProperty("input", out var input))
+            {
+                var questionText = input.TryGetProperty("question", out var q)
+                    ? q.GetString() : null;
+                var header = input.TryGetProperty("header", out var h)
+                    ? h.GetString() : null;
+                var options = new List<QuestionOptionData>();
+
+                if (input.TryGetProperty("options", out var opts) && opts.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var opt in opts.EnumerateArray())
+                    {
+                        var label = opt.TryGetProperty("label", out var l)
+                            ? l.GetString() ?? "" : "";
+                        var description = opt.TryGetProperty("description", out var d)
+                            ? d.GetString() : null;
+                        options.Add(new QuestionOptionData(label, description));
+                    }
+                }
+
+                return (true, questionText, options, header);
+            }
+        }
+
+        return (false, null, [], null);
     }
 
     private string ExtractSummary(JsonElement root)
@@ -240,6 +322,22 @@ public sealed class ClaudeContentItem : INotifyPropertyChanged
     /// </summary>
     public string FormattedJson { get; }
 
+    // Rich tool rendering properties
+    /// <summary>Tool name for tool_use items (e.g., "Edit", "Write", "Bash").</summary>
+    public string? ToolName { get; private set; }
+    /// <summary>File path for Edit/Write/Read tools.</summary>
+    public string? ToolFilePath { get; private set; }
+    /// <summary>Old string for Edit tool diffs.</summary>
+    public string? ToolOldString { get; private set; }
+    /// <summary>New string for Edit tool diffs.</summary>
+    public string? ToolNewString { get; private set; }
+    /// <summary>Command string for Bash tool.</summary>
+    public string? ToolCommand { get; private set; }
+    /// <summary>Description for Bash tool.</summary>
+    public string? ToolDescription { get; private set; }
+    /// <summary>Content for Write tool.</summary>
+    public string? ToolContent { get; private set; }
+
     private ClaudeContentItem(string type, string summary, string formattedJson)
     {
         Type = type;
@@ -275,7 +373,32 @@ public sealed class ClaudeContentItem : INotifyPropertyChanged
             formattedJson = element.GetRawText();
         }
 
-        return new ClaudeContentItem(type, summary, formattedJson);
+        var item = new ClaudeContentItem(type, summary, formattedJson);
+
+        // Extract tool-specific data for rich rendering
+        if (type == "tool_use")
+        {
+            item.ToolName = element.TryGetProperty("name", out var toolName)
+                ? toolName.GetString() : null;
+
+            if (element.TryGetProperty("input", out var input))
+            {
+                item.ToolFilePath = input.TryGetProperty("file_path", out var fp)
+                    ? fp.GetString() : null;
+                item.ToolOldString = input.TryGetProperty("old_string", out var os)
+                    ? os.GetString() : null;
+                item.ToolNewString = input.TryGetProperty("new_string", out var ns)
+                    ? ns.GetString() : null;
+                item.ToolCommand = input.TryGetProperty("command", out var cmd)
+                    ? cmd.GetString() : null;
+                item.ToolDescription = input.TryGetProperty("description", out var desc)
+                    ? desc.GetString() : null;
+                item.ToolContent = input.TryGetProperty("content", out var cnt)
+                    ? cnt.GetString() : null;
+            }
+        }
+
+        return item;
     }
 
     private static string ExtractTextSummary(JsonElement element)
@@ -331,3 +454,8 @@ public sealed class ClaudeContentItem : INotifyPropertyChanged
         return "";
     }
 }
+
+/// <summary>
+/// Data for a single question option with label and optional description.
+/// </summary>
+public record QuestionOptionData(string Label, string? Description);

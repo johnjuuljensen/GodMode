@@ -5,6 +5,7 @@
     <File Path="src/Directory.Build.props" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="lib/LiquidGlassAvaloniaUI/LiquidGlassAvaloniaUI.csproj" />
     <Project Path="src/GodMode.Avalonia/GodMode.Avalonia.csproj" />
     <Project Path="src/GodMode.ClientBase/GodMode.ClientBase.csproj" />
     <Project Path="src/GodMode.Maui/GodMode.Maui.csproj" />

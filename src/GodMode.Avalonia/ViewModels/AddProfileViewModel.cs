@@ -7,6 +7,8 @@ public partial class AddProfileViewModel : ViewModelBase
 {
 	private readonly IProfileService _profileService;
 
+	public event Action? Completed;
+
 	[ObservableProperty]
 	private string _profileName = string.Empty;
 
@@ -46,7 +48,7 @@ public partial class AddProfileViewModel : ViewModelBase
 		{
 			var profile = new Profile { Name = ProfileName, Accounts = [] };
 			await _profileService.SaveProfileAsync(profile);
-			Navigation.GoBack();
+			Completed?.Invoke();
 		}
 		catch (Exception ex)
 		{
@@ -59,5 +61,5 @@ public partial class AddProfileViewModel : ViewModelBase
 	}
 
 	[RelayCommand]
-	private void Cancel() => Navigation.GoBack();
+	private void Cancel() => Completed?.Invoke();
 }
