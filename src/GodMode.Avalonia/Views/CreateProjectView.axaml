@@ -10,15 +10,17 @@
     <UserControl.Resources>
         <views:FormFieldTemplateSelector x:Key="FieldSelector">
             <DataTemplate x:Key="string" x:DataType="models:FormField">
-                <StackPanel Spacing="5" Margin="0,5">
-                    <TextBlock Text="{Binding Title}" FontWeight="Bold" />
+                <StackPanel Spacing="4" Margin="0,6">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                               FontSize="{StaticResource FontSizeBody}" />
                     <TextBox Text="{Binding Value}" Watermark="{Binding Description}" />
                 </StackPanel>
             </DataTemplate>
 
             <DataTemplate x:Key="multiline" x:DataType="models:FormField">
-                <StackPanel Spacing="5" Margin="0,5">
-                    <TextBlock Text="{Binding Title}" FontWeight="Bold" />
+                <StackPanel Spacing="4" Margin="0,6">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                               FontSize="{StaticResource FontSizeBody}" />
                     <TextBox Text="{Binding Value}"
                              Watermark="{Binding Description}"
                              AcceptsReturn="True"
@@ -30,16 +32,21 @@
             <DataTemplate x:Key="boolean" x:DataType="models:FormField">
                 <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,8">
                     <ToggleSwitch IsChecked="{Binding BoolValue}" />
-                    <TextBlock Text="{Binding Title}" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding Description}" VerticalAlignment="Center"
-                               FontSize="12" Foreground="Gray" />
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold"
+                                   FontSize="{StaticResource FontSizeBody}" />
+                        <TextBlock Text="{Binding Description}"
+                                   FontSize="{StaticResource FontSizeCaption}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   IsVisible="{Binding Description, Converter={StaticResource IsNotNullConverter}}" />
+                    </StackPanel>
                 </StackPanel>
             </DataTemplate>
         </views:FormFieldTemplateSelector>
     </UserControl.Resources>
 
-    <ScrollViewer Padding="20">
-        <StackPanel Spacing="15" MaxWidth="800" HorizontalAlignment="Center">
+    <ScrollViewer Padding="24">
+        <StackPanel Spacing="12" MaxWidth="800" HorizontalAlignment="Center">
 
             <!-- Loading -->
             <ProgressBar IsIndeterminate="True"
@@ -47,8 +54,9 @@
                          HorizontalAlignment="Center" />
 
             <!-- Project Root -->
-            <StackPanel Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-                <TextBlock Text="Project Root" FontWeight="Bold" />
+            <StackPanel Spacing="4" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <TextBlock Text="Project Root" FontWeight="SemiBold"
+                           FontSize="{StaticResource FontSizeBody}" />
                 <ComboBox ItemsSource="{Binding ProjectRoots}"
                           SelectedItem="{Binding SelectedProjectRoot}"
                           HorizontalAlignment="Stretch">
@@ -59,7 +67,8 @@
                     </ComboBox.ItemTemplate>
                 </ComboBox>
                 <TextBlock Text="{Binding SelectedProjectRoot.Description}"
-                           FontSize="12" Foreground="Gray" TextWrapping="Wrap" />
+                           FontSize="{StaticResource FontSizeSmall}"
+                           Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" />
             </StackPanel>
 
             <!-- Dynamic Form Fields -->
@@ -68,29 +77,32 @@
                           IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}" />
 
             <!-- Buttons -->
-            <Grid ColumnDefinitions="*,*" Margin="0,20,0,0"
+            <Grid ColumnDefinitions="*,*" Margin="0,16,0,0"
                   IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
                 <Button Grid.Column="0"
                         Content="Cancel"
                         Command="{Binding CancelCommand}"
                         HorizontalAlignment="Stretch"
-                        Margin="0,0,5,0" />
+                        Padding="12,8"
+                        Margin="0,0,4,0" />
                 <Button Grid.Column="1"
                         Content="Create"
                         Command="{Binding CreateCommand}"
                         HorizontalAlignment="Stretch"
-                        Margin="5,0,0,0" />
+                        Padding="12,8"
+                        Margin="4,0,0,0" />
             </Grid>
 
             <!-- Error -->
             <TextBlock Text="{Binding ErrorMessage}"
                        IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
-                       Foreground="Red" HorizontalAlignment="Center" />
+                       Foreground="{StaticResource DangerBrush}" HorizontalAlignment="Center" />
 
             <!-- Creation Progress -->
             <TextBlock Text="{Binding CreationProgressText}"
                        IsVisible="{Binding CreationProgressText, Converter={StaticResource IsNotNullConverter}}"
-                       FontSize="12" Foreground="Gray" HorizontalAlignment="Center" />
+                       FontSize="{StaticResource FontSizeSmall}"
+                       Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center" />
 
             <!-- Creating -->
             <ProgressBar IsIndeterminate="True"

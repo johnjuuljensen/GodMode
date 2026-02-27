@@ -4,76 +4,88 @@
              x:Class="GodMode.Avalonia.Views.AddServerView"
              x:DataType="vm:AddServerViewModel">
 
-    <ScrollViewer Padding="20">
-        <StackPanel Spacing="15" MaxWidth="500" HorizontalAlignment="Center">
+    <ScrollViewer Padding="24">
+        <StackPanel Spacing="12" MaxWidth="500" HorizontalAlignment="Center">
 
             <!-- Profile Info -->
-            <Border Padding="10" Background="#2C2C2C" CornerRadius="4">
-                <StackPanel Orientation="Horizontal" Spacing="10">
-                    <TextBlock Text="Adding server to:" VerticalAlignment="Center" />
-                    <TextBlock Text="{Binding ProfileName}" FontWeight="Bold" VerticalAlignment="Center" />
+            <Border Padding="12"
+                    Background="{StaticResource CardBrush}"
+                    CornerRadius="{StaticResource CornerMedium}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Adding server to:" VerticalAlignment="Center"
+                               Foreground="{StaticResource TextMutedBrush}" />
+                    <TextBlock Text="{Binding ProfileName}" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </StackPanel>
             </Border>
 
             <!-- Server Type -->
-            <StackPanel Spacing="5">
-                <TextBlock Text="Server Type" FontWeight="Bold" />
+            <StackPanel Spacing="4">
+                <TextBlock Text="Server Type" FontWeight="SemiBold"
+                           FontSize="{StaticResource FontSizeBody}" />
                 <ComboBox ItemsSource="{Binding ServerTypes}"
                           SelectedItem="{Binding SelectedServerType}"
                           HorizontalAlignment="Stretch" />
             </StackPanel>
 
             <!-- GitHub Codespaces Fields -->
-            <StackPanel Spacing="10" IsVisible="{Binding IsGitHubCodespaces}">
-                <StackPanel Spacing="5">
-                    <TextBlock Text="GitHub Username" FontWeight="Bold" />
+            <StackPanel Spacing="12" IsVisible="{Binding IsGitHubCodespaces}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="GitHub Username" FontWeight="SemiBold"
+                               FontSize="{StaticResource FontSizeBody}" />
                     <TextBox Text="{Binding GitHubUsername}" Watermark="Enter GitHub username" />
                 </StackPanel>
 
-                <StackPanel Spacing="5">
-                    <TextBlock Text="GitHub Token" FontWeight="Bold" />
+                <StackPanel Spacing="4">
+                    <TextBlock Text="GitHub Token" FontWeight="SemiBold"
+                               FontSize="{StaticResource FontSizeBody}" />
                     <TextBox Text="{Binding GitHubToken}"
                              Watermark="Enter personal access token"
                              PasswordChar="*" />
                     <TextBlock Text="Token needs 'codespace' scope for Codespaces access"
-                               FontSize="12" Foreground="Gray" />
+                               FontSize="{StaticResource FontSizeCaption}"
+                               Foreground="{StaticResource TextMutedBrush}" />
                 </StackPanel>
             </StackPanel>
 
             <!-- Local Server Fields -->
-            <StackPanel Spacing="10" IsVisible="{Binding IsLocalServer}">
-                <StackPanel Spacing="5">
-                    <TextBlock Text="Server URL" FontWeight="Bold" />
+            <StackPanel Spacing="12" IsVisible="{Binding IsLocalServer}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Server URL" FontWeight="SemiBold"
+                               FontSize="{StaticResource FontSizeBody}" />
                     <TextBox Text="{Binding ServerUrl}"
                              Watermark="http://localhost:31337" />
                     <TextBlock Text="URL of the GodMode.Server instance"
-                               FontSize="12" Foreground="Gray" />
+                               FontSize="{StaticResource FontSizeCaption}"
+                               Foreground="{StaticResource TextMutedBrush}" />
                 </StackPanel>
 
-                <StackPanel Spacing="5">
-                    <TextBlock Text="Display Name (optional)" FontWeight="Bold" />
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Display Name (optional)" FontWeight="SemiBold"
+                               FontSize="{StaticResource FontSizeBody}" />
                     <TextBox Text="{Binding ServerDisplayName}" Watermark="Enter display name" />
                 </StackPanel>
             </StackPanel>
 
             <!-- Buttons -->
-            <Grid ColumnDefinitions="*,*" Margin="0,20,0,0">
+            <Grid ColumnDefinitions="*,*" Margin="0,16,0,0">
                 <Button Grid.Column="0"
                         Content="Cancel"
                         Command="{Binding CancelCommand}"
                         HorizontalAlignment="Stretch"
-                        Margin="0,0,5,0" />
+                        Padding="12,8"
+                        Margin="0,0,4,0" />
                 <Button Grid.Column="1"
                         Content="Add Server"
                         Command="{Binding SaveCommand}"
                         HorizontalAlignment="Stretch"
-                        Margin="5,0,0,0" />
+                        Padding="12,8"
+                        Margin="4,0,0,0" />
             </Grid>
 
             <!-- Error -->
             <TextBlock Text="{Binding ErrorMessage}"
                        IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
-                       Foreground="Red" HorizontalAlignment="Center" />
+                       Foreground="{StaticResource DangerBrush}" HorizontalAlignment="Center" />
 
             <!-- Loading -->
             <ProgressBar IsIndeterminate="True"

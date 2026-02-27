@@ -5,95 +5,109 @@
              x:Class="GodMode.Avalonia.Views.ProjectView"
              x:DataType="vm:ProjectViewModel">
 
-    <Grid RowDefinitions="Auto,*,Auto" Margin="10">
+    <Grid RowDefinitions="Auto,*,Auto" Margin="16">
 
         <!-- Header Bar -->
-        <Border Grid.Row="0" Padding="8" Margin="5" Background="#2C2C2C" CornerRadius="4">
+        <Border Grid.Row="0" Padding="12" Margin="0,0,0,8"
+                Background="{StaticResource CardBrush}"
+                CornerRadius="{StaticResource CornerMedium}">
             <Grid ColumnDefinitions="Auto,Auto,*,Auto">
 
                 <!-- State Badge -->
                 <Border Grid.Column="0"
-                        Padding="8,4"
+                        Padding="10,5"
                         Background="{Binding Status.State, Converter={StaticResource StateToColorConverter}}"
-                        CornerRadius="4">
+                        CornerRadius="{StaticResource CornerSmall}">
                     <TextBlock Text="{Binding Status.State}"
-                               FontSize="12" FontWeight="Bold"
-                               Foreground="White" />
+                               FontSize="{StaticResource FontSizeSmall}" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextOnAccentBrush}" />
                 </Border>
 
                 <!-- Quick Stats -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="15" Margin="15,0,0,0" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="$" FontSize="11" Foreground="#AAAAAA" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="16"
+                            Margin="16,0,0,0" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                        <TextBlock Text="$" FontSize="{StaticResource FontSizeCaption}"
+                                   Foreground="{StaticResource TextMutedBrush}" />
                         <TextBlock Text="{Binding Status.Metrics.CostEstimate, StringFormat='{}{0:F2}'}"
-                                   FontSize="11" Foreground="#AAAAAA" FontWeight="Bold" />
+                                   FontSize="{StaticResource FontSizeCaption}"
+                                   Foreground="{StaticResource TextMutedBrush}" FontWeight="SemiBold" />
                     </StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="{Binding Status.Metrics.InputTokens}" FontSize="11" Foreground="#AAAAAA" />
-                        <TextBlock Text="/" FontSize="11" Foreground="#AAAAAA" />
-                        <TextBlock Text="{Binding Status.Metrics.OutputTokens}" FontSize="11" Foreground="#AAAAAA" />
-                        <TextBlock Text=" tok" FontSize="11" Foreground="#AAAAAA" />
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                        <TextBlock Text="{Binding Status.Metrics.InputTokens}"
+                                   FontSize="{StaticResource FontSizeCaption}"
+                                   Foreground="{StaticResource TextMutedBrush}" />
+                        <TextBlock Text="/"
+                                   FontSize="{StaticResource FontSizeCaption}"
+                                   Foreground="{StaticResource TextSubtleBrush}" />
+                        <TextBlock Text="{Binding Status.Metrics.OutputTokens}"
+                                   FontSize="{StaticResource FontSizeCaption}"
+                                   Foreground="{StaticResource TextMutedBrush}" />
+                        <TextBlock Text=" tok"
+                                   FontSize="{StaticResource FontSizeCaption}"
+                                   Foreground="{StaticResource TextSubtleBrush}" />
                     </StackPanel>
                 </StackPanel>
 
                 <!-- Action Buttons -->
-                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5">
+                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4">
                     <Button Content="Back"
                             Command="{Binding GoBackCommand}"
-                            FontSize="11" Padding="8,4" Height="30" />
+                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
                     <Button Content="Refresh"
                             Command="{Binding RefreshCommand}"
-                            FontSize="11" Padding="8,4" Height="30" />
+                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
                     <Button Content="Resume"
                             Command="{Binding ResumeProjectCommand}"
                             IsVisible="{Binding CanResume}"
-                            FontSize="11" Padding="8,4" Height="30" />
+                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
                     <Button Content="Stop"
                             Command="{Binding StopProjectCommand}"
                             IsVisible="{Binding CanResume, Converter={StaticResource InverseBoolConverter}}"
-                            FontSize="11" Padding="8,4" Height="30" />
+                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
                     <Button Content="Metrics"
                             Command="{Binding LoadMetricsCommand}"
-                            FontSize="11" Padding="8,4" Height="30" />
+                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- Chat Output -->
-        <ScrollViewer Grid.Row="1" x:Name="OutputScrollViewer" Margin="5">
+        <ScrollViewer Grid.Row="1" x:Name="OutputScrollViewer">
             <ItemsControl ItemsSource="{Binding OutputMessages}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="models:ClaudeMessage">
-                        <Border Padding="8"
-                                Margin="2"
+                        <Border Padding="10"
+                                Margin="0,2"
                                 MinWidth="80"
                                 MaxWidth="900"
-                                Background="#1E1E1E"
+                                Background="{StaticResource CardInsetBrush}"
                                 BorderBrush="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}"
-                                BorderThickness="2"
-                                CornerRadius="8">
+                                BorderThickness="0,0,0,2"
+                                CornerRadius="{StaticResource CornerMedium}">
                             <StackPanel Spacing="4">
                                 <!-- Header: Chevron + Type Badge + Summary -->
                                 <Grid ColumnDefinitions="Auto,Auto,*">
                                     <TextBlock Grid.Column="0"
                                                Text="{Binding IsExpanded, Converter={StaticResource BoolToChevronConverter}}"
-                                               FontSize="12" VerticalAlignment="Center"
-                                               Foreground="#AAAAAA" Margin="0,0,6,0"
+                                               FontSize="{StaticResource FontSizeSmall}" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextSubtleBrush}" Margin="0,0,6,0"
                                                Cursor="Hand" />
 
                                     <Border Grid.Column="1"
                                             Padding="6,2"
                                             Background="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}"
-                                            CornerRadius="3"
+                                            CornerRadius="{StaticResource CornerSmall}"
                                             VerticalAlignment="Center" Margin="0,0,8,0">
                                         <TextBlock Text="{Binding TypeDisplay}"
-                                                   FontSize="10" FontWeight="Bold"
-                                                   Foreground="White" />
+                                                   FontSize="10" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextOnAccentBrush}" />
                                     </Border>
 
                                     <TextBlock Grid.Column="2"
                                                Text="{Binding Summary}"
-                                               FontSize="11" Foreground="#CCCCCC"
+                                               FontSize="{StaticResource FontSizeCaption}"
+                                               Foreground="{StaticResource TextMutedBrush}"
                                                TextTrimming="CharacterEllipsis"
                                                MaxLines="1" VerticalAlignment="Center"
                                                IsVisible="{Binding HasContentItems, Converter={StaticResource InverseBoolConverter}}" />
@@ -102,7 +116,7 @@
                                 <!-- Collapsed: Content Summary -->
                                 <TextBlock IsVisible="{Binding !IsExpanded}"
                                            Text="{Binding ContentSummary}"
-                                           FontSize="11" FontFamily="Consolas"
+                                           FontSize="{StaticResource FontSizeCaption}" FontFamily="Consolas,Courier New"
                                            Foreground="#E0E0E0"
                                            TextWrapping="Wrap"
                                            Margin="20,4,0,0" />
@@ -111,10 +125,10 @@
                                 <ScrollViewer IsVisible="{Binding IsExpanded}"
                                               MaxHeight="400" Margin="0,4,0,0">
                                     <TextBlock Text="{Binding FormattedJson}"
-                                               FontSize="10" FontFamily="Consolas"
+                                               FontSize="10" FontFamily="Consolas,Courier New"
                                                Foreground="#E0E0E0"
-                                               Background="#0D0D0D"
-                                               Padding="8"
+                                               Background="{StaticResource CodeBlockBrush}"
+                                               Padding="10"
                                                TextWrapping="Wrap" />
                                 </ScrollViewer>
                             </StackPanel>
@@ -125,12 +139,12 @@
         </ScrollViewer>
 
         <!-- Input Area -->
-        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="5">
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,8,0,0">
             <Border Grid.Column="0"
                     BorderThickness="1"
-                    BorderBrush="Gray"
-                    CornerRadius="8"
-                    Padding="10">
+                    BorderBrush="{StaticResource BorderSubtleBrush}"
+                    CornerRadius="{StaticResource CornerMedium}"
+                    Padding="8">
                 <TextBox x:Name="InputEditor"
                          Text="{Binding InputText}"
                          Watermark="Type your response..."
@@ -146,7 +160,8 @@
                     IsEnabled="{Binding CanSendInput}"
                     VerticalAlignment="Bottom"
                     Height="80" Width="80"
-                    Margin="5,0,0,0" />
+                    Margin="8,0,0,0"
+                    FontSize="{StaticResource FontSizeBody}" />
         </Grid>
 
         <!-- Loading Overlay -->
@@ -160,7 +175,7 @@
         <TextBlock Grid.Row="1"
                    Text="{Binding ErrorMessage}"
                    IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
-                   Foreground="Red" Margin="10"
+                   Foreground="{StaticResource DangerBrush}" Margin="16"
                    VerticalAlignment="Bottom" HorizontalAlignment="Center" />
     </Grid>
 </UserControl>
