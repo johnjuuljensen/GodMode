@@ -4,40 +4,35 @@
              x:Class="GodMode.Avalonia.Views.AddProfileView"
              x:DataType="vm:AddProfileViewModel">
 
-    <ScrollViewer Padding="20">
-        <StackPanel Spacing="15" MaxWidth="400" HorizontalAlignment="Center">
+    <StackPanel>
+        <Border Padding="20,16" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
+            <TextBlock Text="NEW PROFILE" FontSize="11" FontWeight="SemiBold"
+                       LetterSpacing="1.5" Foreground="{DynamicResource TextSecondaryBrush}" />
+        </Border>
 
-            <!-- Profile Name -->
-            <StackPanel Spacing="5">
-                <TextBlock Text="Profile Name" FontWeight="Bold" />
-                <TextBox Text="{Binding ProfileName}" Watermark="Enter profile name" />
-                <TextBlock Text="A profile groups multiple accounts (GitHub, local folders) together"
-                           FontSize="12" Foreground="Gray" />
+        <StackPanel Spacing="12" Margin="20,16">
+            <StackPanel Spacing="4">
+                <TextBlock Text="PROFILE NAME" FontSize="10" FontWeight="SemiBold"
+                           LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                <TextBox Text="{Binding ProfileName}" Watermark="Enter profile name" FontSize="13" />
+                <TextBlock Text="A profile groups multiple servers together"
+                           FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" />
             </StackPanel>
 
-            <!-- Buttons -->
-            <Grid ColumnDefinitions="*,*" Margin="0,20,0,0">
-                <Button Grid.Column="0"
-                        Content="Cancel"
-                        Command="{Binding CancelCommand}"
-                        HorizontalAlignment="Stretch"
-                        Margin="0,0,5,0" />
-                <Button Grid.Column="1"
-                        Content="Create"
-                        Command="{Binding SaveCommand}"
-                        HorizontalAlignment="Stretch"
-                        Margin="5,0,0,0" />
-            </Grid>
-
-            <!-- Error -->
             <TextBlock Text="{Binding ErrorMessage}"
                        IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
-                       Foreground="Red" HorizontalAlignment="Center" />
-
-            <!-- Loading -->
-            <ProgressBar IsIndeterminate="True"
-                         IsVisible="{Binding IsSaving}"
-                         HorizontalAlignment="Center" />
+                       Foreground="{DynamicResource StateErrorBrush}" FontSize="12" />
+            <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsSaving}" Height="2" />
         </StackPanel>
-    </ScrollViewer>
+
+        <Border Padding="20,12" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="*,*">
+                <Button Grid.Column="0" Content="Cancel" Command="{Binding CancelCommand}"
+                        HorizontalAlignment="Stretch" Margin="0,0,4,0" FontSize="13" />
+                <Button Grid.Column="1" Content="Create" Command="{Binding SaveCommand}"
+                        HorizontalAlignment="Stretch" Margin="4,0,0,0" FontSize="13" FontWeight="SemiBold"
+                        Background="{DynamicResource AccentBrush}" Foreground="White" />
+            </Grid>
+        </Border>
+    </StackPanel>
 </UserControl>

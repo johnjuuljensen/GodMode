@@ -9,6 +9,8 @@ public partial class EditServerViewModel : ViewModelBase
 	private readonly IDialogService _dialogService;
 	private Account? _originalAccount;
 
+	public event Action? Completed;
+
 	[ObservableProperty]
 	private string _profileName = string.Empty;
 
@@ -156,7 +158,7 @@ public partial class EditServerViewModel : ViewModelBase
 			}
 
 			await _profileService.SaveProfileAsync(profile);
-			Navigation.GoBack();
+			Completed?.Invoke();
 		}
 		catch (Exception ex)
 		{
@@ -191,7 +193,7 @@ public partial class EditServerViewModel : ViewModelBase
 
 			profile.Accounts.RemoveAt(AccountIndex);
 			await _profileService.SaveProfileAsync(profile);
-			Navigation.GoBack();
+			Completed?.Invoke();
 		}
 		catch (Exception ex)
 		{
@@ -204,5 +206,5 @@ public partial class EditServerViewModel : ViewModelBase
 	}
 
 	[RelayCommand]
-	private void Cancel() => Navigation.GoBack();
+	private void Cancel() => Completed?.Invoke();
 }

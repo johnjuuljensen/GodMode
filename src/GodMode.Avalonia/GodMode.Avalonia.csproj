@@ -1,25 +1,29 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<OutputType>WinExe</OutputType>
+		<OutputType>Exe</OutputType>
 		<ImplicitUsings>enable</ImplicitUsings>
-		<BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+		<BuiltInComInteropSupport Condition="$([MSBuild]::IsOSPlatform('Windows'))">true</BuiltInComInteropSupport>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 		<RootNamespace>GodMode.Avalonia</RootNamespace>
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Avalonia" Version="11.3.0" />
-		<PackageReference Include="Avalonia.Desktop" Version="11.3.0" />
-		<PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
-		<PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0" />
+		<PackageReference Include="Avalonia" Version="11.3.10" />
+		<PackageReference Include="Avalonia.Desktop" Version="11.3.10" />
+		<PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.10" />
+		<PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.10" />
+		<PackageReference Include="Avalonia.Skia" Version="11.3.10" />
+		<PackageReference Include="SkiaSharp" Version="3.119.1" />
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+
 		<PackageReference Include="System.Reactive" Version="6.1.0" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
+		<ProjectReference Include="..\..\lib\LiquidGlassAvaloniaUI\LiquidGlassAvaloniaUI.csproj" />
 	</ItemGroup>
 
 </Project>

@@ -4,6 +4,19 @@ using GodMode.Shared.Enums;
 
 namespace GodMode.Avalonia.Converters;
 
+public class ProjectStateToWaitingVisibilityConverter : IValueConverter
+{
+	public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+	{
+		if (value is ProjectState state)
+			return state == ProjectState.WaitingInput;
+		return false;
+	}
+
+	public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+		=> throw new NotImplementedException();
+}
+
 public class StateToStartVisibilityConverter : IValueConverter
 {
 	public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)

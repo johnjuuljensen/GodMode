@@ -38,64 +38,86 @@
         </views:FormFieldTemplateSelector>
     </UserControl.Resources>
 
-    <ScrollViewer Padding="20">
-        <StackPanel Spacing="15" MaxWidth="800" HorizontalAlignment="Center">
+    <StackPanel>
+        <!-- Modal title -->
+        <Border Padding="20,16"
+                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                BorderThickness="0,0,0,1">
+            <TextBlock Text="NEW PROJECT"
+                       FontSize="11" FontWeight="SemiBold"
+                       LetterSpacing="1.5"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+        </Border>
 
-            <!-- Loading -->
-            <ProgressBar IsIndeterminate="True"
-                         IsVisible="{Binding IsLoading}"
-                         HorizontalAlignment="Center" />
+        <ScrollViewer MaxHeight="500" Padding="20,12">
+            <StackPanel Spacing="12">
 
-            <!-- Project Root -->
-            <StackPanel Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-                <TextBlock Text="Project Root" FontWeight="Bold" />
-                <ComboBox ItemsSource="{Binding ProjectRoots}"
-                          SelectedItem="{Binding SelectedProjectRoot}"
-                          HorizontalAlignment="Stretch">
-                    <ComboBox.ItemTemplate>
-                        <DataTemplate x:DataType="shared:ProjectRootInfo">
-                            <TextBlock Text="{Binding Name}" />
-                        </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                </ComboBox>
-                <TextBlock Text="{Binding SelectedProjectRoot.Description}"
-                           FontSize="12" Foreground="Gray" TextWrapping="Wrap" />
+                <!-- Loading -->
+                <ProgressBar IsIndeterminate="True"
+                             IsVisible="{Binding IsLoading}"
+                             Height="2" />
+
+                <!-- Project Root -->
+                <StackPanel Spacing="4" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                    <TextBlock Text="PROJECT ROOT" FontSize="10" FontWeight="SemiBold"
+                               LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                    <ComboBox ItemsSource="{Binding ProjectRoots}"
+                              SelectedItem="{Binding SelectedProjectRoot}"
+                              HorizontalAlignment="Stretch" FontSize="13">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="shared:ProjectRootInfo">
+                                <TextBlock Text="{Binding Name}" FontSize="13" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock Text="{Binding SelectedProjectRoot.Description}"
+                               FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- Dynamic Form Fields -->
+                <ItemsControl ItemsSource="{Binding FormFields}"
+                              ItemTemplate="{StaticResource FieldSelector}"
+                              IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}" />
+
+                <!-- Error -->
+                <TextBlock Text="{Binding ErrorMessage}"
+                           IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
+                           Foreground="{DynamicResource StateErrorBrush}"
+                           FontSize="12" HorizontalAlignment="Center" />
+
+                <!-- Creation Progress -->
+                <TextBlock Text="{Binding CreationProgressText}"
+                           IsVisible="{Binding CreationProgressText, Converter={StaticResource IsNotNullConverter}}"
+                           FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                           HorizontalAlignment="Center" />
+                <ProgressBar IsIndeterminate="True"
+                             IsVisible="{Binding IsCreating}"
+                             Height="2" />
             </StackPanel>
+        </ScrollViewer>
 
-            <!-- Dynamic Form Fields -->
-            <ItemsControl ItemsSource="{Binding FormFields}"
-                          ItemTemplate="{StaticResource FieldSelector}"
-                          IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}" />
-
-            <!-- Buttons -->
-            <Grid ColumnDefinitions="*,*" Margin="0,20,0,0"
-                  IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+        <!-- Footer buttons -->
+        <Border Padding="20,12"
+                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                BorderThickness="0,1,0,0"
+                IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+            <Grid ColumnDefinitions="*,*" HorizontalAlignment="Stretch">
                 <Button Grid.Column="0"
                         Content="Cancel"
                         Command="{Binding CancelCommand}"
                         HorizontalAlignment="Stretch"
-                        Margin="0,0,5,0" />
+                        Margin="0,0,4,0"
+                        FontSize="13" />
                 <Button Grid.Column="1"
                         Content="Create"
                         Command="{Binding CreateCommand}"
                         HorizontalAlignment="Stretch"
-                        Margin="5,0,0,0" />
+                        Margin="4,0,0,0"
+                        FontSize="13" FontWeight="SemiBold"
+                        Background="{DynamicResource AccentBrush}"
+                        Foreground="White" />
             </Grid>
-
-            <!-- Error -->
-            <TextBlock Text="{Binding ErrorMessage}"
-                       IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
-                       Foreground="Red" HorizontalAlignment="Center" />
-
-            <!-- Creation Progress -->
-            <TextBlock Text="{Binding CreationProgressText}"
-                       IsVisible="{Binding CreationProgressText, Converter={StaticResource IsNotNullConverter}}"
-                       FontSize="12" Foreground="Gray" HorizontalAlignment="Center" />
-
-            <!-- Creating -->
-            <ProgressBar IsIndeterminate="True"
-                         IsVisible="{Binding IsCreating}"
-                         HorizontalAlignment="Center" />
-        </StackPanel>
-    </ScrollViewer>
+        </Border>
+    </StackPanel>
 </UserControl>

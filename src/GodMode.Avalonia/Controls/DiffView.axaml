@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:GodMode.Avalonia.Controls"
+             x:Class="GodMode.Avalonia.Controls.DiffView"
+             x:DataType="controls:DiffView">
+
+    <Border Background="{DynamicResource BgCodeBrush}"
+            BorderBrush="{DynamicResource BorderSubtleBrush}"
+            BorderThickness="1" CornerRadius="6"
+            Margin="0,4">
+
+        <StackPanel>
+            <!-- Header: file path + expand toggle -->
+            <Button Padding="10,6"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Stretch"
+                    Background="Transparent"
+                    Click="ToggleExpanded">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding FilePath, RelativeSource={RelativeSource AncestorType=controls:DiffView}}"
+                               FontSize="11" FontFamily="Menlo, Consolas, monospace"
+                               Foreground="{DynamicResource AccentBrush}"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding DiffSummary, RelativeSource={RelativeSource AncestorType=controls:DiffView}}"
+                               FontSize="10"
+                               Foreground="{DynamicResource TextTertiaryBrush}"
+                               Margin="8,0,0,0" />
+                </Grid>
+            </Button>
+
+            <!-- Diff content (collapsed by default) -->
+            <ScrollViewer IsVisible="{Binding IsExpanded, RelativeSource={RelativeSource AncestorType=controls:DiffView}}"
+                          MaxHeight="300"
+                          HorizontalScrollBarVisibility="Auto">
+                <StackPanel x:Name="DiffLines" Margin="0,0,0,6" />
+            </ScrollViewer>
+        </StackPanel>
+    </Border>
+</UserControl>
