@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using GodMode.Avalonia.Tools;
+using GodMode.Avalonia.Voice;
 using GodMode.Voice;
 using GodMode.Voice.Tools;
 using GodMode.Voice.Windows;
@@ -44,24 +45,31 @@ public partial class App : Application
 		services.AddGodModeWindowsSpeech();
 		services.AddGodModeVoiceServices();
 
-		// Voice tool registry — wired to real app services
+		// Voice context — stateful session tracking
+		services.AddSingleton<VoiceContext>();
+
+		// Voice tool registry — wired to real app services via VoiceContext
 		services.AddSingleton<ToolRegistry>(sp =>
 		{
+			var ctx = sp.GetRequiredService<VoiceContext>();
 			var profiles = sp.GetRequiredService<IProfileService>();
 			var hosts = sp.GetRequiredService<IHostConnectionService>();
 			var projects = sp.GetRequiredService<IProjectService>();
 
 			var registry = new ToolRegistry();
 			registry.Register(new RespondTool());
-			registry.Register(new ListProfilesTool(profiles));
-			registry.Register(new SwitchProfileTool(profiles));
-			registry.Register(new ListServersTool(profiles, hosts));
-			registry.Register(new ListProjectsTool(profiles, hosts, projects));
-			registry.Register(new ProjectStatusTool(profiles, hosts, projects));
-			registry.Register(new CreateProjectTool(profiles, hosts, projects));
-			registry.Register(new SendInputTool(profiles, hosts, projects));
-			registry.Register(new StopProjectTool(profiles, hosts, projects));
-			registry.Register(new ResumeProjectTool(profiles, hosts, projects));
+			registry.Register(new SetProfileTool(ctx, profiles));
+			registry.Register(new SetServerTool(ctx, hosts));
+			registry.Register(new ListProfilesTool(ctx, profiles));
+			registry.Register(new ListServersTool(ctx, hosts));
+			registry.Register(new ListProjectsTool(ctx));
+			registry.Register(new ProjectStatusTool(ctx, projects));
+			registry.Register(new CreateProjectTool(ctx, projects));
+			registry.Register(new SendInputTool(ctx, projects));
+			registry.Register(new StopProjectTool(ctx, projects));
+			registry.Register(new ResumeProjectTool(ctx, projects));
+			registry.Register(new FocusProjectTool(ctx));
+			registry.Register(new UnfocusProjectTool(ctx));
 			return registry;
 		});
 

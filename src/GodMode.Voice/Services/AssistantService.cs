@@ -49,6 +49,17 @@ public sealed class AssistantService
     public event EventHandler<string>? StatusChanged;
     public event EventHandler<string>? ErrorOccurred;
 
+    /// <summary>
+    /// Optional: provides voice context summary for system prompt injection.
+    /// </summary>
+    public Func<VoiceContextSummary?>? ContextSummaryProvider { get; set; }
+
+    /// <summary>
+    /// Optional: resolves disambiguation selections (e.g., "2" → ToolCall).
+    /// Return non-null to bypass the LLM and execute the resolved tool directly.
+    /// </summary>
+    public Func<string, ToolCall?>? DisambiguationResolver { get; set; }
+
     public bool IsModelLoaded => _model.IsLoaded;
     public bool IsCollectingParams => _pendingToolCall is not null;
 
@@ -102,12 +113,24 @@ public sealed class AssistantService
             if (_pendingToolCall is not null)
                 return await ContinueParameterCollectionAsync(userText, ct);
 
+            // Check for disambiguation selection (e.g., user says "2" to pick from a list)
+            if (DisambiguationResolver is not null)
+            {
+                var resolved = DisambiguationResolver(userText);
+                if (resolved is not null)
+                {
+                    AssistantLog.Write("DISAMBIGUATION", $"Resolved to: {resolved.ToolName}");
+                    return await ExecuteResolvedToolCallAsync(resolved, ct, sttMs);
+                }
+            }
+
             AssistantLog.Write("USER", userText);
 
             // Generate AI response
             StatusChanged?.Invoke(this, "Thinking...");
             var sw = Stopwatch.StartNew();
-            var systemPrompt = SystemPromptBuilder.Build(_toolRegistry);
+            var contextSummary = ContextSummaryProvider?.Invoke();
+            var systemPrompt = SystemPromptBuilder.Build(_toolRegistry, contextSummary);
             AssistantLog.Write("SYSTEM_PROMPT", systemPrompt);
 
             var llmOutput = await Task.Run(() => _model.GenerateAsync(systemPrompt, userText, ct));
@@ -332,6 +355,45 @@ public sealed class AssistantService
             return isFirst
                 ? $"Would you also like to provide {desc.ToLower()}? Say skip if not."
                 : $"Got it. Would you also like to provide {desc.ToLower()}? Say skip if not.";
+        }
+    }
+
+    private async Task<string> ExecuteResolvedToolCallAsync(ToolCall call, CancellationToken ct, long? sttMs)
+    {
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            StatusChanged?.Invoke(this, "Executing...");
+            var result = await _toolRegistry.ExecuteAsync(call);
+            var toolMs = sw.ElapsedMilliseconds;
+
+            var response = result.Success ? result.Output ?? "Done." : $"Error: {result.Error}";
+            response = TimeFormatter.HumanizeTimestamps(response);
+            response = TimeFormatter.HumanizeUptimeStrings(response);
+            AssistantLog.Write("TOOL_RESULT", response);
+
+            ResponseReceived?.Invoke(this, response);
+
+            sw.Restart();
+            StatusChanged?.Invoke(this, "Speaking...");
+            await _synthesizer.SpeakAsync(response, ct);
+            var ttsMs = sw.ElapsedMilliseconds;
+
+            StatusChanged?.Invoke(this, $"Ready. {FormatTiming(sttMs, null, toolMs, ttsMs)}");
+            return response;
+        }
+        catch (OperationCanceledException)
+        {
+            StatusChanged?.Invoke(this, "Cancelled.");
+            return string.Empty;
+        }
+        catch (Exception ex)
+        {
+            var error = $"Error: {ex.Message}";
+            AssistantLog.Write("ERROR", error);
+            ErrorOccurred?.Invoke(this, error);
+            StatusChanged?.Invoke(this, "Error occurred.");
+            return error;
         }
     }
 

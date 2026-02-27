@@ -1,20 +1,16 @@
+using GodMode.Avalonia.Voice;
 using GodMode.Voice.Tools;
 
 namespace GodMode.Avalonia.Tools;
 
-public sealed class StopProjectTool(
-    IProfileService profileService,
-    IHostConnectionService hostService,
-    IProjectService projectService) : ITool
+public sealed class StopProjectTool(VoiceContext context, IProjectService projectService) : ITool
 {
     public string Name => "stop_project";
     public string Description => "Stops a running project.";
 
     public IReadOnlyList<ToolParameter> Parameters =>
     [
-        new() { Name = "project_name", Type = "string", Description = "The name of the project to stop", Required = true },
-        new() { Name = "server_name", Type = "string", Description = "Server the project is on (uses first available if omitted)", Required = false },
-        new() { Name = "profile_name", Type = "string", Description = "Profile to use (uses current if omitted)", Required = false }
+        new() { Name = "project_name", Type = "string", Description = "The name of the project to stop", Required = true }
     ];
 
     public async Task<ToolResult> ExecuteAsync(IDictionary<string, object> args)
@@ -23,17 +19,26 @@ public sealed class StopProjectTool(
         if (string.IsNullOrWhiteSpace(projectName))
             return ToolResult.Fail(Name, "Missing required parameter: project_name");
 
-        var (profileName, host, resolveError) = await ToolHelper.ResolveProfileAndHostAsync(
-            profileService, hostService, args);
-        if (resolveError is not null)
-            return ToolResult.Fail(Name, resolveError);
+        await context.EnsureIndexFreshAsync();
+        var result = context.ResolveProject(projectName);
 
-        var (project, projectError) = await ToolHelper.ResolveProjectAsync(
-            projectService, profileName, host.Id, projectName);
-        if (project is null)
-            return ToolResult.Fail(Name, projectError!);
+        if (result.Candidates is not null)
+        {
+            context.SetPendingDisambiguation(new DisambiguationState
+            {
+                Options = result.Candidates,
+                OriginalToolName = Name,
+                OriginalArgs = args,
+                ProjectParamName = "project_name"
+            });
+            return ToolResult.Ok(Name, ToolHelper.FormatDisambiguation(result.Candidates));
+        }
 
-        await projectService.StopProjectAsync(profileName, host.Id, project.Id);
-        return ToolResult.Ok(Name, $"Project '{project.Name}' stopped.");
+        if (!result.Resolved)
+            return ToolResult.Fail(Name, result.Error!);
+
+        var match = result.Match!;
+        await projectService.StopProjectAsync(match.ProfileName, match.HostId, match.Summary.Id);
+        return ToolResult.Ok(Name, $"Project '{match.Summary.Name}' stopped.");
     }
 }

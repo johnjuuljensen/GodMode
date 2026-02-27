@@ -2,8 +2,11 @@ using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using GodMode.Avalonia.Voice;
+using GodMode.Shared.Models;
 using GodMode.Voice.Services;
 using GodMode.Voice.Speech;
+using GodMode.Voice.Tools;
 using GodMode.Voice.Windows;
 
 namespace GodMode.Avalonia.ViewModels;
@@ -11,6 +14,7 @@ namespace GodMode.Avalonia.ViewModels;
 public partial class VoiceAssistantViewModel : ViewModelBase
 {
 	private readonly AssistantService _assistant;
+	private readonly VoiceContext _voiceContext;
 	private readonly InferenceConfig _config;
 	private readonly ISpeechRecognizer _recognizer;
 	private CancellationTokenSource? _cts;
@@ -47,11 +51,13 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 	public VoiceAssistantViewModel(
 		INavigationService navigationService,
 		AssistantService assistant,
-		ISpeechRecognizer recognizer)
+		ISpeechRecognizer recognizer,
+		VoiceContext voiceContext)
 		: base(navigationService)
 	{
 		_assistant = assistant;
 		_recognizer = recognizer;
+		_voiceContext = voiceContext;
 		_config = InferenceConfig.Load();
 
 		SttEngineName = $"STT: {_recognizer.EngineName}";
@@ -59,6 +65,11 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 
 		PopulateLanguages();
 
+		// Wire voice context into AssistantService
+		_assistant.ContextSummaryProvider = () => _voiceContext.GetSummary();
+		_assistant.DisambiguationResolver = TryResolveDisambiguation;
+
+		// Subscribe to assistant events
 		_assistant.StatusChanged += (_, status) =>
 			Dispatcher.UIThread.Post(() => StatusText = status);
 
@@ -70,6 +81,9 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 
 		_assistant.ErrorOccurred += (_, error) =>
 			Dispatcher.UIThread.Post(() => AddMessage("Error", error, isUser: false, isError: true));
+
+		// Subscribe to focused project output
+		_voiceContext.ProjectOutputReceived += OnProjectOutputReceived;
 
 		if (!string.IsNullOrEmpty(_config.Phi4ModelPath))
 		{
@@ -89,6 +103,50 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		{
 			ShowFirstRunMessage();
 		}
+	}
+
+	private ToolCall? TryResolveDisambiguation(string userText)
+	{
+		var pending = _voiceContext.PendingDisambiguation;
+		if (pending is null) return null;
+
+		var trimmed = userText.Trim();
+		if (!int.TryParse(trimmed, out var choice) || choice < 1 || choice > pending.Options.Count)
+		{
+			// Not a number selection — clear disambiguation so LLM processes normally
+			_voiceContext.ClearPendingDisambiguation();
+			return null;
+		}
+
+		var selected = pending.Options[choice - 1];
+		_voiceContext.ClearPendingDisambiguation();
+
+		// Rebuild the original tool call with the resolved project name
+		var newArgs = new Dictionary<string, object>(pending.OriginalArgs)
+		{
+			[pending.ProjectParamName] = selected.Summary.Name
+		};
+
+		return new ToolCall { ToolName = pending.OriginalToolName, Arguments = newArgs };
+	}
+
+	private void OnProjectOutputReceived(object? sender, ProjectOutputEventArgs e)
+	{
+		Dispatcher.UIThread.Post(() =>
+		{
+			var summary = SummarizeProjectOutput(e.Message);
+			if (!string.IsNullOrWhiteSpace(summary))
+				AddMessage(e.ProjectName, summary, isUser: false);
+		});
+	}
+
+	private static string SummarizeProjectOutput(ClaudeMessage message)
+	{
+		if (!string.IsNullOrEmpty(message.ContentSummary))
+			return message.ContentSummary;
+		if (!string.IsNullOrEmpty(message.Summary))
+			return message.Summary;
+		return string.Empty;
 	}
 
 	private async Task AutoLoadModelAsync(string path)
@@ -144,7 +202,7 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 	{
 		StatusText = "First run — configure model path below.";
 		AddMessage("System",
-			$"Welcome to Godmode Voice Assistant!\n\n" +
+			$"Welcome to GodMode Voice Assistant!\n\n" +
 			$"No model configured yet. To get started:\n" +
 			$"1. Download Phi-4-mini ONNX from HuggingFace:\n" +
 			$"   huggingface-cli download microsoft/Phi-4-mini-instruct-onnx --local-dir <path>\n" +

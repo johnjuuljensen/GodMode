@@ -1,12 +1,10 @@
 using System.Text.Json;
+using GodMode.Avalonia.Voice;
 using GodMode.Voice.Tools;
 
 namespace GodMode.Avalonia.Tools;
 
-public sealed class CreateProjectTool(
-    IProfileService profileService,
-    IHostConnectionService hostService,
-    IProjectService projectService) : ITool
+public sealed class CreateProjectTool(VoiceContext context, IProjectService projectService) : ITool
 {
     public string Name => "create_project";
     public string Description => "Creates a new project on a server. Lists available project roots if no root is specified.";
@@ -15,24 +13,21 @@ public sealed class CreateProjectTool(
     [
         new() { Name = "project_root", Type = "string", Description = "The project root/template to use", Required = false },
         new() { Name = "name", Type = "string", Description = "Name for the new project", Required = false },
-        new() { Name = "prompt", Type = "string", Description = "Initial prompt or description for the project", Required = false },
-        new() { Name = "server_name", Type = "string", Description = "Server to create on (uses first available if omitted)", Required = false },
-        new() { Name = "profile_name", Type = "string", Description = "Profile to use (uses current if omitted)", Required = false }
+        new() { Name = "prompt", Type = "string", Description = "Initial prompt or description for the project", Required = false }
     ];
 
     public async Task<ToolResult> ExecuteAsync(IDictionary<string, object> args)
     {
-        var (profileName, host, resolveError) = await ToolHelper.ResolveProfileAndHostAsync(
-            profileService, hostService, args);
-        if (resolveError is not null)
-            return ToolResult.Fail(Name, resolveError);
+        var (profileName, host, error) = await ResolveHostFromContextAsync();
+        if (error is not null)
+            return ToolResult.Fail(Name, error);
 
         var rootName = ToolHelper.ExtractString(args, "project_root");
 
         // If no root specified, list available roots
         if (string.IsNullOrWhiteSpace(rootName))
         {
-            var roots = (await projectService.ListProjectRootsAsync(profileName, host.Id)).ToList();
+            var roots = (await projectService.ListProjectRootsAsync(profileName, host!.Id)).ToList();
             if (roots.Count == 0)
                 return ToolResult.Fail(Name, "No project roots configured on this server.");
 
@@ -49,7 +44,6 @@ public sealed class CreateProjectTool(
             }
         }
 
-        // Build inputs from provided parameters
         var inputs = new Dictionary<string, JsonElement>();
         var name = ToolHelper.ExtractString(args, "name");
         var prompt = ToolHelper.ExtractString(args, "prompt");
@@ -59,9 +53,21 @@ public sealed class CreateProjectTool(
         if (!string.IsNullOrWhiteSpace(prompt))
             inputs["prompt"] = JsonSerializer.SerializeToElement(prompt);
 
-        var detail = await projectService.CreateProjectAsync(profileName, host.Id, rootName, inputs);
+        var detail = await projectService.CreateProjectAsync(profileName, host!.Id, rootName, inputs);
+
+        // Refresh index to include the new project
+        await context.RefreshProjectIndexAsync();
 
         return ToolResult.Ok(Name,
             $"Project '{detail.Status.Name}' created successfully. State: {detail.Status.State}");
+    }
+
+    private async Task<(string ProfileName, GodMode.Shared.Models.HostInfo? Host, string? Error)> ResolveHostFromContextAsync()
+    {
+        var (profileName, profileFound) = await context.ResolveEffectiveProfileAsync();
+        if (!profileFound) return ("", null, "No profile available.");
+
+        var (host, hostError) = await context.ResolveEffectiveHostAsync();
+        return (profileName, host, hostError);
     }
 }

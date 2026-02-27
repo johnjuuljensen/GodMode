@@ -1,44 +1,58 @@
+using GodMode.Avalonia.Voice;
 using GodMode.Voice.Tools;
 
 namespace GodMode.Avalonia.Tools;
 
-public sealed class SendInputTool(
-    IProfileService profileService,
-    IHostConnectionService hostService,
-    IProjectService projectService) : ITool
+public sealed class SendInputTool(VoiceContext context, IProjectService projectService) : ITool
 {
     public string Name => "send_input";
-    public string Description => "Sends a text response to a project that is waiting for input.";
+    public string Description => "Sends a text response to a project. Uses the focused project if one is active.";
 
     public IReadOnlyList<ToolParameter> Parameters =>
     [
-        new() { Name = "project_name", Type = "string", Description = "The name of the project to send input to", Required = true },
-        new() { Name = "message", Type = "string", Description = "The text message to send as input", Required = true },
-        new() { Name = "server_name", Type = "string", Description = "Server the project is on (uses first available if omitted)", Required = false },
-        new() { Name = "profile_name", Type = "string", Description = "Profile to use (uses current if omitted)", Required = false }
+        new() { Name = "project_name", Type = "string", Description = "The project name (optional if a project is focused)", Required = false },
+        new() { Name = "message", Type = "string", Description = "The text message to send", Required = true }
     ];
 
     public async Task<ToolResult> ExecuteAsync(IDictionary<string, object> args)
     {
-        var projectName = ToolHelper.ExtractString(args, "project_name");
-        if (string.IsNullOrWhiteSpace(projectName))
-            return ToolResult.Fail(Name, "Missing required parameter: project_name");
-
         var message = ToolHelper.ExtractString(args, "message");
         if (string.IsNullOrWhiteSpace(message))
             return ToolResult.Fail(Name, "Missing required parameter: message");
 
-        var (profileName, host, resolveError) = await ToolHelper.ResolveProfileAndHostAsync(
-            profileService, hostService, args);
-        if (resolveError is not null)
-            return ToolResult.Fail(Name, resolveError);
+        var projectName = ToolHelper.ExtractString(args, "project_name");
 
-        var (project, projectError) = await ToolHelper.ResolveProjectAsync(
-            projectService, profileName, host.Id, projectName);
-        if (project is null)
-            return ToolResult.Fail(Name, projectError!);
+        // If no project name and we have focus, use the focused project
+        if (string.IsNullOrWhiteSpace(projectName) && context.Focus is not null)
+        {
+            await projectService.SendInputAsync(
+                context.Focus.ProfileName, context.Focus.HostId, context.Focus.ProjectId, message);
+            return ToolResult.Ok(Name, $"Sent to '{context.Focus.ProjectName}': {message}");
+        }
 
-        await projectService.SendInputAsync(profileName, host.Id, project.Id, message);
-        return ToolResult.Ok(Name, $"Input sent to project '{project.Name}': {message}");
+        if (string.IsNullOrWhiteSpace(projectName))
+            return ToolResult.Fail(Name, "No project specified and no project is focused.");
+
+        await context.EnsureIndexFreshAsync();
+        var result = context.ResolveProject(projectName);
+
+        if (result.Candidates is not null)
+        {
+            context.SetPendingDisambiguation(new DisambiguationState
+            {
+                Options = result.Candidates,
+                OriginalToolName = Name,
+                OriginalArgs = args,
+                ProjectParamName = "project_name"
+            });
+            return ToolResult.Ok(Name, ToolHelper.FormatDisambiguation(result.Candidates));
+        }
+
+        if (!result.Resolved)
+            return ToolResult.Fail(Name, result.Error!);
+
+        var match = result.Match!;
+        await projectService.SendInputAsync(match.ProfileName, match.HostId, match.Summary.Id, message);
+        return ToolResult.Ok(Name, $"Sent to '{match.Summary.Name}': {message}");
     }
 }

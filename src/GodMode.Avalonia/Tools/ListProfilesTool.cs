@@ -1,9 +1,10 @@
 using System.Text.Json;
+using GodMode.Avalonia.Voice;
 using GodMode.Voice.Tools;
 
 namespace GodMode.Avalonia.Tools;
 
-public sealed class ListProfilesTool(IProfileService profileService) : ITool
+public sealed class ListProfilesTool(VoiceContext context, IProfileService profileService) : ITool
 {
     public string Name => "list_profiles";
     public string Description => "Lists all configured profiles and shows which one is currently active.";
@@ -12,7 +13,6 @@ public sealed class ListProfilesTool(IProfileService profileService) : ITool
     public async Task<ToolResult> ExecuteAsync(IDictionary<string, object> args)
     {
         var profiles = await profileService.GetProfilesAsync();
-        var selected = await profileService.GetSelectedProfileAsync();
 
         if (profiles.Count == 0)
             return ToolResult.Ok(Name, "No profiles configured. Create one in the app first.");
@@ -20,11 +20,13 @@ public sealed class ListProfilesTool(IProfileService profileService) : ITool
         var result = profiles.Select(p => new
         {
             p.Name,
-            Active = p.Name == selected?.Name,
+            Active = p.Name == context.ActiveProfileName,
             Accounts = p.Accounts.Select(a => new { a.Type, a.Username }).ToList()
         });
 
-        return ToolResult.Ok(Name, JsonSerializer.Serialize(result,
-            new JsonSerializerOptions { WriteIndented = true }));
+        var scope = context.ActiveProfileName ?? "All";
+        return ToolResult.Ok(Name,
+            $"Active scope: {scope}\n" +
+            JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }
 }

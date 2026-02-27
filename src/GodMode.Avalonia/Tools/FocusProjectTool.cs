@@ -3,14 +3,14 @@ using GodMode.Voice.Tools;
 
 namespace GodMode.Avalonia.Tools;
 
-public sealed class ResumeProjectTool(VoiceContext context, IProjectService projectService) : ITool
+public sealed class FocusProjectTool(VoiceContext context) : ITool
 {
-    public string Name => "resume_project";
-    public string Description => "Resumes a stopped project.";
+    public string Name => "focus_project";
+    public string Description => "Focuses on a project to see its live output and send it commands directly.";
 
     public IReadOnlyList<ToolParameter> Parameters =>
     [
-        new() { Name = "project_name", Type = "string", Description = "The name of the project to resume", Required = true }
+        new() { Name = "project_name", Type = "string", Description = "The name of the project to focus on", Required = true }
     ];
 
     public async Task<ToolResult> ExecuteAsync(IDictionary<string, object> args)
@@ -18,6 +18,11 @@ public sealed class ResumeProjectTool(VoiceContext context, IProjectService proj
         var projectName = ToolHelper.ExtractString(args, "project_name");
         if (string.IsNullOrWhiteSpace(projectName))
             return ToolResult.Fail(Name, "Missing required parameter: project_name");
+
+        // Already focused on the same project?
+        if (context.Focus is not null &&
+            context.Focus.ProjectName.Equals(projectName, StringComparison.OrdinalIgnoreCase))
+            return ToolResult.Ok(Name, $"Already focused on '{context.Focus.ProjectName}'.");
 
         await context.EnsureIndexFreshAsync();
         var result = context.ResolveProject(projectName);
@@ -38,7 +43,10 @@ public sealed class ResumeProjectTool(VoiceContext context, IProjectService proj
             return ToolResult.Fail(Name, result.Error!);
 
         var match = result.Match!;
-        await projectService.ResumeProjectAsync(match.ProfileName, match.HostId, match.Summary.Id);
-        return ToolResult.Ok(Name, $"Project '{match.Summary.Name}' resumed.");
+        await context.FocusProjectAsync(match.ProfileName, match.HostId, match.Summary.Id, match.Summary.Name);
+
+        return ToolResult.Ok(Name,
+            $"Now focused on '{match.Summary.Name}' ({match.Summary.State}). " +
+            $"You'll see live output. Say 'unfocus' to exit.");
     }
 }
