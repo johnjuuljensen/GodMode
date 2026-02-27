@@ -1,0 +1,84 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:GodMode.Avalonia.ViewModels"
+             x:Class="GodMode.Avalonia.Views.AddServerView"
+             x:DataType="vm:AddServerViewModel">
+
+    <ScrollViewer Padding="20">
+        <StackPanel Spacing="15" MaxWidth="500" HorizontalAlignment="Center">
+
+            <!-- Profile Info -->
+            <Border Padding="10" Background="#2C2C2C" CornerRadius="4">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <TextBlock Text="Adding server to:" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding ProfileName}" FontWeight="Bold" VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+
+            <!-- Server Type -->
+            <StackPanel Spacing="5">
+                <TextBlock Text="Server Type" FontWeight="Bold" />
+                <ComboBox ItemsSource="{Binding ServerTypes}"
+                          SelectedItem="{Binding SelectedServerType}"
+                          HorizontalAlignment="Stretch" />
+            </StackPanel>
+
+            <!-- GitHub Codespaces Fields -->
+            <StackPanel Spacing="10" IsVisible="{Binding IsGitHubCodespaces}">
+                <StackPanel Spacing="5">
+                    <TextBlock Text="GitHub Username" FontWeight="Bold" />
+                    <TextBox Text="{Binding GitHubUsername}" Watermark="Enter GitHub username" />
+                </StackPanel>
+
+                <StackPanel Spacing="5">
+                    <TextBlock Text="GitHub Token" FontWeight="Bold" />
+                    <TextBox Text="{Binding GitHubToken}"
+                             Watermark="Enter personal access token"
+                             PasswordChar="*" />
+                    <TextBlock Text="Token needs 'codespace' scope for Codespaces access"
+                               FontSize="12" Foreground="Gray" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Local Server Fields -->
+            <StackPanel Spacing="10" IsVisible="{Binding IsLocalServer}">
+                <StackPanel Spacing="5">
+                    <TextBlock Text="Server URL" FontWeight="Bold" />
+                    <TextBox Text="{Binding ServerUrl}"
+                             Watermark="http://localhost:31337" />
+                    <TextBlock Text="URL of the GodMode.Server instance"
+                               FontSize="12" Foreground="Gray" />
+                </StackPanel>
+
+                <StackPanel Spacing="5">
+                    <TextBlock Text="Display Name (optional)" FontWeight="Bold" />
+                    <TextBox Text="{Binding ServerDisplayName}" Watermark="Enter display name" />
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Buttons -->
+            <Grid ColumnDefinitions="*,*" Margin="0,20,0,0">
+                <Button Grid.Column="0"
+                        Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        HorizontalAlignment="Stretch"
+                        Margin="0,0,5,0" />
+                <Button Grid.Column="1"
+                        Content="Add Server"
+                        Command="{Binding SaveCommand}"
+                        HorizontalAlignment="Stretch"
+                        Margin="5,0,0,0" />
+            </Grid>
+
+            <!-- Error -->
+            <TextBlock Text="{Binding ErrorMessage}"
+                       IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
+                       Foreground="Red" HorizontalAlignment="Center" />
+
+            <!-- Loading -->
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding IsSaving}"
+                         HorizontalAlignment="Center" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

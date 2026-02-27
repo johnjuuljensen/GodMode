@@ -1,0 +1,166 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:GodMode.Avalonia.ViewModels"
+             xmlns:models="using:GodMode.Shared.Models"
+             x:Class="GodMode.Avalonia.Views.ProjectView"
+             x:DataType="vm:ProjectViewModel">
+
+    <Grid RowDefinitions="Auto,*,Auto" Margin="10">
+
+        <!-- Header Bar -->
+        <Border Grid.Row="0" Padding="8" Margin="5" Background="#2C2C2C" CornerRadius="4">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+
+                <!-- State Badge -->
+                <Border Grid.Column="0"
+                        Padding="8,4"
+                        Background="{Binding Status.State, Converter={StaticResource StateToColorConverter}}"
+                        CornerRadius="4">
+                    <TextBlock Text="{Binding Status.State}"
+                               FontSize="12" FontWeight="Bold"
+                               Foreground="White" />
+                </Border>
+
+                <!-- Quick Stats -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="15" Margin="15,0,0,0" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="$" FontSize="11" Foreground="#AAAAAA" />
+                        <TextBlock Text="{Binding Status.Metrics.CostEstimate, StringFormat='{}{0:F2}'}"
+                                   FontSize="11" Foreground="#AAAAAA" FontWeight="Bold" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Status.Metrics.InputTokens}" FontSize="11" Foreground="#AAAAAA" />
+                        <TextBlock Text="/" FontSize="11" Foreground="#AAAAAA" />
+                        <TextBlock Text="{Binding Status.Metrics.OutputTokens}" FontSize="11" Foreground="#AAAAAA" />
+                        <TextBlock Text=" tok" FontSize="11" Foreground="#AAAAAA" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Action Buttons -->
+                <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="5">
+                    <Button Content="Back"
+                            Command="{Binding GoBackCommand}"
+                            FontSize="11" Padding="8,4" Height="30" />
+                    <Button Content="Refresh"
+                            Command="{Binding RefreshCommand}"
+                            FontSize="11" Padding="8,4" Height="30" />
+                    <Button Content="Resume"
+                            Command="{Binding ResumeProjectCommand}"
+                            IsVisible="{Binding CanResume}"
+                            FontSize="11" Padding="8,4" Height="30" />
+                    <Button Content="Stop"
+                            Command="{Binding StopProjectCommand}"
+                            IsVisible="{Binding CanResume, Converter={StaticResource InverseBoolConverter}}"
+                            FontSize="11" Padding="8,4" Height="30" />
+                    <Button Content="Metrics"
+                            Command="{Binding LoadMetricsCommand}"
+                            FontSize="11" Padding="8,4" Height="30" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Chat Output -->
+        <ScrollViewer Grid.Row="1" x:Name="OutputScrollViewer" Margin="5">
+            <ItemsControl ItemsSource="{Binding OutputMessages}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:ClaudeMessage">
+                        <Border Padding="8"
+                                Margin="2"
+                                MinWidth="80"
+                                MaxWidth="900"
+                                Background="#1E1E1E"
+                                BorderBrush="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}"
+                                BorderThickness="2"
+                                CornerRadius="8">
+                            <StackPanel Spacing="4">
+                                <!-- Header: Chevron + Type Badge + Summary -->
+                                <Grid ColumnDefinitions="Auto,Auto,*">
+                                    <TextBlock Grid.Column="0"
+                                               Text="{Binding IsExpanded, Converter={StaticResource BoolToChevronConverter}}"
+                                               FontSize="12" VerticalAlignment="Center"
+                                               Foreground="#AAAAAA" Margin="0,0,6,0"
+                                               Cursor="Hand" />
+
+                                    <Border Grid.Column="1"
+                                            Padding="6,2"
+                                            Background="{Binding Type, Converter={StaticResource MessageTypeToColorConverter}}"
+                                            CornerRadius="3"
+                                            VerticalAlignment="Center" Margin="0,0,8,0">
+                                        <TextBlock Text="{Binding TypeDisplay}"
+                                                   FontSize="10" FontWeight="Bold"
+                                                   Foreground="White" />
+                                    </Border>
+
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding Summary}"
+                                               FontSize="11" Foreground="#CCCCCC"
+                                               TextTrimming="CharacterEllipsis"
+                                               MaxLines="1" VerticalAlignment="Center"
+                                               IsVisible="{Binding HasContentItems, Converter={StaticResource InverseBoolConverter}}" />
+                                </Grid>
+
+                                <!-- Collapsed: Content Summary -->
+                                <TextBlock IsVisible="{Binding !IsExpanded}"
+                                           Text="{Binding ContentSummary}"
+                                           FontSize="11" FontFamily="Consolas"
+                                           Foreground="#E0E0E0"
+                                           TextWrapping="Wrap"
+                                           Margin="20,4,0,0" />
+
+                                <!-- Expanded: Formatted JSON -->
+                                <ScrollViewer IsVisible="{Binding IsExpanded}"
+                                              MaxHeight="400" Margin="0,4,0,0">
+                                    <TextBlock Text="{Binding FormattedJson}"
+                                               FontSize="10" FontFamily="Consolas"
+                                               Foreground="#E0E0E0"
+                                               Background="#0D0D0D"
+                                               Padding="8"
+                                               TextWrapping="Wrap" />
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- Input Area -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="5">
+            <Border Grid.Column="0"
+                    BorderThickness="1"
+                    BorderBrush="Gray"
+                    CornerRadius="8"
+                    Padding="10">
+                <TextBox x:Name="InputEditor"
+                         Text="{Binding InputText}"
+                         Watermark="Type your response..."
+                         Height="80"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         IsEnabled="{Binding CanSendInput}" />
+            </Border>
+
+            <Button Grid.Column="1"
+                    Content="Send"
+                    Command="{Binding SendInputCommand}"
+                    IsEnabled="{Binding CanSendInput}"
+                    VerticalAlignment="Bottom"
+                    Height="80" Width="80"
+                    Margin="5,0,0,0" />
+        </Grid>
+
+        <!-- Loading Overlay -->
+        <ProgressBar Grid.Row="1"
+                     IsIndeterminate="True"
+                     IsVisible="{Binding IsLoading}"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center" />
+
+        <!-- Error -->
+        <TextBlock Grid.Row="1"
+                   Text="{Binding ErrorMessage}"
+                   IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
+                   Foreground="Red" Margin="10"
+                   VerticalAlignment="Bottom" HorizontalAlignment="Center" />
+    </Grid>
+</UserControl>

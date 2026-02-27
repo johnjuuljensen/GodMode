@@ -1,0 +1,93 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:GodMode.Avalonia.ViewModels"
+             xmlns:models="using:GodMode.Shared.Models"
+             x:Class="GodMode.Avalonia.Views.CreateProjectView"
+             x:DataType="vm:CreateProjectViewModel">
+
+    <ScrollViewer Padding="20">
+        <StackPanel Spacing="15" MaxWidth="600" HorizontalAlignment="Center">
+
+            <!-- Loading -->
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding IsLoading}"
+                         HorizontalAlignment="Center" />
+
+            <!-- Project Root -->
+            <StackPanel Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <TextBlock Text="Project Root" FontWeight="Bold" />
+                <ComboBox ItemsSource="{Binding ProjectRoots}"
+                          SelectedItem="{Binding SelectedProjectRoot}"
+                          HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:ProjectRoot">
+                            <TextBlock Text="{Binding Name}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="Where to create the project"
+                           FontSize="12" Foreground="Gray" />
+            </StackPanel>
+
+            <!-- Project Type -->
+            <StackPanel Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <TextBlock Text="Project Type" FontWeight="Bold" />
+                <ComboBox ItemsSource="{Binding ProjectTypes}"
+                          SelectedItem="{Binding SelectedProjectType}"
+                          HorizontalAlignment="Stretch" />
+                <TextBlock Text="RawFolder: Empty project. GitHubRepo: Clone repository. GitHubWorktree: Branch-based workflow."
+                           FontSize="12" Foreground="Gray" TextWrapping="Wrap" />
+            </StackPanel>
+
+            <!-- Project Name -->
+            <StackPanel Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <TextBlock Text="Project Name" FontWeight="Bold" />
+                <TextBox Text="{Binding ProjectName}" Watermark="Enter project name" />
+                <TextBlock Text="For worktree projects, this is also the branch name"
+                           FontSize="12" Foreground="Gray"
+                           IsVisible="{Binding SelectedProjectType, Converter={StaticResource IsWorktreeConverter}}" />
+            </StackPanel>
+
+            <!-- Repo URL -->
+            <StackPanel Spacing="5" IsVisible="{Binding RequiresRepoUrl}">
+                <TextBlock Text="Repository URL" FontWeight="Bold" />
+                <TextBox Text="{Binding RepoUrl}" Watermark="https://github.com/user/repo" />
+            </StackPanel>
+
+            <!-- Initial Prompt -->
+            <StackPanel Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <TextBlock Text="Initial Prompt" FontWeight="Bold" />
+                <TextBox Text="{Binding InitialPrompt}"
+                         Watermark="Enter the initial task or prompt for Claude..."
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         Height="150" />
+            </StackPanel>
+
+            <!-- Buttons -->
+            <Grid ColumnDefinitions="*,*" Margin="0,20,0,0"
+                  IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <Button Grid.Column="0"
+                        Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        HorizontalAlignment="Stretch"
+                        Margin="0,0,5,0" />
+                <Button Grid.Column="1"
+                        Content="Create"
+                        Command="{Binding CreateCommand}"
+                        HorizontalAlignment="Stretch"
+                        Margin="5,0,0,0" />
+            </Grid>
+
+            <!-- Error -->
+            <TextBlock Text="{Binding ErrorMessage}"
+                       IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
+                       Foreground="Red" HorizontalAlignment="Center" />
+
+            <!-- Creating -->
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding IsCreating}"
+                         HorizontalAlignment="Center" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
