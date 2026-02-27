@@ -1,5 +1,5 @@
+using System.Text.Json;
 using GodMode.Shared.Models;
-using GodMode.Shared.Enums;
 
 namespace GodMode.ClientBase.Abstractions;
 
@@ -14,9 +14,9 @@ public interface IProjectConnection : IDisposable
     bool IsConnected { get; }
 
     /// <summary>
-    /// Lists all available project roots on the server
+    /// Lists all available project roots with their input schemas
     /// </summary>
-    Task<IEnumerable<ProjectRoot>> ListProjectRootsAsync();
+    Task<IEnumerable<ProjectRootInfo>> ListProjectRootsAsync();
 
     /// <summary>
     /// Lists all projects on the connected host
@@ -31,17 +31,9 @@ public interface IProjectConnection : IDisposable
     /// <summary>
     /// Creates a new project with the specified parameters
     /// </summary>
-    /// <param name="name">Project name. For worktree projects, this is also the branch name.</param>
     /// <param name="projectRootName">Name of the project root where the project will be created.</param>
-    /// <param name="projectType">Type of project to create.</param>
-    /// <param name="repoUrl">Repository URL (required for GitHubRepo and GitHubWorktree types).</param>
-    /// <param name="initialPrompt">Initial prompt to send to Claude.</param>
-    Task<ProjectDetail> CreateProjectAsync(
-        string name,
-        string projectRootName,
-        ProjectType projectType,
-        string? repoUrl,
-        string initialPrompt);
+    /// <param name="inputs">Form inputs as key-value pairs from the dynamic form.</param>
+    Task<ProjectDetail> CreateProjectAsync(string projectRootName, Dictionary<string, JsonElement> inputs);
 
     /// <summary>
     /// Sends user input to a project waiting for input
@@ -68,6 +60,12 @@ public interface IProjectConnection : IDisposable
     /// Gets the metrics HTML for a project
     /// </summary>
     Task<string> GetMetricsHtmlAsync(string projectId);
+
+    /// <summary>
+    /// Event raised when the server streams creation progress for a project.
+    /// Parameters: projectId, message.
+    /// </summary>
+    event Action<string, string>? CreationProgressReceived;
 
     /// <summary>
     /// Disconnects from the host

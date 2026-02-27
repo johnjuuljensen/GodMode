@@ -23,4 +23,9 @@ public interface IProjectHubClient
     /// Called when a new project is created.
     /// </summary>
     Task ProjectCreated(ProjectStatus status);
+
+    /// <summary>
+    /// Called during project creation to stream script progress to the client.
+    /// </summary>
+    Task CreationProgress(string projectId, string message);
 }

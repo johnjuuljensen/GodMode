@@ -19,11 +19,12 @@ namespace GodMode.ProjectFiles;
 [JsonSerializable(typeof(ProjectMetrics))]
 [JsonSerializable(typeof(GitStatus))]
 [JsonSerializable(typeof(TestStatus))]
-[JsonSerializable(typeof(CreateProjectRequest))]
 [JsonSerializable(typeof(ProjectDetail))]
 [JsonSerializable(typeof(OutputEventType))]
 [JsonSerializable(typeof(ProjectState))]
+[JsonSerializable(typeof(RootConfig))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
+[JsonSerializable(typeof(Dictionary<string, JsonElement>))]
 public partial class ProjectJsonContext : JsonSerializerContext
 {
 }

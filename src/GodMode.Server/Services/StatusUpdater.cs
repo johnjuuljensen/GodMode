@@ -29,7 +29,6 @@ public class StatusUpdater : IStatusUpdater
             project.State,
             project.CreatedAt,
             project.UpdatedAt,
-            project.RepoUrl,
             project.CurrentQuestion,
             project.Metrics,
             project.Git,

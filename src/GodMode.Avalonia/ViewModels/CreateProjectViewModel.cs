@@ -1,6 +1,7 @@
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using GodMode.Shared.Enums;
+using GodMode.ClientBase.Models;
 using GodMode.Shared.Models;
 using System.Collections.ObjectModel;
 
@@ -17,15 +18,6 @@ public partial class CreateProjectViewModel : ViewModelBase
 	private string _hostId = string.Empty;
 
 	[ObservableProperty]
-	private string _projectName = string.Empty;
-
-	[ObservableProperty]
-	private string? _repoUrl;
-
-	[ObservableProperty]
-	private string _initialPrompt = string.Empty;
-
-	[ObservableProperty]
 	private bool _isCreating;
 
 	[ObservableProperty]
@@ -35,18 +27,16 @@ public partial class CreateProjectViewModel : ViewModelBase
 	private string? _errorMessage;
 
 	[ObservableProperty]
-	private ObservableCollection<ProjectRoot> _projectRoots = [];
+	private string? _creationProgressText;
 
 	[ObservableProperty]
-	private ProjectRoot? _selectedProjectRoot;
+	private ObservableCollection<ProjectRootInfo> _projectRoots = [];
 
 	[ObservableProperty]
-	private ProjectType[] _projectTypes = [ProjectType.RawFolder, ProjectType.GitHubRepo, ProjectType.GitHubWorktree];
+	private ProjectRootInfo? _selectedProjectRoot;
 
 	[ObservableProperty]
-	private ProjectType _selectedProjectType = ProjectType.RawFolder;
-
-	public bool RequiresRepoUrl => SelectedProjectType is ProjectType.GitHubRepo or ProjectType.GitHubWorktree;
+	private ObservableCollection<FormField> _formFields = [];
 
 	public CreateProjectViewModel(INavigationService navigationService, IProjectService projectService)
 		: base(navigationService)
@@ -54,9 +44,17 @@ public partial class CreateProjectViewModel : ViewModelBase
 		_projectService = projectService;
 	}
 
-	partial void OnSelectedProjectTypeChanged(ProjectType value)
+	partial void OnSelectedProjectRootChanged(ProjectRootInfo? value)
 	{
-		OnPropertyChanged(nameof(RequiresRepoUrl));
+		if (value != null)
+		{
+			var fields = FormFieldParser.Parse(value.InputSchema);
+			FormFields = new ObservableCollection<FormField>(fields);
+		}
+		else
+		{
+			FormFields = [];
+		}
 	}
 
 	partial void OnProfileNameChanged(string value)
@@ -83,7 +81,7 @@ public partial class CreateProjectViewModel : ViewModelBase
 		try
 		{
 			var roots = await _projectService.ListProjectRootsAsync(ProfileName, HostId);
-			ProjectRoots = new ObservableCollection<ProjectRoot>(roots);
+			ProjectRoots = new ObservableCollection<ProjectRootInfo>(roots);
 
 			if (ProjectRoots.Count > 0)
 				SelectedProjectRoot = ProjectRoots[0];
@@ -102,21 +100,40 @@ public partial class CreateProjectViewModel : ViewModelBase
 	private async Task CreateAsync()
 	{
 		ErrorMessage = null;
+		CreationProgressText = null;
 
-		if (string.IsNullOrWhiteSpace(ProjectName)) { ErrorMessage = "Please enter a project name"; return; }
 		if (SelectedProjectRoot == null) { ErrorMessage = "Please select a project root"; return; }
-		if (RequiresRepoUrl && string.IsNullOrWhiteSpace(RepoUrl)) { ErrorMessage = "Please enter a repository URL"; return; }
-		if (string.IsNullOrWhiteSpace(InitialPrompt)) { ErrorMessage = "Please enter an initial prompt"; return; }
+
+		// Validate required fields
+		foreach (var field in FormFields)
+		{
+			if (field.IsRequired && string.IsNullOrWhiteSpace(field.Value))
+			{
+				ErrorMessage = $"Please fill in {field.Title}";
+				return;
+			}
+		}
 
 		IsCreating = true;
 
 		try
 		{
+			// Build inputs dictionary from form fields
+			var inputs = new Dictionary<string, JsonElement>();
+			foreach (var field in FormFields)
+			{
+				if (!string.IsNullOrEmpty(field.Value))
+				{
+					inputs[field.Key] = field.FieldType == "boolean"
+						? JsonSerializer.SerializeToElement(field.Value == "true" || field.Value == "True")
+						: JsonSerializer.SerializeToElement(field.Value);
+				}
+			}
+
 			var detail = await _projectService.CreateProjectAsync(
-				ProfileName, HostId, ProjectName,
-				SelectedProjectRoot.Name, SelectedProjectType,
-				string.IsNullOrWhiteSpace(RepoUrl) ? null : RepoUrl,
-				InitialPrompt);
+				ProfileName, HostId,
+				SelectedProjectRoot.Name,
+				inputs);
 
 			// Navigate back then to the new project
 			Navigation.GoBack();

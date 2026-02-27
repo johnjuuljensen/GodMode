@@ -1,7 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:GodMode.Avalonia.ViewModels"
-             xmlns:models="using:GodMode.Shared.Models"
+             xmlns:models="using:GodMode.ClientBase.Models"
+             xmlns:shared="using:GodMode.Shared.Models"
              x:Class="GodMode.Avalonia.Views.CreateProjectView"
              x:DataType="vm:CreateProjectViewModel">
 
@@ -20,49 +21,31 @@
                           SelectedItem="{Binding SelectedProjectRoot}"
                           HorizontalAlignment="Stretch">
                     <ComboBox.ItemTemplate>
-                        <DataTemplate x:DataType="models:ProjectRoot">
+                        <DataTemplate x:DataType="shared:ProjectRootInfo">
                             <TextBlock Text="{Binding Name}" />
                         </DataTemplate>
                     </ComboBox.ItemTemplate>
                 </ComboBox>
-                <TextBlock Text="Where to create the project"
-                           FontSize="12" Foreground="Gray" />
-            </StackPanel>
-
-            <!-- Project Type -->
-            <StackPanel Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-                <TextBlock Text="Project Type" FontWeight="Bold" />
-                <ComboBox ItemsSource="{Binding ProjectTypes}"
-                          SelectedItem="{Binding SelectedProjectType}"
-                          HorizontalAlignment="Stretch" />
-                <TextBlock Text="RawFolder: Empty project. GitHubRepo: Clone repository. GitHubWorktree: Branch-based workflow."
+                <TextBlock Text="{Binding SelectedProjectRoot.Description}"
                            FontSize="12" Foreground="Gray" TextWrapping="Wrap" />
             </StackPanel>
 
-            <!-- Project Name -->
-            <StackPanel Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-                <TextBlock Text="Project Name" FontWeight="Bold" />
-                <TextBox Text="{Binding ProjectName}" Watermark="Enter project name" />
-                <TextBlock Text="For worktree projects, this is also the branch name"
-                           FontSize="12" Foreground="Gray"
-                           IsVisible="{Binding SelectedProjectType, Converter={StaticResource IsWorktreeConverter}}" />
-            </StackPanel>
-
-            <!-- Repo URL -->
-            <StackPanel Spacing="5" IsVisible="{Binding RequiresRepoUrl}">
-                <TextBlock Text="Repository URL" FontWeight="Bold" />
-                <TextBox Text="{Binding RepoUrl}" Watermark="https://github.com/user/repo" />
-            </StackPanel>
-
-            <!-- Initial Prompt -->
-            <StackPanel Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-                <TextBlock Text="Initial Prompt" FontWeight="Bold" />
-                <TextBox Text="{Binding InitialPrompt}"
-                         Watermark="Enter the initial task or prompt for Claude..."
-                         AcceptsReturn="True"
-                         TextWrapping="Wrap"
-                         Height="150" />
-            </StackPanel>
+            <!-- Dynamic Form Fields -->
+            <ItemsControl ItemsSource="{Binding FormFields}"
+                          IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:FormField">
+                        <StackPanel Spacing="5" Margin="0,5">
+                            <TextBlock Text="{Binding Title}" FontWeight="Bold" />
+                            <TextBox Text="{Binding Value}"
+                                     Watermark="{Binding Description}"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     MinHeight="30" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
 
             <!-- Buttons -->
             <Grid ColumnDefinitions="*,*" Margin="0,20,0,0"
@@ -83,6 +66,11 @@
             <TextBlock Text="{Binding ErrorMessage}"
                        IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
                        Foreground="Red" HorizontalAlignment="Center" />
+
+            <!-- Creation Progress -->
+            <TextBlock Text="{Binding CreationProgressText}"
+                       IsVisible="{Binding CreationProgressText, Converter={StaticResource IsNotNullConverter}}"
+                       FontSize="12" Foreground="Gray" HorizontalAlignment="Center" />
 
             <!-- Creating -->
             <ProgressBar IsIndeterminate="True"

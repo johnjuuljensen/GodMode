@@ -37,6 +37,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="..\GodMode.Maui\Collections\ObservableRangeCollection.cs" />
+    <Compile Remove="..\GodMode.Maui\ViewModels\FormFieldTemplateSelector.cs" />
   </ItemGroup>
 
 </Project>

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -12,9 +13,12 @@ public class CreateProjectViewModelTests : TestBase
     private CreateProjectViewModel CreateViewModel() =>
         new(ProjectService);
 
+    private static ProjectRootInfo CreateDefaultRoot(string name = "default", JsonElement? schema = null) =>
+        new(name, "Test root", schema);
+
     private void SetupDefaultProjectRoots()
     {
-        var roots = new[] { new ProjectRoot("default", "/projects") };
+        var roots = new[] { CreateDefaultRoot() };
         ProjectService.ListProjectRootsAsync(Arg.Any<string>(), Arg.Any<string>())
             .Returns(roots);
     }
@@ -30,53 +34,80 @@ public class CreateProjectViewModelTests : TestBase
         // Assert
         vm.ProfileName.Should().BeEmpty();
         vm.HostId.Should().BeEmpty();
-        vm.ProjectName.Should().BeEmpty();
-        vm.RepoUrl.Should().BeNull();
-        vm.InitialPrompt.Should().BeEmpty();
         vm.IsCreating.Should().BeFalse();
         vm.IsLoading.Should().BeFalse();
         vm.ErrorMessage.Should().BeNull();
-        vm.SelectedProjectType.Should().Be(ProjectType.RawFolder);
-        vm.RequiresRepoUrl.Should().BeFalse();
+        vm.FormFields.Should().BeEmpty();
     }
 
+    #endregion
+
+    #region Dynamic Form Tests
+
     [Fact]
-    public void RequiresRepoUrl_WhenRawFolder_ShouldBeFalse()
+    public void SelectingProjectRoot_WithNoSchema_ShouldShowDefaultFields()
     {
         // Arrange
         var vm = CreateViewModel();
 
-        // Act
-        vm.SelectedProjectType = ProjectType.RawFolder;
+        // Act - select a root with no schema
+        vm.SelectedProjectRoot = CreateDefaultRoot();
 
         // Assert
-        vm.RequiresRepoUrl.Should().BeFalse();
+        vm.FormFields.Should().HaveCount(2);
+        vm.FormFields[0].Key.Should().Be("name");
+        vm.FormFields[0].Title.Should().Be("Project Name");
+        vm.FormFields[0].IsRequired.Should().BeTrue();
+        vm.FormFields[1].Key.Should().Be("prompt");
+        vm.FormFields[1].Title.Should().Be("Initial Prompt");
+        vm.FormFields[1].IsMultiline.Should().BeTrue();
     }
 
     [Fact]
-    public void RequiresRepoUrl_WhenGitHubRepo_ShouldBeTrue()
+    public void SelectingProjectRoot_WithCustomSchema_ShouldShowCustomFields()
     {
         // Arrange
         var vm = CreateViewModel();
+        var schemaJson = """
+        {
+            "type": "object",
+            "properties": {
+                "caseId": { "type": "string", "title": "Case ID" },
+                "prompt": { "type": "string", "title": "Instructions", "x-multiline": true, "default": "Fix it" }
+            },
+            "required": ["caseId"]
+        }
+        """;
+        var schema = JsonSerializer.Deserialize<JsonElement>(schemaJson);
 
         // Act
-        vm.SelectedProjectType = ProjectType.GitHubRepo;
+        vm.SelectedProjectRoot = CreateDefaultRoot(schema: schema);
 
         // Assert
-        vm.RequiresRepoUrl.Should().BeTrue();
+        vm.FormFields.Should().HaveCount(2);
+        vm.FormFields[0].Key.Should().Be("caseId");
+        vm.FormFields[0].Title.Should().Be("Case ID");
+        vm.FormFields[0].IsRequired.Should().BeTrue();
+        vm.FormFields[0].IsMultiline.Should().BeFalse();
+        vm.FormFields[1].Key.Should().Be("prompt");
+        vm.FormFields[1].Title.Should().Be("Instructions");
+        vm.FormFields[1].IsMultiline.Should().BeTrue();
+        vm.FormFields[1].Value.Should().Be("Fix it");
     }
 
     [Fact]
-    public void RequiresRepoUrl_WhenGitHubWorktree_ShouldBeTrue()
+    public void SelectingProjectRoot_WithNull_ShouldClearFields()
     {
         // Arrange
         var vm = CreateViewModel();
+        vm.SelectedProjectRoot = CreateDefaultRoot();
+        vm.FormFields.Should().HaveCount(2);
 
         // Act
-        vm.SelectedProjectType = ProjectType.GitHubWorktree;
+        vm.SelectedProjectRoot = null;
 
         // Assert
-        vm.RequiresRepoUrl.Should().BeTrue();
+        vm.FormFields.Should().BeEmpty();
     }
 
     #endregion
@@ -91,9 +122,10 @@ public class CreateProjectViewModelTests : TestBase
         vm.ProfileName = "TestProfile";
         vm.HostId = "host1";
 
-        var roots = new[] {
-            new ProjectRoot("default", "/projects"),
-            new ProjectRoot("work", "/work/projects")
+        var roots = new[]
+        {
+            new ProjectRootInfo("default", "Default root"),
+            new ProjectRootInfo("work", "Work projects")
         };
         ProjectService.ListProjectRootsAsync("TestProfile", "host1")
             .Returns(roots);
@@ -130,35 +162,12 @@ public class CreateProjectViewModelTests : TestBase
     #region CreateAsync Validation Tests
 
     [Fact]
-    public async Task CreateCommand_WhenProjectNameEmpty_ShouldSetErrorMessage()
-    {
-        // Arrange
-        var vm = CreateViewModel();
-        vm.ProfileName = "TestProfile";
-        vm.HostId = "host1";
-        vm.ProjectName = "";
-        vm.InitialPrompt = "Build a web app";
-        vm.SelectedProjectRoot = new ProjectRoot("default", "/projects");
-
-        // Act
-        await vm.CreateCommand.ExecuteAsync(null);
-
-        // Assert
-        vm.ErrorMessage.Should().Be("Please enter a project name");
-        await ProjectService.DidNotReceive().CreateProjectAsync(
-            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Any<string>(), Arg.Any<ProjectType>(), Arg.Any<string?>(), Arg.Any<string>());
-    }
-
-    [Fact]
     public async Task CreateCommand_WhenNoProjectRootSelected_ShouldSetErrorMessage()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
         vm.HostId = "host1";
-        vm.ProjectName = "MyProject";
-        vm.InitialPrompt = "Build a web app";
         vm.SelectedProjectRoot = null;
 
         // Act
@@ -169,41 +178,24 @@ public class CreateProjectViewModelTests : TestBase
     }
 
     [Fact]
-    public async Task CreateCommand_WhenGitHubRepoAndNoUrl_ShouldSetErrorMessage()
+    public async Task CreateCommand_WhenRequiredFieldEmpty_ShouldSetErrorMessage()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
         vm.HostId = "host1";
-        vm.ProjectName = "MyProject";
-        vm.SelectedProjectType = ProjectType.GitHubRepo;
-        vm.RepoUrl = "";
-        vm.InitialPrompt = "Build a web app";
-        vm.SelectedProjectRoot = new ProjectRoot("default", "/projects");
+        vm.SelectedProjectRoot = CreateDefaultRoot();
+        // FormFields auto-populated: name (required), prompt (required)
+        // Leave name empty
 
         // Act
         await vm.CreateCommand.ExecuteAsync(null);
 
         // Assert
-        vm.ErrorMessage.Should().Be("Please enter a repository URL");
-    }
-
-    [Fact]
-    public async Task CreateCommand_WhenInitialPromptEmpty_ShouldSetErrorMessage()
-    {
-        // Arrange
-        var vm = CreateViewModel();
-        vm.ProfileName = "TestProfile";
-        vm.HostId = "host1";
-        vm.ProjectName = "MyProject";
-        vm.InitialPrompt = "";
-        vm.SelectedProjectRoot = new ProjectRoot("default", "/projects");
-
-        // Act
-        await vm.CreateCommand.ExecuteAsync(null);
-
-        // Assert
-        vm.ErrorMessage.Should().Be("Please enter an initial prompt");
+        vm.ErrorMessage.Should().Be("Please fill in Project Name");
+        await ProjectService.DidNotReceive().CreateProjectAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<Dictionary<string, JsonElement>>());
     }
 
     #endregion
@@ -211,25 +203,26 @@ public class CreateProjectViewModelTests : TestBase
     #region CreateAsync Success Tests
 
     [Fact]
-    public async Task CreateCommand_WhenValidRawFolder_ShouldCreateProject()
+    public async Task CreateCommand_WhenValid_ShouldCreateProject()
     {
         // Arrange
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
         vm.HostId = "host1";
-        vm.ProjectName = "MyProject";
-        vm.SelectedProjectType = ProjectType.RawFolder;
-        vm.InitialPrompt = "Build a web app";
-        vm.SelectedProjectRoot = new ProjectRoot("default", "/projects");
+        vm.SelectedProjectRoot = CreateDefaultRoot();
+
+        // Fill in form fields
+        vm.FormFields[0].Value = "MyProject";  // name
+        vm.FormFields[1].Value = "Build a web app";  // prompt
 
         var status = new ProjectStatus(
             "MyProject", "MyProject", ProjectState.Running,
-            DateTime.UtcNow, DateTime.UtcNow, null, null,
+            DateTime.UtcNow, DateTime.UtcNow, null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0);
         var detail = new ProjectDetail(status, "session123");
 
-        ProjectService.CreateProjectAsync("TestProfile", "host1", "MyProject",
-            "default", ProjectType.RawFolder, null, "Build a web app")
+        ProjectService.CreateProjectAsync("TestProfile", "host1", "default",
+            Arg.Any<Dictionary<string, JsonElement>>())
             .Returns(detail);
 
         // Act - Shell.Current will throw, but we can verify CreateProjectAsync was called
@@ -244,46 +237,9 @@ public class CreateProjectViewModelTests : TestBase
 
         // Assert
         await ProjectService.Received(1).CreateProjectAsync(
-            "TestProfile", "host1", "MyProject", "default", ProjectType.RawFolder, null, "Build a web app");
-    }
-
-    [Fact]
-    public async Task CreateCommand_WhenValidGitHubRepo_ShouldCreateProject()
-    {
-        // Arrange
-        var vm = CreateViewModel();
-        vm.ProfileName = "TestProfile";
-        vm.HostId = "host1";
-        vm.ProjectName = "MyProject";
-        vm.SelectedProjectType = ProjectType.GitHubRepo;
-        vm.RepoUrl = "https://github.com/user/repo";
-        vm.InitialPrompt = "Build a web app";
-        vm.SelectedProjectRoot = new ProjectRoot("default", "/projects");
-
-        var status = new ProjectStatus(
-            "MyProject", "MyProject", ProjectState.Running,
-            DateTime.UtcNow, DateTime.UtcNow, "https://github.com/user/repo", null,
-            new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0);
-        var detail = new ProjectDetail(status, "session123");
-
-        ProjectService.CreateProjectAsync("TestProfile", "host1", "MyProject",
-            "default", ProjectType.GitHubRepo, "https://github.com/user/repo", "Build a web app")
-            .Returns(detail);
-
-        // Act
-        try
-        {
-            await vm.CreateCommand.ExecuteAsync(null);
-        }
-        catch (NullReferenceException)
-        {
-            // Expected - Shell.Current is null in tests
-        }
-
-        // Assert
-        await ProjectService.Received(1).CreateProjectAsync(
-            "TestProfile", "host1", "MyProject", "default", ProjectType.GitHubRepo,
-            "https://github.com/user/repo", "Build a web app");
+            "TestProfile", "host1", "default",
+            Arg.Is<Dictionary<string, JsonElement>>(d =>
+                d.ContainsKey("name") && d.ContainsKey("prompt")));
     }
 
     #endregion
@@ -297,13 +253,12 @@ public class CreateProjectViewModelTests : TestBase
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
         vm.HostId = "host1";
-        vm.ProjectName = "MyProject";
-        vm.InitialPrompt = "Build a web app";
-        vm.SelectedProjectRoot = new ProjectRoot("default", "/projects");
+        vm.SelectedProjectRoot = CreateDefaultRoot();
+        vm.FormFields[0].Value = "MyProject";
+        vm.FormFields[1].Value = "Build a web app";
 
         ProjectService.CreateProjectAsync(Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ProjectType>(),
-            Arg.Any<string?>(), Arg.Any<string>())
+            Arg.Any<string>(), Arg.Any<Dictionary<string, JsonElement>>())
             .ThrowsAsync(new Exception("Creation failed"));
 
         // Act
@@ -325,9 +280,9 @@ public class CreateProjectViewModelTests : TestBase
         var vm = CreateViewModel();
         vm.ProfileName = "TestProfile";
         vm.HostId = "host1";
-        vm.ProjectName = "MyProject";
-        vm.InitialPrompt = "Build a web app";
-        vm.SelectedProjectRoot = new ProjectRoot("default", "/projects");
+        vm.SelectedProjectRoot = CreateDefaultRoot();
+        vm.FormFields[0].Value = "MyProject";
+        vm.FormFields[1].Value = "Build a web app";
 
         var creatingStates = new List<bool>();
         vm.PropertyChanged += (_, e) =>
@@ -338,13 +293,12 @@ public class CreateProjectViewModelTests : TestBase
 
         var status = new ProjectStatus(
             "MyProject", "MyProject", ProjectState.Running,
-            DateTime.UtcNow, DateTime.UtcNow, null, null,
+            DateTime.UtcNow, DateTime.UtcNow, null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0);
         var detail = new ProjectDetail(status, "session123");
 
         ProjectService.CreateProjectAsync(Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ProjectType>(),
-            Arg.Any<string?>(), Arg.Any<string>())
+            Arg.Any<string>(), Arg.Any<Dictionary<string, JsonElement>>())
             .Returns(async _ =>
             {
                 await Task.Delay(10);

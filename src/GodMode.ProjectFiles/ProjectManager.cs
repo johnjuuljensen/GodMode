@@ -5,6 +5,7 @@ namespace GodMode.ProjectFiles;
 
 /// <summary>
 /// Manager for discovering and managing multiple project folders across named project roots.
+/// VCS-agnostic — all creation logic lives in scripts, not here.
 /// </summary>
 public sealed class ProjectManager
 {
@@ -53,17 +54,6 @@ public sealed class ProjectManager
     public ProjectManager(string rootPath)
         : this(new Dictionary<string, string> { ["default"] = rootPath })
     {
-    }
-
-    /// <summary>
-    /// Lists all project roots.
-    /// </summary>
-    /// <returns>Array of project roots.</returns>
-    public ProjectRoot[] ListProjectRoots()
-    {
-        return _projectRoots
-            .Select(kvp => new ProjectRoot(kvp.Key, kvp.Value))
-            .ToArray();
     }
 
     /// <summary>
@@ -120,7 +110,7 @@ public sealed class ProjectManager
     }
 
     /// <summary>
-    /// Lists all project summaries in the root directory.
+    /// Lists all project summaries across all project roots.
     /// </summary>
     /// <returns>Array of project summaries.</returns>
     public ProjectSummary[] ListProjects()
@@ -190,83 +180,20 @@ public sealed class ProjectManager
 
     /// <summary>
     /// Creates a new project in the specified project root.
+    /// VCS-agnostic — just creates the folder with .godmode state.
     /// </summary>
     /// <param name="rootName">The name of the project root.</param>
-    /// <param name="name">Human-readable project name. For worktree projects, this is also the branch name.</param>
-    /// <param name="projectType">The type of project to create.</param>
-    /// <param name="repoUrl">Repository URL (required for GitHubRepo and GitHubWorktree types).</param>
+    /// <param name="name">Human-readable project name.</param>
     /// <returns>A new ProjectFolder instance and the project ID.</returns>
     /// <exception cref="ArgumentException">Thrown when required parameters are missing.</exception>
-    public (ProjectFolder Folder, string ProjectId) CreateProject(
-        string rootName,
-        string name,
-        ProjectType projectType,
-        string? repoUrl = null)
+    public (ProjectFolder Folder, string ProjectId) CreateProject(string rootName, string name)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Project name cannot be empty.", nameof(name));
 
         var rootPath = GetProjectRootPath(rootName);
-
-        // Validate repo URL for GitHub project types
-        if (projectType is ProjectType.GitHubRepo or ProjectType.GitHubWorktree)
-        {
-            if (string.IsNullOrWhiteSpace(repoUrl))
-                throw new ArgumentException($"Repository URL is required for {projectType} projects.", nameof(repoUrl));
-        }
-
-        // Convert name to path-safe project ID using the convention: space -> underscore
         var projectId = ConvertNameToPath(name);
-
-        return projectType switch
-        {
-            ProjectType.RawFolder => CreateRawFolderProject(rootPath, projectId, name),
-            ProjectType.GitHubRepo => CreateGitHubRepoProject(rootPath, projectId, name, repoUrl!),
-            ProjectType.GitHubWorktree => CreateWorktreeProject(rootPath, projectId, name, repoUrl!),
-            _ => throw new ArgumentException($"Unknown project type: {projectType}", nameof(projectType))
-        };
-    }
-
-    /// <summary>
-    /// Creates a raw folder project.
-    /// </summary>
-    private (ProjectFolder Folder, string ProjectId) CreateRawFolderProject(
-        string rootPath,
-        string projectId,
-        string name)
-    {
-        var folder = ProjectFolder.Create(rootPath, projectId, name, repoUrl: null);
-        return (folder, projectId);
-    }
-
-    /// <summary>
-    /// Creates a GitHub repo project by cloning the repository.
-    /// Note: Actual cloning is performed by the caller (Server) after creation.
-    /// </summary>
-    private (ProjectFolder Folder, string ProjectId) CreateGitHubRepoProject(
-        string rootPath,
-        string projectId,
-        string name,
-        string repoUrl)
-    {
-        var folder = ProjectFolder.Create(rootPath, projectId, name, repoUrl);
-        return (folder, projectId);
-    }
-
-    /// <summary>
-    /// Creates a worktree project.
-    /// The project name is used as the branch name.
-    /// The bare repo is stored at .{repoName}_bare if not existing.
-    /// Note: Actual git operations are performed by the caller (Server) after creation.
-    /// </summary>
-    private (ProjectFolder Folder, string ProjectId) CreateWorktreeProject(
-        string rootPath,
-        string projectId,
-        string name,
-        string repoUrl)
-    {
-        // For worktree projects, the project ID is the branch name
-        var folder = ProjectFolder.Create(rootPath, projectId, name, repoUrl);
+        var folder = ProjectFolder.Create(rootPath, projectId, name);
         return (folder, projectId);
     }
 
@@ -286,37 +213,6 @@ public sealed class ProjectManager
     public static string ConvertPathToName(string path)
     {
         return path.Replace('_', ' ');
-    }
-
-    /// <summary>
-    /// Gets the bare repository path for a worktree project.
-    /// </summary>
-    /// <param name="rootPath">The project root path.</param>
-    /// <param name="repoUrl">The repository URL.</param>
-    /// <returns>The path to the bare repository.</returns>
-    public static string GetBareRepoPath(string rootPath, string repoUrl)
-    {
-        var repoName = GetRepoNameFromUrl(repoUrl);
-        return Path.Combine(rootPath, $".{repoName}_bare");
-    }
-
-    /// <summary>
-    /// Extracts the repository name from a Git URL.
-    /// </summary>
-    private static string GetRepoNameFromUrl(string repoUrl)
-    {
-        // Handle both HTTPS and SSH URLs
-        // https://github.com/user/repo.git -> repo
-        // git@github.com:user/repo.git -> repo
-        var uri = repoUrl.TrimEnd('/');
-        if (uri.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-            uri = uri[..^4];
-
-        var lastSlash = uri.LastIndexOf('/');
-        var lastColon = uri.LastIndexOf(':');
-        var lastSeparator = Math.Max(lastSlash, lastColon);
-
-        return lastSeparator >= 0 ? uri[(lastSeparator + 1)..] : uri;
     }
 
     /// <summary>

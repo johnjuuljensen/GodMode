@@ -1,13 +1,14 @@
+using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using GodMode.Shared.Enums;
+using GodMode.ClientBase.Models;
 using GodMode.Shared.Models;
 using System.Collections.ObjectModel;
 
 namespace GodMode.Maui.ViewModels;
 
 /// <summary>
-/// ViewModel for creating a new project
+/// ViewModel for creating a new project with dynamic form fields from root config.
 /// </summary>
 [QueryProperty(nameof(ProfileName), "profileName")]
 [QueryProperty(nameof(HostId), "hostId")]
@@ -22,15 +23,6 @@ public partial class CreateProjectViewModel : ObservableObject
     private string _hostId = string.Empty;
 
     [ObservableProperty]
-    private string _projectName = string.Empty;
-
-    [ObservableProperty]
-    private string? _repoUrl;
-
-    [ObservableProperty]
-    private string _initialPrompt = string.Empty;
-
-    [ObservableProperty]
     private bool _isCreating;
 
     [ObservableProperty]
@@ -40,27 +32,33 @@ public partial class CreateProjectViewModel : ObservableObject
     private string? _errorMessage;
 
     [ObservableProperty]
-    private ObservableCollection<ProjectRoot> _projectRoots = [];
+    private string? _creationProgressText;
 
     [ObservableProperty]
-    private ProjectRoot? _selectedProjectRoot;
+    private ObservableCollection<ProjectRootInfo> _projectRoots = [];
 
     [ObservableProperty]
-    private ProjectType[] _projectTypes = [ProjectType.RawFolder, ProjectType.GitHubRepo, ProjectType.GitHubWorktree];
+    private ProjectRootInfo? _selectedProjectRoot;
 
     [ObservableProperty]
-    private ProjectType _selectedProjectType = ProjectType.RawFolder;
-
-    public bool RequiresRepoUrl => SelectedProjectType is ProjectType.GitHubRepo or ProjectType.GitHubWorktree;
+    private ObservableCollection<FormField> _formFields = [];
 
     public CreateProjectViewModel(IProjectService projectService)
     {
         _projectService = projectService;
     }
 
-    partial void OnSelectedProjectTypeChanged(ProjectType value)
+    partial void OnSelectedProjectRootChanged(ProjectRootInfo? value)
     {
-        OnPropertyChanged(nameof(RequiresRepoUrl));
+        if (value != null)
+        {
+            var fields = FormFieldParser.Parse(value.InputSchema);
+            FormFields = new ObservableCollection<FormField>(fields);
+        }
+        else
+        {
+            FormFields = [];
+        }
     }
 
     [RelayCommand]
@@ -75,7 +73,7 @@ public partial class CreateProjectViewModel : ObservableObject
         try
         {
             var roots = await _projectService.ListProjectRootsAsync(ProfileName, HostId);
-            ProjectRoots = new ObservableCollection<ProjectRoot>(roots);
+            ProjectRoots = new ObservableCollection<ProjectRootInfo>(roots);
 
             if (ProjectRoots.Count > 0)
             {
@@ -96,13 +94,7 @@ public partial class CreateProjectViewModel : ObservableObject
     private async Task CreateAsync()
     {
         ErrorMessage = null;
-
-        // Validate
-        if (string.IsNullOrWhiteSpace(ProjectName))
-        {
-            ErrorMessage = "Please enter a project name";
-            return;
-        }
+        CreationProgressText = null;
 
         if (SelectedProjectRoot == null)
         {
@@ -110,30 +102,37 @@ public partial class CreateProjectViewModel : ObservableObject
             return;
         }
 
-        if (RequiresRepoUrl && string.IsNullOrWhiteSpace(RepoUrl))
+        // Validate required fields
+        foreach (var field in FormFields)
         {
-            ErrorMessage = "Please enter a repository URL";
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(InitialPrompt))
-        {
-            ErrorMessage = "Please enter an initial prompt";
-            return;
+            if (field.IsRequired && string.IsNullOrWhiteSpace(field.Value))
+            {
+                ErrorMessage = $"Please fill in {field.Title}";
+                return;
+            }
         }
 
         IsCreating = true;
 
         try
         {
+            // Build inputs dictionary from form fields
+            var inputs = new Dictionary<string, JsonElement>();
+            foreach (var field in FormFields)
+            {
+                if (!string.IsNullOrEmpty(field.Value))
+                {
+                    inputs[field.Key] = field.FieldType == "boolean"
+                        ? JsonSerializer.SerializeToElement(field.Value == "true" || field.Value == "True")
+                        : JsonSerializer.SerializeToElement(field.Value);
+                }
+            }
+
             var detail = await _projectService.CreateProjectAsync(
                 ProfileName,
                 HostId,
-                ProjectName,
                 SelectedProjectRoot.Name,
-                SelectedProjectType,
-                string.IsNullOrWhiteSpace(RepoUrl) ? null : RepoUrl,
-                InitialPrompt);
+                inputs);
 
             // Navigate to the new project
             await Shell.Current!.GoToAsync($"..?projectId={detail.Status.Id}");

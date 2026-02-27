@@ -18,7 +18,6 @@ public class ClaudeProcessManager : IClaudeProcessManager
         "--debug",
         "--replay-user-messages",
         "--verbose",
-        "--dangerously-skip-permissions",
         "--output-format=stream-json",
         "--input-format=stream-json"
     ];
@@ -40,7 +39,12 @@ public class ClaudeProcessManager : IClaudeProcessManager
         }
     }
 
-    public async Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken)
+    public async Task<int> StartClaudeProcessAsync(
+        ProjectInfo project,
+        string initialPrompt,
+        CancellationToken cancellationToken,
+        Dictionary<string, string>? extraEnvironment = null,
+        string[]? extraArgs = null)
     {
         _logger.LogInformation("Starting Claude process for project {ProjectId}", project.Id);
 
@@ -57,11 +61,15 @@ public class ClaudeProcessManager : IClaudeProcessManager
         );
 
         // Start with session ID, send prompt via stdin
-        var args = BuildArgs(["--session-id", sessionId]);
-        return await RunClaudeProcessAsync(project, args, initialPrompt, cancellationToken);
+        var args = BuildArgs(["--session-id", sessionId], extraArgs);
+        return await RunClaudeProcessAsync(project, args, initialPrompt, cancellationToken, extraEnvironment);
     }
 
-    public async Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken)
+    public async Task<int> ResumeClaudeProcessAsync(
+        ProjectInfo project,
+        CancellationToken cancellationToken,
+        Dictionary<string, string>? extraEnvironment = null,
+        string[]? extraArgs = null)
     {
         _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
             project.Id, project.SessionId);
@@ -72,10 +80,10 @@ public class ClaudeProcessManager : IClaudeProcessManager
         }
 
         // Try --resume first, with session validation callback
-        var args = BuildArgs(["--resume", project.SessionId]);
+        var args = BuildArgs(["--resume", project.SessionId], extraArgs);
         var sessionNotFound = false;
 
-        var processId = await RunClaudeProcessAsync(project, args, null, cancellationToken, stderrLine =>
+        var processId = await RunClaudeProcessAsync(project, args, null, cancellationToken, extraEnvironment, stderrLine =>
         {
             // Check for session not found error
             if (stderrLine.Contains("No conversation found with session ID:"))
@@ -98,23 +106,31 @@ public class ClaudeProcessManager : IClaudeProcessManager
             );
 
             // Start with new session - send prompt via stdin
-            var freshArgs = BuildArgs(["--session-id", project.SessionId]);
-            return await RunClaudeProcessAsync(project, freshArgs, "Continue from where we left off. Review the codebase and previous work.", cancellationToken);
+            var freshArgs = BuildArgs(["--session-id", project.SessionId], extraArgs);
+            return await RunClaudeProcessAsync(project, freshArgs, "Continue from where we left off. Review the codebase and previous work.", cancellationToken, extraEnvironment);
         }
 
         return processId;
     }
 
-    private static string[] BuildArgs(string[] additionalArgs) => [..DefaultArgs, ..additionalArgs];
+    private static string[] BuildArgs(string[] additionalArgs, string[]? extraArgs = null)
+    {
+        var result = new List<string>(DefaultArgs);
+        result.AddRange(additionalArgs);
+        if (extraArgs != null)
+            result.AddRange(extraArgs);
+        return result.ToArray();
+    }
 
-    private Task<int> RunClaudeProcessAsync(ProjectInfo project, string[] args, string? initialPrompt, CancellationToken cancellationToken)
-        => RunClaudeProcessAsync(project, args, initialPrompt, cancellationToken, onStderrLine: null);
+    private Task<int> RunClaudeProcessAsync(ProjectInfo project, string[] args, string? initialPrompt, CancellationToken cancellationToken, Dictionary<string, string>? extraEnvironment = null)
+        => RunClaudeProcessAsync(project, args, initialPrompt, cancellationToken, extraEnvironment, onStderrLine: null);
 
     private async Task<int> RunClaudeProcessAsync(
         ProjectInfo project,
         string[] args,
         string? initialPrompt,
         CancellationToken cancellationToken,
+        Dictionary<string, string>? extraEnvironment = null,
         Action<string>? onStderrLine = null)
     {
         var godModePath = Path.Combine(project.ProjectPath, ".godmode");
@@ -139,6 +155,15 @@ public class ClaudeProcessManager : IClaudeProcessManager
         if (!string.IsNullOrEmpty(_claudeConfigDir))
         {
             startInfo.Environment["CLAUDE_CONFIG_DIR"] = _claudeConfigDir;
+        }
+
+        // Set extra environment variables from root config
+        if (extraEnvironment != null)
+        {
+            foreach (var (key, value) in extraEnvironment)
+            {
+                startInfo.Environment[key] = value;
+            }
         }
 
         foreach (var arg in args)

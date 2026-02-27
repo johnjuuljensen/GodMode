@@ -3,6 +3,7 @@ using System.Text.Json;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 
+
 namespace GodMode.ProjectFiles;
 
 /// <summary>
@@ -77,11 +78,10 @@ public sealed class ProjectFolder : IDisposable
     /// <param name="rootPath">Root directory where project folders are stored.</param>
     /// <param name="projectId">Unique project identifier (will be used as folder name).</param>
     /// <param name="name">Human-readable project name.</param>
-    /// <param name="repoUrl">Optional repository URL.</param>
     /// <returns>A new ProjectFolder instance.</returns>
     /// <exception cref="ArgumentException">Thrown when parameters are invalid.</exception>
     /// <exception cref="IOException">Thrown when project folder already exists or I/O fails.</exception>
-    public static ProjectFolder Create(string rootPath, string projectId, string name, string? repoUrl = null)
+    public static ProjectFolder Create(string rootPath, string projectId, string name)
     {
         if (string.IsNullOrWhiteSpace(rootPath))
             throw new ArgumentException("Root path cannot be empty.", nameof(rootPath));
@@ -126,7 +126,6 @@ public sealed class ProjectFolder : IDisposable
             State: ProjectState.Idle,
             CreatedAt: now,
             UpdatedAt: now,
-            RepoUrl: repoUrl,
             CurrentQuestion: null,
             Metrics: new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0m),
             Git: null,

@@ -1,4 +1,4 @@
-using GodMode.Shared.Enums;
+using System.Text.Json;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using GodMode.Server.Services;
@@ -20,27 +20,18 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger = logger;
     }
 
-    /// <summary>
-    /// Lists all available project roots.
-    /// </summary>
-    public async Task<ProjectRoot[]> ListProjectRoots()
+    public async Task<ProjectRootInfo[]> ListProjectRoots()
     {
         _logger.LogInformation("Client {ConnectionId} requested project roots", Context.ConnectionId);
         return await _projectManager.ListProjectRootsAsync();
     }
 
-    /// <summary>
-    /// Lists all projects.
-    /// </summary>
     public async Task<ProjectSummary[]> ListProjects()
     {
         _logger.LogInformation("Client {ConnectionId} requested project list", Context.ConnectionId);
         return await _projectManager.ListProjectsAsync();
     }
 
-    /// <summary>
-    /// Gets the status of a specific project.
-    /// </summary>
     public async Task<ProjectStatus> GetStatus(string projectId)
     {
         _logger.LogInformation("Client {ConnectionId} requested status for project {ProjectId}",
@@ -48,20 +39,12 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.GetStatusAsync(projectId);
     }
 
-    /// <summary>
-    /// Creates a new project.
-    /// </summary>
-    public async Task<ProjectDetail> CreateProject(
-        string name,
-        string projectRootName,
-        ProjectType projectType,
-        string? repoUrl,
-        string initialPrompt)
+    public async Task<ProjectDetail> CreateProject(string projectRootName, Dictionary<string, JsonElement> inputs)
     {
-        _logger.LogInformation("Client {ConnectionId} creating project '{Name}' of type {Type} in root '{Root}'",
-            Context.ConnectionId, name, projectType, projectRootName);
+        _logger.LogInformation("Client {ConnectionId} creating project in root '{Root}' with {InputCount} inputs",
+            Context.ConnectionId, projectRootName, inputs.Count);
 
-        var request = new CreateProjectRequest(name, projectRootName, projectType, repoUrl, initialPrompt);
+        var request = new CreateProjectRequest(projectRootName, inputs);
         var project = await _projectManager.CreateProjectAsync(request);
 
         // Notify all clients about the new project
@@ -70,19 +53,13 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return project;
     }
 
-    /// <summary>
-    /// Sends input to a project.
-    /// </summary>
     public async Task SendInput(string projectId, string input)
     {
-        _logger.LogInformation("Client {ConnectionId} sending input to project {ProjectId}", 
+        _logger.LogInformation("Client {ConnectionId} sending input to project {ProjectId}",
             Context.ConnectionId, projectId);
         await _projectManager.SendInputAsync(projectId, input);
     }
 
-    /// <summary>
-    /// Stops a running project.
-    /// </summary>
     public async Task StopProject(string projectId)
     {
         _logger.LogInformation("Client {ConnectionId} stopping project {ProjectId}",
@@ -90,9 +67,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.StopProjectAsync(projectId);
     }
 
-    /// <summary>
-    /// Resumes a stopped project using its existing session.
-    /// </summary>
     public async Task ResumeProject(string projectId)
     {
         _logger.LogInformation("Client {ConnectionId} resuming project {ProjectId}",
@@ -100,36 +74,27 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.ResumeProjectAsync(projectId);
     }
 
-    /// <summary>
-    /// Subscribes to output events from a project.
-    /// </summary>
     public async Task SubscribeProject(string projectId, long outputOffset)
     {
-        _logger.LogInformation("Client {ConnectionId} subscribing to project {ProjectId} from offset {Offset}", 
+        _logger.LogInformation("Client {ConnectionId} subscribing to project {ProjectId} from offset {Offset}",
             Context.ConnectionId, projectId, outputOffset);
-        
+
         await Groups.AddToGroupAsync(Context.ConnectionId, $"project-{projectId}");
         await _projectManager.SubscribeProjectAsync(projectId, outputOffset, Context.ConnectionId);
     }
 
-    /// <summary>
-    /// Unsubscribes from output events from a project.
-    /// </summary>
     public async Task UnsubscribeProject(string projectId)
     {
-        _logger.LogInformation("Client {ConnectionId} unsubscribing from project {ProjectId}", 
+        _logger.LogInformation("Client {ConnectionId} unsubscribing from project {ProjectId}",
             Context.ConnectionId, projectId);
-        
+
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"project-{projectId}");
         await _projectManager.UnsubscribeProjectAsync(projectId, Context.ConnectionId);
     }
 
-    /// <summary>
-    /// Gets the metrics HTML for a project.
-    /// </summary>
     public async Task<string> GetMetricsHtml(string projectId)
     {
-        _logger.LogInformation("Client {ConnectionId} requested metrics for project {ProjectId}", 
+        _logger.LogInformation("Client {ConnectionId} requested metrics for project {ProjectId}",
             Context.ConnectionId, projectId);
         return await _projectManager.GetMetricsHtmlAsync(projectId);
     }

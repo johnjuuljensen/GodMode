@@ -102,7 +102,7 @@ public class ProjectViewModelTests : TestBase
 
         var status = new ProjectStatus(
             "proj1", "Project 1", ProjectState.Running,
-            DateTime.UtcNow, DateTime.UtcNow, null, null,
+            DateTime.UtcNow, DateTime.UtcNow, null,
             new ProjectMetrics(100, 200, 5, TimeSpan.FromMinutes(1), 0.05m),
             null, null, 0);
 
@@ -134,7 +134,7 @@ public class ProjectViewModelTests : TestBase
 
         var status = new ProjectStatus(
             "proj1", "Project 1", ProjectState.WaitingInput,
-            DateTime.UtcNow, DateTime.UtcNow, null, "What should I do?",
+            DateTime.UtcNow, DateTime.UtcNow, "What should I do?",
             new ProjectMetrics(100, 200, 5, TimeSpan.FromMinutes(1), 0.05m),
             null, null, 0);
 
@@ -186,7 +186,7 @@ public class ProjectViewModelTests : TestBase
 
         var status = new ProjectStatus(
             "proj1", "Project 1", ProjectState.Running,
-            DateTime.UtcNow, DateTime.UtcNow, null, null,
+            DateTime.UtcNow, DateTime.UtcNow, null,
             new ProjectMetrics(100, 200, 5, TimeSpan.FromMinutes(1), 0.05m),
             null, null, 0);
 
@@ -248,7 +248,7 @@ public class ProjectViewModelTests : TestBase
 
         var status = new ProjectStatus(
             "proj1", "Project 1", ProjectState.Running,
-            DateTime.UtcNow, DateTime.UtcNow, null, null,
+            DateTime.UtcNow, DateTime.UtcNow, null,
             new ProjectMetrics(100, 200, 5, TimeSpan.FromMinutes(1), 0.05m),
             null, null, 0);
 
@@ -302,7 +302,7 @@ public class ProjectViewModelTests : TestBase
 
         var status = new ProjectStatus(
             "proj1", "Project 1", ProjectState.Stopped,
-            DateTime.UtcNow, DateTime.UtcNow, null, null,
+            DateTime.UtcNow, DateTime.UtcNow, null,
             new ProjectMetrics(100, 200, 5, TimeSpan.FromMinutes(1), 0.05m),
             null, null, 0);
 
@@ -393,7 +393,7 @@ public class ProjectViewModelTests : TestBase
         // Act
         vm.Status = new ProjectStatus(
             "proj1", "Project 1", ProjectState.WaitingInput,
-            DateTime.UtcNow, DateTime.UtcNow, null, null,
+            DateTime.UtcNow, DateTime.UtcNow, null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0),
             null, null, 0);
 
@@ -410,7 +410,7 @@ public class ProjectViewModelTests : TestBase
         // Act
         vm.Status = new ProjectStatus(
             "proj1", "Project 1", ProjectState.Running,
-            DateTime.UtcNow, DateTime.UtcNow, null, null,
+            DateTime.UtcNow, DateTime.UtcNow, null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0),
             null, null, 0);
 

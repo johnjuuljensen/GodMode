@@ -14,22 +14,27 @@ public class ProjectInfo
     /// The project directory path. This is also the working directory for Claude.
     /// </summary>
     public required string ProjectPath { get; init; }
-    public string? RepoUrl { get; set; }
     public string? SessionId { get; set; }
-    
+
+    /// <summary>
+    /// The name of the project root this project belongs to.
+    /// Used to look up root config for environment and Claude args.
+    /// </summary>
+    public string? RootName { get; set; }
+
     public ProjectState State { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public string? CurrentQuestion { get; set; }
-    
+
     public ProjectMetrics Metrics { get; set; } = new(0, 0, 0, TimeSpan.Zero, 0);
     public GitStatus? Git { get; set; }
     public TestStatus? Tests { get; set; }
-    
+
     public long OutputOffset { get; set; }
-    
+
     public int ProcessId { get; set; }
     public CancellationTokenSource? ProcessCancellation { get; set; }
-    
+
     public HashSet<string> SubscribedConnections { get; } = new();
 }

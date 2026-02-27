@@ -14,7 +14,7 @@
             <!-- Value Converters -->
             <converters:IsNotNullConverter x:Key="IsNotNullConverter" />
             <converters:InverseBoolConverter x:Key="InverseBoolConverter" />
-            <converters:IsWorktreeConverter x:Key="IsWorktreeConverter" />
+
             <converters:BoolToColorConverter x:Key="BoolToColorConverter" />
             <converters:BoolToChevronConverter x:Key="BoolToChevronConverter" />
             <converters:StateToColorConverter x:Key="StateToColorConverter" />

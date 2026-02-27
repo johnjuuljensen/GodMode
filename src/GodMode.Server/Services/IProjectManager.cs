@@ -8,9 +8,9 @@ namespace GodMode.Server.Services;
 public interface IProjectManager
 {
     /// <summary>
-    /// Lists all available project roots.
+    /// Lists all available project roots with their input schemas.
     /// </summary>
-    Task<ProjectRoot[]> ListProjectRootsAsync();
+    Task<ProjectRootInfo[]> ListProjectRootsAsync();
 
     /// <summary>
     /// Lists all projects across all project roots.
@@ -23,7 +23,7 @@ public interface IProjectManager
     Task<ProjectStatus> GetStatusAsync(string projectId);
 
     /// <summary>
-    /// Creates a new project.
+    /// Creates a new project using the config-driven workflow.
     /// </summary>
     Task<ProjectDetail> CreateProjectAsync(CreateProjectRequest request);
 

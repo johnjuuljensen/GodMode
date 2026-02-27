@@ -1,7 +1,7 @@
+using System.Text.Json;
 using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
-using GodMode.Shared.Enums;
 using Microsoft.AspNetCore.SignalR.Client;
 using System.Reactive.Subjects;
 using System.Reactive.Linq;
@@ -21,6 +21,8 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
     private bool _disposed;
 
     public bool IsConnected => _hubConnection.State == HubConnectionState.Connected;
+
+    public event Action<string, string>? CreationProgressReceived;
 
     /// <summary>
     /// Creates a new SignalR connection to a project server.
@@ -56,7 +58,7 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         }
     }
 
-    public async Task<IEnumerable<ProjectRoot>> ListProjectRootsAsync()
+    public async Task<IEnumerable<ProjectRootInfo>> ListProjectRootsAsync()
     {
         return await _hubProxy.ListProjectRoots();
     }
@@ -71,14 +73,9 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         return await _hubProxy.GetStatus(projectId);
     }
 
-    public async Task<ProjectDetail> CreateProjectAsync(
-        string name,
-        string projectRootName,
-        ProjectType projectType,
-        string? repoUrl,
-        string initialPrompt)
+    public async Task<ProjectDetail> CreateProjectAsync(string projectRootName, Dictionary<string, JsonElement> inputs)
     {
-        return await _hubProxy.CreateProject(name, projectRootName, projectType, repoUrl, initialPrompt);
+        return await _hubProxy.CreateProject(projectRootName, inputs);
     }
 
     public async Task SendInputAsync(string projectId, string input)
@@ -133,15 +130,17 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
 
     Task IProjectHubClient.StatusChanged(string projectId, ProjectStatus status)
     {
-        // This could be used to update local cache or trigger UI updates
-        // For now, we'll leave it as a placeholder
         return Task.CompletedTask;
     }
 
     Task IProjectHubClient.ProjectCreated(ProjectStatus status)
     {
-        // This could be used to refresh project lists
-        // For now, we'll leave it as a placeholder
+        return Task.CompletedTask;
+    }
+
+    Task IProjectHubClient.CreationProgress(string projectId, string message)
+    {
+        CreationProgressReceived?.Invoke(projectId, message);
         return Task.CompletedTask;
     }
 

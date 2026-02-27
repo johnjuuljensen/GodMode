@@ -2,10 +2,28 @@
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:viewmodels="clr-namespace:GodMode.Maui.ViewModels"
-             xmlns:models="clr-namespace:GodMode.Shared.Models;assembly=GodMode.Shared"
+             xmlns:models="clr-namespace:GodMode.ClientBase.Models;assembly=GodMode.ClientBase"
              x:Class="GodMode.Maui.Views.CreateProjectPage"
              x:DataType="viewmodels:CreateProjectViewModel"
              Title="Create Project">
+
+    <ContentPage.Resources>
+        <DataTemplate x:Key="StringFieldTemplate" x:DataType="models:FormField">
+            <VerticalStackLayout Spacing="5" Padding="0,5">
+                <Label Text="{Binding Title}" FontAttributes="Bold" />
+                <Entry Text="{Binding Value}" Placeholder="{Binding Description}" />
+            </VerticalStackLayout>
+        </DataTemplate>
+
+        <DataTemplate x:Key="MultilineFieldTemplate" x:DataType="models:FormField">
+            <VerticalStackLayout Spacing="5" Padding="0,5">
+                <Label Text="{Binding Title}" FontAttributes="Bold" />
+                <Editor Text="{Binding Value}"
+                        Placeholder="{Binding Description}"
+                        HeightRequest="150" />
+            </VerticalStackLayout>
+        </DataTemplate>
+    </ContentPage.Resources>
 
     <ScrollView Padding="20">
         <VerticalStackLayout Spacing="15" MaximumWidthRequest="600" HorizontalOptions="Center">
@@ -21,43 +39,20 @@
                 <Picker ItemsSource="{Binding ProjectRoots}"
                         SelectedItem="{Binding SelectedProjectRoot}"
                         ItemDisplayBinding="{Binding Name}" />
-                <Label Text="Where to create the project"
+                <Label Text="{Binding SelectedProjectRoot.Description}"
                        FontSize="12"
                        TextColor="Gray" />
             </VerticalStackLayout>
 
-            <!-- Project Type Selection -->
-            <VerticalStackLayout Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-                <Label Text="Project Type" FontAttributes="Bold" />
-                <Picker ItemsSource="{Binding ProjectTypes}"
-                        SelectedItem="{Binding SelectedProjectType}" />
-                <Label Text="RawFolder: Empty project. GitHubRepo: Clone repository. GitHubWorktree: Branch-based workflow."
-                       FontSize="12"
-                       TextColor="Gray" />
-            </VerticalStackLayout>
-
-            <!-- Project Name -->
-            <VerticalStackLayout Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-                <Label Text="Project Name" FontAttributes="Bold" />
-                <Entry Text="{Binding ProjectName}" Placeholder="Enter project name" />
-                <Label Text="For worktree projects, this is also the branch name"
-                       FontSize="12"
-                       TextColor="Gray"
-                       IsVisible="{Binding SelectedProjectType, Converter={StaticResource IsWorktreeConverter}}" />
-            </VerticalStackLayout>
-
-            <!-- Repository URL (required for GitHub types) -->
-            <VerticalStackLayout Spacing="5" IsVisible="{Binding RequiresRepoUrl}">
-                <Label Text="Repository URL" FontAttributes="Bold" />
-                <Entry Text="{Binding RepoUrl}" Placeholder="https://github.com/user/repo" />
-            </VerticalStackLayout>
-
-            <!-- Initial Prompt -->
-            <VerticalStackLayout Spacing="5" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-                <Label Text="Initial Prompt" FontAttributes="Bold" />
-                <Editor Text="{Binding InitialPrompt}"
-                        Placeholder="Enter the initial task or prompt for Claude..."
-                        HeightRequest="150" />
+            <!-- Dynamic Form Fields -->
+            <VerticalStackLayout BindableLayout.ItemsSource="{Binding FormFields}"
+                                 IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}"
+                                 Spacing="5">
+                <BindableLayout.ItemTemplateSelector>
+                    <viewmodels:FormFieldTemplateSelector
+                        StringTemplate="{StaticResource StringFieldTemplate}"
+                        MultilineTemplate="{StaticResource MultilineFieldTemplate}" />
+                </BindableLayout.ItemTemplateSelector>
             </VerticalStackLayout>
 
             <!-- Buttons -->
@@ -77,6 +72,13 @@
             <Label Text="{Binding ErrorMessage}"
                    IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
                    TextColor="Red"
+                   HorizontalTextAlignment="Center" />
+
+            <!-- Creation Progress -->
+            <Label Text="{Binding CreationProgressText}"
+                   IsVisible="{Binding CreationProgressText, Converter={StaticResource IsNotNullConverter}}"
+                   FontSize="12"
+                   TextColor="Gray"
                    HorizontalTextAlignment="Center" />
 
             <!-- Creating Indicator -->

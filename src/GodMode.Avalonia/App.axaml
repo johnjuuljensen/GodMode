@@ -22,7 +22,7 @@
             <converters:StateToColorConverter x:Key="StateToColorConverter" />
             <converters:StateToStartVisibilityConverter x:Key="StateToStartVisibilityConverter" />
             <converters:StateToStopVisibilityConverter x:Key="StateToStopVisibilityConverter" />
-            <converters:IsWorktreeConverter x:Key="IsWorktreeConverter" />
+
             <converters:MessageTypeToColorConverter x:Key="MessageTypeToColorConverter" />
             <converters:ContentTypeToColorConverter x:Key="ContentTypeToColorConverter" />
         </ResourceDictionary>

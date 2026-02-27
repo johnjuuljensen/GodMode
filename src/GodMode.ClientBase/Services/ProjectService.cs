@@ -1,6 +1,6 @@
+using System.Text.Json;
 using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Models;
-using GodMode.Shared.Enums;
 using System.Collections.Concurrent;
 
 namespace GodMode.ClientBase.Services;
@@ -20,7 +20,7 @@ public class ProjectService : IProjectService
         _hostConnectionService = hostConnectionService;
     }
 
-    public async Task<IEnumerable<ProjectRoot>> ListProjectRootsAsync(string profileName, string hostId)
+    public async Task<IEnumerable<ProjectRootInfo>> ListProjectRootsAsync(string profileName, string hostId)
     {
         var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
         return await connection.ListProjectRootsAsync();
@@ -59,14 +59,11 @@ public class ProjectService : IProjectService
     public async Task<ProjectDetail> CreateProjectAsync(
         string profileName,
         string hostId,
-        string name,
         string projectRootName,
-        ProjectType projectType,
-        string? repoUrl,
-        string initialPrompt)
+        Dictionary<string, JsonElement> inputs)
     {
         var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
-        return await connection.CreateProjectAsync(name, projectRootName, projectType, repoUrl, initialPrompt);
+        return await connection.CreateProjectAsync(projectRootName, inputs);
     }
 
     public async Task SendInputAsync(string profileName, string hostId, string projectId, string input)

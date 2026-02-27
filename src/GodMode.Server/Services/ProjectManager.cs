@@ -13,12 +13,14 @@ namespace GodMode.Server.Services;
 
 /// <summary>
 /// Manages project folders, lifecycle, and state.
-/// Uses GodMode.ProjectFiles.ProjectManager for project file operations.
+/// Uses config-driven workflow: reads .godmode-root.json, runs scripts, starts Claude.
 /// </summary>
 public class ProjectManager : IProjectManager
 {
     private readonly IClaudeProcessManager _processManager;
     private readonly IStatusUpdater _statusUpdater;
+    private readonly IRootConfigReader _rootConfigReader;
+    private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ProjectFiles.ProjectManager _projectFiles;
@@ -27,12 +29,16 @@ public class ProjectManager : IProjectManager
     public ProjectManager(
         IClaudeProcessManager processManager,
         IStatusUpdater statusUpdater,
+        IRootConfigReader rootConfigReader,
+        IScriptRunner scriptRunner,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
         _processManager = processManager;
         _statusUpdater = statusUpdater;
+        _rootConfigReader = rootConfigReader;
+        _scriptRunner = scriptRunner;
         _hubContext = hubContext;
         _logger = logger;
 
@@ -48,9 +54,15 @@ public class ProjectManager : IProjectManager
             string.Join(", ", projectRoots.Select(kvp => $"{kvp.Key}={kvp.Value}")));
     }
 
-    public Task<ProjectRoot[]> ListProjectRootsAsync()
+    public Task<ProjectRootInfo[]> ListProjectRootsAsync()
     {
-        return Task.FromResult(_projectFiles.ListProjectRoots());
+        var roots = _projectFiles.ProjectRoots.Select(kvp =>
+        {
+            var config = _rootConfigReader.ReadConfig(kvp.Value);
+            return new ProjectRootInfo(kvp.Key, config.Description, config.InputSchema);
+        }).ToArray();
+
+        return Task.FromResult(roots);
     }
 
     public async Task<ProjectSummary[]> ListProjectsAsync()
@@ -84,7 +96,6 @@ public class ProjectManager : IProjectManager
             project.State,
             project.CreatedAt,
             project.UpdatedAt,
-            project.RepoUrl,
             project.CurrentQuestion,
             project.Metrics,
             project.Git,
@@ -95,36 +106,86 @@ public class ProjectManager : IProjectManager
 
     public async Task<ProjectDetail> CreateProjectAsync(CreateProjectRequest request)
     {
-        _logger.LogInformation("Creating project '{Name}' of type {Type} in root '{Root}'",
-            request.Name, request.ProjectType, request.ProjectRootName);
+        _logger.LogInformation("Creating project in root '{Root}' with inputs: {InputKeys}",
+            request.ProjectRootName, string.Join(", ", request.Inputs.Keys));
 
-        // Use ProjectFiles to create the project structure
-        var (projectFolder, projectId) = _projectFiles.CreateProject(
-            request.ProjectRootName,
-            request.Name,
-            request.ProjectType,
-            request.RepoUrl);
+        // Read root config
+        var rootPath = _projectFiles.GetProjectRootPath(request.ProjectRootName);
+        var config = _rootConfigReader.ReadConfig(rootPath);
+
+        // Resolve name from inputs or nameTemplate
+        var name = ResolveProjectName(config, request.Inputs);
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Project name is required. Provide a 'name' input or configure nameTemplate in .godmode-root.json.");
+
+        // Resolve prompt from inputs or promptTemplate
+        var prompt = ResolvePrompt(config, request.Inputs);
+
+        // Create project folder via ProjectFiles
+        var (projectFolder, projectId) = _projectFiles.CreateProject(request.ProjectRootName, name);
 
         var project = new ProjectInfo
         {
             Id = projectId,
-            Name = request.Name,
+            Name = name,
             ProjectPath = projectFolder.ProjectPath,
-            RepoUrl = request.RepoUrl,
+            RootName = request.ProjectRootName,
             State = ProjectState.Running,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
-        // Handle git operations based on project type (clone/worktree into project directory)
-        if (request.ProjectType == ProjectType.GitHubRepo && !string.IsNullOrEmpty(request.RepoUrl))
+        // Build environment variables for scripts
+        var scriptEnv = BuildScriptEnvironment(rootPath, project, config, request.Inputs);
+
+        // Run setup scripts
+        if (config.Setup is { Length: > 0 })
         {
-            await CloneRepositoryAsync(request.RepoUrl, projectFolder.ProjectPath);
+            try
+            {
+                await _scriptRunner.RunAsync(
+                    config.Setup,
+                    rootPath,
+                    rootPath, // setup runs in root directory
+                    scriptEnv,
+                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Setup script failed for project {ProjectId}", projectId);
+                project.State = ProjectState.Error;
+                await _statusUpdater.SaveStatusAsync(project);
+                _projects[projectId] = project;
+                throw;
+            }
         }
-        else if (request.ProjectType == ProjectType.GitHubWorktree && !string.IsNullOrEmpty(request.RepoUrl))
+
+        // Run bootstrap scripts
+        if (config.Bootstrap is { Length: > 0 })
         {
-            await SetupWorktreeAsync(request.ProjectRootName, request.Name, request.RepoUrl, projectFolder.ProjectPath);
+            try
+            {
+                await _scriptRunner.RunAsync(
+                    config.Bootstrap,
+                    rootPath,
+                    projectFolder.ProjectPath, // bootstrap runs in project directory
+                    scriptEnv,
+                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Bootstrap script failed for project {ProjectId}", projectId);
+                project.State = ProjectState.Error;
+                await _statusUpdater.SaveStatusAsync(project);
+                _projects[projectId] = project;
+                throw;
+            }
         }
+
+        // Save project settings (persists across restarts)
+        var skipPermissions = GetBool(request.Inputs, "skipPermissions");
+        var settings = new ProjectFiles.ProjectSettings(DangerouslySkipPermissions: skipPermissions);
+        settings.Save(projectFolder.ProjectPath);
 
         // Save initial status
         await _statusUpdater.SaveStatusAsync(project);
@@ -132,14 +193,19 @@ public class ProjectManager : IProjectManager
         // Add to tracking
         _projects[projectId] = project;
 
+        // Build claude env/args from root config + project settings
+        var (claudeEnv, claudeArgs) = BuildClaudeConfig(config, settings);
+
         // Start Claude process
         project.ProcessCancellation = new CancellationTokenSource();
         try
         {
             var processId = await _processManager.StartClaudeProcessAsync(
                 project,
-                request.InitialPrompt,
-                project.ProcessCancellation.Token
+                prompt ?? "Hello",
+                project.ProcessCancellation.Token,
+                claudeEnv,
+                claudeArgs
             );
             project.ProcessId = processId;
         }
@@ -196,13 +262,11 @@ public class ProjectManager : IProjectManager
         }
 
         // Check if process is actually still running (regardless of reported state)
-        // This handles cases where state becomes Idle/Stopped but process hasn't exited
         if (project.ProcessId != 0 && _processManager.IsProcessRunning(project.ProcessId))
         {
             _logger.LogInformation("Project {ProjectId} already has a running process with PID {ProcessId} (state: {State})",
                 projectId, project.ProcessId, project.State);
 
-            // For Idle state with running process, just send a continue prompt
             if (project.State == ProjectState.Idle)
             {
                 _logger.LogInformation("Project {ProjectId} is idle with running process, sending continue prompt", projectId);
@@ -214,7 +278,6 @@ public class ProjectManager : IProjectManager
                 return;
             }
 
-            // For Running/WaitingInput, nothing to do
             return;
         }
 
@@ -245,11 +308,36 @@ public class ProjectManager : IProjectManager
         project.UpdatedAt = DateTime.UtcNow;
         project.ProcessCancellation = new CancellationTokenSource();
 
+        // Build claude env/args from root config + persisted project settings
+        Dictionary<string, string>? claudeEnv = null;
+        string[]? claudeArgs = null;
+        try
+        {
+            var settings = ProjectFiles.ProjectSettings.Load(project.ProjectPath);
+            if (project.RootName != null)
+            {
+                var rootPath = _projectFiles.GetProjectRootPath(project.RootName);
+                var config = _rootConfigReader.ReadConfig(rootPath);
+                (claudeEnv, claudeArgs) = BuildClaudeConfig(config, settings);
+            }
+            else
+            {
+                // No root config, just apply project settings
+                (_, claudeArgs) = BuildClaudeConfig(new RootConfig(), settings);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read config for project {ProjectId}, continuing without extra config", projectId);
+        }
+
         try
         {
             var processId = await _processManager.ResumeClaudeProcessAsync(
                 project,
-                project.ProcessCancellation.Token
+                project.ProcessCancellation.Token,
+                claudeEnv,
+                claudeArgs
             );
             project.ProcessId = processId;
         }
@@ -348,7 +436,6 @@ public class ProjectManager : IProjectManager
                     Id = status.Id,
                     Name = status.Name,
                     ProjectPath = projectPath,
-                    RepoUrl = status.RepoUrl,
                     State = stateChanged ? ProjectState.Stopped : status.State,
                     CreatedAt = status.CreatedAt,
                     UpdatedAt = stateChanged ? DateTime.UtcNow : status.UpdatedAt,
@@ -358,6 +445,16 @@ public class ProjectManager : IProjectManager
                     Tests = status.Tests,
                     OutputOffset = status.OutputOffset
                 };
+
+                // Try to determine which root this project belongs to
+                foreach (var (rootName, rootPath) in _projectFiles.ProjectRoots)
+                {
+                    if (projectPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        project.RootName = rootName;
+                        break;
+                    }
+                }
 
                 // Load session ID if exists
                 var sessionIdPath = Path.Combine(godModePath, "session-id");
@@ -381,6 +478,116 @@ public class ProjectManager : IProjectManager
                 _logger.LogError(ex, "Failed to recover project from {Path}", projectPath);
             }
         });
+    }
+
+    /// <summary>
+    /// Resolves the project name from inputs or nameTemplate.
+    /// </summary>
+    private static string? ResolveProjectName(RootConfig config, Dictionary<string, JsonElement> inputs)
+    {
+        if (config.NameTemplate != null)
+            return TemplateResolver.Resolve(config.NameTemplate, inputs);
+
+        return TemplateResolver.GetString(inputs, "name");
+    }
+
+    /// <summary>
+    /// Resolves the initial prompt from inputs or promptTemplate.
+    /// </summary>
+    private static string? ResolvePrompt(RootConfig config, Dictionary<string, JsonElement> inputs)
+    {
+        if (config.PromptTemplate != null)
+            return TemplateResolver.Resolve(config.PromptTemplate, inputs);
+
+        return TemplateResolver.GetString(inputs, "prompt");
+    }
+
+    /// <summary>
+    /// Gets a boolean value from inputs. Handles both JsonValueKind.True/False and string "true"/"false".
+    /// </summary>
+    private static bool GetBool(Dictionary<string, JsonElement> inputs, string key)
+    {
+        if (!inputs.TryGetValue(key, out var value))
+            return false;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => value.GetString() is "true" or "True",
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Builds claude environment and args from root config + project settings.
+    /// </summary>
+    private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
+        RootConfig config, ProjectFiles.ProjectSettings settings)
+    {
+        var env = config.Environment != null
+            ? new Dictionary<string, string>(config.Environment)
+            : null;
+
+        var args = new List<string>();
+        if (config.ClaudeArgs != null)
+            args.AddRange(config.ClaudeArgs);
+        if (settings.DangerouslySkipPermissions)
+            args.Add("--dangerously-skip-permissions");
+
+        return (env, args.Count > 0 ? args.ToArray() : null);
+    }
+
+    /// <summary>
+    /// Builds the full environment variables dictionary for scripts.
+    /// </summary>
+    private static Dictionary<string, string> BuildScriptEnvironment(
+        string rootPath,
+        ProjectInfo project,
+        RootConfig config,
+        Dictionary<string, JsonElement> inputs)
+    {
+        var env = new Dictionary<string, string>
+        {
+            ["GODMODE_ROOT_PATH"] = rootPath,
+            ["GODMODE_PROJECT_PATH"] = project.ProjectPath,
+            ["GODMODE_PROJECT_ID"] = project.Id,
+            ["GODMODE_PROJECT_NAME"] = project.Name
+        };
+
+        // Add root config environment
+        if (config.Environment != null)
+        {
+            foreach (var (key, value) in config.Environment)
+                env[key] = value;
+        }
+
+        // Add form inputs as GODMODE_INPUT_* env vars
+        foreach (var (key, value) in inputs)
+        {
+            var envKey = "GODMODE_INPUT_" + ToUpperSnakeCase(key);
+            env[envKey] = value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? ""
+                : value.ToString();
+        }
+
+        return env;
+    }
+
+    /// <summary>
+    /// Converts camelCase/PascalCase to UPPER_SNAKE_CASE.
+    /// </summary>
+    private static string ToUpperSnakeCase(string input)
+    {
+        var result = new System.Text.StringBuilder();
+        for (var i = 0; i < input.Length; i++)
+        {
+            var c = input[i];
+            if (char.IsUpper(c) && i > 0)
+                result.Append('_');
+            result.Append(char.ToUpperInvariant(c));
+        }
+        return result.ToString();
     }
 
     /// <summary>
@@ -482,9 +689,6 @@ public class ProjectManager : IProjectManager
         };
     }
 
-    /// <summary>
-    /// Extracts content from user/assistant message format: message.content[0].text
-    /// </summary>
     private static string ExtractMessageContent(JsonElement root)
     {
         if (!root.TryGetProperty("message", out var message))
@@ -503,9 +707,6 @@ public class ProjectManager : IProjectManager
         return "";
     }
 
-    /// <summary>
-    /// Extracts content from result format: result field
-    /// </summary>
     private static string ExtractResultContent(JsonElement root)
     {
         if (root.TryGetProperty("result", out var result))
@@ -514,9 +715,6 @@ public class ProjectManager : IProjectManager
         return "";
     }
 
-    /// <summary>
-    /// Extracts content from system format: subtype or summary
-    /// </summary>
     private static string ExtractSystemContent(JsonElement root)
     {
         if (root.TryGetProperty("subtype", out var subtype))
@@ -529,9 +727,6 @@ public class ProjectManager : IProjectManager
         return "system";
     }
 
-    /// <summary>
-    /// Extracts metadata from the JSON for metrics tracking.
-    /// </summary>
     private static Dictionary<string, object>? ExtractMetadata(JsonElement root)
     {
         var metadata = new Dictionary<string, object>();
@@ -603,144 +798,6 @@ public class ProjectManager : IProjectManager
     {
         var status = await GetStatusAsync(project.Id);
         await _hubContext.Clients.All.StatusChanged(project.Id, status);
-    }
-
-    private async Task CloneRepositoryAsync(string repoUrl, string workPath)
-    {
-        _logger.LogInformation("Cloning repository {RepoUrl} to {WorkPath}", repoUrl, workPath);
-
-        var process = new System.Diagnostics.Process
-        {
-            StartInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments = $"clone {repoUrl} .",
-                WorkingDirectory = workPath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        process.Start();
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode != 0)
-        {
-            var error = await process.StandardError.ReadToEndAsync();
-            throw new Exception($"Failed to clone repository: {error}");
-        }
-    }
-
-    private async Task SetupWorktreeAsync(string rootName, string branchName, string repoUrl, string workPath)
-    {
-        var rootPath = _projectFiles.GetProjectRootPath(rootName);
-        var bareRepoPath = ProjectFiles.ProjectManager.GetBareRepoPath(rootPath, repoUrl);
-
-        _logger.LogInformation("Setting up worktree for branch '{Branch}' from {RepoUrl}", branchName, repoUrl);
-
-        // Check if bare repo exists, if not clone it
-        if (!Directory.Exists(bareRepoPath))
-        {
-            _logger.LogInformation("Cloning bare repository to {BareRepoPath}", bareRepoPath);
-
-            var cloneProcess = new System.Diagnostics.Process
-            {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "git",
-                    Arguments = $"clone --bare {repoUrl} \"{bareRepoPath}\"",
-                    WorkingDirectory = rootPath,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-
-            cloneProcess.Start();
-            await cloneProcess.WaitForExitAsync();
-
-            if (cloneProcess.ExitCode != 0)
-            {
-                var error = await cloneProcess.StandardError.ReadToEndAsync();
-                throw new Exception($"Failed to clone bare repository: {error}");
-            }
-        }
-
-        // Fetch latest changes
-        var fetchProcess = new System.Diagnostics.Process
-        {
-            StartInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments = "fetch --all",
-                WorkingDirectory = bareRepoPath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        fetchProcess.Start();
-        await fetchProcess.WaitForExitAsync();
-
-        // Create worktree for the branch
-        _logger.LogInformation("Creating worktree at {WorkPath} for branch {Branch}", workPath, branchName);
-
-        var worktreeProcess = new System.Diagnostics.Process
-        {
-            StartInfo = new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "git",
-                Arguments = $"worktree add -b {branchName} \"{workPath}\" origin/main",
-                WorkingDirectory = bareRepoPath,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            }
-        };
-
-        worktreeProcess.Start();
-        await worktreeProcess.WaitForExitAsync();
-
-        if (worktreeProcess.ExitCode != 0)
-        {
-            var error = await worktreeProcess.StandardError.ReadToEndAsync();
-            // If branch already exists, try to add worktree without creating branch
-            if (error.Contains("already exists"))
-            {
-                worktreeProcess = new System.Diagnostics.Process
-                {
-                    StartInfo = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "git",
-                        Arguments = $"worktree add \"{workPath}\" {branchName}",
-                        WorkingDirectory = bareRepoPath,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    }
-                };
-
-                worktreeProcess.Start();
-                await worktreeProcess.WaitForExitAsync();
-
-                if (worktreeProcess.ExitCode != 0)
-                {
-                    error = await worktreeProcess.StandardError.ReadToEndAsync();
-                    throw new Exception($"Failed to create worktree: {error}");
-                }
-            }
-            else
-            {
-                throw new Exception($"Failed to create worktree: {error}");
-            }
-        }
     }
 
     private string GenerateMetricsHtml(ProjectInfo project)

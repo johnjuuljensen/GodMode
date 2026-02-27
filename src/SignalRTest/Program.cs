@@ -1,4 +1,4 @@
-using GodMode.Shared.Enums;
+using System.Text.Json;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -31,7 +31,7 @@ Console.WriteLine("\n[INFO] Available project roots:");
 var roots = await hub1.ListProjectRoots();
 foreach (var root in roots)
 {
-    Console.WriteLine($"  - {root.Name}: {root.Path}");
+    Console.WriteLine($"  - {root.Name}: {root.Description ?? "(no description)"}");
 }
 
 // Create a new project
@@ -41,12 +41,15 @@ var initialPrompt = "Just say 'Hello from Claude!' and nothing else.";
 Console.WriteLine($"\n[ACTION] Creating project: {projectName}");
 Console.WriteLine($"[ACTION] Initial prompt: {initialPrompt}");
 
+var inputs = new Dictionary<string, JsonElement>
+{
+    ["name"] = JsonSerializer.SerializeToElement(projectName),
+    ["prompt"] = JsonSerializer.SerializeToElement(initialPrompt)
+};
+
 var detail = await hub1.CreateProject(
-    name: projectName,
     projectRootName: "default",
-    projectType: ProjectType.RawFolder,
-    repoUrl: null,
-    initialPrompt: initialPrompt
+    inputs: inputs
 );
 
 var projectId = detail.Status.Id;
@@ -150,7 +153,7 @@ Console.WriteLine($"\n[RESULT] Received {historyEventCount} events from history"
 
 if (historyEventCount == 0)
 {
-    Console.WriteLine("[ERROR] ❌ NO HISTORY EVENTS RECEIVED - THIS IS THE BUG!");
+    Console.WriteLine("[ERROR] NO HISTORY EVENTS RECEIVED - THIS IS THE BUG!");
 }
 else
 {
@@ -166,22 +169,22 @@ else
     // Verify history matches original
     if (historyEventCount == phase2EventCount)
     {
-        Console.WriteLine($"\n[RESULT] ✅ History event count matches original ({historyEventCount})");
+        Console.WriteLine($"\n[RESULT] History event count matches original ({historyEventCount})");
     }
     else
     {
-        Console.WriteLine($"\n[RESULT] ⚠️ History count ({historyEventCount}) differs from original ({phase2EventCount})");
+        Console.WriteLine($"\n[RESULT] History count ({historyEventCount}) differs from original ({phase2EventCount})");
     }
 
     // Check for content (messages with any properties beyond type)
     var messagesWithContent = clientHandler2.ReceivedMessages.Count(m => m.Properties.Count > 1);
     if (messagesWithContent == 0)
     {
-        Console.WriteLine("[ERROR] ❌ ALL HISTORY EVENTS HAVE NO CONTENT - PARSING BUG!");
+        Console.WriteLine("[ERROR] ALL HISTORY EVENTS HAVE NO CONTENT - PARSING BUG!");
     }
     else
     {
-        Console.WriteLine($"[RESULT] ✅ {messagesWithContent} messages have content");
+        Console.WriteLine($"[RESULT] {messagesWithContent} messages have content");
     }
 }
 
@@ -226,11 +229,11 @@ if (newEvents > 0)
         if (contentPreview.Length > 60) contentPreview = contentPreview[..60] + "...";
         Console.WriteLine($"  [{msg.Type}] {contentPreview}");
     }
-    Console.WriteLine($"\n[RESULT] ✅ Responses arrived after reconnect!");
+    Console.WriteLine($"\n[RESULT] Responses arrived after reconnect!");
 }
 else
 {
-    Console.WriteLine("[ERROR] ❌ NO NEW EVENTS AFTER FOLLOW-UP INPUT");
+    Console.WriteLine("[ERROR] NO NEW EVENTS AFTER FOLLOW-UP INPUT");
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -266,11 +269,11 @@ var allPassed = historyEventCount > 0 &&
 
 if (allPassed)
 {
-    Console.WriteLine("║ RESULT: ✅ ALL TESTS PASSED                                  ║");
+    Console.WriteLine("║ RESULT: ALL TESTS PASSED                                     ║");
 }
 else
 {
-    Console.WriteLine("║ RESULT: ❌ SOME TESTS FAILED                                 ║");
+    Console.WriteLine("║ RESULT: SOME TESTS FAILED                                    ║");
 }
 Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
 
@@ -362,6 +365,12 @@ class ProjectHubClientHandler : IProjectHubClient
     public Task ProjectCreated(ProjectStatus status)
     {
         Console.WriteLine($"  >> [CREATED] {status.Id} ({status.Name})");
+        return Task.CompletedTask;
+    }
+
+    public Task CreationProgress(string projectId, string message)
+    {
+        Console.WriteLine($"  >> [PROGRESS] {projectId}: {message}");
         return Task.CompletedTask;
     }
 }

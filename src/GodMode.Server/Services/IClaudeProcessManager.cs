@@ -20,12 +20,30 @@ public interface IClaudeProcessManager
     /// <summary>
     /// Starts a new Claude process with an initial prompt and new session ID.
     /// </summary>
-    Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken);
+    /// <param name="project">The project info.</param>
+    /// <param name="initialPrompt">The initial prompt to send.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="extraEnvironment">Additional environment variables to set on the process.</param>
+    /// <param name="extraArgs">Additional CLI arguments to append.</param>
+    Task<int> StartClaudeProcessAsync(
+        ProjectInfo project,
+        string initialPrompt,
+        CancellationToken cancellationToken,
+        Dictionary<string, string>? extraEnvironment = null,
+        string[]? extraArgs = null);
 
     /// <summary>
     /// Resumes a Claude process using --resume flag with existing session ID.
     /// </summary>
-    Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken);
+    /// <param name="project">The project info.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="extraEnvironment">Additional environment variables to set on the process.</param>
+    /// <param name="extraArgs">Additional CLI arguments to append.</param>
+    Task<int> ResumeClaudeProcessAsync(
+        ProjectInfo project,
+        CancellationToken cancellationToken,
+        Dictionary<string, string>? extraEnvironment = null,
+        string[]? extraArgs = null);
 
     Task SendInputAsync(ProjectInfo project, string input);
     Task StopProcessAsync(ProjectInfo project);

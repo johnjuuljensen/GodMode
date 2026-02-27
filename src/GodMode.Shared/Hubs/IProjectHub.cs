@@ -1,4 +1,4 @@
-using GodMode.Shared.Enums;
+using System.Text.Json;
 using GodMode.Shared.Models;
 
 namespace GodMode.Shared.Hubs;
@@ -9,9 +9,9 @@ namespace GodMode.Shared.Hubs;
 public interface IProjectHub
 {
     /// <summary>
-    /// Lists all available project roots.
+    /// Lists all available project roots with their input schemas.
     /// </summary>
-    Task<ProjectRoot[]> ListProjectRoots();
+    Task<ProjectRootInfo[]> ListProjectRoots();
 
     /// <summary>
     /// Lists all projects.
@@ -24,14 +24,9 @@ public interface IProjectHub
     Task<ProjectStatus> GetStatus(string projectId);
 
     /// <summary>
-    /// Creates a new project.
+    /// Creates a new project using config-driven workflow.
     /// </summary>
-    Task<ProjectDetail> CreateProject(
-        string name,
-        string projectRootName,
-        ProjectType projectType,
-        string? repoUrl,
-        string initialPrompt);
+    Task<ProjectDetail> CreateProject(string projectRootName, Dictionary<string, JsonElement> inputs);
 
     /// <summary>
     /// Sends input to a project.
