@@ -21,10 +21,7 @@ public static class MauiProgram
 #endif
 
 		// Register Services
-		builder.Services.AddSingleton<IProfileService>(_ => new ProfileService(FileSystem.AppDataDirectory));
-		builder.Services.AddSingleton<IHostConnectionService, HostConnectionService>();
-		builder.Services.AddSingleton<IProjectService, ProjectService>();
-		builder.Services.AddSingleton<INotificationService, NotificationService>();
+		builder.Services.AddGodModeClientServices();
 
 		// Register ViewModels
 		builder.Services.AddTransient<MainViewModel>();
