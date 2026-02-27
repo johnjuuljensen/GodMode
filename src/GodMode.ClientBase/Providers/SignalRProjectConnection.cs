@@ -24,6 +24,7 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
 
     public event Action<string, string>? CreationProgressReceived;
     public event Action<ProjectStatus>? ProjectCreatedReceived;
+    public event Action<string>? ProjectDeletedReceived;
 
     /// <summary>
     /// Creates a new SignalR connection to a project server.
@@ -94,6 +95,11 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         await _hubProxy.ResumeProject(projectId);
     }
 
+    public async Task DeleteProjectAsync(string projectId)
+    {
+        await _hubProxy.DeleteProject(projectId);
+    }
+
     public IObservable<ClaudeMessage> SubscribeOutput(string projectId, long fromOffset = 0)
     {
         if (!_outputSubscriptions.ContainsKey(projectId))
@@ -143,6 +149,20 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
     Task IProjectHubClient.CreationProgress(string projectId, string message)
     {
         CreationProgressReceived?.Invoke(projectId, message);
+        return Task.CompletedTask;
+    }
+
+    Task IProjectHubClient.ProjectDeleted(string projectId)
+    {
+        // Clean up output subscription for deleted project
+        if (_outputSubscriptions.TryGetValue(projectId, out var subject))
+        {
+            subject.OnCompleted();
+            subject.Dispose();
+            _outputSubscriptions.Remove(projectId);
+        }
+
+        ProjectDeletedReceived?.Invoke(projectId);
         return Task.CompletedTask;
     }
 

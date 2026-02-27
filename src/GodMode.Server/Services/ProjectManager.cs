@@ -254,6 +254,53 @@ public class ProjectManager : IProjectManager
         await NotifyStatusChanged(project);
     }
 
+    public async Task DeleteProjectAsync(string projectId)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+        {
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        }
+
+        _logger.LogInformation("Deleting project {ProjectId} ({Name})", projectId, project.Name);
+
+        // Stop Claude process if running
+        await _processManager.StopProcessAsync(project);
+
+        // Run teardown scripts if configured
+        if (project.RootName != null)
+        {
+            try
+            {
+                var rootPath = _projectFiles.GetProjectRootPath(project.RootName);
+                var config = _rootConfigReader.ReadConfig(rootPath);
+
+                if (config.Teardown is { Length: > 0 })
+                {
+                    var scriptEnv = BuildScriptEnvironment(rootPath, project, config, new Dictionary<string, JsonElement>());
+
+                    await _scriptRunner.RunAsync(
+                        config.Teardown,
+                        rootPath,
+                        project.ProjectPath,
+                        scriptEnv,
+                        msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Teardown script failed for project {ProjectId}, continuing with deletion", projectId);
+            }
+        }
+
+        // Remove from tracking
+        _projects.TryRemove(projectId, out _);
+
+        // Delete project folder
+        _projectFiles.DeleteProject(projectId, force: true);
+
+        _logger.LogInformation("Project {ProjectId} deleted successfully", projectId);
+    }
+
     public async Task ResumeProjectAsync(string projectId)
     {
         if (!_projects.TryGetValue(projectId, out var project))

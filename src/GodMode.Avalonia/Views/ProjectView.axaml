@@ -68,6 +68,10 @@
                     <Button Content="Metrics"
                             Command="{Binding LoadMetricsCommand}"
                             Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
+                    <Button Content="Delete"
+                            Command="{Binding DeleteProjectCommand}"
+                            Foreground="{StaticResource DangerBrush}"
+                            Padding="10,5" FontSize="{StaticResource FontSizeSmall}" />
                 </StackPanel>
             </Grid>
         </Border>
