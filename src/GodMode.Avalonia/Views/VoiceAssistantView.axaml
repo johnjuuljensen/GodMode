@@ -1,0 +1,144 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:GodMode.Avalonia.ViewModels"
+             xmlns:local="using:GodMode.Avalonia.Views"
+             x:Class="GodMode.Avalonia.Views.VoiceAssistantView"
+             x:DataType="vm:VoiceAssistantViewModel">
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" Margin="16">
+
+        <!-- Header -->
+        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto" Margin="0,0,0,12">
+            <Button Grid.Column="0"
+                    Content="Back"
+                    Command="{Binding GoBackCommand}"
+                    Padding="10,6"
+                    FontSize="{StaticResource FontSizeBody}"
+                    Margin="0,0,12,0" />
+
+            <TextBlock Grid.Column="1"
+                       Text="Voice Assistant"
+                       FontSize="{StaticResource FontSizeTitle}"
+                       FontWeight="Bold"
+                       VerticalAlignment="Center" />
+
+            <Border Grid.Column="3"
+                    Padding="10,4"
+                    Background="{StaticResource AccentBadgeBrush}"
+                    CornerRadius="{StaticResource CornerPill}"
+                    VerticalAlignment="Center">
+                <TextBlock Text="{Binding StatusText}"
+                           Foreground="{StaticResource TextOnAccentBrush}"
+                           FontSize="{StaticResource FontSizeSmall}" />
+            </Border>
+        </Grid>
+
+        <!-- Input area -->
+        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
+            <TextBox Grid.Column="0"
+                     Text="{Binding InputText}"
+                     Watermark="Type a command or click the mic..."
+                     KeyDown="InputBox_KeyDown" />
+
+            <Button Grid.Column="1"
+                    Content="Send"
+                    Command="{Binding SendCommand}"
+                    IsEnabled="{Binding !IsBusy}"
+                    Padding="12,6"
+                    Margin="8,0,0,0"
+                    FontSize="{StaticResource FontSizeBody}" />
+
+            <Button Grid.Column="2"
+                    Content="Mic"
+                    Command="{Binding ListenCommand}"
+                    IsEnabled="{Binding !IsBusy}"
+                    Padding="12,6"
+                    Margin="4,0,0,0"
+                    FontSize="{StaticResource FontSizeBody}"
+                    ToolTip.Tip="Listen (Speech-to-Text)" />
+        </Grid>
+
+        <!-- Conversation -->
+        <ScrollViewer Grid.Row="2"
+                      VerticalScrollBarVisibility="Auto"
+                      x:Name="ConversationScroller">
+            <ItemsControl ItemsSource="{Binding Messages}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:VoiceMessage">
+                        <Border Margin="4"
+                                Padding="12,8"
+                                CornerRadius="{StaticResource CornerMedium}"
+                                MaxWidth="600"
+                                HorizontalAlignment="{Binding IsUser, Converter={x:Static local:VoiceAssistantView.AlignmentConverter}}">
+                            <Border.Background>
+                                <MultiBinding Converter="{x:Static local:VoiceAssistantView.MessageBgConverter}">
+                                    <Binding Path="IsUser" />
+                                    <Binding Path="IsError" />
+                                </MultiBinding>
+                            </Border.Background>
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="{Binding Sender}"
+                                           FontSize="{StaticResource FontSizeCaption}"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextMutedBrush}" />
+                                <TextBlock Text="{Binding Text}"
+                                           TextWrapping="Wrap"
+                                           FontSize="{StaticResource FontSizeBody}" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- Settings panel -->
+        <Border Grid.Row="3"
+                Background="{StaticResource CardBrush}"
+                CornerRadius="{StaticResource CornerMedium}"
+                Padding="12"
+                Margin="0,8,0,0">
+            <StackPanel Spacing="8">
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBox Grid.Column="0"
+                             Text="{Binding ModelPath}"
+                             Watermark="Path to Phi-4-mini ONNX model directory..." />
+                    <Button Grid.Column="1"
+                            Content="Load Model"
+                            Command="{Binding LoadModelCommand}"
+                            IsEnabled="{Binding !IsBusy}"
+                            Padding="10,6" Margin="8,0,0,0"
+                            FontSize="{StaticResource FontSizeBody}" />
+                    <Button Grid.Column="2"
+                            Content="Browse..."
+                            Padding="10,6" Margin="4,0,0,0"
+                            FontSize="{StaticResource FontSizeBody}"
+                            Click="BrowseButton_Click" />
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Speech Language:"
+                               VerticalAlignment="Center"
+                               FontSize="{StaticResource FontSizeBody}" />
+                    <ComboBox ItemsSource="{Binding SpeechLanguages}"
+                              SelectedItem="{Binding SelectedLanguage}"
+                              Width="200" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Status bar -->
+        <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="16" Margin="0,8,0,0">
+            <TextBlock Text="{Binding SttEngineName}"
+                       FontSize="{StaticResource FontSizeCaption}"
+                       Foreground="{StaticResource TextMutedBrush}"
+                       VerticalAlignment="Center" />
+            <TextBlock Text="{Binding ConfigPath}"
+                       FontSize="{StaticResource FontSizeCaption}"
+                       Foreground="{StaticResource TextMutedBrush}"
+                       VerticalAlignment="Center" />
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding IsBusy}"
+                         Width="100" Height="4"
+                         VerticalAlignment="Center" />
+        </StackPanel>
+    </Grid>
+</UserControl>

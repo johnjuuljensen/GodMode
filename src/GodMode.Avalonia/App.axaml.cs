@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using GodMode.Voice;
+using GodMode.Voice.Windows;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GodMode.Avalonia;
@@ -36,6 +38,10 @@ public partial class App : Application
 		// ClientBase services - shared config at ~/.godmode
 		services.AddGodModeClientServices();
 
+		// Voice services — Windows speech first (before TryAdd fallbacks)
+		services.AddGodModeWindowsSpeech();
+		services.AddGodModeVoiceServices();
+
 		// Avalonia-specific services
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<IDialogService, DialogService>();
@@ -49,5 +55,6 @@ public partial class App : Application
 		services.AddTransient<AddServerViewModel>();
 		services.AddTransient<EditServerViewModel>();
 		services.AddTransient<CreateProjectViewModel>();
+		services.AddTransient<VoiceAssistantViewModel>();
 	}
 }

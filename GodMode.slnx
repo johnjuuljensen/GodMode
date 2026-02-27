@@ -12,6 +12,8 @@
     <Project Path="src/GodMode.Server/GodMode.Server.csproj" />
     <Project Path="src/GodMode.Shared/GodMode.Shared.csproj" />
     <Project Path="src/GodMode.Avalonia/GodMode.Avalonia.csproj" />
+    <Project Path="src/GodMode.Voice/GodMode.Voice.csproj" />
+    <Project Path="src/GodMode.Voice.Windows/GodMode.Voice.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="src/GodMode.Maui.Tests/GodMode.Maui.Tests.csproj" />

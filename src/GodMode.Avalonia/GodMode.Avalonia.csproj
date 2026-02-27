@@ -1,11 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
+		<TargetFramework>net10.0-windows10.0.19041</TargetFramework>
 		<OutputType>WinExe</OutputType>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<BuiltInComInteropSupport>true</BuiltInComInteropSupport>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 		<RootNamespace>GodMode.Avalonia</RootNamespace>
+		<WindowsSdkPackageVersion>10.0.19041.38</WindowsSdkPackageVersion>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -20,6 +23,8 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
+		<ProjectReference Include="..\GodMode.Voice\GodMode.Voice.csproj" />
+		<ProjectReference Include="..\GodMode.Voice.Windows\GodMode.Voice.Windows.csproj" />
 	</ItemGroup>
 
 </Project>

@@ -6,3 +6,5 @@ global using GodMode.ClientBase.Providers;
 global using GodMode.Avalonia.ViewModels;
 global using GodMode.Avalonia.Views;
 global using GodMode.Avalonia.Services;
+global using GodMode.Voice.Services;
+global using GodMode.Voice.Speech;
