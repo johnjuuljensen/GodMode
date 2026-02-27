@@ -68,7 +68,6 @@ public sealed class AssistantService
     {
         StatusChanged?.Invoke(this, "Loading AI model...");
         await _model.InitializeAsync(modelPath);
-        GeneralStatusTool.SetModelsLoaded(1);
         StatusChanged?.Invoke(this, "Model loaded.");
     }
 

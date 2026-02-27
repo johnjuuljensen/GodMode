@@ -1,7 +1,9 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using GodMode.Avalonia.Tools;
 using GodMode.Voice;
+using GodMode.Voice.Tools;
 using GodMode.Voice.Windows;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -41,6 +43,27 @@ public partial class App : Application
 		// Voice services — Windows speech first (before TryAdd fallbacks)
 		services.AddGodModeWindowsSpeech();
 		services.AddGodModeVoiceServices();
+
+		// Voice tool registry — wired to real app services
+		services.AddSingleton<ToolRegistry>(sp =>
+		{
+			var profiles = sp.GetRequiredService<IProfileService>();
+			var hosts = sp.GetRequiredService<IHostConnectionService>();
+			var projects = sp.GetRequiredService<IProjectService>();
+
+			var registry = new ToolRegistry();
+			registry.Register(new RespondTool());
+			registry.Register(new ListProfilesTool(profiles));
+			registry.Register(new SwitchProfileTool(profiles));
+			registry.Register(new ListServersTool(profiles, hosts));
+			registry.Register(new ListProjectsTool(profiles, hosts, projects));
+			registry.Register(new ProjectStatusTool(profiles, hosts, projects));
+			registry.Register(new CreateProjectTool(profiles, hosts, projects));
+			registry.Register(new SendInputTool(profiles, hosts, projects));
+			registry.Register(new StopProjectTool(profiles, hosts, projects));
+			registry.Register(new ResumeProjectTool(profiles, hosts, projects));
+			return registry;
+		});
 
 		// Avalonia-specific services
 		services.AddSingleton<INavigationService, NavigationService>();
