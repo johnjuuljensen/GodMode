@@ -9,11 +9,17 @@ public class FormFieldTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? StringTemplate { get; set; }
     public DataTemplate? MultilineTemplate { get; set; }
+    public DataTemplate? BooleanTemplate { get; set; }
 
     protected override DataTemplate OnSelectTemplate(object item, BindableObject container)
     {
-        if (item is FormField field && field.IsMultiline)
-            return MultilineTemplate!;
+        if (item is FormField field)
+        {
+            if (field.FieldType == "boolean")
+                return BooleanTemplate!;
+            if (field.IsMultiline)
+                return MultilineTemplate!;
+        }
 
         return StringTemplate!;
     }

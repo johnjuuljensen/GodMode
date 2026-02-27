@@ -24,6 +24,26 @@ public partial class FormField : ObservableObject
 
     [ObservableProperty]
     private string _value = "";
+
+    /// <summary>
+    /// Boolean view of Value for checkbox/toggle binding.
+    /// Syncs with Value as "true"/"false" strings.
+    /// </summary>
+    public bool BoolValue
+    {
+        get => Value is "true" or "True";
+        set
+        {
+            Value = value ? "true" : "false";
+            OnPropertyChanged();
+        }
+    }
+
+    partial void OnValueChanged(string value)
+    {
+        if (FieldType == "boolean")
+            OnPropertyChanged(nameof(BoolValue));
+    }
 }
 
 public record EnumOption(string Value, string Label);

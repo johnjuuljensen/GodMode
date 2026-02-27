@@ -23,6 +23,7 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
     public bool IsConnected => _hubConnection.State == HubConnectionState.Connected;
 
     public event Action<string, string>? CreationProgressReceived;
+    public event Action<ProjectStatus>? ProjectCreatedReceived;
 
     /// <summary>
     /// Creates a new SignalR connection to a project server.
@@ -135,6 +136,7 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
 
     Task IProjectHubClient.ProjectCreated(ProjectStatus status)
     {
+        ProjectCreatedReceived?.Invoke(status);
         return Task.CompletedTask;
     }
 

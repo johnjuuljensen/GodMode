@@ -14,6 +14,7 @@ public partial class MainViewModel : ViewModelBase
 	private readonly IProfileService _profileService;
 	private readonly IHostConnectionService _hostConnectionService;
 	private readonly INotificationService _notificationService;
+	private readonly HashSet<string> _subscribedConnections = new();
 
 	public static readonly Profile AllProfilesOption = new() { Name = "All" };
 
@@ -283,6 +284,25 @@ public partial class MainViewModel : ViewModelBase
 			var connection = await _hostConnectionService.ConnectToHostAsync(server.ProfileName, server.Id);
 			server.IsConnected = true;
 			server.State = HostState.Running;
+
+			// Subscribe to project creation events (once per connection)
+			var connectionKey = $"{server.ProfileName}:{server.Id}";
+			if (_subscribedConnections.Add(connectionKey))
+			{
+				connection.ProjectCreatedReceived += status =>
+				{
+					// Add the new project to the matching server's list
+					var target = Servers.FirstOrDefault(s =>
+						s.ProfileName == server.ProfileName && s.Id == server.Id);
+					if (target != null)
+					{
+						var summary = new ProjectSummary(
+							status.Id, status.Name, status.State,
+							status.UpdatedAt, status.CurrentQuestion);
+						target.Projects.Insert(0, summary);
+					}
+				};
+			}
 
 			var projects = await connection.ListProjectsAsync();
 			server.Projects = new ObservableCollection<ProjectSummary>(projects);

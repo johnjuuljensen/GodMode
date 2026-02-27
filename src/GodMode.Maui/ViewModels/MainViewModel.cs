@@ -18,6 +18,7 @@ public partial class MainViewModel : ObservableObject
     private readonly IProfileService _profileService;
     private readonly IHostConnectionService _hostConnectionService;
     private readonly INotificationService _notificationService;
+    private readonly HashSet<string> _subscribedConnections = new();
 
     /// <summary>
     /// Special profile option representing "All" profiles
@@ -318,6 +319,24 @@ public partial class MainViewModel : ObservableObject
             server.IsConnected = true;
             // Sync State with connection status - server is running if we connected
             server.State = HostState.Running;
+
+            // Subscribe to project creation events (once per connection)
+            var connectionKey = $"{server.ProfileName}:{server.Id}";
+            if (_subscribedConnections.Add(connectionKey))
+            {
+                connection.ProjectCreatedReceived += status =>
+                {
+                    var target = Servers.FirstOrDefault(s =>
+                        s.ProfileName == server.ProfileName && s.Id == server.Id);
+                    if (target != null)
+                    {
+                        var summary = new ProjectSummary(
+                            status.Id, status.Name, status.State,
+                            status.UpdatedAt, status.CurrentQuestion);
+                        target.Projects.Insert(0, summary);
+                    }
+                };
+            }
 
             var projects = await connection.ListProjectsAsync();
             server.Projects = new ObservableCollection<ProjectSummary>(projects);

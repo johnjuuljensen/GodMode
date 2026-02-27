@@ -68,6 +68,11 @@ public interface IProjectConnection : IDisposable
     event Action<string, string>? CreationProgressReceived;
 
     /// <summary>
+    /// Event raised when a new project is created (broadcast from server).
+    /// </summary>
+    event Action<ProjectStatus>? ProjectCreatedReceived;
+
+    /// <summary>
     /// Disconnects from the host
     /// </summary>
     void Disconnect();
