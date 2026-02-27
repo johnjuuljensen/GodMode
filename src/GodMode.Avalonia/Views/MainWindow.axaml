@@ -1,17 +1,294 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:GodMode.Avalonia.ViewModels"
+        xmlns:converters="using:GodMode.Avalonia.Converters"
+        xmlns:clientModels="using:GodMode.ClientBase.Services.Models"
+        xmlns:glass="using:LiquidGlassAvaloniaUI"
         x:Class="GodMode.Avalonia.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Title="GodMode - Claude Control"
-        Width="1200" Height="800">
-    <Grid ColumnDefinitions="*,Auto">
-        <ContentControl Grid.Column="0" Content="{Binding CurrentView}" />
-        <Border Grid.Column="1"
-                Width="380"
-                IsVisible="{Binding IsVoicePanelOpen}"
-                BorderThickness="1,0,0,0">
-            <ContentControl Content="{Binding Voice}" />
+        Title="GodMode"
+        Width="1280" Height="800"
+        MinWidth="800" MinHeight="600"
+        Background="{DynamicResource BgBaseBrush}"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="PreferSystemChrome"
+        ExtendClientAreaTitleBarHeightHint="48">
+
+    <Window.Resources>
+        <converters:IsNullConverter x:Key="IsNullConverter" />
+    </Window.Resources>
+
+    <Panel>
+        <!-- Main layout: Header + Banner + (Sidebar + Content) -->
+        <Grid RowDefinitions="48,Auto,*">
+
+            <!-- Header Bar (title bar drag region) — liquid glass background + interactive overlay -->
+            <Panel Grid.Row="0">
+                <!-- Glass background layer (non-interactive, allows title bar drag) -->
+                <glass:LiquidGlassSurface
+                        CornerRadius="0"
+                        BlurRadius="10"
+                        Vibrancy="1.3"
+                        Brightness="0.04"
+                        TintColor="{DynamicResource GlassHeaderTint}"
+                        SurfaceColor="{DynamicResource GlassHeaderSurface}"
+                        HighlightEnabled="True"
+                        HighlightOpacity="0.25"
+                        HighlightWidth="0.3"
+                        ShadowEnabled="False"
+                        IsHitTestVisible="False" />
+
+                <!-- Content layer (no Background = transparent to hit tests, title bar drag works) -->
+                <Border BorderBrush="{DynamicResource BorderSubtleBrush}"
+                        BorderThickness="0,0,0,1">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" Margin="80,0,16,0">
+
+                        <!-- Brand -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10"
+                                    VerticalAlignment="Center">
+                            <TextBlock Text="GODMODE"
+                                       FontSize="13" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                       LetterSpacing="2" />
+
+                            <!-- Waiting badge -->
+                            <Border IsVisible="{Binding HasWaitingProjects}"
+                                    Padding="6,2" CornerRadius="8"
+                                    Background="{DynamicResource StateWaitingBrush}">
+                                <TextBlock Text="{Binding WaitingBadgeCount}"
+                                           FontSize="10" FontWeight="Bold"
+                                           Foreground="#000000" />
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Separator -->
+                        <Border Grid.Column="1" Width="1" Height="20" Margin="12,0"
+                                Background="{DynamicResource BorderSubtleBrush}" />
+
+                        <!-- Profile selector + add profile -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4"
+                                    VerticalAlignment="Center">
+                            <ComboBox ItemsSource="{Binding SidebarViewModel.ProfileOptions}"
+                                      SelectedItem="{Binding SidebarViewModel.SelectedProfileOption}"
+                                      MinWidth="100" MaxWidth="180"
+                                      FontSize="11"
+                                      Padding="8,4"
+                                      CornerRadius="6"
+                                      Background="{DynamicResource BgSurfaceBrush}"
+                                      BorderThickness="0">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate x:DataType="clientModels:Profile">
+                                        <TextBlock Text="{Binding Name}" FontSize="11" />
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Button Command="{Binding SidebarViewModel.AddProfileCommand}"
+                                    ToolTip.Tip="Add Profile"
+                                    Padding="4,4"
+                                    CornerRadius="6"
+                                    Background="{DynamicResource BgSurfaceBrush}"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    BorderThickness="0">
+                                <TextBlock Text="+" FontSize="13" FontWeight="SemiBold" />
+                            </Button>
+                        </StackPanel>
+
+                        <!-- Right toolbar -->
+                        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6"
+                                    VerticalAlignment="Center">
+
+                            <!-- View mode segmented toggle -->
+                            <Border CornerRadius="6"
+                                    Background="{DynamicResource BgSurfaceBrush}"
+                                    Padding="2">
+                                <StackPanel Orientation="Horizontal" Spacing="0">
+                                    <Button Command="{Binding ToggleViewModeCommand}"
+                                            ToolTip.Tip="List view"
+                                            Padding="6,4"
+                                            CornerRadius="4"
+                                            Foreground="{DynamicResource TextSecondaryBrush}"
+                                            Background="{Binding !IsTileView, Converter={StaticResource BoolToActiveBrushConverter}}"
+                                            BorderThickness="0">
+                                        <TextBlock Text="☰" FontSize="13" />
+                                    </Button>
+                                    <Button Command="{Binding ToggleViewModeCommand}"
+                                            ToolTip.Tip="Tile view"
+                                            Padding="6,4"
+                                            CornerRadius="4"
+                                            Foreground="{DynamicResource TextSecondaryBrush}"
+                                            Background="{Binding IsTileView, Converter={StaticResource BoolToActiveBrushConverter}}"
+                                            BorderThickness="0">
+                                        <TextBlock Text="⊞" FontSize="13" />
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Theme toggle -->
+                            <Button Command="{Binding ToggleThemeCommand}"
+                                    ToolTip.Tip="Toggle theme"
+                                    Padding="6,4"
+                                    CornerRadius="6"
+                                    Background="{DynamicResource BgSurfaceBrush}"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    BorderThickness="0">
+                                <TextBlock Text="{Binding ThemeIcon}" FontSize="13" />
+                            </Button>
+
+                            <!-- Voice panel toggle -->
+                            <Button Command="{Binding ToggleVoicePanelCommand}"
+                                    ToolTip.Tip="Toggle voice panel"
+                                    Padding="6,4"
+                                    CornerRadius="6"
+                                    Background="{Binding IsVoicePanelOpen, Converter={StaticResource BoolToActiveBrushConverter}}"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    BorderThickness="0">
+                                <TextBlock Text="🎤" FontSize="13" />
+                            </Button>
+
+                            <!-- Connection indicator -->
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="4,0,0,0">
+                                <Ellipse Width="6" Height="6"
+                                         Fill="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Panel>
+
+            <!-- Auto-restart banner -->
+            <Border Grid.Row="1"
+                    IsVisible="{Binding ShowRestartBanner}"
+                    Padding="16,8"
+                    BorderThickness="0,0,0,1"
+                    BorderBrush="{DynamicResource BorderSubtleBrush}">
+                <Border.Background>
+                    <SolidColorBrush Color="{Binding RestartBannerIsError,
+                        Converter={StaticResource BoolToColorConverter}}"
+                        Opacity="0.15" />
+                </Border.Background>
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding RestartBannerMessage}"
+                               FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextPrimaryBrush}"
+                               VerticalAlignment="Center" />
+                    <Button Grid.Column="1"
+                            Content="&#x2715;"
+                            Command="{Binding DismissRestartBannerCommand}"
+                            Padding="4,2" FontSize="11"
+                            Background="Transparent"
+                            Foreground="{DynamicResource TextTertiaryBrush}" />
+                </Grid>
+            </Border>
+
+            <!-- Body -->
+            <Panel Grid.Row="2">
+
+                <!-- Normal mode: Sidebar + Content + Voice side by side -->
+                <Grid ColumnDefinitions="260,Auto,*,Auto"
+                      IsVisible="{Binding !IsTileView}">
+
+                    <!-- Sidebar — liquid glass -->
+                    <glass:LiquidGlassSurface Grid.Column="0"
+                            CornerRadius="0"
+                            BlurRadius="8"
+                            Vibrancy="1.1"
+                            Brightness="0.02"
+                            TintColor="{DynamicResource GlassSidebarTint}"
+                            SurfaceColor="{DynamicResource GlassSidebarSurface}"
+                            HighlightEnabled="False"
+                            ShadowEnabled="False">
+                        <Border BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                BorderThickness="0,0,1,0">
+                            <ContentControl Content="{Binding SidebarViewModel}" />
+                        </Border>
+                    </glass:LiquidGlassSurface>
+
+                    <!-- Resize grip -->
+                    <GridSplitter Grid.Column="1" Width="1"
+                                  Background="{DynamicResource BorderSubtleBrush}" />
+
+                    <!-- Content area -->
+                    <Panel Grid.Column="2" Background="{DynamicResource BgBaseBrush}">
+                        <ContentControl Content="{Binding ContentViewModel}"
+                                        IsVisible="{Binding ContentViewModel, Converter={StaticResource IsNotNullConverter}}" />
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    IsVisible="{Binding ContentViewModel, Converter={StaticResource IsNullConverter}}">
+                            <TextBlock Text="Select a project to get started"
+                                       FontSize="15"
+                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                       HorizontalAlignment="Center" />
+                            <TextBlock Text="or create a new one from the sidebar"
+                                       FontSize="13" Margin="0,6,0,0"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                       HorizontalAlignment="Center" />
+                        </StackPanel>
+                    </Panel>
+
+                    <!-- Voice panel -->
+                    <Border Grid.Column="3" Width="380"
+                            IsVisible="{Binding IsVoicePanelOpen}"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="1,0,0,0">
+                        <ContentControl Content="{Binding Voice}" />
+                    </Border>
+                </Grid>
+
+                <!-- Tile mode: fullscreen, no sidebar -->
+                <Grid RowDefinitions="Auto,*"
+                      IsVisible="{Binding IsTileView}"
+                      Background="{DynamicResource BgBaseBrush}">
+
+                    <!-- Back bar (visible when drilling into a project from tiles) -->
+                    <Border Grid.Row="0"
+                            IsVisible="{Binding IsTileFullscreen}"
+                            Padding="8,4"
+                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                            BorderThickness="0,0,0,1">
+                        <Button Command="{Binding BackToTilesCommand}"
+                                Padding="8,4"
+                                Background="Transparent"
+                                Foreground="{DynamicResource TextSecondaryBrush}"
+                                HorizontalAlignment="Left">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="&#x2190;" FontSize="16" VerticalAlignment="Center" />
+                                <TextBlock Text="Back to tiles" FontSize="12" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </Border>
+
+                    <!-- Content fills full width -->
+                    <ContentControl Grid.Row="1"
+                                    Content="{Binding ContentViewModel}" />
+                </Grid>
+            </Panel>
+        </Grid>
+
+        <!-- Modal overlay -->
+        <Border IsVisible="{Binding IsModalVisible}"
+                Background="{DynamicResource BgOverlayBrush}">
+            <glass:LiquidGlassSurface HorizontalAlignment="Center" VerticalAlignment="Center"
+                    MaxWidth="500" MinWidth="400"
+                    CornerRadius="16"
+                    BlurRadius="14"
+                    Vibrancy="1.4"
+                    Brightness="0.06"
+                    TintColor="{DynamicResource GlassModalTint}"
+                    SurfaceColor="{DynamicResource GlassModalSurface}"
+                    HighlightEnabled="True"
+                    HighlightOpacity="0.35"
+                    HighlightWidth="0.4"
+                    ShadowEnabled="True"
+                    ShadowRadius="32"
+                    ShadowColor="#40000000"
+                    ShadowOffset="0,8">
+                <Border Padding="0"
+                        BorderBrush="{DynamicResource BorderStrongBrush}"
+                        BorderThickness="1"
+                        CornerRadius="16">
+                    <ContentControl Content="{Binding ModalViewModel}" />
+                </Border>
+            </glass:LiquidGlassSurface>
         </Border>
-    </Grid>
+    </Panel>
 </Window>

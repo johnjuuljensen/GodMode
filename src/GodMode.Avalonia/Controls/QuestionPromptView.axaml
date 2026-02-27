@@ -1,0 +1,151 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:GodMode.Avalonia.Controls"
+             x:Class="GodMode.Avalonia.Controls.QuestionPromptView"
+             x:DataType="controls:QuestionPromptView"
+             Focusable="True">
+
+    <Border BorderBrush="{DynamicResource BorderSubtleBrush}"
+            BorderThickness="0,1,0,0">
+        <StackPanel>
+
+            <!-- Header: "WAITING FOR INPUT" with agent badge -->
+            <Border Padding="20,14,20,10">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <!-- Pulsing question mark icon -->
+                    <Border Width="24" Height="24" CornerRadius="12"
+                            Background="{DynamicResource StateWaitingBrush}"
+                            Opacity="0.15"
+                            VerticalAlignment="Top" Margin="0,1,0,0">
+                        <Border Width="24" Height="24" CornerRadius="12">
+                            <TextBlock Text="?"
+                                       FontSize="13" FontWeight="Bold"
+                                       Foreground="{DynamicResource StateWaitingBrush}"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center" />
+                        </Border>
+                    </Border>
+
+                    <StackPanel Spacing="4">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="WAITING FOR INPUT"
+                                       FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource StateWaitingBrush}"
+                                       VerticalAlignment="Center" />
+
+                            <!-- Agent/header badge -->
+                            <Border IsVisible="{Binding AgentName, RelativeSource={RelativeSource AncestorType=controls:QuestionPromptView}, Converter={StaticResource IsNotNullConverter}}"
+                                    Padding="6,2" CornerRadius="4"
+                                    Background="{DynamicResource BgSurfaceBrush}">
+                                <TextBlock Text="{Binding AgentName, RelativeSource={RelativeSource AncestorType=controls:QuestionPromptView}}"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource TextTertiaryBrush}" />
+                            </Border>
+                        </StackPanel>
+
+                        <!-- Question text -->
+                        <TextBlock Text="{Binding QuestionText, RelativeSource={RelativeSource AncestorType=controls:QuestionPromptView}}"
+                                   FontSize="13"
+                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="20" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- VS Code-style option list (only when options exist) -->
+            <Border IsVisible="{Binding HasOptions, RelativeSource={RelativeSource AncestorType=controls:QuestionPromptView}}"
+                    Margin="16,0,16,8"
+                    CornerRadius="8"
+                    BorderBrush="{DynamicResource BorderDefaultBrush}"
+                    BorderThickness="1"
+                    Background="{DynamicResource BgSurfaceBrush}"
+                    ClipToBounds="True">
+                <ScrollViewer MaxHeight="280">
+                    <ItemsControl x:Name="OptionsPanel"
+                                  ItemsSource="{Binding Options, RelativeSource={RelativeSource AncestorType=controls:QuestionPromptView}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="controls:QuestionOption">
+                                <Button Padding="0"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Stretch"
+                                        CornerRadius="0"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Cursor="Hand"
+                                        Click="OnOptionClicked"
+                                        PointerEntered="OnOptionPointerEntered"
+                                        Tag="{Binding}">
+
+                                    <!-- Row with left bar indicator -->
+                                    <Border Padding="0"
+                                            Background="{Binding RowBackground}"
+                                            BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                            BorderThickness="0,0,0,1">
+                                        <Grid ColumnDefinitions="3,*,Auto" MinHeight="38">
+                                            <!-- Left selection bar -->
+                                            <Border Grid.Column="0"
+                                                    Background="{Binding BarBrush}"
+                                                    CornerRadius="0,2,2,0"
+                                                    Margin="0,6"
+                                                    Width="3" />
+
+                                            <!-- Label + description -->
+                                            <StackPanel Grid.Column="1" Margin="12,8,8,8" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Label}"
+                                                           FontSize="13"
+                                                           Foreground="{Binding LabelForeground}" />
+                                                <TextBlock Text="{Binding Description}"
+                                                           IsVisible="{Binding HasDescription}"
+                                                           FontSize="11"
+                                                           Foreground="{DynamicResource TextTertiaryBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MaxLines="1"
+                                                           Margin="0,1,0,0" />
+                                            </StackPanel>
+
+                                            <!-- Enter hint for active option -->
+                                            <TextBlock Grid.Column="2"
+                                                       IsVisible="{Binding IsActive}"
+                                                       Text="Enter ↵"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                                       Opacity="0.6"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,12,0" />
+                                        </Grid>
+                                    </Border>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Keyboard hints (only when options exist) -->
+            <StackPanel IsVisible="{Binding HasOptions, RelativeSource={RelativeSource AncestorType=controls:QuestionPromptView}}"
+                        Orientation="Horizontal" Spacing="16"
+                        HorizontalAlignment="Center"
+                        Margin="0,0,0,8">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="↑↓" FontSize="10" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                    <TextBlock Text="navigate" FontSize="10"
+                               Foreground="{DynamicResource TextTertiaryBrush}" Opacity="0.7" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="⏎" FontSize="10" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                    <TextBlock Text="select" FontSize="10"
+                               Foreground="{DynamicResource TextTertiaryBrush}" Opacity="0.7" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <TextBlock Text="1-9" FontSize="10" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextTertiaryBrush}" />
+                    <TextBlock Text="shortcut" FontSize="10"
+                               Foreground="{DynamicResource TextTertiaryBrush}" Opacity="0.7" />
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</UserControl>

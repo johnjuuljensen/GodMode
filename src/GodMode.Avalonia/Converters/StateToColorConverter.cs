@@ -7,12 +7,12 @@ namespace GodMode.Avalonia.Converters;
 
 public class StateToColorConverter : IValueConverter
 {
-	private static readonly IBrush Green = new SolidColorBrush(Color.Parse("#4CAF50"));
-	private static readonly IBrush Orange = new SolidColorBrush(Color.Parse("#FF9800"));
-	private static readonly IBrush Gray = new SolidColorBrush(Color.Parse("#9E9E9E"));
-	private static readonly IBrush Blue = new SolidColorBrush(Color.Parse("#2196F3"));
-	private static readonly IBrush Red = new SolidColorBrush(Color.Parse("#F44336"));
-	private static readonly IBrush DefaultGray = new SolidColorBrush(Color.Parse("#757575"));
+	private static readonly IBrush Running = new SolidColorBrush(Color.Parse("#30D158"));
+	private static readonly IBrush Waiting = new SolidColorBrush(Color.Parse("#FFD60A"));
+	private static readonly IBrush Error = new SolidColorBrush(Color.Parse("#FF453A"));
+	private static readonly IBrush Idle = new SolidColorBrush(Color.Parse("#8CFFFFFF"));
+	private static readonly IBrush Stopped = new SolidColorBrush(Color.Parse("#59FFFFFF"));
+	private static readonly IBrush DefaultGray = new SolidColorBrush(Color.Parse("#59FFFFFF"));
 
 	public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
 	{
@@ -20,23 +20,22 @@ public class StateToColorConverter : IValueConverter
 		{
 			return state switch
 			{
-				ProjectState.Running => Green,
-				ProjectState.WaitingInput => Orange,
-				ProjectState.Stopped => Gray,
-				ProjectState.Idle => Blue,
-				ProjectState.Error => Red,
+				ProjectState.Running => Running,
+				ProjectState.WaitingInput => Waiting,
+				ProjectState.Stopped => Stopped,
+				ProjectState.Idle => Idle,
+				ProjectState.Error => Error,
 				_ => DefaultGray
 			};
 		}
-		// Also handle HostState for server status display
 		if (value is HostState hostState)
 		{
 			return hostState switch
 			{
-				HostState.Running => Green,
-				HostState.Stopped => Gray,
-				HostState.Starting => Orange,
-				HostState.Stopping => Orange,
+				HostState.Running => Running,
+				HostState.Stopped => Stopped,
+				HostState.Starting => Waiting,
+				HostState.Stopping => Waiting,
 				_ => DefaultGray
 			};
 		}
