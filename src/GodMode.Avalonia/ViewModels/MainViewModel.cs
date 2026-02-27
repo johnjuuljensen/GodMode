@@ -147,12 +147,6 @@ public partial class MainViewModel : ViewModelBase
 	}
 
 	[RelayCommand]
-	private void OpenVoiceAssistant()
-	{
-		Navigation.NavigateTo<VoiceAssistantViewModel>();
-	}
-
-	[RelayCommand]
 	private void AddServer()
 	{
 		if (SelectedProfile != null)

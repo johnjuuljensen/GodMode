@@ -5,36 +5,10 @@
              x:Class="GodMode.Avalonia.Views.VoiceAssistantView"
              x:DataType="vm:VoiceAssistantViewModel">
 
-    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto" Margin="16">
-
-        <!-- Header -->
-        <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto" Margin="0,0,0,12">
-            <Button Grid.Column="0"
-                    Content="Back"
-                    Command="{Binding GoBackCommand}"
-                    Padding="10,6"
-                    FontSize="{StaticResource FontSizeBody}"
-                    Margin="0,0,12,0" />
-
-            <TextBlock Grid.Column="1"
-                       Text="Voice Assistant"
-                       FontSize="{StaticResource FontSizeTitle}"
-                       FontWeight="Bold"
-                       VerticalAlignment="Center" />
-
-            <Border Grid.Column="3"
-                    Padding="10,4"
-                    Background="{StaticResource AccentBadgeBrush}"
-                    CornerRadius="{StaticResource CornerPill}"
-                    VerticalAlignment="Center">
-                <TextBlock Text="{Binding StatusText}"
-                           Foreground="{StaticResource TextOnAccentBrush}"
-                           FontSize="{StaticResource FontSizeSmall}" />
-            </Border>
-        </Grid>
+    <Grid RowDefinitions="Auto,*,Auto,Auto" Margin="8">
 
         <!-- Input area -->
-        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
             <TextBox Grid.Column="0"
                      Text="{Binding InputText}"
                      Watermark="Type a command or click the mic..."
@@ -59,7 +33,7 @@
         </Grid>
 
         <!-- Conversation -->
-        <ScrollViewer Grid.Row="2"
+        <ScrollViewer Grid.Row="1"
                       VerticalScrollBarVisibility="Auto"
                       x:Name="ConversationScroller">
             <ItemsControl ItemsSource="{Binding Messages}">
@@ -92,7 +66,7 @@
         </ScrollViewer>
 
         <!-- Settings panel -->
-        <Border Grid.Row="3"
+        <Border Grid.Row="2"
                 Background="{StaticResource CardBrush}"
                 CornerRadius="{StaticResource CornerMedium}"
                 Padding="12"
@@ -126,7 +100,7 @@
         </Border>
 
         <!-- Status bar -->
-        <StackPanel Grid.Row="4" Orientation="Horizontal" Spacing="16" Margin="0,8,0,0">
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="16" Margin="0,8,0,0">
             <TextBlock Text="{Binding SttEngineName}"
                        FontSize="{StaticResource FontSizeCaption}"
                        Foreground="{StaticResource TextMutedBrush}"

@@ -5,5 +5,13 @@
         x:DataType="vm:MainWindowViewModel"
         Title="GodMode - Claude Control"
         Width="1200" Height="800">
-    <ContentControl Content="{Binding CurrentView}" />
+    <Grid ColumnDefinitions="*,Auto">
+        <ContentControl Grid.Column="0" Content="{Binding CurrentView}" />
+        <Border Grid.Column="1"
+                Width="380"
+                IsVisible="{Binding IsVoicePanelOpen}"
+                BorderThickness="1,0,0,0">
+            <ContentControl Content="{Binding Voice}" />
+        </Border>
+    </Grid>
 </Window>

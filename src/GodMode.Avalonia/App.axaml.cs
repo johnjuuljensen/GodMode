@@ -4,6 +4,7 @@ using Avalonia.Markup.Xaml;
 using GodMode.Avalonia.Tools;
 using GodMode.Avalonia.Voice;
 using GodMode.Voice;
+using GodMode.Voice.Services;
 using GodMode.Voice.Tools;
 using GodMode.Voice.Windows;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +25,19 @@ public partial class App : Application
 		var services = new ServiceCollection();
 		ConfigureServices(services);
 		Services = services.BuildServiceProvider();
+
+		// Fire-and-forget: load AI model at startup if configured
+		_ = Task.Run(async () =>
+		{
+			var config = InferenceConfig.Load();
+			if (!string.IsNullOrEmpty(config.Phi4ModelPath) &&
+				Directory.Exists(config.Phi4ModelPath) &&
+				File.Exists(Path.Combine(config.Phi4ModelPath, "genai_config.json")))
+			{
+				var assistant = Services.GetRequiredService<AssistantService>();
+				await assistant.InitializeModelAsync(config.Phi4ModelPath);
+			}
+		});
 
 		if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
 		{
@@ -78,6 +92,7 @@ public partial class App : Application
 		services.AddSingleton<IDialogService, DialogService>();
 
 		// ViewModels
+		services.AddSingleton<VoiceAssistantViewModel>();
 		services.AddTransient<MainWindowViewModel>();
 		services.AddTransient<MainViewModel>();
 		services.AddTransient<HostViewModel>();
@@ -86,6 +101,5 @@ public partial class App : Application
 		services.AddTransient<AddServerViewModel>();
 		services.AddTransient<EditServerViewModel>();
 		services.AddTransient<CreateProjectViewModel>();
-		services.AddTransient<VoiceAssistantViewModel>();
 	}
 }

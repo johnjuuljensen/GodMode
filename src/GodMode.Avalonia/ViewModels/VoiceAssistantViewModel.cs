@@ -8,6 +8,7 @@ using GodMode.Voice.Services;
 using GodMode.Voice.Speech;
 using GodMode.Voice.Tools;
 using GodMode.Voice.Windows;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace GodMode.Avalonia.ViewModels;
 
@@ -18,6 +19,9 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 	private readonly InferenceConfig _config;
 	private readonly ISpeechRecognizer _recognizer;
 	private CancellationTokenSource? _cts;
+
+	private static readonly string[] UnfocusKeywords =
+		["unfocus", "exit focus", "stop watching", "leave project"];
 
 	[ObservableProperty]
 	private string _statusText = "Initializing...";
@@ -85,14 +89,22 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		// Subscribe to focused project output
 		_voiceContext.ProjectOutputReceived += OnProjectOutputReceived;
 
+		// Check if model was already loaded at startup
 		if (!string.IsNullOrEmpty(_config.Phi4ModelPath))
 		{
 			ModelPath = _config.Phi4ModelPath;
 
-			if (Directory.Exists(_config.Phi4ModelPath) &&
+			if (_assistant.IsModelLoaded)
+			{
+				IsModelLoaded = true;
+				StatusText = "Model loaded.";
+			}
+			else if (Directory.Exists(_config.Phi4ModelPath) &&
 				File.Exists(Path.Combine(_config.Phi4ModelPath, "genai_config.json")))
 			{
-				_ = AutoLoadModelAsync(_config.Phi4ModelPath);
+				StatusText = "Model loading in background...";
+				// Poll for model load completion from the startup fire-and-forget
+				_ = WaitForModelLoadAsync();
 			}
 			else
 			{
@@ -103,6 +115,20 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		{
 			ShowFirstRunMessage();
 		}
+	}
+
+	private async Task WaitForModelLoadAsync()
+	{
+		// Wait for the startup background load to complete
+		while (!_assistant.IsModelLoaded)
+			await Task.Delay(500);
+
+		await Dispatcher.UIThread.InvokeAsync(() =>
+		{
+			IsModelLoaded = true;
+			StatusText = "Model loaded.";
+			AddMessage("System", "Model loaded automatically from config.", isUser: false);
+		});
 	}
 
 	private ToolCall? TryResolveDisambiguation(string userText)
@@ -149,25 +175,6 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		return string.Empty;
 	}
 
-	private async Task AutoLoadModelAsync(string path)
-	{
-		IsBusy = true;
-		try
-		{
-			await _assistant.InitializeModelAsync(path);
-			IsModelLoaded = true;
-			AddMessage("System", "Model loaded automatically from config.", isUser: false);
-		}
-		catch (Exception ex)
-		{
-			AddMessage("Error", $"Failed to auto-load model: {ex.Message}", isUser: false, isError: true);
-		}
-		finally
-		{
-			IsBusy = false;
-		}
-	}
-
 	private void PopulateLanguages()
 	{
 		List<string> languages;
@@ -210,6 +217,38 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 			$"3. The path will be saved to:\n" +
 			$"   {InferenceConfig.ConfigPath}",
 			isUser: false);
+	}
+
+	private bool TryHandleUnfocusKeyword(string text)
+	{
+		var trimmed = text.Trim();
+		if (UnfocusKeywords.Any(k => trimmed.Equals(k, StringComparison.OrdinalIgnoreCase)))
+		{
+			var name = _voiceContext.Focus?.ProjectName ?? "project";
+			_voiceContext.UnfocusProject();
+			AddMessage("System", $"Unfocused from '{name}'.", isUser: false);
+			return true;
+		}
+		return false;
+	}
+
+	private async Task SendToFocusedProjectAsync(string text)
+	{
+		var focus = _voiceContext.Focus!;
+		var prefixed = $"be as brief as possible. {text}";
+
+		AddMessage("You", text, isUser: true);
+
+		try
+		{
+			var projectService = App.Services.GetRequiredService<IProjectService>();
+			await projectService.SendInputAsync(focus.ProfileName, focus.HostId, focus.ProjectId, prefixed);
+			StatusText = $"Sent to {focus.ProjectName}";
+		}
+		catch (Exception ex)
+		{
+			AddMessage("Error", $"Failed to send: {ex.Message}", isUser: false, isError: true);
+		}
 	}
 
 	[RelayCommand]
@@ -262,19 +301,41 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 	[RelayCommand]
 	private async Task ListenAsync()
 	{
-		if (!_assistant.IsModelLoaded)
-		{
-			AddMessage("System", "Please load the AI model first.", isUser: false);
-			return;
-		}
-
 		_cts?.Cancel();
 		_cts = new CancellationTokenSource();
 
 		IsBusy = true;
 		try
 		{
-			await _assistant.ListenAndProcessAsync(_cts.Token);
+			StatusText = "Listening...";
+			var transcript = await _recognizer.RecognizeSpeechAsync(_cts.Token);
+
+			if (string.IsNullOrWhiteSpace(transcript))
+			{
+				StatusText = "No speech detected.";
+				return;
+			}
+
+			// Keyword intercept (no AI needed)
+			if (_voiceContext.Focus is not null && TryHandleUnfocusKeyword(transcript))
+				return;
+
+			// Focus mode: bypass AI, send directly to project
+			if (_voiceContext.Focus is not null)
+			{
+				await SendToFocusedProjectAsync(transcript);
+				return;
+			}
+
+			// Normal mode: through local AI
+			if (!_assistant.IsModelLoaded)
+			{
+				AddMessage("System", "Please load the AI model first.", isUser: false);
+				return;
+			}
+
+			AddMessage("You", transcript, isUser: true);
+			await _assistant.ProcessTextAsync(transcript, _cts.Token);
 		}
 		catch (OperationCanceledException) { }
 		catch (Exception ex)
@@ -293,13 +354,26 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		var text = InputText.Trim();
 		if (string.IsNullOrEmpty(text)) return;
 
+		InputText = string.Empty;
+
+		// Keyword intercept (no AI needed)
+		if (_voiceContext.Focus is not null && TryHandleUnfocusKeyword(text))
+			return;
+
+		// Focus mode: bypass AI, send directly to project
+		if (_voiceContext.Focus is not null)
+		{
+			await SendToFocusedProjectAsync(text);
+			return;
+		}
+
+		// Normal mode: through local AI
 		if (!_assistant.IsModelLoaded)
 		{
 			AddMessage("System", "Please load the AI model first.", isUser: false);
 			return;
 		}
 
-		InputText = string.Empty;
 		AddMessage("You", text, isUser: true);
 
 		_cts?.Cancel();
@@ -319,12 +393,6 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		{
 			IsBusy = false;
 		}
-	}
-
-	[RelayCommand]
-	private void GoBack()
-	{
-		Navigation.GoBack();
 	}
 
 	private void AddMessage(string sender, string text, bool isUser, bool isError = false)
