@@ -41,7 +41,7 @@
                 <!-- Content layer (no Background = transparent to hit tests, title bar drag works) -->
                 <Border BorderBrush="{DynamicResource BorderSubtleBrush}"
                         BorderThickness="0,0,0,1">
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" Margin="80,0,16,0">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" Margin="80,0,144,0">
 
                         <!-- Brand -->
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10"
