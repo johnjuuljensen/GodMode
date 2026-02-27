@@ -16,5 +16,6 @@ public record RootConfig(
     Dictionary<string, string>? Environment = null,
     string[]? ClaudeArgs = null,
     string? NameTemplate = null,
-    string? PromptTemplate = null
+    string? PromptTemplate = null,
+    string? ClaudeConfigDir = null
 );

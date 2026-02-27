@@ -529,6 +529,12 @@ public class ProjectManager : IProjectManager
             ? new Dictionary<string, string>(config.Environment)
             : null;
 
+        if (!string.IsNullOrEmpty(config.ClaudeConfigDir))
+        {
+            env ??= new Dictionary<string, string>();
+            env["CLAUDE_CONFIG_DIR"] = config.ClaudeConfigDir;
+        }
+
         var args = new List<string>();
         if (config.ClaudeArgs != null)
             args.AddRange(config.ClaudeArgs);
