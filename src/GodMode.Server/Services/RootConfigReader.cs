@@ -4,12 +4,14 @@ using GodMode.Shared.Models;
 namespace GodMode.Server.Services;
 
 /// <summary>
-/// Reads .godmode-root.json configuration from project root directories.
+/// Reads .godmode-root/config.json configuration from project root directories.
+/// Falls back to legacy .godmode-root.json if the new path doesn't exist.
 /// No caching — always reads fresh so changes take effect without restart.
 /// </summary>
 public class RootConfigReader : IRootConfigReader
 {
-    private const string ConfigFileName = ".godmode-root.json";
+    private const string ConfigPath = ".godmode-root/config.json";
+    private const string LegacyConfigFileName = ".godmode-root.json";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -27,12 +29,23 @@ public class RootConfigReader : IRootConfigReader
 
     public RootConfig ReadConfig(string rootPath)
     {
-        var configPath = Path.Combine(rootPath, ConfigFileName);
+        var configPath = Path.Combine(rootPath, ConfigPath);
 
+        // Fall back to legacy path for backward compatibility
         if (!File.Exists(configPath))
         {
-            _logger.LogDebug("No {ConfigFile} found in {RootPath}, using default config", ConfigFileName, rootPath);
-            return new RootConfig();
+            var legacyPath = Path.Combine(rootPath, LegacyConfigFileName);
+            if (File.Exists(legacyPath))
+            {
+                _logger.LogDebug("Using legacy {LegacyFile} in {RootPath} (migrate to {NewPath})",
+                    LegacyConfigFileName, rootPath, ConfigPath);
+                configPath = legacyPath;
+            }
+            else
+            {
+                _logger.LogDebug("No config found in {RootPath}, using default config", rootPath);
+                return new RootConfig();
+            }
         }
 
         try
@@ -43,7 +56,7 @@ public class RootConfigReader : IRootConfigReader
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to read {ConfigFile} from {RootPath}, using default config", ConfigFileName, rootPath);
+            _logger.LogWarning(ex, "Failed to read config from {ConfigPath}, using default config", configPath);
             return new RootConfig();
         }
     }

@@ -13,7 +13,7 @@ namespace GodMode.Server.Services;
 
 /// <summary>
 /// Manages project folders, lifecycle, and state.
-/// Uses config-driven workflow: reads .godmode-root.json, runs scripts, starts Claude.
+/// Uses config-driven workflow: reads .godmode-root/config.json, runs scripts, starts Claude.
 /// </summary>
 public class ProjectManager : IProjectManager
 {
@@ -112,7 +112,7 @@ public class ProjectManager : IProjectManager
         // Resolve name from inputs or nameTemplate
         var name = ResolveProjectName(action, request.Inputs);
         if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("Project name is required. Provide a 'name' input or configure nameTemplate in .godmode-root.json.");
+            throw new ArgumentException("Project name is required. Provide a 'name' input or configure nameTemplate in .godmode-root/config.json.");
 
         // Resolve prompt from inputs or promptTemplate
         var prompt = ResolvePrompt(action, request.Inputs);

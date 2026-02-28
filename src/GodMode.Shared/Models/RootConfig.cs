@@ -3,7 +3,8 @@ using System.Text.Json;
 namespace GodMode.Shared.Models;
 
 /// <summary>
-/// Configuration for a project root directory, read from .godmode-root.json.
+/// Configuration for a project root directory, read from .godmode-root/config.json
+/// (falls back to legacy .godmode-root.json).
 /// Supports multiple named create actions via the Actions array.
 /// When Actions is not set, root-level fields define a single implicit "Create" action (backward compat).
 /// Root-level Environment, ClaudeArgs, and ClaudeConfigDir serve as shared defaults

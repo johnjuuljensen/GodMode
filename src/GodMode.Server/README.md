@@ -6,7 +6,7 @@ SignalR server for the Claude Autonomous Development System. This lightweight .N
 
 - **Real-time Communication**: SignalR hub for bidirectional communication
 - **Process Management**: Spawn and control Claude Code processes
-- **Config-Driven Project Roots**: Each root directory defines its own creation workflow via `.godmode-root.json`
+- **Config-Driven Project Roots**: Each root directory defines its own creation workflow via `.godmode-root/config.json`
 - **Script-Based Bootstrap**: VCS-agnostic — all setup/bootstrap logic lives in scripts, not server code
 - **Cross-Platform Scripts**: Extensionless script references resolve to `.ps1` on Windows, `.sh` on Linux
 - **State Persistence**: Save and recover project state across restarts
@@ -28,13 +28,13 @@ SignalR server for the Claude Autonomous Development System. This lightweight .N
 }
 ```
 
-`ProjectRoots` maps logical names to directory paths. Each root can optionally contain a `.godmode-root.json` file to customize the creation workflow. Roots without the config file get a default form (project name + prompt).
+`ProjectRoots` maps logical names to directory paths. Each root can optionally contain a `.godmode-root/config.json` file to customize the creation workflow. Roots without the config file get a default form (project name + prompt).
 
 ## Project Roots
 
-### .godmode-root.json
+### .godmode-root/config.json
 
-Place this file in a project root directory to configure how projects are created there. The server re-reads it on each operation — no restart needed.
+Place this file in a project root directory to configure how projects are created there. The server re-reads it on each operation — no restart needed. Legacy `.godmode-root.json` at the root level is also supported as a fallback.
 
 ```json
 {
@@ -104,13 +104,14 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 
 ```
 my-project-root/
-├── .godmode-root.json
-└── .godmode-scripts/
-    ├── init-git.sh      ← Linux
-    └── init-git.ps1     ← Windows
+├── .godmode-root/
+│   ├── config.json
+│   └── scripts/
+│       ├── init-git.sh      ← Linux
+│       └── init-git.ps1     ← Windows
 ```
 
-Config references: `".godmode-scripts/init-git"` — works on both platforms.
+Config references: `".godmode-root/scripts/init-git"` — works on both platforms.
 
 If a script is specified with an explicit extension (e.g. `"scripts/setup.ps1"`), it's used as-is.
 
@@ -140,7 +141,7 @@ Script stdout is streamed to the client as creation progress. Non-zero exit code
 ```json
 {
   "description": "Ad-hoc tasks with git",
-  "bootstrap": [".godmode-scripts/init-git"],
+  "bootstrap": [".godmode-root/scripts/init-git"],
   "claudeArgs": ["--append-system-prompt", "Publish to github.com/myuser"]
 }
 ```
@@ -158,8 +159,8 @@ Script stdout is streamed to the client as creation progress. Non-zero exit code
     },
     "required": ["name", "prompt"]
   },
-  "setup": [".godmode-scripts/ensure-bare-repo"],
-  "bootstrap": [".godmode-scripts/create-worktree"]
+  "setup": [".godmode-root/scripts/ensure-bare-repo"],
+  "bootstrap": [".godmode-root/scripts/create-worktree"]
 }
 ```
 
@@ -178,8 +179,8 @@ Script stdout is streamed to the client as creation progress. Non-zero exit code
   },
   "nameTemplate": "{caseId}",
   "promptTemplate": "Fix {caseId}. {prompt}",
-  "setup": [".godmode-scripts/ensure-bare-repo"],
-  "bootstrap": [".godmode-scripts/setup-worktree", ".godmode-scripts/fetch-jira-context"]
+  "setup": [".godmode-root/scripts/ensure-bare-repo"],
+  "bootstrap": [".godmode-root/scripts/setup-worktree", ".godmode-root/scripts/fetch-jira-context"]
 }
 ```
 

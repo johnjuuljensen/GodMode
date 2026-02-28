@@ -53,7 +53,7 @@ dotnet test
 - `SignalRProjectConnection` (ClientBase) - Uses `TypedSignalR.Client` source generator
 
 **Config-Driven Project Roots**
-- Each project root directory can contain a `.godmode-root.json` config file
+- Each project root directory can contain a `.godmode-root/config.json` config file (falls back to legacy `.godmode-root.json`)
 - Config defines: input schema (JSON Schema), setup/bootstrap/teardown scripts, environment vars, Claude args
 - `RootConfigReader` reads config fresh on each operation (no restart needed)
 - `ScriptRunner` executes scripts with cross-platform extension resolution (.ps1 on Windows, .sh on Linux)
@@ -87,10 +87,11 @@ dotnet test
 ### Project Root Config
 ```
 /root/
-├── .godmode-root.json   # Root config (optional — defines creation workflow)
-├── .godmode-scripts/    # Bootstrap/setup scripts (cross-platform)
-│   ├── init-git.sh      # Linux version
-│   └── init-git.ps1     # Windows version
+├── .godmode-root/       # Root config and scripts (optional)
+│   ├── config.json      # Root config (defines creation workflow)
+│   └── scripts/         # Bootstrap/setup scripts (cross-platform)
+│       ├── init-git.sh  # Linux version
+│       └── init-git.ps1 # Windows version
 └── {project-id}/        # Project folders
 ```
 
