@@ -199,11 +199,15 @@ public sealed class ProjectManager
 
     /// <summary>
     /// Converts a display name to a path-safe project ID.
-    /// Convention: spaces become underscores.
+    /// Spaces become underscores; invalid filename characters are removed.
     /// </summary>
     public static string ConvertNameToPath(string name)
     {
-        return name.Replace(' ', '_');
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var cleaned = new string(name.Select(c => c == ' ' ? '_' : c)
+            .Where(c => !invalidChars.Contains(c))
+            .ToArray());
+        return string.IsNullOrWhiteSpace(cleaned) ? "project" : cleaned;
     }
 
     /// <summary>
