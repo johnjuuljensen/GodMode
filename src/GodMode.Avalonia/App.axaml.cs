@@ -109,7 +109,7 @@ public partial class App : Application
 		services.AddSingleton<IThemeService, ThemeService>();
 		services.AddSingleton<IEmbeddedServerService, EmbeddedServerService>();
 
-		// ViewModels — singletons for state preservation
+		// ViewModels
 #if VOICE_ENABLED
 		services.AddSingleton<VoiceAssistantViewModel>();
 #endif
@@ -121,6 +121,7 @@ public partial class App : Application
 		services.AddTransient<AddServerViewModel>();
 		services.AddTransient<EditServerViewModel>();
 		services.AddTransient<CreateProjectViewModel>();
+		services.AddTransient<CredentialListViewModel>();
 		services.AddTransient<TileGridViewModel>();
 	}
 }

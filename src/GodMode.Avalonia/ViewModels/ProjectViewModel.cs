@@ -1,7 +1,6 @@
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using GodMode.Avalonia.Models;
 using GodMode.Shared.Models;
 using GodMode.Shared.Enums;
 using System.Collections.ObjectModel;
@@ -62,10 +61,7 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	private string _inputWatermark = "Type your response...";
 
 	[ObservableProperty]
-	private bool _isSimpleView;
-
-	[ObservableProperty]
-	private ObservableCollection<ChatDisplayItem> _displayMessages = new();
+	private bool _isInputLocked;
 
 	[ObservableProperty]
 	private bool _showMetrics;
@@ -191,9 +187,7 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 					content = new[] { new { type = "text", text = input } }
 				}
 			});
-			var userMessage = new ClaudeMessage(userJson);
-			OutputMessages.Add(userMessage);
-			AddToDisplayMessages(userMessage);
+			OutputMessages.Add(new ClaudeMessage(userJson));
 
 			await RefreshAsync();
 		}
@@ -245,26 +239,6 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	}
 
 	[RelayCommand]
-	private async Task DeleteProjectAsync()
-	{
-		try
-		{
-			IsLoading = true;
-			ErrorMessage = null;
-			await _projectService.DeleteProjectAsync(ProfileName, HostId, ProjectId);
-			Navigation.GoBack();
-		}
-		catch (Exception ex)
-		{
-			ErrorMessage = $"Error deleting project: {ex.Message}";
-		}
-		finally
-		{
-			IsLoading = false;
-		}
-	}
-
-	[RelayCommand]
 	private async Task LoadMetricsAsync()
 	{
 		try
@@ -290,11 +264,6 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	private void CloseMetrics() => ShowMetrics = false;
 
 	[RelayCommand]
-	private void ToggleSimpleView() => IsSimpleView = !IsSimpleView;
-
-	partial void OnIsSimpleViewChanged(bool value) => RebuildDisplayMessages();
-
-	[RelayCommand]
 	private void ToggleMessageExpanded(ClaudeMessage message) => message.IsExpanded = !message.IsExpanded;
 
 	partial void OnStatusChanged(ProjectStatus? value)
@@ -307,16 +276,37 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 			ProjectStatusUpdated?.Invoke(ProjectId, value.State, value.CurrentQuestion);
 	}
 
-	partial void OnIsQuestionActiveChanged(bool value) => UpdateCanSendInput();
+	partial void OnIsQuestionActiveChanged(bool value)
+	{
+		// Lock input when question has options (user should pick from option picker)
+		IsInputLocked = value && CurrentQuestionOptions.Count > 0;
+		UpdateCanSendInput();
+
+		// Propagate question state changes to sidebar/tile views
+		// Defer to next tick so all question properties (Text, Options, Header) are set
+		Dispatcher.UIThread.Post(() =>
+		{
+			if (!string.IsNullOrEmpty(ProjectId))
+			{
+				ProjectStatusUpdated?.Invoke(
+					ProjectId,
+					IsQuestionActive ? ProjectState.WaitingInput : (Status?.State ?? ProjectState.Running),
+					IsQuestionActive ? CurrentQuestionText : null);
+			}
+		});
+	}
 
 	private void UpdateCanSendInput()
 	{
-		// Always allow sending: if active → sends input; if stopped/idle → auto-resumes with input
-		CanSendInput = IsQuestionActive
+		// When input is locked (option picker active), only allow sending via the picker
+		CanSendInput = !IsInputLocked && (
+			IsQuestionActive
 			|| Status?.State is ProjectState.WaitingInput or ProjectState.Running
-			|| Status?.State is ProjectState.Stopped or ProjectState.Idle;
+			|| Status?.State is ProjectState.Stopped or ProjectState.Idle);
 		CanResume = !IsQuestionActive && Status?.State is ProjectState.Stopped or ProjectState.Idle;
-		InputWatermark = CanResume ? "Type to resume..." : "Type your response...";
+		InputWatermark = IsInputLocked
+			? "Select an option above (Esc to type instead)"
+			: CanResume ? "Type to resume..." : "Type your response...";
 	}
 
 	/// <summary>
@@ -441,70 +431,6 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		return [];
 	}
 
-	/// <summary>
-	/// Rebuilds the display messages collection from the source output messages,
-	/// applying simple/detailed view filtering.
-	/// </summary>
-	private void RebuildDisplayMessages()
-	{
-		DisplayMessages.Clear();
-
-		if (!IsSimpleView)
-		{
-			foreach (var msg in OutputMessages)
-				DisplayMessages.Add(new ChatDisplayItem(msg));
-			return;
-		}
-
-		// Simple view: collapse consecutive tool-only messages into summaries
-		int consecutiveToolCount = 0;
-		foreach (var msg in OutputMessages)
-		{
-			if (msg.IsToolOnly)
-			{
-				consecutiveToolCount++;
-				continue;
-			}
-
-			if (consecutiveToolCount > 0)
-			{
-				DisplayMessages.Add(new ChatDisplayItem(consecutiveToolCount));
-				consecutiveToolCount = 0;
-			}
-
-			DisplayMessages.Add(new ChatDisplayItem(msg, isSimpleView: true));
-		}
-
-		if (consecutiveToolCount > 0)
-			DisplayMessages.Add(new ChatDisplayItem(consecutiveToolCount));
-	}
-
-	/// <summary>
-	/// Incrementally adds a new message to the display collection,
-	/// respecting the current view mode.
-	/// </summary>
-	private void AddToDisplayMessages(ClaudeMessage message)
-	{
-		if (!IsSimpleView)
-		{
-			DisplayMessages.Add(new ChatDisplayItem(message));
-			return;
-		}
-
-		if (message.IsToolOnly)
-		{
-			// Extend existing tool summary or create new one
-			if (DisplayMessages.Count > 0 && DisplayMessages[^1].IsToolSummary)
-				DisplayMessages[^1].ToolCallCount++;
-			else
-				DisplayMessages.Add(new ChatDisplayItem(1));
-		}
-		else
-		{
-			DisplayMessages.Add(new ChatDisplayItem(message, isSimpleView: true));
-		}
-	}
-
 	private async Task SubscribeToOutputAsync()
 	{
 		_outputSubscription?.Dispose();
@@ -512,7 +438,6 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		try
 		{
 			OutputMessages.Clear();
-			DisplayMessages.Clear();
 
 			var observable = await _projectService.SubscribeOutputAsync(ProfileName, HostId, ProjectId, fromOffset: 0);
 
@@ -523,7 +448,6 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 						Dispatcher.UIThread.Post(() =>
 						{
 							OutputMessages.Add(message);
-							AddToDisplayMessages(message);
 
 							// Layer 1: Structured AskUserQuestion tool_use
 							if (message.IsQuestion && message.QuestionOptions.Count > 0)

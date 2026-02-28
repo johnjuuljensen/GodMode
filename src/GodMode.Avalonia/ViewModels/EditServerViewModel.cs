@@ -1,13 +1,25 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using GodMode.ClientBase.Services.Models;
 
 namespace GodMode.Avalonia.ViewModels;
+
+public partial class SystemMappingItem : ObservableObject
+{
+	[ObservableProperty]
+	private string _systemName = string.Empty;
+
+	[ObservableProperty]
+	private string _credentialName = string.Empty;
+}
 
 public partial class EditServerViewModel : ViewModelBase
 {
 	private readonly IProfileService _profileService;
 	private readonly IDialogService _dialogService;
-	private Account? _originalAccount;
+	private readonly ICredentialService _credentialService;
+	private ServerConfig? _originalServer;
 
 	public event Action? Completed;
 
@@ -15,7 +27,7 @@ public partial class EditServerViewModel : ViewModelBase
 	private string _profileName = string.Empty;
 
 	[ObservableProperty]
-	private int _accountIndex;
+	private string _serverId = string.Empty;
 
 	[ObservableProperty]
 	private string _selectedServerType = "Local Server";
@@ -41,34 +53,45 @@ public partial class EditServerViewModel : ViewModelBase
 	[ObservableProperty]
 	private string? _errorMessage;
 
+	[ObservableProperty]
+	private string _newSystemName = string.Empty;
+
+	[ObservableProperty]
+	private string _newCredentialName = string.Empty;
+
+	public ObservableCollection<SystemMappingItem> SystemMappings { get; } = new();
+	public ObservableCollection<string> AvailableCredentials { get; } = new();
+
 	public bool IsGitHubCodespaces => SelectedServerType == "GitHub Codespaces";
 	public bool IsLocalServer => SelectedServerType == "Local Server";
 
 	public EditServerViewModel(
 		INavigationService navigationService,
 		IProfileService profileService,
-		IDialogService dialogService)
+		IDialogService dialogService,
+		ICredentialService credentialService)
 		: base(navigationService)
 	{
 		_profileService = profileService;
 		_dialogService = dialogService;
+		_credentialService = credentialService;
 	}
 
 	partial void OnProfileNameChanged(string value)
 	{
-		if (!string.IsNullOrEmpty(value))
-			_ = LoadAccountAsync();
+		if (!string.IsNullOrEmpty(value) && !string.IsNullOrEmpty(ServerId))
+			_ = LoadServerAsync();
 	}
 
-	partial void OnAccountIndexChanged(int value)
+	partial void OnServerIdChanged(string value)
 	{
-		if (!string.IsNullOrEmpty(ProfileName))
-			_ = LoadAccountAsync();
+		if (!string.IsNullOrEmpty(value) && !string.IsNullOrEmpty(ProfileName))
+			_ = LoadServerAsync();
 	}
 
-	private async Task LoadAccountAsync()
+	private async Task LoadServerAsync()
 	{
-		if (string.IsNullOrEmpty(ProfileName) || AccountIndex < 0)
+		if (string.IsNullOrEmpty(ProfileName) || string.IsNullOrEmpty(ServerId))
 			return;
 
 		IsLoading = true;
@@ -78,25 +101,38 @@ public partial class EditServerViewModel : ViewModelBase
 		{
 			var profile = await _profileService.GetProfileAsync(ProfileName);
 			if (profile == null) { ErrorMessage = "Profile not found"; return; }
-			if (AccountIndex >= profile.Accounts.Count) { ErrorMessage = "Server not found"; return; }
 
-			_originalAccount = profile.Accounts[AccountIndex];
+			_originalServer = profile.Servers.FirstOrDefault(s => s.Id == ServerId);
+			if (_originalServer == null) { ErrorMessage = "Server not found"; return; }
 
-			if (_originalAccount.Type == "github")
+			if (_originalServer.Type == "github")
 			{
 				SelectedServerType = "GitHub Codespaces";
-				GitHubUsername = _originalAccount.Username ?? string.Empty;
-				GitHubToken = string.IsNullOrEmpty(_originalAccount.Token) ? string.Empty : "********";
+				GitHubUsername = _originalServer.Username ?? string.Empty;
+				GitHubToken = string.IsNullOrEmpty(_originalServer.Token) ? string.Empty : "********";
 			}
 			else
 			{
 				SelectedServerType = "Local Server";
-				ServerUrl = _originalAccount.Path ?? "http://localhost:31337";
-				ServerDisplayName = _originalAccount.Metadata?.GetValueOrDefault("name") ?? string.Empty;
+				ServerUrl = _originalServer.Path ?? "http://localhost:31337";
+				ServerDisplayName = _originalServer.DisplayName
+					?? _originalServer.Metadata?.GetValueOrDefault("name")
+					?? string.Empty;
 			}
 
 			OnPropertyChanged(nameof(IsGitHubCodespaces));
 			OnPropertyChanged(nameof(IsLocalServer));
+
+			// Load system mappings
+			SystemMappings.Clear();
+			if (_originalServer.Systems is { Count: > 0 })
+			{
+				foreach (var (system, credential) in _originalServer.Systems)
+					SystemMappings.Add(new SystemMappingItem { SystemName = system, CredentialName = credential });
+			}
+
+			// Load available credentials
+			await LoadCredentialsAsync();
 		}
 		catch (Exception ex)
 		{
@@ -106,6 +142,46 @@ public partial class EditServerViewModel : ViewModelBase
 		{
 			IsLoading = false;
 		}
+	}
+
+	private async Task LoadCredentialsAsync()
+	{
+		AvailableCredentials.Clear();
+		try
+		{
+			var credentials = await _credentialService.ListCredentialsAsync(ProfileName);
+			foreach (var c in credentials)
+				AvailableCredentials.Add(c.Name);
+		}
+		catch
+		{
+			// Non-critical — user can still type credential names
+		}
+	}
+
+	[RelayCommand]
+	private void AddSystemMapping()
+	{
+		if (string.IsNullOrWhiteSpace(NewSystemName) || string.IsNullOrWhiteSpace(NewCredentialName))
+			return;
+
+		// Don't allow duplicate system names
+		if (SystemMappings.Any(m => m.SystemName.Equals(NewSystemName, StringComparison.OrdinalIgnoreCase)))
+		{
+			ErrorMessage = $"System '{NewSystemName}' is already mapped";
+			return;
+		}
+
+		SystemMappings.Add(new SystemMappingItem { SystemName = NewSystemName.Trim(), CredentialName = NewCredentialName.Trim() });
+		NewSystemName = string.Empty;
+		NewCredentialName = string.Empty;
+		ErrorMessage = null;
+	}
+
+	[RelayCommand]
+	private void RemoveSystemMapping(SystemMappingItem item)
+	{
+		SystemMappings.Remove(item);
 	}
 
 	[RelayCommand]
@@ -133,29 +209,32 @@ public partial class EditServerViewModel : ViewModelBase
 		{
 			var profile = await _profileService.GetProfileAsync(ProfileName);
 			if (profile == null) { ErrorMessage = "Profile not found"; return; }
-			if (AccountIndex >= profile.Accounts.Count) { ErrorMessage = "Server not found"; return; }
 
-			var account = profile.Accounts[AccountIndex];
+			var server = profile.Servers.FirstOrDefault(s => s.Id == ServerId);
+			if (server == null) { ErrorMessage = "Server not found"; return; }
 
 			if (IsGitHubCodespaces)
 			{
-				account.Type = "github";
-				account.Username = GitHubUsername;
+				server.Type = "github";
+				server.Username = GitHubUsername;
 				if (GitHubToken != "********")
-					account.Token = GitHubToken;
-				account.Path = null;
-				account.Metadata = null;
+					server.Token = GitHubToken;
+				server.Path = null;
+				server.DisplayName = null;
 			}
 			else
 			{
-				account.Type = "local";
-				account.Path = ServerUrl;
-				account.Username = null;
-				account.Token = null;
-				account.Metadata = !string.IsNullOrWhiteSpace(ServerDisplayName)
-					? new Dictionary<string, string> { ["name"] = ServerDisplayName }
-					: null;
+				server.Type = "local";
+				server.Path = ServerUrl;
+				server.Username = null;
+				server.Token = null;
+				server.DisplayName = !string.IsNullOrWhiteSpace(ServerDisplayName) ? ServerDisplayName : null;
 			}
+
+			// Save system mappings
+			server.Systems = SystemMappings.Count > 0
+				? SystemMappings.ToDictionary(m => m.SystemName, m => m.CredentialName)
+				: null;
 
 			await _profileService.SaveProfileAsync(profile);
 			Completed?.Invoke();
@@ -189,9 +268,11 @@ public partial class EditServerViewModel : ViewModelBase
 		{
 			var profile = await _profileService.GetProfileAsync(ProfileName);
 			if (profile == null) { ErrorMessage = "Profile not found"; return; }
-			if (AccountIndex >= profile.Accounts.Count) { ErrorMessage = "Server not found"; return; }
 
-			profile.Accounts.RemoveAt(AccountIndex);
+			var server = profile.Servers.FirstOrDefault(s => s.Id == ServerId);
+			if (server == null) { ErrorMessage = "Server not found"; return; }
+
+			profile.Servers.Remove(server);
 			await _profileService.SaveProfileAsync(profile);
 			Completed?.Invoke();
 		}

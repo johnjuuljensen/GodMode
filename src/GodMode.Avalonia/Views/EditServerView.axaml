@@ -2,10 +2,11 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:GodMode.Avalonia.ViewModels"
              x:Class="GodMode.Avalonia.Views.EditServerView"
-             x:DataType="vm:EditServerViewModel">
+             x:DataType="vm:EditServerViewModel"
+             x:Name="Root">
 
-    <StackPanel>
-        <Border Padding="20,16" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
+    <Grid RowDefinitions="Auto,*,Auto">
+        <Border Grid.Row="0" Padding="20,16" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
             <StackPanel Spacing="4">
                 <TextBlock Text="EDIT SERVER" FontSize="11" FontWeight="SemiBold"
                            LetterSpacing="1.5" Foreground="{DynamicResource TextSecondaryBrush}" />
@@ -17,7 +18,7 @@
             </StackPanel>
         </Border>
 
-        <ScrollViewer MaxHeight="400" Padding="20,12">
+        <ScrollViewer Grid.Row="1" Padding="20,12" VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="12">
                 <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsLoading}" Height="2" />
 
@@ -57,6 +58,62 @@
                     </StackPanel>
                 </StackPanel>
 
+                <!-- Systems mapping section -->
+                <StackPanel Spacing="8" Margin="0,8,0,0"
+                            IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                    <TextBlock Text="SYSTEMS" FontSize="10" FontWeight="SemiBold"
+                               LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                    <TextBlock Text="Map system names to credentials for environment injection"
+                               FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}" />
+
+                    <!-- Existing mappings -->
+                    <ItemsControl ItemsSource="{Binding SystemMappings}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:SystemMappingItem">
+                                <Grid ColumnDefinitions="*,*,Auto" Margin="0,2">
+                                    <TextBox Grid.Column="0" Text="{Binding SystemName}"
+                                             FontSize="12" Margin="0,0,4,0"
+                                             Watermark="e.g. anthropic" />
+                                    <ComboBox Grid.Column="1"
+                                              ItemsSource="{Binding #Root.((vm:EditServerViewModel)DataContext).AvailableCredentials}"
+                                              SelectedItem="{Binding CredentialName}"
+                                              IsEditable="True"
+                                              Text="{Binding CredentialName}"
+                                              FontSize="12" Margin="4,0"
+                                              MinWidth="0" />
+                                    <Button Grid.Column="2"
+                                            Content="&#x2715;"
+                                            Command="{Binding #Root.((vm:EditServerViewModel)DataContext).RemoveSystemMappingCommand}"
+                                            CommandParameter="{Binding}"
+                                            Padding="6,4" FontSize="11"
+                                            Background="Transparent"
+                                            Foreground="{DynamicResource TextTertiaryBrush}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Add new mapping row -->
+                    <Grid ColumnDefinitions="*,*,Auto">
+                        <TextBox Grid.Column="0" Text="{Binding NewSystemName}"
+                                 FontSize="12" Margin="0,0,4,0"
+                                 Watermark="system name" />
+                        <ComboBox Grid.Column="1"
+                                  ItemsSource="{Binding AvailableCredentials}"
+                                  SelectedItem="{Binding NewCredentialName}"
+                                  IsEditable="True"
+                                  Text="{Binding NewCredentialName}"
+                                  FontSize="12" Margin="4,0"
+                                  MinWidth="0" />
+                        <Button Grid.Column="2"
+                                Content="+"
+                                Command="{Binding AddSystemMappingCommand}"
+                                Padding="6,4" FontSize="13" FontWeight="SemiBold"
+                                Background="{DynamicResource BgSurfaceBrush}"
+                                Foreground="{DynamicResource TextSecondaryBrush}" />
+                    </Grid>
+                </StackPanel>
+
                 <TextBlock Text="{Binding ErrorMessage}"
                            IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
                            Foreground="{DynamicResource StateErrorBrush}" FontSize="12" />
@@ -64,7 +121,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <Border Padding="20,12" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,1,0,0"
+        <Border Grid.Row="2" Padding="20,12" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,1,0,0"
                 IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
             <Grid ColumnDefinitions="*,Auto,*">
                 <Button Grid.Column="0" Content="Cancel" Command="{Binding CancelCommand}"
@@ -77,5 +134,5 @@
                         Background="{DynamicResource AccentBrush}" Foreground="White" />
             </Grid>
         </Border>
-    </StackPanel>
+    </Grid>
 </UserControl>

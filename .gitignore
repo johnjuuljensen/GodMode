@@ -32,6 +32,10 @@ Desktop.ini
 # Mac
 .DS_Store
 
+# Node
+node_modules/
+dist/
+
 # AWS
 .aws-sam/
 samconfig.toml

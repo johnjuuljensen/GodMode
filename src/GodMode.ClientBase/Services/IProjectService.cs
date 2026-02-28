@@ -14,14 +14,15 @@ public interface IProjectService
     Task<ProjectDetail> CreateProjectAsync(
         string profileName,
         string hostId,
-        string projectRootName,
-        Dictionary<string, JsonElement> inputs);
+        string? projectRootName,
+        Dictionary<string, JsonElement> inputs,
+        Dictionary<string, string>? environment = null);
     Task SendInputAsync(string profileName, string hostId, string projectId, string input);
     Task StopProjectAsync(string profileName, string hostId, string projectId);
-    Task ResumeProjectAsync(string profileName, string hostId, string projectId);
-    Task DeleteProjectAsync(string profileName, string hostId, string projectId);
+    Task ResumeProjectAsync(string profileName, string hostId, string projectId, Dictionary<string, string>? environment = null);
     Task<IObservable<ClaudeMessage>> SubscribeOutputAsync(string profileName, string hostId, string projectId, long fromOffset = 0);
     Task<string> GetMetricsHtmlAsync(string profileName, string hostId, string projectId);
+    Task<IEnumerable<RepoInfo>> ListKnownReposAsync(string profileName, string hostId);
     void ClearCache();
     void InvalidateProjectCache(string profileName, string hostId, string projectId);
 }

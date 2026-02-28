@@ -40,7 +40,9 @@ public interface IProjectManager
     /// <summary>
     /// Resumes a stopped project using its existing session.
     /// </summary>
-    Task ResumeProjectAsync(string projectId);
+    /// <param name="projectId">The project to resume.</param>
+    /// <param name="environment">Optional client-injected environment variables.</param>
+    Task ResumeProjectAsync(string projectId, Dictionary<string, string>? environment = null);
 
     /// <summary>
     /// Subscribes a client connection to project output.
@@ -66,6 +68,11 @@ public interface IProjectManager
     /// Cleans up resources for a disconnected client.
     /// </summary>
     Task CleanupConnectionAsync(string connectionId);
+
+    /// <summary>
+    /// Lists known repositories configured on the server.
+    /// </summary>
+    Task<RepoInfo[]> ListKnownReposAsync();
 
     /// <summary>
     /// Recovers projects from disk on startup.

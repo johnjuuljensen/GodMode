@@ -26,7 +26,7 @@ public partial class ServerGroupViewModel : ObservableObject
 	private string _profileName = string.Empty;
 
 	[ObservableProperty]
-	private int _accountIndex;
+	private string _serverId = string.Empty;
 
 	[ObservableProperty]
 	private bool _isExpanded = true;
@@ -65,7 +65,7 @@ public partial class ServerGroupViewModel : ObservableObject
 		_ => $"{Projects.Count} projects"
 	};
 
-	public static ServerGroupViewModel FromHostInfo(HostInfo host, string profileName, int accountIndex) => new()
+	public static ServerGroupViewModel FromHostInfo(HostInfo host, string profileName, string serverId) => new()
 	{
 		Id = host.Id,
 		Name = host.Name,
@@ -73,6 +73,6 @@ public partial class ServerGroupViewModel : ObservableObject
 		State = host.State,
 		Url = host.Url,
 		ProfileName = profileName,
-		AccountIndex = accountIndex
+		ServerId = serverId
 	};
 }

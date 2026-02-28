@@ -21,10 +21,10 @@ public class LocalFolderProvider : IHostProvider
     /// </summary>
     /// <param name="serverUrl">The server URL (e.g., "http://localhost:31337").</param>
     /// <param name="hostName">Optional display name for the host.</param>
-    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? hostName = null)
+    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? hostName = null, string? hostId = null)
     {
         _serverUrl = serverUrl;
-        _hostId = "local-server";
+        _hostId = hostId ?? "local-server";
         _hostName = hostName ?? "Local Server";
     }
 

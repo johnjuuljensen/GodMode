@@ -24,6 +24,7 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
 
     public event Action<string, string>? CreationProgressReceived;
     public event Action<ProjectStatus>? ProjectCreatedReceived;
+    public event Action<string, ProjectStatus>? StatusChangedReceived;
     public event Action<string>? ProjectDeletedReceived;
 
     /// <summary>
@@ -75,9 +76,9 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         return await _hubProxy.GetStatus(projectId);
     }
 
-    public async Task<ProjectDetail> CreateProjectAsync(string projectRootName, Dictionary<string, JsonElement> inputs)
+    public async Task<ProjectDetail> CreateProjectAsync(string? projectRootName, Dictionary<string, JsonElement> inputs, Dictionary<string, string>? environment = null)
     {
-        return await _hubProxy.CreateProject(projectRootName, inputs);
+        return await _hubProxy.CreateProject(projectRootName, inputs, environment);
     }
 
     public async Task SendInputAsync(string projectId, string input)
@@ -90,14 +91,9 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         await _hubProxy.StopProject(projectId);
     }
 
-    public async Task ResumeProjectAsync(string projectId)
+    public async Task ResumeProjectAsync(string projectId, Dictionary<string, string>? environment = null)
     {
-        await _hubProxy.ResumeProject(projectId);
-    }
-
-    public async Task DeleteProjectAsync(string projectId)
-    {
-        await _hubProxy.DeleteProject(projectId);
+        await _hubProxy.ResumeProject(projectId, environment);
     }
 
     public IObservable<ClaudeMessage> SubscribeOutput(string projectId, long fromOffset = 0)
@@ -116,6 +112,16 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
     public async Task<string> GetMetricsHtmlAsync(string projectId)
     {
         return await _hubProxy.GetMetricsHtml(projectId);
+    }
+
+    public async Task DeleteProjectAsync(string projectId)
+    {
+        await _hubProxy.DeleteProject(projectId);
+    }
+
+    public async Task<IEnumerable<RepoInfo>> ListKnownReposAsync()
+    {
+        return await _hubProxy.ListKnownRepos();
     }
 
     public void Disconnect()
@@ -137,6 +143,7 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
 
     Task IProjectHubClient.StatusChanged(string projectId, ProjectStatus status)
     {
+        StatusChangedReceived?.Invoke(projectId, status);
         return Task.CompletedTask;
     }
 
@@ -154,14 +161,6 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
 
     Task IProjectHubClient.ProjectDeleted(string projectId)
     {
-        // Clean up output subscription for deleted project
-        if (_outputSubscriptions.TryGetValue(projectId, out var subject))
-        {
-            subject.OnCompleted();
-            subject.Dispose();
-            _outputSubscriptions.Remove(projectId);
-        }
-
         ProjectDeletedReceived?.Invoke(projectId);
         return Task.CompletedTask;
     }

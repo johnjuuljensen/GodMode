@@ -28,7 +28,6 @@
             <converters:MessageTypeToBgBrushConverter x:Key="MessageTypeToBgBrushConverter" />
             <converters:MessageTypeToBorderBrushConverter x:Key="MessageTypeToBorderBrushConverter" />
             <converters:ContentTypeToColorConverter x:Key="ContentTypeToColorConverter" />
-            <converters:ErrorContentForegroundConverter x:Key="ErrorContentForegroundConverter" />
             <converters:SelectedProjectBgConverter x:Key="SelectedProjectBgConverter" />
             <converters:RelativeTimeConverter x:Key="RelativeTimeConverter" />
             <converters:BoolToActiveBrushConverter x:Key="BoolToActiveBrushConverter" />

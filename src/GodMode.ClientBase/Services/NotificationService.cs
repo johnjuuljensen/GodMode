@@ -6,12 +6,17 @@ namespace GodMode.ClientBase.Services;
 public class NotificationService : INotificationService
 {
     private readonly Dictionary<string, int> _badgeCounts = new();
+    private readonly HashSet<string> _waitingProjects = new();
 
     public event EventHandler<NotificationEventArgs>? NotificationRequested;
     public event EventHandler<BadgeUpdateEventArgs>? BadgeCountUpdated;
 
     public void NotifyProjectNeedsInput(string profileName, string hostId, string projectId, string projectName, string? question)
     {
+        var projectKey = $"{profileName}:{hostId}:{projectId}";
+        if (!_waitingProjects.Add(projectKey))
+            return; // Already tracked as waiting, don't double-count
+
         var title = $"Input Required: {projectName}";
         var message = question ?? "Claude is waiting for your input";
 
@@ -87,7 +92,10 @@ public class NotificationService : INotificationService
 
     public void ClearBadgeCountForProject(string profileName, string hostId, string projectId)
     {
-        // For now, just decrement the count
+        var projectKey = $"{profileName}:{hostId}:{projectId}";
+        if (!_waitingProjects.Remove(projectKey))
+            return; // Wasn't tracked as waiting
+
         var key = $"{profileName}:{hostId}";
         if (_badgeCounts.ContainsKey(key) && _badgeCounts[key] > 0)
         {

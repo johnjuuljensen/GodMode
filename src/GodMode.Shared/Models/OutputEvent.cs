@@ -9,9 +9,11 @@ namespace GodMode.Shared.Models;
 /// <param name="Type">The type of the output event.</param>
 /// <param name="Content">The content of the event.</param>
 /// <param name="Metadata">Optional metadata associated with the event.</param>
+/// <param name="RawJson">The raw JSON line for deep inspection (e.g. detecting tool_use).</param>
 public record OutputEvent(
     DateTime Timestamp,
     OutputEventType Type,
     string Content,
-    Dictionary<string, object>? Metadata = null
+    Dictionary<string, object>? Metadata = null,
+    string? RawJson = null
 );

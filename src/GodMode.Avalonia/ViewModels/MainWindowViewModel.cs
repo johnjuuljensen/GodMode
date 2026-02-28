@@ -2,6 +2,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GodMode.Avalonia.Services;
+using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -94,6 +95,7 @@ public partial class MainWindowViewModel : ObservableObject
 		mainViewModel.AddProfileRequested += OnAddProfileRequested;
 		mainViewModel.EditServerRequested += OnEditServerRequested;
 		mainViewModel.ConnectionStateChanged += connected => IsConnected = connected;
+		mainViewModel.StatusChanged += OnServerStatusChanged;
 
 		_notificationService.BadgeCountUpdated += (_, _) => UpdateWaitingBadge();
 
@@ -244,6 +246,43 @@ public partial class MainWindowViewModel : ObservableObject
 		});
 	}
 
+	private void OnServerStatusChanged(ServerGroupViewModel server, string projectId, ProjectStatus status)
+	{
+		Dispatcher.UIThread.Post(() =>
+		{
+			if (_tileGridViewModel != null)
+			{
+				foreach (var tile in _tileGridViewModel.Tiles)
+				{
+					if (tile.Summary.Id == projectId)
+					{
+						tile.Summary = tile.Summary with
+						{
+							State = status.State,
+							CurrentQuestion = status.CurrentQuestion,
+							UpdatedAt = status.UpdatedAt
+						};
+						break;
+					}
+				}
+			}
+
+			if (status.State == ProjectState.WaitingInput)
+			{
+				_notificationService.NotifyProjectNeedsInput(
+					server.ProfileName, server.Id, projectId,
+					status.Name, status.CurrentQuestion);
+			}
+			else if (status.State is ProjectState.Running or ProjectState.Idle)
+			{
+				_notificationService.ClearBadgeCountForProject(
+					server.ProfileName, server.Id, projectId);
+			}
+
+			UpdateWaitingBadge();
+		});
+	}
+
 	private void UpdateWaitingBadge()
 	{
 		var count = _notificationService.GetTotalBadgeCount();
@@ -276,6 +315,8 @@ public partial class MainWindowViewModel : ObservableObject
 		var vm = App.Services.GetRequiredService<CreateProjectViewModel>();
 		vm.ProfileName = server.ProfileName;
 		vm.HostId = server.Id;
+		vm.ServerId = server.ServerId;
+		vm.ServerName = server.Name;
 		vm.Completed += () => CloseModal();
 		ModalViewModel = vm;
 		IsModalVisible = true;
@@ -310,12 +351,36 @@ public partial class MainWindowViewModel : ObservableObject
 	{
 		var vm = App.Services.GetRequiredService<EditServerViewModel>();
 		vm.ProfileName = server.ProfileName;
-		vm.AccountIndex = server.AccountIndex;
+		vm.ServerId = server.ServerId;
 		vm.Completed += () =>
 		{
 			CloseModal();
 			_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
 		};
+		ModalViewModel = vm;
+		IsModalVisible = true;
+	}
+
+	[RelayCommand]
+	private void ManageCredentials()
+	{
+		var vm = App.Services.GetRequiredService<CredentialListViewModel>();
+
+		if (SidebarViewModel.IsAllProfilesSelected)
+		{
+			vm.IsAllProfiles = true;
+			vm.AllProfileNames = SidebarViewModel.ProfileOptions
+				.Where(p => p != MainViewModel.AllProfilesOption)
+				.Select(p => p.Name)
+				.ToList();
+		}
+		else
+		{
+			vm.ProfileName = SidebarViewModel.SelectedProfile!.Name;
+		}
+
+		vm.Completed += () => CloseModal();
+		_ = vm.LoadCommand.ExecuteAsync(null);
 		ModalViewModel = vm;
 		IsModalVisible = true;
 	}

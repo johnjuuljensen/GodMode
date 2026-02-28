@@ -3,6 +3,7 @@ using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace GodMode.Server.Services;
 
@@ -52,12 +53,11 @@ public class StatusUpdater : IStatusUpdater
         switch (outputEvent.Type)
         {
             case OutputEventType.Assistant:
-                // Check if it's asking a question (simple heuristic)
-                if (!string.IsNullOrEmpty(outputEvent.Content) &&
-                    outputEvent.Content.Contains("?") && outputEvent.Content.Length < 500)
+                var questionData = DetectQuestion(outputEvent);
+                if (questionData.IsQuestion)
                 {
                     project.State = ProjectState.WaitingInput;
-                    project.CurrentQuestion = outputEvent.Content;
+                    project.CurrentQuestion = questionData.QuestionText;
                     stateChanged = true;
                 }
                 break;
@@ -215,5 +215,75 @@ public class StatusUpdater : IStatusUpdater
             timer.Dispose();
             _gitPollingTimers.Remove(projectId);
         }
+    }
+
+    /// <summary>
+    /// Multi-tier question detection: checks for AskUserQuestion tool_use first,
+    /// then falls back to text heuristics.
+    /// </summary>
+    private static (bool IsQuestion, string? QuestionText) DetectQuestion(OutputEvent outputEvent)
+    {
+        // Tier 1: Structured AskUserQuestion tool_use in raw JSON
+        if (!string.IsNullOrEmpty(outputEvent.RawJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(outputEvent.RawJson);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("message", out var message) &&
+                    message.TryGetProperty("content", out var content) &&
+                    content.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in content.EnumerateArray())
+                    {
+                        if (item.TryGetProperty("type", out var type) &&
+                            type.GetString() == "tool_use" &&
+                            item.TryGetProperty("name", out var name) &&
+                            name.GetString() == "AskUserQuestion" &&
+                            item.TryGetProperty("input", out var input))
+                        {
+                            var questionText = input.TryGetProperty("question", out var q)
+                                ? q.GetString() : "Question from Claude";
+                            return (true, questionText);
+                        }
+                    }
+                }
+            }
+            catch { /* fall through to heuristic */ }
+        }
+
+        // Tier 2: Text heuristics on extracted content
+        if (!string.IsNullOrEmpty(outputEvent.Content))
+        {
+            var text = outputEvent.Content.Trim();
+
+            // Ends with ?
+            if (text.EndsWith('?') && text.Length < 1000)
+                return (true, text);
+
+            // (y/n) or (yes/no)
+            if (Regex.IsMatch(text, @"\(y(?:es)?/n(?:o)?\)\s*$", RegexOptions.IgnoreCase))
+                return (true, text);
+
+            // (a/b/c) multi-option
+            if (Regex.IsMatch(text, @"\([^)]+/[^)]+\)\s*$"))
+                return (true, text);
+
+            // Numbered list with 2+ items
+            if (Regex.Matches(text, @"^\s*\d+[.)]\s+", RegexOptions.Multiline).Count >= 2)
+                return (true, text);
+
+            // Common question phrases
+            var lower = text.ToLowerInvariant();
+            string[] phrases = ["would you like", "do you want", "should i", "shall i",
+                               "which one", "please choose", "please select"];
+            foreach (var phrase in phrases)
+            {
+                if (lower.Contains(phrase))
+                    return (true, text);
+            }
+        }
+
+        return (false, null);
     }
 }

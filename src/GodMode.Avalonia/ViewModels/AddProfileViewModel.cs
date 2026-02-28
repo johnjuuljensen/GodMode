@@ -46,7 +46,7 @@ public partial class AddProfileViewModel : ViewModelBase
 
 		try
 		{
-			var profile = new Profile { Name = ProfileName, Accounts = [] };
+			var profile = new Profile { Name = ProfileName, Servers = [] };
 			await _profileService.SaveProfileAsync(profile);
 			Completed?.Invoke();
 		}

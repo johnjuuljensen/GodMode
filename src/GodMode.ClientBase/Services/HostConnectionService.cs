@@ -3,8 +3,6 @@ using GodMode.ClientBase.Providers;
 using GodMode.ClientBase.Services.Models;
 using GodMode.Shared.Models;
 
-using Account = GodMode.ClientBase.Services.Models.Account;
-
 namespace GodMode.ClientBase.Services;
 
 /// <summary>
@@ -26,19 +24,16 @@ public class HostConnectionService : IHostConnectionService
         var profile = await _profileService.GetProfileAsync(profileName);
 
         if (profile == null)
-        {
             return Enumerable.Empty<IHostProvider>();
-        }
 
         var providers = new List<IHostProvider>();
 
-        foreach (var account in profile.Accounts)
+        foreach (var server in profile.Servers)
         {
-            var provider = CreateProvider(account);
+            var provider = CreateProvider(server);
             if (provider != null)
             {
-                var key = $"{profileName}:{account.Type}:{account.Username ?? account.Path}";
-                _providers[key] = provider;
+                _providers[server.Id] = provider;
                 providers.Add(provider);
             }
         }
@@ -171,44 +166,37 @@ public class HostConnectionService : IHostConnectionService
             lastException);
     }
 
-    private IHostProvider? CreateProvider(Account account)
+    private IHostProvider? CreateProvider(ServerConfig server)
     {
-        return account.Type switch
+        return server.Type switch
         {
-            "github" => CreateGitHubProvider(account),
-            "local" => CreateLocalProvider(account),
+            "github" => CreateGitHubProvider(server),
+            "local" => CreateLocalProvider(server),
             _ => null
         };
     }
 
-    private IHostProvider? CreateGitHubProvider(Account account)
+    private IHostProvider? CreateGitHubProvider(ServerConfig server)
     {
-        if (string.IsNullOrEmpty(account.Token) || string.IsNullOrEmpty(account.Username))
-        {
+        if (string.IsNullOrEmpty(server.Token) || string.IsNullOrEmpty(server.Username))
             return null;
-        }
 
-        var decryptedToken = _profileService.DecryptToken(account.Token);
-        return new GitHubCodespaceProvider(decryptedToken, account.Username);
+        var decryptedToken = _profileService.DecryptToken(server.Token);
+        return new GitHubCodespaceProvider(decryptedToken, server.Username);
     }
 
-    private IHostProvider? CreateLocalProvider(Account account)
+    private IHostProvider? CreateLocalProvider(ServerConfig server)
     {
-        // Local accounts now specify a server URL (e.g., "http://localhost:31337")
-        // For backward compatibility, if Path looks like a file path, use default server URL
-        var serverUrl = account.Path;
+        var serverUrl = server.Path;
 
         if (string.IsNullOrEmpty(serverUrl))
-        {
             serverUrl = "http://localhost:31337";
-        }
         else if (!serverUrl.StartsWith("http://") && !serverUrl.StartsWith("https://"))
-        {
-            // Legacy file path - use default server URL
             serverUrl = "http://localhost:31337";
-        }
 
-        var hostName = account.Metadata?.GetValueOrDefault("name") ?? "Local Server";
-        return new LocalFolderProvider(serverUrl, hostName);
+        var hostName = server.DisplayName
+            ?? server.Metadata?.GetValueOrDefault("name")
+            ?? "Local Server";
+        return new LocalFolderProvider(serverUrl, hostName, server.Id);
     }
 }

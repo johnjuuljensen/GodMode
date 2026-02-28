@@ -9,5 +9,6 @@ namespace GodMode.Shared.Models;
 public record ProjectRootInfo(
     string Name,
     string? Description = null,
-    JsonElement? InputSchema = null
+    JsonElement? InputSchema = null,
+    bool IsDefault = false
 );

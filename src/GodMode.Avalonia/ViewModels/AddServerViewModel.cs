@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using GodMode.ClientBase.Services.Models;
 
 namespace GodMode.Avalonia.ViewModels;
 
@@ -100,23 +101,21 @@ public partial class AddServerViewModel : ViewModelBase
 				return;
 			}
 
-			var account = IsGitHubCodespaces
-				? new Account
+			var server = IsGitHubCodespaces
+				? new ServerConfig
 				{
 					Type = "github",
 					Username = GitHubUsername,
 					Token = GitHubToken
 				}
-				: new Account
+				: new ServerConfig
 				{
 					Type = "local",
 					Path = ServerUrl,
-					Metadata = !string.IsNullOrWhiteSpace(ServerDisplayName)
-						? new Dictionary<string, string> { ["name"] = ServerDisplayName }
-						: null
+					DisplayName = !string.IsNullOrWhiteSpace(ServerDisplayName) ? ServerDisplayName : null
 				};
 
-			profile.Accounts.Add(account);
+			profile.Servers.Add(server);
 			await _profileService.SaveProfileAsync(profile);
 			Completed?.Invoke();
 		}

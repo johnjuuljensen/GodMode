@@ -15,6 +15,7 @@ public partial class MainViewModel : ViewModelBase
 	private readonly IHostConnectionService _hostConnectionService;
 	private readonly IProjectService _projectService;
 	private readonly INotificationService _notificationService;
+	private readonly IProjectServerMappingService _serverMappingService;
 	private readonly HashSet<string> _subscribedConnections = new();
 	private readonly HashSet<string> _hiddenProjectIds = new();
 	private bool _suppressProfileChange;
@@ -26,6 +27,7 @@ public partial class MainViewModel : ViewModelBase
 	public event Action? AddProfileRequested;
 	public event Action<ServerGroupViewModel>? EditServerRequested;
 	public event Action<bool>? ConnectionStateChanged;
+	public event Action<ServerGroupViewModel, string, ProjectStatus>? StatusChanged;
 
 	public static readonly Profile AllProfilesOption = new() { Name = "All" };
 
@@ -64,13 +66,15 @@ public partial class MainViewModel : ViewModelBase
 		IProfileService profileService,
 		IHostConnectionService hostConnectionService,
 		IProjectService projectService,
-		INotificationService notificationService)
+		INotificationService notificationService,
+		IProjectServerMappingService serverMappingService)
 		: base(navigationService)
 	{
 		_profileService = profileService;
 		_hostConnectionService = hostConnectionService;
 		_projectService = projectService;
 		_notificationService = notificationService;
+		_serverMappingService = serverMappingService;
 	}
 
 	public bool IsAllProfilesSelected => SelectedProfileOption == AllProfilesOption;
@@ -233,7 +237,7 @@ public partial class MainViewModel : ViewModelBase
 
 		try
 		{
-			await _projectService.DeleteProjectAsync(server.ProfileName, server.Id, project.Id);
+			await _projectService.StopProjectAsync(server.ProfileName, server.Id, project.Id);
 			server.Projects.Remove(project);
 		}
 		catch (Exception ex)
@@ -352,16 +356,19 @@ public partial class MainViewModel : ViewModelBase
 	{
 		var providers = await _hostConnectionService.GetProvidersForProfileAsync(profile.Name);
 		var providersList = providers.ToList();
+		var serverConfigs = profile.Servers;
 
-		for (int accountIndex = 0; accountIndex < providersList.Count; accountIndex++)
+		for (int i = 0; i < providersList.Count; i++)
 		{
-			var provider = providersList[accountIndex];
+			var provider = providersList[i];
+			var serverId = i < serverConfigs.Count ? serverConfigs[i].Id : $"unknown-{i}";
+
 			try
 			{
 				var hosts = await provider.ListHostsAsync();
 				foreach (var host in hosts)
 				{
-					var server = ServerGroupViewModel.FromHostInfo(host, profile.Name, accountIndex);
+					var server = ServerGroupViewModel.FromHostInfo(host, profile.Name, serverId);
 					server.IsConnected = _hostConnectionService.IsConnected(profile.Name, host.Id);
 					serverList.Add(server);
 				}
@@ -393,22 +400,45 @@ public partial class MainViewModel : ViewModelBase
 			{
 				connection.ProjectCreatedReceived += status =>
 				{
-					// Add the new project to the matching server's list
-					var target = Servers.FirstOrDefault(s =>
-						s.ProfileName == server.ProfileName && s.Id == server.Id);
-					if (target != null)
+					global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
 					{
-						var summary = new ProjectSummary(
-							status.Id, status.Name, status.State,
-							status.UpdatedAt, status.CurrentQuestion);
-						target.Projects.Insert(0, summary);
-					}
+						// Skip if this project already exists in any server (dedup across connections)
+						if (Servers.Any(s => s.Projects.Any(p => p.Id == status.Id)))
+							return;
+
+						// Only add to the server that owns this project
+						var target = Servers.FirstOrDefault(s =>
+							s.ProfileName == server.ProfileName && s.Id == server.Id);
+						if (target != null)
+						{
+							var summary = new ProjectSummary(
+								status.Id, status.Name, status.State,
+								status.UpdatedAt, status.CurrentQuestion);
+							target.Projects.Insert(0, summary);
+						}
+					});
+				};
+
+				connection.StatusChangedReceived += (projectId, status) =>
+				{
+					global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+						OnServerStatusChanged(server, projectId, status));
 				};
 			}
 
 			var projects = await connection.ListProjectsAsync();
-			System.Diagnostics.Debug.WriteLine($"[GodMode] {server.Name}: loaded {projects.Count()} projects");
-			server.Projects = new ObservableCollection<ProjectSummary>(projects);
+
+			// Filter projects: only show those mapped to this server (or unmapped for backward compat)
+			var filtered = new List<ProjectSummary>();
+			foreach (var p in projects)
+			{
+				var mappedServerId = await _serverMappingService.GetServerIdAsync(p.Id);
+				if (mappedServerId == null || mappedServerId == server.ServerId)
+					filtered.Add(p);
+			}
+
+			System.Diagnostics.Debug.WriteLine($"[GodMode] {server.Name}: loaded {filtered.Count}/{projects.Count()} projects");
+			server.Projects = new ObservableCollection<ProjectSummary>(filtered);
 		}
 		catch (Exception ex)
 		{
@@ -425,4 +455,28 @@ public partial class MainViewModel : ViewModelBase
 
 	public int GetBadgeCount(string profileName, string hostId)
 		=> _notificationService.GetBadgeCount(profileName, hostId);
+
+	private void OnServerStatusChanged(ServerGroupViewModel server, string projectId, ProjectStatus status)
+	{
+		for (int i = 0; i < server.Projects.Count; i++)
+		{
+			if (server.Projects[i].Id == projectId)
+			{
+				var old = server.Projects[i];
+				server.Projects[i] = old with
+				{
+					State = status.State,
+					CurrentQuestion = status.CurrentQuestion,
+					UpdatedAt = status.UpdatedAt
+				};
+
+				if (SelectedProject?.Id == projectId)
+					SelectedProject = server.Projects[i];
+
+				break;
+			}
+		}
+
+		StatusChanged?.Invoke(server, projectId, status);
+	}
 }

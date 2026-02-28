@@ -89,6 +89,7 @@ public partial class QuestionPromptView : UserControl
 	}
 
 	public event EventHandler<string>? OptionSelected;
+	public event EventHandler? EscapePressed;
 
 	public QuestionPromptView()
 	{
@@ -126,6 +127,13 @@ public partial class QuestionPromptView : UserControl
 	{
 		base.OnKeyDown(e);
 
+		if (e.Key == Key.Escape)
+		{
+			EscapePressed?.Invoke(this, EventArgs.Empty);
+			e.Handled = true;
+			return;
+		}
+
 		if (Options.Count == 0) return;
 
 		switch (e.Key)
@@ -143,12 +151,24 @@ public partial class QuestionPromptView : UserControl
 			case Key.Enter:
 				if (_activeIndex >= 0 && _activeIndex < Options.Count)
 				{
-					OptionSelected?.Invoke(this, Options[_activeIndex].Label);
+					_ = ConfirmAndSelectAsync(Options[_activeIndex].Label);
 					e.Handled = true;
 				}
 				break;
+			case Key.Tab:
+				if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+				{
+					_activeIndex = (_activeIndex - 1 + Options.Count) % Options.Count;
+				}
+				else
+				{
+					_activeIndex = (_activeIndex + 1) % Options.Count;
+				}
+				UpdateActive();
+				e.Handled = true;
+				break;
 			default:
-				// Number key selection (1-9)
+				// Number key selection (1-9, 0 for 10)
 				if (e.Key >= Key.D1 && e.Key <= Key.D9)
 				{
 					var idx = e.Key - Key.D1;
@@ -156,18 +176,32 @@ public partial class QuestionPromptView : UserControl
 					{
 						_activeIndex = idx;
 						UpdateActive();
-						OptionSelected?.Invoke(this, Options[idx].Label);
+						_ = ConfirmAndSelectAsync(Options[idx].Label);
 						e.Handled = true;
 					}
+				}
+				else if (e.Key == Key.D0 && Options.Count >= 10)
+				{
+					_activeIndex = 9;
+					UpdateActive();
+					_ = ConfirmAndSelectAsync(Options[9].Label);
+					e.Handled = true;
 				}
 				break;
 		}
 	}
 
+	private async Task ConfirmAndSelectAsync(string label)
+	{
+		// Brief visual feedback before sending
+		await Task.Delay(120);
+		OptionSelected?.Invoke(this, label);
+	}
+
 	private void OnOptionClicked(object? sender, RoutedEventArgs e)
 	{
 		if (sender is Button btn && btn.Tag is QuestionOption option)
-			OptionSelected?.Invoke(this, option.Label);
+			_ = ConfirmAndSelectAsync(option.Label);
 	}
 
 	private void OnOptionPointerEntered(object? sender, PointerEventArgs e)

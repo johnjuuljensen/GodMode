@@ -4,8 +4,8 @@
              x:Class="GodMode.Avalonia.Views.AddServerView"
              x:DataType="vm:AddServerViewModel">
 
-    <StackPanel>
-        <Border Padding="20,16" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
+    <Grid RowDefinitions="Auto,*,Auto">
+        <Border Grid.Row="0" Padding="20,16" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
             <StackPanel Spacing="4">
                 <TextBlock Text="ADD SERVER" FontSize="11" FontWeight="SemiBold"
                            LetterSpacing="1.5" Foreground="{DynamicResource TextSecondaryBrush}" />
@@ -17,7 +17,7 @@
             </StackPanel>
         </Border>
 
-        <ScrollViewer MaxHeight="400" Padding="20,12">
+        <ScrollViewer Grid.Row="1" Padding="20,12" VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="12">
                 <StackPanel Spacing="4">
                     <TextBlock Text="SERVER TYPE" FontSize="10" FontWeight="SemiBold"
@@ -63,7 +63,7 @@
             </StackPanel>
         </ScrollViewer>
 
-        <Border Padding="20,12" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="2" Padding="20,12" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
             <Grid ColumnDefinitions="*,*">
                 <Button Grid.Column="0" Content="Cancel" Command="{Binding CancelCommand}"
                         HorizontalAlignment="Stretch" Margin="0,0,4,0" FontSize="13" />
@@ -72,5 +72,5 @@
                         Background="{DynamicResource AccentBrush}" Foreground="White" />
             </Grid>
         </Border>
-    </StackPanel>
+    </Grid>
 </UserControl>

@@ -209,32 +209,18 @@ public class ContentTypeToColorConverter : IValueConverter
 	private static readonly IBrush DarkText = new SolidColorBrush(Color.Parse("#70FFFFFF"));
 	private static readonly IBrush DarkToolUse = new SolidColorBrush(Color.Parse("#FBBF24"));
 	private static readonly IBrush DarkToolResult = new SolidColorBrush(Color.Parse("#FBBF24"));
-	private static readonly IBrush DarkError = new SolidColorBrush(Color.Parse("#F87171"));
 	private static readonly IBrush DarkDefault = new SolidColorBrush(Color.Parse("#38FFFFFF"));
 
 	// Light
 	private static readonly IBrush LightText = new SolidColorBrush(Color.Parse("#750A0A12"));
 	private static readonly IBrush LightToolUse = new SolidColorBrush(Color.Parse("#D97706"));
 	private static readonly IBrush LightToolResult = new SolidColorBrush(Color.Parse("#D97706"));
-	private static readonly IBrush LightError = new SolidColorBrush(Color.Parse("#E53535"));
 	private static readonly IBrush LightDefault = new SolidColorBrush(Color.Parse("#420A0A12"));
 
 	private static bool IsDark => Application.Current?.ActualThemeVariant != ThemeVariant.Light;
 
 	public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
 	{
-		if (value is ClaudeContentItem item)
-		{
-			var dark = IsDark;
-			if (item.IsError) return dark ? DarkError : LightError;
-			return item.Type.ToLowerInvariant() switch
-			{
-				"text" => dark ? DarkText : LightText,
-				"tool_use" => dark ? DarkToolUse : LightToolUse,
-				"tool_result" => dark ? DarkToolResult : LightToolResult,
-				_ => dark ? DarkDefault : LightDefault
-			};
-		}
 		if (value is string type)
 		{
 			var dark = IsDark;
@@ -247,31 +233,6 @@ public class ContentTypeToColorConverter : IValueConverter
 			};
 		}
 		return IsDark ? DarkDefault : LightDefault;
-	}
-
-	public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-		=> throw new NotImplementedException();
-}
-
-/// <summary>
-/// Converts HasErrorContent bool to appropriate foreground color.
-/// Returns error color if true, otherwise returns the standard text primary color.
-/// </summary>
-public class ErrorContentForegroundConverter : IValueConverter
-{
-	private static readonly IBrush DarkError = new SolidColorBrush(Color.Parse("#F87171"));
-	private static readonly IBrush LightError = new SolidColorBrush(Color.Parse("#E53535"));
-	private static readonly IBrush DarkTextPrimary = new SolidColorBrush(Color.Parse("#E0FFFFFF"));
-	private static readonly IBrush LightTextPrimary = new SolidColorBrush(Color.Parse("#E00A0A12"));
-
-	private static bool IsDark => Application.Current?.ActualThemeVariant != ThemeVariant.Light;
-
-	public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-	{
-		var dark = IsDark;
-		if (value is true)
-			return dark ? DarkError : LightError;
-		return dark ? DarkTextPrimary : LightTextPrimary;
 	}
 
 	public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)

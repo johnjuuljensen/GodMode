@@ -1,5 +1,4 @@
 using GodMode.ClientBase.Services.Models;
-using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace GodMode.ClientBase.Services;
@@ -11,21 +10,13 @@ public class ProfileService : IProfileService
 {
     private const string ProfilesFileName = "profiles.json";
     private readonly string _profilesPath;
-    private readonly string _appDataPath;
+    private readonly EncryptionHelper _encryption;
     private ProfilesConfig? _cachedConfig;
-    private readonly byte[] _encryptionKey;
 
-    /// <summary>
-    /// Creates a new ProfileService with the specified app data directory.
-    /// </summary>
-    /// <param name="appDataPath">The directory path where profile data will be stored.</param>
-    public ProfileService(string appDataPath)
+    public ProfileService(string appDataPath, EncryptionHelper encryption)
     {
-        _appDataPath = appDataPath;
         _profilesPath = Path.Combine(appDataPath, ProfilesFileName);
-
-        // Generate or load encryption key (in production, use secure key storage)
-        _encryptionKey = GetOrCreateEncryptionKey();
+        _encryption = encryption;
     }
 
     public async Task<List<Profile>> GetProfilesAsync()
@@ -45,9 +36,7 @@ public class ProfileService : IProfileService
         var config = await LoadConfigAsync();
 
         if (!string.IsNullOrEmpty(config.SelectedProfile))
-        {
             return config.Profiles.FirstOrDefault(p => p.Name == config.SelectedProfile);
-        }
 
         return config.Profiles.FirstOrDefault();
     }
@@ -58,23 +47,24 @@ public class ProfileService : IProfileService
 
         var existing = config.Profiles.FirstOrDefault(p => p.Name == profile.Name);
         if (existing != null)
-        {
             config.Profiles.Remove(existing);
-        }
 
         // Encrypt GitHub tokens before saving
         var profileToSave = new Profile
         {
             Name = profile.Name,
-            Accounts = profile.Accounts.Select(a => new Account
+            Servers = profile.Servers.Select(s => new ServerConfig
             {
-                Type = a.Type,
-                Username = a.Username,
-                Token = a.Type == "github" && !string.IsNullOrEmpty(a.Token)
-                    ? EncryptToken(a.Token)
-                    : a.Token,
-                Path = a.Path,
-                Metadata = a.Metadata
+                Id = s.Id,
+                DisplayName = s.DisplayName,
+                Type = s.Type,
+                Username = s.Username,
+                Token = s.Type == "github" && !string.IsNullOrEmpty(s.Token)
+                    ? _encryption.Encrypt(s.Token)
+                    : s.Token,
+                Path = s.Path,
+                Metadata = s.Metadata,
+                Systems = s.Systems
             }).ToList()
         };
 
@@ -88,9 +78,7 @@ public class ProfileService : IProfileService
         config.Profiles.RemoveAll(p => p.Name == name);
 
         if (config.SelectedProfile == name)
-        {
             config.SelectedProfile = config.Profiles.FirstOrDefault()?.Name;
-        }
 
         await SaveConfigAsync(config);
     }
@@ -100,69 +88,18 @@ public class ProfileService : IProfileService
         var config = await LoadConfigAsync();
 
         if (!config.Profiles.Any(p => p.Name == name))
-        {
             throw new ArgumentException($"Profile '{name}' not found");
-        }
 
         config.SelectedProfile = name;
         await SaveConfigAsync(config);
     }
 
-    public string DecryptToken(string encryptedToken)
-    {
-        try
-        {
-            var encryptedBytes = Convert.FromBase64String(encryptedToken);
-
-            using var aes = Aes.Create();
-            aes.Key = _encryptionKey;
-
-            // Extract IV from the beginning of the encrypted data
-            var iv = new byte[aes.BlockSize / 8];
-            Array.Copy(encryptedBytes, 0, iv, 0, iv.Length);
-            aes.IV = iv;
-
-            using var decryptor = aes.CreateDecryptor();
-            using var msDecrypt = new MemoryStream(encryptedBytes, iv.Length, encryptedBytes.Length - iv.Length);
-            using var csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read);
-            using var srDecrypt = new StreamReader(csDecrypt);
-
-            return srDecrypt.ReadToEnd();
-        }
-        catch
-        {
-            // If decryption fails, assume it's already decrypted or invalid
-            return encryptedToken;
-        }
-    }
-
-    private string EncryptToken(string token)
-    {
-        using var aes = Aes.Create();
-        aes.Key = _encryptionKey;
-        aes.GenerateIV();
-
-        using var encryptor = aes.CreateEncryptor();
-        using var msEncrypt = new MemoryStream();
-
-        // Prepend IV to encrypted data
-        msEncrypt.Write(aes.IV, 0, aes.IV.Length);
-
-        using (var csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
-        using (var swEncrypt = new StreamWriter(csEncrypt))
-        {
-            swEncrypt.Write(token);
-        }
-
-        return Convert.ToBase64String(msEncrypt.ToArray());
-    }
+    public string DecryptToken(string encryptedToken) => _encryption.Decrypt(encryptedToken);
 
     private async Task<ProfilesConfig> LoadConfigAsync()
     {
         if (_cachedConfig != null)
-        {
             return _cachedConfig;
-        }
 
         if (!File.Exists(_profilesPath))
         {
@@ -174,6 +111,10 @@ public class ProfileService : IProfileService
         {
             var json = await File.ReadAllTextAsync(_profilesPath);
             _cachedConfig = JsonSerializer.Deserialize<ProfilesConfig>(json) ?? new ProfilesConfig();
+
+            // Migration: assign IDs to servers that don't have one
+            if (MigrateServerIds(_cachedConfig))
+                await SaveConfigAsync(_cachedConfig);
         }
         catch
         {
@@ -181,6 +122,34 @@ public class ProfileService : IProfileService
         }
 
         return _cachedConfig;
+    }
+
+    /// <summary>
+    /// Migrates old accounts without IDs by assigning stable IDs.
+    /// Returns true if any migration was performed.
+    /// </summary>
+    private static bool MigrateServerIds(ProfilesConfig config)
+    {
+        var migrated = false;
+        foreach (var profile in config.Profiles)
+        {
+            foreach (var server in profile.Servers)
+            {
+                if (string.IsNullOrEmpty(server.Id))
+                {
+                    server.Id = Guid.NewGuid().ToString("N")[..8];
+                    migrated = true;
+                }
+
+                // Migrate Metadata["name"] → DisplayName
+                if (server.DisplayName == null && server.Metadata?.TryGetValue("name", out var name) == true)
+                {
+                    server.DisplayName = name;
+                    migrated = true;
+                }
+            }
+        }
+        return migrated;
     }
 
     private async Task SaveConfigAsync(ProfilesConfig config)
@@ -193,23 +162,5 @@ public class ProfileService : IProfileService
         });
 
         await File.WriteAllTextAsync(_profilesPath, json);
-    }
-
-    private byte[] GetOrCreateEncryptionKey()
-    {
-        var keyPath = Path.Combine(_appDataPath, ".encryption_key");
-
-        if (File.Exists(keyPath))
-        {
-            return File.ReadAllBytes(keyPath);
-        }
-
-        // Generate new key
-        using var aes = Aes.Create();
-        aes.GenerateKey();
-        var key = aes.Key;
-
-        File.WriteAllBytes(keyPath, key);
-        return key;
     }
 }

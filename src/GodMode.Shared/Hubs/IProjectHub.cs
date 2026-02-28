@@ -26,7 +26,10 @@ public interface IProjectHub
     /// <summary>
     /// Creates a new project using config-driven workflow.
     /// </summary>
-    Task<ProjectDetail> CreateProject(string projectRootName, Dictionary<string, JsonElement> inputs);
+    /// <param name="projectRootName">Name of the project root (null for workspace-less projects).</param>
+    /// <param name="inputs">Dynamic form inputs.</param>
+    /// <param name="environment">Optional client-injected environment variables (e.g. resolved credentials).</param>
+    Task<ProjectDetail> CreateProject(string? projectRootName, Dictionary<string, JsonElement> inputs, Dictionary<string, string>? environment = null);
 
     /// <summary>
     /// Sends input to a project.
@@ -41,7 +44,9 @@ public interface IProjectHub
     /// <summary>
     /// Resumes a stopped project using its existing session.
     /// </summary>
-    Task ResumeProject(string projectId);
+    /// <param name="projectId">The project to resume.</param>
+    /// <param name="environment">Optional client-injected environment variables (e.g. resolved credentials).</param>
+    Task ResumeProject(string projectId, Dictionary<string, string>? environment = null);
 
     /// <summary>
     /// Subscribes to output events from a project.
@@ -57,6 +62,11 @@ public interface IProjectHub
     /// Gets the metrics HTML for a project.
     /// </summary>
     Task<string> GetMetricsHtml(string projectId);
+
+    /// <summary>
+    /// Lists known repositories configured on the server.
+    /// </summary>
+    Task<RepoInfo[]> ListKnownRepos();
 
     /// <summary>
     /// Deletes a project, running teardown scripts and removing all files.

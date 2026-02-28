@@ -74,35 +74,55 @@
                             <StackPanel Margin="0,2">
 
                                 <!-- Server group header -->
-                                <Border Padding="8,6" Background="Transparent">
+                                <Button Padding="8,6"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Stretch"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).ToggleServerExpandedCommand}"
+                                        CommandParameter="{Binding .}">
                                     <Grid ColumnDefinitions="Auto,*,Auto">
-                                        <!-- Clickable expand/collapse area -->
-                                        <Button Grid.Column="0" Grid.ColumnSpan="2"
-                                                HorizontalAlignment="Stretch"
-                                                HorizontalContentAlignment="Stretch"
-                                                Background="Transparent"
-                                                BorderThickness="0"
-                                                Padding="0"
-                                                Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).ToggleServerExpandedCommand}"
-                                                CommandParameter="{Binding .}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <TextBlock Text="{Binding IsExpanded, Converter={StaticResource BoolToChevronConverter}}"
-                                                           FontSize="10"
-                                                           Foreground="{DynamicResource TextTertiaryBrush}"
-                                                           VerticalAlignment="Center" />
-                                                <Ellipse Width="6" Height="6"
-                                                         Fill="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}"
-                                                         VerticalAlignment="Center" />
-                                                <TextBlock Text="{Binding Name}"
-                                                           FontSize="12" FontWeight="SemiBold"
-                                                           Foreground="{DynamicResource TextPrimaryBrush}"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </Button>
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding IsExpanded, Converter={StaticResource BoolToChevronConverter}}"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                                       VerticalAlignment="Center" />
+                                            <Ellipse Width="6" Height="6"
+                                                     Fill="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}"
+                                                     VerticalAlignment="Center" />
+                                        </StackPanel>
 
-                                        <!-- Server actions -->
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="3">
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding Name}"
+                                                   FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimaryBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   Margin="6,0,0,0"
+                                                   VerticalAlignment="Center" />
+
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4">
+                                            <!-- New Project -->
+                                            <Button Padding="4,2"
+                                                    CornerRadius="4"
+                                                    Background="Transparent"
+                                                    BorderThickness="0"
+                                                    Foreground="{DynamicResource TextTertiaryBrush}"
+                                                    ToolTip.Tip="New Project"
+                                                    Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).CreateProjectCommand}"
+                                                    CommandParameter="{Binding .}">
+                                                <TextBlock Text="+" FontSize="13" FontWeight="SemiBold" />
+                                            </Button>
+                                            <!-- Edit Server -->
+                                            <Button Padding="4,2"
+                                                    CornerRadius="4"
+                                                    Background="Transparent"
+                                                    BorderThickness="0"
+                                                    Foreground="{DynamicResource TextTertiaryBrush}"
+                                                    ToolTip.Tip="Edit Server"
+                                                    Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).EditServerCommand}"
+                                                    CommandParameter="{Binding .}">
+                                                <TextBlock Text="⚙" FontSize="11" />
+                                            </Button>
                                             <Border Padding="5,1"
                                                     Background="{DynamicResource AccentMutedBrush}"
                                                     CornerRadius="6"
@@ -114,58 +134,10 @@
                                             <TextBlock Text="{Binding Projects.Count}"
                                                        FontSize="10"
                                                        Foreground="{DynamicResource TextTertiaryBrush}"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,2,0" />
-
-                                            <!-- Start -->
-                                            <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).StartServerCommand}"
-                                                    CommandParameter="{Binding .}"
-                                                    IsVisible="{Binding State, Converter={StaticResource StateToStartVisibilityConverter}}"
-                                                    ToolTip.Tip="Start server"
-                                                    Padding="4,2" FontSize="10"
-                                                    Background="Transparent"
-                                                    Foreground="{DynamicResource StateRunningBrush}"
-                                                    BorderThickness="0">
-                                                <TextBlock Text="Start" FontSize="10" />
-                                            </Button>
-
-                                            <!-- Stop -->
-                                            <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).StopServerCommand}"
-                                                    CommandParameter="{Binding .}"
-                                                    IsVisible="{Binding State, Converter={StaticResource StateToStopVisibilityConverter}}"
-                                                    ToolTip.Tip="Stop server"
-                                                    Padding="4,2" FontSize="10"
-                                                    Background="Transparent"
-                                                    Foreground="{DynamicResource StateErrorBrush}"
-                                                    BorderThickness="0">
-                                                <TextBlock Text="Stop" FontSize="10" />
-                                            </Button>
-
-                                            <!-- New Project -->
-                                            <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).CreateProjectCommand}"
-                                                    CommandParameter="{Binding .}"
-                                                    IsVisible="{Binding CanConnect}"
-                                                    ToolTip.Tip="New project"
-                                                    Padding="4,2" FontSize="12"
-                                                    Background="Transparent"
-                                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                                    BorderThickness="0">
-                                                <TextBlock Text="+" FontSize="12" FontWeight="SemiBold" />
-                                            </Button>
-
-                                            <!-- Edit -->
-                                            <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).EditServerCommand}"
-                                                    CommandParameter="{Binding .}"
-                                                    ToolTip.Tip="Edit server"
-                                                    Padding="4,2" FontSize="10"
-                                                    Background="Transparent"
-                                                    Foreground="{DynamicResource TextTertiaryBrush}"
-                                                    BorderThickness="0">
-                                                <TextBlock Text="Edit" FontSize="10" />
-                                            </Button>
+                                                       VerticalAlignment="Center" />
                                         </StackPanel>
                                     </Grid>
-                                </Border>
+                                </Button>
 
                                 <!-- Loading projects -->
                                 <ProgressBar IsIndeterminate="True"
@@ -198,7 +170,7 @@
                                                     </MultiBinding>
                                                 </Button.Background>
 
-                                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                                                     <Ellipse Grid.Column="0"
                                                              Width="5" Height="5"
                                                              Fill="{Binding State, Converter={StaticResource StateToColorConverter}}"
@@ -236,6 +208,18 @@
                                                                Foreground="{DynamicResource TextTertiaryBrush}"
                                                                VerticalAlignment="Top"
                                                                Margin="4,2,0,0" />
+
+                                                    <Button Grid.Column="3"
+                                                            Content="&#x2715;"
+                                                            ToolTip.Tip="Delete project"
+                                                            Padding="4,2" FontSize="9"
+                                                            Background="Transparent"
+                                                            BorderThickness="0"
+                                                            Foreground="{DynamicResource TextTertiaryBrush}"
+                                                            VerticalAlignment="Top"
+                                                            Margin="4,2,0,0"
+                                                            Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).DeleteProjectCommand}"
+                                                            CommandParameter="{Binding .}" />
                                                 </Grid>
                                             </Button>
                                         </DataTemplate>
@@ -269,7 +253,7 @@
                                                 </MultiBinding>
                                             </Button.Background>
 
-                                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                                                 <Ellipse Grid.Column="0"
                                                          Width="5" Height="5"
                                                          Fill="{Binding State, Converter={StaticResource StateToColorConverter}}"
@@ -307,6 +291,18 @@
                                                            Foreground="{DynamicResource TextTertiaryBrush}"
                                                            VerticalAlignment="Top"
                                                            Margin="4,2,0,0" />
+
+                                                <Button Grid.Column="3"
+                                                        Content="&#x2715;"
+                                                        ToolTip.Tip="Delete project"
+                                                        Padding="4,2" FontSize="9"
+                                                        Background="Transparent"
+                                                        BorderThickness="0"
+                                                        Foreground="{DynamicResource TextTertiaryBrush}"
+                                                        VerticalAlignment="Top"
+                                                        Margin="4,2,0,0"
+                                                        Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).DeleteProjectCommand}"
+                                                        CommandParameter="{Binding .}" />
                                             </Grid>
                                         </Button>
                                     </DataTemplate>

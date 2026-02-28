@@ -17,6 +17,5 @@ public record RootConfig(
     string[]? ClaudeArgs = null,
     string? NameTemplate = null,
     string? PromptTemplate = null,
-    string? ClaudeConfigDir = null,
-    bool ScriptsCreateFolder = false
+    bool IsDefault = false
 );

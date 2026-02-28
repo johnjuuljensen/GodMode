@@ -41,7 +41,7 @@
                 <!-- Content layer (no Background = transparent to hit tests, title bar drag works) -->
                 <Border BorderBrush="{DynamicResource BorderSubtleBrush}"
                         BorderThickness="0,0,0,1">
-                    <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" Margin="80,0,144,0">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" Margin="80,0,16,0">
 
                         <!-- Brand -->
                         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10"
@@ -122,6 +122,17 @@
                                     </Button>
                                 </StackPanel>
                             </Border>
+
+                            <!-- Credentials -->
+                            <Button Command="{Binding ManageCredentialsCommand}"
+                                    ToolTip.Tip="Manage Credentials"
+                                    Padding="6,4"
+                                    CornerRadius="6"
+                                    Background="{DynamicResource BgSurfaceBrush}"
+                                    Foreground="{DynamicResource TextSecondaryBrush}"
+                                    BorderThickness="0">
+                                <TextBlock Text="🔑" FontSize="13" />
+                            </Button>
 
                             <!-- Theme toggle -->
                             <Button Command="{Binding ToggleThemeCommand}"
@@ -268,28 +279,36 @@
         <!-- Modal overlay -->
         <Border IsVisible="{Binding IsModalVisible}"
                 Background="{DynamicResource BgOverlayBrush}">
-            <glass:LiquidGlassSurface HorizontalAlignment="Center" VerticalAlignment="Center"
+            <Border HorizontalAlignment="Center" VerticalAlignment="Stretch"
                     MaxWidth="500" MinWidth="400"
+                    Margin="0,80"
                     CornerRadius="16"
-                    BlurRadius="14"
-                    Vibrancy="1.4"
-                    Brightness="0.06"
-                    TintColor="{DynamicResource GlassModalTint}"
-                    SurfaceColor="{DynamicResource GlassModalSurface}"
-                    HighlightEnabled="True"
-                    HighlightOpacity="0.35"
-                    HighlightWidth="0.4"
-                    ShadowEnabled="True"
-                    ShadowRadius="32"
-                    ShadowColor="#40000000"
-                    ShadowOffset="0,8">
-                <Border Padding="0"
-                        BorderBrush="{DynamicResource BorderStrongBrush}"
-                        BorderThickness="1"
-                        CornerRadius="16">
-                    <ContentControl Content="{Binding ModalViewModel}" />
-                </Border>
-            </glass:LiquidGlassSurface>
+                    ClipToBounds="True">
+                <Panel>
+                    <!-- Glass background (non-interactive, purely decorative) -->
+                    <glass:LiquidGlassSurface
+                            IsHitTestVisible="False"
+                            CornerRadius="16"
+                            BlurRadius="14"
+                            Vibrancy="1.4"
+                            Brightness="0.06"
+                            TintColor="{DynamicResource GlassModalTint}"
+                            SurfaceColor="{DynamicResource GlassModalSurface}"
+                            HighlightEnabled="True"
+                            HighlightOpacity="0.35"
+                            HighlightWidth="0.4"
+                            ShadowEnabled="True"
+                            ShadowRadius="32"
+                            ShadowColor="#40000000"
+                            ShadowOffset="0,8" />
+                    <!-- Modal content -->
+                    <Border BorderBrush="{DynamicResource BorderStrongBrush}"
+                            BorderThickness="1"
+                            CornerRadius="16">
+                        <ContentControl Content="{Binding ModalViewModel}" />
+                    </Border>
+                </Panel>
+            </Border>
         </Border>
     </Panel>
 </Window>

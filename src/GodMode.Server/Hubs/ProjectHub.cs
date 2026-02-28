@@ -39,12 +39,12 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.GetStatusAsync(projectId);
     }
 
-    public async Task<ProjectDetail> CreateProject(string projectRootName, Dictionary<string, JsonElement> inputs)
+    public async Task<ProjectDetail> CreateProject(string? projectRootName, Dictionary<string, JsonElement> inputs, Dictionary<string, string>? environment = null)
     {
         _logger.LogInformation("Client {ConnectionId} creating project in root '{Root}' with {InputCount} inputs",
-            Context.ConnectionId, projectRootName, inputs.Count);
+            Context.ConnectionId, projectRootName ?? "(none)", inputs.Count);
 
-        var request = new CreateProjectRequest(projectRootName, inputs);
+        var request = new CreateProjectRequest(projectRootName, inputs, environment);
         var project = await _projectManager.CreateProjectAsync(request);
 
         // Notify all clients about the new project
@@ -67,11 +67,11 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.StopProjectAsync(projectId);
     }
 
-    public async Task ResumeProject(string projectId)
+    public async Task ResumeProject(string projectId, Dictionary<string, string>? environment = null)
     {
         _logger.LogInformation("Client {ConnectionId} resuming project {ProjectId}",
             Context.ConnectionId, projectId);
-        await _projectManager.ResumeProjectAsync(projectId);
+        await _projectManager.ResumeProjectAsync(projectId, environment);
     }
 
     public async Task SubscribeProject(string projectId, long outputOffset)
@@ -97,6 +97,12 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} requested metrics for project {ProjectId}",
             Context.ConnectionId, projectId);
         return await _projectManager.GetMetricsHtmlAsync(projectId);
+    }
+
+    public async Task<RepoInfo[]> ListKnownRepos()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested known repos", Context.ConnectionId);
+        return await _projectManager.ListKnownReposAsync();
     }
 
     public async Task DeleteProject(string projectId)

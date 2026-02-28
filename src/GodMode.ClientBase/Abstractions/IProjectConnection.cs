@@ -31,9 +31,10 @@ public interface IProjectConnection : IDisposable
     /// <summary>
     /// Creates a new project with the specified parameters
     /// </summary>
-    /// <param name="projectRootName">Name of the project root where the project will be created.</param>
+    /// <param name="projectRootName">Name of the project root (null for workspace-less projects).</param>
     /// <param name="inputs">Form inputs as key-value pairs from the dynamic form.</param>
-    Task<ProjectDetail> CreateProjectAsync(string projectRootName, Dictionary<string, JsonElement> inputs);
+    /// <param name="environment">Optional client-injected environment variables.</param>
+    Task<ProjectDetail> CreateProjectAsync(string? projectRootName, Dictionary<string, JsonElement> inputs, Dictionary<string, string>? environment = null);
 
     /// <summary>
     /// Sends user input to a project waiting for input
@@ -48,7 +49,8 @@ public interface IProjectConnection : IDisposable
     /// <summary>
     /// Resumes a stopped project using its existing session
     /// </summary>
-    Task ResumeProjectAsync(string projectId);
+    /// <param name="environment">Optional client-injected environment variables.</param>
+    Task ResumeProjectAsync(string projectId, Dictionary<string, string>? environment = null);
 
     /// <summary>
     /// Subscribes to output messages from a project, starting from a specific offset.
@@ -62,9 +64,14 @@ public interface IProjectConnection : IDisposable
     Task<string> GetMetricsHtmlAsync(string projectId);
 
     /// <summary>
-    /// Deletes a project, running teardown scripts and removing all files
+    /// Deletes a project on the server
     /// </summary>
     Task DeleteProjectAsync(string projectId);
+
+    /// <summary>
+    /// Lists known repositories configured on the server
+    /// </summary>
+    Task<IEnumerable<RepoInfo>> ListKnownReposAsync();
 
     /// <summary>
     /// Event raised when the server streams creation progress for a project.
@@ -78,7 +85,14 @@ public interface IProjectConnection : IDisposable
     event Action<ProjectStatus>? ProjectCreatedReceived;
 
     /// <summary>
+    /// Event raised when any project's status changes (broadcast from server).
+    /// Parameters: projectId, new status.
+    /// </summary>
+    event Action<string, ProjectStatus>? StatusChangedReceived;
+
+    /// <summary>
     /// Event raised when a project is deleted (broadcast from server).
+    /// Parameter: projectId.
     /// </summary>
     event Action<string>? ProjectDeletedReceived;
 

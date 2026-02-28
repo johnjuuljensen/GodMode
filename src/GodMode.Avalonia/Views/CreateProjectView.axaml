@@ -38,18 +38,25 @@
         </views:FormFieldTemplateSelector>
     </UserControl.Resources>
 
-    <StackPanel>
-        <!-- Modal title -->
-        <Border Padding="20,16"
+    <Grid RowDefinitions="Auto,*,Auto">
+        <!-- Header -->
+        <Border Grid.Row="0" Padding="20,16"
                 BorderBrush="{DynamicResource BorderSubtleBrush}"
                 BorderThickness="0,0,0,1">
-            <TextBlock Text="NEW PROJECT"
-                       FontSize="11" FontWeight="SemiBold"
-                       LetterSpacing="1.5"
-                       Foreground="{DynamicResource TextSecondaryBrush}" />
+            <StackPanel Spacing="4">
+                <TextBlock Text="NEW PROJECT"
+                           FontSize="11" FontWeight="SemiBold"
+                           LetterSpacing="1.5"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+                <TextBlock FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}">
+                    <TextBlock.Text>
+                        <Binding Path="ServerName" StringFormat="{}Server: {0}" />
+                    </TextBlock.Text>
+                </TextBlock>
+            </StackPanel>
         </Border>
 
-        <ScrollViewer MaxHeight="500" Padding="20,12">
+        <ScrollViewer Grid.Row="1" Padding="20,12" VerticalScrollBarVisibility="Auto">
             <StackPanel Spacing="12">
 
                 <!-- Loading -->
@@ -57,67 +64,146 @@
                              IsVisible="{Binding IsLoading}"
                              Height="2" />
 
-                <!-- Project Root -->
-                <StackPanel Spacing="4" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-                    <TextBlock Text="PROJECT ROOT" FontSize="10" FontWeight="SemiBold"
-                               LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
-                    <ComboBox ItemsSource="{Binding ProjectRoots}"
-                              SelectedItem="{Binding SelectedProjectRoot}"
-                              HorizontalAlignment="Stretch" FontSize="13">
-                        <ComboBox.ItemTemplate>
-                            <DataTemplate x:DataType="shared:ProjectRootInfo">
-                                <TextBlock Text="{Binding Name}" FontSize="13" />
-                            </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                    </ComboBox>
-                    <TextBlock Text="{Binding SelectedProjectRoot.Description}"
-                               FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                               TextWrapping="Wrap" />
+                <!-- STEP 0: Workspace + Repo -->
+                <StackPanel Spacing="10" IsVisible="{Binding IsStep0}">
+                    <!-- Project Root (includes "None" option) -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="PROJECT ROOT" FontSize="10" FontWeight="SemiBold"
+                                   LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                        <ComboBox ItemsSource="{Binding ProjectRoots}"
+                                  SelectedItem="{Binding SelectedProjectRoot}"
+                                  HorizontalAlignment="Stretch" FontSize="13">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="shared:ProjectRootInfo">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="{Binding Name}" FontSize="13" />
+                                        <TextBlock Text="(default)" FontSize="11"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"
+                                                   VerticalAlignment="Center"
+                                                   IsVisible="{Binding IsDefault}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBlock Text="{Binding SelectedProjectRoot.Description}"
+                                   FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding !IsNoWorkspace}" />
+                    </StackPanel>
+
+                    <!-- Repository (only if known repos exist) -->
+                    <StackPanel Spacing="4" IsVisible="{Binding HasKnownRepos}">
+                        <TextBlock Text="REPOSITORY" FontSize="10" FontWeight="SemiBold"
+                                   LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                        <ComboBox ItemsSource="{Binding KnownRepos}"
+                                  SelectedItem="{Binding SelectedRepo}"
+                                  HorizontalAlignment="Stretch" FontSize="13">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="shared:RepoInfo">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding Name}" FontSize="13" />
+                                        <TextBlock Text="{Binding Description}"
+                                                   FontSize="10" Foreground="{DynamicResource TextTertiaryBrush}"
+                                                   IsVisible="{Binding Description, Converter={StaticResource IsNotNullConverter}}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
+
+                    <!-- Manual repo URL -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="REPO URL (OPTIONAL)" FontSize="10" FontWeight="SemiBold"
+                                   LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                        <TextBox Text="{Binding ManualRepoUrl}"
+                                 Watermark="https://github.com/org/repo or leave blank"
+                                 FontSize="13" />
+                    </StackPanel>
                 </StackPanel>
 
-                <!-- Dynamic Form Fields -->
-                <ItemsControl ItemsSource="{Binding FormFields}"
-                              ItemTemplate="{StaticResource FieldSelector}"
-                              IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}" />
+                <!-- STEP 1: Create (name + form fields + systems info) -->
+                <StackPanel Spacing="10" IsVisible="{Binding IsStep1}">
+
+                    <!-- Project Name (always shown) -->
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="PROJECT NAME" FontSize="10" FontWeight="SemiBold"
+                                   LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                        <TextBox Text="{Binding ProjectName}"
+                                 Watermark="Optional — auto-generated if blank"
+                                 FontSize="13" />
+                    </StackPanel>
+
+                    <!-- Dynamic form fields (optional) -->
+                    <ItemsControl ItemsSource="{Binding FormFields}"
+                                  ItemTemplate="{StaticResource FieldSelector}"
+                                  IsVisible="{Binding HasFormFields}" />
+
+                    <!-- Systems info (compact, read-only) -->
+                    <StackPanel Spacing="4" IsVisible="{Binding SystemMappings.Count}"
+                                Margin="0,8,0,0">
+                        <TextBlock Text="CREDENTIALS" FontSize="10" FontWeight="SemiBold"
+                                   LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                        <ItemsControl ItemsSource="{Binding SystemMappings}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:SystemMapping">
+                                    <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,2">
+                                        <Ellipse Width="6" Height="6" VerticalAlignment="Center"
+                                                 Fill="{Binding IsResolved, Converter={StaticResource BoolToColorConverter}}" />
+                                        <TextBlock FontSize="11" Foreground="{DynamicResource TextSecondaryBrush}">
+                                            <TextBlock.Text>
+                                                <Binding Path="SystemName" StringFormat="{}{0}" />
+                                            </TextBlock.Text>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <!-- Creation Progress -->
+                    <TextBlock Text="{Binding CreationProgressText}"
+                               IsVisible="{Binding CreationProgressText, Converter={StaticResource IsNotNullConverter}}"
+                               FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                               HorizontalAlignment="Center" />
+                    <ProgressBar IsIndeterminate="True"
+                                 IsVisible="{Binding IsCreating}"
+                                 Height="2" />
+                </StackPanel>
 
                 <!-- Error -->
                 <TextBlock Text="{Binding ErrorMessage}"
                            IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
                            Foreground="{DynamicResource StateErrorBrush}"
                            FontSize="12" HorizontalAlignment="Center" />
-
-                <!-- Creation Progress -->
-                <TextBlock Text="{Binding CreationProgressText}"
-                           IsVisible="{Binding CreationProgressText, Converter={StaticResource IsNotNullConverter}}"
-                           FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
-                           HorizontalAlignment="Center" />
-                <ProgressBar IsIndeterminate="True"
-                             IsVisible="{Binding IsCreating}"
-                             Height="2" />
             </StackPanel>
         </ScrollViewer>
 
-        <!-- Footer buttons -->
-        <Border Padding="20,12"
+        <!-- Footer -->
+        <Border Grid.Row="2" Padding="20,12"
                 BorderBrush="{DynamicResource BorderSubtleBrush}"
                 BorderThickness="0,1,0,0"
                 IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
-            <Grid ColumnDefinitions="*,*" HorizontalAlignment="Stretch">
+            <Grid ColumnDefinitions="Auto,*,Auto">
                 <Button Grid.Column="0"
                         Content="Cancel"
                         Command="{Binding CancelCommand}"
-                        HorizontalAlignment="Stretch"
-                        Margin="0,0,4,0"
+                        Padding="16,8"
                         FontSize="13" />
                 <Button Grid.Column="1"
-                        Content="Create"
-                        Command="{Binding CreateCommand}"
-                        HorizontalAlignment="Stretch"
-                        Margin="4,0,0,0"
+                        Content="Back"
+                        Command="{Binding PreviousStepCommand}"
+                        IsVisible="{Binding CanGoBack}"
+                        HorizontalAlignment="Center"
+                        Padding="16,8"
+                        FontSize="13" />
+                <Button Grid.Column="2"
+                        Content="{Binding NextButtonText}"
+                        Command="{Binding NextStepCommand}"
+                        Padding="16,8"
                         FontSize="13" FontWeight="SemiBold"
                         Background="{DynamicResource AccentBrush}"
                         Foreground="White" />
             </Grid>
         </Border>
-    </StackPanel>
+    </Grid>
 </UserControl>

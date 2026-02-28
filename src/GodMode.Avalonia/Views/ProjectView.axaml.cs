@@ -21,23 +21,40 @@ public partial class ProjectView : UserControl
 		// Intercept Enter key on input (tunnel to catch before TextBox processes it)
 		InputEditor.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
 
-		// Wire question prompt option selection
+		// Wire question prompt events
 		QuestionPrompt.OptionSelected += OnQuestionOptionSelected;
+		QuestionPrompt.EscapePressed += OnQuestionEscapePressed;
+
+		// Wire scroll-to-question and floating answer buttons
+		ScrollToQuestionButton.Click += OnScrollToQuestion;
+		FloatingAnswerButton.Click += OnScrollToQuestion;
 
 		DataContextChanged += (_, _) =>
 		{
 			if (DataContext is ProjectViewModel vm)
 			{
-				vm.DisplayMessages.CollectionChanged += OnDisplayMessagesChanged;
+				vm.OutputMessages.CollectionChanged += OnOutputMessagesChanged;
 				vm.PropertyChanged += OnViewModelPropertyChanged;
 
 				// Scroll to bottom when opening a project with existing messages
-				if (vm.DisplayMessages.Count > 0)
+				if (vm.OutputMessages.Count > 0)
 				{
 					_isAtBottom = true;
 					Dispatcher.UIThread.Post(() =>
 						OutputScrollViewer.ScrollToEnd(),
 						DispatcherPriority.Background);
+				}
+
+				// Re-render option picker if question is still active (QD-04)
+				if (vm.IsQuestionActive)
+				{
+					Dispatcher.UIThread.Post(() =>
+					{
+						QuestionPrompt.QuestionText = vm.CurrentQuestionText ?? "";
+						QuestionPrompt.AgentName = vm.CurrentQuestionHeader ?? vm.Status?.Name;
+						QuestionPrompt.SetOptions(vm.CurrentQuestionOptions);
+						QuestionPrompt.Focus();
+					}, DispatcherPriority.Background);
 				}
 			}
 		};
@@ -50,8 +67,8 @@ public partial class ProjectView : UserControl
 			var viewport = sv.Viewport.Height;
 			var offset = sv.Offset.Y;
 
-			// User is "at bottom" if within threshold of the end
 			_isAtBottom = (extent - viewport - offset) < ScrollThreshold;
+			UpdateFloatingButton();
 		};
 	}
 
@@ -80,6 +97,7 @@ public partial class ProjectView : UserControl
 					QuestionPrompt.SetOptions(vm.CurrentQuestionOptions);
 					QuestionPrompt.Focus();
 				}
+				UpdateFloatingButton();
 			});
 		}
 	}
@@ -93,7 +111,30 @@ public partial class ProjectView : UserControl
 		}
 	}
 
-	private void OnDisplayMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+	private void OnQuestionEscapePressed(object? sender, EventArgs e)
+	{
+		if (DataContext is ProjectViewModel vm)
+		{
+			vm.IsInputLocked = false;
+			InputEditor.Focus();
+		}
+	}
+
+	private void OnScrollToQuestion(object? sender, RoutedEventArgs e)
+	{
+		OutputScrollViewer.ScrollToEnd();
+		QuestionPrompt.Focus();
+	}
+
+	private void UpdateFloatingButton()
+	{
+		if (DataContext is ProjectViewModel vm && vm.IsQuestionActive && !_isAtBottom)
+			FloatingAnswerButton.IsVisible = true;
+		else
+			FloatingAnswerButton.IsVisible = false;
+	}
+
+	private void OnOutputMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
 	{
 		if (DataContext is not ProjectViewModel vm) return;
 
@@ -108,7 +149,7 @@ public partial class ProjectView : UserControl
 		{
 			if (_isAtBottom || _isInitialLoad)
 			{
-				if (_isInitialLoad && vm.DisplayMessages.Count > 5)
+				if (_isInitialLoad && vm.OutputMessages.Count > 5)
 					_isInitialLoad = false;
 
 				Dispatcher.UIThread.Post(() =>
@@ -125,9 +166,10 @@ public partial class ProjectView : UserControl
 
 		if (DataContext is ProjectViewModel vm)
 		{
-			vm.DisplayMessages.CollectionChanged -= OnDisplayMessagesChanged;
+			vm.OutputMessages.CollectionChanged -= OnOutputMessagesChanged;
 			vm.PropertyChanged -= OnViewModelPropertyChanged;
-			vm.Dispose();
+			// Don't dispose VM — it's cached in MainWindowViewModel._projectViewModels
+			// and needs to survive navigation for state persistence (SP-01)
 		}
 	}
 }
