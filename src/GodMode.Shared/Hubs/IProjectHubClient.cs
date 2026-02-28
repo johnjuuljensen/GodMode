@@ -28,4 +28,9 @@ public interface IProjectHubClient
     /// Called during project creation to stream script progress to the client.
     /// </summary>
     Task CreationProgress(string projectId, string message);
+
+    /// <summary>
+    /// Called when a project is deleted.
+    /// </summary>
+    Task ProjectDeleted(string projectId);
 }

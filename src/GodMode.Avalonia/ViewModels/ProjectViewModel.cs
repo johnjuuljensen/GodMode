@@ -236,6 +236,26 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	}
 
 	[RelayCommand]
+	private async Task DeleteProjectAsync()
+	{
+		try
+		{
+			IsLoading = true;
+			ErrorMessage = null;
+			await _projectService.DeleteProjectAsync(ProfileName, HostId, ProjectId);
+			Navigation.GoBack();
+		}
+		catch (Exception ex)
+		{
+			ErrorMessage = $"Error deleting project: {ex.Message}";
+		}
+		finally
+		{
+			IsLoading = false;
+		}
+	}
+
+	[RelayCommand]
 	private async Task LoadMetricsAsync()
 	{
 		try

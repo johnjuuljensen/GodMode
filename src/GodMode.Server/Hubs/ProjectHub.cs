@@ -99,6 +99,14 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.GetMetricsHtmlAsync(projectId);
     }
 
+    public async Task DeleteProject(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} deleting project {ProjectId}",
+            Context.ConnectionId, projectId);
+        await _projectManager.DeleteProjectAsync(projectId);
+        await Clients.All.ProjectDeleted(projectId);
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);

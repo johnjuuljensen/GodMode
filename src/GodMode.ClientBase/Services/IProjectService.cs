@@ -19,6 +19,7 @@ public interface IProjectService
     Task SendInputAsync(string profileName, string hostId, string projectId, string input);
     Task StopProjectAsync(string profileName, string hostId, string projectId);
     Task ResumeProjectAsync(string profileName, string hostId, string projectId);
+    Task DeleteProjectAsync(string profileName, string hostId, string projectId);
     Task<IObservable<ClaudeMessage>> SubscribeOutputAsync(string profileName, string hostId, string projectId, long fromOffset = 0);
     Task<string> GetMetricsHtmlAsync(string profileName, string hostId, string projectId);
     void ClearCache();
