@@ -46,6 +46,9 @@ public partial class ServerGroupViewModel : ObservableObject
 	[NotifyPropertyChangedFor(nameof(ProjectCountDisplay))]
 	private ObservableCollection<ProjectSummary> _projects = new();
 
+	[ObservableProperty]
+	private ObservableCollection<RootGroupViewModel> _rootGroups = new();
+
 	public string StatusDisplay => IsConnected ? "Online" : State switch
 	{
 		HostState.Running => "Online",
@@ -75,4 +78,25 @@ public partial class ServerGroupViewModel : ObservableObject
 		ProfileName = profileName,
 		AccountIndex = accountIndex
 	};
+
+	public void RebuildRootGroups(bool sortByName)
+	{
+		var groups = Projects
+			.GroupBy(p => p.RootName ?? "(default)")
+			.OrderBy(g => g.Key)
+			.Select(g =>
+			{
+				var sorted = sortByName
+					? g.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+					: g.OrderByDescending(p => p.UpdatedAt);
+
+				return new RootGroupViewModel
+				{
+					Name = g.Key,
+					Projects = new ObservableCollection<ProjectSummary>(sorted)
+				};
+			});
+
+		RootGroups = new ObservableCollection<RootGroupViewModel>(groups);
+	}
 }
