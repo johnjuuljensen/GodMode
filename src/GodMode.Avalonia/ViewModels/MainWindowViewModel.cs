@@ -118,6 +118,7 @@ public partial class MainWindowViewModel : ObservableObject
 			{
 				var vm = App.Services.GetRequiredService<TileGridViewModel>();
 				vm.ProjectSelected += OnTileProjectSelected;
+				vm.CreateProjectRequested += OnCreateProjectRequested;
 				_tileGridViewModel = vm;
 				ContentViewModel = vm;
 				_ = vm.LoadAsync(SidebarViewModel.Servers);
@@ -165,6 +166,7 @@ public partial class MainWindowViewModel : ObservableObject
 		{
 			var vm = App.Services.GetRequiredService<TileGridViewModel>();
 			vm.ProjectSelected += OnTileProjectSelected;
+			vm.CreateProjectRequested += OnCreateProjectRequested;
 			_tileGridViewModel = vm;
 			ContentViewModel = vm;
 			_ = vm.LoadAsync(SidebarViewModel.Servers);

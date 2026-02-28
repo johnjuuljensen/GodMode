@@ -76,7 +76,8 @@ public class ProjectManager : IProjectManager
                 project.Name,
                 project.State,
                 project.UpdatedAt,
-                project.CurrentQuestion
+                project.CurrentQuestion,
+                project.RootName
             ));
         }
 

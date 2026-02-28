@@ -10,7 +10,6 @@
     </Project>
     <Project Path="src/GodMode.Avalonia/GodMode.Avalonia.csproj" />
     <Project Path="src/GodMode.ClientBase/GodMode.ClientBase.csproj" />
-    <Project Path="src/GodMode.Maui/GodMode.Maui.csproj" />
     <Project Path="src/GodMode.Mcp/GodMode.Mcp.csproj" />
     <Project Path="src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj" />
     <Project Path="src/GodMode.Server/GodMode.Server.csproj" />
@@ -23,6 +22,5 @@
     </Project>
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="src/GodMode.Maui.Tests/GodMode.Maui.Tests.csproj" />
   </Folder>
 </Solution>

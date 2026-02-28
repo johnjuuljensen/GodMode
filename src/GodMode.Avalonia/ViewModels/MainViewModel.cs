@@ -59,6 +59,9 @@ public partial class MainViewModel : ViewModelBase
 	[ObservableProperty]
 	private bool _isGroupedByServer = true;
 
+	[ObservableProperty]
+	private bool _sortByName;
+
 	public MainViewModel(
 		INavigationService navigationService,
 		IProfileService profileService,
@@ -249,6 +252,14 @@ public partial class MainViewModel : ViewModelBase
 	}
 
 	[RelayCommand]
+	private void ToggleSort()
+	{
+		SortByName = !SortByName;
+		foreach (var server in Servers)
+			server.RebuildRootGroups(SortByName);
+	}
+
+	[RelayCommand]
 	private void RemoveServer(ServerGroupViewModel server)
 	{
 		Servers.Remove(server);
@@ -402,6 +413,7 @@ public partial class MainViewModel : ViewModelBase
 							status.Id, status.Name, status.State,
 							status.UpdatedAt, status.CurrentQuestion);
 						target.Projects.Insert(0, summary);
+						target.RebuildRootGroups(SortByName);
 					}
 				};
 			}
@@ -409,6 +421,7 @@ public partial class MainViewModel : ViewModelBase
 			var projects = await connection.ListProjectsAsync();
 			System.Diagnostics.Debug.WriteLine($"[GodMode] {server.Name}: loaded {projects.Count()} projects");
 			server.Projects = new ObservableCollection<ProjectSummary>(projects);
+			server.RebuildRootGroups(SortByName);
 		}
 		catch (Exception ex)
 		{
