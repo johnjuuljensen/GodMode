@@ -23,7 +23,7 @@ public partial class TileGridViewModel : ViewModelBase
 	private List<ServerGroupViewModel> _connectedServers = new();
 
 	public event Action<ServerGroupViewModel, ProjectSummary>? ProjectSelected;
-	public event Action<ServerGroupViewModel>? CreateProjectRequested;
+	public event Action<ServerGroupViewModel, string?>? CreateProjectRequested;
 
 	public TileGridViewModel(
 		INavigationService navigationService,
@@ -118,7 +118,7 @@ public partial class TileGridViewModel : ViewModelBase
 	{
 		var server = _connectedServers.FirstOrDefault();
 		if (server != null)
-			CreateProjectRequested?.Invoke(server);
+			CreateProjectRequested?.Invoke(server, null);
 	}
 
 	public void Cleanup()

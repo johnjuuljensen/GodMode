@@ -93,6 +93,7 @@ public partial class ServerGroupViewModel : ObservableObject
 				return new RootGroupViewModel
 				{
 					Name = g.Key,
+					Server = this,
 					Projects = new ObservableCollection<ProjectSummary>(sorted)
 				};
 			});
