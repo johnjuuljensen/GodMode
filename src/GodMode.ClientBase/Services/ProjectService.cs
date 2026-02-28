@@ -60,10 +60,11 @@ public class ProjectService : IProjectService
         string profileName,
         string hostId,
         string projectRootName,
+        string? actionName,
         Dictionary<string, JsonElement> inputs)
     {
         var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
-        return await connection.CreateProjectAsync(projectRootName, inputs);
+        return await connection.CreateProjectAsync(projectRootName, actionName, inputs);
     }
 
     public async Task SendInputAsync(string profileName, string hostId, string projectId, string input)

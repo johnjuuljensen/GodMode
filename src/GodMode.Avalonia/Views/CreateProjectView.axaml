@@ -75,6 +75,24 @@
                                TextWrapping="Wrap" />
                 </StackPanel>
 
+                <!-- Action Selector (visible when multiple actions) -->
+                <StackPanel Spacing="4" IsVisible="{Binding ShowActionSelector}">
+                    <TextBlock Text="ACTION" FontSize="10" FontWeight="SemiBold"
+                               LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                    <ComboBox ItemsSource="{Binding Actions}"
+                              SelectedItem="{Binding SelectedAction}"
+                              HorizontalAlignment="Stretch" FontSize="13">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="shared:CreateActionInfo">
+                                <TextBlock Text="{Binding Name}" FontSize="13" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock Text="{Binding SelectedAction.Description}"
+                               FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+
                 <!-- Dynamic Form Fields -->
                 <ItemsControl ItemsSource="{Binding FormFields}"
                               ItemTemplate="{StaticResource FieldSelector}"
