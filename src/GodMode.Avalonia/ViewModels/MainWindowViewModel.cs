@@ -53,7 +53,13 @@ public partial class MainWindowViewModel : ObservableObject
 	[ObservableProperty]
 	private bool _isVoicePanelOpen;
 
-	public VoiceAssistantViewModel Voice { get; }
+#if VOICE_ENABLED
+	public VoiceAssistantViewModel? Voice { get; }
+#else
+	public object? Voice => null;
+#endif
+
+	public bool IsVoiceSupported { get; }
 
 	// Auto-restart banner
 	[ObservableProperty]
@@ -68,13 +74,19 @@ public partial class MainWindowViewModel : ObservableObject
 	public MainWindowViewModel(
 		MainViewModel mainViewModel,
 		IThemeService themeService,
-		INotificationService notificationService,
-		VoiceAssistantViewModel voiceAssistantViewModel)
+		INotificationService notificationService
+#if VOICE_ENABLED
+		, VoiceAssistantViewModel? voiceAssistantViewModel = null
+#endif
+		)
 	{
 		_themeService = themeService;
 		_notificationService = notificationService;
 		_sidebarViewModel = mainViewModel;
+#if VOICE_ENABLED
 		Voice = voiceAssistantViewModel;
+		IsVoiceSupported = Voice != null;
+#endif
 
 		mainViewModel.ProjectSelected += OnProjectSelected;
 		mainViewModel.CreateProjectRequested += OnCreateProjectRequested;

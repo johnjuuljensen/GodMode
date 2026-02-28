@@ -134,8 +134,9 @@
                                 <TextBlock Text="{Binding ThemeIcon}" FontSize="13" />
                             </Button>
 
-                            <!-- Voice panel toggle -->
+                            <!-- Voice panel toggle (Windows only) -->
                             <Button Command="{Binding ToggleVoicePanelCommand}"
+                                    IsVisible="{Binding IsVoiceSupported}"
                                     ToolTip.Tip="Toggle voice panel"
                                     Padding="6,4"
                                     CornerRadius="6"

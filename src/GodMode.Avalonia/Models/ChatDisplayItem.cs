@@ -41,6 +41,9 @@ public sealed class ChatDisplayItem : INotifyPropertyChanged
     /// <summary>Display text for tool-call summaries, e.g. "{ 5 tool calls }".</summary>
     public string ToolSummaryText => $"{{ {ToolCallCount} tool call{(ToolCallCount == 1 ? "" : "s")} }}";
 
+    /// <summary>Whether the underlying message contains error content.</summary>
+    public bool HasErrorContent => Message?.HasErrorContent ?? false;
+
     /// <summary>
     /// Content summary appropriate for the current view mode.
     /// In simple view, shows only text content; in detailed view, shows all content.
