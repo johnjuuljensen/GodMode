@@ -23,8 +23,5 @@ public class ViewLocator : IDataTemplate
 	}
 
 	public bool Match(object? data) => data is ViewModelBase or MainWindowViewModel
-#if VOICE_ENABLED
-		or VoiceAssistantViewModel
-#endif
-		;
+		or VoiceAssistantViewModel;
 }

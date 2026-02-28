@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using GodMode.Voice.Tools;
+using GodMode.AI.Tools;
 
-namespace GodMode.Voice.AI;
+namespace GodMode.AI;
 
 public static class ToolCallParser
 {

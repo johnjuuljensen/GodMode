@@ -8,16 +8,15 @@
 		<RootNamespace>GodMode.Avalonia</RootNamespace>
 	</PropertyGroup>
 
-	<!-- Windows: full build with Voice + Windows SDK -->
+	<!-- Windows: Windows SDK -->
 	<PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
 		<TargetFramework>net10.0-windows10.0.19041</TargetFramework>
 		<WindowsSdkPackageVersion>10.0.19041.38</WindowsSdkPackageVersion>
 		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 		<BuiltInComInteropSupport>true</BuiltInComInteropSupport>
-		<DefineConstants>$(DefineConstants);VOICE_ENABLED</DefineConstants>
 	</PropertyGroup>
 
-	<!-- macOS/Linux: cross-platform, no Voice -->
+	<!-- macOS/Linux -->
 	<PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
 		<TargetFramework>net10.0</TargetFramework>
 	</PropertyGroup>
@@ -34,27 +33,24 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
 	</ItemGroup>
 
-	<!-- Cross-platform project references -->
+	<!-- Cross-platform project references (always) -->
 	<ItemGroup>
 		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
 		<ProjectReference Include="..\..\lib\LiquidGlassAvaloniaUI\LiquidGlassAvaloniaUI.csproj" />
+		<ProjectReference Include="..\GodMode.AI\GodMode.AI.csproj" />
+		<ProjectReference Include="..\GodMode.Voice\GodMode.Voice.csproj" />
 	</ItemGroup>
 
-	<!-- Voice projects: Windows only -->
+	<!-- Windows platform projects -->
 	<ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
-		<ProjectReference Include="..\GodMode.Voice\GodMode.Voice.csproj" />
+		<ProjectReference Include="..\GodMode.AI.LocalInference.Windows\GodMode.AI.LocalInference.Windows.csproj" />
 		<ProjectReference Include="..\GodMode.Voice.Windows\GodMode.Voice.Windows.csproj" />
 	</ItemGroup>
 
-	<!-- Exclude Voice-only source files on non-Windows -->
-	<ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
-		<Compile Remove="Tools\**" />
-		<Compile Remove="Voice\**" />
-		<Compile Remove="ViewModels\VoiceAssistantViewModel.cs" />
-		<Compile Remove="Views\VoiceAssistantView.axaml.cs" />
-		<AvaloniaResource Remove="Views\VoiceAssistantView.axaml" />
-		<AvaloniaXaml Remove="Views\VoiceAssistantView.axaml" />
-		<None Include="Views\VoiceAssistantView.axaml" />
+	<!-- Mac platform projects -->
+	<ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+		<ProjectReference Include="..\GodMode.AI.LocalInference.Mac\GodMode.AI.LocalInference.Mac.csproj" />
+		<ProjectReference Include="..\GodMode.Voice.Mac\GodMode.Voice.Mac.csproj" />
 	</ItemGroup>
 
 </Project>

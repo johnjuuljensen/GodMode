@@ -7,16 +7,18 @@ namespace GodMode.Voice.Windows;
 
 public sealed class WindowsSpeechRecognizer : ISpeechRecognizer
 {
-    private readonly InferenceConfig _config;
+    private readonly VoiceConfig _config;
 
     public WindowsSpeechRecognizer()
     {
-        _config = InferenceConfig.Load();
+        _config = VoiceConfig.Load();
     }
 
     public string EngineName => "Windows Speech Recognition (offline)";
 
     public event EventHandler<string>? PartialResultReceived;
+
+    public IReadOnlyList<string> GetAvailableLanguages() => GetInstalledLanguages();
 
     public Task<bool> IsAvailableAsync()
     {

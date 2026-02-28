@@ -4,10 +4,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GodMode.Avalonia.Voice;
 using GodMode.Shared.Models;
-using GodMode.Voice.Services;
-using GodMode.Voice.Speech;
-using GodMode.Voice.Tools;
-using GodMode.Voice.Windows;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GodMode.Avalonia.ViewModels;
@@ -16,7 +12,8 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 {
 	private readonly AssistantService _assistant;
 	private readonly VoiceContext _voiceContext;
-	private readonly InferenceConfig _config;
+	private readonly AIConfig _aiConfig;
+	private readonly VoiceConfig _voiceConfig;
 	private readonly ISpeechRecognizer _recognizer;
 	private CancellationTokenSource? _cts;
 
@@ -62,10 +59,11 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		_assistant = assistant;
 		_recognizer = recognizer;
 		_voiceContext = voiceContext;
-		_config = InferenceConfig.Load();
+		_aiConfig = AIConfig.Load();
+		_voiceConfig = VoiceConfig.Load();
 
 		SttEngineName = $"STT: {_recognizer.EngineName}";
-		ConfigPath = $"Config: {InferenceConfig.ConfigPath}";
+		ConfigPath = $"Config: {AIConfig.ConfigPath}";
 
 		PopulateLanguages();
 
@@ -90,17 +88,17 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		_voiceContext.ProjectOutputReceived += OnProjectOutputReceived;
 
 		// Check if model was already loaded at startup
-		if (!string.IsNullOrEmpty(_config.Phi4ModelPath))
+		if (!string.IsNullOrEmpty(_aiConfig.ModelPath))
 		{
-			ModelPath = _config.Phi4ModelPath;
+			ModelPath = _aiConfig.ModelPath;
 
 			if (_assistant.IsModelLoaded)
 			{
 				IsModelLoaded = true;
 				StatusText = "Model loaded.";
 			}
-			else if (Directory.Exists(_config.Phi4ModelPath) &&
-				File.Exists(Path.Combine(_config.Phi4ModelPath, "genai_config.json")))
+			else if (Directory.Exists(_aiConfig.ModelPath) &&
+				File.Exists(Path.Combine(_aiConfig.ModelPath, "genai_config.json")))
 			{
 				StatusText = "Model loading in background...";
 				// Poll for model load completion from the startup fire-and-forget
@@ -180,7 +178,7 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		List<string> languages;
 		try
 		{
-			languages = WindowsSpeechRecognizer.GetInstalledLanguages().ToList();
+			languages = _recognizer.GetAvailableLanguages().ToList();
 		}
 		catch
 		{
@@ -189,7 +187,7 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 
 		SpeechLanguages = new ObservableCollection<string>(languages);
 
-		var configured = _config.SpeechLanguage;
+		var configured = _voiceConfig.SpeechLanguage;
 		var match = languages.FirstOrDefault(l =>
 			l.Equals(configured, StringComparison.OrdinalIgnoreCase));
 
@@ -198,10 +196,10 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 
 	partial void OnSelectedLanguageChanged(string? value)
 	{
-		if (value is not null && value != _config.SpeechLanguage)
+		if (value is not null && value != _voiceConfig.SpeechLanguage)
 		{
-			_config.SpeechLanguage = value;
-			_config.Save();
+			_voiceConfig.SpeechLanguage = value;
+			_voiceConfig.Save();
 		}
 	}
 
@@ -215,7 +213,7 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 			$"   huggingface-cli download microsoft/Phi-4-mini-instruct-onnx --local-dir <path>\n" +
 			$"2. Set the path below and click Load Model\n" +
 			$"3. The path will be saved to:\n" +
-			$"   {InferenceConfig.ConfigPath}",
+			$"   {AIConfig.ConfigPath}",
 			isUser: false);
 	}
 
@@ -283,10 +281,10 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 			await _assistant.InitializeModelAsync(fullPath);
 			IsModelLoaded = true;
 
-			_config.Phi4ModelPath = fullPath;
-			_config.Save();
+			_aiConfig.ModelPath = fullPath;
+			_aiConfig.Save();
 
-			AddMessage("System", $"Model loaded successfully.\nPath saved to {InferenceConfig.ConfigPath}", isUser: false);
+			AddMessage("System", $"Model loaded successfully.\nPath saved to {AIConfig.ConfigPath}", isUser: false);
 		}
 		catch (Exception ex)
 		{

@@ -1,19 +1,18 @@
-using GodMode.Voice.Services;
 using Microsoft.Extensions.AI;
 using Microsoft.ML.OnnxRuntimeGenAI;
 
-namespace GodMode.Voice.AI;
+namespace GodMode.AI.LocalInference.Mac;
 
-public sealed class Phi4MiniOnnxModel : ILanguageModel, IDisposable
+public sealed class OnnxLanguageModel : ILanguageModel, IDisposable
 {
     private OnnxRuntimeGenAIChatClient? _chatClient;
-    private readonly InferenceConfig _config;
+    private readonly AIConfig _config;
 
     public bool IsLoaded => _chatClient is not null;
 
-    public Phi4MiniOnnxModel()
+    public OnnxLanguageModel()
     {
-        _config = InferenceConfig.Load();
+        _config = AIConfig.Load();
     }
 
     public async Task InitializeAsync(string modelPath)

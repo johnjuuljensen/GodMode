@@ -1,5 +1,5 @@
 using System.Text;
-using GodMode.Voice.Tools;
+using GodMode.AI.Tools;
 
 namespace GodMode.Voice.AI;
 

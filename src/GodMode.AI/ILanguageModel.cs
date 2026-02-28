@@ -1,4 +1,4 @@
-namespace GodMode.Voice.AI;
+namespace GodMode.AI;
 
 public interface ILanguageModel
 {
