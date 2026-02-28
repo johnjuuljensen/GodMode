@@ -23,6 +23,7 @@ bld/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
+.godmode-logs/
 
 # Visual Studio cache/options directory
 .vs/

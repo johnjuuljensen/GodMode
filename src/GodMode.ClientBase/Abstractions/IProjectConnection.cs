@@ -62,6 +62,11 @@ public interface IProjectConnection : IDisposable
     Task<string> GetMetricsHtmlAsync(string projectId);
 
     /// <summary>
+    /// Deletes a project, running teardown scripts and removing all files
+    /// </summary>
+    Task DeleteProjectAsync(string projectId);
+
+    /// <summary>
     /// Event raised when the server streams creation progress for a project.
     /// Parameters: projectId, message.
     /// </summary>
@@ -71,6 +76,11 @@ public interface IProjectConnection : IDisposable
     /// Event raised when a new project is created (broadcast from server).
     /// </summary>
     event Action<ProjectStatus>? ProjectCreatedReceived;
+
+    /// <summary>
+    /// Event raised when a project is deleted (broadcast from server).
+    /// </summary>
+    event Action<string>? ProjectDeletedReceived;
 
     /// <summary>
     /// Disconnects from the host

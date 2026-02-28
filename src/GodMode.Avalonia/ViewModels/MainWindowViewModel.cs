@@ -49,6 +49,18 @@ public partial class MainWindowViewModel : ObservableObject
 	[ObservableProperty]
 	private string _viewModeIcon = "☰";
 
+	// Voice panel
+	[ObservableProperty]
+	private bool _isVoicePanelOpen;
+
+#if VOICE_ENABLED
+	public VoiceAssistantViewModel? Voice { get; }
+#else
+	public object? Voice => null;
+#endif
+
+	public bool IsVoiceSupported { get; }
+
 	// Auto-restart banner
 	[ObservableProperty]
 	private bool _showRestartBanner;
@@ -62,11 +74,19 @@ public partial class MainWindowViewModel : ObservableObject
 	public MainWindowViewModel(
 		MainViewModel mainViewModel,
 		IThemeService themeService,
-		INotificationService notificationService)
+		INotificationService notificationService
+#if VOICE_ENABLED
+		, VoiceAssistantViewModel? voiceAssistantViewModel = null
+#endif
+		)
 	{
 		_themeService = themeService;
 		_notificationService = notificationService;
 		_sidebarViewModel = mainViewModel;
+#if VOICE_ENABLED
+		Voice = voiceAssistantViewModel;
+		IsVoiceSupported = Voice != null;
+#endif
 
 		mainViewModel.ProjectSelected += OnProjectSelected;
 		mainViewModel.CreateProjectRequested += OnCreateProjectRequested;
@@ -79,6 +99,9 @@ public partial class MainWindowViewModel : ObservableObject
 
 		_ = mainViewModel.LoadCommand.ExecuteAsync(null);
 	}
+
+	[RelayCommand]
+	private void ToggleVoicePanel() => IsVoicePanelOpen = !IsVoicePanelOpen;
 
 	[RelayCommand]
 	private void ToggleTheme()
@@ -97,12 +120,10 @@ public partial class MainWindowViewModel : ObservableObject
 
 		if (IsTileView)
 		{
-			// Save the current content so we can restore it
 			_savedContentViewModel = ContentViewModel;
 
 			if (_tileGridViewModel != null)
 			{
-				// Reuse existing tile grid (preserves loaded messages)
 				ContentViewModel = _tileGridViewModel;
 			}
 			else
@@ -126,7 +147,6 @@ public partial class MainWindowViewModel : ObservableObject
 
 	private void OnTileProjectSelected(ServerGroupViewModel server, ProjectSummary project)
 	{
-		// Open the project fullscreen but stay in tile mode
 		IsTileFullscreen = true;
 
 		var key = $"{server.ProfileName}:{server.Id}:{project.Id}";
@@ -149,7 +169,6 @@ public partial class MainWindowViewModel : ObservableObject
 	{
 		IsTileFullscreen = false;
 
-		// Restore the tile grid
 		if (_tileGridViewModel != null)
 		{
 			ContentViewModel = _tileGridViewModel;
@@ -194,7 +213,6 @@ public partial class MainWindowViewModel : ObservableObject
 	{
 		Dispatcher.UIThread.Post(() =>
 		{
-			// Update ProjectSummary in sidebar
 			foreach (var server in SidebarViewModel.Servers)
 			{
 				for (int i = 0; i < server.Projects.Count; i++)
@@ -204,7 +222,6 @@ public partial class MainWindowViewModel : ObservableObject
 						var old = server.Projects[i];
 						server.Projects[i] = old with { State = state, CurrentQuestion = currentQuestion, UpdatedAt = DateTime.UtcNow };
 
-						// Update SelectedProject reference if it was the same project
 						if (SidebarViewModel.SelectedProject?.Id == projectId)
 							SidebarViewModel.SelectedProject = server.Projects[i];
 
@@ -213,7 +230,6 @@ public partial class MainWindowViewModel : ObservableObject
 				}
 			}
 
-			// Update tile grid if active
 			if (_tileGridViewModel != null)
 			{
 				foreach (var tile in _tileGridViewModel.Tiles)

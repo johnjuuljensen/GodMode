@@ -121,14 +121,27 @@ public class ProjectManager : IProjectManager
         // Resolve prompt from inputs or promptTemplate
         var prompt = ResolvePrompt(config, request.Inputs);
 
-        // Create project folder via ProjectFiles
-        var (projectFolder, projectId) = _projectFiles.CreateProject(request.ProjectRootName, name);
+        // Create project folder — either server-managed or script-managed
+        var projectId = ProjectFiles.ProjectManager.ConvertNameToPath(name);
+        string projectPath;
+
+        if (config.ScriptsCreateFolder)
+        {
+            // Scripts will create the project directory (e.g. git worktree add)
+            projectPath = Path.Combine(rootPath, projectId);
+        }
+        else
+        {
+            // Server creates the project folder via ProjectFiles
+            var (projectFolder, _) = _projectFiles.CreateProject(request.ProjectRootName, name);
+            projectPath = projectFolder.ProjectPath;
+        }
 
         var project = new ProjectInfo
         {
             Id = projectId,
             Name = name,
-            ProjectPath = projectFolder.ProjectPath,
+            ProjectPath = projectPath,
             RootName = request.ProjectRootName,
             State = ProjectState.Running,
             CreatedAt = DateTime.UtcNow,
@@ -138,7 +151,10 @@ public class ProjectManager : IProjectManager
         // Build environment variables for scripts
         var scriptEnv = BuildScriptEnvironment(rootPath, project, config, request.Inputs);
 
-        // Run setup scripts
+        // Script log file — at root level so it persists regardless of what scripts do
+        var logFilePath = GetScriptLogPath(rootPath, projectId);
+
+        // Run setup scripts (always runs in root directory)
         if (config.Setup is { Length: > 0 })
         {
             try
@@ -146,14 +162,16 @@ public class ProjectManager : IProjectManager
                 await _scriptRunner.RunAsync(
                     config.Setup,
                     rootPath,
-                    rootPath, // setup runs in root directory
+                    rootPath,
                     scriptEnv,
-                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg),
+                    logFilePath);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Setup script failed for project {ProjectId}", projectId);
+                _logger.LogError(ex, "Setup script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
                 project.State = ProjectState.Error;
+                EnsureGodModeDirectory(projectPath);
                 await _statusUpdater.SaveStatusAsync(project);
                 _projects[projectId] = project;
                 throw;
@@ -163,29 +181,36 @@ public class ProjectManager : IProjectManager
         // Run bootstrap scripts
         if (config.Bootstrap is { Length: > 0 })
         {
+            // When scripts create the folder, bootstrap runs from root (project dir may not exist yet)
+            var bootstrapWorkDir = config.ScriptsCreateFolder ? rootPath : projectPath;
             try
             {
                 await _scriptRunner.RunAsync(
                     config.Bootstrap,
                     rootPath,
-                    projectFolder.ProjectPath, // bootstrap runs in project directory
+                    bootstrapWorkDir,
                     scriptEnv,
-                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg),
+                    logFilePath);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Bootstrap script failed for project {ProjectId}", projectId);
+                _logger.LogError(ex, "Bootstrap script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
                 project.State = ProjectState.Error;
+                EnsureGodModeDirectory(projectPath);
                 await _statusUpdater.SaveStatusAsync(project);
                 _projects[projectId] = project;
                 throw;
             }
         }
 
+        // Ensure .godmode directory exists (scripts may have created the project dir without it)
+        EnsureGodModeDirectory(projectPath);
+
         // Save project settings (persists across restarts)
         var skipPermissions = GetBool(request.Inputs, "skipPermissions");
         var settings = new ProjectFiles.ProjectSettings(DangerouslySkipPermissions: skipPermissions);
-        settings.Save(projectFolder.ProjectPath);
+        settings.Save(projectPath);
 
         // Save initial status
         await _statusUpdater.SaveStatusAsync(project);
@@ -252,6 +277,48 @@ public class ProjectManager : IProjectManager
 
         await _statusUpdater.SaveStatusAsync(project);
         await NotifyStatusChanged(project);
+    }
+
+    public async Task DeleteProjectAsync(string projectId)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+        {
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        }
+
+        _logger.LogInformation("Deleting project {ProjectId} ({Name})", projectId, project.Name);
+
+        // Stop Claude process if running
+        await _processManager.StopProcessAsync(project);
+
+        // Run teardown scripts if configured (failures block deletion)
+        // Use rootPath as working directory to avoid Windows CWD lock on project folder
+        if (project.RootName != null)
+        {
+            var rootPath = _projectFiles.GetProjectRootPath(project.RootName);
+            var config = _rootConfigReader.ReadConfig(rootPath);
+
+            if (config.Teardown is { Length: > 0 })
+            {
+                var scriptEnv = BuildScriptEnvironment(rootPath, project, config, new Dictionary<string, JsonElement>());
+
+                await _scriptRunner.RunAsync(
+                    config.Teardown,
+                    rootPath,
+                    rootPath,
+                    scriptEnv,
+                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+            }
+        }
+
+        // Remove from tracking
+        _projects.TryRemove(projectId, out _);
+
+        // Delete project folder directly (teardown may have partially cleaned it up)
+        if (Directory.Exists(project.ProjectPath))
+            Directory.Delete(project.ProjectPath, recursive: true);
+
+        _logger.LogInformation("Project {ProjectId} deleted successfully", projectId);
     }
 
     public async Task ResumeProjectAsync(string projectId)
@@ -481,6 +548,33 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
+    /// Ensures the .godmode directory exists in a project folder.
+    /// Called after scripts run (which may have created the project dir without .godmode).
+    /// </summary>
+    private static void EnsureGodModeDirectory(string projectPath)
+    {
+        var godModePath = Path.Combine(projectPath, ".godmode");
+        if (Directory.Exists(godModePath)) return;
+
+        Directory.CreateDirectory(godModePath);
+        File.WriteAllText(
+            Path.Combine(godModePath, ".gitignore"),
+            "# Exclude all GodMode state files\n*\n",
+            System.Text.Encoding.UTF8);
+    }
+
+    /// <summary>
+    /// Returns a log file path at the root level for script output.
+    /// Uses {rootPath}/logs/{projectId}.log so it survives bootstrap's project dir delete.
+    /// </summary>
+    private static string GetScriptLogPath(string rootPath, string projectId)
+    {
+        var logsDir = Path.Combine(rootPath, "logs");
+        Directory.CreateDirectory(logsDir);
+        return Path.Combine(logsDir, $"{projectId}.log");
+    }
+
+    /// <summary>
     /// Resolves the project name from inputs or nameTemplate.
     /// </summary>
     private static string? ResolveProjectName(RootConfig config, Dictionary<string, JsonElement> inputs)
@@ -528,6 +622,12 @@ public class ProjectManager : IProjectManager
         var env = config.Environment != null
             ? new Dictionary<string, string>(config.Environment)
             : null;
+
+        if (!string.IsNullOrEmpty(config.ClaudeConfigDir))
+        {
+            env ??= new Dictionary<string, string>();
+            env["CLAUDE_CONFIG_DIR"] = config.ClaudeConfigDir;
+        }
 
         var args = new List<string>();
         if (config.ClaudeArgs != null)

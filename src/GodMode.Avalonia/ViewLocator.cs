@@ -22,5 +22,9 @@ public class ViewLocator : IDataTemplate
 		return new TextBlock { Text = $"Not Found: {viewName}" };
 	}
 
-	public bool Match(object? data) => data is ViewModelBase or MainWindowViewModel;
+	public bool Match(object? data) => data is ViewModelBase or MainWindowViewModel
+#if VOICE_ENABLED
+		or VoiceAssistantViewModel
+#endif
+		;
 }

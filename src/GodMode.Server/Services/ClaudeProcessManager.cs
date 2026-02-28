@@ -1,5 +1,4 @@
 using GodMode.Server.Models;
-using Microsoft.Extensions.Configuration;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
@@ -23,20 +22,13 @@ public class ClaudeProcessManager : IClaudeProcessManager
     ];
 
     private readonly ILogger<ClaudeProcessManager> _logger;
-    private readonly string? _claudeConfigDir;
     private readonly ConcurrentDictionary<string, Process> _processes = new();
 
     public event OutputReceivedHandler? OnOutputReceived;
 
-    public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger, IConfiguration configuration)
+    public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger)
     {
         _logger = logger;
-        _claudeConfigDir = configuration["ClaudeConfigDir"];
-
-        if (!string.IsNullOrEmpty(_claudeConfigDir))
-        {
-            _logger.LogInformation("Using Claude config directory: {ConfigDir}", _claudeConfigDir);
-        }
     }
 
     public async Task<int> StartClaudeProcessAsync(
@@ -150,12 +142,6 @@ public class ClaudeProcessManager : IClaudeProcessManager
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
-
-        // Set CLAUDE_CONFIG_DIR if configured
-        if (!string.IsNullOrEmpty(_claudeConfigDir))
-        {
-            startInfo.Environment["CLAUDE_CONFIG_DIR"] = _claudeConfigDir;
-        }
 
         // Set extra environment variables from root config
         if (extraEnvironment != null)

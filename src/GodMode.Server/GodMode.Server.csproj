@@ -2,10 +2,13 @@
 
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>eff7560e-7e44-46f7-b010-7ca1368e1689</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="CliWrap" Version="3.10.0" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <!--<PackageReference Include="Microsoft.AspNetCore.SignalR" Version="1.1.0" />-->
   </ItemGroup>
 

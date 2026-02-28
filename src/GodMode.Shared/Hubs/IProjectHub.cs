@@ -57,4 +57,9 @@ public interface IProjectHub
     /// Gets the metrics HTML for a project.
     /// </summary>
     Task<string> GetMetricsHtml(string projectId);
+
+    /// <summary>
+    /// Deletes a project, running teardown scripts and removing all files.
+    /// </summary>
+    Task DeleteProject(string projectId);
 }

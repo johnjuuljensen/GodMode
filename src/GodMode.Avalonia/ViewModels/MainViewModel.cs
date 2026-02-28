@@ -233,7 +233,7 @@ public partial class MainViewModel : ViewModelBase
 
 		try
 		{
-			await _projectService.StopProjectAsync(server.ProfileName, server.Id, project.Id);
+			await _projectService.DeleteProjectAsync(server.ProfileName, server.Id, project.Id);
 			server.Projects.Remove(project);
 		}
 		catch (Exception ex)

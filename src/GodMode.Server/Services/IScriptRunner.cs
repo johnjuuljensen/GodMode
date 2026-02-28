@@ -16,6 +16,7 @@ public interface IScriptRunner
     /// <param name="workingDirectory">Working directory for script execution.</param>
     /// <param name="environment">Environment variables to set for the scripts.</param>
     /// <param name="onProgress">Callback for streaming stdout lines.</param>
+    /// <param name="logFilePath">Optional path to write combined stdout/stderr log.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task RunAsync(
         string[] scripts,
@@ -23,5 +24,6 @@ public interface IScriptRunner
         string workingDirectory,
         Dictionary<string, string> environment,
         Func<string, Task> onProgress,
+        string? logFilePath = null,
         CancellationToken cancellationToken = default);
 }
