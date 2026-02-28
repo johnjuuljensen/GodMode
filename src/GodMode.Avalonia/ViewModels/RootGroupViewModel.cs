@@ -14,4 +14,6 @@ public partial class RootGroupViewModel : ObservableObject
 
 	[ObservableProperty]
 	private ObservableCollection<ProjectSummary> _projects = new();
+
+	public ServerGroupViewModel Server { get; set; } = null!;
 }

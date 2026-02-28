@@ -21,7 +21,7 @@ public partial class MainViewModel : ViewModelBase
 
 	// Events for shell orchestration (replaces page navigation)
 	public event Action<ServerGroupViewModel, ProjectSummary>? ProjectSelected;
-	public event Action<ServerGroupViewModel>? CreateProjectRequested;
+	public event Action<ServerGroupViewModel, string?>? CreateProjectRequested;
 	public event Action<string>? AddServerRequested;
 	public event Action? AddProfileRequested;
 	public event Action<ServerGroupViewModel>? EditServerRequested;
@@ -159,7 +159,13 @@ public partial class MainViewModel : ViewModelBase
 	[RelayCommand]
 	private void CreateProject(ServerGroupViewModel server)
 	{
-		CreateProjectRequested?.Invoke(server);
+		CreateProjectRequested?.Invoke(server, null);
+	}
+
+	[RelayCommand]
+	private void CreateProjectForRoot(RootGroupViewModel root)
+	{
+		CreateProjectRequested?.Invoke(root.Server, root.Name);
 	}
 
 	[RelayCommand]

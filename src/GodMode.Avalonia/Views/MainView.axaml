@@ -154,18 +154,6 @@
                                                 <TextBlock Text="Stop" FontSize="10" />
                                             </Button>
 
-                                            <!-- New Project -->
-                                            <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).CreateProjectCommand}"
-                                                    CommandParameter="{Binding .}"
-                                                    IsVisible="{Binding CanConnect}"
-                                                    ToolTip.Tip="New project"
-                                                    Padding="4,2" FontSize="12"
-                                                    Background="Transparent"
-                                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                                    BorderThickness="0">
-                                                <TextBlock Text="+" FontSize="12" FontWeight="SemiBold" />
-                                            </Button>
-
                                             <!-- Edit -->
                                             <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).EditServerCommand}"
                                                     CommandParameter="{Binding .}"
@@ -199,11 +187,26 @@
                                             <StackPanel>
                                                 <!-- Root sub-header -->
                                                 <Border Padding="20,4,8,2" Background="Transparent">
-                                                    <TextBlock Text="{Binding Name}"
-                                                               FontSize="10" FontWeight="SemiBold"
-                                                               Foreground="{DynamicResource TextTertiaryBrush}"
-                                                               TextTrimming="CharacterEllipsis"
-                                                               Opacity="0.8" />
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Text="{Binding Name}"
+                                                                   FontSize="10" FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource TextTertiaryBrush}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   Opacity="0.8"
+                                                                   VerticalAlignment="Center" />
+                                                        <Button Grid.Column="1"
+                                                                Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).CreateProjectForRootCommand}"
+                                                                CommandParameter="{Binding .}"
+                                                                IsVisible="{Binding Server.CanConnect}"
+                                                                ToolTip.Tip="New project"
+                                                                Padding="4,1" FontSize="11"
+                                                                Background="Transparent"
+                                                                Foreground="{DynamicResource TextTertiaryBrush}"
+                                                                BorderThickness="0"
+                                                                Opacity="0.8">
+                                                            <TextBlock Text="+" FontSize="11" FontWeight="SemiBold" />
+                                                        </Button>
+                                                    </Grid>
                                                 </Border>
 
                                                 <!-- Projects in this root -->
