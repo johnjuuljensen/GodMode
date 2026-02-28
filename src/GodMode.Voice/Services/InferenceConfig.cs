@@ -11,6 +11,12 @@ public sealed class InferenceConfig
     [JsonPropertyName("whisper_model_path")]
     public string? WhisperModelPath { get; set; }
 
+    [JsonPropertyName("npu_model_path")]
+    public string? NpuModelPath { get; set; }
+
+    [JsonPropertyName("execution_provider")]
+    public string? ExecutionProvider { get; set; }
+
     [JsonPropertyName("max_tokens")]
     public int MaxTokens { get; set; } = 256;
 

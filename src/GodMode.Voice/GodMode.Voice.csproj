@@ -7,6 +7,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI.DirectML" Version="0.12.1" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.23.0" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="1.0.2" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="9.4.3-preview.1.25230.7" />
     <PackageReference Include="Whisper.net" Version="1.8.0" />
     <PackageReference Include="Whisper.net.Runtime" Version="1.8.0" />

@@ -11,7 +11,15 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddGodModeVoiceServices(this IServiceCollection services)
     {
-        services.AddSingleton<ILanguageModel, Phi4MiniOnnxModel>();
+        var config = InferenceConfig.Load();
+        var provider = config.ExecutionProvider?.ToLowerInvariant() ?? "auto";
+
+        // Register the appropriate language model based on execution provider config
+        if (provider == "npu" || (provider == "auto" && !string.IsNullOrEmpty(config.NpuModelPath)))
+            services.AddSingleton<ILanguageModel, NpuOnnxModel>();
+        else
+            services.AddSingleton<ILanguageModel, Phi4MiniOnnxModel>();
+
         services.AddSingleton<AssistantService>();
 
         // Speech: defaults to Whisper + NullSynthesizer; override with platform-specific

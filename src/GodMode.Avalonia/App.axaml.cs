@@ -30,12 +30,13 @@ public partial class App : Application
 		_ = Task.Run(async () =>
 		{
 			var config = InferenceConfig.Load();
-			if (!string.IsNullOrEmpty(config.Phi4ModelPath) &&
-				Directory.Exists(config.Phi4ModelPath) &&
-				File.Exists(Path.Combine(config.Phi4ModelPath, "genai_config.json")))
+			var provider = config.ExecutionProvider?.ToLowerInvariant() ?? "auto";
+			var modelPath = ResolveModelPath(config, provider);
+
+			if (modelPath is not null)
 			{
 				var assistant = Services.GetRequiredService<AssistantService>();
-				await assistant.InitializeModelAsync(config.Phi4ModelPath);
+				await assistant.InitializeModelAsync(modelPath);
 			}
 		});
 
@@ -48,6 +49,27 @@ public partial class App : Application
 		}
 
 		base.OnFrameworkInitializationCompleted();
+	}
+
+	private static string? ResolveModelPath(InferenceConfig config, string provider)
+	{
+		// NPU model: requires tokenizer.json (standard ONNX Runtime, not OGA)
+		if (provider is "npu" or "auto" && !string.IsNullOrEmpty(config.NpuModelPath) &&
+			Directory.Exists(config.NpuModelPath) &&
+			File.Exists(Path.Combine(config.NpuModelPath, "tokenizer.json")))
+		{
+			return config.NpuModelPath;
+		}
+
+		// DirectML/OGA model: requires genai_config.json
+		if (!string.IsNullOrEmpty(config.Phi4ModelPath) &&
+			Directory.Exists(config.Phi4ModelPath) &&
+			File.Exists(Path.Combine(config.Phi4ModelPath, "genai_config.json")))
+		{
+			return config.Phi4ModelPath;
+		}
+
+		return null;
 	}
 
 	private static void ConfigureServices(IServiceCollection services)

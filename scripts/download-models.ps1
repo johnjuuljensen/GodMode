@@ -3,11 +3,13 @@
     Downloads AI models required by GodMode Voice.
 
 .DESCRIPTION
-    Downloads Phi-4-mini-instruct ONNX (DirectML GPU variant) and Whisper base GGML
-    models from HuggingFace into ~/.godmode/models/.
+    Downloads Phi-4-mini-instruct ONNX (DirectML GPU variant), Qwen2.5-0.5B-Instruct
+    ONNX (INT8 quantized for NPU), and Whisper base GGML models from HuggingFace
+    into ~/.godmode/models/.
 
 .NOTES
     Requires: huggingface-cli (pip install huggingface-hub)
+    NPU model requires AMD Ryzen AI Software for NPU acceleration.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +47,28 @@ if (Test-Path (Join-Path $phiDir "genai_config.json")) {
     Write-Host "Phi-4-mini (GPU) downloaded successfully." -ForegroundColor Green
 }
 
+# Download Qwen2.5-0.5B-Instruct ONNX (INT8 quantized for NPU)
+$qwenDir = Join-Path $modelsDir "qwen2.5-0.5b-instruct-onnx"
+if (Test-Path (Join-Path $qwenDir "tokenizer.json")) {
+    Write-Host "Qwen2.5-0.5B (NPU) already downloaded, skipping." -ForegroundColor Green
+} else {
+    Write-Host "Downloading Qwen2.5-0.5B-Instruct ONNX (INT8 quantized for NPU)..." -ForegroundColor Yellow
+    & huggingface-cli download onnx-community/Qwen2.5-0.5B-Instruct --include "onnx/model_quantized.onnx" "tokenizer.json" "tokenizer_config.json" "vocab.json" "merges.txt" --local-dir $qwenDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Failed to download Qwen2.5-0.5B model." -ForegroundColor Red
+        exit 1
+    }
+
+    # Move model from onnx/ subdirectory to root
+    $onnxSubDir = Join-Path $qwenDir "onnx"
+    if (Test-Path $onnxSubDir) {
+        Get-ChildItem -Path $onnxSubDir -File | Move-Item -Destination $qwenDir -Force
+        Remove-Item $onnxSubDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "Qwen2.5-0.5B (NPU) downloaded successfully." -ForegroundColor Green
+}
+
 # Download Whisper base GGML
 $whisperDir = Join-Path $modelsDir "whisper"
 $whisperModel = Join-Path $whisperDir "ggml-base.bin"
@@ -62,6 +86,10 @@ if (Test-Path $whisperModel) {
 }
 
 Write-Host "`nAll models downloaded successfully!" -ForegroundColor Green
-Write-Host "Phi-4-mini (GPU): $phiDir"
-Write-Host "Whisper:          $whisperModel"
+Write-Host "Phi-4-mini (GPU):    $phiDir"
+Write-Host "Qwen2.5-0.5B (NPU): $qwenDir"
+Write-Host "Whisper:             $whisperModel"
 Write-Host "`nDefault config path: $(Join-Path $env:USERPROFILE '.godmode' 'inference.json')"
+Write-Host "`nTo use NPU model, add to inference.json:"
+Write-Host "  `"npu_model_path`": `"$qwenDir`""
+Write-Host "  `"execution_provider`": `"npu`"  (or `"auto`" to prefer NPU with DirectML fallback)"
