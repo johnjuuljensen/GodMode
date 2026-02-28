@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 
-namespace GodMode.Voice.Tools;
+namespace GodMode.AI.Tools;
 
 public sealed class ToolRegistry
 {

@@ -21,7 +21,7 @@ public partial class MainViewModel : ViewModelBase
 
 	// Events for shell orchestration (replaces page navigation)
 	public event Action<ServerGroupViewModel, ProjectSummary>? ProjectSelected;
-	public event Action<ServerGroupViewModel>? CreateProjectRequested;
+	public event Action<ServerGroupViewModel, string?>? CreateProjectRequested;
 	public event Action<string>? AddServerRequested;
 	public event Action? AddProfileRequested;
 	public event Action<ServerGroupViewModel>? EditServerRequested;
@@ -58,6 +58,9 @@ public partial class MainViewModel : ViewModelBase
 
 	[ObservableProperty]
 	private bool _isGroupedByServer = true;
+
+	[ObservableProperty]
+	private bool _sortByName;
 
 	public MainViewModel(
 		INavigationService navigationService,
@@ -156,7 +159,13 @@ public partial class MainViewModel : ViewModelBase
 	[RelayCommand]
 	private void CreateProject(ServerGroupViewModel server)
 	{
-		CreateProjectRequested?.Invoke(server);
+		CreateProjectRequested?.Invoke(server, null);
+	}
+
+	[RelayCommand]
+	private void CreateProjectForRoot(RootGroupViewModel root)
+	{
+		CreateProjectRequested?.Invoke(root.Server, root.Name);
 	}
 
 	[RelayCommand]
@@ -246,6 +255,14 @@ public partial class MainViewModel : ViewModelBase
 	private void ToggleGroupByServer()
 	{
 		IsGroupedByServer = !IsGroupedByServer;
+	}
+
+	[RelayCommand]
+	private void ToggleSort()
+	{
+		SortByName = !SortByName;
+		foreach (var server in Servers)
+			server.RebuildRootGroups(SortByName);
 	}
 
 	[RelayCommand]
@@ -402,6 +419,7 @@ public partial class MainViewModel : ViewModelBase
 							status.Id, status.Name, status.State,
 							status.UpdatedAt, status.CurrentQuestion);
 						target.Projects.Insert(0, summary);
+						target.RebuildRootGroups(SortByName);
 					}
 				};
 			}
@@ -409,6 +427,7 @@ public partial class MainViewModel : ViewModelBase
 			var projects = await connection.ListProjectsAsync();
 			System.Diagnostics.Debug.WriteLine($"[GodMode] {server.Name}: loaded {projects.Count()} projects");
 			server.Projects = new ObservableCollection<ProjectSummary>(projects);
+			server.RebuildRootGroups(SortByName);
 		}
 		catch (Exception ex)
 		{

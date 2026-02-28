@@ -1,4 +1,4 @@
-namespace GodMode.Voice.Tools;
+namespace GodMode.AI.Tools;
 
 public interface ITool
 {

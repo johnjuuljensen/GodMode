@@ -53,11 +53,7 @@ public partial class MainWindowViewModel : ObservableObject
 	[ObservableProperty]
 	private bool _isVoicePanelOpen;
 
-#if VOICE_ENABLED
 	public VoiceAssistantViewModel? Voice { get; }
-#else
-	public object? Voice => null;
-#endif
 
 	public bool IsVoiceSupported { get; }
 
@@ -74,19 +70,14 @@ public partial class MainWindowViewModel : ObservableObject
 	public MainWindowViewModel(
 		MainViewModel mainViewModel,
 		IThemeService themeService,
-		INotificationService notificationService
-#if VOICE_ENABLED
-		, VoiceAssistantViewModel? voiceAssistantViewModel = null
-#endif
-		)
+		INotificationService notificationService,
+		VoiceAssistantViewModel? voiceAssistantViewModel = null)
 	{
 		_themeService = themeService;
 		_notificationService = notificationService;
 		_sidebarViewModel = mainViewModel;
-#if VOICE_ENABLED
 		Voice = voiceAssistantViewModel;
 		IsVoiceSupported = Voice != null;
-#endif
 
 		mainViewModel.ProjectSelected += OnProjectSelected;
 		mainViewModel.CreateProjectRequested += OnCreateProjectRequested;
@@ -130,6 +121,7 @@ public partial class MainWindowViewModel : ObservableObject
 			{
 				var vm = App.Services.GetRequiredService<TileGridViewModel>();
 				vm.ProjectSelected += OnTileProjectSelected;
+				vm.CreateProjectRequested += OnCreateProjectRequested;
 				_tileGridViewModel = vm;
 				ContentViewModel = vm;
 				_ = vm.LoadAsync(SidebarViewModel.Servers);
@@ -177,6 +169,7 @@ public partial class MainWindowViewModel : ObservableObject
 		{
 			var vm = App.Services.GetRequiredService<TileGridViewModel>();
 			vm.ProjectSelected += OnTileProjectSelected;
+			vm.CreateProjectRequested += OnCreateProjectRequested;
 			_tileGridViewModel = vm;
 			ContentViewModel = vm;
 			_ = vm.LoadAsync(SidebarViewModel.Servers);
@@ -271,11 +264,12 @@ public partial class MainWindowViewModel : ObservableObject
 		ContentViewModel = vm;
 	}
 
-	private void OnCreateProjectRequested(ServerGroupViewModel server)
+	private void OnCreateProjectRequested(ServerGroupViewModel server, string? rootName)
 	{
 		var vm = App.Services.GetRequiredService<CreateProjectViewModel>();
 		vm.ProfileName = server.ProfileName;
 		vm.HostId = server.Id;
+		vm.PreselectedRootName = rootName;
 		vm.Completed += () => CloseModal();
 		ModalViewModel = vm;
 		IsModalVisible = true;

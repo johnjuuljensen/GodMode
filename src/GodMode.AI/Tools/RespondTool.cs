@@ -1,4 +1,4 @@
-namespace GodMode.Voice.Tools;
+namespace GodMode.AI.Tools;
 
 /// <summary>
 /// Fallback tool for plain text responses. The model calls this

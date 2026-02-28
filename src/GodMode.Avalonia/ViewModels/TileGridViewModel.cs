@@ -17,7 +17,13 @@ public partial class TileGridViewModel : ViewModelBase
 	[ObservableProperty]
 	private bool _isLoading;
 
+	[ObservableProperty]
+	private bool _hasConnectedServers;
+
+	private List<ServerGroupViewModel> _connectedServers = new();
+
 	public event Action<ServerGroupViewModel, ProjectSummary>? ProjectSelected;
+	public event Action<ServerGroupViewModel, string?>? CreateProjectRequested;
 
 	public TileGridViewModel(
 		INavigationService navigationService,
@@ -35,10 +41,11 @@ public partial class TileGridViewModel : ViewModelBase
 
 		try
 		{
-			foreach (var server in servers)
-			{
-				if (!server.IsConnected) continue;
+			_connectedServers = servers.Where(s => s.IsConnected).ToList();
+			HasConnectedServers = _connectedServers.Count > 0;
 
+			foreach (var server in _connectedServers)
+			{
 				foreach (var project in server.Projects)
 				{
 					var tile = new ProjectTileViewModel
@@ -104,6 +111,14 @@ public partial class TileGridViewModel : ViewModelBase
 	private void SelectProject(ProjectTileViewModel tile)
 	{
 		ProjectSelected?.Invoke(tile.ServerGroup, tile.Summary);
+	}
+
+	[RelayCommand]
+	private void CreateProject()
+	{
+		var server = _connectedServers.FirstOrDefault();
+		if (server != null)
+			CreateProjectRequested?.Invoke(server, null);
 	}
 
 	public void Cleanup()

@@ -1,8 +1,9 @@
 using System.Diagnostics;
 using System.Globalization;
+using GodMode.AI;
+using GodMode.AI.Tools;
 using GodMode.Voice.AI;
 using GodMode.Voice.Speech;
-using GodMode.Voice.Tools;
 
 namespace GodMode.Voice.Services;
 

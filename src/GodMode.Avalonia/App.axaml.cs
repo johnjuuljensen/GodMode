@@ -1,15 +1,11 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using GodMode.AI;
 using GodMode.Avalonia.Services;
-#if VOICE_ENABLED
 using GodMode.Avalonia.Tools;
 using GodMode.Avalonia.Voice;
 using GodMode.Voice;
-using GodMode.Voice.Services;
-using GodMode.Voice.Tools;
-using GodMode.Voice.Windows;
-#endif
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GodMode.Avalonia;
@@ -29,11 +25,10 @@ public partial class App : Application
 		ConfigureServices(services);
 		Services = services.BuildServiceProvider();
 
-#if VOICE_ENABLED
 		// Fire-and-forget: load AI model at startup if configured
 		_ = Task.Run(async () =>
 		{
-			var config = InferenceConfig.Load();
+			var config = AIConfig.Load();
 			var provider = config.ExecutionProvider?.ToLowerInvariant() ?? "auto";
 			var modelPath = ResolveModelPath(config, provider);
 
@@ -43,7 +38,6 @@ public partial class App : Application
 				await assistant.InitializeModelAsync(modelPath);
 			}
 		});
-#endif
 
 		if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
 		{
@@ -65,7 +59,7 @@ public partial class App : Application
 		base.OnFrameworkInitializationCompleted();
 	}
 
-	private static string? ResolveModelPath(InferenceConfig config, string provider)
+	private static string? ResolveModelPath(AIConfig config, string provider)
 	{
 		// NPU model: requires tokenizer.json (standard ONNX Runtime, not OGA)
 		if (provider is "npu" or "auto" && !string.IsNullOrEmpty(config.NpuModelPath) &&
@@ -76,11 +70,11 @@ public partial class App : Application
 		}
 
 		// DirectML/OGA model: requires genai_config.json
-		if (!string.IsNullOrEmpty(config.Phi4ModelPath) &&
-			Directory.Exists(config.Phi4ModelPath) &&
-			File.Exists(Path.Combine(config.Phi4ModelPath, "genai_config.json")))
+		if (!string.IsNullOrEmpty(config.ModelPath) &&
+			Directory.Exists(config.ModelPath) &&
+			File.Exists(Path.Combine(config.ModelPath, "genai_config.json")))
 		{
-			return config.Phi4ModelPath;
+			return config.ModelPath;
 		}
 
 		return null;
@@ -91,9 +85,25 @@ public partial class App : Application
 		// ClientBase services - shared config at ~/.godmode
 		services.AddGodModeClientServices();
 
-#if VOICE_ENABLED
-		// Voice services — Windows speech first (before TryAdd fallbacks)
-		services.AddGodModeWindowsSpeech();
+		// Auto-discover and register platform-specific services
+		// (AI inference, speech implementations)
+		foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+		{
+			try
+			{
+				foreach (var type in asm.GetExportedTypes()
+					.Where(t => typeof(IPlatformServiceRegistrar).IsAssignableFrom(t) && !t.IsAbstract))
+				{
+					((IPlatformServiceRegistrar)Activator.CreateInstance(type)!).RegisterServices(services);
+				}
+			}
+			catch (NotSupportedException)
+			{
+				// Some assemblies don't support GetExportedTypes
+			}
+		}
+
+		// Cross-platform voice services (TryAdd — platform overrides already registered above)
 		services.AddGodModeVoiceServices();
 
 		// Voice context — stateful session tracking
@@ -123,7 +133,6 @@ public partial class App : Application
 			registry.Register(new UnfocusProjectTool(ctx));
 			return registry;
 		});
-#endif
 
 		// Avalonia-specific services
 		services.AddSingleton<INavigationService, NavigationService>();
@@ -132,9 +141,7 @@ public partial class App : Application
 		services.AddSingleton<IEmbeddedServerService, EmbeddedServerService>();
 
 		// ViewModels — singletons for state preservation
-#if VOICE_ENABLED
 		services.AddSingleton<VoiceAssistantViewModel>();
-#endif
 		services.AddSingleton<MainWindowViewModel>();
 		services.AddSingleton<MainViewModel>();
 		services.AddTransient<HostViewModel>();

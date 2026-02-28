@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>GodMode.Voice.Mac</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Mac: full build -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <!-- Non-Mac: stub build -->
+  <PropertyGroup Condition="!$([MSBuild]::IsOSPlatform('OSX'))">
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <ProjectReference Include="..\GodMode.AI\GodMode.AI.csproj" />
+    <ProjectReference Include="..\GodMode.Voice\GodMode.Voice.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('OSX'))">
+    <Compile Remove="**/*.cs" />
+  </ItemGroup>
+
+</Project>

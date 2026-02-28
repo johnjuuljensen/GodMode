@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
-using GodMode.Voice.Services;
+using GodMode.AI;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 using Microsoft.ML.Tokenizers;
@@ -16,7 +16,7 @@ public sealed class NpuOnnxModel : ILanguageModel, IDisposable
 {
     private InferenceSession? _session;
     private Tokenizer? _tokenizer;
-    private readonly InferenceConfig _config;
+    private readonly AIConfig _config;
     private string _activeProvider = "unknown";
 
     public bool IsLoaded => _session is not null && _tokenizer is not null;
@@ -29,7 +29,7 @@ public sealed class NpuOnnxModel : ILanguageModel, IDisposable
 
     public NpuOnnxModel()
     {
-        _config = InferenceConfig.Load();
+        _config = AIConfig.Load();
     }
 
     public async Task InitializeAsync(string modelPath)

@@ -37,6 +37,8 @@ public partial class CreateProjectViewModel : ViewModelBase
 	[ObservableProperty]
 	private ProjectRootInfo? _selectedProjectRoot;
 
+	public string? PreselectedRootName { get; set; }
+
 	[ObservableProperty]
 	private ObservableCollection<FormField> _formFields = [];
 
@@ -87,7 +89,11 @@ public partial class CreateProjectViewModel : ViewModelBase
 			ProjectRoots = new ObservableCollection<ProjectRootInfo>(roots);
 
 			if (ProjectRoots.Count > 0)
-				SelectedProjectRoot = ProjectRoots[0];
+			{
+				SelectedProjectRoot = (!string.IsNullOrEmpty(PreselectedRootName)
+					? ProjectRoots.FirstOrDefault(r => r.Name == PreselectedRootName)
+					: null) ?? ProjectRoots[0];
+			}
 		}
 		catch (Exception ex)
 		{

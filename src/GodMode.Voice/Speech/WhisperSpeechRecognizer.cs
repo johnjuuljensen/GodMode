@@ -11,6 +11,8 @@ public sealed class WhisperSpeechRecognizer : ISpeechRecognizer, IDisposable
 
     public event EventHandler<string>? PartialResultReceived;
 
+    public IReadOnlyList<string> GetAvailableLanguages() => ["en-US"];
+
     public Task<bool> IsAvailableAsync()
     {
         return Task.FromResult(_processor is not null || (_modelPath is not null && File.Exists(_modelPath)));

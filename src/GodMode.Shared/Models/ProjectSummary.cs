@@ -15,5 +15,6 @@ public record ProjectSummary(
     string Name,
     ProjectState State,
     DateTime UpdatedAt,
-    string? CurrentQuestion = null
+    string? CurrentQuestion = null,
+    string? RootName = null
 );
