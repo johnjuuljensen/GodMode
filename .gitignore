@@ -44,3 +44,4 @@ appsettings.*.json
 /log.jsonl
 /nul
 /src/MauiDemo
+.godmode-logs/
