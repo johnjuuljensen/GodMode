@@ -28,11 +28,11 @@ public partial class ProjectView : UserControl
 		{
 			if (DataContext is ProjectViewModel vm)
 			{
-				vm.OutputMessages.CollectionChanged += OnOutputMessagesChanged;
+				vm.DisplayMessages.CollectionChanged += OnDisplayMessagesChanged;
 				vm.PropertyChanged += OnViewModelPropertyChanged;
 
 				// Scroll to bottom when opening a project with existing messages
-				if (vm.OutputMessages.Count > 0)
+				if (vm.DisplayMessages.Count > 0)
 				{
 					_isAtBottom = true;
 					Dispatcher.UIThread.Post(() =>
@@ -93,7 +93,7 @@ public partial class ProjectView : UserControl
 		}
 	}
 
-	private void OnOutputMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
+	private void OnDisplayMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
 	{
 		if (DataContext is not ProjectViewModel vm) return;
 
@@ -108,7 +108,7 @@ public partial class ProjectView : UserControl
 		{
 			if (_isAtBottom || _isInitialLoad)
 			{
-				if (_isInitialLoad && vm.OutputMessages.Count > 5)
+				if (_isInitialLoad && vm.DisplayMessages.Count > 5)
 					_isInitialLoad = false;
 
 				Dispatcher.UIThread.Post(() =>
@@ -125,7 +125,7 @@ public partial class ProjectView : UserControl
 
 		if (DataContext is ProjectViewModel vm)
 		{
-			vm.OutputMessages.CollectionChanged -= OnOutputMessagesChanged;
+			vm.DisplayMessages.CollectionChanged -= OnDisplayMessagesChanged;
 			vm.PropertyChanged -= OnViewModelPropertyChanged;
 			vm.Dispose();
 		}

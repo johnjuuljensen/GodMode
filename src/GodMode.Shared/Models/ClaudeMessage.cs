@@ -87,6 +87,18 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
     public string FormattedJson { get; }
 
     /// <summary>
+    /// Whether this message contains only tool_use/tool_result content items (no text).
+    /// Used by simple chat view to identify messages that should be collapsed.
+    /// </summary>
+    public bool IsToolOnly { get; }
+
+    /// <summary>
+    /// Content summary containing only text items (no tool_use/tool_result).
+    /// Used by simple chat view to show text-only content for mixed messages.
+    /// </summary>
+    public string TextOnlyContentSummary { get; }
+
+    /// <summary>
     /// Whether this message is a question/permission prompt requiring user input.
     /// </summary>
     public bool IsQuestion { get; }
@@ -139,6 +151,8 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             HasContentItems = ContentItems.Count > 0;
             ContentSummary = BuildContentSummary();
             FormattedJson = JsonSerializer.Serialize(document, IndentedOptions);
+            IsToolOnly = HasContentItems && ContentItems.All(i => i.Type is "tool_use" or "tool_result");
+            TextOnlyContentSummary = BuildTextOnlyContentSummary();
             (IsQuestion, QuestionText, QuestionOptions, QuestionHeader) = ExtractQuestionData(root);
         }
         catch
@@ -153,6 +167,8 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             HasContentItems = false;
             ContentSummary = "";
             FormattedJson = rawJson;
+            IsToolOnly = false;
+            TextOnlyContentSummary = "";
             IsQuestion = false;
             QuestionText = null;
             QuestionOptions = [];
@@ -241,6 +257,17 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             return text.Length > MaxSummaryLength ? text[..MaxSummaryLength] + "..." : text;
         }
         return "";
+    }
+
+    private string BuildTextOnlyContentSummary()
+    {
+        if (ContentItems.Count == 0) return "";
+
+        var textParts = ContentItems
+            .Where(i => i.Type == "text")
+            .Select(i => i.Summary);
+
+        return string.Join("\n", textParts);
     }
 
     private string BuildContentSummary()
