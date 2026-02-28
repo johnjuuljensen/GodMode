@@ -6,5 +6,7 @@ global using GodMode.ClientBase.Providers;
 global using GodMode.Avalonia.ViewModels;
 global using GodMode.Avalonia.Views;
 global using GodMode.Avalonia.Services;
+#if VOICE_ENABLED
 global using GodMode.Voice.Services;
 global using GodMode.Voice.Speech;
+#endif
