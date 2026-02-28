@@ -203,7 +203,7 @@
                                                        IsVisible="{Binding Message.IsExpanded, Converter={StaticResource InverseBoolConverter}}"
                                                        FontSize="11.5"
                                                        LineHeight="17"
-                                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                                       Foreground="{Binding HasErrorContent, Converter={StaticResource ErrorContentForegroundConverter}}"
                                                        TextWrapping="Wrap" />
 
                                             <!-- Expanded JSON -->
