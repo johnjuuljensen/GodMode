@@ -292,6 +292,7 @@ public class ProjectManager : IProjectManager
         await _processManager.StopProcessAsync(project);
 
         // Run teardown scripts if configured (failures block deletion)
+        // Use rootPath as working directory to avoid Windows CWD lock on project folder
         if (project.RootName != null)
         {
             var rootPath = _projectFiles.GetProjectRootPath(project.RootName);
@@ -304,7 +305,7 @@ public class ProjectManager : IProjectManager
                 await _scriptRunner.RunAsync(
                     config.Teardown,
                     rootPath,
-                    project.ProjectPath,
+                    rootPath,
                     scriptEnv,
                     msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
             }
@@ -313,8 +314,9 @@ public class ProjectManager : IProjectManager
         // Remove from tracking
         _projects.TryRemove(projectId, out _);
 
-        // Delete project folder
-        _projectFiles.DeleteProject(projectId, force: true);
+        // Delete project folder directly (teardown may have partially cleaned it up)
+        if (Directory.Exists(project.ProjectPath))
+            Directory.Delete(project.ProjectPath, recursive: true);
 
         _logger.LogInformation("Project {ProjectId} deleted successfully", projectId);
     }
