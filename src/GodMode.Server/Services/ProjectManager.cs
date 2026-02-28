@@ -291,29 +291,22 @@ public class ProjectManager : IProjectManager
         // Stop Claude process if running
         await _processManager.StopProcessAsync(project);
 
-        // Run teardown scripts if configured
+        // Run teardown scripts if configured (failures block deletion)
         if (project.RootName != null)
         {
-            try
-            {
-                var rootPath = _projectFiles.GetProjectRootPath(project.RootName);
-                var config = _rootConfigReader.ReadConfig(rootPath);
+            var rootPath = _projectFiles.GetProjectRootPath(project.RootName);
+            var config = _rootConfigReader.ReadConfig(rootPath);
 
-                if (config.Teardown is { Length: > 0 })
-                {
-                    var scriptEnv = BuildScriptEnvironment(rootPath, project, config, new Dictionary<string, JsonElement>());
-
-                    await _scriptRunner.RunAsync(
-                        config.Teardown,
-                        rootPath,
-                        project.ProjectPath,
-                        scriptEnv,
-                        msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
-                }
-            }
-            catch (Exception ex)
+            if (config.Teardown is { Length: > 0 })
             {
-                _logger.LogError(ex, "Teardown script failed for project {ProjectId}, continuing with deletion", projectId);
+                var scriptEnv = BuildScriptEnvironment(rootPath, project, config, new Dictionary<string, JsonElement>());
+
+                await _scriptRunner.RunAsync(
+                    config.Teardown,
+                    rootPath,
+                    project.ProjectPath,
+                    scriptEnv,
+                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
             }
         }
 
