@@ -77,6 +77,11 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
     public bool HasContentItems { get; }
 
     /// <summary>
+    /// Whether any content item in this message is an error tool result (is_error: true).
+    /// </summary>
+    public bool HasErrorContent { get; }
+
+    /// <summary>
     /// Concatenated summary of all content items for display.
     /// </summary>
     public string ContentSummary { get; }
@@ -137,6 +142,7 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             Summary = ExtractSummary(root);
             ContentItems = ExtractContentItems(root);
             HasContentItems = ContentItems.Count > 0;
+            HasErrorContent = ContentItems.Any(i => i.IsError);
             ContentSummary = BuildContentSummary();
             FormattedJson = JsonSerializer.Serialize(document, IndentedOptions);
             (IsQuestion, QuestionText, QuestionOptions, QuestionHeader) = ExtractQuestionData(root);
@@ -151,6 +157,7 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             Summary = rawJson.Length > MaxSummaryLength ? rawJson[..MaxSummaryLength] + "..." : rawJson;
             ContentItems = [];
             HasContentItems = false;
+            HasErrorContent = false;
             ContentSummary = "";
             FormattedJson = rawJson;
             IsQuestion = false;
@@ -249,9 +256,12 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
 
         // Build a summary of all content items
         // Text items show full content without prefix, tool items get prefixed for clarity
-        var parts = ContentItems.Select(item => item.Type == "text"
-            ? item.Summary
-            : $"[{item.Type}] {item.Summary}");
+        var parts = ContentItems.Select(item => item.Type switch
+        {
+            "text" => item.Summary,
+            "tool_result" when item.IsError => $"[ERROR] {item.Summary}",
+            _ => $"[{item.Type}] {item.Summary}"
+        });
 
         return string.Join("\n", parts);
     }
@@ -337,6 +347,8 @@ public sealed class ClaudeContentItem : INotifyPropertyChanged
     public string? ToolDescription { get; private set; }
     /// <summary>Content for Write tool.</summary>
     public string? ToolContent { get; private set; }
+    /// <summary>Whether this tool_result has is_error set to true.</summary>
+    public bool IsError { get; private set; }
 
     private ClaudeContentItem(string type, string summary, string formattedJson)
     {
@@ -376,7 +388,12 @@ public sealed class ClaudeContentItem : INotifyPropertyChanged
         var item = new ClaudeContentItem(type, summary, formattedJson);
 
         // Extract tool-specific data for rich rendering
-        if (type == "tool_use")
+        if (type == "tool_result")
+        {
+            item.IsError = element.TryGetProperty("is_error", out var isError)
+                && isError.ValueKind == JsonValueKind.True;
+        }
+        else if (type == "tool_use")
         {
             item.ToolName = element.TryGetProperty("name", out var toolName)
                 ? toolName.GetString() : null;
