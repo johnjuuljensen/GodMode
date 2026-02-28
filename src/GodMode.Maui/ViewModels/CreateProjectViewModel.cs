@@ -53,6 +53,7 @@ public partial class CreateProjectViewModel : ObservableObject
         if (value != null)
         {
             var fields = FormFieldParser.Parse(value.InputSchema);
+            FormFieldParser.PreserveUserValues(FormFields, fields);
             FormFields = new ObservableCollection<FormField>(fields);
         }
         else

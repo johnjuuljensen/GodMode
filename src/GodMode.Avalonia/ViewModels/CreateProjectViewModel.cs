@@ -11,6 +11,8 @@ public partial class CreateProjectViewModel : ViewModelBase
 {
 	private readonly IProjectService _projectService;
 
+	public event Action? Completed;
+
 	[ObservableProperty]
 	private string _profileName = string.Empty;
 
@@ -49,6 +51,7 @@ public partial class CreateProjectViewModel : ViewModelBase
 		if (value != null)
 		{
 			var fields = FormFieldParser.Parse(value.InputSchema);
+			FormFieldParser.PreserveUserValues(FormFields, fields);
 			FormFields = new ObservableCollection<FormField>(fields);
 		}
 		else
@@ -135,8 +138,7 @@ public partial class CreateProjectViewModel : ViewModelBase
 				SelectedProjectRoot.Name,
 				inputs);
 
-			// Navigate back then to the new project
-			Navigation.GoBack();
+			Completed?.Invoke();
 		}
 		catch (Exception ex)
 		{
@@ -149,5 +151,5 @@ public partial class CreateProjectViewModel : ViewModelBase
 	}
 
 	[RelayCommand]
-	private void Cancel() => Navigation.GoBack();
+	private void Cancel() => Completed?.Invoke();
 }

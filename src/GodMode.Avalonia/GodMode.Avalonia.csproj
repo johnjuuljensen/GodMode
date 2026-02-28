@@ -12,10 +12,12 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Avalonia" Version="11.3.0" />
-		<PackageReference Include="Avalonia.Desktop" Version="11.3.0" />
-		<PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.0" />
-		<PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.0" />
+		<PackageReference Include="Avalonia" Version="11.3.10" />
+		<PackageReference Include="Avalonia.Desktop" Version="11.3.10" />
+		<PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.10" />
+		<PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.10" />
+		<PackageReference Include="Avalonia.Skia" Version="11.3.10" />
+		<PackageReference Include="SkiaSharp" Version="3.119.1" />
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
 		<PackageReference Include="System.Reactive" Version="6.1.0" />
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
@@ -25,6 +27,7 @@
 		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
 		<ProjectReference Include="..\GodMode.Voice\GodMode.Voice.csproj" />
 		<ProjectReference Include="..\GodMode.Voice.Windows\GodMode.Voice.Windows.csproj" />
+		<ProjectReference Include="..\..\lib\LiquidGlassAvaloniaUI\LiquidGlassAvaloniaUI.csproj" />
 	</ItemGroup>
 
 </Project>

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using GodMode.Avalonia.Services;
 using GodMode.Avalonia.Tools;
 using GodMode.Avalonia.Voice;
 using GodMode.Voice;
@@ -41,9 +42,18 @@ public partial class App : Application
 
 		if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
 		{
+			// Auto-start embedded server
+			var embeddedServer = Services.GetRequiredService<IEmbeddedServerService>();
+			_ = embeddedServer.StartAsync();
+
 			desktop.MainWindow = new MainWindow
 			{
 				DataContext = Services.GetRequiredService<MainWindowViewModel>()
+			};
+
+			desktop.ShutdownRequested += (_, _) =>
+			{
+				embeddedServer.Stop();
 			};
 		}
 
@@ -90,16 +100,19 @@ public partial class App : Application
 		// Avalonia-specific services
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<IDialogService, DialogService>();
+		services.AddSingleton<IThemeService, ThemeService>();
+		services.AddSingleton<IEmbeddedServerService, EmbeddedServerService>();
 
-		// ViewModels
+		// ViewModels — singletons for state preservation
 		services.AddSingleton<VoiceAssistantViewModel>();
-		services.AddTransient<MainWindowViewModel>();
-		services.AddTransient<MainViewModel>();
+		services.AddSingleton<MainWindowViewModel>();
+		services.AddSingleton<MainViewModel>();
 		services.AddTransient<HostViewModel>();
 		services.AddTransient<ProjectViewModel>();
 		services.AddTransient<AddProfileViewModel>();
 		services.AddTransient<AddServerViewModel>();
 		services.AddTransient<EditServerViewModel>();
 		services.AddTransient<CreateProjectViewModel>();
+		services.AddTransient<TileGridViewModel>();
 	}
 }
