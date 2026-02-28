@@ -24,10 +24,14 @@ public sealed class AIConfig
     [JsonPropertyName("temperature")]
     public double Temperature { get; set; } = 0.3;
 
+    [JsonPropertyName("tiers")]
+    public Dictionary<InferenceTier, TierConfig>? Tiers { get; set; }
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() }
     };
 
     public static string ConfigDir =>
@@ -84,6 +88,11 @@ public sealed class AIConfig
 
         existing["max_tokens"] = JsonSerializer.SerializeToElement(MaxTokens);
         existing["temperature"] = JsonSerializer.SerializeToElement(Temperature);
+
+        if (Tiers is not null && Tiers.Count > 0)
+            existing["tiers"] = JsonSerializer.SerializeToElement(Tiers, JsonOptions);
+        else
+            existing.Remove("tiers");
 
         var json = JsonSerializer.Serialize(existing, JsonOptions);
         File.WriteAllText(ConfigPath, json);

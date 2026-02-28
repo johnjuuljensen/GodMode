@@ -85,11 +85,71 @@ if (Test-Path $whisperModel) {
     Write-Host "Whisper model downloaded successfully." -ForegroundColor Green
 }
 
-Write-Host "`nAll models downloaded successfully!" -ForegroundColor Green
+# Hardware detection summary
+Write-Host "`n--- Hardware Detection ---" -ForegroundColor Cyan
+$hasDirectML = $true  # DirectML available on Windows 10+
+Write-Host "DirectML (GPU):  Available" -ForegroundColor Green
+
+$npuDriver = Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match "NPU|Neural|VitisAI|Ryzen AI" } | Select-Object -First 1
+if ($npuDriver) {
+    Write-Host "AMD NPU:         Detected ($($npuDriver.Name))" -ForegroundColor Green
+} else {
+    Write-Host "AMD NPU:         Not detected (VitisAI driver not found)" -ForegroundColor Yellow
+}
+Write-Host "CPU:             Available" -ForegroundColor Green
+
+# Generate default config if no tiers section exists
+$configPath = Join-Path $env:USERPROFILE ".godmode" "inference.json"
+$needsTierConfig = $true
+
+if (Test-Path $configPath) {
+    try {
+        $existingConfig = Get-Content $configPath -Raw | ConvertFrom-Json
+        if ($existingConfig.tiers) {
+            $needsTierConfig = $false
+            Write-Host "`nExisting tier config found, preserving." -ForegroundColor Green
+        }
+    } catch {
+        # Corrupted config, will overwrite tiers section
+    }
+}
+
+if ($needsTierConfig) {
+    Write-Host "`nGenerating default tier configuration..." -ForegroundColor Yellow
+
+    $existing = @{}
+    if (Test-Path $configPath) {
+        try {
+            $raw = Get-Content $configPath -Raw | ConvertFrom-Json
+            $raw.PSObject.Properties | ForEach-Object { $existing[$_.Name] = $_.Value }
+        } catch { }
+    }
+
+    $existing["phi4_model_path"] = $phiDir
+    $existing["npu_model_path"] = $qwenDir
+
+    New-Item -ItemType Directory -Path (Split-Path $configPath) -Force | Out-Null
+    $existing | ConvertTo-Json -Depth 5 | Set-Content $configPath -Encoding UTF8
+    Write-Host "Config saved to: $configPath" -ForegroundColor Green
+}
+
+Write-Host "`n--- Summary ---" -ForegroundColor Cyan
+Write-Host "All models downloaded successfully!" -ForegroundColor Green
 Write-Host "Phi-4-mini (GPU):    $phiDir"
 Write-Host "Qwen2.5-0.5B (NPU): $qwenDir"
 Write-Host "Whisper:             $whisperModel"
-Write-Host "`nDefault config path: $(Join-Path $env:USERPROFILE '.godmode' 'inference.json')"
-Write-Host "`nTo use NPU model, add to inference.json:"
-Write-Host "  `"npu_model_path`": `"$qwenDir`""
-Write-Host "  `"execution_provider`": `"npu`"  (or `"auto`" to prefer NPU with DirectML fallback)"
+Write-Host "Config:              $configPath"
+Write-Host ""
+Write-Host "Tier routing (auto-detected from config):" -ForegroundColor Cyan
+if ($npuDriver) {
+    Write-Host "  Light  -> NPU  (Qwen2.5-0.5B)"
+    Write-Host "  Medium -> GPU  (Phi-4-mini)"
+    Write-Host "  Heavy  -> GPU  (Phi-4-mini)"
+} else {
+    Write-Host "  Light  -> GPU  (Phi-4-mini)"
+    Write-Host "  Medium -> GPU  (Phi-4-mini)"
+    Write-Host "  Heavy  -> GPU  (Phi-4-mini)"
+}
+Write-Host ""
+Write-Host "To customize tier routing, add a 'tiers' section to inference.json." -ForegroundColor Yellow

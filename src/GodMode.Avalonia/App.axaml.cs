@@ -1,7 +1,6 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
-using GodMode.AI;
 using GodMode.Avalonia.Services;
 using GodMode.Avalonia.Tools;
 using GodMode.Avalonia.Voice;
@@ -25,18 +24,11 @@ public partial class App : Application
 		ConfigureServices(services);
 		Services = services.BuildServiceProvider();
 
-		// Fire-and-forget: load AI model at startup if configured
+		// Fire-and-forget: initialize inference router at startup
 		_ = Task.Run(async () =>
 		{
-			var config = AIConfig.Load();
-			var provider = config.ExecutionProvider?.ToLowerInvariant() ?? "auto";
-			var modelPath = ResolveModelPath(config, provider);
-
-			if (modelPath is not null)
-			{
-				var assistant = Services.GetRequiredService<AssistantService>();
-				await assistant.InitializeModelAsync(modelPath);
-			}
+			var assistant = Services.GetRequiredService<AssistantService>();
+			await assistant.InitializeAsync();
 		});
 
 		if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
@@ -57,27 +49,6 @@ public partial class App : Application
 		}
 
 		base.OnFrameworkInitializationCompleted();
-	}
-
-	private static string? ResolveModelPath(AIConfig config, string provider)
-	{
-		// NPU model: requires tokenizer.json (standard ONNX Runtime, not OGA)
-		if (provider is "npu" or "auto" && !string.IsNullOrEmpty(config.NpuModelPath) &&
-			Directory.Exists(config.NpuModelPath) &&
-			File.Exists(Path.Combine(config.NpuModelPath, "tokenizer.json")))
-		{
-			return config.NpuModelPath;
-		}
-
-		// DirectML/OGA model: requires genai_config.json
-		if (!string.IsNullOrEmpty(config.ModelPath) &&
-			Directory.Exists(config.ModelPath) &&
-			File.Exists(Path.Combine(config.ModelPath, "genai_config.json")))
-		{
-			return config.ModelPath;
-		}
-
-		return null;
 	}
 
 	private static void ConfigureServices(IServiceCollection services)

@@ -4,7 +4,6 @@ using Avalonia.Data.Converters;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Avalonia.Platform.Storage;
 using System.Globalization;
 
 namespace GodMode.Avalonia.Views;
@@ -29,23 +28,6 @@ public partial class VoiceAssistantView : UserControl
 		{
 			e.Handled = true;
 			vm.SendCommand.Execute(null);
-		}
-	}
-
-	private async void BrowseButton_Click(object? sender, global::Avalonia.Interactivity.RoutedEventArgs e)
-	{
-		var topLevel = TopLevel.GetTopLevel(this);
-		if (topLevel is null) return;
-
-		var folders = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-		{
-			Title = "Select Phi-4-mini ONNX Model Directory",
-			AllowMultiple = false
-		});
-
-		if (folders.Count > 0 && DataContext is VoiceAssistantViewModel vm)
-		{
-			vm.ModelPath = folders[0].Path.LocalPath;
 		}
 	}
 

@@ -11,8 +11,8 @@ namespace GodMode.Avalonia.ViewModels;
 public partial class VoiceAssistantViewModel : ViewModelBase
 {
 	private readonly AssistantService _assistant;
+	private readonly InferenceRouter _router;
 	private readonly VoiceContext _voiceContext;
-	private readonly AIConfig _aiConfig;
 	private readonly VoiceConfig _voiceConfig;
 	private readonly ISpeechRecognizer _recognizer;
 	private CancellationTokenSource? _cts;
@@ -27,13 +27,13 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 	private string _inputText = string.Empty;
 
 	[ObservableProperty]
-	private string _modelPath = string.Empty;
-
-	[ObservableProperty]
 	private bool _isBusy;
 
 	[ObservableProperty]
 	private bool _isModelLoaded;
+
+	[ObservableProperty]
+	private string _inferenceStatusText = "No inference configured";
 
 	[ObservableProperty]
 	private ObservableCollection<string> _speechLanguages = new();
@@ -52,14 +52,15 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 	public VoiceAssistantViewModel(
 		INavigationService navigationService,
 		AssistantService assistant,
+		InferenceRouter router,
 		ISpeechRecognizer recognizer,
 		VoiceContext voiceContext)
 		: base(navigationService)
 	{
 		_assistant = assistant;
+		_router = router;
 		_recognizer = recognizer;
 		_voiceContext = voiceContext;
-		_aiConfig = AIConfig.Load();
 		_voiceConfig = VoiceConfig.Load();
 
 		SttEngineName = $"STT: {_recognizer.EngineName}";
@@ -84,48 +85,77 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		_assistant.ErrorOccurred += (_, error) =>
 			Dispatcher.UIThread.Post(() => AddMessage("Error", error, isUser: false, isError: true));
 
+		// Subscribe to router status changes
+		_router.StatusChanged += (_, _) =>
+			Dispatcher.UIThread.Post(UpdateInferenceStatus);
+
 		// Subscribe to focused project output
 		_voiceContext.ProjectOutputReceived += OnProjectOutputReceived;
 
-		// Check if model was already loaded at startup
-		if (!string.IsNullOrEmpty(_aiConfig.ModelPath))
+		// Check if models were already loaded at startup
+		if (_router.IsLoaded)
 		{
-			ModelPath = _aiConfig.ModelPath;
-
-			if (_assistant.IsModelLoaded)
-			{
-				IsModelLoaded = true;
-				StatusText = "Model loaded.";
-			}
-			else if (Directory.Exists(_aiConfig.ModelPath) &&
-				File.Exists(Path.Combine(_aiConfig.ModelPath, "genai_config.json")))
-			{
-				StatusText = "Model loading in background...";
-				// Poll for model load completion from the startup fire-and-forget
-				_ = WaitForModelLoadAsync();
-			}
-			else
-			{
-				StatusText = "Model path in config but files missing. Update path and click Load Model.";
-			}
+			IsModelLoaded = true;
+			UpdateInferenceStatus();
+			StatusText = "Models loaded.";
 		}
 		else
 		{
-			ShowFirstRunMessage();
+			StatusText = "Models loading in background...";
+			_ = WaitForModelLoadAsync();
 		}
+	}
+
+	private void UpdateInferenceStatus()
+	{
+		IsModelLoaded = _router.IsLoaded;
+
+		var tierMap = _router.TierProviderMap;
+		if (tierMap.Count == 0 || tierMap.Values.All(p => p == "none"))
+		{
+			InferenceStatusText = "No inference configured";
+			return;
+		}
+
+		// Group tiers by provider for compact display (e.g. "NPU: light | GPU: medium, heavy")
+		var providerTiers = tierMap
+			.Where(kv => kv.Value != "none")
+			.GroupBy(kv => kv.Value)
+			.Select(g =>
+			{
+				var providerLabel = g.Key.ToUpperInvariant();
+				var tiers = string.Join(", ", g.Select(kv => kv.Key.ToString().ToLowerInvariant()));
+				var status = _router.ProviderStatus.TryGetValue(g.Key, out var s) ? s : "unknown";
+				return $"{providerLabel}: {tiers} ({status})";
+			});
+
+		InferenceStatusText = string.Join(" | ", providerTiers);
 	}
 
 	private async Task WaitForModelLoadAsync()
 	{
 		// Wait for the startup background load to complete
-		while (!_assistant.IsModelLoaded)
+		while (!_router.IsLoaded)
+		{
 			await Task.Delay(500);
+			// Check if router finished but nothing loaded (no config)
+			if (_router.TierProviderMap.Count > 0 && _router.TierProviderMap.Values.All(p => p == "none"))
+			{
+				await Dispatcher.UIThread.InvokeAsync(() =>
+				{
+					UpdateInferenceStatus();
+					StatusText = "No models configured.";
+					ShowFirstRunMessage();
+				});
+				return;
+			}
+		}
 
 		await Dispatcher.UIThread.InvokeAsync(() =>
 		{
-			IsModelLoaded = true;
-			StatusText = "Model loaded.";
-			AddMessage("System", "Model loaded automatically from config.", isUser: false);
+			UpdateInferenceStatus();
+			StatusText = "Models loaded.";
+			AddMessage("System", "Models loaded automatically from config.", isUser: false);
 		});
 	}
 
@@ -205,16 +235,39 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 
 	private void ShowFirstRunMessage()
 	{
-		StatusText = "First run — configure model path below.";
+		StatusText = "First run — configure inference in config file.";
 		AddMessage("System",
 			$"Welcome to GodMode Voice Assistant!\n\n" +
 			$"No model configured yet. To get started:\n" +
-			$"1. Download Phi-4-mini ONNX from HuggingFace:\n" +
-			$"   huggingface-cli download microsoft/Phi-4-mini-instruct-onnx --local-dir <path>\n" +
-			$"2. Set the path below and click Load Model\n" +
-			$"3. The path will be saved to:\n" +
-			$"   {AIConfig.ConfigPath}",
+			$"1. Run the download script: scripts/download-models.ps1\n" +
+			$"2. Or manually edit the config file at:\n" +
+			$"   {AIConfig.ConfigPath}\n\n" +
+			$"Tier configuration example (in inference.json):\n" +
+			$"  \"tiers\": {{\n" +
+			$"    \"Light\": {{ \"provider\": \"npu\", \"model_path\": \"~/.godmode/models/qwen2.5\" }},\n" +
+			$"    \"Medium\": {{ \"provider\": \"directml\" }},\n" +
+			$"    \"Heavy\": {{ \"provider\": \"directml\" }}\n" +
+			$"  }}",
 			isUser: false);
+	}
+
+	[RelayCommand]
+	private void OpenConfig()
+	{
+		try
+		{
+			var path = AIConfig.ConfigPath;
+			if (!File.Exists(path))
+			{
+				Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+				File.WriteAllText(path, "{}");
+			}
+			System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+		}
+		catch (Exception ex)
+		{
+			AddMessage("Error", $"Failed to open config: {ex.Message}", isUser: false, isError: true);
+		}
 	}
 
 	private bool TryHandleUnfocusKeyword(string text)
@@ -246,53 +299,6 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		catch (Exception ex)
 		{
 			AddMessage("Error", $"Failed to send: {ex.Message}", isUser: false, isError: true);
-		}
-	}
-
-	[RelayCommand]
-	private async Task LoadModelAsync()
-	{
-		var path = ModelPath.Trim();
-		if (string.IsNullOrEmpty(path))
-		{
-			AddMessage("System", "Please enter a model directory path first.", isUser: false);
-			return;
-		}
-
-		var fullPath = Path.GetFullPath(path);
-		if (!Directory.Exists(fullPath))
-		{
-			AddMessage("Error", $"Directory not found: {fullPath}", isUser: false, isError: true);
-			return;
-		}
-
-		if (!File.Exists(Path.Combine(fullPath, "genai_config.json")))
-		{
-			AddMessage("Error",
-				$"Not a valid model directory (genai_config.json missing):\n{fullPath}\n\n" +
-				$"Expected files: genai_config.json, tokenizer.json, model.onnx",
-				isUser: false, isError: true);
-			return;
-		}
-
-		IsBusy = true;
-		try
-		{
-			await _assistant.InitializeModelAsync(fullPath);
-			IsModelLoaded = true;
-
-			_aiConfig.ModelPath = fullPath;
-			_aiConfig.Save();
-
-			AddMessage("System", $"Model loaded successfully.\nPath saved to {AIConfig.ConfigPath}", isUser: false);
-		}
-		catch (Exception ex)
-		{
-			AddMessage("Error", $"Failed to load model: {ex.Message}", isUser: false, isError: true);
-		}
-		finally
-		{
-			IsBusy = false;
 		}
 	}
 
