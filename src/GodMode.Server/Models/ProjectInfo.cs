@@ -17,6 +17,13 @@ public class ProjectInfo
     public required string ProjectPath { get; init; }
 
     public string? SessionId { get; set; }
+
+    /// <summary>
+    /// The name of the create action used to create this project.
+    /// Used to look up action-specific config for teardown and resume.
+    /// </summary>
+    public string? ActionName { get; set; }
+
     public int ProcessId { get; set; }
     public CancellationTokenSource? ProcessCancellation { get; set; }
 
