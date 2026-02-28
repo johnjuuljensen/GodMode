@@ -2,7 +2,7 @@
 
 	<!-- Shared properties -->
 	<PropertyGroup>
-		<OutputType>Exe</OutputType>
+		<OutputType>WinExe</OutputType>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
 		<RootNamespace>GodMode.Avalonia</RootNamespace>
