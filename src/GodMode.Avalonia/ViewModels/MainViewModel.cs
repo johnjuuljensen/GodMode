@@ -417,7 +417,7 @@ public partial class MainViewModel : ViewModelBase
 					{
 						var summary = new ProjectSummary(
 							status.Id, status.Name, status.State,
-							status.UpdatedAt, status.CurrentQuestion);
+							status.UpdatedAt, status.CurrentQuestion, status.RootName);
 						target.Projects.Insert(0, summary);
 						target.RebuildRootGroups(SortByName);
 					}

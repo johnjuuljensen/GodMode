@@ -23,20 +23,7 @@ public class StatusUpdater : IStatusUpdater
     {
         var statusPath = Path.Combine(project.ProjectPath, ".godmode", "status.json");
 
-        var status = new ProjectStatus(
-            project.Id,
-            project.Name,
-            project.State,
-            project.CreatedAt,
-            project.UpdatedAt,
-            project.CurrentQuestion,
-            project.Metrics,
-            project.Git,
-            project.Tests,
-            project.OutputOffset
-        );
-
-        var json = JsonSerializer.Serialize(status, new JsonSerializerOptions
+        var json = JsonSerializer.Serialize(project.Status, new JsonSerializerOptions
         {
             WriteIndented = true
         });
@@ -47,6 +34,7 @@ public class StatusUpdater : IStatusUpdater
     public async Task UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent)
     {
         var stateChanged = false;
+        var status = project.Status;
 
         // Parse Claude output events to update state
         switch (outputEvent.Type)
@@ -56,21 +44,19 @@ public class StatusUpdater : IStatusUpdater
                 if (!string.IsNullOrEmpty(outputEvent.Content) &&
                     outputEvent.Content.Contains("?") && outputEvent.Content.Length < 500)
                 {
-                    project.State = ProjectState.WaitingInput;
-                    project.CurrentQuestion = outputEvent.Content;
+                    status = status with { State = ProjectState.WaitingInput, CurrentQuestion = outputEvent.Content };
                     stateChanged = true;
                 }
                 break;
 
             case OutputEventType.Error:
-                project.State = ProjectState.Error;
+                status = status with { State = ProjectState.Error };
                 stateChanged = true;
                 break;
 
             case OutputEventType.Result:
                 // Result indicates the turn is complete
-                project.State = ProjectState.Idle;
-                project.CurrentQuestion = null;
+                status = status with { State = ProjectState.Idle, CurrentQuestion = null };
                 stateChanged = true;
 
                 // Update metrics from result metadata
@@ -80,7 +66,7 @@ public class StatusUpdater : IStatusUpdater
                     {
                         if (long.TryParse(inputTokens?.ToString(), out var tokens))
                         {
-                            project.Metrics = project.Metrics with { InputTokens = tokens };
+                            status = status with { Metrics = status.Metrics with { InputTokens = tokens } };
                         }
                     }
 
@@ -88,7 +74,7 @@ public class StatusUpdater : IStatusUpdater
                     {
                         if (long.TryParse(outputTokens?.ToString(), out var tokens))
                         {
-                            project.Metrics = project.Metrics with { OutputTokens = tokens };
+                            status = status with { Metrics = status.Metrics with { OutputTokens = tokens } };
                         }
                     }
                 }
@@ -96,25 +82,26 @@ public class StatusUpdater : IStatusUpdater
 
             case OutputEventType.System:
                 // System init event - project is running
-                project.State = ProjectState.Running;
+                status = status with { State = ProjectState.Running };
                 stateChanged = true;
                 break;
         }
 
         // Update duration
-        var duration = DateTime.UtcNow - project.CreatedAt;
-        project.Metrics = project.Metrics with { Duration = duration };
+        var duration = DateTime.UtcNow - status.CreatedAt;
+        status = status with { Metrics = status.Metrics with { Duration = duration } };
 
         // Update cost estimate (rough calculation: $3/M input tokens, $15/M output tokens for Claude Opus)
-        var inputCost = (project.Metrics.InputTokens / 1_000_000m) * 3m;
-        var outputCost = (project.Metrics.OutputTokens / 1_000_000m) * 15m;
-        project.Metrics = project.Metrics with { CostEstimate = inputCost + outputCost };
+        var inputCost = (status.Metrics.InputTokens / 1_000_000m) * 3m;
+        var outputCost = (status.Metrics.OutputTokens / 1_000_000m) * 15m;
+        status = status with { Metrics = status.Metrics with { CostEstimate = inputCost + outputCost } };
 
         if (stateChanged)
         {
-            project.UpdatedAt = DateTime.UtcNow;
+            status = status with { UpdatedAt = DateTime.UtcNow };
         }
 
+        project.Status = status;
         await SaveStatusAsync(project);
     }
 
@@ -152,18 +139,21 @@ public class StatusUpdater : IStatusUpdater
                 }
             }
 
-            project.Git = new GitStatus(
-                branch.Trim(),
-                lastCommit.Trim(),
-                uncommittedChanges,
-                untrackedFiles
-            );
+            project.Status = project.Status with
+            {
+                Git = new GitStatus(
+                    branch.Trim(),
+                    lastCommit.Trim(),
+                    uncommittedChanges,
+                    untrackedFiles
+                )
+            };
 
             await SaveStatusAsync(project);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to update git status for project {ProjectId}", project.Id);
+            _logger.LogWarning(ex, "Failed to update git status for project {ProjectId}", project.Status.Id);
         }
     }
 
@@ -192,7 +182,7 @@ public class StatusUpdater : IStatusUpdater
 
     public void StartGitPolling(ProjectInfo project, TimeSpan interval)
     {
-        if (_gitPollingTimers.ContainsKey(project.Id))
+        if (_gitPollingTimers.ContainsKey(project.Status.Id))
         {
             return;
         }
@@ -204,7 +194,7 @@ public class StatusUpdater : IStatusUpdater
         };
         timer.Start();
 
-        _gitPollingTimers[project.Id] = timer;
+        _gitPollingTimers[project.Status.Id] = timer;
     }
 
     public void StopGitPolling(string projectId)
