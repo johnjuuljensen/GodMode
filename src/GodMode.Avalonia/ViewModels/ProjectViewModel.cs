@@ -65,6 +65,9 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	private bool _isSimpleView;
 
 	[ObservableProperty]
+	private bool _isInputLocked;
+
+	[ObservableProperty]
 	private ObservableCollection<ChatDisplayItem> _displayMessages = new();
 
 	[ObservableProperty]
@@ -307,16 +310,37 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 			ProjectStatusUpdated?.Invoke(ProjectId, value.State, value.CurrentQuestion);
 	}
 
-	partial void OnIsQuestionActiveChanged(bool value) => UpdateCanSendInput();
+	partial void OnIsQuestionActiveChanged(bool value)
+	{
+		// Lock input when question has options (user should pick from option picker)
+		IsInputLocked = value && CurrentQuestionOptions.Count > 0;
+		UpdateCanSendInput();
+
+		// Propagate question state changes to sidebar/tile views
+		// Defer to next tick so all question properties (Text, Options, Header) are set
+		Dispatcher.UIThread.Post(() =>
+		{
+			if (!string.IsNullOrEmpty(ProjectId))
+			{
+				ProjectStatusUpdated?.Invoke(
+					ProjectId,
+					IsQuestionActive ? ProjectState.WaitingInput : (Status?.State ?? ProjectState.Running),
+					IsQuestionActive ? CurrentQuestionText : null);
+			}
+		});
+	}
 
 	private void UpdateCanSendInput()
 	{
-		// Always allow sending: if active → sends input; if stopped/idle → auto-resumes with input
-		CanSendInput = IsQuestionActive
+		// When input is locked (option picker active), only allow sending via the picker
+		CanSendInput = !IsInputLocked && (
+			IsQuestionActive
 			|| Status?.State is ProjectState.WaitingInput or ProjectState.Running
-			|| Status?.State is ProjectState.Stopped or ProjectState.Idle;
+			|| Status?.State is ProjectState.Stopped or ProjectState.Idle);
 		CanResume = !IsQuestionActive && Status?.State is ProjectState.Stopped or ProjectState.Idle;
-		InputWatermark = CanResume ? "Type to resume..." : "Type your response...";
+		InputWatermark = IsInputLocked
+			? "Select an option above (Esc to type instead)"
+			: CanResume ? "Type to resume..." : "Type your response...";
 	}
 
 	/// <summary>

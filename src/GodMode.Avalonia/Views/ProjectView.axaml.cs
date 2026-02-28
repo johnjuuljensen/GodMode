@@ -21,8 +21,13 @@ public partial class ProjectView : UserControl
 		// Intercept Enter key on input (tunnel to catch before TextBox processes it)
 		InputEditor.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
 
-		// Wire question prompt option selection
+		// Wire question prompt events
 		QuestionPrompt.OptionSelected += OnQuestionOptionSelected;
+		QuestionPrompt.EscapePressed += OnQuestionEscapePressed;
+
+		// Wire scroll-to-question and floating answer buttons
+		ScrollToQuestionButton.Click += OnScrollToQuestion;
+		FloatingAnswerButton.Click += OnScrollToQuestion;
 
 		DataContextChanged += (_, _) =>
 		{
@@ -39,6 +44,18 @@ public partial class ProjectView : UserControl
 						OutputScrollViewer.ScrollToEnd(),
 						DispatcherPriority.Background);
 				}
+
+				// Re-render option picker if question is still active
+				if (vm.IsQuestionActive)
+				{
+					Dispatcher.UIThread.Post(() =>
+					{
+						QuestionPrompt.QuestionText = vm.CurrentQuestionText ?? "";
+						QuestionPrompt.AgentName = vm.CurrentQuestionHeader ?? vm.Status?.Name;
+						QuestionPrompt.SetOptions(vm.CurrentQuestionOptions);
+						QuestionPrompt.Focus();
+					}, DispatcherPriority.Background);
+				}
 			}
 		};
 
@@ -50,8 +67,8 @@ public partial class ProjectView : UserControl
 			var viewport = sv.Viewport.Height;
 			var offset = sv.Offset.Y;
 
-			// User is "at bottom" if within threshold of the end
 			_isAtBottom = (extent - viewport - offset) < ScrollThreshold;
+			UpdateFloatingButton();
 		};
 	}
 
@@ -80,6 +97,7 @@ public partial class ProjectView : UserControl
 					QuestionPrompt.SetOptions(vm.CurrentQuestionOptions);
 					QuestionPrompt.Focus();
 				}
+				UpdateFloatingButton();
 			});
 		}
 	}
@@ -91,6 +109,29 @@ public partial class ProjectView : UserControl
 			vm.InputText = selectedOption;
 			_ = vm.SendInputCommand.ExecuteAsync(null);
 		}
+	}
+
+	private void OnQuestionEscapePressed(object? sender, EventArgs e)
+	{
+		if (DataContext is ProjectViewModel vm)
+		{
+			vm.IsInputLocked = false;
+			InputEditor.Focus();
+		}
+	}
+
+	private void OnScrollToQuestion(object? sender, RoutedEventArgs e)
+	{
+		OutputScrollViewer.ScrollToEnd();
+		QuestionPrompt.Focus();
+	}
+
+	private void UpdateFloatingButton()
+	{
+		if (DataContext is ProjectViewModel vm && vm.IsQuestionActive && !_isAtBottom)
+			FloatingAnswerButton.IsVisible = true;
+		else
+			FloatingAnswerButton.IsVisible = false;
 	}
 
 	private void OnDisplayMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
