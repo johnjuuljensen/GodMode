@@ -8,7 +8,8 @@ namespace GodMode.ProjectFiles;
 /// Survives process restarts and server recovery.
 /// </summary>
 public record ProjectSettings(
-    bool DangerouslySkipPermissions = false
+    bool DangerouslySkipPermissions = false,
+    string? ActionName = null
 )
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

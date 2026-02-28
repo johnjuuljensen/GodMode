@@ -15,6 +15,7 @@ public interface IProjectService
         string profileName,
         string hostId,
         string projectRootName,
+        string? actionName,
         Dictionary<string, JsonElement> inputs);
     Task SendInputAsync(string profileName, string hostId, string projectId, string input);
     Task StopProjectAsync(string profileName, string hostId, string projectId);

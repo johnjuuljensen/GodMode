@@ -6,11 +6,12 @@ namespace GodMode.Avalonia.Tools;
 public sealed class CreateProjectTool(VoiceContext context, IProjectService projectService) : ITool
 {
     public string Name => "create_project";
-    public string Description => "Creates a new project on a server. Lists available project roots if no root is specified.";
+    public string Description => "Creates a new project on a server. Lists available project roots and actions if not specified.";
 
     public IReadOnlyList<ToolParameter> Parameters =>
     [
         new() { Name = "project_root", Type = "string", Description = "The project root/template to use", Required = false },
+        new() { Name = "action", Type = "string", Description = "The create action to use (e.g. 'Issue', 'Freeform')", Required = false },
         new() { Name = "name", Type = "string", Description = "Name for the new project", Required = false },
         new() { Name = "prompt", Type = "string", Description = "Initial prompt or description for the project", Required = false }
     ];
@@ -36,11 +37,29 @@ public sealed class CreateProjectTool(VoiceContext context, IProjectService proj
             }
             else
             {
-                var rootList = roots.Select(r => new { r.Name, r.Description });
+                var rootList = roots.Select(r => new { r.Name, r.Description, Actions = r.Actions?.Select(a => a.Name) });
                 return ToolResult.Ok(Name,
                     $"Multiple project roots available. Specify one:\n" +
                     JsonSerializer.Serialize(rootList, new JsonSerializerOptions { WriteIndented = true }));
             }
+        }
+
+        var actionName = ToolHelper.ExtractString(args, "action");
+
+        // If no action specified and root has multiple actions, list them
+        if (string.IsNullOrWhiteSpace(actionName))
+        {
+            var roots = (await projectService.ListProjectRootsAsync(profileName, host!.Id)).ToList();
+            var root = roots.FirstOrDefault(r => r.Name == rootName);
+            if (root?.Actions is { Length: > 1 })
+            {
+                var actionList = root.Actions.Select(a => new { a.Name, a.Description });
+                return ToolResult.Ok(Name,
+                    $"Multiple actions available for root '{rootName}'. Specify one:\n" +
+                    JsonSerializer.Serialize(actionList, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            // Single action — use it automatically
+            actionName = root?.Actions?.FirstOrDefault()?.Name;
         }
 
         var inputs = new Dictionary<string, JsonElement>();
@@ -52,7 +71,7 @@ public sealed class CreateProjectTool(VoiceContext context, IProjectService proj
         if (!string.IsNullOrWhiteSpace(prompt))
             inputs["prompt"] = JsonSerializer.SerializeToElement(prompt);
 
-        var detail = await projectService.CreateProjectAsync(profileName, host!.Id, rootName, inputs);
+        var detail = await projectService.CreateProjectAsync(profileName, host!.Id, rootName, actionName, inputs);
 
         // Refresh index to include the new project
         await context.RefreshProjectIndexAsync();

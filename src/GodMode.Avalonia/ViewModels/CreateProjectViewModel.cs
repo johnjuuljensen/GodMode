@@ -40,6 +40,17 @@ public partial class CreateProjectViewModel : ViewModelBase
 	public string? PreselectedRootName { get; set; }
 
 	[ObservableProperty]
+	private ObservableCollection<CreateActionInfo> _actions = [];
+
+	[ObservableProperty]
+	private CreateActionInfo? _selectedAction;
+
+	/// <summary>
+	/// Whether the action selector should be visible (more than one action available).
+	/// </summary>
+	public bool ShowActionSelector => Actions.Count > 1;
+
+	[ObservableProperty]
 	private ObservableCollection<FormField> _formFields = [];
 
 	public CreateProjectViewModel(INavigationService navigationService, IProjectService projectService)
@@ -49,6 +60,21 @@ public partial class CreateProjectViewModel : ViewModelBase
 	}
 
 	partial void OnSelectedProjectRootChanged(ProjectRootInfo? value)
+	{
+		if (value?.Actions is { Length: > 0 } actions)
+		{
+			Actions = new ObservableCollection<CreateActionInfo>(actions);
+			SelectedAction = actions[0];
+		}
+		else
+		{
+			Actions = [];
+			SelectedAction = null;
+		}
+		OnPropertyChanged(nameof(ShowActionSelector));
+	}
+
+	partial void OnSelectedActionChanged(CreateActionInfo? value)
 	{
 		if (value != null)
 		{
@@ -112,6 +138,7 @@ public partial class CreateProjectViewModel : ViewModelBase
 		CreationProgressText = null;
 
 		if (SelectedProjectRoot == null) { ErrorMessage = "Please select a project root"; return; }
+		if (SelectedAction == null) { ErrorMessage = "Please select an action"; return; }
 
 		// Validate required fields
 		foreach (var field in FormFields)
@@ -142,6 +169,7 @@ public partial class CreateProjectViewModel : ViewModelBase
 			var detail = await _projectService.CreateProjectAsync(
 				ProfileName, HostId,
 				SelectedProjectRoot.Name,
+				SelectedAction.Name,
 				inputs);
 
 			Completed?.Invoke();

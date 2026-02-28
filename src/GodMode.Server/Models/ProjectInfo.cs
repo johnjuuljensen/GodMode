@@ -22,6 +22,12 @@ public class ProjectInfo
     /// </summary>
     public string? RootName { get; set; }
 
+    /// <summary>
+    /// The name of the create action used to create this project.
+    /// Used to look up action-specific config for teardown and resume.
+    /// </summary>
+    public string? ActionName { get; set; }
+
     public ProjectState State { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

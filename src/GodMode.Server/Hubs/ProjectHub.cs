@@ -39,12 +39,12 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.GetStatusAsync(projectId);
     }
 
-    public async Task<ProjectDetail> CreateProject(string projectRootName, Dictionary<string, JsonElement> inputs)
+    public async Task<ProjectDetail> CreateProject(string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
     {
-        _logger.LogInformation("Client {ConnectionId} creating project in root '{Root}' with {InputCount} inputs",
-            Context.ConnectionId, projectRootName, inputs.Count);
+        _logger.LogInformation("Client {ConnectionId} creating project in root '{Root}' action '{Action}' with {InputCount} inputs",
+            Context.ConnectionId, projectRootName, actionName ?? "(default)", inputs.Count);
 
-        var request = new CreateProjectRequest(projectRootName, inputs);
+        var request = new CreateProjectRequest(projectRootName, inputs, actionName);
         var project = await _projectManager.CreateProjectAsync(request);
 
         // Notify all clients about the new project

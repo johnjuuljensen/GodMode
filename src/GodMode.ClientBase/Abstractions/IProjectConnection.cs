@@ -32,8 +32,9 @@ public interface IProjectConnection : IDisposable
     /// Creates a new project with the specified parameters
     /// </summary>
     /// <param name="projectRootName">Name of the project root where the project will be created.</param>
+    /// <param name="actionName">Name of the create action to use, or null for the default action.</param>
     /// <param name="inputs">Form inputs as key-value pairs from the dynamic form.</param>
-    Task<ProjectDetail> CreateProjectAsync(string projectRootName, Dictionary<string, JsonElement> inputs);
+    Task<ProjectDetail> CreateProjectAsync(string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
 
     /// <summary>
     /// Sends user input to a project waiting for input
