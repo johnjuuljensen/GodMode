@@ -139,3 +139,4 @@ When doing work initiated by GodMode, indicated by the presence of a `.godmode` 
 - If the solution needs user attention create the PR as draft and start the description with !!Attention needed!!
 - Make sure to maintain slnx file
 - When asked to merge master into a branch always use origin/master as local master is likely stale
+- When creating branches and PR connected to issues, use issue-XX-name
