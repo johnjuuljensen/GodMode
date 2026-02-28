@@ -1,7 +1,17 @@
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((context, configuration) =>
+    configuration
+        .ReadFrom.Configuration(context.Configuration)
+        .WriteTo.Console()
+        .WriteTo.File(
+            Path.Combine(".godmode-logs", "server-.log"),
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: 31));
 
 // Add services to the container
 builder.Services.AddSignalR()
@@ -27,13 +37,6 @@ builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
 builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
-
-// Add logging
-builder.Services.AddLogging(logging =>
-{
-    logging.AddConsole();
-    logging.AddDebug();
-});
 
 var app = builder.Build();
 

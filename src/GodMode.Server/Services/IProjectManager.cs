@@ -58,6 +58,11 @@ public interface IProjectManager
     Task<string> GetMetricsHtmlAsync(string projectId);
 
     /// <summary>
+    /// Deletes a project, running teardown scripts and removing all files.
+    /// </summary>
+    Task DeleteProjectAsync(string projectId);
+
+    /// <summary>
     /// Cleans up resources for a disconnected client.
     /// </summary>
     Task CleanupConnectionAsync(string connectionId);

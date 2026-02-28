@@ -1,12 +1,15 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using GodMode.Avalonia.Services;
+#if VOICE_ENABLED
 using GodMode.Avalonia.Tools;
 using GodMode.Avalonia.Voice;
 using GodMode.Voice;
 using GodMode.Voice.Services;
 using GodMode.Voice.Tools;
 using GodMode.Voice.Windows;
+#endif
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GodMode.Avalonia;
@@ -26,6 +29,7 @@ public partial class App : Application
 		ConfigureServices(services);
 		Services = services.BuildServiceProvider();
 
+#if VOICE_ENABLED
 		// Fire-and-forget: load AI model at startup if configured
 		_ = Task.Run(async () =>
 		{
@@ -39,12 +43,22 @@ public partial class App : Application
 				await assistant.InitializeModelAsync(modelPath);
 			}
 		});
+#endif
 
 		if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
 		{
+			// Auto-start embedded server
+			var embeddedServer = Services.GetRequiredService<IEmbeddedServerService>();
+			_ = embeddedServer.StartAsync();
+
 			desktop.MainWindow = new MainWindow
 			{
 				DataContext = Services.GetRequiredService<MainWindowViewModel>()
+			};
+
+			desktop.ShutdownRequested += (_, _) =>
+			{
+				embeddedServer.Stop();
 			};
 		}
 
@@ -77,6 +91,7 @@ public partial class App : Application
 		// ClientBase services - shared config at ~/.godmode
 		services.AddGodModeClientServices();
 
+#if VOICE_ENABLED
 		// Voice services — Windows speech first (before TryAdd fallbacks)
 		services.AddGodModeWindowsSpeech();
 		services.AddGodModeVoiceServices();
@@ -108,20 +123,26 @@ public partial class App : Application
 			registry.Register(new UnfocusProjectTool(ctx));
 			return registry;
 		});
+#endif
 
 		// Avalonia-specific services
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<IDialogService, DialogService>();
+		services.AddSingleton<IThemeService, ThemeService>();
+		services.AddSingleton<IEmbeddedServerService, EmbeddedServerService>();
 
-		// ViewModels
+		// ViewModels — singletons for state preservation
+#if VOICE_ENABLED
 		services.AddSingleton<VoiceAssistantViewModel>();
-		services.AddTransient<MainWindowViewModel>();
-		services.AddTransient<MainViewModel>();
+#endif
+		services.AddSingleton<MainWindowViewModel>();
+		services.AddSingleton<MainViewModel>();
 		services.AddTransient<HostViewModel>();
 		services.AddTransient<ProjectViewModel>();
 		services.AddTransient<AddProfileViewModel>();
 		services.AddTransient<AddServerViewModel>();
 		services.AddTransient<EditServerViewModel>();
 		services.AddTransient<CreateProjectViewModel>();
+		services.AddTransient<TileGridViewModel>();
 	}
 }

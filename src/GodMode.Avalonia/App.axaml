@@ -9,51 +9,34 @@
         <FluentTheme />
     </Application.Styles>
 
-    <Application.DataTemplates>
-        <local:ViewLocator />
-    </Application.DataTemplates>
-
     <Application.Resources>
         <ResourceDictionary>
-            <!-- Converters -->
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="/Styles/Theme.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+
             <converters:IsNotNullConverter x:Key="IsNotNullConverter" />
             <converters:InverseBoolConverter x:Key="InverseBoolConverter" />
             <converters:BoolToColorConverter x:Key="BoolToColorConverter" />
             <converters:BoolToChevronConverter x:Key="BoolToChevronConverter" />
             <converters:StateToColorConverter x:Key="StateToColorConverter" />
+            <converters:ProjectStateToWaitingVisibilityConverter x:Key="ProjectStateToWaitingVisibilityConverter" />
             <converters:StateToStartVisibilityConverter x:Key="StateToStartVisibilityConverter" />
             <converters:StateToStopVisibilityConverter x:Key="StateToStopVisibilityConverter" />
             <converters:MessageTypeToColorConverter x:Key="MessageTypeToColorConverter" />
+            <converters:MessageTypeToGradientConverter x:Key="MessageTypeToGradientConverter" />
+            <converters:MessageTypeToBgBrushConverter x:Key="MessageTypeToBgBrushConverter" />
+            <converters:MessageTypeToBorderBrushConverter x:Key="MessageTypeToBorderBrushConverter" />
             <converters:ContentTypeToColorConverter x:Key="ContentTypeToColorConverter" />
-
-            <!-- Surface Brushes -->
-            <SolidColorBrush x:Key="CardBrush" Color="#2A2A2A" />
-            <SolidColorBrush x:Key="CardInsetBrush" Color="#1E1E1E" />
-            <SolidColorBrush x:Key="CodeBlockBrush" Color="#111111" />
-            <SolidColorBrush x:Key="BorderSubtleBrush" Color="#3A3A3A" />
-
-            <!-- Accent Brushes -->
-            <SolidColorBrush x:Key="AccentBadgeBrush" Color="#6C5CE7" />
-            <SolidColorBrush x:Key="DangerBrush" Color="#DC3545" />
-            <SolidColorBrush x:Key="HighlightBrush" Color="#FF9800" />
-
-            <!-- Text Brushes -->
-            <SolidColorBrush x:Key="TextMutedBrush" Color="#999999" />
-            <SolidColorBrush x:Key="TextSubtleBrush" Color="#666666" />
-            <SolidColorBrush x:Key="TextOnAccentBrush" Color="#FFFFFF" />
-
-            <!-- Corner Radii -->
-            <CornerRadius x:Key="CornerSmall">4</CornerRadius>
-            <CornerRadius x:Key="CornerMedium">8</CornerRadius>
-            <CornerRadius x:Key="CornerPill">12</CornerRadius>
-
-            <!-- Font Sizes -->
-            <x:Double x:Key="FontSizeCaption">11</x:Double>
-            <x:Double x:Key="FontSizeSmall">12</x:Double>
-            <x:Double x:Key="FontSizeBody">13</x:Double>
-            <x:Double x:Key="FontSizeSubtitle">16</x:Double>
-            <x:Double x:Key="FontSizeTitle">20</x:Double>
+            <converters:ErrorContentForegroundConverter x:Key="ErrorContentForegroundConverter" />
+            <converters:SelectedProjectBgConverter x:Key="SelectedProjectBgConverter" />
+            <converters:RelativeTimeConverter x:Key="RelativeTimeConverter" />
+            <converters:BoolToActiveBrushConverter x:Key="BoolToActiveBrushConverter" />
         </ResourceDictionary>
     </Application.Resources>
+
+    <Application.DataTemplates>
+        <local:ViewLocator />
+    </Application.DataTemplates>
 
 </Application>
