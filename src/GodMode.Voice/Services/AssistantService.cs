@@ -37,7 +37,7 @@ public sealed class AssistantService
 {
     private readonly ISpeechRecognizer _recognizer;
     private readonly ISpeechSynthesizer _synthesizer;
-    private readonly ILanguageModel _model;
+    private readonly InferenceRouter _router;
     private readonly ToolRegistry _toolRegistry;
 
     // Multi-turn parameter collection state
@@ -61,35 +61,51 @@ public sealed class AssistantService
     /// </summary>
     public Func<string, ToolCall?>? DisambiguationResolver { get; set; }
 
-    public bool IsModelLoaded => _model.IsLoaded;
+    public bool IsModelLoaded => _router.IsLoaded;
     public bool IsCollectingParams => _pendingToolCall is not null;
 
     public AssistantService(
         ISpeechRecognizer recognizer,
         ISpeechSynthesizer synthesizer,
-        ILanguageModel model,
+        InferenceRouter router,
         ToolRegistry toolRegistry)
     {
         _recognizer = recognizer;
         _synthesizer = synthesizer;
-        _model = model;
+        _router = router;
         _toolRegistry = toolRegistry;
     }
 
     public async Task InitializeModelAsync(string modelPath)
     {
         StatusChanged?.Invoke(this, "Loading AI model...");
-        await _model.InitializeAsync(modelPath);
+        await _router.InitializeAsync(modelPath);
         StatusChanged?.Invoke(this, "Model loaded.");
+    }
+
+    public async Task InitializeAsync()
+    {
+        StatusChanged?.Invoke(this, "Loading AI models...");
+        await _router.InitializeAsync();
+
+        // Log tier routing and provider status
+        foreach (var (tier, provider) in _router.TierProviderMap)
+            AssistantLog.Write("INIT", $"Tier {tier} -> {provider}");
+        foreach (var (provider, status) in _router.ProviderStatus)
+            AssistantLog.Write("INIT", $"Provider {provider}: {status}");
+
+        StatusChanged?.Invoke(this, _router.IsLoaded ? "Models loaded." : "No models configured.");
     }
 
     public async Task<string> ListenAndProcessAsync(CancellationToken ct = default)
     {
         var sw = Stopwatch.StartNew();
 
+        AssistantLog.Write("AUDIO", $"Capture started (engine: {_recognizer.EngineName})");
         StatusChanged?.Invoke(this, "Listening...");
         var transcript = await _recognizer.RecognizeSpeechAsync(ct);
         var sttMs = sw.ElapsedMilliseconds;
+        AssistantLog.Write("AUDIO", $"Capture finished ({sttMs}ms)");
 
         if (string.IsNullOrWhiteSpace(transcript))
         {
@@ -134,8 +150,9 @@ public sealed class AssistantService
             var systemPrompt = SystemPromptBuilder.Build(_toolRegistry, contextSummary);
             AssistantLog.Write("SYSTEM_PROMPT", systemPrompt);
 
-            var llmOutput = await Task.Run(() => _model.GenerateAsync(systemPrompt, userText, ct));
+            var llmOutput = await Task.Run(() => _router.GenerateAsync(InferenceTier.Medium, systemPrompt, userText, ct));
             var inferenceMs = sw.ElapsedMilliseconds;
+            AssistantLog.Write("ROUTING", $"Tier: {_router.LastUsedTier} | Provider: {_router.LastUsedProvider}");
             AssistantLog.Write("LLM_RAW", llmOutput);
             AssistantLog.Write("TIMING", $"Inference: {inferenceMs}ms");
 
