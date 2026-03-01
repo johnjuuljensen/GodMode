@@ -159,13 +159,13 @@ public class ProjectManager : IProjectManager
         // Script log file — at root level so it persists regardless of what scripts do
         var logFilePath = GetScriptLogPath(rootPath, projectId);
 
-        // Run setup scripts (always runs in root directory)
-        if (action.Setup is { Length: > 0 })
+        // Run prepare scripts (always runs in root directory)
+        if (action.Prepare is { Length: > 0 })
         {
             try
             {
                 await _scriptRunner.RunAsync(
-                    action.Setup,
+                    action.Prepare,
                     rootPath,
                     rootPath,
                     scriptEnv,
@@ -174,7 +174,7 @@ public class ProjectManager : IProjectManager
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Setup script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
+                _logger.LogError(ex, "Prepare script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
                 project.Status = project.Status with { State = ProjectState.Error };
                 EnsureGodModeDirectory(projectPath);
                 await _statusUpdater.SaveStatusAsync(project);
@@ -183,24 +183,24 @@ public class ProjectManager : IProjectManager
             }
         }
 
-        // Run bootstrap scripts
-        if (action.Bootstrap is { Length: > 0 })
+        // Run create scripts
+        if (action.Create is { Length: > 0 })
         {
-            // When scripts create the folder, bootstrap runs from root (project dir may not exist yet)
-            var bootstrapWorkDir = action.ScriptsCreateFolder ? rootPath : projectPath;
+            // When scripts create the folder, create runs from root (project dir may not exist yet)
+            var createWorkDir = action.ScriptsCreateFolder ? rootPath : projectPath;
             try
             {
                 await _scriptRunner.RunAsync(
-                    action.Bootstrap,
+                    action.Create,
                     rootPath,
-                    bootstrapWorkDir,
+                    createWorkDir,
                     scriptEnv,
                     msg => _hubContext.Clients.All.CreationProgress(projectId, msg),
                     logFilePath);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Bootstrap script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
+                _logger.LogError(ex, "Create script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
                 project.Status = project.Status with { State = ProjectState.Error };
                 EnsureGodModeDirectory(projectPath);
                 await _statusUpdater.SaveStatusAsync(project);
@@ -212,7 +212,7 @@ public class ProjectManager : IProjectManager
         // Ensure .godmode directory exists (scripts may have created the project dir without it)
         EnsureGodModeDirectory(projectPath);
 
-        // Save project settings (persists across restarts, includes action name for teardown/resume)
+        // Save project settings (persists across restarts, includes action name for delete/resume)
         var skipPermissions = GetBool(request.Inputs, "skipPermissions");
         var settings = new ProjectFiles.ProjectSettings(
             DangerouslySkipPermissions: skipPermissions,
@@ -303,7 +303,7 @@ public class ProjectManager : IProjectManager
         // Stop Claude process if running
         await _processManager.StopProcessAsync(project);
 
-        // Run teardown scripts if configured (failures block deletion)
+        // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
         if (project.Status.RootName != null)
         {
@@ -311,12 +311,12 @@ public class ProjectManager : IProjectManager
             var config = _rootConfigReader.ReadConfig(rootPath);
             var action = config.ResolveAction(project.ActionName);
 
-            if (action?.Teardown is { Length: > 0 })
+            if (action?.Delete is { Length: > 0 })
             {
                 var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>());
 
                 await _scriptRunner.RunAsync(
-                    action.Teardown,
+                    action.Delete,
                     rootPath,
                     rootPath,
                     scriptEnv,
@@ -583,7 +583,7 @@ public class ProjectManager : IProjectManager
 
     /// <summary>
     /// Returns a log file path at the root level for script output.
-    /// Uses {rootPath}/logs/{projectId}.log so it survives bootstrap's project dir delete.
+    /// Uses {rootPath}/logs/{projectId}.log so it survives create script's project dir delete.
     /// </summary>
     private static string GetScriptLogPath(string rootPath, string projectId)
     {
@@ -640,12 +640,6 @@ public class ProjectManager : IProjectManager
         var env = action.Environment != null
             ? new Dictionary<string, string>(action.Environment)
             : null;
-
-        if (!string.IsNullOrEmpty(action.ClaudeConfigDir))
-        {
-            env ??= new Dictionary<string, string>();
-            env["CLAUDE_CONFIG_DIR"] = action.ClaudeConfigDir;
-        }
 
         var args = new List<string>();
         if (action.ClaudeArgs != null)

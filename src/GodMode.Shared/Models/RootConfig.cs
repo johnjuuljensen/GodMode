@@ -1,97 +1,37 @@
-using System.Text.Json;
-
 namespace GodMode.Shared.Models;
 
 /// <summary>
-/// Configuration for a project root directory, read from .godmode-root/config.json
-/// (falls back to legacy .godmode-root.json).
-/// Supports multiple named create actions via the Actions array.
-/// When Actions is not set, root-level fields define a single implicit "Create" action (backward compat).
-/// Root-level Environment, ClaudeArgs, and ClaudeConfigDir serve as shared defaults
-/// that are merged with each action's own values when Actions is explicitly set.
+/// Resolved configuration for a project root directory.
+/// Built by RootConfigReader from multi-file discovery and merging:
+/// config.json (base) + config.{action}.json (per-action overlays).
+/// All merging logic lives in RootConfigReader — this is the final resolved output.
 /// </summary>
 public record RootConfig(
     string? Description = null,
-    CreateAction[]? Actions = null,
-    // Shared config (merged with action-level when Actions is set)
-    Dictionary<string, string>? Environment = null,
-    string[]? ClaudeArgs = null,
-    string? ClaudeConfigDir = null,
-    // Legacy single-action fields (used when Actions is null for backward compat)
-    JsonElement? InputSchema = null,
-    string[]? Setup = null,
-    string[]? Bootstrap = null,
-    string[]? Teardown = null,
-    string? NameTemplate = null,
-    string? PromptTemplate = null,
-    bool ScriptsCreateFolder = false
-)
+    IReadOnlyDictionary<string, CreateAction>? Actions = null)
 {
     /// <summary>
-    /// Returns the effective list of create actions.
-    /// If Actions is set, returns those. Otherwise creates a single "Create" action
-    /// from the legacy root-level fields.
-    /// </summary>
-    public CreateAction[] GetEffectiveActions() =>
-        Actions is { Length: > 0 }
-            ? Actions
-            :
-            [
-                new CreateAction(
-                    "Create",
-                    Description,
-                    InputSchema,
-                    Setup, Bootstrap, Teardown,
-                    Environment, ClaudeArgs,
-                    NameTemplate, PromptTemplate,
-                    ClaudeConfigDir, ScriptsCreateFolder)
-            ];
-
-    /// <summary>
-    /// Resolves a specific action by name, merging root-level shared config with action-level config.
-    /// Returns null if the action is not found.
+    /// Resolves a specific action by name (case-insensitive).
     /// When actionName is null, returns the first (or only) action.
+    /// Returns null if no actions exist or the named action is not found.
     /// </summary>
     public CreateAction? ResolveAction(string? actionName)
     {
-        var actions = GetEffectiveActions();
-        var action = actionName != null
-            ? Array.Find(actions, a => string.Equals(a.Name, actionName, StringComparison.OrdinalIgnoreCase))
-            : actions.Length > 0 ? actions[0] : null;
+        if (Actions is not { Count: > 0 }) return null;
 
-        if (action == null) return null;
-
-        // When using explicit Actions, merge root-level shared config with action-level
-        if (Actions is { Length: > 0 })
+        if (actionName != null)
         {
-            return action with
-            {
-                Environment = MergeDictionaries(Environment, action.Environment),
-                ClaudeArgs = MergeArrays(ClaudeArgs, action.ClaudeArgs),
-                ClaudeConfigDir = action.ClaudeConfigDir ?? ClaudeConfigDir
-            };
+            return Actions.TryGetValue(actionName, out var action) ? action : null;
         }
 
-        // Legacy mode: action already has all config from root-level fields
-        return action;
+        // Return first action when no name specified
+        using var enumerator = Actions.Values.GetEnumerator();
+        return enumerator.MoveNext() ? enumerator.Current : null;
     }
 
-    private static Dictionary<string, string>? MergeDictionaries(
-        Dictionary<string, string>? baseDict, Dictionary<string, string>? overrideDict)
-    {
-        if (baseDict == null) return overrideDict;
-        if (overrideDict == null) return baseDict;
-
-        var merged = new Dictionary<string, string>(baseDict);
-        foreach (var (key, value) in overrideDict)
-            merged[key] = value;
-        return merged;
-    }
-
-    private static string[]? MergeArrays(string[]? baseArr, string[]? additionalArr)
-    {
-        if (baseArr == null) return additionalArr;
-        if (additionalArr == null) return baseArr;
-        return [.. baseArr, .. additionalArr];
-    }
+    /// <summary>
+    /// Returns all effective create actions.
+    /// </summary>
+    public IEnumerable<CreateAction> GetEffectiveActions() =>
+        Actions?.Values ?? [];
 }

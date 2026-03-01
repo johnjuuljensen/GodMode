@@ -10,13 +10,12 @@ public record CreateAction(
     string Name,
     string? Description = null,
     JsonElement? InputSchema = null,
-    string[]? Setup = null,
-    string[]? Bootstrap = null,
-    string[]? Teardown = null,
+    string[]? Prepare = null,
+    string[]? Create = null,
+    string[]? Delete = null,
     Dictionary<string, string>? Environment = null,
     string[]? ClaudeArgs = null,
     string? NameTemplate = null,
     string? PromptTemplate = null,
-    string? ClaudeConfigDir = null,
     bool ScriptsCreateFolder = false
 );

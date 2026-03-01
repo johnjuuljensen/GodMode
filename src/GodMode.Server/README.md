@@ -6,8 +6,8 @@ SignalR server for the Claude Autonomous Development System. This lightweight .N
 
 - **Real-time Communication**: SignalR hub for bidirectional communication
 - **Process Management**: Spawn and control Claude Code processes
-- **Config-Driven Project Roots**: Each root directory defines its own creation workflow via `.godmode-root/config.json`
-- **Script-Based Bootstrap**: VCS-agnostic — all setup/bootstrap logic lives in scripts, not server code
+- **Config-Driven Project Roots**: Multi-file config discovery with per-action overlays
+- **Script-Based Creation**: VCS-agnostic — all prepare/create/delete logic lives in scripts, not server code
 - **Cross-Platform Scripts**: Extensionless script references resolve to `.ps1` on Windows, `.sh` on Linux
 - **State Persistence**: Save and recover project state across restarts
 - **Git Integration**: Track git status and changes
@@ -23,53 +23,98 @@ SignalR server for the Claude Autonomous Development System. This lightweight .N
     "default": "projects",
     "work": "C:\\Users\\me\\work\\projects"
   },
-  "ClaudeConfigDir": "C:\\Users\\me\\.claude",
   "Urls": "http://0.0.0.0:31337"
 }
 ```
 
-`ProjectRoots` maps logical names to directory paths. Each root can optionally contain a `.godmode-root/config.json` file to customize the creation workflow. Roots without the config file get a default form (project name + prompt).
+`ProjectRoots` maps logical names to directory paths. Each root can optionally contain a `.godmode-root/` directory with config files to customize the creation workflow. Roots without config get a default form (project name + prompt).
 
 ## Project Roots
 
-### .godmode-root/config.json
+### Multi-File Config Structure
 
-Place this file in a project root directory to configure how projects are created there. The server re-reads it on each operation — no restart needed. Legacy `.godmode-root.json` at the root level is also supported as a fallback.
+```
+.godmode-root/
+├── config.json               # Base/shared config (also the default action if no others exist)
+├── config.freeform.json      # Freeform action (merged with config.json base)
+├── config.issue.json         # Issue action (merged with config.json base)
+├── freeform/                 # Freeform action resources
+│   ├── schema.json           # Input schema (discovered by convention)
+│   └── create.ps1 / .sh      # Action-specific create script
+├── issue/                    # Issue action resources
+│   ├── schema.json           # Input schema
+│   └── create.ps1 / .sh      # Action-specific create script
+└── scripts/                  # Shared scripts
+    ├── prepare.ps1 / .sh     # Shared prepare script
+    └── delete.ps1 / .sh      # Shared delete script
+```
+
+### config.json — Base/Shared Config
+
+Defines shared settings (prepare + delete scripts, environment, claude args) inherited by all actions:
 
 ```json
 {
   "description": "Human-readable description shown in the UI",
-  "environment": { "KEY": "value" },
-  "inputSchema": { ... },
-  "setup": ["scripts/prepare"],
-  "bootstrap": ["scripts/init"],
-  "teardown": ["scripts/cleanup"],
+  "environment": { "KEY": "value", "CLAUDE_CONFIG_DIR": "/path/to/.claude" },
   "claudeArgs": ["--append-system-prompt", "Extra instructions"],
-  "nameTemplate": "{caseId}",
-  "promptTemplate": "Fix {caseId}. {prompt}"
+  "prepare": "scripts/prepare",
+  "delete": "scripts/delete"
 }
 ```
 
-All fields are optional. When the file is missing or empty, the server uses a default schema with `name` and `prompt` fields.
+### config.{action}.json — Per-Action Overlay
+
+Each `config.*.json` file defines an action. Action name is derived from the filename. Fields are merged with config.json:
+
+```json
+{
+  "description": "Create project from a GitHub issue",
+  "scriptsCreateFolder": true,
+  "create": "issue/create",
+  "nameTemplate": "issue_{issueNumber}",
+  "promptTemplate": "Read GitHub issue #{issueNumber}..."
+}
+```
+
+### Config Merging Rules
+
+When resolving an action, `config.json` (base) is merged with `config.{action}.json` (overlay):
+
+| Field | Merge Rule |
+|-------|-----------|
+| Scalars (description, nameTemplate, etc.) | Overlay replaces if present |
+| `environment` | Dictionary merge, overlay keys override |
+| `claudeArgs` | Concatenated (base + overlay) |
+| Script fields (prepare, create, delete) | Overlay replaces entirely |
+
+### Action Discovery
+
+- Scan `config.*.json` → action names from filenames
+- If only `config.json` exists (no `config.*.json`) → single default "Create" action
+- If no config exists at all → default form with name + prompt fields
 
 ### Fields
 
 | Field | Description |
 |-------|-------------|
-| `description` | Shown in the UI when selecting a project root |
+| `description` | Shown in the UI when selecting an action |
 | `environment` | Env vars set for scripts and passed to Claude processes |
-| `inputSchema` | JSON Schema defining the creation form (see below) |
-| `setup` | Scripts run before project folder is created (working dir = root) |
-| `bootstrap` | Scripts run after project folder is created (working dir = project) |
-| `teardown` | Scripts run when a project is deleted |
+| `prepare` | Scripts run before project folder is created (working dir = root) |
+| `create` | Scripts run to create the project (working dir = project or root if scriptsCreateFolder) |
+| `delete` | Scripts run when a project is deleted |
 | `claudeArgs` | Extra CLI arguments appended when starting Claude |
-| `nameTemplate` | Derive project name from inputs, e.g. `"{caseId}"` |
-| `promptTemplate` | Derive initial prompt from inputs, e.g. `"Fix {caseId}. {prompt}"` |
+| `nameTemplate` | Derive project name from inputs, e.g. `"issue_{issueNumber}"` |
+| `promptTemplate` | Derive initial prompt from inputs |
+| `scriptsCreateFolder` | If true, create scripts are responsible for creating the project directory |
 
-### Input Schema
+Script fields accept either a single string or a string array in JSON. Paths are relative to `.godmode-root/`.
 
-A JSON Schema subset defining what the creation form looks like. Supported types:
+### Input Schema (Convention-Based)
 
+Place a `schema.json` file in the action's folder: `{actionName}/schema.json`. If no schema file exists, the default schema (name + prompt) is used.
+
+Supported JSON Schema types:
 - `string` — text input
 - `string` + `"x-multiline": true` — multiline text area
 - `string` + `"enum": [...]` — dropdown/combobox
@@ -81,12 +126,7 @@ A JSON Schema subset defining what the creation form looks like. Supported types
   "properties": {
     "name": { "type": "string", "title": "Project Name" },
     "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
-    "skipPermissions": {
-      "type": "boolean",
-      "title": "Skip Permissions",
-      "description": "Start Claude with --dangerously-skip-permissions",
-      "default": "true"
-    }
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
   },
   "required": ["name", "prompt"]
 }
@@ -102,17 +142,6 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 - Windows: tries `.ps1`, `.cmd`, `.bat`
 - Linux/Mac: tries `.sh`
 
-```
-my-project-root/
-├── .godmode-root/
-│   ├── config.json
-│   └── scripts/
-│       ├── init-git.sh      ← Linux
-│       └── init-git.ps1     ← Windows
-```
-
-Config references: `".godmode-root/scripts/init-git"` — works on both platforms.
-
 If a script is specified with an explicit extension (e.g. `"scripts/setup.ps1"`), it's used as-is.
 
 **Environment variables** available to all scripts:
@@ -123,66 +152,10 @@ If a script is specified with an explicit extension (e.g. `"scripts/setup.ps1"`)
 | `GODMODE_PROJECT_PATH` | Project directory path |
 | `GODMODE_PROJECT_ID` | Folder name / project ID |
 | `GODMODE_PROJECT_NAME` | Display name |
-| `GODMODE_INPUT_*` | All form inputs (key uppercased, e.g. `GODMODE_INPUT_CASE_ID`) |
-| *(from `environment`)* | All vars from the root config's `environment` block |
+| `GODMODE_INPUT_*` | All form inputs (key uppercased, e.g. `GODMODE_INPUT_ISSUE_NUMBER`) |
+| *(from `environment`)* | All vars from the config's `environment` block |
 
 Script stdout is streamed to the client as creation progress. Non-zero exit code aborts creation.
-
-### Examples
-
-**Scratch space** (no config needed):
-```json
-{
-  "description": "Ad-hoc Claude tasks"
-}
-```
-
-**Git-initialized projects**:
-```json
-{
-  "description": "Ad-hoc tasks with git",
-  "bootstrap": [".godmode-root/scripts/init-git"],
-  "claudeArgs": ["--append-system-prompt", "Publish to github.com/myuser"]
-}
-```
-
-**Git worktree workflow**:
-```json
-{
-  "description": "Worktrees for my-app",
-  "environment": { "REPO_URL": "https://github.com/user/my-app.git" },
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "name": { "type": "string", "title": "Branch Name" },
-      "prompt": { "type": "string", "title": "Task Description", "x-multiline": true }
-    },
-    "required": ["name", "prompt"]
-  },
-  "setup": [".godmode-root/scripts/ensure-bare-repo"],
-  "bootstrap": [".godmode-root/scripts/create-worktree"]
-}
-```
-
-**Case management**:
-```json
-{
-  "description": "Fix tasks from Jira",
-  "environment": { "JIRA_URL": "https://myco.atlassian.net" },
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "caseId": { "type": "string", "title": "Case ID" },
-      "prompt": { "type": "string", "title": "Additional Instructions", "x-multiline": true, "default": "Fix the issue" }
-    },
-    "required": ["caseId"]
-  },
-  "nameTemplate": "{caseId}",
-  "promptTemplate": "Fix {caseId}. {prompt}",
-  "setup": [".godmode-root/scripts/ensure-bare-repo"],
-  "bootstrap": [".godmode-root/scripts/setup-worktree", ".godmode-root/scripts/fetch-jira-context"]
-}
-```
 
 ## Project Folder Structure
 
@@ -197,7 +170,7 @@ Each project is stored in a folder under its root:
 │   ├── output.jsonl     # Claude output log
 │   ├── session-id       # Claude session ID for resumption
 │   └── .gitignore       # Excludes all .godmode state from git
-├── .gitignore           # Created by bootstrap scripts (excludes .godmode/)
+├── .gitignore           # Created by create scripts (excludes .godmode/)
 └── (project files)      # Working directory for Claude
 ```
 
