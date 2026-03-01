@@ -194,10 +194,37 @@
                                                                    TextTrimming="CharacterEllipsis"
                                                                    Opacity="0.8"
                                                                    VerticalAlignment="Center" />
+                                                        <!-- Action buttons (when actions are defined) -->
+                                                        <ItemsControl Grid.Column="1"
+                                                                      ItemsSource="{Binding ActionItems}"
+                                                                      IsVisible="{Binding HasActions}">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <StackPanel Orientation="Horizontal" Spacing="2" />
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate x:DataType="vm:RootActionItem">
+                                                                    <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).CreateProjectForRootActionCommand}"
+                                                                            CommandParameter="{Binding .}"
+                                                                            IsVisible="{Binding Root.Server.CanConnect}"
+                                                                            ToolTip.Tip="{Binding Action.Description}"
+                                                                            Padding="5,1" FontSize="9"
+                                                                            Background="{DynamicResource BgSurfaceBrush}"
+                                                                            Foreground="{DynamicResource TextTertiaryBrush}"
+                                                                            BorderThickness="0"
+                                                                            CornerRadius="4"
+                                                                            Opacity="0.9">
+                                                                        <TextBlock Text="{Binding Action.Name}" FontSize="9" />
+                                                                    </Button>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                        <!-- Fallback + button (when no actions defined) -->
                                                         <Button Grid.Column="1"
                                                                 Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).CreateProjectForRootCommand}"
                                                                 CommandParameter="{Binding .}"
-                                                                IsVisible="{Binding Server.CanConnect}"
+                                                                IsVisible="{Binding !HasActions}"
                                                                 ToolTip.Tip="New project"
                                                                 Padding="4,1" FontSize="11"
                                                                 Background="Transparent"
@@ -228,7 +255,7 @@
                                                                     </MultiBinding>
                                                                 </Button.Background>
 
-                                                                <Grid ColumnDefinitions="Auto,*,Auto">
+                                                                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                                                                     <Ellipse Grid.Column="0"
                                                                              Width="5" Height="5"
                                                                              Fill="{Binding State, Converter={StaticResource StateToColorConverter}}"
@@ -266,6 +293,21 @@
                                                                                Foreground="{DynamicResource TextTertiaryBrush}"
                                                                                VerticalAlignment="Top"
                                                                                Margin="4,2,0,0" />
+
+                                                                    <!-- Delete button -->
+                                                                    <Button Grid.Column="3"
+                                                                            Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).DeleteProjectCommand}"
+                                                                            CommandParameter="{Binding .}"
+                                                                            ToolTip.Tip="Delete project"
+                                                                            Padding="4,2"
+                                                                            Background="Transparent"
+                                                                            Foreground="{DynamicResource TextTertiaryBrush}"
+                                                                            BorderThickness="0"
+                                                                            VerticalAlignment="Center"
+                                                                            Margin="4,0,0,0"
+                                                                            Opacity="0.5">
+                                                                        <TextBlock Text="✕" FontSize="10" />
+                                                                    </Button>
                                                                 </Grid>
                                                             </Button>
                                                         </DataTemplate>
@@ -303,7 +345,7 @@
                                                 </MultiBinding>
                                             </Button.Background>
 
-                                            <Grid ColumnDefinitions="Auto,*,Auto">
+                                            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
                                                 <Ellipse Grid.Column="0"
                                                          Width="5" Height="5"
                                                          Fill="{Binding State, Converter={StaticResource StateToColorConverter}}"
@@ -341,6 +383,21 @@
                                                            Foreground="{DynamicResource TextTertiaryBrush}"
                                                            VerticalAlignment="Top"
                                                            Margin="4,2,0,0" />
+
+                                                <!-- Delete button -->
+                                                <Button Grid.Column="3"
+                                                        Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).DeleteProjectCommand}"
+                                                        CommandParameter="{Binding .}"
+                                                        ToolTip.Tip="Delete project"
+                                                        Padding="4,2"
+                                                        Background="Transparent"
+                                                        Foreground="{DynamicResource TextTertiaryBrush}"
+                                                        BorderThickness="0"
+                                                        VerticalAlignment="Center"
+                                                        Margin="4,0,0,0"
+                                                        Opacity="0.5">
+                                                    <TextBlock Text="✕" FontSize="10" />
+                                                </Button>
                                             </Grid>
                                         </Button>
                                     </DataTemplate>

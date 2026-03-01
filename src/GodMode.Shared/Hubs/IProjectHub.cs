@@ -64,5 +64,5 @@ public interface IProjectHub
     /// <summary>
     /// Deletes a project, running teardown scripts and removing all files.
     /// </summary>
-    Task DeleteProject(string projectId);
+    Task DeleteProject(string projectId, bool force = false);
 }

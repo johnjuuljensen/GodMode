@@ -100,10 +100,10 @@ public class ProjectService : IProjectService
         _lastStatusUpdate.TryRemove(cacheKey, out _);
     }
 
-    public async Task DeleteProjectAsync(string profileName, string hostId, string projectId)
+    public async Task DeleteProjectAsync(string profileName, string hostId, string projectId, bool force = false)
     {
         var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
-        await connection.DeleteProjectAsync(projectId);
+        await connection.DeleteProjectAsync(projectId, force);
 
         // Invalidate cache
         var cacheKey = $"{profileName}:{hostId}:{projectId}";

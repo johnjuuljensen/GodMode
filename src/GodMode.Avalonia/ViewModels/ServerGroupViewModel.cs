@@ -49,6 +49,11 @@ public partial class ServerGroupViewModel : ObservableObject
 	[ObservableProperty]
 	private ObservableCollection<RootGroupViewModel> _rootGroups = new();
 
+	/// <summary>
+	/// Known project roots from the server (includes empty roots).
+	/// </summary>
+	public IReadOnlyList<ProjectRootInfo> KnownRoots { get; set; } = [];
+
 	public string StatusDisplay => IsConnected ? "Online" : State switch
 	{
 		HostState.Running => "Online",
@@ -81,22 +86,36 @@ public partial class ServerGroupViewModel : ObservableObject
 
 	public void RebuildRootGroups(bool sortByName)
 	{
-		var groups = Projects
+		var projectsByRoot = Projects
 			.GroupBy(p => p.RootName ?? "(default)")
-			.OrderBy(g => g.Key)
-			.Select(g =>
-			{
-				var sorted = sortByName
-					? g.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-					: g.OrderByDescending(p => p.UpdatedAt);
+			.ToDictionary(g => g.Key, g => g.AsEnumerable());
 
-				return new RootGroupViewModel
-				{
-					Name = g.Key,
-					Server = this,
-					Projects = new ObservableCollection<ProjectSummary>(sorted)
-				};
-			});
+		// Start with all known roots so empty roots are included
+		var rootNames = KnownRoots.Select(r => r.Name)
+			.Union(projectsByRoot.Keys)
+			.Order();
+
+		var rootInfoByName = KnownRoots.ToDictionary(r => r.Name);
+
+		var groups = rootNames.Select(name =>
+		{
+			var projects = projectsByRoot.GetValueOrDefault(name, []);
+			var sorted = sortByName
+				? projects.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+				: projects.OrderByDescending(p => p.UpdatedAt);
+
+			var rootGroup = new RootGroupViewModel
+			{
+				Name = name,
+				Server = this,
+				Projects = new ObservableCollection<ProjectSummary>(sorted)
+			};
+
+			var actions = rootInfoByName.GetValueOrDefault(name)?.Actions ?? [];
+			rootGroup.ActionItems = actions.Select(a => new RootActionItem(rootGroup, a)).ToList();
+
+			return rootGroup;
+		});
 
 		RootGroups = new ObservableCollection<RootGroupViewModel>(groups);
 	}

@@ -307,14 +307,14 @@ public class ProjectManager : IProjectManager
         await NotifyStatusChanged(project);
     }
 
-    public async Task DeleteProjectAsync(string projectId)
+    public async Task DeleteProjectAsync(string projectId, bool force = false)
     {
         if (!_projects.TryGetValue(projectId, out var project))
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        _logger.LogInformation("Deleting project {ProjectId} ({Name})", projectId, project.Status.Name);
+        _logger.LogInformation("Deleting project {ProjectId} ({Name}), force={Force}", projectId, project.Status.Name, force);
 
         // Stop Claude process if running
         await _processManager.StopProcessAsync(project);
@@ -331,6 +331,9 @@ public class ProjectManager : IProjectManager
             {
                 var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>());
 
+                if (force)
+                    scriptEnv["GODMODE_FORCE"] = "true";
+
                 await _scriptRunner.RunAsync(
                     action.Delete,
                     rootPath,
@@ -343,9 +346,9 @@ public class ProjectManager : IProjectManager
         // Remove from tracking
         _projects.TryRemove(projectId, out _);
 
-        // Delete project folder directly (teardown may have partially cleaned it up)
-        if (Directory.Exists(project.ProjectPath))
-            Directory.Delete(project.ProjectPath, recursive: true);
+        // Delete project folder — use robust deletion to handle locked/read-only files
+        // (common with .git directories on Windows after git init or process shutdown)
+        await DeleteDirectoryRobustAsync(project.ProjectPath);
 
         _logger.LogInformation("Project {ProjectId} deleted successfully", projectId);
     }
@@ -579,6 +582,38 @@ public class ProjectManager : IProjectManager
                 _logger.LogError(ex, "Failed to recover project from {Path}", projectPath);
             }
         });
+    }
+
+    /// <summary>
+    /// Robustly deletes a directory, handling read-only files and retrying on lock conflicts.
+    /// Git directories on Windows often have read-only or temporarily locked files.
+    /// </summary>
+    private async Task DeleteDirectoryRobustAsync(string path)
+    {
+        if (!Directory.Exists(path)) return;
+
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                // Clear read-only attributes that git sets on object files
+                foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                {
+                    var attrs = File.GetAttributes(file);
+                    if ((attrs & FileAttributes.ReadOnly) != 0)
+                        File.SetAttributes(file, attrs & ~FileAttributes.ReadOnly);
+                }
+
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (Exception ex) when (attempt < 2 && ex is UnauthorizedAccessException or IOException)
+            {
+                _logger.LogWarning("Delete attempt {Attempt} failed for {Path}: {Message}. Retrying...",
+                    attempt + 1, path, ex.Message);
+                await Task.Delay(500 * (attempt + 1));
+            }
+        }
     }
 
     /// <summary>

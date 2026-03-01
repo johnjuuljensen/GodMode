@@ -60,7 +60,7 @@ public interface IProjectManager
     /// <summary>
     /// Deletes a project, running teardown scripts and removing all files.
     /// </summary>
-    Task DeleteProjectAsync(string projectId);
+    Task DeleteProjectAsync(string projectId, bool force = false);
 
     /// <summary>
     /// Cleans up resources for a disconnected client.

@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GodMode.ClientBase.Services.Models;
@@ -15,13 +16,14 @@ public partial class MainViewModel : ViewModelBase
 	private readonly IHostConnectionService _hostConnectionService;
 	private readonly IProjectService _projectService;
 	private readonly INotificationService _notificationService;
+	private readonly IDialogService _dialogService;
 	private readonly HashSet<string> _subscribedConnections = new();
 	private readonly HashSet<string> _hiddenProjectIds = new();
 	private bool _suppressProfileChange;
 
 	// Events for shell orchestration (replaces page navigation)
 	public event Action<ServerGroupViewModel, ProjectSummary>? ProjectSelected;
-	public event Action<ServerGroupViewModel, string?>? CreateProjectRequested;
+	public event Action<ServerGroupViewModel, string?, string?>? CreateProjectRequested;
 	public event Action<string>? AddServerRequested;
 	public event Action? AddProfileRequested;
 	public event Action<ServerGroupViewModel>? EditServerRequested;
@@ -67,13 +69,15 @@ public partial class MainViewModel : ViewModelBase
 		IProfileService profileService,
 		IHostConnectionService hostConnectionService,
 		IProjectService projectService,
-		INotificationService notificationService)
+		INotificationService notificationService,
+		IDialogService dialogService)
 		: base(navigationService)
 	{
 		_profileService = profileService;
 		_hostConnectionService = hostConnectionService;
 		_projectService = projectService;
 		_notificationService = notificationService;
+		_dialogService = dialogService;
 	}
 
 	public bool IsAllProfilesSelected => SelectedProfileOption == AllProfilesOption;
@@ -159,13 +163,19 @@ public partial class MainViewModel : ViewModelBase
 	[RelayCommand]
 	private void CreateProject(ServerGroupViewModel server)
 	{
-		CreateProjectRequested?.Invoke(server, null);
+		CreateProjectRequested?.Invoke(server, null, null);
 	}
 
 	[RelayCommand]
 	private void CreateProjectForRoot(RootGroupViewModel root)
 	{
-		CreateProjectRequested?.Invoke(root.Server, root.Name);
+		CreateProjectRequested?.Invoke(root.Server, root.Name, null);
+	}
+
+	[RelayCommand]
+	private void CreateProjectForRootAction(RootActionItem item)
+	{
+		CreateProjectRequested?.Invoke(item.Root.Server, item.Root.Name, item.Action.Name);
 	}
 
 	[RelayCommand]
@@ -240,10 +250,14 @@ public partial class MainViewModel : ViewModelBase
 		var server = Servers.FirstOrDefault(s => s.Projects.Contains(project));
 		if (server == null) return;
 
+		var (confirmed, force) = await _dialogService.ConfirmDeleteAsync(project.Name);
+		if (!confirmed) return;
+
 		try
 		{
-			await _projectService.DeleteProjectAsync(server.ProfileName, server.Id, project.Id);
+			await _projectService.DeleteProjectAsync(server.ProfileName, server.Id, project.Id, force);
 			server.Projects.Remove(project);
+			server.RebuildRootGroups(SortByName);
 		}
 		catch (Exception ex)
 		{
@@ -410,22 +424,31 @@ public partial class MainViewModel : ViewModelBase
 			{
 				connection.ProjectCreatedReceived += status =>
 				{
-					// Add the new project to the matching server's list
-					var target = Servers.FirstOrDefault(s =>
-						s.ProfileName == server.ProfileName && s.Id == server.Id);
-					if (target != null)
+					Dispatcher.UIThread.Post(() =>
 					{
-						var summary = new ProjectSummary(
-							status.Id, status.Name, status.State,
-							status.UpdatedAt, status.CurrentQuestion, status.RootName);
-						target.Projects.Insert(0, summary);
-						target.RebuildRootGroups(SortByName);
-					}
+						// Add the new project to the matching server's list
+						var target = Servers.FirstOrDefault(s =>
+							s.ProfileName == server.ProfileName && s.Id == server.Id);
+						if (target != null)
+						{
+							var summary = new ProjectSummary(
+								status.Id, status.Name, status.State,
+								status.UpdatedAt, status.CurrentQuestion, status.RootName);
+							target.Projects.Insert(0, summary);
+							target.RebuildRootGroups(SortByName);
+						}
+					});
 				};
 			}
 
-			var projects = await connection.ListProjectsAsync();
-			System.Diagnostics.Debug.WriteLine($"[GodMode] {server.Name}: loaded {projects.Count()} projects");
+			var rootsTask = connection.ListProjectRootsAsync();
+			var projectsTask = connection.ListProjectsAsync();
+			await Task.WhenAll(rootsTask, projectsTask);
+
+			var roots = await rootsTask;
+			var projects = await projectsTask;
+			System.Diagnostics.Debug.WriteLine($"[GodMode] {server.Name}: loaded {projects.Count()} projects, {roots.Count()} roots");
+			server.KnownRoots = roots.ToList();
 			server.Projects = new ObservableCollection<ProjectSummary>(projects);
 			server.RebuildRootGroups(SortByName);
 		}

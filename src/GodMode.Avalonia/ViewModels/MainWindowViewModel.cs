@@ -264,12 +264,13 @@ public partial class MainWindowViewModel : ObservableObject
 		ContentViewModel = vm;
 	}
 
-	private void OnCreateProjectRequested(ServerGroupViewModel server, string? rootName)
+	private void OnCreateProjectRequested(ServerGroupViewModel server, string? rootName, string? actionName)
 	{
 		var vm = App.Services.GetRequiredService<CreateProjectViewModel>();
 		vm.ProfileName = server.ProfileName;
 		vm.HostId = server.Id;
 		vm.PreselectedRootName = rootName;
+		vm.PreselectedActionName = actionName;
 		vm.Completed += () => CloseModal();
 		ModalViewModel = vm;
 		IsModalVisible = true;

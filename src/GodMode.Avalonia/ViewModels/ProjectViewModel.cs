@@ -12,6 +12,7 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 {
 	private readonly IProjectService _projectService;
 	private readonly INotificationService _notificationService;
+	private readonly IDialogService _dialogService;
 	private IDisposable? _outputSubscription;
 	private bool _hasLoaded;
 	private DateTime _lastInputSentAt;
@@ -81,11 +82,13 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	public ProjectViewModel(
 		INavigationService navigationService,
 		IProjectService projectService,
-		INotificationService notificationService)
+		INotificationService notificationService,
+		IDialogService dialogService)
 		: base(navigationService)
 	{
 		_projectService = projectService;
 		_notificationService = notificationService;
+		_dialogService = dialogService;
 	}
 
 	partial void OnProfileNameChanged(string value)
@@ -247,11 +250,14 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	[RelayCommand]
 	private async Task DeleteProjectAsync()
 	{
+		var (confirmed, force) = await _dialogService.ConfirmDeleteAsync(Status?.Name ?? ProjectId);
+		if (!confirmed) return;
+
 		try
 		{
 			IsLoading = true;
 			ErrorMessage = null;
-			await _projectService.DeleteProjectAsync(ProfileName, HostId, ProjectId);
+			await _projectService.DeleteProjectAsync(ProfileName, HostId, ProjectId, force);
 			Navigation.GoBack();
 		}
 		catch (Exception ex)
