@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 	<string name="app_name">GodMode</string>
+
+	<style name="GodMode.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+	</style>
 </resources>

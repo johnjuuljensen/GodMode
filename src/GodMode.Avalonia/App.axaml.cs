@@ -86,6 +86,10 @@ public partial class App : Application
 			{
 				// Some assemblies don't support GetExportedTypes
 			}
+			catch (ReflectionTypeLoadException)
+			{
+				// Assembly has types with missing dependencies (e.g. MAUI) — skip
+			}
 		}
 
 		// Cross-platform voice services (TryAdd — platform overrides already registered above)

@@ -6,7 +6,7 @@ using GodMode.Avalonia;
 
 namespace GodMode.Avalonia.Android;
 
-[Activity(Label = "@string/app_name", MainLauncher = true,
+[Activity(Label = "@string/app_name", Theme = "@style/GodMode.NoActionBar", MainLauncher = true,
 	ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
 public class MainActivity : AvaloniaMainActivity<App>
 {
