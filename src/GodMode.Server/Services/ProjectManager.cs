@@ -176,8 +176,6 @@ public class ProjectManager : IProjectManager
             {
                 _logger.LogError(ex, "Prepare script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
                 project.Status = project.Status with { State = ProjectState.Error };
-                EnsureGodModeDirectory(projectPath);
-                await _statusUpdater.SaveStatusAsync(project);
                 _projects[projectId] = project;
                 throw;
             }
@@ -202,8 +200,6 @@ public class ProjectManager : IProjectManager
             {
                 _logger.LogError(ex, "Create script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
                 project.Status = project.Status with { State = ProjectState.Error };
-                EnsureGodModeDirectory(projectPath);
-                await _statusUpdater.SaveStatusAsync(project);
                 _projects[projectId] = project;
                 throw;
             }
