@@ -39,7 +39,7 @@ dotnet test
 - **GodMode.Avalonia** - Cross-platform Avalonia control plane app
 - **GodMode.ClientBase** - Shared client abstractions, services, and models used by the Avalonia app
 - **GodMode.ProjectFiles** - File system utilities for project folders (status.json, JSONL streams)
-- **GodMode.AI** - Cross-platform AI abstractions (ILanguageModel, tools, tool call parsing, AIConfig)
+- **GodMode.AI** - Cross-platform AI abstractions (IChatClientFactory, IChatClient, tools, tool call parsing, AIConfig, Anthropic provider)
 - **GodMode.AI.LocalInference.Windows** - Windows DirectML ONNX local inference (Phi-4 mini)
 - **GodMode.AI.LocalInference.Mac** - macOS CPU ONNX local inference
 - **GodMode.Voice** - Cross-platform voice/speech abstractions and orchestration (AssistantService, ISpeechRecognizer, VoiceConfig)
@@ -134,7 +134,7 @@ This is a cross-platform application (Windows, macOS, Android, iOS). Follow thes
 - **No `#if` preprocessor directives or `<Compile Remove>` in app projects.** All app code must compile on every platform. If you need platform-specific behavior, define an interface, implement it per-platform, and inject it.
 - **Pragmas and conditionals are a last resort** — only use them when there is genuinely no other way (e.g., suppressing an unavoidable compiler warning on a no-op interface implementation). Never use them to gate features.
 - **Platform projects use conditional csproj patterns** for stub builds on non-target platforms: `<Compile Remove="**/*.cs" />` with an OS condition so they produce empty assemblies elsewhere.
-- **Null/no-op implementations** (`NullLanguageModel`, `NullSpeechRecognizer`, etc.) ensure the app runs gracefully on platforms where a capability isn't yet available.
+- **Null/no-op implementations** (`NullChatClient`, `NullSpeechRecognizer`, etc.) ensure the app runs gracefully on platforms where a capability isn't yet available.
 - **Configuration classes that share a file** (e.g., `AIConfig` and `VoiceConfig` both read/write `~/.godmode/inference.json`) must merge on save — never overwrite the other class's keys.
 
 ## Inference Configuration
@@ -144,17 +144,19 @@ All inference and voice config lives in `~/.godmode/inference.json`. This file i
 ### Config File Structure (`~/.godmode/inference.json`)
 ```json
 {
+  "api_key": "sk-ant-...",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-20250514",
   "phi4_model_path": "~/.godmode/models/phi-4-mini-instruct-onnx-gpu",
-  "npu_model_path": "~/.godmode/models/qwen2.5-0.5b-instruct-onnx",
   "max_tokens": 256,
   "temperature": 0.3,
   "whisper_model_path": "~/.godmode/models/whisper/ggml-base.bin",
   "speech_language": "en-US",
   "prefer_offline_stt": true,
   "tiers": {
-    "Light": { "provider": "npu", "model_path": null },
-    "Medium": { "provider": "directml" },
-    "Heavy": { "provider": "directml" }
+    "Light": { "provider": "anthropic" },
+    "Medium": { "provider": "anthropic" },
+    "Heavy": { "provider": "anthropic" }
   }
 }
 ```
@@ -163,8 +165,10 @@ All inference and voice config lives in `~/.godmode/inference.json`. This file i
 
 | Field | Owner | Description |
 |-------|-------|-------------|
+| `api_key` | AIConfig | API key for remote providers (env var `ANTHROPIC_API_KEY` as fallback) |
+| `provider` | AIConfig | Active provider: `"anthropic"`, `"directml"`, `"cpu"`, `"none"` (default: auto-detect) |
+| `model` | AIConfig | Model ID for remote providers (e.g., `"claude-sonnet-4-20250514"`) |
 | `phi4_model_path` | AIConfig | Path to Phi-4-mini ONNX model dir (must contain `genai_config.json`) |
-| `npu_model_path` | AIConfig | Path to Qwen2.5-0.5B ONNX model dir (must contain `tokenizer.json`) |
 | `max_tokens` | AIConfig | Max generation tokens (default: 256) |
 | `temperature` | AIConfig | Sampling temperature (default: 0.3) |
 | `tiers` | AIConfig | Optional tier→provider mapping (auto-detected if absent) |
@@ -174,18 +178,27 @@ All inference and voice config lives in `~/.godmode/inference.json`. This file i
 
 ### Inference Tier System
 
-The `InferenceRouter` maps task tiers (Light/Medium/Heavy) to execution providers (npu/directml/cpu):
+The `InferenceRouter` maps task tiers (Light/Medium/Heavy) to execution providers via `IChatClientFactory`:
 
-- **Auto-detect mode** (no `tiers` section): Router infers from flat config fields. NPU+DirectML → Light=npu, Medium/Heavy=directml. DirectML only → all tiers=directml.
-- **Explicit tiers**: Add a `tiers` section to override auto-detection. Provider values: `"npu"`, `"directml"`, `"cpu"`, `"auto"`, `"none"`.
-- **Fallback chain**: If a tier's provider fails, falls back through npu→directml→cpu→any loaded model.
-- **Model sharing**: If multiple tiers map to the same provider, they share one model instance.
+- **Auto-detect mode** (no `tiers` section): If `api_key` or `ANTHROPIC_API_KEY` env var is set, uses Anthropic for all tiers. Otherwise falls back to local DirectML/CPU if a model path is configured.
+- **Explicit tiers**: Add a `tiers` section to override auto-detection. Provider values: `"anthropic"`, `"directml"`, `"cpu"`, `"auto"`, `"none"`.
+- **Fallback chain**: If a tier's provider fails, falls back through anthropic→directml→cpu→any loaded client.
+- **Client sharing**: If multiple tiers map to the same provider, they share one `IChatClient` instance.
+- **NPU is disabled**: NPU/VitisAI support has been removed.
+
+### IChatClientFactory Pattern
+
+Inference providers implement `IChatClientFactory` and are registered as keyed DI services:
+- `AnthropicChatClientFactory` ("anthropic") — remote inference via Anthropic API (lives in GodMode.AI)
+- `Phi4ChatClientFactory` ("directml") — local ONNX via DirectML (lives in GodMode.AI.LocalInference.Windows)
+- `OnnxChatClientFactory` ("cpu") — local ONNX on CPU (lives in GodMode.AI.LocalInference.Mac)
+
+The `InferenceRouter` resolves factories from DI by provider key, calls `CreateAsync()`, and stores the resulting `IChatClient` instances.
 
 ### Model Downloads
 
-Run `scripts/download-models.ps1` to download all models to `~/.godmode/models/`:
+Run `scripts/download-models.ps1` to download local models to `~/.godmode/models/`:
 - **Phi-4-mini** (DirectML GPU): `phi-4-mini-instruct-onnx-gpu/` — requires `genai_config.json`
-- **Qwen2.5-0.5B** (NPU): `qwen2.5-0.5b-instruct-onnx/` — requires `tokenizer.json`
 - **Whisper base** (STT): `whisper/ggml-base.bin` — single GGML file
 
 ### Platform Service Discovery

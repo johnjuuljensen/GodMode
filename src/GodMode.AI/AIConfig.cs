@@ -12,17 +12,20 @@ public sealed class AIConfig
     [JsonPropertyName("phi4_model_path")]
     public string? ModelPath { get; set; }
 
-    [JsonPropertyName("npu_model_path")]
-    public string? NpuModelPath { get; set; }
-
-    [JsonPropertyName("execution_provider")]
-    public string? ExecutionProvider { get; set; }
-
     [JsonPropertyName("max_tokens")]
     public int MaxTokens { get; set; } = 256;
 
     [JsonPropertyName("temperature")]
     public double Temperature { get; set; } = 0.3;
+
+    [JsonPropertyName("api_key")]
+    public string? ApiKey { get; set; }
+
+    [JsonPropertyName("provider")]
+    public string? Provider { get; set; }
+
+    [JsonPropertyName("model")]
+    public string? Model { get; set; }
 
     [JsonPropertyName("tiers")]
     public Dictionary<InferenceTier, TierConfig>? Tiers { get; set; }
@@ -71,20 +74,10 @@ public sealed class AIConfig
         existing ??= new Dictionary<string, JsonElement>();
 
         // Merge our keys
-        if (ModelPath is not null)
-            existing["phi4_model_path"] = JsonSerializer.SerializeToElement(ModelPath);
-        else
-            existing.Remove("phi4_model_path");
-
-        if (NpuModelPath is not null)
-            existing["npu_model_path"] = JsonSerializer.SerializeToElement(NpuModelPath);
-        else
-            existing.Remove("npu_model_path");
-
-        if (ExecutionProvider is not null)
-            existing["execution_provider"] = JsonSerializer.SerializeToElement(ExecutionProvider);
-        else
-            existing.Remove("execution_provider");
+        MergeOptional(existing, "phi4_model_path", ModelPath);
+        MergeOptional(existing, "api_key", ApiKey);
+        MergeOptional(existing, "provider", Provider);
+        MergeOptional(existing, "model", Model);
 
         existing["max_tokens"] = JsonSerializer.SerializeToElement(MaxTokens);
         existing["temperature"] = JsonSerializer.SerializeToElement(Temperature);
@@ -96,5 +89,13 @@ public sealed class AIConfig
 
         var json = JsonSerializer.Serialize(existing, JsonOptions);
         File.WriteAllText(ConfigPath, json);
+    }
+
+    private static void MergeOptional(Dictionary<string, JsonElement> existing, string key, string? value)
+    {
+        if (value is not null)
+            existing[key] = JsonSerializer.SerializeToElement(value);
+        else
+            existing.Remove(key);
     }
 }

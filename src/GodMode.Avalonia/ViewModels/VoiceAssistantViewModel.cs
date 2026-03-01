@@ -238,16 +238,14 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		StatusText = "First run — configure inference in config file.";
 		AddMessage("System",
 			$"Welcome to GodMode Voice Assistant!\n\n" +
-			$"No model configured yet. To get started:\n" +
-			$"1. Run the download script: scripts/download-models.ps1\n" +
-			$"2. Or manually edit the config file at:\n" +
-			$"   {AIConfig.ConfigPath}\n\n" +
-			$"Tier configuration example (in inference.json):\n" +
-			$"  \"tiers\": {{\n" +
-			$"    \"Light\": {{ \"provider\": \"npu\", \"model_path\": \"~/.godmode/models/qwen2.5\" }},\n" +
-			$"    \"Medium\": {{ \"provider\": \"directml\" }},\n" +
-			$"    \"Heavy\": {{ \"provider\": \"directml\" }}\n" +
-			$"  }}",
+			$"No inference provider configured. To get started:\n\n" +
+			$"Option 1 — Anthropic API (recommended):\n" +
+			$"  Set ANTHROPIC_API_KEY env var, or add to config:\n" +
+			$"  \"api_key\": \"sk-ant-...\", \"provider\": \"anthropic\"\n\n" +
+			$"Option 2 — Local ONNX model:\n" +
+			$"  Run: scripts/download-models.ps1\n" +
+			$"  Set \"provider\": \"directml\" in config\n\n" +
+			$"Config file: {AIConfig.ConfigPath}",
 			isUser: false);
 	}
 
