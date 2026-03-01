@@ -8,9 +8,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="Avalonia" Version="11.3.10" />
-      <PackageReference Include="Avalonia.Skia" Version="11.3.10" />
-      <PackageReference Include="SkiaSharp" Version="3.119.1" />
+      <PackageReference Include="Avalonia" />
+      <PackageReference Include="Avalonia.Skia" />
+      <PackageReference Include="SkiaSharp" />
     </ItemGroup>
 
     <ItemGroup>
