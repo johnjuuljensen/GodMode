@@ -297,8 +297,9 @@ public sealed class NpuOnnxModel : ILanguageModel, IDisposable
             try
             {
                 options.AppendExecutionProvider_DML();
+                var session = new InferenceSession(modelFile, options);
                 _activeProvider = "DirectML (GPU)";
-                return new InferenceSession(modelFile, options);
+                return session;
             }
             catch
             {

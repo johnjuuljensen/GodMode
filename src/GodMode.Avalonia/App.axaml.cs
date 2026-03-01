@@ -28,8 +28,15 @@ public partial class App : Application
 		// Fire-and-forget: initialize inference router at startup
 		_ = Task.Run(async () =>
 		{
-			var assistant = Services.GetRequiredService<AssistantService>();
-			await assistant.InitializeAsync();
+			try
+			{
+				var assistant = Services.GetRequiredService<AssistantService>();
+				await assistant.InitializeAsync();
+			}
+			catch (Exception ex)
+			{
+				AssistantLog.Write("INIT_ERROR", ex.ToString());
+			}
 		});
 
 		if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
