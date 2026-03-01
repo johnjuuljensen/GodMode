@@ -165,7 +165,7 @@
                                                 </StackPanel>
 
                                                 <!-- Message content -->
-                                                <TextBlock Text="{Binding DisplayContentSummary}"
+                                                <SelectableTextBlock Text="{Binding DisplayContentSummary}"
                                                            IsVisible="{Binding Message.IsExpanded, Converter={StaticResource InverseBoolConverter}}"
                                                            FontSize="11.5"
                                                            LineHeight="17"
@@ -175,7 +175,7 @@
                                                 <!-- Expanded JSON -->
                                                 <ScrollViewer IsVisible="{Binding Message.IsExpanded}"
                                                               MaxHeight="400" Margin="0,4,0,0">
-                                                    <TextBlock Text="{Binding Message.FormattedJson}"
+                                                    <SelectableTextBlock Text="{Binding Message.FormattedJson}"
                                                                FontSize="10" FontFamily="Menlo, Consolas, monospace"
                                                                Foreground="{DynamicResource TextSecondaryBrush}"
                                                                Background="{DynamicResource BgCodeBrush}"
@@ -199,7 +199,7 @@
                                             HorizontalAlignment="Right">
                                         <StackPanel Spacing="2">
                                             <!-- Message content -->
-                                            <TextBlock Text="{Binding DisplayContentSummary}"
+                                            <SelectableTextBlock Text="{Binding DisplayContentSummary}"
                                                        IsVisible="{Binding Message.IsExpanded, Converter={StaticResource InverseBoolConverter}}"
                                                        FontSize="11.5"
                                                        LineHeight="17"
@@ -209,7 +209,7 @@
                                             <!-- Expanded JSON -->
                                             <ScrollViewer IsVisible="{Binding Message.IsExpanded}"
                                                           MaxHeight="400" Margin="0,4,0,0">
-                                                <TextBlock Text="{Binding Message.FormattedJson}"
+                                                <SelectableTextBlock Text="{Binding Message.FormattedJson}"
                                                            FontSize="10" FontFamily="Menlo, Consolas, monospace"
                                                            Foreground="{DynamicResource TextSecondaryBrush}"
                                                            Background="{DynamicResource BgCodeBrush}"
