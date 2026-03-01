@@ -1,3 +1,4 @@
+using System.Reflection;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -24,16 +25,17 @@ public partial class App : Application
 		ConfigureServices(services);
 		Services = services.BuildServiceProvider();
 
-		// Fire-and-forget: load AI model at startup if configured
+		// Fire-and-forget: initialize inference router at startup
 		_ = Task.Run(async () =>
 		{
-			var config = AIConfig.Load();
-			if (!string.IsNullOrEmpty(config.ModelPath) &&
-				Directory.Exists(config.ModelPath) &&
-				File.Exists(Path.Combine(config.ModelPath, "genai_config.json")))
+			try
 			{
 				var assistant = Services.GetRequiredService<AssistantService>();
-				await assistant.InitializeModelAsync(config.ModelPath);
+				await assistant.InitializeAsync();
+			}
+			catch (Exception ex)
+			{
+				AssistantLog.Write("INIT_ERROR", ex.ToString());
 			}
 		});
 
@@ -52,6 +54,15 @@ public partial class App : Application
 	{
 		// ClientBase services - shared config at ~/.godmode
 		services.AddGodModeClientServices();
+
+		// Preload platform assemblies so they're discoverable via reflection.
+		// Without this, GodMode.Voice.Windows / GodMode.AI.LocalInference.Windows
+		// may not be in AppDomain.GetAssemblies() yet (lazy loading).
+		foreach (var dll in Directory.GetFiles(AppContext.BaseDirectory, "GodMode.*.dll"))
+		{
+			try { Assembly.LoadFrom(dll); }
+			catch { /* non-managed or duplicate — skip */ }
+		}
 
 		// Auto-discover and register platform-specific services
 		// (AI inference, speech implementations)

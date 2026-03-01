@@ -55,7 +55,7 @@
                                            FontSize="{StaticResource FontSizeCaption}"
                                            FontWeight="SemiBold"
                                            Foreground="{StaticResource TextMutedBrush}" />
-                                <TextBlock Text="{Binding Text}"
+                                <SelectableTextBlock Text="{Binding Text}"
                                            TextWrapping="Wrap"
                                            FontSize="{StaticResource FontSizeBody}" />
                             </StackPanel>
@@ -65,28 +65,24 @@
             </ItemsControl>
         </ScrollViewer>
 
-        <!-- Settings panel -->
+        <!-- Inference & Settings panel -->
         <Border Grid.Row="2"
                 Background="{StaticResource CardBrush}"
                 CornerRadius="{StaticResource CornerMedium}"
                 Padding="12"
                 Margin="0,8,0,0">
             <StackPanel Spacing="8">
-                <Grid ColumnDefinitions="*,Auto,Auto">
-                    <TextBox Grid.Column="0"
-                             Text="{Binding ModelPath}"
-                             Watermark="Path to Phi-4-mini ONNX model directory..." />
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding InferenceStatusText}"
+                               FontSize="{StaticResource FontSizeBody}"
+                               VerticalAlignment="Center"
+                               TextWrapping="Wrap" />
                     <Button Grid.Column="1"
-                            Content="Load Model"
-                            Command="{Binding LoadModelCommand}"
-                            IsEnabled="{Binding !IsBusy}"
+                            Content="Open Config"
+                            Command="{Binding OpenConfigCommand}"
                             Padding="10,6" Margin="8,0,0,0"
                             FontSize="{StaticResource FontSizeBody}" />
-                    <Button Grid.Column="2"
-                            Content="Browse..."
-                            Padding="10,6" Margin="4,0,0,0"
-                            FontSize="{StaticResource FontSizeBody}"
-                            Click="BrowseButton_Click" />
                 </Grid>
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBlock Text="Speech Language:"
