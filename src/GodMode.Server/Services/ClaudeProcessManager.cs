@@ -38,7 +38,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         Dictionary<string, string>? extraEnvironment = null,
         string[]? extraArgs = null)
     {
-        _logger.LogInformation("Starting Claude process for project {ProjectId}", project.Id);
+        _logger.LogInformation("Starting Claude process for project {ProjectId}", project.Status.Id);
 
         var sessionId = project.SessionId ?? Guid.NewGuid().ToString();
         project.SessionId = sessionId;
@@ -64,11 +64,11 @@ public class ClaudeProcessManager : IClaudeProcessManager
         string[]? extraArgs = null)
     {
         _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
-            project.Id, project.SessionId);
+            project.Status.Id, project.SessionId);
 
         if (string.IsNullOrEmpty(project.SessionId))
         {
-            throw new InvalidOperationException($"Cannot resume project {project.Id}: no session ID found");
+            throw new InvalidOperationException($"Cannot resume project {project.Status.Id}: no session ID found");
         }
 
         // Try --resume first, with session validation callback
@@ -88,7 +88,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         if (sessionNotFound)
         {
             _logger.LogWarning("Resume failed for project {ProjectId}, session {SessionId} not found. Starting fresh session.",
-                project.Id, project.SessionId);
+                project.Status.Id, project.SessionId);
 
             var godModePath = Path.Combine(project.ProjectPath, ".godmode");
             await File.WriteAllTextAsync(
@@ -176,9 +176,9 @@ public class ClaudeProcessManager : IClaudeProcessManager
         {
             _logger.LogInformation(
                 "Claude process exited for project {ProjectId} with exit code {ExitCode} (PID {ProcessId})",
-                project.Id, process.ExitCode, process.Id);
+                project.Status.Id, process.ExitCode, process.Id);
 
-            _processes.TryRemove(project.Id, out _);
+            _processes.TryRemove(project.Status.Id, out _);
 
             // Clean up streams
             outputWriter.Dispose();
@@ -199,7 +199,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
                 outputWriter.WriteLine(e.Data);
 
                 _logger.LogInformation("Claude output [{ProjectId}]: {Output}",
-                    project.Id,
+                    project.Status.Id,
                     e.Data.Length > 200 ? e.Data[..200] + "..." : e.Data);
 
                 // Raise event to notify listeners
@@ -211,13 +211,13 @@ public class ClaudeProcessManager : IClaudeProcessManager
                     }
                     catch (Exception eventEx)
                     {
-                        _logger.LogError(eventEx, "Error in OnOutputReceived handler for project {ProjectId}", project.Id);
+                        _logger.LogError(eventEx, "Error in OnOutputReceived handler for project {ProjectId}", project.Status.Id);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error writing stdout for project {ProjectId}", project.Id);
+                _logger.LogError(ex, "Error writing stdout for project {ProjectId}", project.Status.Id);
             }
         };
 
@@ -229,27 +229,27 @@ public class ClaudeProcessManager : IClaudeProcessManager
             try
             {
                 stderrWriter.WriteLine($"[{DateTime.UtcNow:O}] {e.Data}");
-                _logger.LogWarning("Claude stderr [{ProjectId}]: {Error}", project.Id, e.Data);
+                _logger.LogWarning("Claude stderr [{ProjectId}]: {Error}", project.Status.Id, e.Data);
 
                 onStderrLine?.Invoke(e.Data);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error writing stderr for project {ProjectId}", project.Id);
+                _logger.LogError(ex, "Error writing stderr for project {ProjectId}", project.Status.Id);
             }
         };
 
-        _processes[project.Id] = process;
+        _processes[project.Status.Id] = process;
 
         _logger.LogInformation("Starting Claude process for project {ProjectId} with args: {Args}",
-            project.Id, string.Join(" ", args));
+            project.Status.Id, string.Join(" ", args));
 
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
         _logger.LogInformation("Claude process started for project {ProjectId} with PID {ProcessId}",
-            project.Id, process.Id);
+            project.Status.Id, process.Id);
 
         // Handle cancellation
         cancellationToken.Register(() =>
@@ -258,13 +258,13 @@ public class ClaudeProcessManager : IClaudeProcessManager
             {
                 if (!process.HasExited)
                 {
-                    _logger.LogInformation("Cancellation requested, killing process for project {ProjectId}", project.Id);
+                    _logger.LogInformation("Cancellation requested, killing process for project {ProjectId}", project.Status.Id);
                     process.Kill(entireProcessTree: true);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error killing process for project {ProjectId}", project.Id);
+                _logger.LogWarning(ex, "Error killing process for project {ProjectId}", project.Status.Id);
             }
         });
 
@@ -277,7 +277,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
             if (completed == exitedTcs.Task)
             {
-                _logger.LogInformation("Process exited quickly for project {ProjectId}", project.Id);
+                _logger.LogInformation("Process exited quickly for project {ProjectId}", project.Status.Id);
             }
         }
 
@@ -293,13 +293,13 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
     public async Task SendInputAsync(ProjectInfo project, string input)
     {
-        if (!_processes.TryGetValue(project.Id, out var process) || process.HasExited)
+        if (!_processes.TryGetValue(project.Status.Id, out var process) || process.HasExited)
         {
-            throw new InvalidOperationException($"No running process found for project {project.Id}");
+            throw new InvalidOperationException($"No running process found for project {project.Status.Id}");
         }
 
         _logger.LogInformation("Sending input to project {ProjectId}: {Input}",
-            project.Id,
+            project.Status.Id,
             input.Length > 50 ? input[..50] + "..." : input);
 
         // Send json input: {"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}
@@ -328,7 +328,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
     public async Task StopProcessAsync(ProjectInfo project)
     {
-        _logger.LogInformation("Stopping process for project {ProjectId}", project.Id);
+        _logger.LogInformation("Stopping process for project {ProjectId}", project.Status.Id);
 
         if (project.ProcessCancellation != null)
         {
@@ -337,7 +337,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             project.ProcessCancellation = null;
         }
 
-        if (_processes.TryRemove(project.Id, out var process))
+        if (_processes.TryRemove(project.Status.Id, out var process))
         {
             try
             {
@@ -350,7 +350,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error stopping process for project {ProjectId}", project.Id);
+                _logger.LogWarning(ex, "Error stopping process for project {ProjectId}", project.Status.Id);
             }
         }
 

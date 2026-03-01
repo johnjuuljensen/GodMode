@@ -34,18 +34,9 @@ public partial class App : Application
 
 		if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
 		{
-			// Auto-start embedded server
-			var embeddedServer = Services.GetRequiredService<IEmbeddedServerService>();
-			_ = embeddedServer.StartAsync();
-
 			desktop.MainWindow = new MainWindow
 			{
 				DataContext = Services.GetRequiredService<MainWindowViewModel>()
-			};
-
-			desktop.ShutdownRequested += (_, _) =>
-			{
-				embeddedServer.Stop();
 			};
 		}
 
@@ -119,7 +110,7 @@ public partial class App : Application
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<IDialogService, DialogService>();
 		services.AddSingleton<IThemeService, ThemeService>();
-		services.AddSingleton<IEmbeddedServerService, EmbeddedServerService>();
+		// services.AddSingleton<IEmbeddedServerService, EmbeddedServerService>(); // Disabled — server managed externally
 
 		// ViewModels — singletons for state preservation
 		services.AddSingleton<VoiceAssistantViewModel>();

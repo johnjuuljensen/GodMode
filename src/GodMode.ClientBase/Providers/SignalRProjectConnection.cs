@@ -75,9 +75,9 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         return await _hubProxy.GetStatus(projectId);
     }
 
-    public async Task<ProjectDetail> CreateProjectAsync(string projectRootName, Dictionary<string, JsonElement> inputs)
+    public async Task<ProjectDetail> CreateProjectAsync(string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
     {
-        return await _hubProxy.CreateProject(projectRootName, inputs);
+        return await _hubProxy.CreateProject(projectRootName, actionName, inputs);
     }
 
     public async Task SendInputAsync(string projectId, string input)

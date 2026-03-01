@@ -28,6 +28,8 @@ dotnet run --project src/GodMode.Avalonia/GodMode.Avalonia.csproj
 dotnet test
 ```
 
+**Running/Debugging**: The server and Avalonia app are separate processes — the server is **not** embedded in the Avalonia app. To debug, start both projects concurrently (e.g., "Multiple Startup Projects" in Visual Studio, or compound launch configurations in VS Code).
+
 ## Architecture
 
 ### Projects
@@ -52,10 +54,12 @@ dotnet test
 - `ProjectHub` (Server) - Implements `Hub<IProjectHubClient>, IProjectHub`
 - `SignalRProjectConnection` (ClientBase) - Uses `TypedSignalR.Client` source generator
 
-**Config-Driven Project Roots**
-- Each project root directory can contain a `.godmode-root.json` config file
-- Config defines: input schema (JSON Schema), setup/bootstrap/teardown scripts, environment vars, Claude args
-- `RootConfigReader` reads config fresh on each operation (no restart needed)
+**Config-Driven Project Roots (Multi-File)**
+- Each project root directory can contain a `.godmode-root/` folder with config files
+- `config.json` defines base/shared config (prepare, delete, environment, claudeArgs)
+- `config.{action}.json` files define per-action overlays (merged with base)
+- `{actionName}/schema.json` provides input schema by convention (falls back to default name+prompt)
+- `RootConfigReader` discovers, merges, and resolves configs fresh on each operation (no restart needed)
 - `ScriptRunner` executes scripts with cross-platform extension resolution (.ps1 on Windows, .sh on Linux)
 - `TemplateResolver` resolves `{fieldName}` placeholders in name/prompt templates
 - UIs render dynamic forms from the JSON Schema (string, multiline, boolean, enum fields)
@@ -87,11 +91,20 @@ dotnet test
 ### Project Root Config
 ```
 /root/
-├── .godmode-root.json   # Root config (optional — defines creation workflow)
-├── .godmode-scripts/    # Bootstrap/setup scripts (cross-platform)
-│   ├── init-git.sh      # Linux version
-│   └── init-git.ps1     # Windows version
-└── {project-id}/        # Project folders
+├── .godmode-root/               # Root config and scripts (optional)
+│   ├── config.json              # Base/shared config (prepare, delete, env, claudeArgs)
+│   ├── config.freeform.json     # Per-action overlay (merged with base)
+│   ├── config.issue.json        # Per-action overlay (merged with base)
+│   ├── freeform/                # Action resources
+│   │   ├── schema.json          # Input schema (convention-based)
+│   │   └── create.ps1 / .sh    # Action-specific create script
+│   ├── issue/                   # Action resources
+│   │   ├── schema.json          # Input schema
+│   │   └── create.ps1 / .sh    # Action-specific create script
+│   └── scripts/                 # Shared scripts (cross-platform)
+│       ├── prepare.ps1 / .sh
+│       └── delete.ps1 / .sh
+└── {project-id}/                # Project folders
 ```
 
 ## Code Style Preferences

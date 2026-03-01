@@ -13,7 +13,7 @@ namespace GodMode.Server.Services;
 
 /// <summary>
 /// Manages project folders, lifecycle, and state.
-/// Uses config-driven workflow: reads .godmode-root.json, runs scripts, starts Claude.
+/// Uses config-driven workflow: reads .godmode-root/config.json, runs scripts, starts Claude.
 /// </summary>
 public class ProjectManager : IProjectManager
 {
@@ -59,7 +59,10 @@ public class ProjectManager : IProjectManager
         var roots = _projectFiles.ProjectRoots.Select(kvp =>
         {
             var config = _rootConfigReader.ReadConfig(kvp.Value);
-            return new ProjectRootInfo(kvp.Key, config.Description, config.InputSchema);
+            var actions = config.GetEffectiveActions()
+                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema))
+                .ToArray();
+            return new ProjectRootInfo(kvp.Key, config.Description, actions);
         }).ToArray();
 
         return Task.FromResult(roots);
@@ -71,13 +74,14 @@ public class ProjectManager : IProjectManager
 
         foreach (var project in _projects.Values)
         {
+            var s = project.Status;
             summaries.Add(new ProjectSummary(
-                project.Id,
-                project.Name,
-                project.State,
-                project.UpdatedAt,
-                project.CurrentQuestion,
-                project.RootName
+                s.Id,
+                s.Name,
+                s.State,
+                s.UpdatedAt,
+                s.CurrentQuestion,
+                s.RootName
             ));
         }
 
@@ -91,42 +95,33 @@ public class ProjectManager : IProjectManager
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        return new ProjectStatus(
-            project.Id,
-            project.Name,
-            project.State,
-            project.CreatedAt,
-            project.UpdatedAt,
-            project.CurrentQuestion,
-            project.Metrics,
-            project.Git,
-            project.Tests,
-            project.OutputOffset
-        );
+        return project.Status;
     }
 
     public async Task<ProjectDetail> CreateProjectAsync(CreateProjectRequest request)
     {
-        _logger.LogInformation("Creating project in root '{Root}' with inputs: {InputKeys}",
-            request.ProjectRootName, string.Join(", ", request.Inputs.Keys));
+        _logger.LogInformation("Creating project in root '{Root}' action '{Action}' with inputs: {InputKeys}",
+            request.ProjectRootName, request.ActionName ?? "(default)", string.Join(", ", request.Inputs.Keys));
 
-        // Read root config
+        // Read root config and resolve action
         var rootPath = _projectFiles.GetProjectRootPath(request.ProjectRootName);
         var config = _rootConfigReader.ReadConfig(rootPath);
+        var action = config.ResolveAction(request.ActionName)
+            ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
 
         // Resolve name from inputs or nameTemplate
-        var name = ResolveProjectName(config, request.Inputs);
+        var name = ResolveProjectName(action, request.Inputs);
         if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("Project name is required. Provide a 'name' input or configure nameTemplate in .godmode-root.json.");
+            throw new ArgumentException("Project name is required. Provide a 'name' input or configure nameTemplate in .godmode-root/config.json.");
 
         // Resolve prompt from inputs or promptTemplate
-        var prompt = ResolvePrompt(config, request.Inputs);
+        var prompt = ResolvePrompt(action, request.Inputs);
 
         // Create project folder — either server-managed or script-managed
         var projectId = ProjectFiles.ProjectManager.ConvertNameToPath(name);
         string projectPath;
 
-        if (config.ScriptsCreateFolder)
+        if (action.ScriptsCreateFolder)
         {
             // Scripts will create the project directory (e.g. git worktree add)
             projectPath = Path.Combine(rootPath, projectId);
@@ -138,30 +133,39 @@ public class ProjectManager : IProjectManager
             projectPath = projectFolder.ProjectPath;
         }
 
+        var now = DateTime.UtcNow;
         var project = new ProjectInfo
         {
-            Id = projectId,
-            Name = name,
+            Status = new ProjectStatus(
+                projectId,
+                name,
+                ProjectState.Running,
+                now,
+                now,
+                CurrentQuestion: null,
+                new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0),
+                Git: null,
+                Tests: null,
+                OutputOffset: 0,
+                RootName: request.ProjectRootName
+            ),
             ProjectPath = projectPath,
-            RootName = request.ProjectRootName,
-            State = ProjectState.Running,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            ActionName = action.Name
         };
 
         // Build environment variables for scripts
-        var scriptEnv = BuildScriptEnvironment(rootPath, project, config, request.Inputs);
+        var scriptEnv = BuildScriptEnvironment(rootPath, project, action, request.Inputs);
 
         // Script log file — at root level so it persists regardless of what scripts do
         var logFilePath = GetScriptLogPath(rootPath, projectId);
 
-        // Run setup scripts (always runs in root directory)
-        if (config.Setup is { Length: > 0 })
+        // Run prepare scripts (always runs in root directory)
+        if (action.Prepare is { Length: > 0 })
         {
             try
             {
                 await _scriptRunner.RunAsync(
-                    config.Setup,
+                    action.Prepare,
                     rootPath,
                     rootPath,
                     scriptEnv,
@@ -170,36 +174,32 @@ public class ProjectManager : IProjectManager
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Setup script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
-                project.State = ProjectState.Error;
-                EnsureGodModeDirectory(projectPath);
-                await _statusUpdater.SaveStatusAsync(project);
+                _logger.LogError(ex, "Prepare script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
+                project.Status = project.Status with { State = ProjectState.Error };
                 _projects[projectId] = project;
                 throw;
             }
         }
 
-        // Run bootstrap scripts
-        if (config.Bootstrap is { Length: > 0 })
+        // Run create scripts
+        if (action.Create is { Length: > 0 })
         {
-            // When scripts create the folder, bootstrap runs from root (project dir may not exist yet)
-            var bootstrapWorkDir = config.ScriptsCreateFolder ? rootPath : projectPath;
+            // When scripts create the folder, create runs from root (project dir may not exist yet)
+            var createWorkDir = action.ScriptsCreateFolder ? rootPath : projectPath;
             try
             {
                 await _scriptRunner.RunAsync(
-                    config.Bootstrap,
+                    action.Create,
                     rootPath,
-                    bootstrapWorkDir,
+                    createWorkDir,
                     scriptEnv,
                     msg => _hubContext.Clients.All.CreationProgress(projectId, msg),
                     logFilePath);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Bootstrap script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
-                project.State = ProjectState.Error;
-                EnsureGodModeDirectory(projectPath);
-                await _statusUpdater.SaveStatusAsync(project);
+                _logger.LogError(ex, "Create script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
+                project.Status = project.Status with { State = ProjectState.Error };
                 _projects[projectId] = project;
                 throw;
             }
@@ -208,9 +208,11 @@ public class ProjectManager : IProjectManager
         // Ensure .godmode directory exists (scripts may have created the project dir without it)
         EnsureGodModeDirectory(projectPath);
 
-        // Save project settings (persists across restarts)
+        // Save project settings (persists across restarts, includes action name for delete/resume)
         var skipPermissions = GetBool(request.Inputs, "skipPermissions");
-        var settings = new ProjectFiles.ProjectSettings(DangerouslySkipPermissions: skipPermissions);
+        var settings = new ProjectFiles.ProjectSettings(
+            DangerouslySkipPermissions: skipPermissions,
+            ActionName: action.Name);
         settings.Save(projectPath);
 
         // Save initial status
@@ -219,8 +221,8 @@ public class ProjectManager : IProjectManager
         // Add to tracking
         _projects[projectId] = project;
 
-        // Build claude env/args from root config + project settings
-        var (claudeEnv, claudeArgs) = BuildClaudeConfig(config, settings);
+        // Build claude env/args from action config + project settings
+        var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings);
 
         // Start Claude process
         project.ProcessCancellation = new CancellationTokenSource();
@@ -238,13 +240,12 @@ public class ProjectManager : IProjectManager
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to start Claude process for project {ProjectId}", projectId);
-            project.State = ProjectState.Error;
+            project.Status = project.Status with { State = ProjectState.Error };
             await _statusUpdater.SaveStatusAsync(project);
             throw;
         }
 
-        var status = await GetStatusAsync(projectId);
-        return new ProjectDetail(status, project.SessionId ?? "");
+        return new ProjectDetail(project.Status, project.SessionId ?? "");
     }
 
     public async Task SendInputAsync(string projectId, string input)
@@ -256,9 +257,12 @@ public class ProjectManager : IProjectManager
 
         await _processManager.SendInputAsync(project, input);
 
-        project.State = ProjectState.Running;
-        project.CurrentQuestion = null;
-        project.UpdatedAt = DateTime.UtcNow;
+        project.Status = project.Status with
+        {
+            State = ProjectState.Running,
+            CurrentQuestion = null,
+            UpdatedAt = DateTime.UtcNow
+        };
 
         await _statusUpdater.SaveStatusAsync(project);
         await NotifyStatusChanged(project);
@@ -273,8 +277,11 @@ public class ProjectManager : IProjectManager
 
         await _processManager.StopProcessAsync(project);
 
-        project.State = ProjectState.Stopped;
-        project.UpdatedAt = DateTime.UtcNow;
+        project.Status = project.Status with
+        {
+            State = ProjectState.Stopped,
+            UpdatedAt = DateTime.UtcNow
+        };
 
         await _statusUpdater.SaveStatusAsync(project);
         await NotifyStatusChanged(project);
@@ -287,24 +294,25 @@ public class ProjectManager : IProjectManager
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        _logger.LogInformation("Deleting project {ProjectId} ({Name})", projectId, project.Name);
+        _logger.LogInformation("Deleting project {ProjectId} ({Name})", projectId, project.Status.Name);
 
         // Stop Claude process if running
         await _processManager.StopProcessAsync(project);
 
-        // Run teardown scripts if configured (failures block deletion)
+        // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
-        if (project.RootName != null)
+        if (project.Status.RootName != null)
         {
-            var rootPath = _projectFiles.GetProjectRootPath(project.RootName);
+            var rootPath = _projectFiles.GetProjectRootPath(project.Status.RootName);
             var config = _rootConfigReader.ReadConfig(rootPath);
+            var action = config.ResolveAction(project.ActionName);
 
-            if (config.Teardown is { Length: > 0 })
+            if (action?.Delete is { Length: > 0 })
             {
-                var scriptEnv = BuildScriptEnvironment(rootPath, project, config, new Dictionary<string, JsonElement>());
+                var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>());
 
                 await _scriptRunner.RunAsync(
-                    config.Teardown,
+                    action.Delete,
                     rootPath,
                     rootPath,
                     scriptEnv,
@@ -333,14 +341,13 @@ public class ProjectManager : IProjectManager
         if (project.ProcessId != 0 && _processManager.IsProcessRunning(project.ProcessId))
         {
             _logger.LogInformation("Project {ProjectId} already has a running process with PID {ProcessId} (state: {State})",
-                projectId, project.ProcessId, project.State);
+                projectId, project.ProcessId, project.Status.State);
 
-            if (project.State == ProjectState.Idle)
+            if (project.Status.State == ProjectState.Idle)
             {
                 _logger.LogInformation("Project {ProjectId} is idle with running process, sending continue prompt", projectId);
                 await _processManager.SendInputAsync(project, "Continue");
-                project.State = ProjectState.Running;
-                project.UpdatedAt = DateTime.UtcNow;
+                project.Status = project.Status with { State = ProjectState.Running, UpdatedAt = DateTime.UtcNow };
                 await _statusUpdater.SaveStatusAsync(project);
                 await NotifyStatusChanged(project);
                 return;
@@ -350,16 +357,16 @@ public class ProjectManager : IProjectManager
         }
 
         // Process is not running - check if state needs correction
-        if (project.State is ProjectState.Running or ProjectState.WaitingInput)
+        if (project.Status.State is ProjectState.Running or ProjectState.WaitingInput)
         {
             _logger.LogWarning("Project {ProjectId} was marked as {State} but process is not running, resetting state",
-                projectId, project.State);
-            project.State = ProjectState.Stopped;
+                projectId, project.Status.State);
+            project.Status = project.Status with { State = ProjectState.Stopped };
         }
 
-        if (project.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
+        if (project.Status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
         {
-            throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {project.State})");
+            throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {project.Status.State})");
         }
 
         // Stop any existing process/cancellation token
@@ -372,26 +379,32 @@ public class ProjectManager : IProjectManager
         _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}",
             projectId, project.SessionId);
 
-        project.State = ProjectState.Running;
-        project.UpdatedAt = DateTime.UtcNow;
+        project.Status = project.Status with { State = ProjectState.Running, UpdatedAt = DateTime.UtcNow };
         project.ProcessCancellation = new CancellationTokenSource();
 
-        // Build claude env/args from root config + persisted project settings
+        // Build claude env/args from action config + persisted project settings
         Dictionary<string, string>? claudeEnv = null;
         string[]? claudeArgs = null;
         try
         {
             var settings = ProjectFiles.ProjectSettings.Load(project.ProjectPath);
-            if (project.RootName != null)
+            // Restore action name from settings if not already set (recovery scenario)
+            project.ActionName ??= settings.ActionName;
+
+            if (project.Status.RootName != null)
             {
-                var rootPath = _projectFiles.GetProjectRootPath(project.RootName);
+                var rootPath = _projectFiles.GetProjectRootPath(project.Status.RootName);
                 var config = _rootConfigReader.ReadConfig(rootPath);
-                (claudeEnv, claudeArgs) = BuildClaudeConfig(config, settings);
+                var action = config.ResolveAction(project.ActionName);
+                if (action != null)
+                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings);
+                else
+                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings);
             }
             else
             {
                 // No root config, just apply project settings
-                (_, claudeArgs) = BuildClaudeConfig(new RootConfig(), settings);
+                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings);
             }
         }
         catch (Exception ex)
@@ -412,7 +425,7 @@ public class ProjectManager : IProjectManager
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to resume Claude process for project {ProjectId}", projectId);
-            project.State = ProjectState.Error;
+            project.Status = project.Status with { State = ProjectState.Error };
             await _statusUpdater.SaveStatusAsync(project);
             throw;
         }
@@ -499,30 +512,30 @@ public class ProjectManager : IProjectManager
                 // Check if state needs to be corrected (was running when server stopped)
                 var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput;
 
-                var project = new ProjectInfo
+                // Determine which root this project belongs to
+                string? rootName = null;
+                foreach (var (rn, rp) in _projectFiles.ProjectRoots)
                 {
-                    Id = status.Id,
-                    Name = status.Name,
-                    ProjectPath = projectPath,
-                    State = stateChanged ? ProjectState.Stopped : status.State,
-                    CreatedAt = status.CreatedAt,
-                    UpdatedAt = stateChanged ? DateTime.UtcNow : status.UpdatedAt,
-                    CurrentQuestion = status.CurrentQuestion,
-                    Metrics = status.Metrics,
-                    Git = status.Git,
-                    Tests = status.Tests,
-                    OutputOffset = status.OutputOffset
-                };
-
-                // Try to determine which root this project belongs to
-                foreach (var (rootName, rootPath) in _projectFiles.ProjectRoots)
-                {
-                    if (projectPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+                    if (projectPath.StartsWith(rp, StringComparison.OrdinalIgnoreCase))
                     {
-                        project.RootName = rootName;
+                        rootName = rn;
                         break;
                     }
                 }
+
+                var correctedStatus = stateChanged
+                    ? status with { State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName }
+                    : status with { RootName = rootName };
+
+                var project = new ProjectInfo
+                {
+                    Status = correctedStatus,
+                    ProjectPath = projectPath
+                };
+
+                // Load action name from settings
+                var settings = ProjectFiles.ProjectSettings.Load(projectPath);
+                project.ActionName = settings.ActionName;
 
                 // Load session ID if exists
                 var sessionIdPath = Path.Combine(godModePath, "session-id");
@@ -531,7 +544,7 @@ public class ProjectManager : IProjectManager
                     project.SessionId = await File.ReadAllTextAsync(sessionIdPath, ct);
                 }
 
-                _projects[project.Id] = project;
+                _projects[project.Status.Id] = project;
 
                 // Only save if state changed
                 if (stateChanged)
@@ -539,7 +552,7 @@ public class ProjectManager : IProjectManager
                     await _statusUpdater.SaveStatusAsync(project);
                 }
 
-                _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Id, project.Name);
+                _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Status.Id, project.Status.Name);
             }
             catch (Exception ex)
             {
@@ -566,7 +579,7 @@ public class ProjectManager : IProjectManager
 
     /// <summary>
     /// Returns a log file path at the root level for script output.
-    /// Uses {rootPath}/logs/{projectId}.log so it survives bootstrap's project dir delete.
+    /// Uses {rootPath}/logs/{projectId}.log so it survives create script's project dir delete.
     /// </summary>
     private static string GetScriptLogPath(string rootPath, string projectId)
     {
@@ -578,10 +591,10 @@ public class ProjectManager : IProjectManager
     /// <summary>
     /// Resolves the project name from inputs or nameTemplate.
     /// </summary>
-    private static string? ResolveProjectName(RootConfig config, Dictionary<string, JsonElement> inputs)
+    private static string? ResolveProjectName(CreateAction action, Dictionary<string, JsonElement> inputs)
     {
-        if (config.NameTemplate != null)
-            return TemplateResolver.Resolve(config.NameTemplate, inputs);
+        if (action.NameTemplate != null)
+            return TemplateResolver.Resolve(action.NameTemplate, inputs);
 
         return TemplateResolver.GetString(inputs, "name");
     }
@@ -589,10 +602,10 @@ public class ProjectManager : IProjectManager
     /// <summary>
     /// Resolves the initial prompt from inputs or promptTemplate.
     /// </summary>
-    private static string? ResolvePrompt(RootConfig config, Dictionary<string, JsonElement> inputs)
+    private static string? ResolvePrompt(CreateAction action, Dictionary<string, JsonElement> inputs)
     {
-        if (config.PromptTemplate != null)
-            return TemplateResolver.Resolve(config.PromptTemplate, inputs);
+        if (action.PromptTemplate != null)
+            return TemplateResolver.Resolve(action.PromptTemplate, inputs);
 
         return TemplateResolver.GetString(inputs, "prompt");
     }
@@ -615,24 +628,18 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
-    /// Builds claude environment and args from root config + project settings.
+    /// Builds claude environment and args from action config + project settings.
     /// </summary>
     private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
-        RootConfig config, ProjectFiles.ProjectSettings settings)
+        CreateAction action, ProjectFiles.ProjectSettings settings)
     {
-        var env = config.Environment != null
-            ? new Dictionary<string, string>(config.Environment)
+        var env = action.Environment != null
+            ? new Dictionary<string, string>(action.Environment)
             : null;
 
-        if (!string.IsNullOrEmpty(config.ClaudeConfigDir))
-        {
-            env ??= new Dictionary<string, string>();
-            env["CLAUDE_CONFIG_DIR"] = config.ClaudeConfigDir;
-        }
-
         var args = new List<string>();
-        if (config.ClaudeArgs != null)
-            args.AddRange(config.ClaudeArgs);
+        if (action.ClaudeArgs != null)
+            args.AddRange(action.ClaudeArgs);
         if (settings.DangerouslySkipPermissions)
             args.Add("--dangerously-skip-permissions");
 
@@ -645,21 +652,21 @@ public class ProjectManager : IProjectManager
     private static Dictionary<string, string> BuildScriptEnvironment(
         string rootPath,
         ProjectInfo project,
-        RootConfig config,
+        CreateAction action,
         Dictionary<string, JsonElement> inputs)
     {
         var env = new Dictionary<string, string>
         {
             ["GODMODE_ROOT_PATH"] = rootPath,
             ["GODMODE_PROJECT_PATH"] = project.ProjectPath,
-            ["GODMODE_PROJECT_ID"] = project.Id,
-            ["GODMODE_PROJECT_NAME"] = project.Name
+            ["GODMODE_PROJECT_ID"] = project.Status.Id,
+            ["GODMODE_PROJECT_NAME"] = project.Status.Name
         };
 
-        // Add root config environment
-        if (config.Environment != null)
+        // Add action environment
+        if (action.Environment != null)
         {
-            foreach (var (key, value) in config.Environment)
+            foreach (var (key, value) in action.Environment)
                 env[key] = value;
         }
 
@@ -699,8 +706,10 @@ public class ProjectManager : IProjectManager
     {
         if (string.IsNullOrWhiteSpace(jsonLine)) return;
 
+        var id = project.Status.Id;
+
         _logger.LogInformation("HandleOutputReceivedAsync for project {ProjectId}: {Line}",
-            project.Id, jsonLine.Length > 100 ? jsonLine[..100] + "..." : jsonLine);
+            id, jsonLine.Length > 100 ? jsonLine[..100] + "..." : jsonLine);
 
         try
         {
@@ -708,13 +717,13 @@ public class ProjectManager : IProjectManager
             var eventType = ExtractEventType(jsonLine);
 
             _logger.LogInformation("Sending raw JSON to group 'project-{ProjectId}', Type: {Type}",
-                project.Id, eventType);
+                id, eventType);
 
             // Send raw JSON to subscribed clients - UI will parse and render
-            await _hubContext.Clients.Group($"project-{project.Id}")
-                .OutputReceived(project.Id, jsonLine);
+            await _hubContext.Clients.Group($"project-{id}")
+                .OutputReceived(id, jsonLine);
 
-            _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", project.Id);
+            _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", id);
 
             // Update status based on event (still need to parse for status updates)
             if (eventType != null)
@@ -732,7 +741,7 @@ public class ProjectManager : IProjectManager
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error in HandleOutputReceivedAsync for project {ProjectId}", project.Id);
+            _logger.LogError(ex, "Error in HandleOutputReceivedAsync for project {ProjectId}", id);
         }
     }
 
@@ -851,14 +860,15 @@ public class ProjectManager : IProjectManager
 
     private async Task SendOutputFromOffsetAsync(ProjectInfo project, long offset, string connectionId)
     {
+        var id = project.Status.Id;
         var outputPath = Path.Combine(project.ProjectPath, ".godmode", "output.jsonl");
 
         _logger.LogInformation("SendOutputFromOffsetAsync called for project {ProjectId}, offset: {Offset}, connectionId: {ConnectionId}",
-            project.Id, offset, connectionId);
+            id, offset, connectionId);
 
         if (!File.Exists(outputPath))
         {
-            _logger.LogInformation("No output file exists yet for project {ProjectId}", project.Id);
+            _logger.LogInformation("No output file exists yet for project {ProjectId}", id);
             return;
         }
 
@@ -879,35 +889,35 @@ public class ProjectManager : IProjectManager
 
                 var eventType = ExtractEventType(line);
                 _logger.LogInformation("Sending existing output line {LineNum} to client {ConnectionId} for project {ProjectId}, Type: {Type}",
-                    lineCount, connectionId, project.Id, eventType);
+                    lineCount, connectionId, id, eventType);
 
                 // Send raw JSON to client - UI will parse and render
                 await _hubContext.Clients.Client(connectionId)
-                    .OutputReceived(project.Id, line);
+                    .OutputReceived(id, line);
             }
 
             _logger.LogInformation("Sent {LineCount} existing output lines to client {ConnectionId} for project {ProjectId}",
-                lineCount, connectionId, project.Id);
+                lineCount, connectionId, id);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error sending output from offset for project {ProjectId}", project.Id);
+            _logger.LogError(ex, "Error sending output from offset for project {ProjectId}", id);
         }
     }
 
     private async Task NotifyStatusChanged(ProjectInfo project)
     {
-        var status = await GetStatusAsync(project.Id);
-        await _hubContext.Clients.All.StatusChanged(project.Id, status);
+        await _hubContext.Clients.All.StatusChanged(project.Status.Id, project.Status);
     }
 
     private string GenerateMetricsHtml(ProjectInfo project)
     {
+        var s = project.Status;
         return $@"
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Metrics - {project.Name}</title>
+    <title>Metrics - {s.Name}</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; }}
         .metric {{ margin: 10px 0; }}
@@ -915,21 +925,21 @@ public class ProjectManager : IProjectManager
     </style>
 </head>
 <body>
-    <h1>Project Metrics: {project.Name}</h1>
+    <h1>Project Metrics: {s.Name}</h1>
     <div class=""metric"">
-        <span class=""label"">Input Tokens:</span> {project.Metrics.InputTokens:N0}
+        <span class=""label"">Input Tokens:</span> {s.Metrics.InputTokens:N0}
     </div>
     <div class=""metric"">
-        <span class=""label"">Output Tokens:</span> {project.Metrics.OutputTokens:N0}
+        <span class=""label"">Output Tokens:</span> {s.Metrics.OutputTokens:N0}
     </div>
     <div class=""metric"">
-        <span class=""label"">Tool Calls:</span> {project.Metrics.ToolCalls}
+        <span class=""label"">Tool Calls:</span> {s.Metrics.ToolCalls}
     </div>
     <div class=""metric"">
-        <span class=""label"">Duration:</span> {project.Metrics.Duration}
+        <span class=""label"">Duration:</span> {s.Metrics.Duration}
     </div>
     <div class=""metric"">
-        <span class=""label"">Cost Estimate:</span> ${project.Metrics.CostEstimate:F4}
+        <span class=""label"">Cost Estimate:</span> ${s.Metrics.CostEstimate:F4}
     </div>
 </body>
 </html>";

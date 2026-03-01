@@ -1,37 +1,28 @@
 using GodMode.Shared.Models;
-using GodMode.Shared.Enums;
 
 namespace GodMode.Server.Models;
 
 /// <summary>
 /// Internal project information tracked by the server.
+/// Composes a <see cref="ProjectStatus"/> for all client-visible state,
+/// and adds server-internal fields (process management, subscriptions).
 /// </summary>
 public class ProjectInfo
 {
-    public required string Id { get; init; }
-    public required string Name { get; init; }
+    public required ProjectStatus Status { get; set; }
+
     /// <summary>
     /// The project directory path. This is also the working directory for Claude.
     /// </summary>
     public required string ProjectPath { get; init; }
+
     public string? SessionId { get; set; }
 
     /// <summary>
-    /// The name of the project root this project belongs to.
-    /// Used to look up root config for environment and Claude args.
+    /// The name of the create action used to create this project.
+    /// Used to look up action-specific config for teardown and resume.
     /// </summary>
-    public string? RootName { get; set; }
-
-    public ProjectState State { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime UpdatedAt { get; set; }
-    public string? CurrentQuestion { get; set; }
-
-    public ProjectMetrics Metrics { get; set; } = new(0, 0, 0, TimeSpan.Zero, 0);
-    public GitStatus? Git { get; set; }
-    public TestStatus? Tests { get; set; }
-
-    public long OutputOffset { get; set; }
+    public string? ActionName { get; set; }
 
     public int ProcessId { get; set; }
     public CancellationTokenSource? ProcessCancellation { get; set; }

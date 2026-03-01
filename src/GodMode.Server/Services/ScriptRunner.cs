@@ -10,7 +10,7 @@ namespace GodMode.Server.Services;
 /// - With extension ("scripts/init.ps1") — used as-is.
 /// - Without extension ("scripts/init") — resolved per OS:
 ///   Windows tries .ps1, .cmd, .bat; Linux/Mac tries .sh.
-///   This lets the same .godmode-root.json work on both platforms
+///   This lets the same config work on both platforms
 ///   when paired scripts (init.sh + init.ps1) live side by side.
 /// </summary>
 public class ScriptRunner : IScriptRunner

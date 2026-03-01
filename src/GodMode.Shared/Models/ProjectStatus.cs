@@ -15,6 +15,7 @@ namespace GodMode.Shared.Models;
 /// <param name="Git">Git status information, if available.</param>
 /// <param name="Tests">Test status information, if available.</param>
 /// <param name="OutputOffset">The byte offset in the output.jsonl file.</param>
+/// <param name="RootName">The name of the project root this project belongs to.</param>
 /// <param name="RepoUrl">Deprecated. Kept for backward compatibility with existing status.json files on disk.</param>
 public record ProjectStatus(
     string Id,
@@ -27,5 +28,6 @@ public record ProjectStatus(
     GitStatus? Git,
     TestStatus? Tests,
     long OutputOffset,
+    string? RootName = null,
     string? RepoUrl = null
 );
