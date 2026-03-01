@@ -424,8 +424,14 @@ public partial class MainViewModel : ViewModelBase
 				};
 			}
 
-			var projects = await connection.ListProjectsAsync();
-			System.Diagnostics.Debug.WriteLine($"[GodMode] {server.Name}: loaded {projects.Count()} projects");
+			var rootsTask = connection.ListProjectRootsAsync();
+			var projectsTask = connection.ListProjectsAsync();
+			await Task.WhenAll(rootsTask, projectsTask);
+
+			var roots = await rootsTask;
+			var projects = await projectsTask;
+			System.Diagnostics.Debug.WriteLine($"[GodMode] {server.Name}: loaded {projects.Count()} projects, {roots.Count()} roots");
+			server.KnownRoots = roots.ToList();
 			server.Projects = new ObservableCollection<ProjectSummary>(projects);
 			server.RebuildRootGroups(SortByName);
 		}
