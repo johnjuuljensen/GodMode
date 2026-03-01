@@ -87,6 +87,13 @@ public sealed class AssistantService
     {
         StatusChanged?.Invoke(this, "Loading AI models...");
         await _router.InitializeAsync();
+
+        // Log tier routing and provider status
+        foreach (var (tier, provider) in _router.TierProviderMap)
+            AssistantLog.Write("INIT", $"Tier {tier} -> {provider}");
+        foreach (var (provider, status) in _router.ProviderStatus)
+            AssistantLog.Write("INIT", $"Provider {provider}: {status}");
+
         StatusChanged?.Invoke(this, _router.IsLoaded ? "Models loaded." : "No models configured.");
     }
 
@@ -94,9 +101,11 @@ public sealed class AssistantService
     {
         var sw = Stopwatch.StartNew();
 
+        AssistantLog.Write("AUDIO", $"Capture started (engine: {_recognizer.EngineName})");
         StatusChanged?.Invoke(this, "Listening...");
         var transcript = await _recognizer.RecognizeSpeechAsync(ct);
         var sttMs = sw.ElapsedMilliseconds;
+        AssistantLog.Write("AUDIO", $"Capture finished ({sttMs}ms)");
 
         if (string.IsNullOrWhiteSpace(transcript))
         {
@@ -143,6 +152,7 @@ public sealed class AssistantService
 
             var llmOutput = await Task.Run(() => _router.GenerateAsync(InferenceTier.Medium, systemPrompt, userText, ct));
             var inferenceMs = sw.ElapsedMilliseconds;
+            AssistantLog.Write("ROUTING", $"Tier: {_router.LastUsedTier} | Provider: {_router.LastUsedProvider}");
             AssistantLog.Write("LLM_RAW", llmOutput);
             AssistantLog.Write("TIMING", $"Inference: {inferenceMs}ms");
 

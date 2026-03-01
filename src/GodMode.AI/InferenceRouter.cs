@@ -28,6 +28,12 @@ public sealed class InferenceRouter : ILanguageModel
     /// <summary>True when at least one model is loaded and ready.</summary>
     public bool IsLoaded => _loadedModels.Values.Any(m => m.IsLoaded);
 
+    /// <summary>Provider used for the most recent GenerateAsync call (for logging/diagnostics).</summary>
+    public string? LastUsedProvider { get; private set; }
+
+    /// <summary>Tier requested for the most recent GenerateAsync call.</summary>
+    public InferenceTier? LastUsedTier { get; private set; }
+
     public InferenceRouter(IServiceProvider services, IHardwareDetector hardwareDetector)
     {
         _services = services;
@@ -77,10 +83,13 @@ public sealed class InferenceRouter : ILanguageModel
     /// </summary>
     public async Task<string> GenerateAsync(InferenceTier tier, string systemPrompt, string userMessage, CancellationToken ct = default)
     {
+        LastUsedTier = tier;
+
         // Try the configured provider for this tier
         if (_tierProviderMap.TryGetValue(tier, out var provider) &&
             _loadedModels.TryGetValue(provider, out var model) && model.IsLoaded)
         {
+            LastUsedProvider = provider;
             return await model.GenerateAsync(systemPrompt, userMessage, ct);
         }
 
@@ -88,15 +97,24 @@ public sealed class InferenceRouter : ILanguageModel
         foreach (var fallback in DefaultFallbackOrder)
         {
             if (_loadedModels.TryGetValue(fallback, out var fbModel) && fbModel.IsLoaded)
+            {
+                LastUsedProvider = fallback;
                 return await fbModel.GenerateAsync(systemPrompt, userMessage, ct);
+            }
         }
 
         // Try any loaded model regardless of tier
-        var anyLoaded = _loadedModels.Values.FirstOrDefault(m => m.IsLoaded);
-        if (anyLoaded is not null)
-            return await anyLoaded.GenerateAsync(systemPrompt, userMessage, ct);
+        foreach (var (key, m) in _loadedModels)
+        {
+            if (m.IsLoaded)
+            {
+                LastUsedProvider = key;
+                return await m.GenerateAsync(systemPrompt, userMessage, ct);
+            }
+        }
 
         // Nothing loaded — NullLanguageModel behavior
+        LastUsedProvider = "none";
         return string.Empty;
     }
 

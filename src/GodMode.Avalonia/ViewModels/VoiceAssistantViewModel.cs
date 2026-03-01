@@ -311,14 +311,21 @@ public partial class VoiceAssistantViewModel : ViewModelBase
 		IsBusy = true;
 		try
 		{
+			var sw = System.Diagnostics.Stopwatch.StartNew();
+			AssistantLog.Write("AUDIO", $"Capture started (engine: {_recognizer.EngineName})");
 			StatusText = "Listening...";
 			var transcript = await _recognizer.RecognizeSpeechAsync(_cts.Token);
+			var sttMs = sw.ElapsedMilliseconds;
+			AssistantLog.Write("AUDIO", $"Capture finished ({sttMs}ms)");
 
 			if (string.IsNullOrWhiteSpace(transcript))
 			{
-				StatusText = "No speech detected.";
+				AssistantLog.Write("AUDIO", $"No speech detected ({sttMs}ms)");
+				StatusText = $"No speech detected. [STT: {sttMs}ms]";
 				return;
 			}
+
+			AssistantLog.Write("TIMING", $"STT: {sttMs}ms");
 
 			// Keyword intercept (no AI needed)
 			if (_voiceContext.Focus is not null && TryHandleUnfocusKeyword(transcript))

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 
 namespace GodMode.Avalonia.Services;
@@ -14,8 +15,9 @@ public interface IEmbeddedServerService : IDisposable
 
 public class EmbeddedServerService : IEmbeddedServerService
 {
+	private const int ServerPort = 31337;
 	private Process? _serverProcess;
-	private readonly string _serverUrl = "http://localhost:31337";
+	private readonly string _serverUrl = $"http://localhost:{ServerPort}";
 
 	public bool IsRunning => _serverProcess is { HasExited: false };
 	public string ServerUrl => _serverUrl;
@@ -24,6 +26,13 @@ public class EmbeddedServerService : IEmbeddedServerService
 	public async Task StartAsync()
 	{
 		if (IsRunning) return;
+
+		// Skip if something is already listening on the port (e.g., standalone Server started by IDE)
+		if (IsPortInUse(ServerPort))
+		{
+			Debug.WriteLine($"EmbeddedServer: Port {ServerPort} already in use, skipping auto-start");
+			return;
+		}
 
 		// Find the server project relative to the app
 		var serverDll = FindServerDll();
@@ -113,6 +122,20 @@ public class EmbeddedServerService : IEmbeddedServerService
 			dir = Path.GetDirectoryName(dir);
 		}
 		return null;
+	}
+
+	private static bool IsPortInUse(int port)
+	{
+		try
+		{
+			using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+			socket.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, port));
+			return false;
+		}
+		catch (SocketException)
+		{
+			return true;
+		}
 	}
 
 	private static string? FindServerDll()

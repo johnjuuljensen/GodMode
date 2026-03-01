@@ -124,6 +124,61 @@ This is a cross-platform application (Windows, macOS, Android, iOS). Follow thes
 - **Null/no-op implementations** (`NullLanguageModel`, `NullSpeechRecognizer`, etc.) ensure the app runs gracefully on platforms where a capability isn't yet available.
 - **Configuration classes that share a file** (e.g., `AIConfig` and `VoiceConfig` both read/write `~/.godmode/inference.json`) must merge on save — never overwrite the other class's keys.
 
+## Inference Configuration
+
+All inference and voice config lives in `~/.godmode/inference.json`. This file is shared between `AIConfig` (AI keys) and `VoiceConfig` (voice keys) — each class owns its keys and merges on save.
+
+### Config File Structure (`~/.godmode/inference.json`)
+```json
+{
+  "phi4_model_path": "~/.godmode/models/phi-4-mini-instruct-onnx-gpu",
+  "npu_model_path": "~/.godmode/models/qwen2.5-0.5b-instruct-onnx",
+  "max_tokens": 256,
+  "temperature": 0.3,
+  "whisper_model_path": "~/.godmode/models/whisper/ggml-base.bin",
+  "speech_language": "en-US",
+  "prefer_offline_stt": true,
+  "tiers": {
+    "Light": { "provider": "npu", "model_path": null },
+    "Medium": { "provider": "directml" },
+    "Heavy": { "provider": "directml" }
+  }
+}
+```
+
+### Key Fields
+
+| Field | Owner | Description |
+|-------|-------|-------------|
+| `phi4_model_path` | AIConfig | Path to Phi-4-mini ONNX model dir (must contain `genai_config.json`) |
+| `npu_model_path` | AIConfig | Path to Qwen2.5-0.5B ONNX model dir (must contain `tokenizer.json`) |
+| `max_tokens` | AIConfig | Max generation tokens (default: 256) |
+| `temperature` | AIConfig | Sampling temperature (default: 0.3) |
+| `tiers` | AIConfig | Optional tier→provider mapping (auto-detected if absent) |
+| `whisper_model_path` | VoiceConfig | Path to Whisper GGML model **file** (e.g., `ggml-base.bin`) |
+| `speech_language` | VoiceConfig | Speech recognition language (default: `en-US`) |
+| `prefer_offline_stt` | VoiceConfig | Prefer offline STT engine (default: true) |
+
+### Inference Tier System
+
+The `InferenceRouter` maps task tiers (Light/Medium/Heavy) to execution providers (npu/directml/cpu):
+
+- **Auto-detect mode** (no `tiers` section): Router infers from flat config fields. NPU+DirectML → Light=npu, Medium/Heavy=directml. DirectML only → all tiers=directml.
+- **Explicit tiers**: Add a `tiers` section to override auto-detection. Provider values: `"npu"`, `"directml"`, `"cpu"`, `"auto"`, `"none"`.
+- **Fallback chain**: If a tier's provider fails, falls back through npu→directml→cpu→any loaded model.
+- **Model sharing**: If multiple tiers map to the same provider, they share one model instance.
+
+### Model Downloads
+
+Run `scripts/download-models.ps1` to download all models to `~/.godmode/models/`:
+- **Phi-4-mini** (DirectML GPU): `phi-4-mini-instruct-onnx-gpu/` — requires `genai_config.json`
+- **Qwen2.5-0.5B** (NPU): `qwen2.5-0.5b-instruct-onnx/` — requires `tokenizer.json`
+- **Whisper base** (STT): `whisper/ggml-base.bin` — single GGML file
+
+### Platform Service Discovery
+
+Platform-specific implementations (speech, AI inference) are registered via `IPlatformServiceRegistrar` discovered at startup by scanning `GodMode.*.dll` assemblies. Platform assemblies are preloaded from the output directory before scanning to avoid lazy-loading gaps.
+
 ## Testing Notes
 
 - Run all tests with `dotnet test`
