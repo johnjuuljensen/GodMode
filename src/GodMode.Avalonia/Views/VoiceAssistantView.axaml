@@ -55,7 +55,7 @@
                                            FontSize="{StaticResource FontSizeCaption}"
                                            FontWeight="SemiBold"
                                            Foreground="{StaticResource TextMutedBrush}" />
-                                <TextBlock Text="{Binding Text}"
+                                <SelectableTextBlock Text="{Binding Text}"
                                            TextWrapping="Wrap"
                                            FontSize="{StaticResource FontSizeBody}" />
                             </StackPanel>
