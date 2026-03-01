@@ -39,6 +39,17 @@ public partial class CreateProjectViewModel : ViewModelBase
 
 	public string? PreselectedRootName { get; set; }
 
+	public string? PreselectedActionName { get; set; }
+
+	/// <summary>
+	/// Whether both root and action were preselected (hides selectors, changes title).
+	/// </summary>
+	public bool HasPreselection => PreselectedRootName != null && PreselectedActionName != null;
+
+	public string ModalTitle => HasPreselection
+		? $"START {PreselectedRootName!.ToUpperInvariant()} {PreselectedActionName!.ToUpperInvariant()}"
+		: "NEW PROJECT";
+
 	[ObservableProperty]
 	private ObservableCollection<CreateActionInfo> _actions = [];
 
@@ -46,9 +57,14 @@ public partial class CreateProjectViewModel : ViewModelBase
 	private CreateActionInfo? _selectedAction;
 
 	/// <summary>
-	/// Whether the action selector should be visible (more than one action available).
+	/// Whether the action selector should be visible (more than one action available and no preselection).
 	/// </summary>
-	public bool ShowActionSelector => Actions.Count > 1;
+	public bool ShowActionSelector => !HasPreselection && Actions.Count > 1;
+
+	/// <summary>
+	/// Whether the root selector should be visible (no preselection).
+	/// </summary>
+	public bool ShowRootSelector => !HasPreselection;
 
 	[ObservableProperty]
 	private ObservableCollection<FormField> _formFields = [];
@@ -119,6 +135,13 @@ public partial class CreateProjectViewModel : ViewModelBase
 				SelectedProjectRoot = (!string.IsNullOrEmpty(PreselectedRootName)
 					? ProjectRoots.FirstOrDefault(r => r.Name == PreselectedRootName)
 					: null) ?? ProjectRoots[0];
+			}
+
+			// Auto-select the preselected action if specified
+			if (!string.IsNullOrEmpty(PreselectedActionName) && Actions.Count > 0)
+			{
+				SelectedAction = Actions.FirstOrDefault(a => a.Name == PreselectedActionName)
+					?? Actions[0];
 			}
 		}
 		catch (Exception ex)

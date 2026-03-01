@@ -15,13 +15,14 @@ public partial class MainViewModel : ViewModelBase
 	private readonly IHostConnectionService _hostConnectionService;
 	private readonly IProjectService _projectService;
 	private readonly INotificationService _notificationService;
+	private readonly IDialogService _dialogService;
 	private readonly HashSet<string> _subscribedConnections = new();
 	private readonly HashSet<string> _hiddenProjectIds = new();
 	private bool _suppressProfileChange;
 
 	// Events for shell orchestration (replaces page navigation)
 	public event Action<ServerGroupViewModel, ProjectSummary>? ProjectSelected;
-	public event Action<ServerGroupViewModel, string?>? CreateProjectRequested;
+	public event Action<ServerGroupViewModel, string?, string?>? CreateProjectRequested;
 	public event Action<string>? AddServerRequested;
 	public event Action? AddProfileRequested;
 	public event Action<ServerGroupViewModel>? EditServerRequested;
@@ -67,13 +68,15 @@ public partial class MainViewModel : ViewModelBase
 		IProfileService profileService,
 		IHostConnectionService hostConnectionService,
 		IProjectService projectService,
-		INotificationService notificationService)
+		INotificationService notificationService,
+		IDialogService dialogService)
 		: base(navigationService)
 	{
 		_profileService = profileService;
 		_hostConnectionService = hostConnectionService;
 		_projectService = projectService;
 		_notificationService = notificationService;
+		_dialogService = dialogService;
 	}
 
 	public bool IsAllProfilesSelected => SelectedProfileOption == AllProfilesOption;
@@ -159,13 +162,19 @@ public partial class MainViewModel : ViewModelBase
 	[RelayCommand]
 	private void CreateProject(ServerGroupViewModel server)
 	{
-		CreateProjectRequested?.Invoke(server, null);
+		CreateProjectRequested?.Invoke(server, null, null);
 	}
 
 	[RelayCommand]
 	private void CreateProjectForRoot(RootGroupViewModel root)
 	{
-		CreateProjectRequested?.Invoke(root.Server, root.Name);
+		CreateProjectRequested?.Invoke(root.Server, root.Name, null);
+	}
+
+	[RelayCommand]
+	private void CreateProjectForRootAction(RootActionItem item)
+	{
+		CreateProjectRequested?.Invoke(item.Root.Server, item.Root.Name, item.Action.Name);
 	}
 
 	[RelayCommand]
@@ -240,10 +249,18 @@ public partial class MainViewModel : ViewModelBase
 		var server = Servers.FirstOrDefault(s => s.Projects.Contains(project));
 		if (server == null) return;
 
+		var confirmed = await _dialogService.ConfirmAsync(
+			"Delete Project",
+			$"Are you sure you want to delete \"{project.Name}\"?",
+			"Delete",
+			"Cancel");
+		if (!confirmed) return;
+
 		try
 		{
 			await _projectService.DeleteProjectAsync(server.ProfileName, server.Id, project.Id);
 			server.Projects.Remove(project);
+			server.RebuildRootGroups(SortByName);
 		}
 		catch (Exception ex)
 		{

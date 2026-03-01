@@ -95,6 +95,8 @@ public partial class ServerGroupViewModel : ObservableObject
 			.Union(projectsByRoot.Keys)
 			.Order();
 
+		var rootInfoByName = KnownRoots.ToDictionary(r => r.Name);
+
 		var groups = rootNames.Select(name =>
 		{
 			var projects = projectsByRoot.GetValueOrDefault(name, []);
@@ -102,12 +104,17 @@ public partial class ServerGroupViewModel : ObservableObject
 				? projects.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
 				: projects.OrderByDescending(p => p.UpdatedAt);
 
-			return new RootGroupViewModel
+			var rootGroup = new RootGroupViewModel
 			{
 				Name = name,
 				Server = this,
 				Projects = new ObservableCollection<ProjectSummary>(sorted)
 			};
+
+			var actions = rootInfoByName.GetValueOrDefault(name)?.Actions ?? [];
+			rootGroup.ActionItems = actions.Select(a => new RootActionItem(rootGroup, a)).ToList();
+
+			return rootGroup;
 		});
 
 		RootGroups = new ObservableCollection<RootGroupViewModel>(groups);

@@ -43,7 +43,7 @@
         <Border Padding="20,16"
                 BorderBrush="{DynamicResource BorderSubtleBrush}"
                 BorderThickness="0,0,0,1">
-            <TextBlock Text="NEW PROJECT"
+            <TextBlock Text="{Binding ModalTitle}"
                        FontSize="11" FontWeight="SemiBold"
                        LetterSpacing="1.5"
                        Foreground="{DynamicResource TextSecondaryBrush}" />
@@ -58,7 +58,7 @@
                              Height="2" />
 
                 <!-- Project Root -->
-                <StackPanel Spacing="4" IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                <StackPanel Spacing="4" IsVisible="{Binding ShowRootSelector}">
                     <TextBlock Text="PROJECT ROOT" FontSize="10" FontWeight="SemiBold"
                                LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
                     <ComboBox ItemsSource="{Binding ProjectRoots}"
