@@ -17,8 +17,8 @@
 
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
     <ProjectReference Include="..\GodMode.AI\GodMode.AI.csproj" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.12.1" />
-    <PackageReference Include="Microsoft.Extensions.AI" Version="9.4.3-preview.1.25230.7" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
   </ItemGroup>
 
   <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('OSX'))">

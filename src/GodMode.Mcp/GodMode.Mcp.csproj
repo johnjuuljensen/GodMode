@@ -8,11 +8,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Amazon.Lambda.AspNetCoreServer.Hosting" Version="1.7.2" />
-    <PackageReference Include="AWSSDK.DynamoDBv2" Version="3.7.400" />
-    <PackageReference Include="AWSSDK.SecretsManager" Version="3.7.400" />
-    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.5.0-preview.1" />
-    <PackageReference Include="Octokit" Version="13.0.1" />
+    <PackageReference Include="Amazon.Lambda.AspNetCoreServer.Hosting" />
+    <PackageReference Include="AWSSDK.DynamoDBv2" />
+    <PackageReference Include="AWSSDK.SecretsManager" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="Octokit" />
   </ItemGroup>
 
 </Project>
