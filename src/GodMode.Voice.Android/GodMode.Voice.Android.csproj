@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<RootNamespace>GodMode.Voice.Android</RootNamespace>
+	</PropertyGroup>
+
+	<!-- Android: full build -->
+	<PropertyGroup Condition="'$(AndroidSdkDirectory)' != '' Or Exists('$(ANDROID_HOME)')">
+		<TargetFramework>net10.0-android35.0</TargetFramework>
+	</PropertyGroup>
+
+	<!-- Fallback for machines without Android workload -->
+	<PropertyGroup Condition="'$(AndroidSdkDirectory)' == '' And !Exists('$(ANDROID_HOME)')">
+		<TargetFramework>net10.0</TargetFramework>
+	</PropertyGroup>
+
+	<ItemGroup Condition="'$(AndroidSdkDirectory)' != '' Or Exists('$(ANDROID_HOME)')">
+		<ProjectReference Include="..\GodMode.AI\GodMode.AI.csproj" />
+		<ProjectReference Include="..\GodMode.Voice\GodMode.Voice.csproj" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(AndroidSdkDirectory)' == '' And !Exists('$(ANDROID_HOME)')">
+		<Compile Remove="**/*.cs" />
+	</ItemGroup>
+
+</Project>

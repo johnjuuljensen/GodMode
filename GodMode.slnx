@@ -11,6 +11,8 @@
     <Project Path="src/GodMode.AI.LocalInference.Mac/GodMode.AI.LocalInference.Mac.csproj" />
     <Project Path="src/GodMode.AI.LocalInference.Windows/GodMode.AI.LocalInference.Windows.csproj" />
     <Project Path="src/GodMode.Avalonia/GodMode.Avalonia.csproj" />
+    <Project Path="src/GodMode.Avalonia.Android/GodMode.Avalonia.Android.csproj" />
+    <Project Path="src/GodMode.Avalonia.Desktop/GodMode.Avalonia.Desktop.csproj" />
     <Project Path="src/GodMode.ClientBase/GodMode.ClientBase.csproj" />
     <Project Path="src/GodMode.Mcp/GodMode.Mcp.csproj" />
     <Project Path="src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj" />
@@ -18,6 +20,7 @@
     <Project Path="src/GodMode.Shared/GodMode.Shared.csproj" />
     <Project Path="src/GodMode.Voice/GodMode.Voice.csproj" />
     <Project Path="src/GodMode.Voice.Mac/GodMode.Voice.Mac.csproj" />
+    <Project Path="src/GodMode.Voice.Android/GodMode.Voice.Android.csproj" />
     <Project Path="src/GodMode.Voice.Windows/GodMode.Voice.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">

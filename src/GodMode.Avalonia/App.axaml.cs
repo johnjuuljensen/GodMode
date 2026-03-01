@@ -46,6 +46,12 @@ public partial class App : Application
 				DataContext = Services.GetRequiredService<MainWindowViewModel>()
 			};
 		}
+		else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
+		{
+			var vm = Services.GetRequiredService<MainWindowViewModel>();
+			vm.IsCompact = true;
+			singleView.MainView = new ShellView { DataContext = vm };
+		}
 
 		base.OnFrameworkInitializationCompleted();
 	}

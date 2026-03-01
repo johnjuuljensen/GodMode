@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>Exe</OutputType>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<RootNamespace>GodMode.Avalonia.Android</RootNamespace>
+	</PropertyGroup>
+
+	<!-- Android: full build -->
+	<PropertyGroup Condition="$(TargetFramework.Contains('android'))">
+		<SupportedOSPlatformVersion>21</SupportedOSPlatformVersion>
+		<ApplicationId>com.godmode.app</ApplicationId>
+		<ApplicationVersion>1</ApplicationVersion>
+		<ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+	</PropertyGroup>
+
+	<!-- Machines with Android workload -->
+	<PropertyGroup Condition="'$(AndroidSdkDirectory)' != '' Or Exists('$(ANDROID_HOME)')">
+		<TargetFramework>net10.0-android35.0</TargetFramework>
+	</PropertyGroup>
+
+	<!-- Fallback for machines without Android workload -->
+	<PropertyGroup Condition="'$(AndroidSdkDirectory)' == '' And !Exists('$(ANDROID_HOME)')">
+		<TargetFramework>net10.0</TargetFramework>
+		<OutputType>Library</OutputType>
+	</PropertyGroup>
+	<ItemGroup Condition="'$(AndroidSdkDirectory)' == '' And !Exists('$(ANDROID_HOME)')">
+		<Compile Remove="**/*.cs" />
+	</ItemGroup>
+
+	<ItemGroup Condition="$(TargetFramework.Contains('android'))">
+		<PackageReference Include="Avalonia.Android" />
+		<ProjectReference Include="..\GodMode.Avalonia\GodMode.Avalonia.csproj" />
+		<ProjectReference Include="..\GodMode.Voice.Android\GodMode.Voice.Android.csproj" />
+	</ItemGroup>
+
+</Project>

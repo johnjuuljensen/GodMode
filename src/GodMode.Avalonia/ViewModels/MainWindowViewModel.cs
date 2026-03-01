@@ -67,6 +67,21 @@ public partial class MainWindowViewModel : ObservableObject
 	[ObservableProperty]
 	private bool _restartBannerIsError;
 
+	// Compact/mobile mode
+	[ObservableProperty]
+	private bool _isCompact;
+
+	[ObservableProperty]
+	private object? _compactContent;
+
+	[ObservableProperty]
+	private bool _canGoBack;
+
+	[ObservableProperty]
+	private bool _isMenuOpen;
+
+	private readonly Stack<object?> _compactNavStack = new();
+
 	public MainWindowViewModel(
 		MainViewModel mainViewModel,
 		IThemeService themeService,
@@ -87,6 +102,9 @@ public partial class MainWindowViewModel : ObservableObject
 		mainViewModel.ConnectionStateChanged += connected => IsConnected = connected;
 
 		_notificationService.BadgeCountUpdated += (_, _) => UpdateWaitingBadge();
+
+		// Compact mode starts showing the sidebar (project list)
+		_compactContent = mainViewModel;
 
 		_ = mainViewModel.LoadCommand.ExecuteAsync(null);
 	}
@@ -202,6 +220,41 @@ public partial class MainWindowViewModel : ObservableObject
 		});
 	}
 
+	// === Compact mode navigation ===
+
+	[RelayCommand]
+	private void GoBack()
+	{
+		if (_compactNavStack.Count > 0)
+		{
+			CompactContent = _compactNavStack.Pop();
+			CanGoBack = _compactNavStack.Count > 0;
+		}
+
+		IsMenuOpen = false;
+	}
+
+	[RelayCommand]
+	private void ToggleMenu() => IsMenuOpen = !IsMenuOpen;
+
+	[RelayCommand]
+	private void NavigateToVoice()
+	{
+		if (!IsCompact || Voice == null) return;
+
+		_compactNavStack.Push(CompactContent);
+		CompactContent = Voice;
+		CanGoBack = true;
+		IsMenuOpen = false;
+	}
+
+	private void CompactNavigateTo(object content)
+	{
+		_compactNavStack.Push(CompactContent);
+		CompactContent = content;
+		CanGoBack = true;
+	}
+
 	private void OnProjectStatusUpdated(string projectId, GodMode.Shared.Enums.ProjectState state, string? currentQuestion)
 	{
 		Dispatcher.UIThread.Post(() =>
@@ -261,7 +314,14 @@ public partial class MainWindowViewModel : ObservableObject
 			_projectViewModels[key] = vm;
 		}
 
-		ContentViewModel = vm;
+		if (IsCompact)
+		{
+			CompactNavigateTo(vm);
+		}
+		else
+		{
+			ContentViewModel = vm;
+		}
 	}
 
 	private void OnCreateProjectRequested(ServerGroupViewModel server, string? rootName, string? actionName)
