@@ -16,10 +16,13 @@ public sealed class ListProjectsTool(VoiceContext context) : ITool
         if (context.ProjectIndex.Count == 0)
             return ToolResult.Ok(Name, "No projects found in the current scope.");
 
+        var activeProfile = context.ActiveProfileName;
         var result = context.ProjectIndex
             .OrderByDescending(p => p.Summary.UpdatedAt)
             .Select(p => new
             {
+                Profile = activeProfile is null ? p.ProfileName : null,
+                Root = p.Summary.RootName,
                 p.Summary.Name,
                 State = p.Summary.State.ToString(),
                 p.Summary.UpdatedAt,
@@ -28,7 +31,9 @@ public sealed class ListProjectsTool(VoiceContext context) : ITool
                 Question = p.Summary.CurrentQuestion
             });
 
-        return ToolResult.Ok(Name, JsonSerializer.Serialize(result,
-            new JsonSerializerOptions { WriteIndented = true }));
+        var scope = activeProfile is not null ? $"Profile: {activeProfile}" : "All profiles";
+        return ToolResult.Ok(Name,
+            $"Scope: {scope}\n" +
+            JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }
 }
