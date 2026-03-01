@@ -13,8 +13,9 @@ public class ProjectInfo
 
     /// <summary>
     /// The project directory path. This is also the working directory for Claude.
+    /// May be updated after create scripts run (scripts can override via result file).
     /// </summary>
-    public required string ProjectPath { get; init; }
+    public required string ProjectPath { get; set; }
 
     public string? SessionId { get; set; }
 

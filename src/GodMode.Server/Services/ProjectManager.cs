@@ -153,8 +153,12 @@ public class ProjectManager : IProjectManager
             ActionName = action.Name
         };
 
+        // Result file — scripts can write key=value pairs to override project path/name
+        var resultFilePath = GetResultFilePath(rootPath, projectId);
+        if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
+
         // Build environment variables for scripts
-        var scriptEnv = BuildScriptEnvironment(rootPath, project, action, request.Inputs);
+        var scriptEnv = BuildScriptEnvironment(rootPath, project, action, request.Inputs, resultFilePath);
 
         // Script log file — at root level so it persists regardless of what scripts do
         var logFilePath = GetScriptLogPath(rootPath, projectId);
@@ -204,6 +208,22 @@ public class ProjectManager : IProjectManager
                 throw;
             }
         }
+
+        // Apply script result overrides (project_path, project_name)
+        var scriptResults = ReadResultFile(resultFilePath);
+        if (scriptResults.TryGetValue("project_path", out var overridePath) && !string.IsNullOrWhiteSpace(overridePath))
+        {
+            projectPath = overridePath;
+            projectId = Path.GetFileName(overridePath);
+            project.ProjectPath = projectPath;
+            _logger.LogInformation("Script overrode project path to {ProjectPath} (id: {ProjectId})", projectPath, projectId);
+        }
+        if (scriptResults.TryGetValue("project_name", out var overrideName) && !string.IsNullOrWhiteSpace(overrideName))
+        {
+            name = overrideName;
+            _logger.LogInformation("Script overrode project name to '{ProjectName}'", name);
+        }
+        project.Status = project.Status with { Id = projectId, Name = name };
 
         // Ensure .godmode directory exists (scripts may have created the project dir without it)
         EnsureGodModeDirectory(projectPath);
@@ -589,6 +609,39 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
+    /// Returns a result file path for script-to-server communication.
+    /// Scripts can write key=value pairs (e.g. project_path, project_name) to override defaults.
+    /// </summary>
+    private static string GetResultFilePath(string rootPath, string projectId)
+    {
+        var logsDir = Path.Combine(rootPath, "logs");
+        Directory.CreateDirectory(logsDir);
+        return Path.Combine(logsDir, $"{projectId}.result");
+    }
+
+    /// <summary>
+    /// Reads a result file written by scripts. Format: key=value per line. Ignores blank/comment lines.
+    /// Returns empty dictionary if file doesn't exist.
+    /// </summary>
+    private static Dictionary<string, string> ReadResultFile(string resultFilePath)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!File.Exists(resultFilePath)) return result;
+
+        foreach (var line in File.ReadAllLines(resultFilePath))
+        {
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#')) continue;
+            var eqIndex = line.IndexOf('=');
+            if (eqIndex <= 0) continue;
+            var key = line[..eqIndex].Trim();
+            var value = line[(eqIndex + 1)..].Trim();
+            result[key] = value;
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Resolves the project name from inputs or nameTemplate.
     /// </summary>
     private static string? ResolveProjectName(CreateAction action, Dictionary<string, JsonElement> inputs)
@@ -653,7 +706,8 @@ public class ProjectManager : IProjectManager
         string rootPath,
         ProjectInfo project,
         CreateAction action,
-        Dictionary<string, JsonElement> inputs)
+        Dictionary<string, JsonElement> inputs,
+        string? resultFilePath = null)
     {
         var env = new Dictionary<string, string>
         {
@@ -662,6 +716,9 @@ public class ProjectManager : IProjectManager
             ["GODMODE_PROJECT_ID"] = project.Status.Id,
             ["GODMODE_PROJECT_NAME"] = project.Status.Name
         };
+
+        if (resultFilePath != null)
+            env["GODMODE_RESULT_FILE"] = resultFilePath;
 
         // Add action environment
         if (action.Environment != null)

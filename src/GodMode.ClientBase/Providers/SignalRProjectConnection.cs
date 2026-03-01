@@ -105,10 +105,12 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         if (!_outputSubscriptions.ContainsKey(projectId))
         {
             _outputSubscriptions[projectId] = new Subject<ClaudeMessage>();
-
-            // Subscribe on the server
-            _hubProxy.SubscribeProject(projectId, fromOffset).ConfigureAwait(false);
         }
+
+        // Always re-subscribe on the server to replay history from the requested offset.
+        // The Subject is hot — previous events aren't replayed to new observers,
+        // so we need the server to re-send from the file.
+        _hubProxy.SubscribeProject(projectId, fromOffset).ConfigureAwait(false);
 
         return _outputSubscriptions[projectId].AsObservable();
     }
