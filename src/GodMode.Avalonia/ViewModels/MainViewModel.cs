@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GodMode.ClientBase.Services.Models;
@@ -249,16 +250,12 @@ public partial class MainViewModel : ViewModelBase
 		var server = Servers.FirstOrDefault(s => s.Projects.Contains(project));
 		if (server == null) return;
 
-		var confirmed = await _dialogService.ConfirmAsync(
-			"Delete Project",
-			$"Are you sure you want to delete \"{project.Name}\"?",
-			"Delete",
-			"Cancel");
+		var (confirmed, force) = await _dialogService.ConfirmDeleteAsync(project.Name);
 		if (!confirmed) return;
 
 		try
 		{
-			await _projectService.DeleteProjectAsync(server.ProfileName, server.Id, project.Id);
+			await _projectService.DeleteProjectAsync(server.ProfileName, server.Id, project.Id, force);
 			server.Projects.Remove(project);
 			server.RebuildRootGroups(SortByName);
 		}
@@ -427,17 +424,20 @@ public partial class MainViewModel : ViewModelBase
 			{
 				connection.ProjectCreatedReceived += status =>
 				{
-					// Add the new project to the matching server's list
-					var target = Servers.FirstOrDefault(s =>
-						s.ProfileName == server.ProfileName && s.Id == server.Id);
-					if (target != null)
+					Dispatcher.UIThread.Post(() =>
 					{
-						var summary = new ProjectSummary(
-							status.Id, status.Name, status.State,
-							status.UpdatedAt, status.CurrentQuestion, status.RootName);
-						target.Projects.Insert(0, summary);
-						target.RebuildRootGroups(SortByName);
-					}
+						// Add the new project to the matching server's list
+						var target = Servers.FirstOrDefault(s =>
+							s.ProfileName == server.ProfileName && s.Id == server.Id);
+						if (target != null)
+						{
+							var summary = new ProjectSummary(
+								status.Id, status.Name, status.State,
+								status.UpdatedAt, status.CurrentQuestion, status.RootName);
+							target.Projects.Insert(0, summary);
+							target.RebuildRootGroups(SortByName);
+						}
+					});
 				};
 			}
 

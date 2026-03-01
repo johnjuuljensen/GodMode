@@ -65,7 +65,7 @@ public interface IProjectConnection : IDisposable
     /// <summary>
     /// Deletes a project, running teardown scripts and removing all files
     /// </summary>
-    Task DeleteProjectAsync(string projectId);
+    Task DeleteProjectAsync(string projectId, bool force = false);
 
     /// <summary>
     /// Event raised when the server streams creation progress for a project.

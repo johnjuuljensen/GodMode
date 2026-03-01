@@ -129,6 +129,7 @@ public partial class App : Application
 		services.AddTransient<AddServerViewModel>();
 		services.AddTransient<EditServerViewModel>();
 		services.AddTransient<CreateProjectViewModel>();
+		services.AddTransient<DeleteConfirmViewModel>();
 		services.AddTransient<TileGridViewModel>();
 	}
 }

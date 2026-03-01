@@ -95,9 +95,9 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         await _hubProxy.ResumeProject(projectId);
     }
 
-    public async Task DeleteProjectAsync(string projectId)
+    public async Task DeleteProjectAsync(string projectId, bool force = false)
     {
-        await _hubProxy.DeleteProject(projectId);
+        await _hubProxy.DeleteProject(projectId, force);
     }
 
     public IObservable<ClaudeMessage> SubscribeOutput(string projectId, long fromOffset = 0)

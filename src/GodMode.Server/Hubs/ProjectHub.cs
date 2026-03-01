@@ -99,11 +99,11 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.GetMetricsHtmlAsync(projectId);
     }
 
-    public async Task DeleteProject(string projectId)
+    public async Task DeleteProject(string projectId, bool force = false)
     {
-        _logger.LogInformation("Client {ConnectionId} deleting project {ProjectId}",
-            Context.ConnectionId, projectId);
-        await _projectManager.DeleteProjectAsync(projectId);
+        _logger.LogInformation("Client {ConnectionId} deleting project {ProjectId} (force={Force})",
+            Context.ConnectionId, projectId, force);
+        await _projectManager.DeleteProjectAsync(projectId, force);
         await Clients.All.ProjectDeleted(projectId);
     }
 

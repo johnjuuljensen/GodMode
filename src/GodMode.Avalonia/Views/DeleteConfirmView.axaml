@@ -1,0 +1,62 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:GodMode.Avalonia.ViewModels"
+             x:Class="GodMode.Avalonia.Views.DeleteConfirmView"
+             x:DataType="vm:DeleteConfirmViewModel">
+
+    <StackPanel>
+        <!-- Header -->
+        <Border Padding="20,16"
+                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                BorderThickness="0,0,0,1">
+            <TextBlock Text="DELETE PROJECT"
+                       FontSize="11" FontWeight="SemiBold"
+                       LetterSpacing="1.5"
+                       Foreground="{DynamicResource TextSecondaryBrush}" />
+        </Border>
+
+        <!-- Content -->
+        <StackPanel Spacing="16" Margin="20,16">
+            <TextBlock TextWrapping="Wrap" FontSize="13">
+                <Run Text="Are you sure you want to delete " />
+                <Run Text="{Binding ProjectName}" FontWeight="SemiBold" />
+                <Run Text="?" />
+            </TextBlock>
+
+            <!-- Force checkbox -->
+            <StackPanel Spacing="4">
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                    <CheckBox IsChecked="{Binding IsForce}" />
+                    <TextBlock Text="Force delete" VerticalAlignment="Center"
+                               FontSize="13" FontWeight="SemiBold" />
+                </StackPanel>
+                <TextBlock Text="Skip uncommitted/unpushed change checks"
+                           FontSize="11"
+                           Foreground="{DynamicResource TextTertiaryBrush}"
+                           Margin="36,0,0,0" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Footer buttons -->
+        <Border Padding="20,12"
+                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="*,*" HorizontalAlignment="Stretch">
+                <Button Grid.Column="0"
+                        Content="Cancel"
+                        Command="{Binding CancelCommand}"
+                        HorizontalAlignment="Stretch"
+                        Margin="0,0,4,0"
+                        FontSize="13" />
+                <Button Grid.Column="1"
+                        Content="Delete"
+                        Command="{Binding ConfirmCommand}"
+                        HorizontalAlignment="Stretch"
+                        Margin="4,0,0,0"
+                        FontSize="13" FontWeight="SemiBold"
+                        Background="{DynamicResource StateErrorBrush}"
+                        Foreground="White" />
+            </Grid>
+        </Border>
+    </StackPanel>
+</UserControl>
