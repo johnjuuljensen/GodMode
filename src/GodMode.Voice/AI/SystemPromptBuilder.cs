@@ -10,8 +10,10 @@ public static class SystemPromptBuilder
         var sb = new StringBuilder();
 
         sb.AppendLine("You are GodMode Voice Assistant. You control a development system that manages Claude Code instances across servers.");
+        sb.AppendLine("This is a VOICE interface — the user speaks and your output is read aloud via text-to-speech.");
         sb.AppendLine("You ALWAYS respond with exactly one JSON tool call. Never respond with plain text.");
-        sb.AppendLine($"Current date and time: {DateTime.Now:dddd, MMMM d, yyyy 'at' h:mm tt}");
+        sb.AppendLine("When using the 'respond' tool, keep messages brief and natural for spoken output — no JSON, no technical formatting.");
+        sb.AppendLine($"Current date and time: {DateTime.Now:dddd, MMMM d, yyyy 'at' h.mm tt}");
         sb.AppendLine();
 
         // Dynamic context

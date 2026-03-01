@@ -211,13 +211,20 @@ public sealed class AssistantService
                 var results = await _toolRegistry.ExecuteAsync(toolCalls);
                 var toolMs = sw.ElapsedMilliseconds;
 
-                response = FormatToolResults(results);
-                response = TimeFormatter.HumanizeTimestamps(response);
-                response = TimeFormatter.HumanizeUptimeStrings(response);
-                AssistantLog.Write("TOOL_RESULT", response);
+                var rawResult = FormatToolResults(results);
+                rawResult = TimeFormatter.HumanizeTimestamps(rawResult);
+                rawResult = TimeFormatter.HumanizeUptimeStrings(rawResult);
+                AssistantLog.Write("TOOL_RESULT", rawResult);
                 AssistantLog.Write("TIMING", $"Tool exec: {toolMs}ms");
 
-                // Show result immediately, then speak
+                // Second AI pass: summarize tool result into voice-friendly response
+                StatusChanged?.Invoke(this, "Summarizing...");
+                sw.Restart();
+                response = await SummarizeForVoiceAsync(userText, call.ToolName, rawResult, ct);
+                var summarizeMs = sw.ElapsedMilliseconds;
+                AssistantLog.Write("VOICE_SUMMARY", response);
+                AssistantLog.Write("TIMING", $"Summarize: {summarizeMs}ms");
+
                 ResponseReceived?.Invoke(this, response);
 
                 sw.Restart();
@@ -225,9 +232,9 @@ public sealed class AssistantService
                 await _synthesizer.SpeakAsync(response, ct);
                 var ttsMs = sw.ElapsedMilliseconds;
 
-                StatusChanged?.Invoke(this, $"Ready. {FormatTiming(sttMs, inferenceMs, toolMs, ttsMs)}");
+                StatusChanged?.Invoke(this, $"Ready. {FormatTiming(sttMs, inferenceMs + summarizeMs, toolMs, ttsMs)}");
                 AssistantLog.Write("TIMING",
-                    $"Total: {(sttMs ?? 0) + inferenceMs + toolMs + ttsMs}ms | {FormatTiming(sttMs, inferenceMs, toolMs, ttsMs)}");
+                    $"Total: {(sttMs ?? 0) + inferenceMs + toolMs + summarizeMs + ttsMs}ms | {FormatTiming(sttMs, inferenceMs + summarizeMs, toolMs, ttsMs)}");
             }
             else
             {
@@ -315,11 +322,17 @@ public sealed class AssistantService
             var result = await _toolRegistry.ExecuteAsync(call);
             var toolMs = sw.ElapsedMilliseconds;
 
-            var response = result.Success ? result.Output ?? "Done." : $"Error: {result.Error}";
-            response = TimeFormatter.HumanizeTimestamps(response);
-            response = TimeFormatter.HumanizeUptimeStrings(response);
+            var rawResult = result.Success ? result.Output ?? "Done." : $"Error: {result.Error}";
+            rawResult = TimeFormatter.HumanizeTimestamps(rawResult);
+            rawResult = TimeFormatter.HumanizeUptimeStrings(rawResult);
+            AssistantLog.Write("TOOL_RESULT", rawResult);
 
-            AssistantLog.Write("TOOL_RESULT", response);
+            StatusChanged?.Invoke(this, "Summarizing...");
+            sw.Restart();
+            var response = await SummarizeForVoiceAsync(null, call.ToolName, rawResult, ct);
+            var summarizeMs = sw.ElapsedMilliseconds;
+            AssistantLog.Write("VOICE_SUMMARY", response);
+
             ResponseReceived?.Invoke(this, response);
 
             sw.Restart();
@@ -327,7 +340,7 @@ public sealed class AssistantService
             await _synthesizer.SpeakAsync(response, ct);
             var ttsMs = sw.ElapsedMilliseconds;
 
-            StatusChanged?.Invoke(this, $"Ready. [Tool: {toolMs}ms | TTS: {ttsMs}ms]");
+            StatusChanged?.Invoke(this, $"Ready. [Tool: {toolMs}ms | AI: {summarizeMs}ms | TTS: {ttsMs}ms]");
             return response;
         }
         catch (OperationCanceledException)
@@ -385,10 +398,16 @@ public sealed class AssistantService
             var result = await _toolRegistry.ExecuteAsync(call);
             var toolMs = sw.ElapsedMilliseconds;
 
-            var response = result.Success ? result.Output ?? "Done." : $"Error: {result.Error}";
-            response = TimeFormatter.HumanizeTimestamps(response);
-            response = TimeFormatter.HumanizeUptimeStrings(response);
-            AssistantLog.Write("TOOL_RESULT", response);
+            var rawResult = result.Success ? result.Output ?? "Done." : $"Error: {result.Error}";
+            rawResult = TimeFormatter.HumanizeTimestamps(rawResult);
+            rawResult = TimeFormatter.HumanizeUptimeStrings(rawResult);
+            AssistantLog.Write("TOOL_RESULT", rawResult);
+
+            StatusChanged?.Invoke(this, "Summarizing...");
+            sw.Restart();
+            var response = await SummarizeForVoiceAsync(null, call.ToolName, rawResult, ct);
+            var summarizeMs = sw.ElapsedMilliseconds;
+            AssistantLog.Write("VOICE_SUMMARY", response);
 
             ResponseReceived?.Invoke(this, response);
 
@@ -397,7 +416,7 @@ public sealed class AssistantService
             await _synthesizer.SpeakAsync(response, ct);
             var ttsMs = sw.ElapsedMilliseconds;
 
-            StatusChanged?.Invoke(this, $"Ready. {FormatTiming(sttMs, null, toolMs, ttsMs)}");
+            StatusChanged?.Invoke(this, $"Ready. {FormatTiming(sttMs, summarizeMs, toolMs, ttsMs)}");
             return response;
         }
         catch (OperationCanceledException)
@@ -412,6 +431,35 @@ public sealed class AssistantService
             ErrorOccurred?.Invoke(this, error);
             StatusChanged?.Invoke(this, "Error occurred.");
             return error;
+        }
+    }
+
+    private const string SummarizeSystemPrompt =
+        "You are a voice assistant. The user asked a question and a tool was executed. " +
+        "Summarize the tool result into a brief, natural spoken response. " +
+        "Be concise — this will be read aloud via text-to-speech. " +
+        "No JSON, no markdown, no bullet points. Just natural speech. " +
+        "When listing projects, group by profile and project root first, then by server if relevant. " +
+        "Summarize counts per group (e.g. 'Mega profile, repo root: 3 running, 2 idle'). " +
+        "Only mention the active profile's scope if one is set — don't repeat data the user already filtered on. " +
+        "Name individual projects only when there are few, otherwise summarize by state.";
+
+    private async Task<string> SummarizeForVoiceAsync(string? userText, string toolName, string toolResult, CancellationToken ct)
+    {
+        var userPrompt = userText is not null
+            ? $"User asked: \"{userText}\"\nTool '{toolName}' returned:\n{toolResult}"
+            : $"Tool '{toolName}' returned:\n{toolResult}";
+
+        try
+        {
+            var summary = await Task.Run(
+                () => _router.GenerateAsync(InferenceTier.Light, SummarizeSystemPrompt, userPrompt, ct), ct);
+            return !string.IsNullOrWhiteSpace(summary) ? summary.Trim() : toolResult;
+        }
+        catch
+        {
+            // If summarization fails, fall back to raw result
+            return toolResult;
         }
     }
 
