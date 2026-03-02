@@ -15,8 +15,8 @@
                        Margin="20,12,20,6"
                        LetterSpacing="1" />
 
-            <!-- Add Profile -->
-            <Button Command="{Binding AddProfileCommand}"
+            <!-- Add Server -->
+            <Button Command="{Binding AddServerCommand}"
                     Padding="20,14"
                     Background="Transparent"
                     Foreground="{DynamicResource TextPrimaryBrush}"
@@ -26,7 +26,7 @@
                 <Grid ColumnDefinitions="28,*">
                     <TextBlock Grid.Column="0" Text="+" FontSize="16" FontWeight="SemiBold"
                                VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="Add Profile" FontSize="14"
+                    <TextBlock Grid.Column="1" Text="Add Server" FontSize="14"
                                VerticalAlignment="Center" />
                 </Grid>
             </Button>

@@ -2,7 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:GodMode.Avalonia.ViewModels"
              xmlns:converters="using:GodMode.Avalonia.Converters"
-             xmlns:clientModels="using:GodMode.ClientBase.Services.Models"
+             xmlns:sys="using:System"
              xmlns:glass="using:LiquidGlassAvaloniaUI"
              x:Class="GodMode.Avalonia.Views.ShellView"
              x:DataType="vm:MainWindowViewModel">
@@ -58,33 +58,23 @@
                         <Border Grid.Column="1" Width="1" Height="20" Margin="12,0"
                                 Background="{DynamicResource BorderSubtleBrush}" />
 
-                        <!-- Profile selector + add profile -->
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4"
-                                    VerticalAlignment="Center">
-                            <ComboBox ItemsSource="{Binding SidebarViewModel.ProfileOptions}"
-                                      SelectedItem="{Binding SidebarViewModel.SelectedProfileOption}"
-                                      MinWidth="100" MaxWidth="180"
-                                      FontSize="11"
-                                      Padding="8,4"
-                                      CornerRadius="6"
-                                      Background="{DynamicResource BgSurfaceBrush}"
-                                      BorderThickness="0">
-                                <ComboBox.ItemTemplate>
-                                    <DataTemplate x:DataType="clientModels:Profile">
-                                        <TextBlock Text="{Binding Name}" FontSize="11" />
-                                    </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                            </ComboBox>
-                            <Button Command="{Binding SidebarViewModel.AddProfileCommand}"
-                                    ToolTip.Tip="Add Profile"
-                                    Padding="4,4"
-                                    CornerRadius="6"
-                                    Background="{DynamicResource BgSurfaceBrush}"
-                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                    BorderThickness="0">
-                                <TextBlock Text="+" FontSize="13" FontWeight="SemiBold" />
-                            </Button>
-                        </StackPanel>
+                        <!-- Profile filter -->
+                        <ComboBox Grid.Column="2"
+                                  ItemsSource="{Binding SidebarViewModel.ProfileFilterOptions}"
+                                  SelectedItem="{Binding SidebarViewModel.SelectedProfileFilter}"
+                                  MinWidth="100" MaxWidth="180"
+                                  FontSize="11"
+                                  Padding="8,4"
+                                  CornerRadius="6"
+                                  Background="{DynamicResource BgSurfaceBrush}"
+                                  BorderThickness="0"
+                                  VerticalAlignment="Center">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="sys:String">
+                                    <TextBlock Text="{Binding}" FontSize="11" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
 
                         <!-- Right toolbar -->
                         <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6"
@@ -168,10 +158,10 @@
                             <TextBlock Text="&#x2190;" FontSize="18" />
                         </Button>
 
-                        <!-- Profile selector -->
+                        <!-- Profile filter -->
                         <ComboBox Grid.Column="1"
-                                  ItemsSource="{Binding SidebarViewModel.ProfileOptions}"
-                                  SelectedItem="{Binding SidebarViewModel.SelectedProfileOption}"
+                                  ItemsSource="{Binding SidebarViewModel.ProfileFilterOptions}"
+                                  SelectedItem="{Binding SidebarViewModel.SelectedProfileFilter}"
                                   MinWidth="80" MaxWidth="140"
                                   FontSize="11"
                                   Padding="6,3"
@@ -180,8 +170,8 @@
                                   BorderThickness="0"
                                   VerticalAlignment="Center">
                             <ComboBox.ItemTemplate>
-                                <DataTemplate x:DataType="clientModels:Profile">
-                                    <TextBlock Text="{Binding Name}" FontSize="11" />
+                                <DataTemplate x:DataType="sys:String">
+                                    <TextBlock Text="{Binding}" FontSize="11" />
                                 </DataTemplate>
                             </ComboBox.ItemTemplate>
                         </ComboBox>

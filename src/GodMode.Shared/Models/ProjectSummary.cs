@@ -16,5 +16,6 @@ public record ProjectSummary(
     ProjectState State,
     DateTime UpdatedAt,
     string? CurrentQuestion = null,
-    string? RootName = null
+    string? RootName = null,
+    string? ProfileName = null
 );

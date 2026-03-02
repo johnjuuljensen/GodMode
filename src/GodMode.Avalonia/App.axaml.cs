@@ -102,15 +102,14 @@ public partial class App : Application
 		services.AddSingleton<ToolRegistry>(sp =>
 		{
 			var ctx = sp.GetRequiredService<VoiceContext>();
-			var profiles = sp.GetRequiredService<IProfileService>();
 			var hosts = sp.GetRequiredService<IHostConnectionService>();
 			var projects = sp.GetRequiredService<IProjectService>();
 
 			var registry = new ToolRegistry();
 			registry.Register(new RespondTool());
-			registry.Register(new SetProfileTool(ctx, profiles));
+			registry.Register(new SetProfileTool(ctx));
 			registry.Register(new SetServerTool(ctx, hosts));
-			registry.Register(new ListProfilesTool(ctx, profiles));
+			registry.Register(new ListProfilesTool(ctx));
 			registry.Register(new ListServersTool(ctx, hosts));
 			registry.Register(new ListProjectsTool(ctx));
 			registry.Register(new ProjectStatusTool(ctx, projects));
@@ -135,7 +134,6 @@ public partial class App : Application
 		services.AddSingleton<MainViewModel>();
 		services.AddTransient<HostViewModel>();
 		services.AddTransient<ProjectViewModel>();
-		services.AddTransient<AddProfileViewModel>();
 		services.AddTransient<AddServerViewModel>();
 		services.AddTransient<EditServerViewModel>();
 		services.AddTransient<CreateProjectViewModel>();

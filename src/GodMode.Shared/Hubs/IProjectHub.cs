@@ -9,6 +9,11 @@ namespace GodMode.Shared.Hubs;
 public interface IProjectHub
 {
     /// <summary>
+    /// Lists all server-defined profiles.
+    /// </summary>
+    Task<ProfileInfo[]> ListProfiles();
+
+    /// <summary>
     /// Lists all available project roots with their input schemas.
     /// </summary>
     Task<ProjectRootInfo[]> ListProjectRoots();
@@ -26,10 +31,11 @@ public interface IProjectHub
     /// <summary>
     /// Creates a new project using config-driven workflow.
     /// </summary>
+    /// <param name="profileName">Name of the profile the root belongs to.</param>
     /// <param name="projectRootName">Name of the project root.</param>
     /// <param name="actionName">Name of the create action to use, or null for the default action.</param>
     /// <param name="inputs">Form inputs from the dynamic form.</param>
-    Task<ProjectStatus> CreateProject(string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
+    Task<ProjectStatus> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
 
     /// <summary>
     /// Sends input to a project.

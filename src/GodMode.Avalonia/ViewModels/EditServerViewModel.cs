@@ -1,16 +1,21 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using GodMode.ClientBase.Services.Models;
 
 namespace GodMode.Avalonia.ViewModels;
 
 public partial class EditServerViewModel : ViewModelBase
 {
-	private readonly IProfileService _profileService;
+	private readonly IServerRegistryService _serverRegistry;
 	private readonly IDialogService _dialogService;
-	private Account? _originalAccount;
+	private ServerRegistration? _originalServer;
 
 	public event Action? Completed;
 
+	[ObservableProperty]
+	private int _serverIndex;
+
+	// Kept for backward compat — ignored internally
 	[ObservableProperty]
 	private string _profileName = string.Empty;
 
@@ -48,29 +53,28 @@ public partial class EditServerViewModel : ViewModelBase
 
 	public EditServerViewModel(
 		INavigationService navigationService,
-		IProfileService profileService,
+		IServerRegistryService serverRegistry,
 		IDialogService dialogService)
 		: base(navigationService)
 	{
-		_profileService = profileService;
+		_serverRegistry = serverRegistry;
 		_dialogService = dialogService;
 	}
 
-	partial void OnProfileNameChanged(string value)
+	partial void OnServerIndexChanged(int value)
 	{
-		if (!string.IsNullOrEmpty(value))
-			_ = LoadAccountAsync();
+		_ = LoadServerAsync();
 	}
 
+	// Backward compat: AccountIndex triggers load too
 	partial void OnAccountIndexChanged(int value)
 	{
-		if (!string.IsNullOrEmpty(ProfileName))
-			_ = LoadAccountAsync();
+		ServerIndex = value;
 	}
 
-	private async Task LoadAccountAsync()
+	private async Task LoadServerAsync()
 	{
-		if (string.IsNullOrEmpty(ProfileName) || AccountIndex < 0)
+		if (ServerIndex < 0)
 			return;
 
 		IsLoading = true;
@@ -78,23 +82,22 @@ public partial class EditServerViewModel : ViewModelBase
 
 		try
 		{
-			var profile = await _profileService.GetProfileAsync(ProfileName);
-			if (profile == null) { ErrorMessage = "Profile not found"; return; }
-			if (AccountIndex >= profile.Accounts.Count) { ErrorMessage = "Server not found"; return; }
+			var servers = await _serverRegistry.GetServersAsync();
+			if (ServerIndex >= servers.Count) { ErrorMessage = "Server not found"; return; }
 
-			_originalAccount = profile.Accounts[AccountIndex];
+			_originalServer = servers[ServerIndex];
 
-			if (_originalAccount.Type == "github")
+			if (_originalServer.Type == "github")
 			{
 				SelectedServerType = "GitHub Codespaces";
-				GitHubUsername = _originalAccount.Username ?? string.Empty;
-				GitHubToken = string.IsNullOrEmpty(_originalAccount.Token) ? string.Empty : "********";
+				GitHubUsername = _originalServer.Username ?? string.Empty;
+				GitHubToken = string.IsNullOrEmpty(_originalServer.Token) ? string.Empty : "********";
 			}
 			else
 			{
 				SelectedServerType = "Local Server";
-				ServerUrl = _originalAccount.Path ?? "http://localhost:31337";
-				ServerDisplayName = _originalAccount.Metadata?.GetValueOrDefault("name") ?? string.Empty;
+				ServerUrl = _originalServer.Url ?? "http://localhost:31337";
+				ServerDisplayName = _originalServer.DisplayName ?? string.Empty;
 			}
 
 			OnPropertyChanged(nameof(IsGitHubCodespaces));
@@ -115,8 +118,6 @@ public partial class EditServerViewModel : ViewModelBase
 	{
 		ErrorMessage = null;
 
-		if (string.IsNullOrWhiteSpace(ProfileName)) { ErrorMessage = "No profile selected"; return; }
-
 		if (IsGitHubCodespaces)
 		{
 			if (string.IsNullOrWhiteSpace(GitHubUsername)) { ErrorMessage = "Please enter your GitHub username"; return; }
@@ -133,41 +134,29 @@ public partial class EditServerViewModel : ViewModelBase
 
 		try
 		{
-			var profile = await _profileService.GetProfileAsync(ProfileName);
-			if (profile == null) { ErrorMessage = "Profile not found"; return; }
-			if (AccountIndex >= profile.Accounts.Count) { ErrorMessage = "Server not found"; return; }
+			var server = IsGitHubCodespaces
+				? new ServerRegistration
+				{
+					Type = "github",
+					Username = GitHubUsername,
+					Token = GitHubToken != "********" ? GitHubToken : _originalServer?.Token
+				}
+				: new ServerRegistration
+				{
+					Type = "local",
+					Url = ServerUrl,
+					DisplayName = !string.IsNullOrWhiteSpace(ServerDisplayName) ? ServerDisplayName : null
+				};
 
-			var account = profile.Accounts[AccountIndex];
-
-			if (IsGitHubCodespaces)
-			{
-				account.Type = "github";
-				account.Username = GitHubUsername;
-				if (GitHubToken != "********")
-					account.Token = GitHubToken;
-				account.Path = null;
-				account.Metadata = null;
-			}
-			else
-			{
-				account.Type = "local";
-				account.Path = ServerUrl;
-				account.Username = null;
-				account.Token = null;
-				account.Metadata = !string.IsNullOrWhiteSpace(ServerDisplayName)
-					? new Dictionary<string, string> { ["name"] = ServerDisplayName }
-					: null;
-			}
-
-			if (profile.HasDuplicateAccount(account, AccountIndex))
+			if (_serverRegistry.IsDuplicate(server, ServerIndex))
 			{
 				ErrorMessage = IsGitHubCodespaces
-					? "A GitHub account with this username already exists in the profile"
-					: "A server with this URL already exists in the profile";
+					? "A GitHub account with this username already exists"
+					: "A server with this URL already exists";
 				return;
 			}
 
-			await _profileService.SaveProfileAsync(profile);
+			await _serverRegistry.UpdateServerAsync(ServerIndex, server);
 			Completed?.Invoke();
 		}
 		catch (Exception ex)
@@ -187,7 +176,7 @@ public partial class EditServerViewModel : ViewModelBase
 
 		var confirmed = await _dialogService.ConfirmAsync(
 			"Delete Server",
-			"Are you sure you want to remove this server from the profile?",
+			"Are you sure you want to remove this server?",
 			"Delete",
 			"Cancel");
 
@@ -197,12 +186,7 @@ public partial class EditServerViewModel : ViewModelBase
 
 		try
 		{
-			var profile = await _profileService.GetProfileAsync(ProfileName);
-			if (profile == null) { ErrorMessage = "Profile not found"; return; }
-			if (AccountIndex >= profile.Accounts.Count) { ErrorMessage = "Server not found"; return; }
-
-			profile.Accounts.RemoveAt(AccountIndex);
-			await _profileService.SaveProfileAsync(profile);
+			await _serverRegistry.RemoveServerAsync(ServerIndex);
 			WasDeleted = true;
 			Completed?.Invoke();
 		}

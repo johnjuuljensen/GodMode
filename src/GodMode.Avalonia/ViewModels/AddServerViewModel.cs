@@ -1,16 +1,14 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using GodMode.ClientBase.Services.Models;
 
 namespace GodMode.Avalonia.ViewModels;
 
 public partial class AddServerViewModel : ViewModelBase
 {
-	private readonly IProfileService _profileService;
+	private readonly IServerRegistryService _serverRegistry;
 
 	public event Action? Completed;
-
-	[ObservableProperty]
-	private string _profileName = string.Empty;
 
 	[ObservableProperty]
 	private string[] _serverTypes = ["GitHub Codespaces", "Local Server"];
@@ -39,10 +37,10 @@ public partial class AddServerViewModel : ViewModelBase
 	public bool IsGitHubCodespaces => SelectedServerType == "GitHub Codespaces";
 	public bool IsLocalServer => SelectedServerType == "Local Server";
 
-	public AddServerViewModel(INavigationService navigationService, IProfileService profileService)
+	public AddServerViewModel(INavigationService navigationService, IServerRegistryService serverRegistry)
 		: base(navigationService)
 	{
-		_profileService = profileService;
+		_serverRegistry = serverRegistry;
 	}
 
 	partial void OnSelectedServerTypeChanged(string value)
@@ -55,12 +53,6 @@ public partial class AddServerViewModel : ViewModelBase
 	private async Task SaveAsync()
 	{
 		ErrorMessage = null;
-
-		if (string.IsNullOrWhiteSpace(ProfileName))
-		{
-			ErrorMessage = "No profile selected";
-			return;
-		}
 
 		if (IsGitHubCodespaces)
 		{
@@ -93,39 +85,29 @@ public partial class AddServerViewModel : ViewModelBase
 
 		try
 		{
-			var profile = await _profileService.GetProfileAsync(ProfileName);
-			if (profile == null)
-			{
-				ErrorMessage = "Profile not found";
-				return;
-			}
-
-			var account = IsGitHubCodespaces
-				? new Account
+			var server = IsGitHubCodespaces
+				? new ServerRegistration
 				{
 					Type = "github",
 					Username = GitHubUsername,
 					Token = GitHubToken
 				}
-				: new Account
+				: new ServerRegistration
 				{
 					Type = "local",
-					Path = ServerUrl,
-					Metadata = !string.IsNullOrWhiteSpace(ServerDisplayName)
-						? new Dictionary<string, string> { ["name"] = ServerDisplayName }
-						: null
+					Url = ServerUrl,
+					DisplayName = !string.IsNullOrWhiteSpace(ServerDisplayName) ? ServerDisplayName : null
 				};
 
-			if (profile.HasDuplicateAccount(account))
+			if (_serverRegistry.IsDuplicate(server))
 			{
 				ErrorMessage = IsGitHubCodespaces
-					? "A GitHub account with this username already exists in the profile"
-					: "A server with this URL already exists in the profile";
+					? "A GitHub account with this username already exists"
+					: "A server with this URL already exists";
 				return;
 			}
 
-			profile.Accounts.Add(account);
-			await _profileService.SaveProfileAsync(profile);
+			await _serverRegistry.AddServerAsync(server);
 			Completed?.Invoke();
 		}
 		catch (Exception ex)

@@ -14,6 +14,7 @@ public interface IProjectService
     Task<ProjectStatus> CreateProjectAsync(
         string profileName,
         string hostId,
+        string serverProfileName,
         string projectRootName,
         string? actionName,
         Dictionary<string, JsonElement> inputs);

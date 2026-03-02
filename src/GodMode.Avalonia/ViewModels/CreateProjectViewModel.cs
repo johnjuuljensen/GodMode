@@ -191,6 +191,7 @@ public partial class CreateProjectViewModel : ViewModelBase
 
 			await _projectService.CreateProjectAsync(
 				ProfileName, HostId,
+				SelectedProjectRoot.ProfileName ?? "Default",
 				SelectedProjectRoot.Name,
 				SelectedAction.Name,
 				inputs);

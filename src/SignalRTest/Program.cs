@@ -48,7 +48,9 @@ var inputs = new Dictionary<string, JsonElement>
 };
 
 var detail = await hub1.CreateProject(
+    profileName: "Default",
     projectRootName: "default",
+    actionName: null,
     inputs: inputs
 );
 
@@ -370,6 +372,12 @@ class ProjectHubClientHandler : IProjectHubClient
     public Task CreationProgress(string projectId, string message)
     {
         Console.WriteLine($"  >> [PROGRESS] {projectId}: {message}");
+        return Task.CompletedTask;
+    }
+
+    public Task ProjectDeleted(string projectId)
+    {
+        Console.WriteLine($"  >> [DELETED] {projectId}");
         return Task.CompletedTask;
     }
 }

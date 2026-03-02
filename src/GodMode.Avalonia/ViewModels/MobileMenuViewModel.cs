@@ -16,10 +16,10 @@ public partial class MobileMenuViewModel : ObservableObject
 	public bool IsVoiceSupported => _shell.IsVoiceSupported;
 
 	[RelayCommand]
-	private void AddProfile()
+	private void AddServer()
 	{
 		_shell.GoBackCommand.Execute(null);
-		_shell.SidebarViewModel.AddProfileCommand.Execute(null);
+		_shell.SidebarViewModel.AddServerCommand.Execute(null);
 	}
 
 	[RelayCommand]

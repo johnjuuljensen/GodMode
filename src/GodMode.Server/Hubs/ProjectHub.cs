@@ -20,6 +20,12 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger = logger;
     }
 
+    public async Task<ProfileInfo[]> ListProfiles()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested profiles", Context.ConnectionId);
+        return await _projectManager.ListProfilesAsync();
+    }
+
     public async Task<ProjectRootInfo[]> ListProjectRoots()
     {
         _logger.LogInformation("Client {ConnectionId} requested project roots", Context.ConnectionId);
@@ -39,12 +45,12 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.GetStatusAsync(projectId);
     }
 
-    public async Task<ProjectStatus> CreateProject(string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
+    public async Task<ProjectStatus> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
     {
-        _logger.LogInformation("Client {ConnectionId} creating project in root '{Root}' action '{Action}' with {InputCount} inputs",
-            Context.ConnectionId, projectRootName, actionName ?? "(default)", inputs.Count);
+        _logger.LogInformation("Client {ConnectionId} creating project in profile '{Profile}' root '{Root}' action '{Action}' with {InputCount} inputs",
+            Context.ConnectionId, profileName, projectRootName, actionName ?? "(default)", inputs.Count);
 
-        var request = new CreateProjectRequest(projectRootName, inputs, actionName);
+        var request = new CreateProjectRequest(profileName, projectRootName, inputs, actionName);
         var status = await _projectManager.CreateProjectAsync(request);
 
         // Notify all clients about the new project

@@ -29,5 +29,6 @@ public record ProjectStatus(
     TestStatus? Tests,
     long OutputOffset,
     string? RootName = null,
+    string? ProfileName = null,
     string? RepoUrl = null
 );

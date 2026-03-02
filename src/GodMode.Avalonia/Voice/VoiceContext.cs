@@ -52,7 +52,6 @@ public sealed class VoiceContext : IDisposable
     private static readonly TimeSpan StaleThreshold = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan OldProjectThreshold = TimeSpan.FromDays(30);
 
-    private readonly IProfileService _profileService;
     private readonly IHostConnectionService _hostService;
     private readonly IProjectService _projectService;
     private readonly SemaphoreSlim _lock = new(1, 1);
@@ -71,11 +70,9 @@ public sealed class VoiceContext : IDisposable
     public event EventHandler<ProjectOutputEventArgs>? ProjectOutputReceived;
 
     public VoiceContext(
-        IProfileService profileService,
         IHostConnectionService hostService,
         IProjectService projectService)
     {
-        _profileService = profileService;
         _hostService = hostService;
         _projectService = projectService;
     }
@@ -131,46 +128,54 @@ public sealed class VoiceContext : IDisposable
     {
         var index = new List<IndexedProject>();
 
-        if (ActiveProfileName is not null)
-        {
-            await IndexProfileAsync(ActiveProfileName, index);
-        }
-        else
-        {
-            var profiles = await _profileService.GetProfilesAsync();
-            foreach (var profile in profiles)
-                await IndexProfileAsync(profile.Name, index);
-        }
-
-        ProjectIndex = index.AsReadOnly();
-        IndexBuiltAt = DateTime.UtcNow;
-    }
-
-    private async Task IndexProfileAsync(string profileName, List<IndexedProject> index)
-    {
         IEnumerable<HostInfo> hosts;
-        try { hosts = await _hostService.ListAllHostsAsync(profileName); }
-        catch { return; }
+        try { hosts = await _hostService.ListAllHostsAsync(); }
+        catch { hosts = []; }
 
         foreach (var host in hosts)
         {
             if (ActiveHostId is not null && host.Id != ActiveHostId)
                 continue;
 
-            if (!_hostService.IsConnected(profileName, host.Id))
+            if (!_hostService.IsConnected(host.Id))
                 continue;
 
             try
             {
-                var projects = await _projectService.ListProjectsAsync(profileName, host.Id);
+                // profileName parameter is ignored in new API but kept for compatibility
+                var projects = await _projectService.ListProjectsAsync("", host.Id);
                 foreach (var p in projects)
+                {
+                    var profileName = p.ProfileName ?? "Default";
+
+                    // Apply profile filter
+                    if (ActiveProfileName is not null &&
+                        !profileName.Equals(ActiveProfileName, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
                     index.Add(new IndexedProject(profileName, host.Id, host.Name, p));
+                }
             }
             catch
             {
                 // Host unreachable — skip
             }
         }
+
+        ProjectIndex = index.AsReadOnly();
+        IndexBuiltAt = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Gets distinct profile names discovered from the project index.
+    /// </summary>
+    public IReadOnlyList<string> GetDiscoveredProfileNames()
+    {
+        return ProjectIndex
+            .Select(p => p.ProfileName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     // --- Smart Project Resolution ---
@@ -286,41 +291,37 @@ public sealed class VoiceContext : IDisposable
 
     // --- Effective Resolution (used by tools for host/profile) ---
 
-    public async Task<(string ProfileName, bool Found)> ResolveEffectiveProfileAsync()
+    public Task<(string ProfileName, bool Found)> ResolveEffectiveProfileAsync()
     {
+        // Use the active profile filter, or fall back to "Default"
         if (ActiveProfileName is not null)
-        {
-            var profile = await _profileService.GetProfileAsync(ActiveProfileName);
-            return profile is not null ? (profile.Name, true) : (ActiveProfileName, false);
-        }
+            return Task.FromResult((ActiveProfileName, true));
 
-        var selected = await _profileService.GetSelectedProfileAsync();
-        if (selected is not null) return (selected.Name, true);
+        // No profile filter — check if we have any discovered profiles
+        var discovered = GetDiscoveredProfileNames();
+        if (discovered.Count > 0)
+            return Task.FromResult((discovered[0], true));
 
-        var all = await _profileService.GetProfilesAsync();
-        return all.Count > 0 ? (all[0].Name, true) : ("", false);
+        return Task.FromResult(("Default", true));
     }
 
     public async Task<(HostInfo? Host, string? Error)> ResolveEffectiveHostAsync()
     {
-        var (profileName, found) = await ResolveEffectiveProfileAsync();
-        if (!found) return (null, "No profile available.");
-
         if (ActiveHostId is not null)
         {
-            var hosts = (await _hostService.ListAllHostsAsync(profileName)).ToList();
+            var hosts = (await _hostService.ListAllHostsAsync()).ToList();
             var match = hosts.FirstOrDefault(h => h.Id == ActiveHostId);
-            return match is not null ? (match, null) : (null, $"Active server not found.");
+            return match is not null ? (match, null) : (null, "Active server not found.");
         }
 
         // Auto-select first connected host
-        var allHosts = (await _hostService.ListAllHostsAsync(profileName)).ToList();
-        var connected = allHosts.FirstOrDefault(h => _hostService.IsConnected(profileName, h.Id));
+        var allHosts = (await _hostService.ListAllHostsAsync()).ToList();
+        var connected = allHosts.FirstOrDefault(h => _hostService.IsConnected(h.Id));
         if (connected is not null) return (connected, null);
 
         return allHosts.Count > 0
             ? (allHosts[0], null)
-            : (null, $"No servers found for profile '{profileName}'.");
+            : (null, "No servers found.");
     }
 
     // --- Context Summary for System Prompt ---
