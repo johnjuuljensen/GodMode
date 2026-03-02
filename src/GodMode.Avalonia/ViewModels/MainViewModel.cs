@@ -280,32 +280,9 @@ public partial class MainViewModel : ViewModelBase
 	}
 
 	[RelayCommand]
-	private async Task DeleteServerAsync(ServerGroupViewModel server)
+	private void RemoveServer(ServerGroupViewModel server)
 	{
-		var confirmed = await _dialogService.ConfirmAsync(
-			"Delete Server",
-			$"Remove '{server.Name}' from the profile? This cannot be undone.",
-			"Delete",
-			"Cancel");
-
-		if (!confirmed) return;
-
-		try
-		{
-			var profile = await _profileService.GetProfileAsync(server.ProfileName);
-			if (profile == null) return;
-			if (server.AccountIndex >= profile.Accounts.Count) return;
-
-			profile.Accounts.RemoveAt(server.AccountIndex);
-			await _profileService.SaveProfileAsync(profile);
-
-			_hostConnectionService.DisconnectFromHost(server.ProfileName, server.Id);
-			Servers.Remove(server);
-		}
-		catch (Exception ex)
-		{
-			ErrorMessage = $"Error deleting server: {ex.Message}";
-		}
+		Servers.Remove(server);
 	}
 
 	public bool IsProjectHidden(string projectId) => _hiddenProjectIds.Contains(projectId);
