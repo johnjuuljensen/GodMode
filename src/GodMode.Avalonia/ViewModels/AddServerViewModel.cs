@@ -116,6 +116,14 @@ public partial class AddServerViewModel : ViewModelBase
 						: null
 				};
 
+			if (profile.HasDuplicateAccount(account))
+			{
+				ErrorMessage = IsGitHubCodespaces
+					? "A GitHub account with this username already exists in the profile"
+					: "A server with this URL already exists in the profile";
+				return;
+			}
+
 			profile.Accounts.Add(account);
 			await _profileService.SaveProfileAsync(profile);
 			Completed?.Invoke();
