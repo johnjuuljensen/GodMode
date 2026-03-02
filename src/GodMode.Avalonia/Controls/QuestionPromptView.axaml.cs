@@ -89,6 +89,7 @@ public partial class QuestionPromptView : UserControl
 	}
 
 	public event EventHandler<string>? OptionSelected;
+	public event EventHandler? Dismissed;
 
 	public QuestionPromptView()
 	{
@@ -125,6 +126,13 @@ public partial class QuestionPromptView : UserControl
 	protected override void OnKeyDown(KeyEventArgs e)
 	{
 		base.OnKeyDown(e);
+
+		if (e.Key == Key.Escape)
+		{
+			Dismissed?.Invoke(this, EventArgs.Empty);
+			e.Handled = true;
+			return;
+		}
 
 		if (Options.Count == 0) return;
 
@@ -163,6 +171,9 @@ public partial class QuestionPromptView : UserControl
 				break;
 		}
 	}
+
+	private void OnDismissClicked(object? sender, RoutedEventArgs e)
+		=> Dismissed?.Invoke(this, EventArgs.Empty);
 
 	private void OnOptionClicked(object? sender, RoutedEventArgs e)
 	{
