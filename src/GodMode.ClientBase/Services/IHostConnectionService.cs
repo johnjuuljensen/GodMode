@@ -8,7 +8,7 @@ namespace GodMode.ClientBase.Services;
 /// </summary>
 public interface IHostConnectionService
 {
-    Task<IEnumerable<IHostProvider>> GetProvidersForProfileAsync(string profileName);
+    Task<IEnumerable<(IHostProvider Provider, int AccountIndex)>> GetProvidersForProfileAsync(string profileName);
     Task<IEnumerable<HostInfo>> ListAllHostsAsync(string profileName);
     Task<IProjectConnection> ConnectToHostAsync(string profileName, string hostId);
     void DisconnectFromHost(string profileName, string hostId);
