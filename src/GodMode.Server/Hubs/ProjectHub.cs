@@ -103,7 +103,19 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     {
         _logger.LogInformation("Client {ConnectionId} deleting project {ProjectId} (force={Force})",
             Context.ConnectionId, projectId, force);
-        await _projectManager.DeleteProjectAsync(projectId, force);
+
+        try
+        {
+            await _projectManager.DeleteProjectAsync(projectId, force);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete project {ProjectId}", projectId);
+            // Re-throw as HubException so SignalR propagates the message to the client
+            // (regular exceptions are replaced with a generic message for security)
+            throw new HubException(ex.Message);
+        }
+
         await Clients.All.ProjectDeleted(projectId);
     }
 
