@@ -66,22 +66,25 @@
                                              Fill="{Binding Summary.State, Converter={StaticResource StateToColorConverter}}"
                                              VerticalAlignment="Center"
                                              Margin="0,0,8,0" />
-                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6"
-                                                VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding Summary.Name}"
+                                    <Grid Grid.Column="1" ColumnDefinitions="*,Auto"
+                                          VerticalAlignment="Center" ClipToBounds="True">
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding Summary.Name}"
                                                    FontSize="12" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource TextPrimaryBrush}"
                                                    TextTrimming="CharacterEllipsis" />
                                         <!-- Waiting badge -->
-                                        <Border IsVisible="{Binding Summary.State, Converter={StaticResource ProjectStateToWaitingVisibilityConverter}}"
+                                        <Border Grid.Column="1"
+                                                IsVisible="{Binding Summary.State, Converter={StaticResource ProjectStateToWaitingVisibilityConverter}}"
                                                 Padding="5,1" CornerRadius="4"
                                                 Background="#28FBBF24"
-                                                VerticalAlignment="Center">
+                                                VerticalAlignment="Center"
+                                                Margin="6,0,0,0">
                                             <TextBlock Text="WAITING"
                                                        FontSize="8" FontWeight="Bold"
                                                        Foreground="{DynamicResource StateWaitingBrush}" />
                                         </Border>
-                                    </StackPanel>
+                                    </Grid>
                                     <TextBlock Grid.Column="2"
                                                Text="{Binding Summary.UpdatedAt, Converter={StaticResource RelativeTimeConverter}}"
                                                FontSize="9"
