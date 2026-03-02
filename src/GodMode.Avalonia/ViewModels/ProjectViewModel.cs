@@ -10,12 +10,18 @@ namespace GodMode.Avalonia.ViewModels;
 
 public partial class ProjectViewModel : ViewModelBase, IDisposable
 {
+	private const int DisplayMessageWindow = 50;
+	private const int LoadMoreBatch = 50;
+
 	private readonly IProjectService _projectService;
 	private readonly INotificationService _notificationService;
 	private readonly IDialogService _dialogService;
 	private IDisposable? _outputSubscription;
 	private bool _hasLoaded;
 	private DateTime _lastInputSentAt;
+	private int _displayStartIndex;
+	private bool _displayDirty;
+	private DispatcherTimer? _displayFlushTimer;
 
 	[ObservableProperty]
 	private string _profileName = string.Empty;
@@ -73,6 +79,12 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 
 	[ObservableProperty]
 	private string? _metricsHtml;
+
+	[ObservableProperty]
+	private bool _hasEarlierMessages;
+
+	[ObservableProperty]
+	private string _earlierMessagesText = string.Empty;
 
 	/// <summary>
 	/// Fires when project status changes. Args: projectId, state, currentQuestion.
@@ -204,7 +216,7 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 			});
 			var userMessage = new ClaudeMessage(userJson);
 			OutputMessages.Add(userMessage);
-			AddToDisplayMessages(userMessage);
+			FlushDisplayMessages();
 
 			await RefreshAsync();
 		}
@@ -457,23 +469,26 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 
 	/// <summary>
 	/// Rebuilds the display messages collection from the source output messages,
-	/// applying simple/detailed view filtering.
+	/// applying simple/detailed view filtering and the display window.
 	/// </summary>
 	private void RebuildDisplayMessages()
 	{
 		DisplayMessages.Clear();
+		_displayStartIndex = Math.Max(0, OutputMessages.Count - DisplayMessageWindow);
 
 		if (!IsSimpleView)
 		{
-			foreach (var msg in OutputMessages)
-				DisplayMessages.Add(new ChatDisplayItem(msg));
+			for (int i = _displayStartIndex; i < OutputMessages.Count; i++)
+				DisplayMessages.Add(new ChatDisplayItem(OutputMessages[i]));
+			UpdateEarlierMessagesState();
 			return;
 		}
 
 		// Simple view: collapse consecutive tool-only messages into summaries
 		int consecutiveToolCount = 0;
-		foreach (var msg in OutputMessages)
+		for (int i = _displayStartIndex; i < OutputMessages.Count; i++)
 		{
+			var msg = OutputMessages[i];
 			if (msg.IsToolOnly)
 			{
 				consecutiveToolCount++;
@@ -491,32 +506,70 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 
 		if (consecutiveToolCount > 0)
 			DisplayMessages.Add(new ChatDisplayItem(consecutiveToolCount));
+
+		UpdateEarlierMessagesState();
 	}
 
-	/// <summary>
-	/// Incrementally adds a new message to the display collection,
-	/// respecting the current view mode.
-	/// </summary>
-	private void AddToDisplayMessages(ClaudeMessage message)
+	private void UpdateEarlierMessagesState()
 	{
+		HasEarlierMessages = _displayStartIndex > 0;
+		EarlierMessagesText = HasEarlierMessages
+			? $"Load {Math.Min(LoadMoreBatch, _displayStartIndex)} earlier messages ({_displayStartIndex} hidden)"
+			: string.Empty;
+	}
+
+	[RelayCommand]
+	private void LoadEarlierMessages()
+	{
+		if (_displayStartIndex <= 0) return;
+
+		var loadCount = Math.Min(LoadMoreBatch, _displayStartIndex);
+		var newStart = _displayStartIndex - loadCount;
+
+		// Build the earlier items to prepend
+		var earlier = new List<ChatDisplayItem>();
 		if (!IsSimpleView)
 		{
-			DisplayMessages.Add(new ChatDisplayItem(message));
-			return;
-		}
-
-		if (message.IsToolOnly)
-		{
-			// Extend existing tool summary or create new one
-			if (DisplayMessages.Count > 0 && DisplayMessages[^1].IsToolSummary)
-				DisplayMessages[^1].ToolCallCount++;
-			else
-				DisplayMessages.Add(new ChatDisplayItem(1));
+			for (int i = newStart; i < _displayStartIndex; i++)
+				earlier.Add(new ChatDisplayItem(OutputMessages[i]));
 		}
 		else
 		{
-			DisplayMessages.Add(new ChatDisplayItem(message, isSimpleView: true));
+			int consecutiveToolCount = 0;
+			for (int i = newStart; i < _displayStartIndex; i++)
+			{
+				var msg = OutputMessages[i];
+				if (msg.IsToolOnly)
+				{
+					consecutiveToolCount++;
+					continue;
+				}
+
+				if (consecutiveToolCount > 0)
+				{
+					earlier.Add(new ChatDisplayItem(consecutiveToolCount));
+					consecutiveToolCount = 0;
+				}
+
+				earlier.Add(new ChatDisplayItem(msg, isSimpleView: true));
+			}
+
+			// Merge trailing tool summary with the first existing display item if applicable
+			if (consecutiveToolCount > 0)
+			{
+				if (DisplayMessages.Count > 0 && DisplayMessages[0].IsToolSummary)
+					DisplayMessages[0].ToolCallCount += consecutiveToolCount;
+				else
+					earlier.Add(new ChatDisplayItem(consecutiveToolCount));
+			}
 		}
+
+		// Prepend: insert in reverse order at index 0
+		for (int i = earlier.Count - 1; i >= 0; i--)
+			DisplayMessages.Insert(0, earlier[i]);
+
+		_displayStartIndex = newStart;
+		UpdateEarlierMessagesState();
 	}
 
 	private async Task SubscribeToOutputAsync()
@@ -527,6 +580,17 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		{
 			OutputMessages.Clear();
 			DisplayMessages.Clear();
+			_displayDirty = false;
+
+			// Debounce timer: when messages stop arriving, flush the tail to display
+			_displayFlushTimer?.Stop();
+			_displayFlushTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+			_displayFlushTimer.Tick += (_, _) =>
+			{
+				_displayFlushTimer.Stop();
+				if (_displayDirty)
+					FlushDisplayMessages();
+			};
 
 			var observable = await _projectService.SubscribeOutputAsync(ProfileName, HostId, ProjectId, fromOffset: 0);
 
@@ -537,38 +601,14 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 						Dispatcher.UIThread.Post(() =>
 						{
 							OutputMessages.Add(message);
-							AddToDisplayMessages(message);
 
-							// Layer 1: Structured AskUserQuestion tool_use
-							if (message.IsQuestion && message.QuestionOptions.Count > 0)
-							{
-								IsQuestionActive = true;
-								CurrentQuestionText = message.QuestionText;
-								CurrentQuestionOptions = message.QuestionOptions;
-								CurrentQuestionHeader = message.QuestionHeader;
-							}
-							// Layer 2: Text-based question from assistant message
-							else if (message.Type == "assistant" && !string.IsNullOrEmpty(message.ContentSummary)
-								&& LooksLikeQuestion(message.ContentSummary))
-							{
-								IsQuestionActive = true;
-								CurrentQuestionText = message.ContentSummary;
-								CurrentQuestionHeader = Status?.Name;
-								CurrentQuestionOptions = ParseTextOptions(message.ContentSummary);
-							}
-							// Layer 3: Result means turn is over — clear question if active,
-							// then refresh status to check for WaitingInput
-							else if (message.Type == "result")
-							{
-								if (IsQuestionActive)
-								{
-									IsQuestionActive = false;
-									CurrentQuestionText = null;
-									CurrentQuestionOptions = [];
-									CurrentQuestionHeader = null;
-								}
-								_ = RefreshAsync();
-							}
+							// Mark dirty and restart debounce timer (don't touch DisplayMessages yet)
+							_displayDirty = true;
+							_displayFlushTimer.Stop();
+							_displayFlushTimer.Start();
+
+							// Question detection still runs immediately on every message
+							DetectQuestionFromMessage(message);
 						});
 					},
 					onError: error =>
@@ -583,8 +623,55 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		}
 	}
 
+	/// <summary>
+	/// Flushes the display: rebuilds from the tail of OutputMessages in a single pass.
+	/// </summary>
+	private void FlushDisplayMessages()
+	{
+		_displayDirty = false;
+		RebuildDisplayMessages();
+	}
+
+	/// <summary>
+	/// Detects questions from a newly received message (layers 1-3).
+	/// </summary>
+	private void DetectQuestionFromMessage(ClaudeMessage message)
+	{
+		// Layer 1: Structured AskUserQuestion tool_use
+		if (message.IsQuestion && message.QuestionOptions.Count > 0)
+		{
+			IsQuestionActive = true;
+			CurrentQuestionText = message.QuestionText;
+			CurrentQuestionOptions = message.QuestionOptions;
+			CurrentQuestionHeader = message.QuestionHeader;
+		}
+		// Layer 2: Text-based question from assistant message
+		else if (message.Type == "assistant" && !string.IsNullOrEmpty(message.ContentSummary)
+			&& LooksLikeQuestion(message.ContentSummary))
+		{
+			IsQuestionActive = true;
+			CurrentQuestionText = message.ContentSummary;
+			CurrentQuestionHeader = Status?.Name;
+			CurrentQuestionOptions = ParseTextOptions(message.ContentSummary);
+		}
+		// Layer 3: Result means turn is over — clear question if active,
+		// then refresh status to check for WaitingInput
+		else if (message.Type == "result")
+		{
+			if (IsQuestionActive)
+			{
+				IsQuestionActive = false;
+				CurrentQuestionText = null;
+				CurrentQuestionOptions = [];
+				CurrentQuestionHeader = null;
+			}
+			_ = RefreshAsync();
+		}
+	}
+
 	public void Dispose()
 	{
+		_displayFlushTimer?.Stop();
 		_outputSubscription?.Dispose();
 	}
 }

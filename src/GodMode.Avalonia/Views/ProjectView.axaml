@@ -104,7 +104,20 @@
 
         <!-- Chat Output -->
         <ScrollViewer Grid.Row="1" x:Name="OutputScrollViewer" Padding="16,8,16,0">
-            <ItemsControl ItemsSource="{Binding DisplayMessages}" x:Name="OutputItemsControl" Margin="0,0,0,16">
+            <StackPanel>
+                <!-- Load earlier messages button -->
+                <Button IsVisible="{Binding HasEarlierMessages}"
+                        Command="{Binding LoadEarlierMessagesCommand}"
+                        HorizontalAlignment="Center"
+                        Padding="12,6" Margin="0,4,0,8"
+                        Background="{DynamicResource BgSurfaceBrush}"
+                        Foreground="{DynamicResource TextSecondaryBrush}"
+                        BorderThickness="0" CornerRadius="12"
+                        FontSize="11">
+                    <TextBlock Text="{Binding EarlierMessagesText}" />
+                </Button>
+
+                <ItemsControl ItemsSource="{Binding DisplayMessages}" x:Name="OutputItemsControl" Margin="0,0,0,16">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="displayModels:ChatDisplayItem">
                         <Panel Margin="0,3">
@@ -225,7 +238,8 @@
                         </Panel>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                </ItemsControl>
+            </StackPanel>
         </ScrollViewer>
 
         <!-- Question Prompt (visible when LLM asks a question) -->

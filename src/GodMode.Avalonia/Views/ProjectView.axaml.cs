@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -12,6 +13,8 @@ public partial class ProjectView : UserControl
 {
 	private bool _isInitialLoad = true;
 	private bool _isAtBottom = true;
+	private bool _scrollPending;
+	private DispatcherTimer? _scrollTimer;
 	private const double ScrollThreshold = 50; // px from bottom to count as "at bottom"
 
 	public ProjectView()
@@ -24,6 +27,18 @@ public partial class ProjectView : UserControl
 		// Wire question prompt events
 		QuestionPrompt.OptionSelected += OnQuestionOptionSelected;
 		QuestionPrompt.Dismissed += OnQuestionDismissed;
+
+		// Debounced scroll-to-end timer (coalesces rapid message adds)
+		_scrollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+		_scrollTimer.Tick += (_, _) =>
+		{
+			_scrollTimer.Stop();
+			if (_scrollPending)
+			{
+				_scrollPending = false;
+				OutputScrollViewer.ScrollToEnd();
+			}
+		};
 
 		DataContextChanged += (_, _) =>
 		{
@@ -44,7 +59,7 @@ public partial class ProjectView : UserControl
 		};
 
 		// Track scroll position to determine if user has scrolled up
-		OutputScrollViewer.ScrollChanged += (_, e) =>
+		OutputScrollViewer.ScrollChanged += (_, _) =>
 		{
 			var sv = OutputScrollViewer;
 			var extent = sv.Extent.Height;
@@ -121,17 +136,19 @@ public partial class ProjectView : UserControl
 				if (_isInitialLoad && vm.DisplayMessages.Count > 5)
 					_isInitialLoad = false;
 
-				Dispatcher.UIThread.Post(() =>
-				{
-					OutputScrollViewer.ScrollToEnd();
-				}, DispatcherPriority.Background);
+				// Debounce: restart timer on each add to coalesce rapid messages
+				_scrollPending = true;
+				_scrollTimer!.Stop();
+				_scrollTimer.Start();
 			}
 		}
 	}
 
-	protected override void OnDetachedFromVisualTree(global::Avalonia.VisualTreeAttachmentEventArgs e)
+	protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
 	{
 		base.OnDetachedFromVisualTree(e);
+
+		_scrollTimer?.Stop();
 
 		if (DataContext is ProjectViewModel vm)
 		{
