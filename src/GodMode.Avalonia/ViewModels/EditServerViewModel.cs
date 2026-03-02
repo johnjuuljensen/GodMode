@@ -41,6 +41,8 @@ public partial class EditServerViewModel : ViewModelBase
 	[ObservableProperty]
 	private string? _errorMessage;
 
+	public bool WasDeleted { get; private set; }
+
 	public bool IsGitHubCodespaces => SelectedServerType == "GitHub Codespaces";
 	public bool IsLocalServer => SelectedServerType == "Local Server";
 
@@ -193,6 +195,7 @@ public partial class EditServerViewModel : ViewModelBase
 
 			profile.Accounts.RemoveAt(AccountIndex);
 			await _profileService.SaveProfileAsync(profile);
+			WasDeleted = true;
 			Completed?.Invoke();
 		}
 		catch (Exception ex)

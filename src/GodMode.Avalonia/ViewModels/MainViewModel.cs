@@ -294,7 +294,7 @@ public partial class MainViewModel : ViewModelBase
 		{
 			server.State = HostState.Starting;
 			var providers = await _hostConnectionService.GetProvidersForProfileAsync(server.ProfileName);
-			var provider = providers.FirstOrDefault(p => p.Type == server.Type);
+			var provider = providers.FirstOrDefault(p => p.Provider.Type == server.Type).Provider;
 
 			if (provider != null)
 			{
@@ -317,7 +317,7 @@ public partial class MainViewModel : ViewModelBase
 		{
 			server.State = HostState.Stopping;
 			var providers = await _hostConnectionService.GetProvidersForProfileAsync(server.ProfileName);
-			var provider = providers.FirstOrDefault(p => p.Type == server.Type);
+			var provider = providers.FirstOrDefault(p => p.Provider.Type == server.Type).Provider;
 
 			if (provider != null)
 			{
@@ -382,11 +382,9 @@ public partial class MainViewModel : ViewModelBase
 	private async Task LoadServersFromProfileAsync(Profile profile, List<ServerGroupViewModel> serverList)
 	{
 		var providers = await _hostConnectionService.GetProvidersForProfileAsync(profile.Name);
-		var providersList = providers.ToList();
 
-		for (int accountIndex = 0; accountIndex < providersList.Count; accountIndex++)
+		foreach (var (provider, accountIndex) in providers)
 		{
-			var provider = providersList[accountIndex];
 			try
 			{
 				var hosts = await provider.ListHostsAsync();

@@ -21,25 +21,26 @@ public class HostConnectionService : IHostConnectionService
         _profileService = profileService;
     }
 
-    public async Task<IEnumerable<IHostProvider>> GetProvidersForProfileAsync(string profileName)
+    public async Task<IEnumerable<(IHostProvider Provider, int AccountIndex)>> GetProvidersForProfileAsync(string profileName)
     {
         var profile = await _profileService.GetProfileAsync(profileName);
 
         if (profile == null)
         {
-            return Enumerable.Empty<IHostProvider>();
+            return Enumerable.Empty<(IHostProvider, int)>();
         }
 
-        var providers = new List<IHostProvider>();
+        var providers = new List<(IHostProvider Provider, int AccountIndex)>();
 
-        foreach (var account in profile.Accounts)
+        for (int i = 0; i < profile.Accounts.Count; i++)
         {
+            var account = profile.Accounts[i];
             var provider = CreateProvider(account);
             if (provider != null)
             {
                 var key = $"{profileName}:{account.Type}:{account.Username ?? account.Path}";
                 _providers[key] = provider;
-                providers.Add(provider);
+                providers.Add((provider, i));
             }
         }
 
@@ -51,7 +52,7 @@ public class HostConnectionService : IHostConnectionService
         var providers = await GetProvidersForProfileAsync(profileName);
         var allHosts = new List<HostInfo>();
 
-        foreach (var provider in providers)
+        foreach (var (provider, _) in providers)
         {
             try
             {
@@ -88,7 +89,7 @@ public class HostConnectionService : IHostConnectionService
         var providers = await GetProvidersForProfileAsync(profileName);
         IHostProvider? targetProvider = null;
 
-        foreach (var provider in providers)
+        foreach (var (provider, _) in providers)
         {
             var hosts = await provider.ListHostsAsync();
             if (hosts.Any(h => h.Id == hostId))

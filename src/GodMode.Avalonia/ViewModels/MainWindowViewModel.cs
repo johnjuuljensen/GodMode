@@ -11,6 +11,7 @@ public partial class MainWindowViewModel : ObservableObject
 {
 	private readonly IThemeService _themeService;
 	private readonly INotificationService _notificationService;
+	private readonly IHostConnectionService _hostConnectionService;
 	private readonly Dictionary<string, ProjectViewModel> _projectViewModels = new();
 
 	[ObservableProperty]
@@ -83,10 +84,12 @@ public partial class MainWindowViewModel : ObservableObject
 		MainViewModel mainViewModel,
 		IThemeService themeService,
 		INotificationService notificationService,
+		IHostConnectionService hostConnectionService,
 		VoiceAssistantViewModel? voiceAssistantViewModel = null)
 	{
 		_themeService = themeService;
 		_notificationService = notificationService;
+		_hostConnectionService = hostConnectionService;
 		_sidebarViewModel = mainViewModel;
 		Voice = voiceAssistantViewModel;
 		IsVoiceSupported = Voice != null;
@@ -363,6 +366,9 @@ public partial class MainWindowViewModel : ObservableObject
 		vm.AccountIndex = server.AccountIndex;
 		vm.Completed += () =>
 		{
+			if (vm.WasDeleted)
+				_hostConnectionService.DisconnectFromHost(server.ProfileName, server.Id);
+
 			CloseModal();
 			_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
 		};

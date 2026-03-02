@@ -101,7 +101,7 @@ public partial class HostViewModel : ViewModelBase
 		try
 		{
 			var providers = await _hostConnectionService.GetProvidersForProfileAsync(ProfileName);
-			var provider = providers.FirstOrDefault(p => p.Type == HostStatus.Type.ToString().ToLower());
+			var provider = providers.FirstOrDefault(p => p.Provider.Type == HostStatus.Type.ToString().ToLower()).Provider;
 
 			if (provider != null)
 			{
@@ -131,7 +131,7 @@ public partial class HostViewModel : ViewModelBase
 		try
 		{
 			var providers = await _hostConnectionService.GetProvidersForProfileAsync(ProfileName);
-			var provider = providers.FirstOrDefault(p => p.Type == HostStatus.Type.ToString().ToLower());
+			var provider = providers.FirstOrDefault(p => p.Provider.Type == HostStatus.Type.ToString().ToLower()).Provider;
 
 			if (provider != null)
 			{
@@ -178,7 +178,7 @@ public partial class HostViewModel : ViewModelBase
 	{
 		var providers = await _hostConnectionService.GetProvidersForProfileAsync(ProfileName);
 
-		foreach (var provider in providers)
+		foreach (var (provider, _) in providers)
 		{
 			try
 			{
