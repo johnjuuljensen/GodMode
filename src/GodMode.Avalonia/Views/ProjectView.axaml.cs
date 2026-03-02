@@ -21,8 +21,9 @@ public partial class ProjectView : UserControl
 		// Intercept Enter key on input (tunnel to catch before TextBox processes it)
 		InputEditor.AddHandler(KeyDownEvent, OnInputKeyDown, RoutingStrategies.Tunnel);
 
-		// Wire question prompt option selection
+		// Wire question prompt events
 		QuestionPrompt.OptionSelected += OnQuestionOptionSelected;
+		QuestionPrompt.Dismissed += OnQuestionDismissed;
 
 		DataContextChanged += (_, _) =>
 		{
@@ -90,6 +91,15 @@ public partial class ProjectView : UserControl
 		{
 			vm.InputText = selectedOption;
 			_ = vm.SendInputCommand.ExecuteAsync(null);
+		}
+	}
+
+	private void OnQuestionDismissed(object? sender, EventArgs e)
+	{
+		if (DataContext is ProjectViewModel vm)
+		{
+			vm.DismissQuestion();
+			InputEditor.Focus();
 		}
 	}
 

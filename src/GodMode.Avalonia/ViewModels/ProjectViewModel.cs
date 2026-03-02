@@ -155,6 +155,14 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		}
 	}
 
+	public void DismissQuestion()
+	{
+		IsQuestionActive = false;
+		CurrentQuestionText = null;
+		CurrentQuestionOptions = [];
+		CurrentQuestionHeader = null;
+	}
+
 	[RelayCommand]
 	private async Task SendInputAsync()
 	{
