@@ -7,7 +7,6 @@ using GodMode.Server.Hubs;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using ProjectFiles = GodMode.ProjectFiles;
-using System.Collections.Frozen;
 
 namespace GodMode.Server.Services;
 
@@ -25,6 +24,21 @@ public class ProjectManager : IProjectManager
     private readonly ILogger<ProjectManager> _logger;
     private readonly ProjectFiles.ProjectManager _projectFiles;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
+
+    /// <summary>
+    /// Profile name → ProfileConfig. Always has at least a "Default" profile.
+    /// </summary>
+    private readonly Dictionary<string, ProfileConfig> _profiles;
+
+    /// <summary>
+    /// (profileName, rootName) → resolved absolute path. Built from _profiles.
+    /// </summary>
+    private readonly Dictionary<(string Profile, string Root), string> _rootLookup;
+
+    /// <summary>
+    /// Resolved absolute path → (profileName, rootName). Reverse lookup for recovery.
+    /// </summary>
+    private readonly Dictionary<string, (string Profile, string Root)> _pathToProfileRoot;
 
     public ProjectManager(
         IClaudeProcessManager processManager,
@@ -45,24 +59,110 @@ public class ProjectManager : IProjectManager
         // Subscribe to output events from Claude processes
         _processManager.OnOutputReceived += HandleOutputReceivedAsync;
 
-        // Load project roots from configuration
-        IReadOnlyDictionary<string, string> projectRoots = configuration.GetSection("ProjectRoots").Get<IReadOnlyDictionary<string, string>>() ?? FrozenDictionary<string,string>.Empty;
+        // Load profiles from configuration (with backward compat for ProjectRoots)
+        _profiles = LoadProfiles(configuration);
+        (_rootLookup, _pathToProfileRoot) = BuildRootLookups(_profiles);
 
-        _projectFiles = new ProjectFiles.ProjectManager(projectRoots);
+        // Build flat root dictionary for ProjectFiles.ProjectManager using composite keys
+        var compositeRoots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ((profile, root), path) in _rootLookup)
+        {
+            compositeRoots[$"{profile}/{root}"] = path;
+        }
 
-        _logger.LogInformation("Initialized with project roots: {Roots}",
-            string.Join(", ", projectRoots.Select(kvp => $"{kvp.Key}={kvp.Value}")));
+        _projectFiles = compositeRoots.Count > 0
+            ? new ProjectFiles.ProjectManager(compositeRoots)
+            : new ProjectFiles.ProjectManager("projects");
+
+        _logger.LogInformation("Initialized with {ProfileCount} profiles, {RootCount} total roots: {Roots}",
+            _profiles.Count,
+            _rootLookup.Count,
+            string.Join(", ", _rootLookup.Select(kvp => $"{kvp.Key.Profile}/{kvp.Key.Root}={kvp.Value}")));
+    }
+
+    private static Dictionary<string, ProfileConfig> LoadProfiles(IConfiguration configuration)
+    {
+        var profiles = configuration.GetSection("Profiles").Get<Dictionary<string, ProfileConfig>>();
+
+        if (profiles is { Count: > 0 })
+            return profiles;
+
+        // Backward compat: map old ProjectRoots → "Default" profile
+        var legacyRoots = configuration.GetSection("ProjectRoots").Get<Dictionary<string, string>>();
+        if (legacyRoots is { Count: > 0 })
+        {
+            return new Dictionary<string, ProfileConfig>
+            {
+                ["Default"] = new ProfileConfig { Roots = legacyRoots }
+            };
+        }
+
+        // No config at all — single default profile with "projects" root
+        return new Dictionary<string, ProfileConfig>
+        {
+            ["Default"] = new ProfileConfig
+            {
+                Roots = new Dictionary<string, string> { ["default"] = "projects" }
+            }
+        };
+    }
+
+    private static (Dictionary<(string, string), string>, Dictionary<string, (string, string)>) BuildRootLookups(
+        Dictionary<string, ProfileConfig> profiles)
+    {
+        var rootLookup = new Dictionary<(string, string), string>(TupleComparer.Instance);
+        var pathLookup = new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (profileName, config) in profiles)
+        {
+            foreach (var (rootName, rootPath) in config.Roots)
+            {
+                rootLookup[(profileName, rootName)] = rootPath;
+                pathLookup[Path.GetFullPath(rootPath)] = (profileName, rootName);
+            }
+        }
+
+        return (rootLookup, pathLookup);
+    }
+
+    private sealed class TupleComparer : IEqualityComparer<(string, string)>
+    {
+        public static readonly TupleComparer Instance = new();
+        public bool Equals((string, string) x, (string, string) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.Item1, y.Item1) &&
+            StringComparer.OrdinalIgnoreCase.Equals(x.Item2, y.Item2);
+        public int GetHashCode((string, string) obj) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Item1),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Item2));
+    }
+
+    /// <summary>
+    /// Gets the composite key used in ProjectFiles.ProjectManager for a (profile, root) pair.
+    /// </summary>
+    private static string CompositeKey(string profile, string root) => $"{profile}/{root}";
+
+    public Task<ProfileInfo[]> ListProfilesAsync()
+    {
+        var profiles = _profiles.Select(kvp =>
+            new ProfileInfo(kvp.Key, kvp.Value.Description)
+        ).ToArray();
+
+        return Task.FromResult(profiles);
     }
 
     public Task<ProjectRootInfo[]> ListProjectRootsAsync()
     {
-        var roots = _projectFiles.ProjectRoots.Select(kvp =>
+        var roots = _rootLookup.Select(kvp =>
         {
-            var config = _rootConfigReader.ReadConfig(kvp.Value);
+            var (profileName, rootName) = kvp.Key;
+            var rootPath = kvp.Value;
+            var resolvedPath = _projectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+            var config = _rootConfigReader.ReadConfig(resolvedPath);
             var actions = config.GetEffectiveActions()
                 .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema))
                 .ToArray();
-            return new ProjectRootInfo(kvp.Key, config.Description, actions);
+            return new ProjectRootInfo(rootName, config.Description, actions, ProfileName: profileName);
         }).ToArray();
 
         return Task.FromResult(roots);
@@ -81,7 +181,8 @@ public class ProjectManager : IProjectManager
                 s.State,
                 s.UpdatedAt,
                 s.CurrentQuestion,
-                s.RootName
+                s.RootName,
+                ProfileName: project.ProfileName ?? s.ProfileName
             ));
         }
 
@@ -100,14 +201,19 @@ public class ProjectManager : IProjectManager
 
     public async Task<ProjectStatus> CreateProjectAsync(CreateProjectRequest request)
     {
-        _logger.LogInformation("Creating project in root '{Root}' action '{Action}' with inputs: {InputKeys}",
-            request.ProjectRootName, request.ActionName ?? "(default)", string.Join(", ", request.Inputs.Keys));
+        _logger.LogInformation("Creating project in profile '{Profile}' root '{Root}' action '{Action}' with inputs: {InputKeys}",
+            request.ProfileName, request.ProjectRootName, request.ActionName ?? "(default)", string.Join(", ", request.Inputs.Keys));
 
-        // Read root config and resolve action
-        var rootPath = _projectFiles.GetProjectRootPath(request.ProjectRootName);
+        // Resolve root path via profile lookup
+        var compositeKey = CompositeKey(request.ProfileName, request.ProjectRootName);
+        var rootPath = _projectFiles.GetProjectRootPath(compositeKey);
         var config = _rootConfigReader.ReadConfig(rootPath);
         var action = config.ResolveAction(request.ActionName)
             ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
+
+        // Get profile environment for merging
+        _profiles.TryGetValue(request.ProfileName, out var profileConfig);
+        var profileEnv = profileConfig?.Environment;
 
         // Resolve name from inputs or nameTemplate
         var name = ResolveProjectName(action, request.Inputs);
@@ -129,7 +235,7 @@ public class ProjectManager : IProjectManager
         else
         {
             // Server creates the project folder via ProjectFiles
-            var (projectFolder, _) = _projectFiles.CreateProject(request.ProjectRootName, name);
+            var (projectFolder, _) = _projectFiles.CreateProject(compositeKey, name);
             projectPath = projectFolder.ProjectPath;
         }
 
@@ -147,18 +253,20 @@ public class ProjectManager : IProjectManager
                 Git: null,
                 Tests: null,
                 OutputOffset: 0,
-                RootName: request.ProjectRootName
+                RootName: request.ProjectRootName,
+                ProfileName: request.ProfileName
             ),
             ProjectPath = projectPath,
-            ActionName = action.Name
+            ActionName = action.Name,
+            ProfileName = request.ProfileName
         };
 
         // Result file — scripts can write key=value pairs to override project path/name
         var resultFilePath = GetResultFilePath(rootPath, projectId);
         if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
 
-        // Build environment variables for scripts
-        var scriptEnv = BuildScriptEnvironment(rootPath, project, action, request.Inputs, resultFilePath);
+        // Build environment variables for scripts (profile env merged in)
+        var scriptEnv = BuildScriptEnvironment(rootPath, project, action, request.Inputs, profileEnv, resultFilePath);
 
         // Script log file — at root level so it persists regardless of what scripts do
         var logFilePath = GetScriptLogPath(rootPath, projectId);
@@ -223,6 +331,11 @@ public class ProjectManager : IProjectManager
             name = overrideName;
             _logger.LogInformation("Script overrode project name to '{ProjectName}'", name);
         }
+        if (scriptResults.TryGetValue("project_prompt", out var overridePrompt) && !string.IsNullOrWhiteSpace(overridePrompt))
+        {
+            prompt = overridePrompt;
+            _logger.LogInformation("Script overrode project prompt ({Length} chars)", prompt.Length);
+        }
         project.Status = project.Status with { Id = projectId, Name = name };
 
         // Ensure .godmode directory exists (scripts may have created the project dir without it)
@@ -241,8 +354,8 @@ public class ProjectManager : IProjectManager
         // Add to tracking
         _projects[projectId] = project;
 
-        // Build claude env/args from action config + project settings
-        var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings);
+        // Build claude env/args from action config + project settings + profile env
+        var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, profileEnv);
 
         // Start Claude process
         project.ProcessCancellation = new CancellationTokenSource();
@@ -321,15 +434,17 @@ public class ProjectManager : IProjectManager
 
         // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
-        if (project.Status.RootName != null)
+        var profileName = project.ProfileName ?? project.Status.ProfileName;
+        if (project.Status.RootName != null && profileName != null)
         {
-            var rootPath = _projectFiles.GetProjectRootPath(project.Status.RootName);
+            var rootPath = _projectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
             var config = _rootConfigReader.ReadConfig(rootPath);
             var action = config.ResolveAction(project.ActionName);
 
             if (action?.Delete is { Length: > 0 })
             {
-                var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>());
+                _profiles.TryGetValue(profileName, out var profileCfg);
+                var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment);
 
                 if (force)
                     scriptEnv["GODMODE_FORCE"] = "true";
@@ -405,7 +520,7 @@ public class ProjectManager : IProjectManager
         project.Status = project.Status with { State = ProjectState.Running, UpdatedAt = DateTime.UtcNow };
         project.ProcessCancellation = new CancellationTokenSource();
 
-        // Build claude env/args from action config + persisted project settings
+        // Build claude env/args from action config + persisted project settings + profile env
         Dictionary<string, string>? claudeEnv = null;
         string[]? claudeArgs = null;
         try
@@ -414,20 +529,24 @@ public class ProjectManager : IProjectManager
             // Restore action name from settings if not already set (recovery scenario)
             project.ActionName ??= settings.ActionName;
 
-            if (project.Status.RootName != null)
+            var resumeProfileName = project.ProfileName ?? project.Status.ProfileName;
+            _profiles.TryGetValue(resumeProfileName ?? "", out var profileCfg);
+            var profileEnv = profileCfg?.Environment;
+
+            if (project.Status.RootName != null && resumeProfileName != null)
             {
-                var rootPath = _projectFiles.GetProjectRootPath(project.Status.RootName);
+                var rootPath = _projectFiles.GetProjectRootPath(CompositeKey(resumeProfileName, project.Status.RootName));
                 var config = _rootConfigReader.ReadConfig(rootPath);
                 var action = config.ResolveAction(project.ActionName);
                 if (action != null)
-                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings);
+                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, profileEnv);
                 else
-                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings);
+                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, profileEnv);
             }
             else
             {
                 // No root config, just apply project settings
-                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings);
+                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, profileEnv);
             }
         }
         catch (Exception ex)
@@ -535,25 +654,37 @@ public class ProjectManager : IProjectManager
                 // Check if state needs to be corrected (was running when server stopped)
                 var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput;
 
-                // Determine which root this project belongs to
+                // Determine which profile and root this project belongs to
                 string? rootName = null;
+                string? profileName = null;
                 foreach (var (rn, rp) in _projectFiles.ProjectRoots)
                 {
                     if (projectPath.StartsWith(rp, StringComparison.OrdinalIgnoreCase))
                     {
-                        rootName = rn;
+                        // Composite key is "profile/root" — split to extract both
+                        var slashIdx = rn.IndexOf('/');
+                        if (slashIdx > 0)
+                        {
+                            profileName = rn[..slashIdx];
+                            rootName = rn[(slashIdx + 1)..];
+                        }
+                        else
+                        {
+                            rootName = rn;
+                        }
                         break;
                     }
                 }
 
                 var correctedStatus = stateChanged
-                    ? status with { State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName }
-                    : status with { RootName = rootName };
+                    ? status with { State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName }
+                    : status with { RootName = rootName, ProfileName = profileName };
 
                 var project = new ProjectInfo
                 {
                     Status = correctedStatus,
-                    ProjectPath = projectPath
+                    ProjectPath = projectPath,
+                    ProfileName = profileName
                 };
 
                 // Load action name from settings
@@ -656,6 +787,8 @@ public class ProjectManager : IProjectManager
 
     /// <summary>
     /// Reads a result file written by scripts. Format: key=value per line. Ignores blank/comment lines.
+    /// The last key in the file may span multiple lines (everything after the first '=' until EOF).
+    /// This allows scripts to return multiline values (e.g. project_prompt) by placing them last.
     /// Returns empty dictionary if file doesn't exist.
     /// </summary>
     private static Dictionary<string, string> ReadResultFile(string resultFilePath)
@@ -663,14 +796,46 @@ public class ProjectManager : IProjectManager
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!File.Exists(resultFilePath)) return result;
 
-        foreach (var line in File.ReadAllLines(resultFilePath))
+        var lines = File.ReadAllLines(resultFilePath);
+        string? multilineKey = null;
+        List<string>? multilineLines = null;
+
+        foreach (var line in lines)
         {
+            if (multilineKey != null)
+            {
+                // We're accumulating lines for the last key
+                multilineLines!.Add(line);
+                continue;
+            }
+
             if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#')) continue;
             var eqIndex = line.IndexOf('=');
             if (eqIndex <= 0) continue;
             var key = line[..eqIndex].Trim();
-            var value = line[(eqIndex + 1)..].Trim();
-            result[key] = value;
+            var value = line[(eqIndex + 1)..];
+            result[key] = value.Trim();
+        }
+
+        // Find the last key and re-read its value as multiline (everything after key= to EOF)
+        // This lets scripts place a multiline value (like a prompt) as the last entry.
+        for (int i = lines.Length - 1; i >= 0; i--)
+        {
+            if (string.IsNullOrWhiteSpace(lines[i]) || lines[i].StartsWith('#')) continue;
+            var eqIndex = lines[i].IndexOf('=');
+            if (eqIndex <= 0) continue;
+
+            var lastKey = lines[i][..eqIndex].Trim();
+            // Collect all lines from this key's value line to end of file
+            var firstValueLine = lines[i][(eqIndex + 1)..];
+            var valueParts = new List<string> { firstValueLine };
+            for (int j = i + 1; j < lines.Length; j++)
+                valueParts.Add(lines[j]);
+
+            var multiValue = string.Join(Environment.NewLine, valueParts).Trim();
+            if (!string.IsNullOrEmpty(multiValue))
+                result[lastKey] = multiValue;
+            break;
         }
 
         return result;
@@ -716,14 +881,26 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
-    /// Builds claude environment and args from action config + project settings.
+    /// Builds claude environment and args from action config + project settings + profile env.
+    /// Merge order: profile env (base) → action env (overrides).
     /// </summary>
     private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
-        CreateAction action, ProjectFiles.ProjectSettings settings)
+        CreateAction action, ProjectFiles.ProjectSettings settings,
+        Dictionary<string, string>? profileEnv = null)
     {
-        var env = action.Environment != null
-            ? new Dictionary<string, string>(action.Environment)
-            : null;
+        Dictionary<string, string>? env = null;
+
+        // Start with profile environment as base
+        if (profileEnv is { Count: > 0 })
+            env = new Dictionary<string, string>(profileEnv);
+
+        // Action environment overrides profile
+        if (action.Environment != null)
+        {
+            env ??= new Dictionary<string, string>();
+            foreach (var (key, value) in action.Environment)
+                env[key] = value;
+        }
 
         var args = new List<string>();
         if (action.ClaudeArgs != null)
@@ -736,31 +913,40 @@ public class ProjectManager : IProjectManager
 
     /// <summary>
     /// Builds the full environment variables dictionary for scripts.
+    /// Merge order: profile env (base) → action env → GODMODE_* vars.
     /// </summary>
     private static Dictionary<string, string> BuildScriptEnvironment(
         string rootPath,
         ProjectInfo project,
         CreateAction action,
         Dictionary<string, JsonElement> inputs,
+        Dictionary<string, string>? profileEnv = null,
         string? resultFilePath = null)
     {
-        var env = new Dictionary<string, string>
+        var env = new Dictionary<string, string>();
+
+        // Profile environment as base layer
+        if (profileEnv is { Count: > 0 })
         {
-            ["GODMODE_ROOT_PATH"] = rootPath,
-            ["GODMODE_PROJECT_PATH"] = project.ProjectPath,
-            ["GODMODE_PROJECT_ID"] = project.Status.Id,
-            ["GODMODE_PROJECT_NAME"] = project.Status.Name
-        };
+            foreach (var (key, value) in profileEnv)
+                env[key] = value;
+        }
 
-        if (resultFilePath != null)
-            env["GODMODE_RESULT_FILE"] = resultFilePath;
-
-        // Add action environment
+        // Action environment overrides profile
         if (action.Environment != null)
         {
             foreach (var (key, value) in action.Environment)
                 env[key] = value;
         }
+
+        // GODMODE_* vars always win
+        env["GODMODE_ROOT_PATH"] = rootPath;
+        env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
+        env["GODMODE_PROJECT_ID"] = project.Status.Id;
+        env["GODMODE_PROJECT_NAME"] = project.Status.Name;
+
+        if (resultFilePath != null)
+            env["GODMODE_RESULT_FILE"] = resultFilePath;
 
         // Add form inputs as GODMODE_INPUT_* env vars
         foreach (var (key, value) in inputs)

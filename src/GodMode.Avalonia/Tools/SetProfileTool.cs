@@ -3,7 +3,7 @@ using GodMode.Avalonia.Voice;
 
 namespace GodMode.Avalonia.Tools;
 
-public sealed class SetProfileTool(VoiceContext context, IProfileService profileService) : ITool
+public sealed class SetProfileTool(VoiceContext context) : ITool
 {
     public string Name => "set_profile";
     public string Description => "Sets the active voice profile scope. Call with no arguments to list profiles. Use 'all' to show everything.";
@@ -17,21 +17,21 @@ public sealed class SetProfileTool(VoiceContext context, IProfileService profile
     {
         var name = ToolHelper.ExtractString(args, "profile_name");
 
-        // No arg → list profiles
+        // No arg → list discovered profiles
         if (string.IsNullOrWhiteSpace(name))
         {
-            var profiles = await profileService.GetProfilesAsync();
+            await context.EnsureIndexFreshAsync();
+            var profiles = context.GetDiscoveredProfileNames();
             if (profiles.Count == 0)
-                return ToolResult.Ok(Name, "No profiles configured.");
-
-            var result = profiles.Select(p => new
-            {
-                p.Name,
-                Active = p.Name == context.ActiveProfileName,
-                Accounts = p.Accounts.Select(a => a.Type).ToList()
-            });
+                return ToolResult.Ok(Name, "No profiles discovered from connected servers.");
 
             var current = context.ActiveProfileName ?? "All";
+            var result = profiles.Select(p => new
+            {
+                Name = p,
+                Active = p.Equals(context.ActiveProfileName, StringComparison.OrdinalIgnoreCase)
+            });
+
             return ToolResult.Ok(Name,
                 $"Current scope: {current}\n" +
                 JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
@@ -45,16 +45,18 @@ public sealed class SetProfileTool(VoiceContext context, IProfileService profile
             return ToolResult.Ok(Name, "Profile scope set to All (showing everything).");
         }
 
-        // Specific profile
-        var profile = await profileService.GetProfileAsync(name);
-        if (profile is null)
+        // Specific profile — validate against discovered names
+        await context.EnsureIndexFreshAsync();
+        var discovered = context.GetDiscoveredProfileNames();
+        var match = discovered.FirstOrDefault(p => p.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+        if (match is null)
         {
-            var all = await profileService.GetProfilesAsync();
             return ToolResult.Fail(Name,
-                $"Profile '{name}' not found. Available: {string.Join(", ", all.Select(p => p.Name))}");
+                $"Profile '{name}' not found. Available: {string.Join(", ", discovered)}");
         }
 
-        await context.SetProfileAsync(profile.Name);
-        return ToolResult.Ok(Name, $"Profile scope set to: {profile.Name}");
+        await context.SetProfileAsync(match);
+        return ToolResult.Ok(Name, $"Profile scope set to: {match}");
     }
 }

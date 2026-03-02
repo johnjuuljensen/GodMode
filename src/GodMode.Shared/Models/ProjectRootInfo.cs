@@ -7,5 +7,6 @@ namespace GodMode.Shared.Models;
 public record ProjectRootInfo(
     string Name,
     string? Description = null,
-    CreateActionInfo[]? Actions = null
+    CreateActionInfo[]? Actions = null,
+    string? ProfileName = null
 );

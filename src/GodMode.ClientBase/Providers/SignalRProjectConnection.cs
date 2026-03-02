@@ -60,6 +60,19 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         }
     }
 
+    public async Task<IEnumerable<ProfileInfo>> ListProfilesAsync()
+    {
+        try
+        {
+            return await _hubProxy.ListProfiles();
+        }
+        catch
+        {
+            // Old servers don't support ListProfiles — return empty
+            return [];
+        }
+    }
+
     public async Task<IEnumerable<ProjectRootInfo>> ListProjectRootsAsync()
     {
         return await _hubProxy.ListProjectRoots();
@@ -75,9 +88,9 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         return await _hubProxy.GetStatus(projectId);
     }
 
-    public async Task<ProjectStatus> CreateProjectAsync(string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
+    public async Task<ProjectStatus> CreateProjectAsync(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
     {
-        return await _hubProxy.CreateProject(projectRootName, actionName, inputs);
+        return await _hubProxy.CreateProject(profileName, projectRootName, actionName, inputs);
     }
 
     public async Task SendInputAsync(string projectId, string input)

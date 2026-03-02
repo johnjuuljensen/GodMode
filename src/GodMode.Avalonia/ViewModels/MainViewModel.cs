@@ -1,42 +1,52 @@
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using GodMode.ClientBase.Services.Models;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using System.Collections.ObjectModel;
-
-using Profile = GodMode.ClientBase.Services.Models.Profile;
 
 namespace GodMode.Avalonia.ViewModels;
 
 public partial class MainViewModel : ViewModelBase
 {
-	private readonly IProfileService _profileService;
+	private readonly IServerRegistryService _serverRegistry;
 	private readonly IHostConnectionService _hostConnectionService;
 	private readonly IProjectService _projectService;
 	private readonly INotificationService _notificationService;
 	private readonly IDialogService _dialogService;
 	private readonly HashSet<string> _subscribedConnections = new();
 	private readonly HashSet<string> _hiddenProjectIds = new();
-	private bool _suppressProfileChange;
 
-	// Events for shell orchestration (replaces page navigation)
-	public event Action<ServerGroupViewModel, ProjectSummary>? ProjectSelected;
-	public event Action<ServerGroupViewModel, string?, string?>? CreateProjectRequested;
-	public event Action<string>? AddServerRequested;
-	public event Action? AddProfileRequested;
+	/// <summary>
+	/// Internal list of servers for connection tracking.
+	/// </summary>
+	private readonly List<ServerGroupViewModel> _serverConnections = new();
+
+	// Events for shell orchestration
+	public event Action<RootGroupViewModel, ProjectSummary>? ProjectSelected;
+	public event Action<RootGroupViewModel, string?>? CreateProjectRequested;
+	public event Action? AddServerRequested;
 	public event Action<ServerGroupViewModel>? EditServerRequested;
 	public event Action<bool>? ConnectionStateChanged;
 
-	public static readonly Profile AllProfilesOption = new() { Name = "All" };
+	/// <summary>
+	/// Profile filter options: "All" + discovered profile names.
+	/// </summary>
+	[ObservableProperty]
+	private ObservableCollection<string> _profileFilterOptions = new() { "All" };
 
 	[ObservableProperty]
-	private ObservableCollection<Profile> _profileOptions = new();
+	private string _selectedProfileFilter = "All";
 
+	/// <summary>
+	/// Main display hierarchy: Profile → Root:Server → Projects.
+	/// </summary>
 	[ObservableProperty]
-	private Profile? _selectedProfileOption;
+	private ObservableCollection<ProfileGroupViewModel> _profileGroups = new();
 
+	/// <summary>
+	/// Flat server list kept for backward compat (tile view, status updates).
+	/// </summary>
 	[ObservableProperty]
 	private ObservableCollection<ServerGroupViewModel> _servers = new();
 
@@ -66,22 +76,19 @@ public partial class MainViewModel : ViewModelBase
 
 	public MainViewModel(
 		INavigationService navigationService,
-		IProfileService profileService,
+		IServerRegistryService serverRegistry,
 		IHostConnectionService hostConnectionService,
 		IProjectService projectService,
 		INotificationService notificationService,
 		IDialogService dialogService)
 		: base(navigationService)
 	{
-		_profileService = profileService;
+		_serverRegistry = serverRegistry;
 		_hostConnectionService = hostConnectionService;
 		_projectService = projectService;
 		_notificationService = notificationService;
 		_dialogService = dialogService;
 	}
-
-	public bool IsAllProfilesSelected => SelectedProfileOption == AllProfilesOption;
-	public Profile? SelectedProfile => IsAllProfilesSelected ? null : SelectedProfileOption;
 
 	[RelayCommand]
 	private async Task LoadAsync()
@@ -91,30 +98,11 @@ public partial class MainViewModel : ViewModelBase
 
 		try
 		{
-			System.Diagnostics.Debug.WriteLine("[GodMode] LoadAsync started");
-			var profiles = await _profileService.GetProfilesAsync();
-			System.Diagnostics.Debug.WriteLine($"[GodMode] Loaded {profiles.Count()} profiles");
-			var options = new List<Profile> { AllProfilesOption };
-			options.AddRange(profiles);
-			ProfileOptions = new ObservableCollection<Profile>(options);
-
-			var selectedName = await _profileService.GetSelectedProfileAsync();
-			// Suppress the OnSelectedProfileOptionChanged callback during initial load
-			// to prevent a duplicate concurrent LoadServersAsync call
-			_suppressProfileChange = true;
-			SelectedProfileOption = selectedName != null
-				? ProfileOptions.FirstOrDefault(p => p.Name == selectedName.Name) ?? AllProfilesOption
-				: AllProfilesOption;
-			_suppressProfileChange = false;
-			System.Diagnostics.Debug.WriteLine($"[GodMode] Selected profile: {SelectedProfileOption?.Name}");
-
 			await LoadServersAsync();
-			System.Diagnostics.Debug.WriteLine($"[GodMode] After LoadServersAsync, Servers.Count={Servers.Count}");
 		}
 		catch (Exception ex)
 		{
-			System.Diagnostics.Debug.WriteLine($"[GodMode] LoadAsync error: {ex}");
-			ErrorMessage = $"Error loading profiles: {ex.Message}";
+			ErrorMessage = $"Error loading servers: {ex.Message}";
 		}
 		finally
 		{
@@ -143,39 +131,33 @@ public partial class MainViewModel : ViewModelBase
 	}
 
 	[RelayCommand]
-	private async Task ToggleServerExpandedAsync(ServerGroupViewModel server)
-	{
-		server.IsExpanded = !server.IsExpanded;
-		if (server.IsExpanded && server.Projects.Count == 0 && server.CanConnect)
-			await LoadServerProjectsAsync(server);
-	}
-
-	[RelayCommand]
 	private void SelectProject(ProjectSummary project)
 	{
-		var server = Servers.FirstOrDefault(s => s.Projects.Any(p => p.Id == project.Id));
-		if (server == null) return;
-
-		SelectedProject = project;
-		ProjectSelected?.Invoke(server, project);
-	}
-
-	[RelayCommand]
-	private void CreateProject(ServerGroupViewModel server)
-	{
-		CreateProjectRequested?.Invoke(server, null, null);
+		// Find the root group containing this project
+		foreach (var profileGroup in ProfileGroups)
+		{
+			foreach (var rootGroup in profileGroup.RootGroups)
+			{
+				if (rootGroup.Projects.Any(p => p.Id == project.Id))
+				{
+					SelectedProject = project;
+					ProjectSelected?.Invoke(rootGroup, project);
+					return;
+				}
+			}
+		}
 	}
 
 	[RelayCommand]
 	private void CreateProjectForRoot(RootGroupViewModel root)
 	{
-		CreateProjectRequested?.Invoke(root.Server, root.Name, null);
+		CreateProjectRequested?.Invoke(root, null);
 	}
 
 	[RelayCommand]
 	private void CreateProjectForRootAction(RootActionItem item)
 	{
-		CreateProjectRequested?.Invoke(item.Root.Server, item.Root.Name, item.Action.Name);
+		CreateProjectRequested?.Invoke(item.Root, item.Action.Name);
 	}
 
 	[RelayCommand]
@@ -185,28 +167,9 @@ public partial class MainViewModel : ViewModelBase
 	}
 
 	[RelayCommand]
-	private void AddProfile()
-	{
-		AddProfileRequested?.Invoke();
-	}
-
-	[RelayCommand]
 	private void AddServer()
 	{
-		if (SelectedProfile != null)
-		{
-			AddServerRequested?.Invoke(SelectedProfile.Name);
-		}
-		else if (ProfileOptions.Count > 1)
-		{
-			var firstProfile = ProfileOptions.FirstOrDefault(p => p != AllProfilesOption);
-			if (firstProfile != null)
-				AddServerRequested?.Invoke(firstProfile.Name);
-		}
-		else
-		{
-			ErrorMessage = "Create a profile first before adding servers";
-		}
+		AddServerRequested?.Invoke();
 	}
 
 	[RelayCommand]
@@ -215,16 +178,18 @@ public partial class MainViewModel : ViewModelBase
 		_hiddenProjectIds.Add(project.Id);
 		HiddenProjectCount = _hiddenProjectIds.Count;
 
-		// Remove from visible projects if not showing hidden
 		if (!ShowHiddenProjects)
 		{
-			foreach (var server in Servers)
+			foreach (var profileGroup in ProfileGroups)
 			{
-				var found = server.Projects.FirstOrDefault(p => p.Id == project.Id);
-				if (found != null)
+				foreach (var rootGroup in profileGroup.RootGroups)
 				{
-					server.Projects.Remove(found);
-					break;
+					var found = rootGroup.Projects.FirstOrDefault(p => p.Id == project.Id);
+					if (found != null)
+					{
+						rootGroup.Projects.Remove(found);
+						return;
+					}
 				}
 			}
 		}
@@ -247,17 +212,31 @@ public partial class MainViewModel : ViewModelBase
 	[RelayCommand]
 	private async Task DeleteProjectAsync(ProjectSummary project)
 	{
-		var server = Servers.FirstOrDefault(s => s.Projects.Contains(project));
-		if (server == null) return;
+		// Find which root group this project belongs to
+		RootGroupViewModel? ownerRoot = null;
+		foreach (var profileGroup in ProfileGroups)
+		{
+			foreach (var rootGroup in profileGroup.RootGroups)
+			{
+				if (rootGroup.Projects.Contains(project))
+				{
+					ownerRoot = rootGroup;
+					break;
+				}
+			}
+			if (ownerRoot != null) break;
+		}
+
+		if (ownerRoot == null) return;
 
 		var (confirmed, force) = await _dialogService.ConfirmDeleteAsync(project.Name);
 		if (!confirmed) return;
 
 		try
 		{
-			await _projectService.DeleteProjectAsync(server.ProfileName, server.Id, project.Id, force);
-			server.Projects.Remove(project);
-			server.RebuildRootGroups(SortByName);
+			// ProfileName here is the client-side connection profile (ignored by backend now)
+			await _projectService.DeleteProjectAsync(ownerRoot.ProfileName, ownerRoot.HostId, project.Id, force);
+			ownerRoot.Projects.Remove(project);
 		}
 		catch (Exception ex)
 		{
@@ -275,14 +254,15 @@ public partial class MainViewModel : ViewModelBase
 	private void ToggleSort()
 	{
 		SortByName = !SortByName;
-		foreach (var server in Servers)
-			server.RebuildRootGroups(SortByName);
+		RebuildProfileGroups();
 	}
 
 	[RelayCommand]
 	private void RemoveServer(ServerGroupViewModel server)
 	{
 		Servers.Remove(server);
+		_serverConnections.Remove(server);
+		RebuildProfileGroups();
 	}
 
 	public bool IsProjectHidden(string projectId) => _hiddenProjectIds.Contains(projectId);
@@ -293,7 +273,7 @@ public partial class MainViewModel : ViewModelBase
 		try
 		{
 			server.State = HostState.Starting;
-			var providers = await _hostConnectionService.GetProvidersForProfileAsync(server.ProfileName);
+			var providers = await _hostConnectionService.GetAllProvidersAsync();
 			var provider = providers.FirstOrDefault(p => p.Provider.Type == server.Type).Provider;
 
 			if (provider != null)
@@ -316,7 +296,7 @@ public partial class MainViewModel : ViewModelBase
 		try
 		{
 			server.State = HostState.Stopping;
-			var providers = await _hostConnectionService.GetProvidersForProfileAsync(server.ProfileName);
+			var providers = await _hostConnectionService.GetAllProvidersAsync();
 			var provider = providers.FirstOrDefault(p => p.Provider.Type == server.Type).Provider;
 
 			if (provider != null)
@@ -325,6 +305,7 @@ public partial class MainViewModel : ViewModelBase
 				server.State = HostState.Stopped;
 				server.Projects.Clear();
 				server.IsConnected = false;
+				RebuildProfileGroups();
 			}
 		}
 		catch (Exception ex)
@@ -334,71 +315,50 @@ public partial class MainViewModel : ViewModelBase
 		}
 	}
 
-	partial void OnSelectedProfileOptionChanged(Profile? value)
+	partial void OnSelectedProfileFilterChanged(string value)
 	{
-		if (value != null && !_suppressProfileChange)
-		{
-			if (value != AllProfilesOption)
-				_ = _profileService.SetSelectedProfileAsync(value.Name);
-			_ = LoadServersAsync();
-		}
+		RebuildProfileGroups();
 	}
 
 	private async Task LoadServersAsync()
 	{
-		System.Diagnostics.Debug.WriteLine($"[GodMode] LoadServersAsync: IsAllProfilesSelected={IsAllProfilesSelected}, SelectedProfile={SelectedProfile?.Name}");
 		var serverList = new List<ServerGroupViewModel>();
 
 		try
 		{
-			if (IsAllProfilesSelected)
+			var providers = await _hostConnectionService.GetAllProvidersAsync();
+
+			foreach (var (provider, serverIndex) in providers)
 			{
-				var profilesForLoad = ProfileOptions.Where(p => p != AllProfilesOption).ToList();
-				System.Diagnostics.Debug.WriteLine($"[GodMode] Loading servers for all {profilesForLoad.Count} profiles");
-				foreach (var profile in profilesForLoad)
-					await LoadServersFromProfileAsync(profile, serverList);
-			}
-			else if (SelectedProfile != null)
-			{
-				await LoadServersFromProfileAsync(SelectedProfile, serverList);
+				try
+				{
+					var hosts = await provider.ListHostsAsync();
+					foreach (var host in hosts)
+					{
+						var server = ServerGroupViewModel.FromHostInfo(host, "", serverIndex);
+						server.IsConnected = _hostConnectionService.IsConnected(host.Id);
+						serverList.Add(server);
+					}
+				}
+				catch (Exception ex)
+				{
+					System.Diagnostics.Debug.WriteLine($"Error loading hosts from provider: {ex.Message}");
+				}
 			}
 
-			System.Diagnostics.Debug.WriteLine($"[GodMode] Total servers found: {serverList.Count}");
 			Servers = new ObservableCollection<ServerGroupViewModel>(serverList);
+			_serverConnections.Clear();
+			_serverConnections.AddRange(serverList);
 
-			foreach (var server in Servers)
+			// Load projects for each server (also discovers profiles)
+			foreach (var server in _serverConnections)
 			{
-				System.Diagnostics.Debug.WriteLine($"[GodMode] Loading projects for server: {server.Name} ({server.Id})");
 				_ = LoadServerProjectsAsync(server);
 			}
 		}
 		catch (Exception ex)
 		{
-			System.Diagnostics.Debug.WriteLine($"[GodMode] LoadServersAsync error: {ex}");
 			ErrorMessage = $"Error loading servers: {ex.Message}";
-		}
-	}
-
-	private async Task LoadServersFromProfileAsync(Profile profile, List<ServerGroupViewModel> serverList)
-	{
-		var providers = await _hostConnectionService.GetProvidersForProfileAsync(profile.Name);
-
-		foreach (var (provider, accountIndex) in providers)
-		{
-			try
-			{
-				var hosts = await provider.ListHostsAsync();
-				foreach (var host in hosts)
-				{
-					var server = ServerGroupViewModel.FromHostInfo(host, profile.Name, accountIndex);
-					server.IsConnected = _hostConnectionService.IsConnected(profile.Name, host.Id);
-					serverList.Add(server);
-				}
-			}
-			catch (Exception ex)
-			{
-				System.Diagnostics.Debug.WriteLine($"Error loading hosts from provider: {ex.Message}");
-			}
 		}
 	}
 
@@ -406,34 +366,49 @@ public partial class MainViewModel : ViewModelBase
 	{
 		server.IsLoadingProjects = true;
 		server.ErrorMessage = null;
-		System.Diagnostics.Debug.WriteLine($"[GodMode] LoadServerProjectsAsync: connecting to {server.Name}...");
 
 		try
 		{
-			var connection = await _hostConnectionService.ConnectToHostAsync(server.ProfileName, server.Id);
-			System.Diagnostics.Debug.WriteLine($"[GodMode] Connected to {server.Name}");
+			var connection = await _hostConnectionService.ConnectToHostAsync(server.Id);
 			server.IsConnected = true;
 			server.State = HostState.Running;
 			ConnectionStateChanged?.Invoke(true);
 
 			// Subscribe to project creation events (once per connection)
-			var connectionKey = $"{server.ProfileName}:{server.Id}";
-			if (_subscribedConnections.Add(connectionKey))
+			if (_subscribedConnections.Add(server.Id))
 			{
 				connection.ProjectCreatedReceived += status =>
 				{
 					Dispatcher.UIThread.Post(() =>
 					{
-						// Add the new project to the matching server's list
-						var target = Servers.FirstOrDefault(s =>
-							s.ProfileName == server.ProfileName && s.Id == server.Id);
+						var target = _serverConnections.FirstOrDefault(s => s.Id == server.Id);
 						if (target != null)
 						{
 							var summary = new ProjectSummary(
 								status.Id, status.Name, status.State,
-								status.UpdatedAt, status.CurrentQuestion, status.RootName);
+								status.UpdatedAt, status.CurrentQuestion, status.RootName,
+								status.ProfileName);
 							target.Projects.Insert(0, summary);
 							target.RebuildRootGroups(SortByName);
+							RebuildProfileGroups();
+						}
+					});
+				};
+
+				connection.ProjectDeletedReceived += projectId =>
+				{
+					Dispatcher.UIThread.Post(() =>
+					{
+						var target = _serverConnections.FirstOrDefault(s => s.Id == server.Id);
+						if (target != null)
+						{
+							var project = target.Projects.FirstOrDefault(p => p.Id == projectId);
+							if (project != null)
+							{
+								target.Projects.Remove(project);
+								target.RebuildRootGroups(SortByName);
+								RebuildProfileGroups();
+							}
 						}
 					});
 				};
@@ -445,14 +420,15 @@ public partial class MainViewModel : ViewModelBase
 
 			var roots = await rootsTask;
 			var projects = await projectsTask;
-			System.Diagnostics.Debug.WriteLine($"[GodMode] {server.Name}: loaded {projects.Count()} projects, {roots.Count()} roots");
 			server.KnownRoots = roots.ToList();
 			server.Projects = new ObservableCollection<ProjectSummary>(projects);
 			server.RebuildRootGroups(SortByName);
+
+			RebuildProfileGroups();
 		}
 		catch (Exception ex)
 		{
-			System.Diagnostics.Debug.WriteLine($"[GodMode] LoadServerProjectsAsync error for {server.Name}: {ex.Message}");
+			System.Diagnostics.Debug.WriteLine($"LoadServerProjectsAsync error for {server.Name}: {ex.Message}");
 			server.IsConnected = false;
 			if (server.State is HostState.Running or HostState.Unknown)
 				server.State = HostState.Stopped;
@@ -460,6 +436,118 @@ public partial class MainViewModel : ViewModelBase
 		finally
 		{
 			server.IsLoadingProjects = false;
+		}
+	}
+
+	/// <summary>
+	/// Rebuilds the ProfileGroups hierarchy from all connected servers' data.
+	/// Groups: Profile → Root:Server → Projects.
+	/// </summary>
+	private void RebuildProfileGroups()
+	{
+		var profileDict = new Dictionary<string, List<RootGroupViewModel>>(StringComparer.OrdinalIgnoreCase);
+		var allProfileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		foreach (var server in _serverConnections)
+		{
+			if (!server.IsConnected) continue;
+
+			foreach (var rootGroup in server.RootGroups)
+			{
+				// Each root has projects with ProfileName set
+				// Group projects by their profile name
+				var projectsByProfile = rootGroup.Projects
+					.GroupBy(p => p.ProfileName ?? "Default")
+					.ToDictionary(g => g.Key, g => g.ToList());
+
+				// Also include empty roots via KnownRoots
+				var rootInfo = server.KnownRoots.FirstOrDefault(r => r.Name == rootGroup.Name);
+				var rootProfileName = rootInfo?.ProfileName ?? "Default";
+				allProfileNames.Add(rootProfileName);
+
+				// Ensure at least the root's profile is represented (even with no projects)
+				if (!projectsByProfile.ContainsKey(rootProfileName))
+					projectsByProfile[rootProfileName] = new List<ProjectSummary>();
+
+				foreach (var (profileName, projects) in projectsByProfile)
+				{
+					allProfileNames.Add(profileName);
+
+					if (!profileDict.TryGetValue(profileName, out var rootList))
+					{
+						rootList = new List<RootGroupViewModel>();
+						profileDict[profileName] = rootList;
+					}
+
+					// Check if we already have this root:server combination
+					var existingRoot = rootList.FirstOrDefault(r =>
+						r.RootName == rootGroup.Name && r.HostId == server.Id);
+
+					if (existingRoot != null)
+					{
+						// Merge projects
+						foreach (var p in projects)
+						{
+							if (!existingRoot.Projects.Any(ep => ep.Id == p.Id))
+								existingRoot.Projects.Add(p);
+						}
+					}
+					else
+					{
+						var sorted = SortByName
+							? projects.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+							: projects.OrderByDescending(p => p.UpdatedAt);
+
+						var newRoot = new RootGroupViewModel
+						{
+							Name = _serverConnections.Count > 1
+								? $"{rootGroup.Name} ({server.Name})"
+								: rootGroup.Name,
+							RootName = rootGroup.Name,
+							ProfileName = profileName,
+							HostId = server.Id,
+							HostDisplayName = server.Name,
+							IsConnected = server.IsConnected,
+							Server = server,
+							Projects = new ObservableCollection<ProjectSummary>(sorted)
+						};
+
+						// Copy action items from the server's root info
+						var actions = rootInfo?.Actions ?? [];
+						newRoot.ActionItems = actions.Select(a => new RootActionItem(newRoot, a)).ToList();
+
+						rootList.Add(newRoot);
+					}
+				}
+			}
+		}
+
+		// Apply profile filter
+		var filter = SelectedProfileFilter;
+		var filteredProfiles = filter == "All"
+			? profileDict
+			: profileDict.Where(kvp => kvp.Key.Equals(filter, StringComparison.OrdinalIgnoreCase))
+				.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
+		var groups = filteredProfiles
+			.OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+			.Select(kvp => new ProfileGroupViewModel
+			{
+				Name = kvp.Key,
+				RootGroups = new ObservableCollection<RootGroupViewModel>(kvp.Value)
+			});
+
+		ProfileGroups = new ObservableCollection<ProfileGroupViewModel>(groups);
+
+		// Update filter options
+		var options = new List<string> { "All" };
+		options.AddRange(allProfileNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase));
+		if (!options.SequenceEqual(ProfileFilterOptions))
+		{
+			ProfileFilterOptions = new ObservableCollection<string>(options);
+			// Restore selection
+			if (!ProfileFilterOptions.Contains(SelectedProfileFilter))
+				SelectedProfileFilter = "All";
 		}
 	}
 

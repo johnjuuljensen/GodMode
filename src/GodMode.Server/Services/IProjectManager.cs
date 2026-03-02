@@ -8,6 +8,11 @@ namespace GodMode.Server.Services;
 public interface IProjectManager
 {
     /// <summary>
+    /// Lists all server-defined profiles.
+    /// </summary>
+    Task<ProfileInfo[]> ListProfilesAsync();
+
+    /// <summary>
     /// Lists all available project roots with their input schemas.
     /// </summary>
     Task<ProjectRootInfo[]> ListProjectRootsAsync();

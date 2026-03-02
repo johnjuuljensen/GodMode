@@ -25,6 +25,12 @@ public class ProjectInfo
     /// </summary>
     public string? ActionName { get; set; }
 
+    /// <summary>
+    /// The profile this project belongs to.
+    /// Set at creation time and during recovery.
+    /// </summary>
+    public string? ProfileName { get; set; }
+
     public int ProcessId { get; set; }
     public CancellationTokenSource? ProcessCancellation { get; set; }
 
