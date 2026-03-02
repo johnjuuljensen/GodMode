@@ -100,8 +100,8 @@ public class GitHubCodespaceProvider : IHostProvider
             throw new InvalidOperationException($"Codespace {hostId} is not running");
         }
 
-        // Construct SignalR server URL (assuming standard port 31337)
-        var serverUrl = $"{codespace.WebUrl}:31337/hubs/projects";
+        // Construct SignalR server URL using codespace port forwarding format
+        var serverUrl = $"https://{codespace.Name}-31337.app.github.dev/hubs/projects";
 
         // Pass the GitHub token for authentication
         var connection = new SignalRProjectConnection(serverUrl, _token);
