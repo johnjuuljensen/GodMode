@@ -4,9 +4,9 @@
              x:Class="GodMode.Avalonia.Views.DeleteConfirmView"
              x:DataType="vm:DeleteConfirmViewModel">
 
-    <StackPanel>
+    <Grid RowDefinitions="Auto,*,Auto">
         <!-- Header -->
-        <Border Padding="20,16"
+        <Border Grid.Row="0" Padding="20,16"
                 BorderBrush="{DynamicResource BorderSubtleBrush}"
                 BorderThickness="0,0,0,1">
             <TextBlock Text="DELETE PROJECT"
@@ -16,7 +16,7 @@
         </Border>
 
         <!-- Content -->
-        <StackPanel Spacing="16" Margin="20,16">
+        <StackPanel Grid.Row="1" Spacing="16" Margin="20,16">
             <TextBlock TextWrapping="Wrap" FontSize="13">
                 <Run Text="Are you sure you want to delete " />
                 <Run Text="{Binding ProjectName}" FontWeight="SemiBold" />
@@ -38,7 +38,7 @@
         </StackPanel>
 
         <!-- Footer buttons -->
-        <Border Padding="20,12"
+        <Border Grid.Row="2" Padding="20,12"
                 BorderBrush="{DynamicResource BorderSubtleBrush}"
                 BorderThickness="0,1,0,0">
             <Grid ColumnDefinitions="*,*" HorizontalAlignment="Stretch">
@@ -58,5 +58,5 @@
                         Foreground="White" />
             </Grid>
         </Border>
-    </StackPanel>
+    </Grid>
 </UserControl>

@@ -38,9 +38,9 @@
         </views:FormFieldTemplateSelector>
     </UserControl.Resources>
 
-    <StackPanel>
+    <Grid RowDefinitions="Auto,*,Auto">
         <!-- Modal title -->
-        <Border Padding="20,16"
+        <Border Grid.Row="0" Padding="20,16"
                 BorderBrush="{DynamicResource BorderSubtleBrush}"
                 BorderThickness="0,0,0,1">
             <TextBlock Text="{Binding ModalTitle}"
@@ -49,7 +49,7 @@
                        Foreground="{DynamicResource TextSecondaryBrush}" />
         </Border>
 
-        <ScrollViewer MaxHeight="500" Padding="20,12">
+        <ScrollViewer Grid.Row="1" MaxHeight="500" Padding="20,12">
             <StackPanel Spacing="12">
 
                 <!-- Loading -->
@@ -116,7 +116,7 @@
         </ScrollViewer>
 
         <!-- Footer buttons -->
-        <Border Padding="20,12"
+        <Border Grid.Row="2" Padding="20,12"
                 BorderBrush="{DynamicResource BorderSubtleBrush}"
                 BorderThickness="0,1,0,0"
                 IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
@@ -137,5 +137,5 @@
                         Foreground="White" />
             </Grid>
         </Border>
-    </StackPanel>
+    </Grid>
 </UserControl>
