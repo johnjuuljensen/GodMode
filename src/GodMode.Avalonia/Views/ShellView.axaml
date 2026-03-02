@@ -5,8 +5,7 @@
              xmlns:clientModels="using:GodMode.ClientBase.Services.Models"
              xmlns:glass="using:LiquidGlassAvaloniaUI"
              x:Class="GodMode.Avalonia.Views.ShellView"
-             x:DataType="vm:MainWindowViewModel"
-             Background="{DynamicResource BgBaseBrush}">
+             x:DataType="vm:MainWindowViewModel">
 
     <UserControl.Resources>
         <converters:IsNullConverter x:Key="IsNullConverter" />
