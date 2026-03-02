@@ -7,6 +7,35 @@ public class Profile
 {
     public string Name { get; set; } = string.Empty;
     public List<Account> Accounts { get; set; } = new();
+
+    /// <summary>
+    /// Checks whether an account with the same identity already exists in this profile.
+    /// For local servers, identity is the normalized URL (case-insensitive, trailing slash stripped).
+    /// For GitHub accounts, identity is the username (case-insensitive).
+    /// </summary>
+    /// <param name="account">The account to check against existing accounts.</param>
+    /// <param name="excludeIndex">Optional index to exclude (used when editing an existing account).</param>
+    public bool HasDuplicateAccount(Account account, int? excludeIndex = null)
+    {
+        for (var i = 0; i < Accounts.Count; i++)
+        {
+            if (i == excludeIndex) continue;
+            var existing = Accounts[i];
+            if (!string.Equals(existing.Type, account.Type, StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (account.Type == "local" &&
+                NormalizeUrl(existing.Path) == NormalizeUrl(account.Path))
+                return true;
+
+            if (account.Type == "github" &&
+                string.Equals(existing.Username, account.Username, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static string? NormalizeUrl(string? url) =>
+        url?.TrimEnd('/').ToLowerInvariant();
 }
 
 /// <summary>
