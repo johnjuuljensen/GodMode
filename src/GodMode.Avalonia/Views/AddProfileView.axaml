@@ -4,13 +4,13 @@
              x:Class="GodMode.Avalonia.Views.AddProfileView"
              x:DataType="vm:AddProfileViewModel">
 
-    <StackPanel>
-        <Border Padding="20,16" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
+    <Grid RowDefinitions="Auto,*,Auto">
+        <Border Grid.Row="0" Padding="20,16" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,0,0,1">
             <TextBlock Text="NEW PROFILE" FontSize="11" FontWeight="SemiBold"
                        LetterSpacing="1.5" Foreground="{DynamicResource TextSecondaryBrush}" />
         </Border>
 
-        <StackPanel Spacing="12" Margin="20,16">
+        <StackPanel Grid.Row="1" Spacing="12" Margin="20,16">
             <StackPanel Spacing="4">
                 <TextBlock Text="PROFILE NAME" FontSize="10" FontWeight="SemiBold"
                            LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
@@ -25,7 +25,7 @@
             <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsSaving}" Height="2" />
         </StackPanel>
 
-        <Border Padding="20,12" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="2" Padding="20,12" BorderBrush="{DynamicResource BorderSubtleBrush}" BorderThickness="0,1,0,0">
             <Grid ColumnDefinitions="*,*">
                 <Button Grid.Column="0" Content="Cancel" Command="{Binding CancelCommand}"
                         HorizontalAlignment="Stretch" Margin="0,0,4,0" FontSize="13" />
@@ -34,5 +34,5 @@
                         Background="{DynamicResource AccentBrush}" Foreground="White" />
             </Grid>
         </Border>
-    </StackPanel>
+    </Grid>
 </UserControl>
