@@ -213,7 +213,7 @@
 
                         <!-- Menu button -->
                         <Button Grid.Column="4"
-                                Command="{Binding ToggleMenuCommand}"
+                                Command="{Binding NavigateToMenuCommand}"
                                 Padding="8,4"
                                 Background="Transparent"
                                 Foreground="{DynamicResource TextPrimaryBrush}"
@@ -338,75 +338,6 @@
                 <ContentControl Content="{Binding CompactContent}" />
             </Panel>
         </Grid>
-
-        <!-- Mobile menu overlay -->
-        <Border IsVisible="{Binding IsMenuOpen}"
-                Background="{DynamicResource BgOverlayBrush}">
-            <Border HorizontalAlignment="Right"
-                    Width="260"
-                    Background="{DynamicResource BgSurfaceBrush}"
-                    BorderBrush="{DynamicResource BorderSubtleBrush}"
-                    BorderThickness="1,0,0,0">
-                <StackPanel Margin="16,16" Spacing="12">
-                    <!-- Add profile -->
-                    <Button Command="{Binding SidebarViewModel.AddProfileCommand}"
-                            Padding="8,8"
-                            Background="Transparent"
-                            Foreground="{DynamicResource TextPrimaryBrush}"
-                            BorderThickness="0"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Left">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock Text="+" FontSize="14" FontWeight="SemiBold" />
-                            <TextBlock Text="Add Profile" FontSize="13" />
-                        </StackPanel>
-                    </Button>
-
-                    <Border Height="1" Background="{DynamicResource BorderSubtleBrush}" />
-
-                    <!-- Theme toggle -->
-                    <Button Command="{Binding ToggleThemeCommand}"
-                            Padding="8,8"
-                            Background="Transparent"
-                            Foreground="{DynamicResource TextPrimaryBrush}"
-                            BorderThickness="0"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Left">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock Text="{Binding ThemeIcon}" FontSize="14" />
-                            <TextBlock Text="Toggle Theme" FontSize="13" />
-                        </StackPanel>
-                    </Button>
-
-                    <!-- Voice assistant -->
-                    <Button Command="{Binding NavigateToVoiceCommand}"
-                            IsVisible="{Binding IsVoiceSupported}"
-                            Padding="8,8"
-                            Background="Transparent"
-                            Foreground="{DynamicResource TextPrimaryBrush}"
-                            BorderThickness="0"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Left">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock Text="🎤" FontSize="14" />
-                            <TextBlock Text="Voice Assistant" FontSize="13" />
-                        </StackPanel>
-                    </Button>
-
-                    <!-- Close menu -->
-                    <Button Command="{Binding ToggleMenuCommand}"
-                            Padding="8,8"
-                            Background="Transparent"
-                            Foreground="{DynamicResource TextTertiaryBrush}"
-                            BorderThickness="0"
-                            HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Left"
-                            Margin="0,8,0,0">
-                        <TextBlock Text="Close" FontSize="13" />
-                    </Button>
-                </StackPanel>
-            </Border>
-        </Border>
 
         <!-- Modal overlay (shared) -->
         <Border IsVisible="{Binding IsModalVisible}"

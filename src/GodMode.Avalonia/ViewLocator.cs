@@ -23,5 +23,5 @@ public class ViewLocator : IDataTemplate
 	}
 
 	public bool Match(object? data) => data is ViewModelBase or MainWindowViewModel
-		or VoiceAssistantViewModel or DeleteConfirmViewModel;
+		or VoiceAssistantViewModel or DeleteConfirmViewModel or MobileMenuViewModel;
 }

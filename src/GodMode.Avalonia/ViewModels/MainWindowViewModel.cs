@@ -77,9 +77,6 @@ public partial class MainWindowViewModel : ObservableObject
 	[ObservableProperty]
 	private bool _canGoBack;
 
-	[ObservableProperty]
-	private bool _isMenuOpen;
-
 	private readonly Stack<object?> _compactNavStack = new();
 
 	public MainWindowViewModel(
@@ -230,22 +227,20 @@ public partial class MainWindowViewModel : ObservableObject
 			CompactContent = _compactNavStack.Pop();
 			CanGoBack = _compactNavStack.Count > 0;
 		}
-
-		IsMenuOpen = false;
 	}
 
 	[RelayCommand]
-	private void ToggleMenu() => IsMenuOpen = !IsMenuOpen;
+	private void NavigateToMenu()
+	{
+		if (!IsCompact) return;
+		CompactNavigateTo(new MobileMenuViewModel(this));
+	}
 
 	[RelayCommand]
 	private void NavigateToVoice()
 	{
 		if (!IsCompact || Voice == null) return;
-
-		_compactNavStack.Push(CompactContent);
-		CompactContent = Voice;
-		CanGoBack = true;
-		IsMenuOpen = false;
+		CompactNavigateTo(Voice);
 	}
 
 	private void CompactNavigateTo(object content)
