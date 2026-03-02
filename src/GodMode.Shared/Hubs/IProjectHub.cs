@@ -29,7 +29,7 @@ public interface IProjectHub
     /// <param name="projectRootName">Name of the project root.</param>
     /// <param name="actionName">Name of the create action to use, or null for the default action.</param>
     /// <param name="inputs">Form inputs from the dynamic form.</param>
-    Task<ProjectDetail> CreateProject(string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
+    Task<ProjectStatus> CreateProject(string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
 
     /// <summary>
     /// Sends input to a project.

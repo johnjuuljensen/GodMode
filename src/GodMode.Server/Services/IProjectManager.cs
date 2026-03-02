@@ -25,7 +25,7 @@ public interface IProjectManager
     /// <summary>
     /// Creates a new project using the config-driven workflow.
     /// </summary>
-    Task<ProjectDetail> CreateProjectAsync(CreateProjectRequest request);
+    Task<ProjectStatus> CreateProjectAsync(CreateProjectRequest request);
 
     /// <summary>
     /// Sends input to a running project.

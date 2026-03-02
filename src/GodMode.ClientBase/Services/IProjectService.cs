@@ -11,7 +11,7 @@ public interface IProjectService
     Task<IEnumerable<ProjectRootInfo>> ListProjectRootsAsync(string profileName, string hostId);
     Task<IEnumerable<ProjectSummary>> ListProjectsAsync(string profileName, string hostId);
     Task<ProjectStatus> GetStatusAsync(string profileName, string hostId, string projectId, bool forceRefresh = false);
-    Task<ProjectDetail> CreateProjectAsync(
+    Task<ProjectStatus> CreateProjectAsync(
         string profileName,
         string hostId,
         string projectRootName,
