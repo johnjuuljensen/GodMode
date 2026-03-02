@@ -1,6 +1,7 @@
 using Avalonia;
+using GodMode.Avalonia;
 
-namespace GodMode.Avalonia;
+namespace GodMode.Avalonia.Desktop;
 
 class Program
 {

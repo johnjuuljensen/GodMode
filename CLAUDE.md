@@ -16,13 +16,16 @@ dotnet build
 
 # Build specific project
 dotnet build src/GodMode.Server/GodMode.Server.csproj
-dotnet build src/GodMode.Avalonia/GodMode.Avalonia.csproj
+dotnet build src/GodMode.Avalonia.Desktop/GodMode.Avalonia.Desktop.csproj
 
 # Run server (port 31337)
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
-# Run Avalonia app
-dotnet run --project src/GodMode.Avalonia/GodMode.Avalonia.csproj
+# Run Desktop app
+dotnet run --project src/GodMode.Avalonia.Desktop/GodMode.Avalonia.Desktop.csproj
+
+# Build Android app (requires Android workload)
+dotnet build src/GodMode.Avalonia.Android/GodMode.Avalonia.Android.csproj
 
 # Run all tests
 dotnet test
@@ -36,7 +39,9 @@ dotnet test
 
 - **GodMode.Shared** - Shared types, models, enums, and SignalR hub interfaces (`IProjectHub`, `IProjectHubClient`)
 - **GodMode.Server** - ASP.NET SignalR server that spawns/manages Claude Code processes
-- **GodMode.Avalonia** - Cross-platform Avalonia control plane app
+- **GodMode.Avalonia** - Shared UI class library (views, view models, converters, styles) — referenced by Desktop and Android heads
+- **GodMode.Avalonia.Desktop** - Desktop entry point (WinExe, Program.cs, platform project refs)
+- **GodMode.Avalonia.Android** - Android entry point (MainActivity, AndroidManifest)
 - **GodMode.ClientBase** - Shared client abstractions, services, and models used by the Avalonia app
 - **GodMode.ProjectFiles** - File system utilities for project folders (status.json, JSONL streams)
 - **GodMode.AI** - Cross-platform AI abstractions (IChatClientFactory, IChatClient, tools, tool call parsing, AIConfig, Anthropic provider)
@@ -45,6 +50,7 @@ dotnet test
 - **GodMode.Voice** - Cross-platform voice/speech abstractions and orchestration (AssistantService, ISpeechRecognizer, VoiceConfig)
 - **GodMode.Voice.Windows** - Windows native STT/TTS (Windows.Media.SpeechRecognition)
 - **GodMode.Voice.Mac** - macOS speech stubs (placeholder for AVSpeechSynthesizer/SFSpeechRecognizer)
+- **GodMode.Voice.Android** - Android speech stubs (placeholder for future Android SpeechRecognizer/TextToSpeech)
 
 ### Key Patterns
 

@@ -8,6 +8,7 @@
     <PackageVersion Include="Amazon.Lambda.AspNetCoreServer.Hosting" Version="1.7.2" />
     <PackageVersion Include="Anthropic" Version="12.8.0" />
     <PackageVersion Include="Avalonia" Version="11.3.12" />
+    <PackageVersion Include="Avalonia.Android" Version="11.3.12" />
     <PackageVersion Include="Avalonia.Desktop" Version="11.3.12" />
     <PackageVersion Include="Avalonia.Fonts.Inter" Version="11.3.12" />
     <PackageVersion Include="Avalonia.Skia" Version="11.3.12" />

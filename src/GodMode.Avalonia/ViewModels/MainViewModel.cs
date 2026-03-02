@@ -153,7 +153,7 @@ public partial class MainViewModel : ViewModelBase
 	[RelayCommand]
 	private void SelectProject(ProjectSummary project)
 	{
-		var server = Servers.FirstOrDefault(s => s.Projects.Contains(project));
+		var server = Servers.FirstOrDefault(s => s.Projects.Any(p => p.Id == project.Id));
 		if (server == null) return;
 
 		SelectedProject = project;

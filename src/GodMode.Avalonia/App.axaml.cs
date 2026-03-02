@@ -46,6 +46,12 @@ public partial class App : Application
 				DataContext = Services.GetRequiredService<MainWindowViewModel>()
 			};
 		}
+		else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
+		{
+			var vm = Services.GetRequiredService<MainWindowViewModel>();
+			vm.IsCompact = true;
+			singleView.MainView = new ShellView { DataContext = vm };
+		}
 
 		base.OnFrameworkInitializationCompleted();
 	}
@@ -79,6 +85,10 @@ public partial class App : Application
 			catch (NotSupportedException)
 			{
 				// Some assemblies don't support GetExportedTypes
+			}
+			catch (ReflectionTypeLoadException)
+			{
+				// Assembly has types with missing dependencies (e.g. MAUI) — skip
 			}
 		}
 
