@@ -19,7 +19,6 @@ namespace GodMode.ProjectFiles;
 [JsonSerializable(typeof(ProjectMetrics))]
 [JsonSerializable(typeof(GitStatus))]
 [JsonSerializable(typeof(TestStatus))]
-[JsonSerializable(typeof(ProjectDetail))]
 [JsonSerializable(typeof(OutputEventType))]
 [JsonSerializable(typeof(ProjectState))]
 [JsonSerializable(typeof(RootConfig))]

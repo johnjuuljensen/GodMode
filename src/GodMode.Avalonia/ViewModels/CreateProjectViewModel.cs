@@ -189,7 +189,7 @@ public partial class CreateProjectViewModel : ViewModelBase
 				}
 			}
 
-			var detail = await _projectService.CreateProjectAsync(
+			await _projectService.CreateProjectAsync(
 				ProfileName, HostId,
 				SelectedProjectRoot.Name,
 				SelectedAction.Name,

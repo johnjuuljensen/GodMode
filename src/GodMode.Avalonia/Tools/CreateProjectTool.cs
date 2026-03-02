@@ -71,13 +71,13 @@ public sealed class CreateProjectTool(VoiceContext context, IProjectService proj
         if (!string.IsNullOrWhiteSpace(prompt))
             inputs["prompt"] = JsonSerializer.SerializeToElement(prompt);
 
-        var detail = await projectService.CreateProjectAsync(profileName, host!.Id, rootName, actionName, inputs);
+        var status = await projectService.CreateProjectAsync(profileName, host!.Id, rootName, actionName, inputs);
 
         // Refresh index to include the new project
         await context.RefreshProjectIndexAsync();
 
         return ToolResult.Ok(Name,
-            $"Project '{detail.Status.Name}' created successfully. State: {detail.Status.State}");
+            $"Project '{status.Name}' created successfully. State: {status.State}");
     }
 
     private async Task<(string ProfileName, GodMode.Shared.Models.HostInfo? Host, string? Error)> ResolveHostFromContextAsync()

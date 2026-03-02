@@ -98,7 +98,7 @@ public class ProjectManager : IProjectManager
         return project.Status;
     }
 
-    public async Task<ProjectDetail> CreateProjectAsync(CreateProjectRequest request)
+    public async Task<ProjectStatus> CreateProjectAsync(CreateProjectRequest request)
     {
         _logger.LogInformation("Creating project in root '{Root}' action '{Action}' with inputs: {InputKeys}",
             request.ProjectRootName, request.ActionName ?? "(default)", string.Join(", ", request.Inputs.Keys));
@@ -265,7 +265,7 @@ public class ProjectManager : IProjectManager
             throw;
         }
 
-        return new ProjectDetail(project.Status, project.SessionId ?? "");
+        return project.Status;
     }
 
     public async Task SendInputAsync(string projectId, string input)

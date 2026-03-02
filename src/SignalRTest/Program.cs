@@ -52,9 +52,8 @@ var detail = await hub1.CreateProject(
     inputs: inputs
 );
 
-var projectId = detail.Status.Id;
+var projectId = detail.Id;
 Console.WriteLine($"[SUCCESS] Created project: {projectId}");
-Console.WriteLine($"[INFO] Session ID: {detail.SessionId}");
 
 // ═══════════════════════════════════════════════════════════════════
 // PHASE 2: Subscribe and Interact

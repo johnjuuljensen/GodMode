@@ -56,7 +56,7 @@ public class ProjectService : IProjectService
         return status;
     }
 
-    public async Task<ProjectDetail> CreateProjectAsync(
+    public async Task<ProjectStatus> CreateProjectAsync(
         string profileName,
         string hostId,
         string projectRootName,
