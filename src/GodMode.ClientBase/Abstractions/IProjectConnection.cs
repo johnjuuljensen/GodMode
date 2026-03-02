@@ -14,6 +14,12 @@ public interface IProjectConnection : IDisposable
     bool IsConnected { get; }
 
     /// <summary>
+    /// Lists all server-defined profiles.
+    /// Returns empty for servers that don't support profiles.
+    /// </summary>
+    Task<IEnumerable<ProfileInfo>> ListProfilesAsync();
+
+    /// <summary>
     /// Lists all available project roots with their input schemas
     /// </summary>
     Task<IEnumerable<ProjectRootInfo>> ListProjectRootsAsync();
@@ -31,10 +37,11 @@ public interface IProjectConnection : IDisposable
     /// <summary>
     /// Creates a new project with the specified parameters
     /// </summary>
+    /// <param name="profileName">Name of the profile the root belongs to.</param>
     /// <param name="projectRootName">Name of the project root where the project will be created.</param>
     /// <param name="actionName">Name of the create action to use, or null for the default action.</param>
     /// <param name="inputs">Form inputs as key-value pairs from the dynamic form.</param>
-    Task<ProjectStatus> CreateProjectAsync(string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
+    Task<ProjectStatus> CreateProjectAsync(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
 
     /// <summary>
     /// Sends user input to a project waiting for input

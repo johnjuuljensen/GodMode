@@ -44,14 +44,14 @@
                 <!-- Group by server toggle -->
                 <Button Grid.Column="2"
                         Command="{Binding ToggleGroupByServerCommand}"
-                        ToolTip.Tip="Toggle group by server"
+                        ToolTip.Tip="Toggle group by profile"
                         Padding="6,4"
                         CornerRadius="6"
                         Background="{Binding IsGroupedByServer, Converter={StaticResource BoolToActiveBrushConverter}}"
                         Foreground="{DynamicResource TextSecondaryBrush}"
                         BorderThickness="0"
                         Margin="4,0,0,0">
-                    <TextBlock Text="≡" FontSize="13" />
+                    <TextBlock Text="&#x2261;" FontSize="13" />
                 </Button>
 
                 <!-- Refresh -->
@@ -64,7 +64,7 @@
                         Foreground="{DynamicResource TextTertiaryBrush}"
                         BorderThickness="0"
                         Margin="4,0,0,0">
-                    <TextBlock Text="↻" FontSize="13" />
+                    <TextBlock Text="&#x21BB;" FontSize="13" />
                 </Button>
             </Grid>
         </Border>
@@ -75,109 +75,40 @@
                      Height="2" Grid.Row="0"
                      VerticalAlignment="Bottom" />
 
-        <!-- Server groups + projects -->
+        <!-- Profile groups + projects -->
         <ScrollViewer Grid.Row="1" Padding="4,0">
             <StackPanel>
 
-                <!-- GROUPED view: projects under server headers -->
-                <ItemsControl ItemsSource="{Binding Servers}"
+                <!-- GROUPED view: projects under profile → root headers -->
+                <ItemsControl ItemsSource="{Binding ProfileGroups}"
                               IsVisible="{Binding IsGroupedByServer}">
                     <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ServerGroupViewModel">
+                        <DataTemplate x:DataType="vm:ProfileGroupViewModel">
                             <StackPanel Margin="0,2">
 
-                                <!-- Server group header -->
+                                <!-- Profile group header -->
                                 <Border Padding="8,6" Background="Transparent">
                                     <Grid ColumnDefinitions="Auto,*,Auto">
-                                        <!-- Clickable expand/collapse area -->
-                                        <Button Grid.Column="0" Grid.ColumnSpan="2"
-                                                HorizontalAlignment="Stretch"
-                                                HorizontalContentAlignment="Stretch"
-                                                Background="Transparent"
-                                                BorderThickness="0"
-                                                Padding="0"
-                                                Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).ToggleServerExpandedCommand}"
-                                                CommandParameter="{Binding .}">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <TextBlock Text="{Binding IsExpanded, Converter={StaticResource BoolToChevronConverter}}"
-                                                           FontSize="10"
-                                                           Foreground="{DynamicResource TextTertiaryBrush}"
-                                                           VerticalAlignment="Center" />
-                                                <Ellipse Width="6" Height="6"
-                                                         Fill="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}"
-                                                         VerticalAlignment="Center" />
-                                                <TextBlock Text="{Binding Name}"
-                                                           FontSize="12" FontWeight="SemiBold"
-                                                           Foreground="{DynamicResource TextPrimaryBrush}"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </Button>
-
-                                        <!-- Server actions -->
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="3">
-                                            <Border Padding="5,1"
-                                                    Background="{DynamicResource AccentMutedBrush}"
-                                                    CornerRadius="6"
-                                                    VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Type}"
-                                                           Foreground="{DynamicResource AccentBrush}"
-                                                           FontSize="9" />
-                                            </Border>
-                                            <TextBlock Text="{Binding Projects.Count}"
+                                        <StackPanel Grid.Column="0" Grid.ColumnSpan="2"
+                                                    Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding IsExpanded, Converter={StaticResource BoolToChevronConverter}}"
                                                        FontSize="10"
                                                        Foreground="{DynamicResource TextTertiaryBrush}"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,2,0" />
-
-                                            <!-- Start -->
-                                            <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).StartServerCommand}"
-                                                    CommandParameter="{Binding .}"
-                                                    IsVisible="{Binding State, Converter={StaticResource StateToStartVisibilityConverter}}"
-                                                    ToolTip.Tip="Start server"
-                                                    Padding="4,2" FontSize="10"
-                                                    Background="Transparent"
-                                                    Foreground="{DynamicResource StateRunningBrush}"
-                                                    BorderThickness="0">
-                                                <TextBlock Text="Start" FontSize="10" />
-                                            </Button>
-
-                                            <!-- Stop -->
-                                            <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).StopServerCommand}"
-                                                    CommandParameter="{Binding .}"
-                                                    IsVisible="{Binding State, Converter={StaticResource StateToStopVisibilityConverter}}"
-                                                    ToolTip.Tip="Stop server"
-                                                    Padding="4,2" FontSize="10"
-                                                    Background="Transparent"
-                                                    Foreground="{DynamicResource StateErrorBrush}"
-                                                    BorderThickness="0">
-                                                <TextBlock Text="Stop" FontSize="10" />
-                                            </Button>
-
-                                            <!-- Edit -->
-                                            <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).EditServerCommand}"
-                                                    CommandParameter="{Binding .}"
-                                                    ToolTip.Tip="Edit server"
-                                                    Padding="4,2" FontSize="10"
-                                                    Background="Transparent"
-                                                    Foreground="{DynamicResource TextTertiaryBrush}"
-                                                    BorderThickness="0">
-                                                <TextBlock Text="Edit" FontSize="10" />
-                                            </Button>
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="12" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource TextPrimaryBrush}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center" />
                                         </StackPanel>
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding ProjectCountDisplay}"
+                                                   FontSize="10"
+                                                   Foreground="{DynamicResource TextTertiaryBrush}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,4,0" />
                                     </Grid>
                                 </Border>
-
-                                <!-- Loading projects -->
-                                <ProgressBar IsIndeterminate="True"
-                                             IsVisible="{Binding IsLoadingProjects}"
-                                             Height="2" Margin="28,0,8,4" />
-
-                                <!-- Error -->
-                                <TextBlock Text="{Binding ErrorMessage}"
-                                           IsVisible="{Binding ErrorMessage, Converter={StaticResource IsNotNullConverter}}"
-                                           Foreground="{DynamicResource StateErrorBrush}"
-                                           FontSize="10" Margin="28,0,8,4" />
 
                                 <!-- Root groups with projects -->
                                 <ItemsControl ItemsSource="{Binding RootGroups}"
@@ -188,12 +119,18 @@
                                                 <!-- Root sub-header -->
                                                 <Border Padding="20,4,8,2" Background="Transparent">
                                                     <Grid ColumnDefinitions="*,Auto">
-                                                        <TextBlock Text="{Binding Name}"
-                                                                   FontSize="10" FontWeight="SemiBold"
-                                                                   Foreground="{DynamicResource TextTertiaryBrush}"
-                                                                   TextTrimming="CharacterEllipsis"
-                                                                   Opacity="0.8"
-                                                                   VerticalAlignment="Center" />
+                                                        <StackPanel Orientation="Horizontal" Spacing="6"
+                                                                    VerticalAlignment="Center">
+                                                            <Ellipse Width="5" Height="5"
+                                                                     Fill="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}"
+                                                                     VerticalAlignment="Center" />
+                                                            <TextBlock Text="{Binding Name}"
+                                                                       FontSize="10" FontWeight="SemiBold"
+                                                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                                                       TextTrimming="CharacterEllipsis"
+                                                                       Opacity="0.8"
+                                                                       VerticalAlignment="Center" />
+                                                        </StackPanel>
                                                         <!-- Action buttons (when actions are defined) -->
                                                         <ItemsControl Grid.Column="1"
                                                                       ItemsSource="{Binding ActionItems}"
@@ -207,7 +144,7 @@
                                                                 <DataTemplate x:DataType="vm:RootActionItem">
                                                                     <Button Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).CreateProjectForRootActionCommand}"
                                                                             CommandParameter="{Binding .}"
-                                                                            IsVisible="{Binding Root.Server.CanConnect}"
+                                                                            IsVisible="{Binding Root.IsConnected}"
                                                                             ToolTip.Tip="{Binding Action.Description}"
                                                                             Padding="5,1" FontSize="9"
                                                                             Background="{DynamicResource BgSurfaceBrush}"
@@ -309,7 +246,7 @@
                                                                             VerticalAlignment="Center"
                                                                             Margin="4,0,0,0"
                                                                             Opacity="0.5">
-                                                                        <TextBlock Text="✕" FontSize="10" />
+                                                                        <TextBlock Text="&#x2715;" FontSize="10" />
                                                                     </Button>
                                                                 </Grid>
                                                             </Button>
@@ -325,87 +262,93 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <!-- FLAT view: all projects without server grouping -->
-                <ItemsControl ItemsSource="{Binding Servers}"
+                <!-- FLAT view: all projects without grouping -->
+                <ItemsControl ItemsSource="{Binding ProfileGroups}"
                               IsVisible="{Binding !IsGroupedByServer}">
                     <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ServerGroupViewModel">
-                            <ItemsControl ItemsSource="{Binding Projects}">
+                        <DataTemplate x:DataType="vm:ProfileGroupViewModel">
+                            <ItemsControl ItemsSource="{Binding RootGroups}">
                                 <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="models:ProjectSummary">
-                                        <Button Margin="8,1"
-                                                Padding="10,7"
-                                                HorizontalAlignment="Stretch"
-                                                HorizontalContentAlignment="Stretch"
-                                                CornerRadius="8"
-                                                BorderThickness="0"
-                                                Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).SelectProjectCommand}"
-                                                CommandParameter="{Binding .}">
-                                            <Button.Background>
-                                                <MultiBinding Converter="{StaticResource SelectedProjectBgConverter}">
-                                                    <Binding />
-                                                    <Binding Path="$parent[UserControl].((vm:MainViewModel)DataContext).SelectedProject" />
-                                                </MultiBinding>
-                                            </Button.Background>
+                                    <DataTemplate x:DataType="vm:RootGroupViewModel">
+                                        <ItemsControl ItemsSource="{Binding Projects}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="models:ProjectSummary">
+                                                    <Button Margin="8,1"
+                                                            Padding="10,7"
+                                                            HorizontalAlignment="Stretch"
+                                                            HorizontalContentAlignment="Stretch"
+                                                            CornerRadius="8"
+                                                            BorderThickness="0"
+                                                            Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).SelectProjectCommand}"
+                                                            CommandParameter="{Binding .}">
+                                                        <Button.Background>
+                                                            <MultiBinding Converter="{StaticResource SelectedProjectBgConverter}">
+                                                                <Binding />
+                                                                <Binding Path="$parent[UserControl].((vm:MainViewModel)DataContext).SelectedProject" />
+                                                            </MultiBinding>
+                                                        </Button.Background>
 
-                                            <Grid ColumnDefinitions="Auto,*,Auto,Auto">
-                                                <Ellipse Grid.Column="0"
-                                                         Width="5" Height="5"
-                                                         Fill="{Binding State, Converter={StaticResource StateToColorConverter}}"
-                                                         VerticalAlignment="Center"
-                                                         Margin="0,0,8,0" />
+                                                        <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                                                            <Ellipse Grid.Column="0"
+                                                                     Width="5" Height="5"
+                                                                     Fill="{Binding State, Converter={StaticResource StateToColorConverter}}"
+                                                                     VerticalAlignment="Center"
+                                                                     Margin="0,0,8,0" />
 
-                                                <StackPanel Grid.Column="1" Spacing="1" ClipToBounds="True">
-                                                    <Grid ColumnDefinitions="*,Auto">
-                                                        <TextBlock Grid.Column="0"
-                                                                   Text="{Binding Name}"
-                                                                   FontSize="13" FontWeight="Medium"
-                                                                   Foreground="{DynamicResource TextPrimaryBrush}"
-                                                                   TextTrimming="CharacterEllipsis" />
-                                                        <!-- Waiting badge -->
-                                                        <Border Grid.Column="1"
-                                                                IsVisible="{Binding State, Converter={StaticResource ProjectStateToWaitingVisibilityConverter}}"
-                                                                Padding="5,1" CornerRadius="4"
-                                                                Background="#28FBBF24"
-                                                                VerticalAlignment="Center"
-                                                                Margin="6,0,0,0">
-                                                            <TextBlock Text="WAITING"
-                                                                       FontSize="8" FontWeight="Bold"
-                                                                       Foreground="{DynamicResource StateWaitingBrush}" />
-                                                        </Border>
-                                                    </Grid>
-                                                    <TextBlock Text="{Binding CurrentQuestion}"
-                                                               FontSize="10"
-                                                               Foreground="{DynamicResource StateWaitingBrush}"
-                                                               IsVisible="{Binding CurrentQuestion, Converter={StaticResource IsNotNullConverter}}"
-                                                               TextTrimming="CharacterEllipsis"
-                                                               MaxLines="1"
-                                                               Opacity="0.8" />
-                                                </StackPanel>
+                                                            <StackPanel Grid.Column="1" Spacing="1" ClipToBounds="True">
+                                                                <Grid ColumnDefinitions="*,Auto">
+                                                                    <TextBlock Grid.Column="0"
+                                                                               Text="{Binding Name}"
+                                                                               FontSize="13" FontWeight="Medium"
+                                                                               Foreground="{DynamicResource TextPrimaryBrush}"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                    <!-- Waiting badge -->
+                                                                    <Border Grid.Column="1"
+                                                                            IsVisible="{Binding State, Converter={StaticResource ProjectStateToWaitingVisibilityConverter}}"
+                                                                            Padding="5,1" CornerRadius="4"
+                                                                            Background="#28FBBF24"
+                                                                            VerticalAlignment="Center"
+                                                                            Margin="6,0,0,0">
+                                                                        <TextBlock Text="WAITING"
+                                                                                   FontSize="8" FontWeight="Bold"
+                                                                                   Foreground="{DynamicResource StateWaitingBrush}" />
+                                                                    </Border>
+                                                                </Grid>
+                                                                <TextBlock Text="{Binding CurrentQuestion}"
+                                                                           FontSize="10"
+                                                                           Foreground="{DynamicResource StateWaitingBrush}"
+                                                                           IsVisible="{Binding CurrentQuestion, Converter={StaticResource IsNotNullConverter}}"
+                                                                           TextTrimming="CharacterEllipsis"
+                                                                           MaxLines="1"
+                                                                           Opacity="0.8" />
+                                                            </StackPanel>
 
-                                                <TextBlock Grid.Column="2"
-                                                           Text="{Binding UpdatedAt, Converter={StaticResource RelativeTimeConverter}}"
-                                                           FontSize="10"
-                                                           Foreground="{DynamicResource TextTertiaryBrush}"
-                                                           VerticalAlignment="Top"
-                                                           Margin="4,2,0,0" />
+                                                            <TextBlock Grid.Column="2"
+                                                                       Text="{Binding UpdatedAt, Converter={StaticResource RelativeTimeConverter}}"
+                                                                       FontSize="10"
+                                                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                                                       VerticalAlignment="Top"
+                                                                       Margin="4,2,0,0" />
 
-                                                <!-- Delete button -->
-                                                <Button Grid.Column="3"
-                                                        Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).DeleteProjectCommand}"
-                                                        CommandParameter="{Binding .}"
-                                                        ToolTip.Tip="Delete project"
-                                                        Padding="4,2"
-                                                        Background="Transparent"
-                                                        Foreground="{DynamicResource TextTertiaryBrush}"
-                                                        BorderThickness="0"
-                                                        VerticalAlignment="Center"
-                                                        Margin="4,0,0,0"
-                                                        Opacity="0.5">
-                                                    <TextBlock Text="✕" FontSize="10" />
-                                                </Button>
-                                            </Grid>
-                                        </Button>
+                                                            <!-- Delete button -->
+                                                            <Button Grid.Column="3"
+                                                                    Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).DeleteProjectCommand}"
+                                                                    CommandParameter="{Binding .}"
+                                                                    ToolTip.Tip="Delete project"
+                                                                    Padding="4,2"
+                                                                    Background="Transparent"
+                                                                    Foreground="{DynamicResource TextTertiaryBrush}"
+                                                                    BorderThickness="0"
+                                                                    VerticalAlignment="Center"
+                                                                    Margin="4,0,0,0"
+                                                                    Opacity="0.5">
+                                                                <TextBlock Text="&#x2715;" FontSize="10" />
+                                                            </Button>
+                                                        </Grid>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>

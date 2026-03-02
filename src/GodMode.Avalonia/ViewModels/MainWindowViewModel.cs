@@ -97,7 +97,6 @@ public partial class MainWindowViewModel : ObservableObject
 		mainViewModel.ProjectSelected += OnProjectSelected;
 		mainViewModel.CreateProjectRequested += OnCreateProjectRequested;
 		mainViewModel.AddServerRequested += OnAddServerRequested;
-		mainViewModel.AddProfileRequested += OnAddProfileRequested;
 		mainViewModel.EditServerRequested += OnEditServerRequested;
 		mainViewModel.ConnectionStateChanged += connected => IsConnected = connected;
 
@@ -155,17 +154,17 @@ public partial class MainWindowViewModel : ObservableObject
 	private object? _savedContentViewModel;
 	private TileGridViewModel? _tileGridViewModel;
 
-	private void OnTileProjectSelected(ServerGroupViewModel server, ProjectSummary project)
+	private void OnTileProjectSelected(RootGroupViewModel root, ProjectSummary project)
 	{
 		IsTileFullscreen = true;
 
-		var key = $"{server.ProfileName}:{server.Id}:{project.Id}";
+		var key = $"{root.HostId}:{project.Id}";
 
 		if (!_projectViewModels.TryGetValue(key, out var vm))
 		{
 			vm = App.Services.GetRequiredService<ProjectViewModel>();
-			vm.ProfileName = server.ProfileName;
-			vm.HostId = server.Id;
+			vm.ProfileName = root.ProfileName;
+			vm.HostId = root.HostId;
 			vm.ProjectId = project.Id;
 			vm.ProjectStatusUpdated += OnProjectStatusUpdated;
 			_projectViewModels[key] = vm;
@@ -257,6 +256,27 @@ public partial class MainWindowViewModel : ObservableObject
 	{
 		Dispatcher.UIThread.Post(() =>
 		{
+			foreach (var profileGroup in SidebarViewModel.ProfileGroups)
+			{
+				foreach (var rootGroup in profileGroup.RootGroups)
+				{
+					for (int i = 0; i < rootGroup.Projects.Count; i++)
+					{
+						if (rootGroup.Projects[i].Id == projectId)
+						{
+							var old = rootGroup.Projects[i];
+							rootGroup.Projects[i] = old with { State = state, CurrentQuestion = currentQuestion, UpdatedAt = DateTime.UtcNow };
+
+							if (SidebarViewModel.SelectedProject?.Id == projectId)
+								SidebarViewModel.SelectedProject = rootGroup.Projects[i];
+
+							break;
+						}
+					}
+				}
+			}
+
+			// Also update servers list for tile view compat
 			foreach (var server in SidebarViewModel.Servers)
 			{
 				for (int i = 0; i < server.Projects.Count; i++)
@@ -265,10 +285,6 @@ public partial class MainWindowViewModel : ObservableObject
 					{
 						var old = server.Projects[i];
 						server.Projects[i] = old with { State = state, CurrentQuestion = currentQuestion, UpdatedAt = DateTime.UtcNow };
-
-						if (SidebarViewModel.SelectedProject?.Id == projectId)
-							SidebarViewModel.SelectedProject = server.Projects[i];
-
 						break;
 					}
 				}
@@ -298,15 +314,15 @@ public partial class MainWindowViewModel : ObservableObject
 		});
 	}
 
-	private void OnProjectSelected(ServerGroupViewModel server, ProjectSummary project)
+	private void OnProjectSelected(RootGroupViewModel root, ProjectSummary project)
 	{
-		var key = $"{server.ProfileName}:{server.Id}:{project.Id}";
+		var key = $"{root.HostId}:{project.Id}";
 
 		if (!_projectViewModels.TryGetValue(key, out var vm))
 		{
 			vm = App.Services.GetRequiredService<ProjectViewModel>();
-			vm.ProfileName = server.ProfileName;
-			vm.HostId = server.Id;
+			vm.ProfileName = root.ProfileName;
+			vm.HostId = root.HostId;
 			vm.ProjectId = project.Id;
 			vm.ProjectStatusUpdated += OnProjectStatusUpdated;
 			_projectViewModels[key] = vm;
@@ -322,22 +338,21 @@ public partial class MainWindowViewModel : ObservableObject
 		}
 	}
 
-	private void OnCreateProjectRequested(ServerGroupViewModel server, string? rootName, string? actionName)
+	private void OnCreateProjectRequested(RootGroupViewModel root, string? actionName)
 	{
 		var vm = App.Services.GetRequiredService<CreateProjectViewModel>();
-		vm.ProfileName = server.ProfileName;
-		vm.HostId = server.Id;
-		vm.PreselectedRootName = rootName;
+		vm.ProfileName = root.ProfileName;
+		vm.HostId = root.HostId;
+		vm.PreselectedRootName = root.RootName;
 		vm.PreselectedActionName = actionName;
 		vm.Completed += () => CloseModal();
 		ModalViewModel = vm;
 		IsModalVisible = true;
 	}
 
-	private void OnAddServerRequested(string profileName)
+	private void OnAddServerRequested()
 	{
 		var vm = App.Services.GetRequiredService<AddServerViewModel>();
-		vm.ProfileName = profileName;
 		vm.Completed += () =>
 		{
 			CloseModal();
@@ -347,27 +362,14 @@ public partial class MainWindowViewModel : ObservableObject
 		IsModalVisible = true;
 	}
 
-	private void OnAddProfileRequested()
-	{
-		var vm = App.Services.GetRequiredService<AddProfileViewModel>();
-		vm.Completed += () =>
-		{
-			CloseModal();
-			_ = SidebarViewModel.LoadCommand.ExecuteAsync(null);
-		};
-		ModalViewModel = vm;
-		IsModalVisible = true;
-	}
-
 	private void OnEditServerRequested(ServerGroupViewModel server)
 	{
 		var vm = App.Services.GetRequiredService<EditServerViewModel>();
-		vm.ProfileName = server.ProfileName;
-		vm.AccountIndex = server.AccountIndex;
+		vm.ServerIndex = server.AccountIndex;
 		vm.Completed += () =>
 		{
 			if (vm.WasDeleted)
-				_hostConnectionService.DisconnectFromHost(server.ProfileName, server.Id);
+				_hostConnectionService.DisconnectFromHost(server.Id);
 
 			CloseModal();
 			_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);

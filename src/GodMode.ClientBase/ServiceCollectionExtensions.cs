@@ -10,7 +10,7 @@ public static class ServiceCollectionExtensions
 {
 	public static IServiceCollection AddGodModeClientServices(this IServiceCollection services)
 	{
-		services.AddSingleton<IProfileService>(_ => new ProfileService(GodModePaths.AppDataDirectory));
+		services.AddSingleton<IServerRegistryService>(_ => new ServerRegistryService(GodModePaths.AppDataDirectory));
 		services.AddSingleton<IHostConnectionService, HostConnectionService>();
 		services.AddSingleton<IProjectService, ProjectService>();
 		services.AddSingleton<INotificationService, NotificationService>();

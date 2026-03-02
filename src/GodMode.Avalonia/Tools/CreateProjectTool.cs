@@ -71,7 +71,12 @@ public sealed class CreateProjectTool(VoiceContext context, IProjectService proj
         if (!string.IsNullOrWhiteSpace(prompt))
             inputs["prompt"] = JsonSerializer.SerializeToElement(prompt);
 
-        var status = await projectService.CreateProjectAsync(profileName, host!.Id, rootName, actionName, inputs);
+        // Resolve server-side profile name from the project root
+        var allRoots = (await projectService.ListProjectRootsAsync(profileName, host!.Id)).ToList();
+        var targetRoot = allRoots.FirstOrDefault(r => r.Name == rootName);
+        var serverProfileName = targetRoot?.ProfileName ?? "Default";
+
+        var status = await projectService.CreateProjectAsync(profileName, host!.Id, serverProfileName, rootName, actionName, inputs);
 
         // Refresh index to include the new project
         await context.RefreshProjectIndexAsync();

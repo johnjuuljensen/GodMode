@@ -22,8 +22,8 @@ public partial class TileGridViewModel : ViewModelBase
 
 	private List<ServerGroupViewModel> _connectedServers = new();
 
-	public event Action<ServerGroupViewModel, ProjectSummary>? ProjectSelected;
-	public event Action<ServerGroupViewModel, string?, string?>? CreateProjectRequested;
+	public event Action<RootGroupViewModel, ProjectSummary>? ProjectSelected;
+	public event Action<RootGroupViewModel, string?>? CreateProjectRequested;
 
 	public TileGridViewModel(
 		INavigationService navigationService,
@@ -48,14 +48,18 @@ public partial class TileGridViewModel : ViewModelBase
 			{
 				foreach (var project in server.Projects)
 				{
+					// Find the root group this project belongs to
+					var rootGroup = server.RootGroups
+						.FirstOrDefault(r => r.Projects.Any(p => p.Id == project.Id));
+
 					var tile = new ProjectTileViewModel
 					{
 						Summary = project,
-						ServerGroup = server
+						ServerGroup = server,
+						RootGroup = rootGroup
 					};
 					Tiles.Add(tile);
 
-					// Load messages in background
 					_ = LoadTileMessagesAsync(tile);
 				}
 			}
@@ -97,7 +101,6 @@ public partial class TileGridViewModel : ViewModelBase
 
 			_subscriptions.Add(subscription);
 
-			// Give it a moment to load, then mark as done
 			await Task.Delay(2000);
 			Dispatcher.UIThread.Post(() => tile.IsLoadingMessages = false);
 		}
@@ -110,15 +113,18 @@ public partial class TileGridViewModel : ViewModelBase
 	[RelayCommand]
 	private void SelectProject(ProjectTileViewModel tile)
 	{
-		ProjectSelected?.Invoke(tile.ServerGroup, tile.Summary);
+		if (tile.RootGroup != null)
+			ProjectSelected?.Invoke(tile.RootGroup, tile.Summary);
 	}
 
 	[RelayCommand]
 	private void CreateProject()
 	{
+		// Find first connected root group
 		var server = _connectedServers.FirstOrDefault();
-		if (server != null)
-			CreateProjectRequested?.Invoke(server, null, null);
+		var root = server?.RootGroups.FirstOrDefault();
+		if (root != null)
+			CreateProjectRequested?.Invoke(root, null);
 	}
 
 	public void Cleanup()
@@ -141,6 +147,11 @@ public partial class ProjectTileViewModel : ObservableObject
 
 	[ObservableProperty]
 	private ServerGroupViewModel _serverGroup = null!;
+
+	/// <summary>
+	/// The root group this tile's project belongs to. Used for navigation.
+	/// </summary>
+	public RootGroupViewModel? RootGroup { get; set; }
 
 	[ObservableProperty]
 	private ObservableCollection<ClaudeMessage> _messages = new();
