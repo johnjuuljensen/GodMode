@@ -262,6 +262,94 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
+                <!-- INACTIVE servers group (servers not under any profile) -->
+                <StackPanel Margin="0,2"
+                            IsVisible="{Binding InactiveServers.Count}">
+
+                    <!-- Group header -->
+                    <Button Padding="8,6"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch"
+                            Command="{Binding ToggleInactiveExpandedCommand}">
+                        <Grid ColumnDefinitions="Auto,*,Auto">
+                            <StackPanel Grid.Column="0" Grid.ColumnSpan="2"
+                                        Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding IsInactiveExpanded, Converter={StaticResource BoolToChevronConverter}}"
+                                           FontSize="10"
+                                           Foreground="{DynamicResource TextTertiaryBrush}"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Text="Inactive"
+                                           FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextTertiaryBrush}"
+                                           VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding InactiveServers.Count, StringFormat='{}{0} servers'}"
+                                       FontSize="10"
+                                       Foreground="{DynamicResource TextTertiaryBrush}"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,4,0" />
+                        </Grid>
+                    </Button>
+
+                    <!-- Inactive server entries -->
+                    <ItemsControl ItemsSource="{Binding InactiveServers}"
+                                  IsVisible="{Binding IsInactiveExpanded}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ServerGroupViewModel">
+                                <Border Padding="20,4,8,4" Background="Transparent">
+                                    <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                                        <Ellipse Grid.Column="0"
+                                                 Width="5" Height="5"
+                                                 Fill="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}"
+                                                 VerticalAlignment="Center"
+                                                 Margin="0,0,6,0" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource TextSecondaryBrush}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding StatusDisplay}"
+                                                       FontSize="9"
+                                                       Foreground="{DynamicResource TextTertiaryBrush}" />
+                                        </StackPanel>
+                                        <!-- Start / Stop -->
+                                        <Button Grid.Column="2"
+                                                Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).StartServerCommand}"
+                                                CommandParameter="{Binding .}"
+                                                IsVisible="{Binding !IsConnected}"
+                                                ToolTip.Tip="Start server"
+                                                Padding="5,2" FontSize="9"
+                                                Background="{DynamicResource BgSurfaceBrush}"
+                                                Foreground="{DynamicResource TextTertiaryBrush}"
+                                                BorderThickness="0"
+                                                CornerRadius="4"
+                                                VerticalAlignment="Center"
+                                                Margin="4,0">
+                                            <TextBlock Text="Start" FontSize="9" />
+                                        </Button>
+                                        <!-- Edit -->
+                                        <Button Grid.Column="3"
+                                                Command="{Binding $parent[UserControl].((vm:MainViewModel)DataContext).EditServerCommand}"
+                                                CommandParameter="{Binding .}"
+                                                ToolTip.Tip="Edit server"
+                                                Padding="4,2" FontSize="9"
+                                                Background="Transparent"
+                                                Foreground="{DynamicResource TextTertiaryBrush}"
+                                                BorderThickness="0"
+                                                VerticalAlignment="Center"
+                                                Opacity="0.7">
+                                            <TextBlock Text="&#x270E;" FontSize="10" />
+                                        </Button>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
                 <!-- FLAT view: all projects without grouping -->
                 <ItemsControl ItemsSource="{Binding ProfileGroups}"
                               IsVisible="{Binding !IsGroupedByServer}">

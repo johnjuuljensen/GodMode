@@ -74,6 +74,16 @@ public partial class MainViewModel : ViewModelBase
 	[ObservableProperty]
 	private bool _sortByName;
 
+	/// <summary>
+	/// Servers that don't appear under any profile group (disconnected or no roots).
+	/// Shown in the [Inactive] section so they can be edited/started.
+	/// </summary>
+	[ObservableProperty]
+	private ObservableCollection<ServerGroupViewModel> _inactiveServers = new();
+
+	[ObservableProperty]
+	private bool _isInactiveExpanded = true;
+
 	public MainViewModel(
 		INavigationService navigationService,
 		IServerRegistryService serverRegistry,
@@ -248,6 +258,12 @@ public partial class MainViewModel : ViewModelBase
 	private void ToggleGroupByServer()
 	{
 		IsGroupedByServer = !IsGroupedByServer;
+	}
+
+	[RelayCommand]
+	private void ToggleInactiveExpanded()
+	{
+		IsInactiveExpanded = !IsInactiveExpanded;
 	}
 
 	[RelayCommand]
@@ -538,6 +554,15 @@ public partial class MainViewModel : ViewModelBase
 			});
 
 		ProfileGroups = new ObservableCollection<ProfileGroupViewModel>(groups);
+
+		// Identify servers not represented in any profile group
+		var representedServerIds = profileDict.Values
+			.SelectMany(roots => roots)
+			.Select(r => r.HostId)
+			.ToHashSet();
+
+		InactiveServers = new ObservableCollection<ServerGroupViewModel>(
+			_serverConnections.Where(s => !representedServerIds.Contains(s.Id)));
 
 		// Update filter options
 		var options = new List<string> { "All" };
