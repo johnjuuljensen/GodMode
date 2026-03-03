@@ -211,6 +211,42 @@ Run `scripts/download-models.ps1` to download local models to `~/.godmode/models
 
 Platform-specific implementations (speech, AI inference) are registered via `IPlatformServiceRegistrar` discovered at startup by scanning `GodMode.*.dll` assemblies. Platform assemblies are preloaded from the output directory before scanning to avoid lazy-loading gaps.
 
+## GitHub Codespaces (GodMode Server)
+
+The `.devcontainer/godmode-server/devcontainer.json` config provisions a codespace that builds and runs GodMode.Server automatically. It clones the repo, publishes the server to `/opt/godmode-server`, installs Claude Code, and starts the server on port 31337.
+
+### Create a codespace
+
+```bash
+gh codespace create \
+  --repo johnjuuljensen/GodMode \
+  --branch feature/server-auth-and-devcontainer \
+  --devcontainer-path .devcontainer/godmode-server/devcontainer.json \
+  --display-name GodMode
+```
+
+The devcontainer must exist on the target branch — GitHub reads it from the repo at that ref.
+
+### SSH into a codespace
+
+```bash
+gh codespace ssh -c <codespace-name>
+```
+
+### Port forwarding
+
+Port 31337 is forwarded automatically. To make it publicly accessible:
+
+```bash
+gh codespace ports visibility 31337:public -c <codespace-name>
+```
+
+The server URL follows the pattern: `https://<codespace-name>-31337.app.github.dev/`
+
+### Secrets
+
+Set `ANTHROPIC_API_KEY` as a Codespaces secret (repo or org level) for Claude Code to use inside the codespace.
+
 ## Testing Notes
 
 - Run all tests with `dotnet test`
