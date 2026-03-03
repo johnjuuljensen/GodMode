@@ -3,10 +3,14 @@
   "image": "mcr.microsoft.com/devcontainers/dotnet:10.0",
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {}
   },
-  "postCreateCommand": "git clone https://github.com/johnjuuljensen/GodMode.git /tmp/godmode-src && dotnet publish /tmp/godmode-src/src/GodMode.Server -c Release -o /opt/godmode-server && rm -rf /tmp/godmode-src && curl -fsSL https://claude.ai/install.sh | bash",
-  "postStartCommand": "/opt/godmode-server/GodMode.Server",
+  "postCreateCommand": "git clone https://github.com/johnjuuljensen/GodMode.git /tmp/godmode-src && sudo dotnet publish /tmp/godmode-src/src/GodMode.Server -c Release -o /opt/godmode-server && sudo rm -rf /tmp/godmode-src && curl -fsSL https://claude.ai/install.sh | bash",
+  "postStartCommand": {
+    "server": "cd $HOME && export PATH=\"$HOME/.local/bin:$PATH\" && /opt/godmode-server/GodMode.Server --contentRoot /opt/godmode-server",
+    "port-visibility": "sleep 5 && gh codespace ports visibility 31337:public -c \"$CODESPACE_NAME\" 2>/dev/null || true"
+  },
   "forwardPorts": [31337],
   "portsAttributes": {
     "31337": {

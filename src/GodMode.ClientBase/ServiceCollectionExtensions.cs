@@ -10,7 +10,9 @@ public static class ServiceCollectionExtensions
 {
 	public static IServiceCollection AddGodModeClientServices(this IServiceCollection services)
 	{
-		services.AddSingleton<IServerRegistryService>(_ => new ServerRegistryService(GodModePaths.AppDataDirectory));
+		services.AddSingleton<ITokenProtector, TokenProtector>();
+		services.AddSingleton<IServerRegistryService>(sp =>
+			new ServerRegistryService(GodModePaths.AppDataDirectory, sp.GetRequiredService<ITokenProtector>()));
 		services.AddSingleton<IHostConnectionService, HostConnectionService>();
 		services.AddSingleton<IProjectService, ProjectService>();
 		services.AddSingleton<INotificationService, NotificationService>();

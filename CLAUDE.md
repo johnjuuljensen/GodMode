@@ -211,6 +211,81 @@ Run `scripts/download-models.ps1` to download local models to `~/.godmode/models
 
 Platform-specific implementations (speech, AI inference) are registered via `IPlatformServiceRegistrar` discovered at startup by scanning `GodMode.*.dll` assemblies. Platform assemblies are preloaded from the output directory before scanning to avoid lazy-loading gaps.
 
+## GitHub Codespaces (GodMode Server)
+
+The `.devcontainer/godmode-server/devcontainer.json` provisions a codespace with GodMode.Server. On creation it clones the repo, publishes the server to `/opt/godmode-server`, and installs Claude Code. On every start it launches the server on port 31337 and sets the port to public.
+
+### Codespace layout
+
+- **Binary**: `/opt/godmode-server/` (root-owned, read-only)
+- **Config**: `/opt/godmode-server/appsettings.json` (via `--contentRoot`)
+- **Projects**: `~/projects/` (server CWD is `$HOME`)
+- **Claude Code**: `~/.local/bin/claude` (added to PATH in postStartCommand)
+- **Root configs**: `.devcontainer/godmode-server/roots/` in the repo
+
+### Create / delete a codespace
+
+```bash
+# Create
+gh codespace create \
+  --repo johnjuuljensen/GodMode \
+  --branch feature/server-auth-and-devcontainer \
+  --devcontainer-path .devcontainer/godmode-server/devcontainer.json \
+  --display-name GodMode
+
+# Delete
+gh codespace delete -c <codespace-name>
+```
+
+The devcontainer must exist on the target branch — GitHub reads it from the repo at that ref.
+
+### SSH access
+
+An SSH config wildcard (`~/.ssh/config`) enables passwordless SSH to any GodMode codespace using the ssh-agent:
+
+```
+Host godmode-*
+    User vscode
+    ProxyCommand C:\Program Files\GitHub CLI\gh.exe cs ssh -c %n --stdio -- -i C:\Users\JJJ\.ssh\id_ed25519
+    UserKnownHostsFile=/dev/null
+    StrictHostKeyChecking no
+    LogLevel quiet
+    ControlMaster auto
+    IdentityFile C:\Users\JJJ\.ssh\id_ed25519
+```
+
+Then: `ssh <codespace-name>` (e.g., `ssh godmode-p6gpgg6v7539xpx`).
+
+### Checking codespace health
+
+```bash
+# List codespaces and their state
+gh codespace list
+
+# Server probe (authenticated — bypasses port forwarding auth)
+TOKEN=$(gh auth token)
+curl -s -H "Authorization: Bearer $TOKEN" "https://<codespace-name>-31337.app.github.dev/"
+
+# SSH in and check
+ssh <codespace-name> 'ss -tlnp | grep 31337'          # port listening?
+ssh <codespace-name> 'curl -s http://localhost:31337/'  # server responding?
+ssh <codespace-name> 'which claude || ~/.local/bin/claude --version'  # claude installed?
+```
+
+### Port forwarding
+
+Port 31337 is forwarded automatically. The `postStartCommand` sets it to public via `gh codespace ports visibility`. The `portsAttributes.visibility` field in devcontainer.json does NOT work (GitHub backlog since 2022, see github/community#4068).
+
+The authenticated probe (`Bearer` token from `gh auth token`) bypasses both private-port login redirects and public-port interstitial warnings, so port visibility is not critical for the Avalonia client.
+
+Server URL pattern: `https://<codespace-name>-31337.app.github.dev/`
+
+### Secrets
+
+```bash
+gh secret set ANTHROPIC_API_KEY --repos johnjuuljensen/GodMode --app codespaces
+```
+
 ## Testing Notes
 
 - Run all tests with `dotnet test`

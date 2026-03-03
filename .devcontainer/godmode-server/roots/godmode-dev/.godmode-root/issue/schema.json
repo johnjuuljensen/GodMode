@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "issueNumber": { "type": "string", "title": "Issue Number", "description": "GitHub issue number" },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions", "default": "true" }
+  },
+  "required": ["issueNumber"]
+}

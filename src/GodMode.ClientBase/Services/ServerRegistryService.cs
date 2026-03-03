@@ -1,5 +1,4 @@
 using GodMode.ClientBase.Services.Models;
-using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace GodMode.ClientBase.Services;
@@ -14,14 +13,14 @@ public class ServerRegistryService : IServerRegistryService
     private const string ProfilesFileName = "profiles.json";
     private readonly string _serversPath;
     private readonly string _appDataPath;
-    private readonly byte[] _encryptionKey;
+    private readonly ITokenProtector _tokenProtector;
     private ServersConfig? _cachedConfig;
 
-    public ServerRegistryService(string appDataPath)
+    public ServerRegistryService(string appDataPath, ITokenProtector tokenProtector)
     {
         _appDataPath = appDataPath;
         _serversPath = Path.Combine(appDataPath, ServersFileName);
-        _encryptionKey = GetOrCreateEncryptionKey();
+        _tokenProtector = tokenProtector;
     }
 
     public async Task<List<ServerRegistration>> GetServersAsync()
@@ -80,49 +79,11 @@ public class ServerRegistryService : IServerRegistryService
         return false;
     }
 
-    public string DecryptToken(string encryptedToken)
-    {
-        try
-        {
-            var encryptedBytes = Convert.FromBase64String(encryptedToken);
-            using var aes = Aes.Create();
-            aes.Key = _encryptionKey;
+    public string DecryptToken(string encryptedToken) =>
+        _tokenProtector.Unprotect(encryptedToken);
 
-            var iv = new byte[aes.BlockSize / 8];
-            Array.Copy(encryptedBytes, 0, iv, 0, iv.Length);
-            aes.IV = iv;
-
-            using var decryptor = aes.CreateDecryptor();
-            using var msDecrypt = new MemoryStream(encryptedBytes, iv.Length, encryptedBytes.Length - iv.Length);
-            using var csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read);
-            using var srDecrypt = new StreamReader(csDecrypt);
-
-            return srDecrypt.ReadToEnd();
-        }
-        catch
-        {
-            return encryptedToken;
-        }
-    }
-
-    public string EncryptToken(string token)
-    {
-        using var aes = Aes.Create();
-        aes.Key = _encryptionKey;
-        aes.GenerateIV();
-
-        using var encryptor = aes.CreateEncryptor();
-        using var msEncrypt = new MemoryStream();
-        msEncrypt.Write(aes.IV, 0, aes.IV.Length);
-
-        using (var csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
-        using (var swEncrypt = new StreamWriter(csEncrypt))
-        {
-            swEncrypt.Write(token);
-        }
-
-        return Convert.ToBase64String(msEncrypt.ToArray());
-    }
+    public string EncryptToken(string token) =>
+        _tokenProtector.Protect(token);
 
     private ServerRegistration CloneWithEncryptedToken(ServerRegistration server)
     {
@@ -132,7 +93,7 @@ public class ServerRegistryService : IServerRegistryService
             Url = server.Url,
             Username = server.Username,
             Token = server.Type == "github" && !string.IsNullOrEmpty(server.Token)
-                ? EncryptToken(server.Token)
+                ? _tokenProtector.Protect(server.Token)
                 : server.Token,
             DisplayName = server.DisplayName
         };
@@ -216,19 +177,6 @@ public class ServerRegistryService : IServerRegistryService
         _cachedConfig = config;
         var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(_serversPath, json);
-    }
-
-    private byte[] GetOrCreateEncryptionKey()
-    {
-        var keyPath = Path.Combine(_appDataPath, ".encryption_key");
-        if (File.Exists(keyPath))
-            return File.ReadAllBytes(keyPath);
-
-        using var aes = Aes.Create();
-        aes.GenerateKey();
-        var key = aes.Key;
-        File.WriteAllBytes(keyPath, key);
-        return key;
     }
 
     private static string? NormalizeUrl(string? url) =>

@@ -10,6 +10,7 @@
 		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
 		<PackageReference Include="Octokit" />
 		<PackageReference Include="System.Reactive" />
+		<PackageReference Include="System.Security.Cryptography.ProtectedData" />
 		<PackageReference Include="TypedSignalR.Client" />
 	</ItemGroup>
 
