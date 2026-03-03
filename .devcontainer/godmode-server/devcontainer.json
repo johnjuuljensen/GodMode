@@ -7,7 +7,10 @@
     "ghcr.io/devcontainers/features/sshd:1": {}
   },
   "postCreateCommand": "git clone https://github.com/johnjuuljensen/GodMode.git /tmp/godmode-src && sudo dotnet publish /tmp/godmode-src/src/GodMode.Server -c Release -o /opt/godmode-server && sudo rm -rf /tmp/godmode-src && curl -fsSL https://claude.ai/install.sh | bash",
-  "postStartCommand": "cd /opt/godmode-server && ./GodMode.Server",
+  "postStartCommand": {
+    "server": "cd /opt/godmode-server && ./GodMode.Server",
+    "port-visibility": "sleep 5 && gh codespace ports visibility 31337:public -c \"$CODESPACE_NAME\" 2>/dev/null || true"
+  },
   "forwardPorts": [31337],
   "portsAttributes": {
     "31337": {
