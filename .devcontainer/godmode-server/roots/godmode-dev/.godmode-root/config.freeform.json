@@ -1,0 +1,5 @@
+{
+  "description": "Create a new project from scratch or existing branch",
+  "scriptsCreateFolder": true,
+  "create": "freeform/create"
+}

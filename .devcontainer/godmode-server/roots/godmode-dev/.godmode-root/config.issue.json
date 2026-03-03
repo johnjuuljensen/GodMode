@@ -1,0 +1,7 @@
+{
+  "description": "Create project from a GitHub issue",
+  "scriptsCreateFolder": true,
+  "create": "issue/create",
+  "nameTemplate": "issue_{issueNumber}",
+  "promptTemplate": "Read GitHub issue #{issueNumber} by running `gh issue view {issueNumber}`. Understand the requirements and implement the changes."
+}
