@@ -1,0 +1,36 @@
+{
+  "name": "GodMode Server",
+  "image": "mcr.microsoft.com/devcontainers/dotnet:10.0",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "git clone https://github.com/johnjuuljensen/GodMode.git /tmp/godmode-src && dotnet publish /tmp/godmode-src/src/GodMode.Server -c Release -o /opt/godmode-server && rm -rf /tmp/godmode-src && curl -fsSL https://claude.ai/install.sh | bash",
+  "postStartCommand": "/opt/godmode-server/GodMode.Server",
+  "forwardPorts": [31337],
+  "portsAttributes": {
+    "31337": {
+      "label": "GodMode Server",
+      "protocol": "https",
+      "visibility": "public",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-dotnettools.csharp",
+        "ms-dotnettools.csdevkit"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "secrets": {
+    "ANTHROPIC_API_KEY": {
+      "description": "Anthropic API key for Claude Code"
+    }
+  },
+  "remoteUser": "vscode"
+}
