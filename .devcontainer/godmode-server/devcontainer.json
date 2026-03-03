@@ -3,7 +3,8 @@
   "image": "mcr.microsoft.com/devcontainers/dotnet:10.0",
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/sshd:1": {}
   },
   "postCreateCommand": "git clone https://github.com/johnjuuljensen/GodMode.git /tmp/godmode-src && dotnet publish /tmp/godmode-src/src/GodMode.Server -c Release -o /opt/godmode-server && rm -rf /tmp/godmode-src && curl -fsSL https://claude.ai/install.sh | bash",
   "postStartCommand": "/opt/godmode-server/GodMode.Server",
