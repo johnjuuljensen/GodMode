@@ -53,6 +53,19 @@ public class GitHubCodespaceProvider : IHostProvider
                 ));
             }
 
+            // Running codespaces where probe failed but name matches — still show them
+            foreach (var (codespace, _) in probeResults.Where(r =>
+                !r.HasGodMode && (r.Codespace.DisplayName ?? r.Codespace.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
+            {
+                hosts.Add(new HostInfo(
+                    codespace.Name,
+                    codespace.DisplayName ?? codespace.Name,
+                    "github",
+                    HostState.Running,
+                    codespace.WebUrl
+                ));
+            }
+
             // For non-running codespaces, filter by display name containing "godmode"
             foreach (var codespace in notRunning.Where(c =>
                 (c.DisplayName ?? c.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
