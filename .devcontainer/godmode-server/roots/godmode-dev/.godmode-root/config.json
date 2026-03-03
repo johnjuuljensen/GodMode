@@ -1,5 +1,6 @@
 {
   "description": "GodMode development worktrees",
+  "profileName": "GodMode Dev",
   "environment": {},
   "claudeArgs": ["--append-system-prompt", "If asked to publish or push this project, push to github.com/johnjuuljensen/GodMode on a feature branch."],
   "prepare": "scripts/prepare",

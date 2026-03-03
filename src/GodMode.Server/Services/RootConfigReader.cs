@@ -87,7 +87,8 @@ public class RootConfigReader : IRootConfigReader
 
             return new RootConfig(
                 Description: baseRaw.Description,
-                Actions: actions);
+                Actions: actions,
+                ProfileName: baseRaw.ProfileName);
         }
         catch (Exception ex)
         {
@@ -254,6 +255,7 @@ public class RootConfigReader : IRootConfigReader
     private record RawConfig
     {
         public string? Description { get; init; }
+        public string? ProfileName { get; init; }
         public JsonElement? Prepare { get; init; }
         public JsonElement? Create { get; init; }
         public JsonElement? Delete { get; init; }
