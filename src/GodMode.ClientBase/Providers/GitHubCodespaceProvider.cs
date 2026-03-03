@@ -40,7 +40,7 @@ public class GitHubCodespaceProvider : IHostProvider
 
             // Probe running codespaces for GodMode.Server in parallel
             var probeResults = await Task.WhenAll(
-                running.Select(async c => (Codespace: c, HasGodMode: await ProbeGodModeServerAsync(c.Name))));
+                running.Select(async c => (Codespace: c, HasGodMode: await ProbeGodModeServerAsync(c.Name, _token))));
 
             foreach (var (codespace, _) in probeResults.Where(r => r.HasGodMode))
             {
@@ -141,11 +141,13 @@ public class GitHubCodespaceProvider : IHostProvider
         return connection;
     }
 
-    private static async Task<bool> ProbeGodModeServerAsync(string codespaceName)
+    private static async Task<bool> ProbeGodModeServerAsync(string codespaceName, string token)
     {
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            client.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             var url = $"https://{codespaceName}-31337.app.github.dev/";
             var response = await client.GetFromJsonAsync<ServerProbeResponse>(url);
             return response?.Service == "GodMode.Server";

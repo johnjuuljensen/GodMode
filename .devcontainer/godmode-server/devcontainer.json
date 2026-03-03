@@ -8,7 +8,7 @@
   },
   "postCreateCommand": "git clone https://github.com/johnjuuljensen/GodMode.git /tmp/godmode-src && sudo dotnet publish /tmp/godmode-src/src/GodMode.Server -c Release -o /opt/godmode-server && sudo rm -rf /tmp/godmode-src && curl -fsSL https://claude.ai/install.sh | bash",
   "postStartCommand": {
-    "server": "cd /opt/godmode-server && ./GodMode.Server",
+    "server": "cd $HOME && export PATH=\"$HOME/.local/bin:$PATH\" && /opt/godmode-server/GodMode.Server --contentRoot /opt/godmode-server",
     "port-visibility": "sleep 5 && gh codespace ports visibility 31337:public -c \"$CODESPACE_NAME\" 2>/dev/null || true"
   },
   "forwardPorts": [31337],
