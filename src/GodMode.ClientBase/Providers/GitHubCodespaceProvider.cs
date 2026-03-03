@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
@@ -32,11 +33,29 @@ public class GitHubCodespaceProvider : IHostProvider
 
         try
         {
-            // Note: Octokit doesn't have built-in Codespaces API support yet
-            // We'll need to use the REST API directly
             var codespaces = await GetCodespacesViaRestApi();
 
-            foreach (var codespace in codespaces)
+            var running = codespaces.Where(c => c.State == "Available").ToList();
+            var notRunning = codespaces.Where(c => c.State != "Available").ToList();
+
+            // Probe running codespaces for GodMode.Server in parallel
+            var probeResults = await Task.WhenAll(
+                running.Select(async c => (Codespace: c, HasGodMode: await ProbeGodModeServerAsync(c.Name))));
+
+            foreach (var (codespace, _) in probeResults.Where(r => r.HasGodMode))
+            {
+                hosts.Add(new HostInfo(
+                    codespace.Name,
+                    codespace.DisplayName ?? codespace.Name,
+                    "github",
+                    HostState.Running,
+                    codespace.WebUrl
+                ));
+            }
+
+            // For non-running codespaces, filter by display name containing "godmode"
+            foreach (var codespace in notRunning.Where(c =>
+                (c.DisplayName ?? c.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
             {
                 hosts.Add(new HostInfo(
                     codespace.Name,
@@ -49,7 +68,6 @@ public class GitHubCodespaceProvider : IHostProvider
         }
         catch (Exception ex)
         {
-            // Log error and return empty list
             Console.WriteLine($"Error listing codespaces: {ex.Message}");
         }
 
@@ -110,6 +128,21 @@ public class GitHubCodespaceProvider : IHostProvider
         return connection;
     }
 
+    private static async Task<bool> ProbeGodModeServerAsync(string codespaceName)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+            var url = $"https://{codespaceName}-31337.app.github.dev/";
+            var response = await client.GetFromJsonAsync<ServerProbeResponse>(url);
+            return response?.Service == "GodMode.Server";
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static HostState MapCodespaceState(string state)
     {
         return state switch
@@ -161,6 +194,11 @@ public class GitHubCodespaceProvider : IHostProvider
     private class CodespacesResponse
     {
         public List<CodespaceInfo> Codespaces { get; set; } = new();
+    }
+
+    private class ServerProbeResponse
+    {
+        public string? Service { get; set; }
     }
 
     private class CodespaceInfo
