@@ -1,0 +1,7 @@
+{
+  "description": "Explore the codebase — quick questions and research",
+  "model": "haiku",
+  "scriptsCreateFolder": true,
+  "create": "explore/create",
+  "nameTemplate": "explore_{name}"
+}

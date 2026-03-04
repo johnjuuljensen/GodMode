@@ -1,5 +1,6 @@
 {
   "description": "Create project from a GitHub issue",
+  "model": "opus[1m]",
   "scriptsCreateFolder": true,
   "create": "issue/create",
   "nameTemplate": "issue_{issueNumber}",

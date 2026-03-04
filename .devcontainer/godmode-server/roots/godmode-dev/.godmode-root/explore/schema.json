@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Name", "description": "Short name for this exploration" },
+    "prompt": { "type": "string", "title": "Question", "x-multiline": true, "description": "What do you want to explore or understand?" },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions", "default": "true" }
+  },
+  "required": ["name", "prompt"]
+}
