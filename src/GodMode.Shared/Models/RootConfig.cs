@@ -9,7 +9,8 @@ namespace GodMode.Shared.Models;
 public record RootConfig(
     string? Description = null,
     IReadOnlyDictionary<string, CreateAction>? Actions = null,
-    string? ProfileName = null)
+    string? ProfileName = null,
+    bool StripEnvVarProfile = false)
 {
     /// <summary>
     /// Resolves a specific action by name (case-insensitive).

@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="GodMode.Server.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="CliWrap" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Serilog.Sinks.File" />
