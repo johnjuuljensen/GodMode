@@ -346,42 +346,19 @@ public partial class MainWindowViewModel : ObservableObject
 		vm.PreselectedRootName = root.RootName;
 		vm.PreselectedActionName = actionName;
 
-		if (IsCompact)
-		{
-			vm.Completed += GoBack;
-			CompactNavigateTo(vm);
-		}
-		else
-		{
-			vm.Completed += CloseModal;
-			ModalViewModel = vm;
-			IsModalVisible = true;
-		}
+		var dismiss = ShowAsModalOrNavigate(vm);
+		vm.Completed += dismiss;
 	}
 
 	private void OnAddServerRequested()
 	{
 		var vm = App.Services.GetRequiredService<AddServerViewModel>();
-
-		if (IsCompact)
+		var dismiss = ShowAsModalOrNavigate(vm);
+		vm.Completed += () =>
 		{
-			vm.Completed += () =>
-			{
-				GoBack();
-				_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
-			};
-			CompactNavigateTo(vm);
-		}
-		else
-		{
-			vm.Completed += () =>
-			{
-				CloseModal();
-				_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
-			};
-			ModalViewModel = vm;
-			IsModalVisible = true;
-		}
+			dismiss();
+			_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
+		};
 	}
 
 	private void OnEditServerRequested(ServerGroupViewModel server)
@@ -389,31 +366,28 @@ public partial class MainWindowViewModel : ObservableObject
 		var vm = App.Services.GetRequiredService<EditServerViewModel>();
 		vm.ServerIndex = server.AccountIndex;
 
+		var dismiss = ShowAsModalOrNavigate(vm);
+		vm.Completed += () =>
+		{
+			if (vm.WasDeleted)
+				_hostConnectionService.DisconnectFromHost(server.Id);
+
+			dismiss();
+			_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
+		};
+	}
+
+	private Action ShowAsModalOrNavigate(object vm)
+	{
 		if (IsCompact)
 		{
-			vm.Completed += () =>
-			{
-				if (vm.WasDeleted)
-					_hostConnectionService.DisconnectFromHost(server.Id);
-
-				GoBack();
-				_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
-			};
 			CompactNavigateTo(vm);
+			return GoBack;
 		}
-		else
-		{
-			vm.Completed += () =>
-			{
-				if (vm.WasDeleted)
-					_hostConnectionService.DisconnectFromHost(server.Id);
 
-				CloseModal();
-				_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
-			};
-			ModalViewModel = vm;
-			IsModalVisible = true;
-		}
+		ModalViewModel = vm;
+		IsModalVisible = true;
+		return CloseModal;
 	}
 
 	[RelayCommand]
