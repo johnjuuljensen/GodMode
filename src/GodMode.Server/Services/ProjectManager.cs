@@ -22,23 +22,38 @@ public class ProjectManager : IProjectManager
     private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ILogger<ProjectManager> _logger;
-    private readonly ProjectFiles.ProjectManager _projectFiles;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
     /// <summary>
-    /// Profile name → ProfileConfig. Always has at least a "Default" profile.
+    /// Profiles loaded from appsettings.json (static, never changes at runtime).
     /// </summary>
-    private readonly Dictionary<string, ProfileConfig> _profiles;
+    private readonly Dictionary<string, ProfileConfig> _explicitProfiles;
 
     /// <summary>
-    /// (profileName, rootName) → resolved absolute path. Built from _profiles.
+    /// Optional directory to scan for autodiscovered roots.
+    /// Null when autodiscovery is disabled.
     /// </summary>
-    private readonly Dictionary<(string Profile, string Root), string> _rootLookup;
+    private readonly string? _projectRootsDir;
 
     /// <summary>
-    /// Resolved absolute path → (profileName, rootName). Reverse lookup for recovery.
+    /// Lock for rebuilding the profile snapshot.
     /// </summary>
-    private readonly Dictionary<string, (string Profile, string Root)> _pathToProfileRoot;
+    private readonly object _profileLock = new();
+
+    /// <summary>
+    /// Immutable snapshot of all profile/root state. Swapped atomically via volatile.
+    /// Readers capture the reference once to get a consistent view.
+    /// </summary>
+    private volatile ProfileSnapshot _snapshot;
+
+    /// <summary>
+    /// Immutable snapshot of merged profile and root lookup state.
+    /// </summary>
+    private sealed record ProfileSnapshot(
+        Dictionary<string, ProfileConfig> Profiles,
+        Dictionary<(string, string), string> RootLookup,
+        Dictionary<string, (string, string)> PathToProfileRoot,
+        ProjectFiles.ProjectManager ProjectFiles);
 
     public ProjectManager(
         IClaudeProcessManager processManager,
@@ -59,28 +74,21 @@ public class ProjectManager : IProjectManager
         // Subscribe to output events from Claude processes
         _processManager.OnOutputReceived += HandleOutputReceivedAsync;
 
-        // Load profiles from configuration (with backward compat for ProjectRoots)
-        _profiles = LoadProfiles(configuration);
-        (_rootLookup, _pathToProfileRoot) = BuildRootLookups(_profiles);
+        // Read optional autodiscovery directory (normalize empty/whitespace to null)
+        var rawDir = configuration["ProjectRootsDir"];
+        _projectRootsDir = string.IsNullOrWhiteSpace(rawDir) ? null : rawDir;
 
-        // Build flat root dictionary for ProjectFiles.ProjectManager using composite keys
-        var compositeRoots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var ((profile, root), path) in _rootLookup)
-        {
-            compositeRoots[$"{profile}/{root}"] = path;
-        }
+        // Load explicit profiles from configuration (with backward compat for ProjectRoots)
+        _explicitProfiles = LoadProfiles(configuration, hasAutoDiscovery: _projectRootsDir != null);
 
-        _projectFiles = compositeRoots.Count > 0
-            ? new ProjectFiles.ProjectManager(compositeRoots)
-            : new ProjectFiles.ProjectManager("projects");
+        if (_projectRootsDir != null)
+            _logger.LogInformation("Autodiscovery enabled: scanning {ProjectRootsDir} for .godmode-root/ directories", _projectRootsDir);
 
-        _logger.LogInformation("Initialized with {ProfileCount} profiles, {RootCount} total roots: {Roots}",
-            _profiles.Count,
-            _rootLookup.Count,
-            string.Join(", ", _rootLookup.Select(kvp => $"{kvp.Key.Profile}/{kvp.Key.Root}={kvp.Value}")));
+        // Build initial profile/root snapshot
+        _snapshot = BuildSnapshot();
     }
 
-    private static Dictionary<string, ProfileConfig> LoadProfiles(IConfiguration configuration)
+    private static Dictionary<string, ProfileConfig> LoadProfiles(IConfiguration configuration, bool hasAutoDiscovery)
     {
         var profiles = configuration.GetSection("Profiles").Get<Dictionary<string, ProfileConfig>>();
 
@@ -97,7 +105,11 @@ public class ProjectManager : IProjectManager
             };
         }
 
-        // No config at all — single default profile with "projects" root
+        // No explicit config — return empty if autodiscovery will provide roots,
+        // otherwise fall back to a default "projects" root.
+        if (hasAutoDiscovery)
+            return new Dictionary<string, ProfileConfig>();
+
         return new Dictionary<string, ProfileConfig>
         {
             ["Default"] = new ProfileConfig
@@ -105,6 +117,134 @@ public class ProjectManager : IProjectManager
                 Roots = new Dictionary<string, string> { ["default"] = "projects" }
             }
         };
+    }
+
+    /// <summary>
+    /// Builds an immutable snapshot of all profile/root state by merging explicit profiles
+    /// with autodiscovered roots. Thread-safe — can be called from any thread.
+    /// </summary>
+    private ProfileSnapshot BuildSnapshot()
+    {
+        // Start with explicit profiles
+        var merged = new Dictionary<string, ProfileConfig>(_explicitProfiles, StringComparer.OrdinalIgnoreCase);
+
+        // Discover roots from ProjectRootsDir (if configured)
+        if (_projectRootsDir != null)
+        {
+            var discovered = DiscoverProfiles(_projectRootsDir);
+            foreach (var (profileName, profileConfig) in discovered)
+            {
+                if (merged.TryGetValue(profileName, out var existing))
+                {
+                    // Explicit profiles take precedence — merge only new root names
+                    var mergedRoots = new Dictionary<string, string>(existing.Roots, StringComparer.OrdinalIgnoreCase);
+                    foreach (var (rootName, rootPath) in profileConfig.Roots)
+                    {
+                        mergedRoots.TryAdd(rootName, rootPath);
+                    }
+                    merged[profileName] = new ProfileConfig
+                    {
+                        Roots = mergedRoots,
+                        Environment = existing.Environment,
+                        Description = existing.Description ?? profileConfig.Description
+                    };
+                }
+                else
+                {
+                    merged[profileName] = profileConfig;
+                }
+            }
+        }
+
+        // If still empty after discovery, create a default
+        if (merged.Count == 0)
+        {
+            merged["Default"] = new ProfileConfig
+            {
+                Roots = new Dictionary<string, string> { ["default"] = "projects" }
+            };
+        }
+
+        var (rootLookup, pathToProfileRoot) = BuildRootLookups(merged);
+
+        // Build ProjectFiles.ProjectManager with the merged root set
+        var compositeRoots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ((profile, root), path) in rootLookup)
+        {
+            compositeRoots[$"{profile}/{root}"] = path;
+        }
+        var projectFiles = compositeRoots.Count > 0
+            ? new ProjectFiles.ProjectManager(compositeRoots)
+            : new ProjectFiles.ProjectManager("projects");
+
+        _logger.LogInformation("Profile snapshot: {ProfileCount} profiles, {RootCount} total roots: {Roots}",
+            merged.Count,
+            rootLookup.Count,
+            string.Join(", ", rootLookup.Select(kvp => $"{kvp.Key.Item1}/{kvp.Key.Item2}={kvp.Value}")));
+
+        return new ProfileSnapshot(merged, rootLookup, pathToProfileRoot, projectFiles);
+    }
+
+    /// <summary>
+    /// Rebuilds the profile snapshot atomically.
+    /// Uses a lock to prevent concurrent rebuilds from wasting work.
+    /// </summary>
+    private void RebuildSnapshot()
+    {
+        lock (_profileLock)
+        {
+            _snapshot = BuildSnapshot();
+        }
+    }
+
+    /// <summary>
+    /// Scans a directory for subdirectories containing .godmode-root/ and builds profiles from them.
+    /// Roots with the same profileName in config.json are grouped into one profile.
+    /// Roots without profileName become their own single-root profile (named after the directory).
+    /// </summary>
+    private Dictionary<string, ProfileConfig> DiscoverProfiles(string rootsDir)
+    {
+        var fullPath = Path.GetFullPath(rootsDir);
+        if (!Directory.Exists(fullPath))
+        {
+            _logger.LogDebug("ProjectRootsDir {RootsDir} does not exist, skipping autodiscovery", fullPath);
+            return new Dictionary<string, ProfileConfig>();
+        }
+
+        var profiles = new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var subDir in Directory.GetDirectories(fullPath))
+        {
+            var godModeRootDir = Path.Combine(subDir, ".godmode-root");
+            if (!Directory.Exists(godModeRootDir))
+                continue;
+
+            var dirName = Path.GetFileName(subDir);
+            try
+            {
+                var config = _rootConfigReader.ReadConfig(subDir);
+                var profileName = config.ProfileName ?? dirName;
+
+                if (!profiles.TryGetValue(profileName, out var existingProfile))
+                {
+                    existingProfile = new ProfileConfig
+                    {
+                        Roots = new Dictionary<string, string>(),
+                        Description = config.Description
+                    };
+                    profiles[profileName] = existingProfile;
+                }
+
+                existingProfile.Roots[dirName] = subDir;
+                _logger.LogDebug("Discovered root '{RootName}' → profile '{ProfileName}' at {Path}", dirName, profileName, subDir);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to read config for discovered root at {Path}, skipping", subDir);
+            }
+        }
+
+        return profiles;
     }
 
     private static (Dictionary<(string, string), string>, Dictionary<string, (string, string)>) BuildRootLookups(
@@ -144,7 +284,12 @@ public class ProjectManager : IProjectManager
 
     public Task<ProfileInfo[]> ListProfilesAsync()
     {
-        var profiles = _profiles.Select(kvp =>
+        // Rebuild to pick up newly added autodiscovered roots
+        if (_projectRootsDir != null)
+            RebuildSnapshot();
+
+        var snap = _snapshot;
+        var profiles = snap.Profiles.Select(kvp =>
             new ProfileInfo(kvp.Key, kvp.Value.Description)
         ).ToArray();
 
@@ -153,11 +298,16 @@ public class ProjectManager : IProjectManager
 
     public Task<ProjectRootInfo[]> ListProjectRootsAsync()
     {
-        var roots = _rootLookup.Select(kvp =>
+        // Rebuild to pick up newly added autodiscovered roots
+        if (_projectRootsDir != null)
+            RebuildSnapshot();
+
+        var snap = _snapshot;
+        var roots = snap.RootLookup.Select(kvp =>
         {
             var (profileName, rootName) = kvp.Key;
             var rootPath = kvp.Value;
-            var resolvedPath = _projectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+            var resolvedPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
             var config = _rootConfigReader.ReadConfig(resolvedPath);
             var actions = config.GetEffectiveActions()
                 .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema))
@@ -204,15 +354,18 @@ public class ProjectManager : IProjectManager
         _logger.LogInformation("Creating project in profile '{Profile}' root '{Root}' action '{Action}' with inputs: {InputKeys}",
             request.ProfileName, request.ProjectRootName, request.ActionName ?? "(default)", string.Join(", ", request.Inputs.Keys));
 
+        // Capture snapshot for consistent state throughout this operation
+        var snap = _snapshot;
+
         // Resolve root path via profile lookup
         var compositeKey = CompositeKey(request.ProfileName, request.ProjectRootName);
-        var rootPath = _projectFiles.GetProjectRootPath(compositeKey);
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(compositeKey);
         var config = _rootConfigReader.ReadConfig(rootPath);
         var action = config.ResolveAction(request.ActionName)
             ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
 
         // Get profile environment for merging
-        _profiles.TryGetValue(request.ProfileName, out var profileConfig);
+        snap.Profiles.TryGetValue(request.ProfileName, out var profileConfig);
         var profileEnv = profileConfig?.Environment;
 
         // Resolve name from inputs or nameTemplate
@@ -235,7 +388,7 @@ public class ProjectManager : IProjectManager
         else
         {
             // Server creates the project folder via ProjectFiles
-            var (projectFolder, _) = _projectFiles.CreateProject(compositeKey, name);
+            var (projectFolder, _) = snap.ProjectFiles.CreateProject(compositeKey, name);
             projectPath = projectFolder.ProjectPath;
         }
 
@@ -434,16 +587,17 @@ public class ProjectManager : IProjectManager
 
         // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
+        var snap = _snapshot;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
         if (project.Status.RootName != null && profileName != null)
         {
-            var rootPath = _projectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
+            var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
             var config = _rootConfigReader.ReadConfig(rootPath);
             var action = config.ResolveAction(project.ActionName);
 
             if (action?.Delete is { Length: > 0 })
             {
-                _profiles.TryGetValue(profileName, out var profileCfg);
+                snap.Profiles.TryGetValue(profileName, out var profileCfg);
                 var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment);
 
                 if (force)
@@ -529,13 +683,14 @@ public class ProjectManager : IProjectManager
             // Restore action name from settings if not already set (recovery scenario)
             project.ActionName ??= settings.ActionName;
 
+            var resumeSnap = _snapshot;
             var resumeProfileName = project.ProfileName ?? project.Status.ProfileName;
-            _profiles.TryGetValue(resumeProfileName ?? "", out var profileCfg);
+            resumeSnap.Profiles.TryGetValue(resumeProfileName ?? "", out var profileCfg);
             var profileEnv = profileCfg?.Environment;
 
             if (project.Status.RootName != null && resumeProfileName != null)
             {
-                var rootPath = _projectFiles.GetProjectRootPath(CompositeKey(resumeProfileName, project.Status.RootName));
+                var rootPath = resumeSnap.ProjectFiles.GetProjectRootPath(CompositeKey(resumeProfileName, project.Status.RootName));
                 var config = _rootConfigReader.ReadConfig(rootPath);
                 var action = config.ResolveAction(project.ActionName);
                 if (action != null)
@@ -630,9 +785,14 @@ public class ProjectManager : IProjectManager
 
     public async Task RecoverProjectsAsync()
     {
+        // Rebuild snapshot to include autodiscovered roots before recovery
+        if (_projectRootsDir != null)
+            RebuildSnapshot();
+
+        var recoverSnap = _snapshot;
         _logger.LogInformation("Recovering projects from all project roots");
 
-        var projectPaths = _projectFiles.ListProjectPaths().ToList();
+        var projectPaths = recoverSnap.ProjectFiles.ListProjectPaths().ToList();
 
         // Process all projects in parallel for faster startup
         await Parallel.ForEachAsync(projectPaths, async (projectPath, ct) =>
@@ -657,7 +817,7 @@ public class ProjectManager : IProjectManager
                 // Determine which profile and root this project belongs to
                 string? rootName = null;
                 string? profileName = null;
-                foreach (var (rn, rp) in _projectFiles.ProjectRoots)
+                foreach (var (rn, rp) in recoverSnap.ProjectFiles.ProjectRoots)
                 {
                     if (projectPath.StartsWith(rp, StringComparison.OrdinalIgnoreCase))
                     {

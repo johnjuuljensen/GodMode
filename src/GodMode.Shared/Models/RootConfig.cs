@@ -8,7 +8,8 @@ namespace GodMode.Shared.Models;
 /// </summary>
 public record RootConfig(
     string? Description = null,
-    IReadOnlyDictionary<string, CreateAction>? Actions = null)
+    IReadOnlyDictionary<string, CreateAction>? Actions = null,
+    string? ProfileName = null)
 {
     /// <summary>
     /// Resolves a specific action by name (case-insensitive).
