@@ -55,9 +55,26 @@ public static partial class EnvironmentExpander
     }
 
     /// <summary>
+    /// Checks whether prefix stripping is enabled for a profile, either via config flag
+    /// or via a {PREFIX}STRIP_ENV_VAR_PROFILE env var (e.g. MEGA_STRIP_ENV_VAR_PROFILE=true).
+    /// </summary>
+    public static bool IsStripEnabled(string? profileName, bool configFlag)
+    {
+        if (configFlag) return true;
+        if (string.IsNullOrWhiteSpace(profileName)) return false;
+
+        var prefix = ProfileNameToPrefix(profileName);
+        if (prefix.Length == 0) return false;
+
+        var envValue = Environment.GetEnvironmentVariable($"{prefix}STRIP_ENV_VAR_PROFILE");
+        return envValue is "true" or "True" or "1";
+    }
+
+    /// <summary>
     /// Scans process environment for variables with the given profile name as prefix,
     /// strips the prefix, and returns the stripped mappings.
     /// Profile name is converted to UPPER_SNAKE_CASE for the prefix (e.g. "My Profile" → "MY_PROFILE_").
+    /// The control variable {PREFIX}STRIP_ENV_VAR_PROFILE is excluded from the results.
     /// </summary>
     public static Dictionary<string, string>? GetPrefixStrippedVars(string? profileName)
     {
@@ -78,6 +95,10 @@ public static partial class EnvironmentExpander
 
             var stripped = envKey[prefix.Length..];
             if (stripped.Length == 0) continue;
+
+            // Don't inject the control variable itself
+            if (stripped.Equals("STRIP_ENV_VAR_PROFILE", StringComparison.OrdinalIgnoreCase))
+                continue;
 
             result ??= new Dictionary<string, string>();
             result[stripped] = envValue;

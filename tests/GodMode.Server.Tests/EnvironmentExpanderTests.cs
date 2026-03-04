@@ -169,4 +169,67 @@ public class EnvironmentExpanderTests
         var result = EnvironmentExpander.GetPrefixStrippedVars("UniqueProfileThatHasNoEnvVars99999");
         Assert.Null(result);
     }
+
+    [Fact]
+    public void GetPrefixStrippedVars_ExcludesControlVariable()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8].ToUpper();
+        var profileName = $"Ctl{suffix}";
+        var prefix = EnvironmentExpander.ProfileNameToPrefix(profileName);
+
+        Environment.SetEnvironmentVariable($"{prefix}STRIP_ENV_VAR_PROFILE", "true");
+        Environment.SetEnvironmentVariable($"{prefix}SOME_KEY", "value");
+        try
+        {
+            var result = EnvironmentExpander.GetPrefixStrippedVars(profileName);
+
+            Assert.NotNull(result);
+            Assert.True(result.ContainsKey("SOME_KEY"));
+            Assert.False(result.ContainsKey("STRIP_ENV_VAR_PROFILE"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable($"{prefix}STRIP_ENV_VAR_PROFILE", null);
+            Environment.SetEnvironmentVariable($"{prefix}SOME_KEY", null);
+        }
+    }
+
+    // --- IsStripEnabled ---
+
+    [Fact]
+    public void IsStripEnabled_ConfigFlagTrue_ReturnsTrue()
+    {
+        Assert.True(EnvironmentExpander.IsStripEnabled("AnyProfile", configFlag: true));
+    }
+
+    [Fact]
+    public void IsStripEnabled_ConfigFlagFalse_NoEnvVar_ReturnsFalse()
+    {
+        Assert.False(EnvironmentExpander.IsStripEnabled("UniqueProfileNoEnv99999", configFlag: false));
+    }
+
+    [Fact]
+    public void IsStripEnabled_EnvVarTrue_ReturnsTrue()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8].ToUpper();
+        var profileName = $"Env{suffix}";
+        var prefix = EnvironmentExpander.ProfileNameToPrefix(profileName);
+        var controlVar = $"{prefix}STRIP_ENV_VAR_PROFILE";
+
+        Environment.SetEnvironmentVariable(controlVar, "true");
+        try
+        {
+            Assert.True(EnvironmentExpander.IsStripEnabled(profileName, configFlag: false));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(controlVar, null);
+        }
+    }
+
+    [Fact]
+    public void IsStripEnabled_NullProfileName_ReturnsFalse()
+    {
+        Assert.False(EnvironmentExpander.IsStripEnabled(null, configFlag: false));
+    }
 }

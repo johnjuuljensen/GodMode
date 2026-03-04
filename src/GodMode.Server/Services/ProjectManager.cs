@@ -1047,7 +1047,7 @@ public class ProjectManager : IProjectManager
 
     /// <summary>
     /// Merges environment from all layers and applies ${VAR} expansion + optional prefix stripping.
-    /// Merge order: prefix-stripped vars (auto) → profile env → action env, then ${VAR} expansion.
+    /// Merge order: profile env (stripped vars + explicit config) → action env, then ${VAR} expansion.
     /// </summary>
     private static Dictionary<string, string>? MergeAndExpandEnvironment(
         Dictionary<string, string>? profileEnv,
@@ -1057,15 +1057,15 @@ public class ProjectManager : IProjectManager
     {
         Dictionary<string, string>? env = null;
 
-        // Prefix-stripped vars as lowest-priority base layer
-        if (stripEnvVarProfile)
+        // Profile environment: prefix-stripped vars + explicit config (same priority layer)
+        if (EnvironmentExpander.IsStripEnabled(profileName, stripEnvVarProfile))
         {
             var stripped = EnvironmentExpander.GetPrefixStrippedVars(profileName);
             if (stripped is { Count: > 0 })
                 env = new Dictionary<string, string>(stripped);
         }
 
-        // Profile environment overrides stripped vars
+        // Explicit profile env merges on top of stripped vars (both are "profile" layer)
         if (profileEnv is { Count: > 0 })
         {
             env ??= new Dictionary<string, string>();
