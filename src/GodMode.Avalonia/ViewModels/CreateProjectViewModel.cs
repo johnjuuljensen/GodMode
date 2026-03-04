@@ -74,12 +74,14 @@ public partial class CreateProjectViewModel : ViewModelBase
 	/// Pre-populated from the action config, overridable by the user.
 	/// </summary>
 	[ObservableProperty]
-	private string? _selectedModel;
+	private string _selectedModel = DefaultModel;
 
 	/// <summary>
-	/// Preset model aliases available in the combobox dropdown.
+	/// Preset model aliases available in the dropdown.
 	/// </summary>
 	public static string[] ModelPresets { get; } = ["opus", "opus[1m]", "sonnet", "sonnet[1m]", "haiku"];
+
+	private const string DefaultModel = "opus";
 
 	public CreateProjectViewModel(INavigationService navigationService, IProjectService projectService)
 		: base(navigationService)
@@ -109,12 +111,12 @@ public partial class CreateProjectViewModel : ViewModelBase
 			var fields = FormFieldParser.Parse(value.InputSchema);
 			FormFieldParser.PreserveUserValues(FormFields, fields);
 			FormFields = new ObservableCollection<FormField>(fields);
-			SelectedModel = value.Model;
+			SelectedModel = value.Model ?? DefaultModel;
 		}
 		else
 		{
 			FormFields = [];
-			SelectedModel = null;
+			SelectedModel = DefaultModel;
 		}
 	}
 
