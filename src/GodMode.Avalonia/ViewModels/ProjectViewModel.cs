@@ -181,8 +181,16 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		if (string.IsNullOrWhiteSpace(InputText) || !CanSendInput)
 			return;
 
-		var input = InputText;
+		var input = InputText.Trim();
 		InputText = string.Empty;
+
+		// Route slash commands through the command path
+		if (input.StartsWith('/'))
+		{
+			await HandleSlashCommandAsync(input);
+			return;
+		}
+
 		_lastInputSentAt = DateTime.UtcNow;
 		IsQuestionActive = false;
 		CurrentQuestionText = null;
@@ -228,6 +236,39 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		}
 	}
 
+	private async Task HandleSlashCommandAsync(string command)
+	{
+		var commandName = command.Split(' ', 2)[0].ToLowerInvariant();
+
+		try
+		{
+			ErrorMessage = null;
+
+			if (commandName == "/clear")
+			{
+				await ClearSessionAsync();
+				return;
+			}
+
+			// For other commands (/compact, /model, custom), send to server
+			// Auto-resume if needed (commands require a running process)
+			if (Status?.State is ProjectState.Stopped or ProjectState.Idle)
+			{
+				IsLoading = true;
+				await _projectService.ResumeProjectAsync(ProfileName, HostId, ProjectId);
+				IsLoading = false;
+				await Task.Delay(500);
+			}
+
+			await _projectService.SendCommandAsync(ProfileName, HostId, ProjectId, command);
+		}
+		catch (Exception ex)
+		{
+			ErrorMessage = $"Error sending {commandName}: {ex.Message}";
+			InputText = command;
+		}
+	}
+
 	[RelayCommand]
 	private async Task StopProjectAsync()
 	{
@@ -240,6 +281,46 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		catch (Exception ex)
 		{
 			ErrorMessage = $"Error stopping project: {ex.Message}";
+		}
+		finally
+		{
+			IsLoading = false;
+		}
+	}
+
+	[RelayCommand]
+	private async Task CompactAsync()
+	{
+		try
+		{
+			ErrorMessage = null;
+			await _projectService.SendCommandAsync(ProfileName, HostId, ProjectId, "/compact");
+		}
+		catch (Exception ex)
+		{
+			ErrorMessage = $"Error sending /compact: {ex.Message}";
+		}
+	}
+
+	[RelayCommand]
+	private async Task ClearSessionAsync()
+	{
+		try
+		{
+			IsLoading = true;
+			ErrorMessage = null;
+			await _projectService.SendCommandAsync(ProfileName, HostId, ProjectId, "/clear");
+
+			// Reset local state to reflect the cleared session
+			OutputMessages.Clear();
+			DisplayMessages.Clear();
+			DismissQuestion();
+
+			await RefreshAsync();
+		}
+		catch (Exception ex)
+		{
+			ErrorMessage = $"Error clearing session: {ex.Message}";
 		}
 		finally
 		{

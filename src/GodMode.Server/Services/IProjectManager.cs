@@ -38,6 +38,11 @@ public interface IProjectManager
     Task SendInputAsync(string projectId, string input);
 
     /// <summary>
+    /// Sends a slash command to a project (e.g., /compact, /clear).
+    /// </summary>
+    Task SendCommandAsync(string projectId, string command);
+
+    /// <summary>
     /// Stops a running project.
     /// </summary>
     Task StopProjectAsync(string projectId);

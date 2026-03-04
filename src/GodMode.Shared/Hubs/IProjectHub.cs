@@ -43,6 +43,12 @@ public interface IProjectHub
     Task SendInput(string projectId, string input);
 
     /// <summary>
+    /// Sends a slash command to a project (e.g., /compact, /clear).
+    /// Commands are handled server-side or forwarded to Claude as appropriate.
+    /// </summary>
+    Task SendCommand(string projectId, string command);
+
+    /// <summary>
     /// Stops a running project.
     /// </summary>
     Task StopProject(string projectId);

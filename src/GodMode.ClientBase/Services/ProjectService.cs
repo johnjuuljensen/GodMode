@@ -79,6 +79,17 @@ public class ProjectService : IProjectService
         _lastStatusUpdate.TryRemove(cacheKey, out _);
     }
 
+    public async Task SendCommandAsync(string profileName, string hostId, string projectId, string command)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        await connection.SendCommandAsync(projectId, command);
+
+        // Invalidate cache
+        var cacheKey = $"{profileName}:{hostId}:{projectId}";
+        _statusCache.TryRemove(cacheKey, out _);
+        _lastStatusUpdate.TryRemove(cacheKey, out _);
+    }
+
     public async Task StopProjectAsync(string profileName, string hostId, string projectId)
     {
         var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);

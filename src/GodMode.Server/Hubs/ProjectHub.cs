@@ -66,6 +66,13 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.SendInputAsync(projectId, input);
     }
 
+    public async Task SendCommand(string projectId, string command)
+    {
+        _logger.LogInformation("Client {ConnectionId} sending command '{Command}' to project {ProjectId}",
+            Context.ConnectionId, command, projectId);
+        await _projectManager.SendCommandAsync(projectId, command);
+    }
+
     public async Task StopProject(string projectId)
     {
         _logger.LogInformation("Client {ConnectionId} stopping project {ProjectId}",

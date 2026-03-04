@@ -559,6 +559,55 @@ public class ProjectManager : IProjectManager
         await NotifyStatusChanged(project);
     }
 
+    public async Task SendCommandAsync(string projectId, string command)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        // Normalize: ensure command starts with /
+        if (!command.StartsWith('/'))
+            command = "/" + command;
+
+        var commandName = command.Split(' ', 2)[0].ToLowerInvariant();
+
+        switch (commandName)
+        {
+            case "/clear":
+                // /clear requires a full session reset — stop process and start fresh
+                await _processManager.StopProcessAsync(project);
+                project.SessionId = Guid.NewGuid().ToString();
+                var godModePath = Path.Combine(project.ProjectPath, ".godmode");
+                await File.WriteAllTextAsync(Path.Combine(godModePath, "session-id"), project.SessionId);
+
+                // Truncate the output file so the client sees a fresh conversation
+                var outputPath = Path.Combine(godModePath, "output.jsonl");
+                await File.WriteAllTextAsync(outputPath, "");
+
+                project.Status = project.Status with
+                {
+                    State = ProjectState.Stopped,
+                    CurrentQuestion = null,
+                    UpdatedAt = DateTime.UtcNow,
+                    Metrics = new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0)
+                };
+                await _statusUpdater.SaveStatusAsync(project);
+                await NotifyStatusChanged(project);
+                _logger.LogInformation("Cleared session for project {ProjectId}, new session {SessionId}",
+                    projectId, project.SessionId);
+                break;
+
+            default:
+                // Forward all other slash commands (e.g., /compact, /model, /help, custom commands)
+                // to Claude via stdin — Claude Code handles them in stream-json mode
+                if (project.ProcessId == 0 || !_processManager.IsProcessRunning(project.ProcessId))
+                    throw new InvalidOperationException($"Cannot send command to project {projectId}: no running process");
+
+                await _processManager.SendInputAsync(project, command);
+                _logger.LogInformation("Sent command {Command} to project {ProjectId}", commandName, projectId);
+                break;
+        }
+    }
+
     public async Task StopProjectAsync(string projectId)
     {
         if (!_projects.TryGetValue(projectId, out var project))
