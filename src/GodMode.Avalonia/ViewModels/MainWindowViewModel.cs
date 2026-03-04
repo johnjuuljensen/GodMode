@@ -345,37 +345,49 @@ public partial class MainWindowViewModel : ObservableObject
 		vm.HostId = root.HostId;
 		vm.PreselectedRootName = root.RootName;
 		vm.PreselectedActionName = actionName;
-		vm.Completed += () => CloseModal();
-		ModalViewModel = vm;
-		IsModalVisible = true;
+
+		var dismiss = ShowAsModalOrNavigate(vm);
+		vm.Completed += dismiss;
 	}
 
 	private void OnAddServerRequested()
 	{
 		var vm = App.Services.GetRequiredService<AddServerViewModel>();
+		var dismiss = ShowAsModalOrNavigate(vm);
 		vm.Completed += () =>
 		{
-			CloseModal();
+			dismiss();
 			_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
 		};
-		ModalViewModel = vm;
-		IsModalVisible = true;
 	}
 
 	private void OnEditServerRequested(ServerGroupViewModel server)
 	{
 		var vm = App.Services.GetRequiredService<EditServerViewModel>();
 		vm.ServerIndex = server.AccountIndex;
+
+		var dismiss = ShowAsModalOrNavigate(vm);
 		vm.Completed += () =>
 		{
 			if (vm.WasDeleted)
 				_hostConnectionService.DisconnectFromHost(server.Id);
 
-			CloseModal();
+			dismiss();
 			_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
 		};
+	}
+
+	private Action ShowAsModalOrNavigate(object vm)
+	{
+		if (IsCompact)
+		{
+			CompactNavigateTo(vm);
+			return GoBack;
+		}
+
 		ModalViewModel = vm;
 		IsModalVisible = true;
+		return CloseModal;
 	}
 
 	[RelayCommand]
