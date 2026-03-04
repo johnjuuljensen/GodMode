@@ -328,11 +328,11 @@
             </Panel>
         </Grid>
 
-        <!-- Modal overlay (shared) -->
+        <!-- Modal overlay (desktop only; compact mode navigates instead) -->
         <Border IsVisible="{Binding IsModalVisible}"
                 Background="{DynamicResource BgOverlayBrush}">
             <glass:LiquidGlassSurface HorizontalAlignment="Center" VerticalAlignment="Center"
-                    MaxWidth="500" MinWidth="400" Margin="32"
+                    MaxWidth="700" MinWidth="400" Margin="32"
                     CornerRadius="16"
                     BlurRadius="14"
                     Vibrancy="1.4"

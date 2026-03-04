@@ -345,37 +345,75 @@ public partial class MainWindowViewModel : ObservableObject
 		vm.HostId = root.HostId;
 		vm.PreselectedRootName = root.RootName;
 		vm.PreselectedActionName = actionName;
-		vm.Completed += () => CloseModal();
-		ModalViewModel = vm;
-		IsModalVisible = true;
+
+		if (IsCompact)
+		{
+			vm.Completed += GoBack;
+			CompactNavigateTo(vm);
+		}
+		else
+		{
+			vm.Completed += CloseModal;
+			ModalViewModel = vm;
+			IsModalVisible = true;
+		}
 	}
 
 	private void OnAddServerRequested()
 	{
 		var vm = App.Services.GetRequiredService<AddServerViewModel>();
-		vm.Completed += () =>
+
+		if (IsCompact)
 		{
-			CloseModal();
-			_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
-		};
-		ModalViewModel = vm;
-		IsModalVisible = true;
+			vm.Completed += () =>
+			{
+				GoBack();
+				_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
+			};
+			CompactNavigateTo(vm);
+		}
+		else
+		{
+			vm.Completed += () =>
+			{
+				CloseModal();
+				_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
+			};
+			ModalViewModel = vm;
+			IsModalVisible = true;
+		}
 	}
 
 	private void OnEditServerRequested(ServerGroupViewModel server)
 	{
 		var vm = App.Services.GetRequiredService<EditServerViewModel>();
 		vm.ServerIndex = server.AccountIndex;
-		vm.Completed += () =>
-		{
-			if (vm.WasDeleted)
-				_hostConnectionService.DisconnectFromHost(server.Id);
 
-			CloseModal();
-			_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
-		};
-		ModalViewModel = vm;
-		IsModalVisible = true;
+		if (IsCompact)
+		{
+			vm.Completed += () =>
+			{
+				if (vm.WasDeleted)
+					_hostConnectionService.DisconnectFromHost(server.Id);
+
+				GoBack();
+				_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
+			};
+			CompactNavigateTo(vm);
+		}
+		else
+		{
+			vm.Completed += () =>
+			{
+				if (vm.WasDeleted)
+					_hostConnectionService.DisconnectFromHost(server.Id);
+
+				CloseModal();
+				_ = SidebarViewModel.RefreshCommand.ExecuteAsync(null);
+			};
+			ModalViewModel = vm;
+			IsModalVisible = true;
+		}
 	}
 
 	[RelayCommand]
