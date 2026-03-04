@@ -310,7 +310,7 @@ public class ProjectManager : IProjectManager
             var resolvedPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
             var config = _rootConfigReader.ReadConfig(resolvedPath);
             var actions = config.GetEffectiveActions()
-                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema))
+                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Model))
                 .ToArray();
             return new ProjectRootInfo(rootName, config.Description, actions, ProfileName: profileName);
         }).ToArray();
@@ -508,8 +508,11 @@ public class ProjectManager : IProjectManager
         // Add to tracking
         _projects[projectId] = project;
 
+        // Resolve model: user input overrides action config default
+        var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
+
         // Build claude env/args from action config + project settings + profile env
-        var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, profileEnv,
+        var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, model, profileEnv,
             request.ProfileName, config.StripEnvVarProfile);
 
         // Start Claude process
@@ -697,16 +700,17 @@ public class ProjectManager : IProjectManager
                 var config = _rootConfigReader.ReadConfig(rootPath);
                 var action = config.ResolveAction(project.ActionName);
                 if (action != null)
-                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, profileEnv,
+                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, action.Model, profileEnv,
                         resumeProfileName, config.StripEnvVarProfile);
                 else
-                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, profileEnv,
-                        resumeProfileName, config.StripEnvVarProfile);
+                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings,
+                        profileEnv: profileEnv, profileName: resumeProfileName,
+                        stripEnvVarProfile: config.StripEnvVarProfile);
             }
             else
             {
                 // No root config, just apply project settings
-                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, profileEnv);
+                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, profileEnv: profileEnv);
             }
         }
         catch (Exception ex)
@@ -1090,6 +1094,7 @@ public class ProjectManager : IProjectManager
     /// </summary>
     private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
         CreateAction action, ProjectFiles.ProjectSettings settings,
+        string? model = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
         bool stripEnvVarProfile = false)
@@ -1101,6 +1106,11 @@ public class ProjectManager : IProjectManager
             args.AddRange(action.ClaudeArgs);
         if (settings.DangerouslySkipPermissions)
             args.Add("--dangerously-skip-permissions");
+        if (!string.IsNullOrWhiteSpace(model))
+        {
+            args.Add("--model");
+            args.Add(model);
+        }
 
         return (env, args.Count > 0 ? args.ToArray() : null);
     }

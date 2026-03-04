@@ -153,7 +153,8 @@ public class RootConfigReader : IRootConfigReader
         ClaudeArgs = ConcatArrays(baseConfig.ClaudeArgs, overlay.ClaudeArgs),
         NameTemplate = overlay.NameTemplate ?? baseConfig.NameTemplate,
         PromptTemplate = overlay.PromptTemplate ?? baseConfig.PromptTemplate,
-        ScriptsCreateFolder = overlay.ScriptsCreateFolder ?? baseConfig.ScriptsCreateFolder
+        ScriptsCreateFolder = overlay.ScriptsCreateFolder ?? baseConfig.ScriptsCreateFolder,
+        Model = overlay.Model ?? baseConfig.Model
     };
 
     /// <summary>
@@ -173,7 +174,8 @@ public class RootConfigReader : IRootConfigReader
             ClaudeArgs: raw.ClaudeArgs,
             NameTemplate: raw.NameTemplate,
             PromptTemplate: raw.PromptTemplate,
-            ScriptsCreateFolder: raw.ScriptsCreateFolder ?? false
+            ScriptsCreateFolder: raw.ScriptsCreateFolder ?? false,
+            Model: raw.Model
         );
     }
 
@@ -266,5 +268,6 @@ public class RootConfigReader : IRootConfigReader
         public string? PromptTemplate { get; init; }
         public bool? ScriptsCreateFolder { get; init; }
         public bool? StripEnvVarProfile { get; init; }
+        public string? Model { get; init; }
     }
 }

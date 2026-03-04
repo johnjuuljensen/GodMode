@@ -17,5 +17,6 @@ public record CreateAction(
     string[]? ClaudeArgs = null,
     string? NameTemplate = null,
     string? PromptTemplate = null,
-    bool ScriptsCreateFolder = false
+    bool ScriptsCreateFolder = false,
+    string? Model = null
 );

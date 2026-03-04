@@ -69,6 +69,18 @@ public partial class CreateProjectViewModel : ViewModelBase
 	[ObservableProperty]
 	private ObservableCollection<FormField> _formFields = [];
 
+	/// <summary>
+	/// The selected or entered model identifier for Claude Code (e.g. "sonnet", "opus[1m]").
+	/// Pre-populated from the action config, overridable by the user.
+	/// </summary>
+	[ObservableProperty]
+	private string? _selectedModel;
+
+	/// <summary>
+	/// Preset model aliases available in the combobox dropdown.
+	/// </summary>
+	public static string[] ModelPresets { get; } = ["opus", "opus[1m]", "sonnet", "sonnet[1m]", "haiku"];
+
 	public CreateProjectViewModel(INavigationService navigationService, IProjectService projectService)
 		: base(navigationService)
 	{
@@ -97,10 +109,12 @@ public partial class CreateProjectViewModel : ViewModelBase
 			var fields = FormFieldParser.Parse(value.InputSchema);
 			FormFieldParser.PreserveUserValues(FormFields, fields);
 			FormFields = new ObservableCollection<FormField>(fields);
+			SelectedModel = value.Model;
 		}
 		else
 		{
 			FormFields = [];
+			SelectedModel = null;
 		}
 	}
 
@@ -188,6 +202,10 @@ public partial class CreateProjectViewModel : ViewModelBase
 						: JsonSerializer.SerializeToElement(field.Value);
 				}
 			}
+
+			// Include model selection (user override or config default)
+			if (!string.IsNullOrWhiteSpace(SelectedModel))
+				inputs["model"] = JsonSerializer.SerializeToElement(SelectedModel);
 
 			await _projectService.CreateProjectAsync(
 				ProfileName, HostId,

@@ -9,5 +9,6 @@ namespace GodMode.Shared.Models;
 public record CreateActionInfo(
     string Name,
     string? Description = null,
-    JsonElement? InputSchema = null
+    JsonElement? InputSchema = null,
+    string? Model = null
 );

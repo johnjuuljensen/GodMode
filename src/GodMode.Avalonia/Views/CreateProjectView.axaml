@@ -93,6 +93,20 @@
                                TextWrapping="Wrap" />
                 </StackPanel>
 
+                <!-- Model Selector -->
+                <StackPanel Spacing="4"
+                            IsVisible="{Binding IsLoading, Converter={StaticResource InverseBoolConverter}}">
+                    <TextBlock Text="MODEL" FontSize="10" FontWeight="SemiBold"
+                               LetterSpacing="1" Foreground="{DynamicResource TextTertiaryBrush}" />
+                    <AutoCompleteBox ItemsSource="{Binding ModelPresets}"
+                                     Text="{Binding SelectedModel}"
+                                     Watermark="Default (no override)"
+                                     FilterMode="Contains"
+                                     HorizontalAlignment="Stretch" FontSize="13" />
+                    <TextBlock Text="Claude Code model alias or full model ID"
+                               FontSize="11" Foreground="{DynamicResource TextTertiaryBrush}" />
+                </StackPanel>
+
                 <!-- Dynamic Form Fields -->
                 <ItemsControl ItemsSource="{Binding FormFields}"
                               ItemTemplate="{StaticResource FieldSelector}"
