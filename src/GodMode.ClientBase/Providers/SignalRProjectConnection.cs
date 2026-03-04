@@ -98,6 +98,11 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         await _hubProxy.SendInput(projectId, input);
     }
 
+    public async Task SendCommandAsync(string projectId, string command)
+    {
+        await _hubProxy.SendCommand(projectId, command);
+    }
+
     public async Task StopProjectAsync(string projectId)
     {
         await _hubProxy.StopProject(projectId);
