@@ -419,7 +419,8 @@ public class ProjectManager : IProjectManager
         if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
 
         // Build environment variables for scripts (profile env merged in)
-        var scriptEnv = BuildScriptEnvironment(rootPath, project, action, request.Inputs, profileEnv, resultFilePath);
+        var scriptEnv = BuildScriptEnvironment(rootPath, project, action, request.Inputs, profileEnv, resultFilePath,
+            request.ProfileName, config.StripEnvVarProfile);
 
         // Script log file — at root level so it persists regardless of what scripts do
         var logFilePath = GetScriptLogPath(rootPath, projectId);
@@ -508,7 +509,8 @@ public class ProjectManager : IProjectManager
         _projects[projectId] = project;
 
         // Build claude env/args from action config + project settings + profile env
-        var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, profileEnv);
+        var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, profileEnv,
+            request.ProfileName, config.StripEnvVarProfile);
 
         // Start Claude process
         project.ProcessCancellation = new CancellationTokenSource();
@@ -598,7 +600,8 @@ public class ProjectManager : IProjectManager
             if (action?.Delete is { Length: > 0 })
             {
                 snap.Profiles.TryGetValue(profileName, out var profileCfg);
-                var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment);
+                var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+                    profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
 
                 if (force)
                     scriptEnv["GODMODE_FORCE"] = "true";
@@ -694,9 +697,11 @@ public class ProjectManager : IProjectManager
                 var config = _rootConfigReader.ReadConfig(rootPath);
                 var action = config.ResolveAction(project.ActionName);
                 if (action != null)
-                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, profileEnv);
+                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, profileEnv,
+                        resumeProfileName, config.StripEnvVarProfile);
                 else
-                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, profileEnv);
+                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, profileEnv,
+                        resumeProfileName, config.StripEnvVarProfile);
             }
             else
             {
@@ -1041,26 +1046,55 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
-    /// Builds claude environment and args from action config + project settings + profile env.
-    /// Merge order: profile env (base) → action env (overrides).
+    /// Merges environment from all layers and applies ${VAR} expansion + optional prefix stripping.
+    /// Merge order: profile env (stripped vars + explicit config) → action env, then ${VAR} expansion.
     /// </summary>
-    private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
-        CreateAction action, ProjectFiles.ProjectSettings settings,
-        Dictionary<string, string>? profileEnv = null)
+    private static Dictionary<string, string>? MergeAndExpandEnvironment(
+        Dictionary<string, string>? profileEnv,
+        Dictionary<string, string>? actionEnv,
+        string? profileName = null,
+        bool stripEnvVarProfile = false)
     {
         Dictionary<string, string>? env = null;
 
-        // Start with profile environment as base
-        if (profileEnv is { Count: > 0 })
-            env = new Dictionary<string, string>(profileEnv);
+        // Profile environment: prefix-stripped vars + explicit config (same priority layer)
+        if (EnvironmentExpander.IsStripEnabled(profileName, stripEnvVarProfile))
+        {
+            var stripped = EnvironmentExpander.GetPrefixStrippedVars(profileName);
+            if (stripped is { Count: > 0 })
+                env = new Dictionary<string, string>(stripped);
+        }
 
-        // Action environment overrides profile
-        if (action.Environment != null)
+        // Explicit profile env merges on top of stripped vars (both are "profile" layer)
+        if (profileEnv is { Count: > 0 })
         {
             env ??= new Dictionary<string, string>();
-            foreach (var (key, value) in action.Environment)
+            foreach (var (key, value) in profileEnv)
                 env[key] = value;
         }
+
+        // Action environment overrides profile
+        if (actionEnv is { Count: > 0 })
+        {
+            env ??= new Dictionary<string, string>();
+            foreach (var (key, value) in actionEnv)
+                env[key] = value;
+        }
+
+        // Expand ${VAR} references — entries with unresolvable vars are removed
+        return EnvironmentExpander.ExpandVariables(env);
+    }
+
+    /// <summary>
+    /// Builds claude environment and args from action config + project settings + profile env.
+    /// </summary>
+    private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
+        CreateAction action, ProjectFiles.ProjectSettings settings,
+        Dictionary<string, string>? profileEnv = null,
+        string? profileName = null,
+        bool stripEnvVarProfile = false)
+    {
+        var env = MergeAndExpandEnvironment(profileEnv, action.Environment, profileName, stripEnvVarProfile);
 
         var args = new List<string>();
         if (action.ClaudeArgs != null)
@@ -1073,7 +1107,7 @@ public class ProjectManager : IProjectManager
 
     /// <summary>
     /// Builds the full environment variables dictionary for scripts.
-    /// Merge order: profile env (base) → action env → GODMODE_* vars.
+    /// Merge order: prefix-stripped vars (auto) → profile env → action env → ${VAR} expansion → GODMODE_* vars.
     /// </summary>
     private static Dictionary<string, string> BuildScriptEnvironment(
         string rootPath,
@@ -1081,23 +1115,12 @@ public class ProjectManager : IProjectManager
         CreateAction action,
         Dictionary<string, JsonElement> inputs,
         Dictionary<string, string>? profileEnv = null,
-        string? resultFilePath = null)
+        string? resultFilePath = null,
+        string? profileName = null,
+        bool stripEnvVarProfile = false)
     {
-        var env = new Dictionary<string, string>();
-
-        // Profile environment as base layer
-        if (profileEnv is { Count: > 0 })
-        {
-            foreach (var (key, value) in profileEnv)
-                env[key] = value;
-        }
-
-        // Action environment overrides profile
-        if (action.Environment != null)
-        {
-            foreach (var (key, value) in action.Environment)
-                env[key] = value;
-        }
+        var env = MergeAndExpandEnvironment(profileEnv, action.Environment, profileName, stripEnvVarProfile)
+            ?? new Dictionary<string, string>();
 
         // GODMODE_* vars always win
         env["GODMODE_ROOT_PATH"] = rootPath;

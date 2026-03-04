@@ -26,5 +26,6 @@
     <Project Path="src/GodMode.Voice.Windows/GodMode.Voice.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/GodMode.Server.Tests/GodMode.Server.Tests.csproj" />
   </Folder>
 </Solution>

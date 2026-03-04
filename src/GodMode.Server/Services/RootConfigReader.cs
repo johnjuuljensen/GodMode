@@ -88,7 +88,8 @@ public class RootConfigReader : IRootConfigReader
             return new RootConfig(
                 Description: baseRaw.Description,
                 Actions: actions,
-                ProfileName: baseRaw.ProfileName);
+                ProfileName: baseRaw.ProfileName,
+                StripEnvVarProfile: baseRaw.StripEnvVarProfile ?? false);
         }
         catch (Exception ex)
         {
@@ -264,5 +265,6 @@ public class RootConfigReader : IRootConfigReader
         public string? NameTemplate { get; init; }
         public string? PromptTemplate { get; init; }
         public bool? ScriptsCreateFolder { get; init; }
+        public bool? StripEnvVarProfile { get; init; }
     }
 }
