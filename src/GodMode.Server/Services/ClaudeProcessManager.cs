@@ -23,6 +23,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
     private readonly ILogger<ClaudeProcessManager> _logger;
     private readonly ConcurrentDictionary<string, Process> _processes = new();
+    private readonly ConcurrentDictionary<string, StreamWriter> _outputWriters = new();
 
     public event OutputReceivedHandler? OnOutputReceived;
 
@@ -179,6 +180,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
                 project.Status.Id, process.ExitCode, process.Id);
 
             _processes.TryRemove(project.Status.Id, out _);
+            _outputWriters.TryRemove(project.Status.Id, out _);
 
             // Clean up streams
             outputWriter.Dispose();
@@ -240,6 +242,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         };
 
         _processes[project.Status.Id] = process;
+        _outputWriters[project.Status.Id] = outputWriter;
 
         _logger.LogInformation("Starting Claude process for project {ProjectId} with args: {Args}",
             project.Status.Id, string.Join(" ", args));
@@ -320,6 +323,12 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
         await process.StandardInput.WriteLineAsync(json);
         await process.StandardInput.FlushAsync();
+
+        // Write user message to output.jsonl so it appears in the chat stream on reload
+        if (_outputWriters.TryGetValue(project.Status.Id, out var writer))
+        {
+            writer.WriteLine(json);
+        }
 
         // Log input
         var inputPath = Path.Combine(project.ProjectPath, ".godmode", "input.jsonl");

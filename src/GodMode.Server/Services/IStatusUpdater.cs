@@ -6,6 +6,6 @@ namespace GodMode.Server.Services;
 public interface IStatusUpdater
 {
     Task SaveStatusAsync(ProjectInfo project);
-    Task UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent);
+    Task<bool> UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent);
     Task UpdateGitStatusAsync(ProjectInfo project);
 }

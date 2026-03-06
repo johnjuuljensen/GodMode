@@ -107,6 +107,11 @@ public partial class ServerGroupViewModel : ObservableObject
 			var rootGroup = new RootGroupViewModel
 			{
 				Name = name,
+				RootName = name,
+				ProfileName = ProfileName,
+				HostId = Id,
+				HostDisplayName = Name,
+				IsConnected = IsConnected,
 				Server = this,
 				Projects = new ObservableCollection<ProjectSummary>(sorted)
 			};

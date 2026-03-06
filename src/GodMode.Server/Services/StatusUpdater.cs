@@ -31,7 +31,7 @@ public class StatusUpdater : IStatusUpdater
         await File.WriteAllTextAsync(statusPath, json);
     }
 
-    public async Task UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent)
+    public async Task<bool> UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent)
     {
         var stateChanged = false;
         var status = project.Status;
@@ -40,8 +40,14 @@ public class StatusUpdater : IStatusUpdater
         switch (outputEvent.Type)
         {
             case OutputEventType.Assistant:
-                // Check if it's asking a question (simple heuristic)
-                if (!string.IsNullOrEmpty(outputEvent.Content) &&
+                // Check for structured AskUserQuestion tool_use first
+                if (outputEvent.IsQuestion)
+                {
+                    status = status with { State = ProjectState.WaitingInput, CurrentQuestion = outputEvent.QuestionText ?? outputEvent.Content };
+                    stateChanged = true;
+                }
+                // Fallback: simple heuristic for text questions
+                else if (!string.IsNullOrEmpty(outputEvent.Content) &&
                     outputEvent.Content.Contains("?") && outputEvent.Content.Length < 500)
                 {
                     status = status with { State = ProjectState.WaitingInput, CurrentQuestion = outputEvent.Content };
@@ -103,6 +109,7 @@ public class StatusUpdater : IStatusUpdater
 
         project.Status = status;
         await SaveStatusAsync(project);
+        return stateChanged;
     }
 
     public async Task UpdateGitStatusAsync(ProjectInfo project)

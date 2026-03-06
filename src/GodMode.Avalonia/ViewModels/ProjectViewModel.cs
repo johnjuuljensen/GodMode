@@ -22,6 +22,8 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	private int _displayStartIndex;
 	private bool _displayDirty;
 	private DispatcherTimer? _displayFlushTimer;
+	private string? _lastQuestionMessageId;
+	private bool _isReplaying;
 
 	[ObservableProperty]
 	private string _profileName = string.Empty;
@@ -55,6 +57,9 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 
 	[ObservableProperty]
 	private bool _isQuestionActive;
+
+	[ObservableProperty]
+	private bool _isOptionPickerDismissed;
 
 	[ObservableProperty]
 	private string? _currentQuestionText;
@@ -167,12 +172,53 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		}
 	}
 
+	/// <summary>
+	/// Dismisses the option picker but keeps the session in Awaiting Input state.
+	/// The user can still type a free-text response.
+	/// </summary>
 	public void DismissQuestion()
 	{
+		IsOptionPickerDismissed = true;
+		UpdateCanSendInput();
+	}
+
+	/// <summary>
+	/// Fully dismisses the question — clears all question state so the session
+	/// no longer shows as waiting for input.
+	/// </summary>
+	public void FullyDismissQuestion()
+	{
 		IsQuestionActive = false;
+		IsOptionPickerDismissed = false;
 		CurrentQuestionText = null;
 		CurrentQuestionOptions = [];
 		CurrentQuestionHeader = null;
+		_lastQuestionMessageId = null;
+		UpdateCanSendInput();
+	}
+
+	/// <summary>
+	/// Called when the user confirms an option selection.
+	/// Clears question state and unlocks input so SendInput can proceed.
+	/// </summary>
+	public void AcceptOptionSelection()
+	{
+		IsQuestionActive = false;
+		IsOptionPickerDismissed = false;
+		CurrentQuestionText = null;
+		CurrentQuestionOptions = [];
+		CurrentQuestionHeader = null;
+		_lastQuestionMessageId = null;
+		UpdateCanSendInput();
+	}
+
+	/// <summary>
+	/// Called when the server pushes a status change via SignalR.
+	/// </summary>
+	public void OnServerStatusPush(ProjectStatus status)
+	{
+		System.Diagnostics.Debug.WriteLine($"[{DateTime.UtcNow:HH:mm:ss.fff}] StatusPush: {ProjectId} → {status.State} (question: {status.CurrentQuestion?.Substring(0, Math.Min(60, status.CurrentQuestion?.Length ?? 0))})");
+		Status = status;
 	}
 
 	[RelayCommand]
@@ -185,9 +231,11 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		InputText = string.Empty;
 		_lastInputSentAt = DateTime.UtcNow;
 		IsQuestionActive = false;
+		IsOptionPickerDismissed = false;
 		CurrentQuestionText = null;
 		CurrentQuestionOptions = [];
 		CurrentQuestionHeader = null;
+		_lastQuestionMessageId = null;
 
 		try
 		{
@@ -328,21 +376,43 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		UpdateCanSendInput();
 		DetectQuestionFromStatus();
 
-		// Propagate state changes to sidebar/tile views
+		// Propagate state changes to sidebar/tile views.
+		// Client-side question detection overrides server state for sidebar display.
 		if (value != null && !string.IsNullOrEmpty(ProjectId))
-			ProjectStatusUpdated?.Invoke(ProjectId, value.State, value.CurrentQuestion);
+		{
+			var effectiveState = IsQuestionActive ? ProjectState.WaitingInput : value.State;
+			var effectiveQuestion = IsQuestionActive ? CurrentQuestionText : value.CurrentQuestion;
+			ProjectStatusUpdated?.Invoke(ProjectId, effectiveState, effectiveQuestion);
+		}
 	}
 
-	partial void OnIsQuestionActiveChanged(bool value) => UpdateCanSendInput();
+	partial void OnIsQuestionActiveChanged(bool value)
+	{
+		UpdateCanSendInput();
+
+		// Notify sidebar/tiles so waiting indicators update from client-side detection
+		if (!string.IsNullOrEmpty(ProjectId))
+		{
+			var state = value ? ProjectState.WaitingInput : (Status?.State ?? ProjectState.Running);
+			ProjectStatusUpdated?.Invoke(ProjectId, state, value ? CurrentQuestionText : null);
+		}
+	}
+	partial void OnIsOptionPickerDismissedChanged(bool value) => UpdateCanSendInput();
 
 	private void UpdateCanSendInput()
 	{
-		// Always allow sending: if active → sends input; if stopped/idle → auto-resumes with input
-		CanSendInput = IsQuestionActive
+		// When question is active with options and picker is NOT dismissed, lock the input (IC-03)
+		// Open-ended questions (no options) should not lock the input
+		var inputLocked = IsQuestionActive && !IsOptionPickerDismissed && CurrentQuestionOptions.Count > 0;
+
+		// Allow sending when picker is dismissed (free-text mode), or normal states
+		CanSendInput = !inputLocked && (
+			IsQuestionActive // picker dismissed but question still active
 			|| Status?.State is ProjectState.WaitingInput or ProjectState.Running
-			|| Status?.State is ProjectState.Stopped or ProjectState.Idle;
+			|| Status?.State is ProjectState.Stopped or ProjectState.Idle);
 		CanResume = !IsQuestionActive && Status?.State is ProjectState.Stopped or ProjectState.Idle;
-		InputWatermark = CanResume ? "Type to resume..." : "Type your response...";
+		InputWatermark = inputLocked ? "Select an option above" :
+			CanResume ? "Type to resume..." : "Type your response...";
 	}
 
 	/// <summary>
@@ -373,6 +443,7 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 
 		if (!string.IsNullOrEmpty(questionText))
 		{
+			IsOptionPickerDismissed = false;
 			IsQuestionActive = true;
 			CurrentQuestionText = questionText;
 			CurrentQuestionHeader = Status?.Name;
@@ -420,6 +491,10 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		var numberedItems = System.Text.RegularExpressions.Regex.Matches(trimmed, @"^\s*\d+[.)]\s+", System.Text.RegularExpressions.RegexOptions.Multiline);
 		if (numberedItems.Count >= 2) return true;
 
+		// Lettered list: a. / b. / a) / b) style
+		var letteredItems = System.Text.RegularExpressions.Regex.Matches(trimmed, @"^\s*[a-z][.)]\s+", System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+		if (letteredItems.Count >= 2) return true;
+
 		// Common question phrases
 		var phrases = new[] { "would you like", "do you want", "should i", "shall i", "which one", "please choose", "please select" };
 		var lower = trimmed.ToLowerInvariant();
@@ -454,6 +529,13 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 		var numbered = System.Text.RegularExpressions.Regex.Matches(trimmed, @"^\s*\d+[.)]\s+(.+)$", System.Text.RegularExpressions.RegexOptions.Multiline);
 		if (numbered.Count >= 2)
 			return numbered.Cast<System.Text.RegularExpressions.Match>()
+				.Select(m => new QuestionOptionData(m.Groups[1].Value.Trim(), null))
+				.ToList();
+
+		// Lettered list: a. Option / b. Option or a) Option / b) Option
+		var lettered = System.Text.RegularExpressions.Regex.Matches(trimmed, @"^\s*[a-z][.)]\s+(.+)$", System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+		if (lettered.Count >= 2)
+			return lettered.Cast<System.Text.RegularExpressions.Match>()
 				.Select(m => new QuestionOptionData(m.Groups[1].Value.Trim(), null))
 				.ToList();
 
@@ -592,6 +674,7 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 					FlushDisplayMessages();
 			};
 
+			_isReplaying = true;
 			var observable = await _projectService.SubscribeOutputAsync(ProfileName, HostId, ProjectId, fromOffset: 0);
 
 			_outputSubscription = observable
@@ -607,8 +690,10 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 							_displayFlushTimer.Stop();
 							_displayFlushTimer.Start();
 
-							// Question detection still runs immediately on every message
-							DetectQuestionFromMessage(message);
+							// During replay, skip per-message detection to avoid flickering.
+							// Question state is detected once after flush in DetectQuestionFromLastMessage.
+							if (!_isReplaying)
+								DetectQuestionFromMessage(message);
 						});
 					},
 					onError: error =>
@@ -628,8 +713,51 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	/// </summary>
 	private void FlushDisplayMessages()
 	{
+		var wasReplaying = _isReplaying;
+		_isReplaying = false;
 		_displayDirty = false;
 		RebuildDisplayMessages();
+
+		// After replay ends (or any flush), detect question from the final message.
+		// During replay, per-message detection is skipped to avoid flickering from
+		// result messages in earlier turns toggling IsQuestionActive on and off.
+		if (!IsQuestionActive)
+			DetectQuestionFromLastMessage();
+	}
+
+	/// <summary>
+	/// Checks the last message in OutputMessages for a pending question.
+	/// Used as a post-replay safety net.
+	/// </summary>
+	private void DetectQuestionFromLastMessage()
+	{
+		if (OutputMessages.Count == 0) return;
+
+		var lastMsg = OutputMessages[^1];
+
+		// Check structured question
+		if (lastMsg.IsQuestion && lastMsg.QuestionOptions.Count > 0)
+		{
+			_lastQuestionMessageId = lastMsg.QuestionText;
+			IsOptionPickerDismissed = false;
+			IsQuestionActive = true;
+			CurrentQuestionText = lastMsg.QuestionText;
+			CurrentQuestionOptions = lastMsg.QuestionOptions;
+			CurrentQuestionHeader = lastMsg.QuestionHeader;
+			return;
+		}
+
+		// Check heuristic text question
+		if (lastMsg.Type == "assistant" && !string.IsNullOrEmpty(lastMsg.ContentSummary)
+			&& LooksLikeQuestion(lastMsg.ContentSummary))
+		{
+			_lastQuestionMessageId = lastMsg.ContentSummary;
+			IsOptionPickerDismissed = false;
+			IsQuestionActive = true;
+			CurrentQuestionText = lastMsg.ContentSummary;
+			CurrentQuestionHeader = Status?.Name;
+			CurrentQuestionOptions = ParseTextOptions(lastMsg.ContentSummary);
+		}
 	}
 
 	/// <summary>
@@ -637,22 +765,33 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 	/// </summary>
 	private void DetectQuestionFromMessage(ClaudeMessage message)
 	{
+		// EC-03: Duplicate question detection — skip if same question text received again
+		var questionKey = message.IsQuestion ? message.QuestionText : message.ContentSummary;
+		if (!string.IsNullOrEmpty(questionKey) && questionKey == _lastQuestionMessageId)
+			return;
+
 		// Layer 1: Structured AskUserQuestion tool_use
 		if (message.IsQuestion && message.QuestionOptions.Count > 0)
 		{
+			_lastQuestionMessageId = questionKey;
+			IsOptionPickerDismissed = false;
 			IsQuestionActive = true;
 			CurrentQuestionText = message.QuestionText;
 			CurrentQuestionOptions = message.QuestionOptions;
 			CurrentQuestionHeader = message.QuestionHeader;
+			System.Diagnostics.Debug.WriteLine($"[{DateTime.UtcNow:HH:mm:ss.fff}] Question detected (structured): {ProjectId}");
 		}
 		// Layer 2: Text-based question from assistant message
 		else if (message.Type == "assistant" && !string.IsNullOrEmpty(message.ContentSummary)
 			&& LooksLikeQuestion(message.ContentSummary))
 		{
+			_lastQuestionMessageId = questionKey;
+			IsOptionPickerDismissed = false;
 			IsQuestionActive = true;
 			CurrentQuestionText = message.ContentSummary;
 			CurrentQuestionHeader = Status?.Name;
 			CurrentQuestionOptions = ParseTextOptions(message.ContentSummary);
+			System.Diagnostics.Debug.WriteLine($"[{DateTime.UtcNow:HH:mm:ss.fff}] Question detected (heuristic): {ProjectId}");
 		}
 		// Layer 3: Result means turn is over — clear question if active,
 		// then refresh status to check for WaitingInput
@@ -661,9 +800,12 @@ public partial class ProjectViewModel : ViewModelBase, IDisposable
 			if (IsQuestionActive)
 			{
 				IsQuestionActive = false;
+				IsOptionPickerDismissed = false;
 				CurrentQuestionText = null;
 				CurrentQuestionOptions = [];
 				CurrentQuestionHeader = null;
+				_lastQuestionMessageId = null;
+				System.Diagnostics.Debug.WriteLine($"[{DateTime.UtcNow:HH:mm:ss.fff}] Question cleared (result): {ProjectId}");
 			}
 			_ = RefreshAsync();
 		}

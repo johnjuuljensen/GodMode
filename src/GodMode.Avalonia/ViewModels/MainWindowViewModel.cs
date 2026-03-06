@@ -42,6 +42,9 @@ public partial class MainWindowViewModel : ObservableObject
 	private bool _hasWaitingProjects;
 
 	[ObservableProperty]
+	private string _waitingBadgeText = "";
+
+	[ObservableProperty]
 	private bool _isTileView;
 
 	[ObservableProperty]
@@ -99,6 +102,7 @@ public partial class MainWindowViewModel : ObservableObject
 		mainViewModel.AddServerRequested += OnAddServerRequested;
 		mainViewModel.EditServerRequested += OnEditServerRequested;
 		mainViewModel.ConnectionStateChanged += connected => IsConnected = connected;
+		mainViewModel.ServerStatusChanged += OnServerStatusChanged;
 
 		_notificationService.BadgeCountUpdated += (_, _) => UpdateWaitingBadge();
 
@@ -252,6 +256,25 @@ public partial class MainWindowViewModel : ObservableObject
 		CanGoBack = true;
 	}
 
+	private void OnServerStatusChanged(string projectId, ProjectStatus status)
+	{
+		// Server pushed a status change — update the cached ProjectViewModel if one exists
+		Dispatcher.UIThread.Post(() =>
+		{
+			foreach (var (key, vm) in _projectViewModels)
+			{
+				if (vm.ProjectId == projectId)
+				{
+					vm.OnServerStatusPush(status);
+					break;
+				}
+			}
+		});
+
+		// Also update sidebar/tiles via the same path as OnProjectStatusUpdated
+		OnProjectStatusUpdated(projectId, status.State, status.CurrentQuestion);
+	}
+
 	private void OnProjectStatusUpdated(string projectId, GodMode.Shared.Enums.ProjectState state, string? currentQuestion)
 	{
 		Dispatcher.UIThread.Post(() =>
@@ -311,6 +334,7 @@ public partial class MainWindowViewModel : ObservableObject
 		{
 			WaitingBadgeCount = count;
 			HasWaitingProjects = count > 0;
+			WaitingBadgeText = count > 0 ? $"{count} waiting" : "";
 		});
 	}
 
@@ -395,5 +419,57 @@ public partial class MainWindowViewModel : ObservableObject
 	{
 		IsModalVisible = false;
 		ModalViewModel = null;
+	}
+
+	// === Global keyboard shortcut commands ===
+
+	[RelayCommand]
+	private void JumpToNextWaiting()
+	{
+		var waitingProjects = GetWaitingProjects();
+		if (waitingProjects.Count == 0) return;
+
+		// Find the current project index in the waiting list
+		var currentId = (ContentViewModel as ProjectViewModel)?.ProjectId;
+		var currentIndex = currentId != null
+			? waitingProjects.FindIndex(p => p.project.Id == currentId)
+			: -1;
+
+		var nextIndex = (currentIndex + 1) % waitingProjects.Count;
+		var (root, project) = waitingProjects[nextIndex];
+		OnProjectSelected(root, project);
+	}
+
+	[RelayCommand]
+	private void JumpToPreviousWaiting()
+	{
+		var waitingProjects = GetWaitingProjects();
+		if (waitingProjects.Count == 0) return;
+
+		var currentId = (ContentViewModel as ProjectViewModel)?.ProjectId;
+		var currentIndex = currentId != null
+			? waitingProjects.FindIndex(p => p.project.Id == currentId)
+			: 0;
+
+		var prevIndex = (currentIndex - 1 + waitingProjects.Count) % waitingProjects.Count;
+		var (root, project) = waitingProjects[prevIndex];
+		OnProjectSelected(root, project);
+	}
+
+	private List<(RootGroupViewModel root, ProjectSummary project)> GetWaitingProjects()
+	{
+		var result = new List<(RootGroupViewModel, ProjectSummary)>();
+		foreach (var profileGroup in SidebarViewModel.ProfileGroups)
+		{
+			foreach (var rootGroup in profileGroup.RootGroups)
+			{
+				foreach (var project in rootGroup.Projects)
+				{
+					if (project.State == GodMode.Shared.Enums.ProjectState.WaitingInput)
+						result.Add((rootGroup, project));
+				}
+			}
+		}
+		return result;
 	}
 }

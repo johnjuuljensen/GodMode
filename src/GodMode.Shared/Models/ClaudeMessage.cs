@@ -155,11 +155,33 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             ContentItems = ExtractContentItems(root);
             HasContentItems = ContentItems.Count > 0;
             HasErrorContent = ContentItems.Any(i => i.IsError);
-            ContentSummary = BuildContentSummary();
             FormattedJson = JsonSerializer.Serialize(document, IndentedOptions);
-            IsToolOnly = HasContentItems && ContentItems.All(i => i.Type is "tool_use" or "tool_result");
-            TextOnlyContentSummary = BuildTextOnlyContentSummary();
+
             (IsQuestion, QuestionText, QuestionOptions, QuestionHeader) = ExtractQuestionData(root);
+
+            // Fallback: if ExtractQuestionData didn't detect the question (e.g., due to JSON
+            // path differences), check whether any content item is an AskUserQuestion tool_use
+            if (!IsQuestion)
+            {
+                var askItem = ContentItems.FirstOrDefault(i => i.ToolName == "AskUserQuestion");
+                if (askItem != null)
+                {
+                    IsQuestion = true;
+                    QuestionText = askItem.ToolQuestionText ?? "Waiting for input";
+                    QuestionOptions = askItem.ToolQuestionOptions ?? [];
+                    QuestionHeader = askItem.ToolQuestionHeader;
+                }
+            }
+
+            // Question messages should display the question text and not be collapsed as tool calls
+            IsToolOnly = !IsQuestion && HasContentItems && ContentItems.All(i => i.Type is "tool_use" or "tool_result");
+            ContentSummary = IsQuestion && !string.IsNullOrEmpty(QuestionText)
+                ? QuestionText!
+                : BuildContentSummary();
+            TextOnlyContentSummary = IsQuestion && !string.IsNullOrEmpty(QuestionText)
+                ? QuestionText!
+                : BuildTextOnlyContentSummary();
+
         }
         catch
         {
@@ -187,9 +209,7 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
     {
         // Claude Code question prompts come as assistant messages with specific patterns
         // Check for tool_use with AskUserQuestion or permission prompts
-        if (!root.TryGetProperty("message", out var message)) return (false, null, [], null);
-        if (!message.TryGetProperty("content", out var content)) return (false, null, [], null);
-        if (content.ValueKind != JsonValueKind.Array) return (false, null, [], null);
+        if (!TryGetContentArray(root, out var content)) return (false, null, [], null);
 
         foreach (var item in content.EnumerateArray())
         {
@@ -200,13 +220,23 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             var toolName = name.GetString();
             if (toolName == "AskUserQuestion" && item.TryGetProperty("input", out var input))
             {
-                var questionText = input.TryGetProperty("question", out var q)
+                // AskUserQuestion uses "questions" (plural array) as the top-level input key.
+                // Each element has question, header, options, multiSelect.
+                // Fall back to singular "question"/"options" for backward compat.
+                var source = input;
+                if (input.TryGetProperty("questions", out var questionsArr) &&
+                    questionsArr.ValueKind == JsonValueKind.Array && questionsArr.GetArrayLength() > 0)
+                {
+                    source = questionsArr[0];
+                }
+
+                var questionText = source.TryGetProperty("question", out var q)
                     ? q.GetString() : null;
-                var header = input.TryGetProperty("header", out var h)
+                var header = source.TryGetProperty("header", out var h)
                     ? h.GetString() : null;
                 var options = new List<QuestionOptionData>();
 
-                if (input.TryGetProperty("options", out var opts) && opts.ValueKind == JsonValueKind.Array)
+                if (source.TryGetProperty("options", out var opts) && opts.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var opt in opts.EnumerateArray())
                     {
@@ -293,14 +323,38 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
         return string.Join("\n", parts);
     }
 
+    /// <summary>
+    /// Finds the content array from multiple possible JSON paths:
+    /// root.message.content, root.content
+    /// </summary>
+    private static bool TryGetContentArray(JsonElement root, out JsonElement content)
+    {
+        content = default;
+
+        // Primary path: root.message.content (standard stream-json format)
+        if (root.TryGetProperty("message", out var message) &&
+            message.TryGetProperty("content", out content) &&
+            content.ValueKind == JsonValueKind.Array)
+        {
+            return true;
+        }
+
+        // Fallback: root.content (alternative format)
+        if (root.TryGetProperty("content", out content) &&
+            content.ValueKind == JsonValueKind.Array)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     private List<ClaudeContentItem> ExtractContentItems(JsonElement root)
     {
         var items = new List<ClaudeContentItem>();
 
         if (Type is not ("user" or "assistant")) return items;
-        if (!root.TryGetProperty("message", out var message)) return items;
-        if (!message.TryGetProperty("content", out var content)) return items;
-        if (content.ValueKind != JsonValueKind.Array) return items;
+        if (!TryGetContentArray(root, out var content)) return items;
 
         foreach (var item in content.EnumerateArray())
         {
@@ -376,6 +430,12 @@ public sealed class ClaudeContentItem : INotifyPropertyChanged
     public string? ToolContent { get; private set; }
     /// <summary>Whether this tool_result has is_error set to true.</summary>
     public bool IsError { get; private set; }
+    /// <summary>Question text extracted from AskUserQuestion tool_use input.</summary>
+    public string? ToolQuestionText { get; private set; }
+    /// <summary>Question options extracted from AskUserQuestion tool_use input.</summary>
+    public IReadOnlyList<QuestionOptionData>? ToolQuestionOptions { get; private set; }
+    /// <summary>Question header extracted from AskUserQuestion tool_use input.</summary>
+    public string? ToolQuestionHeader { get; private set; }
 
     private ClaudeContentItem(string type, string summary, string formattedJson)
     {
@@ -439,10 +499,42 @@ public sealed class ClaudeContentItem : INotifyPropertyChanged
                     ? desc.GetString() : null;
                 item.ToolContent = input.TryGetProperty("content", out var cnt)
                     ? cnt.GetString() : null;
+
+                // Extract question data from AskUserQuestion tool_use
+                if (item.ToolName == "AskUserQuestion")
+                    ExtractAskUserQuestionData(item, input);
             }
         }
 
         return item;
+    }
+
+    private static void ExtractAskUserQuestionData(ClaudeContentItem item, JsonElement input)
+    {
+        // Navigate to the first question, handling both plural "questions" array and singular "question" key
+        var source = input;
+        if (input.TryGetProperty("questions", out var questionsArr) &&
+            questionsArr.ValueKind == JsonValueKind.Array && questionsArr.GetArrayLength() > 0)
+        {
+            source = questionsArr[0];
+        }
+
+        item.ToolQuestionText = source.TryGetProperty("question", out var q)
+            ? q.GetString() : null;
+        item.ToolQuestionHeader = source.TryGetProperty("header", out var h)
+            ? h.GetString() : null;
+
+        var options = new List<QuestionOptionData>();
+        if (source.TryGetProperty("options", out var opts) && opts.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var opt in opts.EnumerateArray())
+            {
+                var label = opt.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "";
+                var description = opt.TryGetProperty("description", out var d) ? d.GetString() : null;
+                options.Add(new QuestionOptionData(label, description));
+            }
+        }
+        item.ToolQuestionOptions = options;
     }
 
     private static string ExtractTextSummary(JsonElement element)

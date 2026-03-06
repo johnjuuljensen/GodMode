@@ -2,6 +2,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:GodMode.Avalonia.ViewModels"
              xmlns:models="using:GodMode.Shared.Models"
+             xmlns:controls="using:GodMode.Avalonia.Controls"
              x:Class="GodMode.Avalonia.Views.TileGridView"
              x:DataType="vm:TileGridViewModel">
 
@@ -96,10 +97,13 @@
 
                             <!-- Miniature chat preview -->
                             <Panel Grid.Row="1" ClipToBounds="True">
-                                <!-- Messages -->
-                                <ItemsControl ItemsSource="{Binding Messages}"
-                                              Margin="8,6"
+                                <!-- Messages (auto-scrolled to show latest) -->
+                                <ScrollViewer VerticalScrollBarVisibility="Hidden"
+                                              HorizontalScrollBarVisibility="Disabled"
+                                              controls:ScrollToEndBehavior.IsEnabled="True"
                                               IsHitTestVisible="False">
+                                <ItemsControl ItemsSource="{Binding Messages}"
+                                              Margin="8,6">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate x:DataType="models:ClaudeMessage">
                                             <Panel Margin="0,2">
@@ -143,6 +147,7 @@
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
+                                </ScrollViewer>
 
                                 <!-- Loading indicator -->
                                 <ProgressBar IsIndeterminate="True"
@@ -155,12 +160,26 @@
                                         VerticalAlignment="Bottom"
                                         Padding="8,6"
                                         Background="{DynamicResource StateWaitingBrush}"
+                                        CornerRadius="0,0,12,12"
                                         Opacity="0.9">
                                     <TextBlock Text="{Binding Summary.CurrentQuestion}"
                                                FontSize="9" FontWeight="SemiBold"
                                                Foreground="#000000"
                                                MaxLines="1"
                                                TextTrimming="CharacterEllipsis" />
+                                </Border>
+
+                                <!-- TV-03: Attention icon overlay -->
+                                <Border IsVisible="{Binding Summary.State, Converter={StaticResource ProjectStateToWaitingVisibilityConverter}}"
+                                        HorizontalAlignment="Right" VerticalAlignment="Top"
+                                        Margin="0,6,6,0"
+                                        Width="24" Height="24" CornerRadius="12"
+                                        Background="{DynamicResource StateWaitingBrush}">
+                                    <TextBlock Text="!"
+                                               FontSize="13" FontWeight="Bold"
+                                               Foreground="#000000"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
                                 </Border>
                             </Panel>
                         </Grid>

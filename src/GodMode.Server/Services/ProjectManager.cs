@@ -1202,7 +1202,11 @@ public class ProjectManager : IProjectManager
                 var outputEvent = ParseClaudeOutput(jsonLine);
                 if (outputEvent != null)
                 {
-                    await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
+                    var stateChanged = await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
+                    if (stateChanged)
+                    {
+                        await NotifyStatusChanged(project);
+                    }
                 }
             }
         }
@@ -1250,8 +1254,9 @@ public class ProjectManager : IProjectManager
 
         var content = ExtractContent(root, eventType);
         var metadata = ExtractMetadata(root);
+        var (isQuestion, questionText) = ExtractAskUserQuestion(root, eventType);
 
-        return new OutputEvent(DateTime.UtcNow, eventType, content, metadata);
+        return new OutputEvent(DateTime.UtcNow, eventType, content, metadata, isQuestion, questionText);
     }
 
     /// <summary>
@@ -1268,6 +1273,41 @@ public class ProjectManager : IProjectManager
             OutputEventType.Error => root.TryGetProperty("error", out var err) ? err.GetString() ?? "" : "",
             _ => ""
         };
+    }
+
+    private static (bool IsQuestion, string? QuestionText) ExtractAskUserQuestion(JsonElement root, OutputEventType eventType)
+    {
+        if (eventType != OutputEventType.Assistant)
+            return (false, null);
+
+        if (!root.TryGetProperty("message", out var message) ||
+            !message.TryGetProperty("content", out var content) ||
+            content.ValueKind != JsonValueKind.Array)
+            return (false, null);
+
+        foreach (var item in content.EnumerateArray())
+        {
+            if (item.TryGetProperty("type", out var type) && type.GetString() == "tool_use" &&
+                item.TryGetProperty("name", out var name) && name.GetString() == "AskUserQuestion" &&
+                item.TryGetProperty("input", out var input))
+            {
+                // Extract question text from the first question in the questions array
+                if (input.TryGetProperty("questions", out var questions) &&
+                    questions.ValueKind == JsonValueKind.Array && questions.GetArrayLength() > 0)
+                {
+                    var firstQ = questions[0];
+                    if (firstQ.TryGetProperty("question", out var q))
+                        return (true, q.GetString());
+                }
+                // Fallback: check for a top-level question property
+                if (input.TryGetProperty("question", out var topQ))
+                    return (true, topQ.GetString());
+
+                return (true, "Waiting for input");
+            }
+        }
+
+        return (false, null);
     }
 
     private static string ExtractMessageContent(JsonElement root)

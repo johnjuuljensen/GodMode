@@ -91,6 +91,12 @@ public interface IProjectConnection : IDisposable
     event Action<string>? ProjectDeletedReceived;
 
     /// <summary>
+    /// Event raised when a project's status changes (broadcast from server).
+    /// Parameters: projectId, updatedStatus.
+    /// </summary>
+    event Action<string, ProjectStatus>? StatusChangedReceived;
+
+    /// <summary>
     /// Disconnects from the host
     /// </summary>
     void Disconnect();

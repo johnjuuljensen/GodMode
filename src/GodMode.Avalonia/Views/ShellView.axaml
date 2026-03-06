@@ -11,6 +11,12 @@
         <converters:IsNullConverter x:Key="IsNullConverter" />
     </UserControl.Resources>
 
+    <UserControl.KeyBindings>
+        <KeyBinding Gesture="Alt+Shift+N" Command="{Binding JumpToNextWaitingCommand}" />
+        <KeyBinding Gesture="Alt+Shift+P" Command="{Binding JumpToPreviousWaitingCommand}" />
+        <KeyBinding Gesture="Alt+Shift+T" Command="{Binding ToggleViewModeCommand}" />
+    </UserControl.KeyBindings>
+
     <Panel>
         <!-- Main layout: Header + Banner + Body -->
         <Grid RowDefinitions="48,Auto,*">
@@ -44,11 +50,11 @@
                                        Foreground="{DynamicResource TextPrimaryBrush}"
                                        LetterSpacing="2" />
 
-                            <!-- Waiting badge -->
+                            <!-- Waiting badge (CL-03) -->
                             <Border IsVisible="{Binding HasWaitingProjects}"
                                     Padding="6,2" CornerRadius="8"
                                     Background="{DynamicResource StateWaitingBrush}">
-                                <TextBlock Text="{Binding WaitingBadgeCount}"
+                                <TextBlock Text="{Binding WaitingBadgeText}"
                                            FontSize="10" FontWeight="Bold"
                                            Foreground="#000000" />
                             </Border>
@@ -101,7 +107,15 @@
                                             Foreground="{DynamicResource TextSecondaryBrush}"
                                             Background="{Binding IsTileView, Converter={StaticResource BoolToActiveBrushConverter}}"
                                             BorderThickness="0">
-                                        <TextBlock Text="⊞" FontSize="13" />
+                                        <Panel>
+                                            <TextBlock Text="⊞" FontSize="13" />
+                                            <!-- TV-06: Badge on tile view button -->
+                                            <Border IsVisible="{Binding HasWaitingProjects}"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                    Margin="0,-4,-6,0"
+                                                    Width="10" Height="10" CornerRadius="5"
+                                                    Background="{DynamicResource StateWaitingBrush}" />
+                                        </Panel>
                                     </Button>
                                 </StackPanel>
                             </Border>
@@ -185,11 +199,11 @@
                                        Foreground="{DynamicResource TextPrimaryBrush}"
                                        LetterSpacing="2" />
 
-                            <!-- Waiting badge -->
+                            <!-- Waiting badge (CL-03) -->
                             <Border IsVisible="{Binding HasWaitingProjects}"
                                     Padding="6,2" CornerRadius="8"
                                     Background="{DynamicResource StateWaitingBrush}">
-                                <TextBlock Text="{Binding WaitingBadgeCount}"
+                                <TextBlock Text="{Binding WaitingBadgeText}"
                                            FontSize="10" FontWeight="Bold"
                                            Foreground="#000000" />
                             </Border>

@@ -28,6 +28,13 @@ public partial class ProjectView : UserControl
 		QuestionPrompt.OptionSelected += OnQuestionOptionSelected;
 		QuestionPrompt.Dismissed += OnQuestionDismissed;
 
+		// Wire attention banner click → scroll to question prompt
+		AttentionBanner.PointerPressed += (_, _) => ScrollToQuestionPrompt();
+		ScrollToPickerButton.Click += (_, _) => ScrollToQuestionPrompt();
+
+		// Wire dismiss button on attention banner
+		DismissBannerButton.Click += OnDismissBannerClicked;
+
 		// Debounced scroll-to-end timer (coalesces rapid message adds)
 		_scrollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
 		_scrollTimer.Tick += (_, _) =>
@@ -46,6 +53,9 @@ public partial class ProjectView : UserControl
 			{
 				vm.DisplayMessages.CollectionChanged += OnDisplayMessagesChanged;
 				vm.PropertyChanged += OnViewModelPropertyChanged;
+
+				// Sync picker state for already-active questions (e.g. navigating back to a waiting project)
+				SyncQuestionPromptState(vm);
 
 				// Scroll to bottom when opening a project with existing messages
 				if (vm.DisplayMessages.Count > 0)
@@ -68,7 +78,29 @@ public partial class ProjectView : UserControl
 
 			// User is "at bottom" if within threshold of the end
 			_isAtBottom = (extent - viewport - offset) < ScrollThreshold;
+
+			// IC-04: Show/hide scroll-to-picker button
+			UpdateScrollToPickerButton();
 		};
+	}
+
+	private void ScrollToQuestionPrompt()
+	{
+		OutputScrollViewer.ScrollToEnd();
+		QuestionPrompt.Focus();
+	}
+
+	private void UpdateScrollToPickerButton()
+	{
+		if (DataContext is ProjectViewModel vm && vm.IsQuestionActive && !vm.IsOptionPickerDismissed)
+		{
+			// Show button when not at bottom (question prompt is below viewport)
+			ScrollToPickerButton.IsVisible = !_isAtBottom;
+		}
+		else
+		{
+			ScrollToPickerButton.IsVisible = false;
+		}
 	}
 
 	private void OnInputKeyDown(object? sender, KeyEventArgs e)
@@ -81,23 +113,42 @@ public partial class ProjectView : UserControl
 				e.Handled = true;
 			}
 		}
+		else if (e.Key == Key.Escape)
+		{
+			// ESC in input area: fully dismiss the question if active
+			if (DataContext is ProjectViewModel vm && vm.IsQuestionActive)
+			{
+				vm.FullyDismissQuestion();
+				e.Handled = true;
+			}
+		}
+	}
+
+	private void SyncQuestionPromptState(ProjectViewModel vm)
+	{
+		Dispatcher.UIThread.Post(() =>
+		{
+			var showPicker = vm.IsQuestionActive && !vm.IsOptionPickerDismissed;
+			QuestionPrompt.IsVisible = showPicker;
+
+			if (showPicker)
+			{
+				QuestionPrompt.QuestionText = vm.CurrentQuestionText ?? "";
+				QuestionPrompt.AgentName = vm.CurrentQuestionHeader ?? vm.Status?.Name;
+				QuestionPrompt.SetOptions(vm.CurrentQuestionOptions);
+				QuestionPrompt.Focus();
+			}
+
+			UpdateScrollToPickerButton();
+		});
 	}
 
 	private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
 	{
-		if (e.PropertyName == nameof(ProjectViewModel.IsQuestionActive) && sender is ProjectViewModel vm)
-		{
-			Dispatcher.UIThread.Post(() =>
-			{
-				if (vm.IsQuestionActive)
-				{
-					QuestionPrompt.QuestionText = vm.CurrentQuestionText ?? "";
-					QuestionPrompt.AgentName = vm.CurrentQuestionHeader ?? vm.Status?.Name;
-					QuestionPrompt.SetOptions(vm.CurrentQuestionOptions);
-					QuestionPrompt.Focus();
-				}
-			});
-		}
+		if (sender is not ProjectViewModel vm) return;
+
+		if (e.PropertyName is nameof(ProjectViewModel.IsQuestionActive) or nameof(ProjectViewModel.IsOptionPickerDismissed))
+			SyncQuestionPromptState(vm);
 	}
 
 	private void OnQuestionOptionSelected(object? sender, string selectedOption)
@@ -105,6 +156,7 @@ public partial class ProjectView : UserControl
 		if (DataContext is ProjectViewModel vm)
 		{
 			vm.InputText = selectedOption;
+			vm.AcceptOptionSelection(); // Unlocks input and clears question state before send
 			_ = vm.SendInputCommand.ExecuteAsync(null);
 		}
 	}
@@ -114,6 +166,15 @@ public partial class ProjectView : UserControl
 		if (DataContext is ProjectViewModel vm)
 		{
 			vm.DismissQuestion();
+			InputEditor.Focus();
+		}
+	}
+
+	private void OnDismissBannerClicked(object? sender, RoutedEventArgs e)
+	{
+		if (DataContext is ProjectViewModel vm)
+		{
+			vm.FullyDismissQuestion();
 			InputEditor.Focus();
 		}
 	}

@@ -81,63 +81,121 @@
                     Background="{DynamicResource BgSurfaceBrush}"
                     ClipToBounds="True">
                 <ScrollViewer MaxHeight="280">
-                    <ItemsControl x:Name="OptionsPanel"
-                                  ItemsSource="{Binding Options, RelativeSource={RelativeSource AncestorType=controls:QuestionPromptView}}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="controls:QuestionOption">
-                                <Button Padding="0"
-                                        HorizontalAlignment="Stretch"
-                                        HorizontalContentAlignment="Stretch"
-                                        CornerRadius="0"
-                                        Background="Transparent"
-                                        BorderThickness="0"
-                                        Cursor="Hand"
-                                        Click="OnOptionClicked"
-                                        PointerEntered="OnOptionPointerEntered"
-                                        Tag="{Binding}">
+                    <StackPanel>
+                        <ItemsControl x:Name="OptionsPanel"
+                                      AutomationProperties.Name="Question options"
+                                      ItemsSource="{Binding Options, RelativeSource={RelativeSource AncestorType=controls:QuestionPromptView}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="controls:QuestionOption">
+                                    <Button Padding="0"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch"
+                                            CornerRadius="0"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            Cursor="Hand"
+                                            Click="OnOptionClicked"
+                                            PointerEntered="OnOptionPointerEntered"
+                                            Tag="{Binding}"
+                                            AutomationProperties.Name="{Binding Label}"
+                                            ToolTip.Tip="{Binding Label}">
 
-                                    <!-- Row with left bar indicator -->
-                                    <Border Padding="0"
-                                            Background="{Binding RowBackground}"
-                                            BorderBrush="{DynamicResource BorderSubtleBrush}"
-                                            BorderThickness="0,0,0,1">
-                                        <Grid ColumnDefinitions="3,*,Auto" MinHeight="38">
-                                            <!-- Left selection bar -->
-                                            <Border Grid.Column="0"
-                                                    Background="{Binding BarBrush}"
-                                                    CornerRadius="0,2,2,0"
-                                                    Margin="0,6"
-                                                    Width="3" />
+                                        <!-- Row with left bar indicator -->
+                                        <Border Padding="0"
+                                                Background="{Binding RowBackground}"
+                                                BorderBrush="{DynamicResource BorderSubtleBrush}"
+                                                BorderThickness="0,0,0,1">
+                                            <Grid ColumnDefinitions="3,*,Auto" MinHeight="38">
+                                                <!-- Left selection bar -->
+                                                <Border Grid.Column="0"
+                                                        Background="{Binding BarBrush}"
+                                                        CornerRadius="0,2,2,0"
+                                                        Margin="0,6"
+                                                        Width="3" />
 
-                                            <!-- Label + description -->
-                                            <StackPanel Grid.Column="1" Margin="12,8,8,8" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Label}"
-                                                           FontSize="13"
-                                                           Foreground="{Binding LabelForeground}" />
-                                                <TextBlock Text="{Binding Description}"
-                                                           IsVisible="{Binding HasDescription}"
-                                                           FontSize="11"
+                                                <!-- Label + description -->
+                                                <StackPanel Grid.Column="1" Margin="12,8,8,8" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Label}"
+                                                               FontSize="13"
+                                                               Foreground="{Binding LabelForeground}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               MaxLines="1" />
+                                                    <TextBlock Text="{Binding Description}"
+                                                               IsVisible="{Binding HasDescription}"
+                                                               FontSize="11"
+                                                               Foreground="{DynamicResource TextTertiaryBrush}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               MaxLines="1"
+                                                               Margin="0,1,0,0" />
+                                                </StackPanel>
+
+                                                <!-- Enter hint for active option -->
+                                                <TextBlock Grid.Column="2"
+                                                           IsVisible="{Binding IsActive}"
+                                                           Text="Enter ↵"
+                                                           FontSize="10"
                                                            Foreground="{DynamicResource TextTertiaryBrush}"
-                                                           TextTrimming="CharacterEllipsis"
-                                                           MaxLines="1"
-                                                           Margin="0,1,0,0" />
-                                            </StackPanel>
+                                                           Opacity="0.6"
+                                                           VerticalAlignment="Center"
+                                                           Margin="0,0,12,0" />
+                                            </Grid>
+                                        </Border>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
 
-                                            <!-- Enter hint for active option -->
-                                            <TextBlock Grid.Column="2"
-                                                       IsVisible="{Binding IsActive}"
-                                                       Text="Enter ↵"
-                                                       FontSize="10"
-                                                       Foreground="{DynamicResource TextTertiaryBrush}"
-                                                       Opacity="0.6"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,12,0" />
-                                        </Grid>
-                                    </Border>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                        <!-- "Other" option row -->
+                        <Button x:Name="OtherOptionButton"
+                                Padding="0"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                CornerRadius="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Cursor="Hand"
+                                Click="OnOtherClicked"
+                                PointerEntered="OnOtherPointerEntered">
+                            <Border x:Name="OtherRowBorder"
+                                    Padding="0"
+                                    Background="Transparent">
+                                <Grid ColumnDefinitions="3,*,Auto" MinHeight="38">
+                                    <Border x:Name="OtherBarIndicator"
+                                            Grid.Column="0"
+                                            Background="Transparent"
+                                            CornerRadius="0,2,2,0"
+                                            Margin="0,6"
+                                            Width="3" />
+                                    <StackPanel Grid.Column="1" Margin="12,8,8,8" VerticalAlignment="Center">
+                                        <!-- Label (visible when not editing) -->
+                                        <TextBlock x:Name="OtherLabel"
+                                                   Text="Other..."
+                                                   FontSize="13"
+                                                   FontStyle="Italic"
+                                                   Foreground="{DynamicResource TextSecondaryBrush}" />
+                                        <!-- Inline text input (visible when editing) -->
+                                        <TextBox x:Name="OtherTextBox"
+                                                 IsVisible="False"
+                                                 Watermark="Type your response..."
+                                                 FontSize="13"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 Padding="0"
+                                                 Foreground="{DynamicResource TextPrimaryBrush}" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="OtherEnterHint"
+                                               Grid.Column="2"
+                                               IsVisible="False"
+                                               Text="Enter ↵"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource TextTertiaryBrush}"
+                                               Opacity="0.6"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,12,0" />
+                                </Grid>
+                            </Border>
+                        </Button>
+                    </StackPanel>
                 </ScrollViewer>
             </Border>
 
@@ -153,7 +211,7 @@
                                Foreground="{DynamicResource TextTertiaryBrush}" Opacity="0.7" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Spacing="4">
-                    <TextBlock Text="⏎" FontSize="10" FontWeight="SemiBold"
+                    <TextBlock Text="⏎/␣" FontSize="10" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextTertiaryBrush}" />
                     <TextBlock Text="select" FontSize="10"
                                Foreground="{DynamicResource TextTertiaryBrush}" Opacity="0.7" />

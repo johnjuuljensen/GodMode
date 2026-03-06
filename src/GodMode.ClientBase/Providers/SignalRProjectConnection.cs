@@ -25,6 +25,7 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
     public event Action<string, string>? CreationProgressReceived;
     public event Action<ProjectStatus>? ProjectCreatedReceived;
     public event Action<string>? ProjectDeletedReceived;
+    public event Action<string, ProjectStatus>? StatusChangedReceived;
 
     /// <summary>
     /// Creates a new SignalR connection to a project server.
@@ -152,6 +153,7 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
 
     Task IProjectHubClient.StatusChanged(string projectId, ProjectStatus status)
     {
+        StatusChangedReceived?.Invoke(projectId, status);
         return Task.CompletedTask;
     }
 

@@ -28,6 +28,7 @@ public partial class MainViewModel : ViewModelBase
 	public event Action? AddServerRequested;
 	public event Action<ServerGroupViewModel>? EditServerRequested;
 	public event Action<bool>? ConnectionStateChanged;
+	public event Action<string, ProjectStatus>? ServerStatusChanged;
 
 	/// <summary>
 	/// Profile filter options: "All" + discovered profile names.
@@ -427,6 +428,11 @@ public partial class MainViewModel : ViewModelBase
 							}
 						}
 					});
+				};
+
+				connection.StatusChangedReceived += (projectId, status) =>
+				{
+					ServerStatusChanged?.Invoke(projectId, status);
 				};
 			}
 

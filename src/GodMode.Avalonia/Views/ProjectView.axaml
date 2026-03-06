@@ -102,22 +102,23 @@
             </Grid>
         </Border>
 
-        <!-- Chat Output -->
-        <ScrollViewer Grid.Row="1" x:Name="OutputScrollViewer" Padding="16,8,16,0">
-            <StackPanel>
-                <!-- Load earlier messages button -->
-                <Button IsVisible="{Binding HasEarlierMessages}"
-                        Command="{Binding LoadEarlierMessagesCommand}"
-                        HorizontalAlignment="Center"
-                        Padding="12,6" Margin="0,4,0,8"
-                        Background="{DynamicResource BgSurfaceBrush}"
-                        Foreground="{DynamicResource TextSecondaryBrush}"
-                        BorderThickness="0" CornerRadius="12"
-                        FontSize="11">
-                    <TextBlock Text="{Binding EarlierMessagesText}" />
-                </Button>
+        <!-- Chat Output with overlaid attention banner -->
+        <Panel Grid.Row="1">
+            <ScrollViewer x:Name="OutputScrollViewer" Padding="16,8,16,0">
+                <StackPanel>
+                    <!-- Load earlier messages button -->
+                    <Button IsVisible="{Binding HasEarlierMessages}"
+                            Command="{Binding LoadEarlierMessagesCommand}"
+                            HorizontalAlignment="Center"
+                            Padding="12,6" Margin="0,4,0,8"
+                            Background="{DynamicResource BgSurfaceBrush}"
+                            Foreground="{DynamicResource TextSecondaryBrush}"
+                            BorderThickness="0" CornerRadius="12"
+                            FontSize="11">
+                        <TextBlock Text="{Binding EarlierMessagesText}" />
+                    </Button>
 
-                <ItemsControl ItemsSource="{Binding DisplayMessages}" x:Name="OutputItemsControl" Margin="0,0,0,16">
+                    <ItemsControl ItemsSource="{Binding DisplayMessages}" x:Name="OutputItemsControl" Margin="0,0,0,16">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="displayModels:ChatDisplayItem">
                         <Panel Margin="0,3">
@@ -238,14 +239,67 @@
                         </Panel>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-        </ScrollViewer>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
 
-        <!-- Question Prompt (visible when LLM asks a question) -->
+            <!-- IC-01: Sticky attention banner at top of chat area -->
+            <Border x:Name="AttentionBanner"
+                    IsVisible="{Binding IsQuestionActive}"
+                    VerticalAlignment="Top"
+                    HorizontalAlignment="Stretch"
+                    Padding="12,8"
+                    Background="{DynamicResource StateWaitingBrush}"
+                    Opacity="0.95"
+                    Cursor="Hand">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0"
+                                Orientation="Horizontal" Spacing="8"
+                                HorizontalAlignment="Center">
+                        <Ellipse Width="8" Height="8"
+                                 Fill="#000000" Opacity="0.7" />
+                        <TextBlock Text="Waiting for your input"
+                                   FontSize="12" FontWeight="SemiBold"
+                                   Foreground="#000000" />
+                    </StackPanel>
+                    <Button x:Name="DismissBannerButton"
+                            Grid.Column="1"
+                            Padding="4"
+                            Width="24" Height="24"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Cursor="Hand"
+                            ToolTip.Tip="Dismiss (Esc)">
+                        <TextBlock Text="✕"
+                                   FontSize="12" FontWeight="Bold"
+                                   Foreground="#000000" Opacity="0.6"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- IC-04: Floating scroll-to-picker button -->
+            <Button x:Name="ScrollToPickerButton"
+                    IsVisible="False"
+                    VerticalAlignment="Bottom"
+                    HorizontalAlignment="Right"
+                    Margin="0,0,16,8"
+                    Padding="10,6"
+                    CornerRadius="12"
+                    Background="{DynamicResource StateWaitingBrush}"
+                    Foreground="#000000"
+                    BorderThickness="0"
+                    Cursor="Hand"
+                    FontSize="11" FontWeight="SemiBold">
+                <TextBlock Text="Answer required ↓" />
+            </Button>
+        </Panel>
+
+        <!-- Question Prompt (visible when question active AND picker not dismissed) -->
         <controls:QuestionPromptView x:Name="QuestionPrompt"
             Grid.Row="2"
-            IsVisible="{Binding IsQuestionActive}"
+            IsVisible="False"
             Margin="16,0" />
 
         <!-- Input Area -->

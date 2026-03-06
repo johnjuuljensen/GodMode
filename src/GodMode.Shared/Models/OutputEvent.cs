@@ -13,5 +13,7 @@ public record OutputEvent(
     DateTime Timestamp,
     OutputEventType Type,
     string Content,
-    Dictionary<string, object>? Metadata = null
+    Dictionary<string, object>? Metadata = null,
+    bool IsQuestion = false,
+    string? QuestionText = null
 );
