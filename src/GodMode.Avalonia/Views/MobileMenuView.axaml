@@ -57,23 +57,6 @@
                 </Grid>
             </Button>
 
-            <!-- Voice assistant -->
-            <Button Command="{Binding NavigateToVoiceCommand}"
-                    IsVisible="{Binding IsVoiceSupported}"
-                    Padding="20,14"
-                    Background="Transparent"
-                    Foreground="{DynamicResource TextPrimaryBrush}"
-                    BorderThickness="0"
-                    HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Left">
-                <Grid ColumnDefinitions="28,*">
-                    <TextBlock Grid.Column="0" Text="&#x1f3a4;" FontSize="16"
-                               VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1" Text="Voice Assistant" FontSize="14"
-                               VerticalAlignment="Center" />
-                </Grid>
-            </Button>
-
         </StackPanel>
     </ScrollViewer>
 </UserControl>

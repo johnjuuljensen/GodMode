@@ -47,10 +47,6 @@ dotnet test
 - **GodMode.AI** - Cross-platform AI abstractions (IChatClientFactory, IChatClient, tools, tool call parsing, AIConfig, Anthropic provider)
 - **GodMode.AI.LocalInference.Windows** - Windows DirectML ONNX local inference (Phi-4 mini)
 - **GodMode.AI.LocalInference.Mac** - macOS CPU ONNX local inference
-- **GodMode.Voice** - Cross-platform voice/speech abstractions and orchestration (AssistantService, ISpeechRecognizer, VoiceConfig)
-- **GodMode.Voice.Windows** - Windows native STT/TTS (Windows.Media.SpeechRecognition)
-- **GodMode.Voice.Mac** - macOS speech stubs (placeholder for AVSpeechSynthesizer/SFSpeechRecognizer)
-- **GodMode.Voice.Android** - Android speech stubs (placeholder for future Android SpeechRecognizer/TextToSpeech)
 
 ### Key Patterns
 
@@ -135,17 +131,16 @@ dotnet test
 ### Cross-Platform Rules
 This is a cross-platform application (Windows, macOS, Android, iOS). Follow these rules strictly:
 
-- **All platform-specific code lives in platform projects** (e.g., `GodMode.Voice.Windows`, `GodMode.AI.LocalInference.Mac`). App projects like `GodMode.Avalonia` must only depend on cross-platform abstractions.
-- **Define common interfaces in cross-platform projects** (`GodMode.AI`, `GodMode.Voice`) and implement them per-platform. Register via `IPlatformServiceRegistrar` for automatic discovery, or use `TryAddSingleton` for fallback defaults.
+- **All platform-specific code lives in platform projects** (e.g., `GodMode.AI.LocalInference.Mac`). App projects like `GodMode.Avalonia` must only depend on cross-platform abstractions.
+- **Define common interfaces in cross-platform projects** (`GodMode.AI`) and implement them per-platform. Register via `IPlatformServiceRegistrar` for automatic discovery, or use `TryAddSingleton` for fallback defaults.
 - **No `#if` preprocessor directives or `<Compile Remove>` in app projects.** All app code must compile on every platform. If you need platform-specific behavior, define an interface, implement it per-platform, and inject it.
 - **Pragmas and conditionals are a last resort** — only use them when there is genuinely no other way (e.g., suppressing an unavoidable compiler warning on a no-op interface implementation). Never use them to gate features.
 - **Platform projects use conditional csproj patterns** for stub builds on non-target platforms: `<Compile Remove="**/*.cs" />` with an OS condition so they produce empty assemblies elsewhere.
-- **Null/no-op implementations** (`NullChatClient`, `NullSpeechRecognizer`, etc.) ensure the app runs gracefully on platforms where a capability isn't yet available.
-- **Configuration classes that share a file** (e.g., `AIConfig` and `VoiceConfig` both read/write `~/.godmode/inference.json`) must merge on save — never overwrite the other class's keys.
+- **Null/no-op implementations** (`NullChatClient`, etc.) ensure the app runs gracefully on platforms where a capability isn't yet available.
 
 ## Inference Configuration
 
-All inference and voice config lives in `~/.godmode/inference.json`. This file is shared between `AIConfig` (AI keys) and `VoiceConfig` (voice keys) — each class owns its keys and merges on save.
+All inference config lives in `~/.godmode/inference.json`.
 
 ### Config File Structure (`~/.godmode/inference.json`)
 ```json
@@ -156,9 +151,6 @@ All inference and voice config lives in `~/.godmode/inference.json`. This file i
   "phi4_model_path": "~/.godmode/models/phi-4-mini-instruct-onnx-gpu",
   "max_tokens": 256,
   "temperature": 0.3,
-  "whisper_model_path": "~/.godmode/models/whisper/ggml-base.bin",
-  "speech_language": "en-US",
-  "prefer_offline_stt": true,
   "tiers": {
     "Light": { "provider": "anthropic" },
     "Medium": { "provider": "anthropic" },
@@ -178,9 +170,6 @@ All inference and voice config lives in `~/.godmode/inference.json`. This file i
 | `max_tokens` | AIConfig | Max generation tokens (default: 256) |
 | `temperature` | AIConfig | Sampling temperature (default: 0.3) |
 | `tiers` | AIConfig | Optional tier→provider mapping (auto-detected if absent) |
-| `whisper_model_path` | VoiceConfig | Path to Whisper GGML model **file** (e.g., `ggml-base.bin`) |
-| `speech_language` | VoiceConfig | Speech recognition language (default: `en-US`) |
-| `prefer_offline_stt` | VoiceConfig | Prefer offline STT engine (default: true) |
 
 ### Inference Tier System
 
@@ -205,11 +194,10 @@ The `InferenceRouter` resolves factories from DI by provider key, calls `CreateA
 
 Run `scripts/download-models.ps1` to download local models to `~/.godmode/models/`:
 - **Phi-4-mini** (DirectML GPU): `phi-4-mini-instruct-onnx-gpu/` — requires `genai_config.json`
-- **Whisper base** (STT): `whisper/ggml-base.bin` — single GGML file
 
 ### Platform Service Discovery
 
-Platform-specific implementations (speech, AI inference) are registered via `IPlatformServiceRegistrar` discovered at startup by scanning `GodMode.*.dll` assemblies. Platform assemblies are preloaded from the output directory before scanning to avoid lazy-loading gaps.
+Platform-specific implementations (AI inference) are registered via `IPlatformServiceRegistrar` discovered at startup by scanning `GodMode.*.dll` assemblies. Platform assemblies are preloaded from the output directory before scanning to avoid lazy-loading gaps.
 
 ## GitHub Codespaces (GodMode Server)
 

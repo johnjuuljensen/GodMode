@@ -20,10 +20,6 @@
     <Project Path="src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj" />
     <Project Path="src/GodMode.Server/GodMode.Server.csproj" />
     <Project Path="src/GodMode.Shared/GodMode.Shared.csproj" />
-    <Project Path="src/GodMode.Voice/GodMode.Voice.csproj" />
-    <Project Path="src/GodMode.Voice.Mac/GodMode.Voice.Mac.csproj" />
-    <Project Path="src/GodMode.Voice.Android/GodMode.Voice.Android.csproj" />
-    <Project Path="src/GodMode.Voice.Windows/GodMode.Voice.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/GodMode.Server.Tests/GodMode.Server.Tests.csproj" />

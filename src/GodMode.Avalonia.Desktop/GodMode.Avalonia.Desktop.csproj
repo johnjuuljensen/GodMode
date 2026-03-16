@@ -31,13 +31,11 @@
 	<!-- Windows platform projects -->
 	<ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
 		<ProjectReference Include="..\GodMode.AI.LocalInference.Windows\GodMode.AI.LocalInference.Windows.csproj" />
-		<ProjectReference Include="..\GodMode.Voice.Windows\GodMode.Voice.Windows.csproj" />
 	</ItemGroup>
 
 	<!-- Mac platform projects -->
 	<ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
 		<ProjectReference Include="..\GodMode.AI.LocalInference.Mac\GodMode.AI.LocalInference.Mac.csproj" />
-		<ProjectReference Include="..\GodMode.Voice.Mac\GodMode.Voice.Mac.csproj" />
 	</ItemGroup>
 
 </Project>

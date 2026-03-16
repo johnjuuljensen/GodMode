@@ -4,8 +4,7 @@ using System.Text.Json.Serialization;
 namespace GodMode.AI;
 
 /// <summary>
-/// AI model configuration. Reads/writes ~/.godmode/inference.json
-/// (shared file with VoiceConfig — each class owns its keys).
+/// AI model configuration. Reads/writes ~/.godmode/inference.json.
 /// </summary>
 public sealed class AIConfig
 {
