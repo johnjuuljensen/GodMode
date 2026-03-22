@@ -13,7 +13,6 @@ public partial class MobileMenuViewModel : ObservableObject
 	}
 
 	public string ThemeIcon => _shell.ThemeIcon;
-	public bool IsVoiceSupported => _shell.IsVoiceSupported;
 
 	[RelayCommand]
 	private void AddServer()
@@ -27,13 +26,5 @@ public partial class MobileMenuViewModel : ObservableObject
 	{
 		_shell.ToggleThemeCommand.Execute(null);
 		OnPropertyChanged(nameof(ThemeIcon));
-	}
-
-	[RelayCommand]
-	private void NavigateToVoice()
-	{
-		// Pop menu off stack first, then navigate to voice
-		_shell.GoBackCommand.Execute(null);
-		_shell.NavigateToVoiceCommand.Execute(null);
 	}
 }

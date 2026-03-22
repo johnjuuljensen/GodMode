@@ -8,5 +8,3 @@ global using GodMode.Avalonia.Views;
 global using GodMode.Avalonia.Services;
 global using GodMode.AI;
 global using GodMode.AI.Tools;
-global using GodMode.Voice.Services;
-global using GodMode.Voice.Speech;

@@ -14,7 +14,6 @@
 	<ItemGroup>
 		<PackageReference Include="Avalonia.Android" />
 		<ProjectReference Include="..\GodMode.Avalonia\GodMode.Avalonia.csproj" />
-		<ProjectReference Include="..\GodMode.Voice.Android\GodMode.Voice.Android.csproj" />
 	</ItemGroup>
 
 </Project>

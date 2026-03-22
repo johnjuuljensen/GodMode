@@ -23,7 +23,6 @@
 		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
 		<ProjectReference Include="..\..\lib\LiquidGlassAvaloniaUI\LiquidGlassAvaloniaUI.csproj" />
 		<ProjectReference Include="..\GodMode.AI\GodMode.AI.csproj" />
-		<ProjectReference Include="..\GodMode.Voice\GodMode.Voice.csproj" />
 	</ItemGroup>
 
 </Project>

@@ -117,18 +117,6 @@
                                 <TextBlock Text="{Binding ThemeIcon}" FontSize="13" />
                             </Button>
 
-                            <!-- Voice panel toggle -->
-                            <Button Command="{Binding ToggleVoicePanelCommand}"
-                                    IsVisible="{Binding IsVoiceSupported}"
-                                    ToolTip.Tip="Toggle voice panel"
-                                    Padding="6,4"
-                                    CornerRadius="6"
-                                    Background="{Binding IsVoicePanelOpen, Converter={StaticResource BoolToActiveBrushConverter}}"
-                                    Foreground="{DynamicResource TextSecondaryBrush}"
-                                    BorderThickness="0">
-                                <TextBlock Text="🎤" FontSize="13" />
-                            </Button>
-
                             <!-- Connection indicator -->
                             <StackPanel Orientation="Horizontal" Spacing="6" Margin="4,0,0,0">
                                 <Ellipse Width="6" Height="6"
@@ -243,8 +231,8 @@
             <!-- ===== DESKTOP BODY (hidden in compact mode) ===== -->
             <Panel Grid.Row="2" IsVisible="{Binding !IsCompact}">
 
-                <!-- Normal mode: Sidebar + Content + Voice side by side -->
-                <Grid ColumnDefinitions="260,Auto,*,Auto"
+                <!-- Normal mode: Sidebar + Content side by side -->
+                <Grid ColumnDefinitions="260,Auto,*"
                       IsVisible="{Binding !IsTileView}">
 
                     <!-- Sidebar — liquid glass -->
@@ -284,13 +272,6 @@
                         </StackPanel>
                     </Panel>
 
-                    <!-- Voice panel -->
-                    <Border Grid.Column="3" Width="380"
-                            IsVisible="{Binding IsVoicePanelOpen}"
-                            BorderBrush="{DynamicResource BorderSubtleBrush}"
-                            BorderThickness="1,0,0,0">
-                        <ContentControl Content="{Binding Voice}" />
-                    </Border>
                 </Grid>
 
                 <!-- Tile mode: fullscreen, no sidebar -->

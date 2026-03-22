@@ -50,14 +50,6 @@ public partial class MainWindowViewModel : ObservableObject
 	[ObservableProperty]
 	private string _viewModeIcon = "☰";
 
-	// Voice panel
-	[ObservableProperty]
-	private bool _isVoicePanelOpen;
-
-	public VoiceAssistantViewModel? Voice { get; }
-
-	public bool IsVoiceSupported { get; }
-
 	// Auto-restart banner
 	[ObservableProperty]
 	private bool _showRestartBanner;
@@ -84,15 +76,12 @@ public partial class MainWindowViewModel : ObservableObject
 		MainViewModel mainViewModel,
 		IThemeService themeService,
 		INotificationService notificationService,
-		IHostConnectionService hostConnectionService,
-		VoiceAssistantViewModel? voiceAssistantViewModel = null)
+		IHostConnectionService hostConnectionService)
 	{
 		_themeService = themeService;
 		_notificationService = notificationService;
 		_hostConnectionService = hostConnectionService;
 		_sidebarViewModel = mainViewModel;
-		Voice = voiceAssistantViewModel;
-		IsVoiceSupported = Voice != null;
 
 		mainViewModel.ProjectSelected += OnProjectSelected;
 		mainViewModel.CreateProjectRequested += OnCreateProjectRequested;
@@ -107,9 +96,6 @@ public partial class MainWindowViewModel : ObservableObject
 
 		_ = mainViewModel.LoadCommand.ExecuteAsync(null);
 	}
-
-	[RelayCommand]
-	private void ToggleVoicePanel() => IsVoicePanelOpen = !IsVoicePanelOpen;
 
 	[RelayCommand]
 	private void ToggleTheme()
@@ -236,13 +222,6 @@ public partial class MainWindowViewModel : ObservableObject
 	{
 		if (!IsCompact) return;
 		CompactNavigateTo(new MobileMenuViewModel(this));
-	}
-
-	[RelayCommand]
-	private void NavigateToVoice()
-	{
-		if (!IsCompact || Voice == null) return;
-		CompactNavigateTo(Voice);
 	}
 
 	private void CompactNavigateTo(object content)

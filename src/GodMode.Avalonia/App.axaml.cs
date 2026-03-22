@@ -3,9 +3,6 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using GodMode.Avalonia.Services;
-using GodMode.Avalonia.Tools;
-using GodMode.Avalonia.Voice;
-using GodMode.Voice;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GodMode.Avalonia;
@@ -24,20 +21,6 @@ public partial class App : Application
 		var services = new ServiceCollection();
 		ConfigureServices(services);
 		Services = services.BuildServiceProvider();
-
-		// Fire-and-forget: initialize inference router at startup
-		_ = Task.Run(async () =>
-		{
-			try
-			{
-				var assistant = Services.GetRequiredService<AssistantService>();
-				await assistant.InitializeAsync();
-			}
-			catch (Exception ex)
-			{
-				AssistantLog.Write("INIT_ERROR", ex.ToString());
-			}
-		});
 
 		if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
 		{
@@ -62,7 +45,7 @@ public partial class App : Application
 		services.AddGodModeClientServices();
 
 		// Preload platform assemblies so they're discoverable via reflection.
-		// Without this, GodMode.Voice.Windows / GodMode.AI.LocalInference.Windows
+		// Without this, GodMode.AI.LocalInference.Windows
 		// may not be in AppDomain.GetAssemblies() yet (lazy loading).
 		foreach (var dll in Directory.GetFiles(AppContext.BaseDirectory, "GodMode.*.dll"))
 		{
@@ -70,8 +53,7 @@ public partial class App : Application
 			catch { /* non-managed or duplicate — skip */ }
 		}
 
-		// Auto-discover and register platform-specific services
-		// (AI inference, speech implementations)
+		// Auto-discover and register platform-specific services (AI inference)
 		foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
 		{
 			try
@@ -92,44 +74,15 @@ public partial class App : Application
 			}
 		}
 
-		// Cross-platform voice services (TryAdd — platform overrides already registered above)
-		services.AddGodModeVoiceServices();
-
-		// Voice context — stateful session tracking
-		services.AddSingleton<VoiceContext>();
-
-		// Voice tool registry — wired to real app services via VoiceContext
-		services.AddSingleton<ToolRegistry>(sp =>
-		{
-			var ctx = sp.GetRequiredService<VoiceContext>();
-			var hosts = sp.GetRequiredService<IHostConnectionService>();
-			var projects = sp.GetRequiredService<IProjectService>();
-
-			var registry = new ToolRegistry();
-			registry.Register(new RespondTool());
-			registry.Register(new SetProfileTool(ctx));
-			registry.Register(new SetServerTool(ctx, hosts));
-			registry.Register(new ListProfilesTool(ctx));
-			registry.Register(new ListServersTool(ctx, hosts));
-			registry.Register(new ListProjectsTool(ctx));
-			registry.Register(new ProjectStatusTool(ctx, projects));
-			registry.Register(new CreateProjectTool(ctx, projects));
-			registry.Register(new SendInputTool(ctx, projects));
-			registry.Register(new StopProjectTool(ctx, projects));
-			registry.Register(new ResumeProjectTool(ctx, projects));
-			registry.Register(new FocusProjectTool(ctx));
-			registry.Register(new UnfocusProjectTool(ctx));
-			return registry;
-		});
+		// AI services (Anthropic, InferenceRouter, etc.)
+		services.AddGodModeAIServices();
 
 		// Avalonia-specific services
 		services.AddSingleton<INavigationService, NavigationService>();
 		services.AddSingleton<IDialogService, DialogService>();
 		services.AddSingleton<IThemeService, ThemeService>();
-		// services.AddSingleton<IEmbeddedServerService, EmbeddedServerService>(); // Disabled — server managed externally
 
 		// ViewModels — singletons for state preservation
-		services.AddSingleton<VoiceAssistantViewModel>();
 		services.AddSingleton<MainWindowViewModel>();
 		services.AddSingleton<MainViewModel>();
 		services.AddTransient<HostViewModel>();
