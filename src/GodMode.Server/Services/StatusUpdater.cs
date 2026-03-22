@@ -1,4 +1,5 @@
 using GodMode.Server.Models;
+using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using System.Diagnostics;
@@ -23,10 +24,7 @@ public class StatusUpdater : IStatusUpdater
     {
         var statusPath = Path.Combine(project.ProjectPath, ".godmode", "status.json");
 
-        var json = JsonSerializer.Serialize(project.Status, new JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
+        var json = JsonSerializer.Serialize(project.Status, JsonDefaults.Options);
 
         await File.WriteAllTextAsync(statusPath, json);
     }

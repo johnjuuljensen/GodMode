@@ -1,6 +1,7 @@
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
+using GodMode.Shared;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,7 +25,11 @@ var requireAuth = isCodespace || !string.IsNullOrEmpty(apiKey);
 builder.Services.AddSignalR()
     .AddJsonProtocol(options =>
     {
-        options.PayloadSerializerOptions.PropertyNamingPolicy = null;
+        var defaults = JsonDefaults.Options;
+        options.PayloadSerializerOptions.PropertyNamingPolicy = defaults.PropertyNamingPolicy;
+        options.PayloadSerializerOptions.DefaultIgnoreCondition = defaults.DefaultIgnoreCondition;
+        foreach (var converter in defaults.Converters)
+            options.PayloadSerializerOptions.Converters.Add(converter);
     });
 
 builder.Services.AddCors(options =>
