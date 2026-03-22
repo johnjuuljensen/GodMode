@@ -1,8 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace GodMode.Shared.Enums;
 
 /// <summary>
 /// Represents the current state of a host provider.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<HostState>))]
 public enum HostState
 {
     /// <summary>
