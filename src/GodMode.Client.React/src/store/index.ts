@@ -4,8 +4,17 @@
  */
 import { create } from 'zustand';
 import { GodModeHub, type ConnectionState } from '../signalr/hub';
-import type { ProjectSummary, ProjectRootInfo, ClaudeMessage } from '../signalr/types';
+import type { ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage } from '../signalr/types';
 import { loadServers, saveServers, type ServerRegistration } from '../services/serverRegistry';
+import { type QuestionState, emptyQuestion, detectQuestionFromMessage, detectQuestionFromStatus, looksLikeQuestion } from '../services/questionDetection';
+
+const DISMISSED_KEY = 'godmode-dismissed-projects';
+function loadDismissed(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(DISMISSED_KEY) || '{}'); } catch { return {}; }
+}
+function saveDismissed(dp: Record<string, boolean>) {
+  localStorage.setItem(DISMISSED_KEY, JSON.stringify(dp));
+}
 
 export interface ServerState {
   registration: ServerRegistration;
@@ -13,6 +22,7 @@ export interface ServerState {
   connectionState: ConnectionState;
   projects: ProjectSummary[];
   roots: ProjectRootInfo[];
+  profiles: ProfileInfo[];
 }
 
 interface AppState {
@@ -36,11 +46,60 @@ interface AppState {
   appendOutput: (projectId: string, message: ClaudeMessage) => void;
   clearOutput: () => void;
 
+  // Question state (for the selected project's UI)
+  question: QuestionState;
+  lastInputSentAt: number;
+  setQuestion: (q: QuestionState) => void;
+  dismissQuestion: () => void;
+  markInputSent: () => void;
+
+  // Per-project client-side question detection (projectId → true if waiting)
+  projectQuestions: Record<string, boolean>;
+
+  // Per-project dismiss tracking (projectId → true if dismissed, cleared on Running)
+  dismissedProjects: Record<string, boolean>;
+
+  // Notification badges
+  waitingCounts: Record<number, number>;
+  totalWaitingCount: number;
+
+  // Tile view
+  isTileView: boolean;
+  setTileView: (tile: boolean) => void;
+  tileMessages: Record<string, ClaudeMessage[]>;
+  tileLoading: Record<string, boolean>;
+  appendTileMessage: (projectId: string, message: ClaudeMessage) => void;
+  setTileMessages: (projectId: string, messages: ClaudeMessage[]) => void;
+  setTileLoading: (projectId: string, loading: boolean) => void;
+  clearTileMessages: () => void;
+
+  // Profile filter
+  profileFilter: string; // 'All' or a profile name
+  setProfileFilter: (filter: string) => void;
+
+  // Create project / profile dialogs
+  showCreateProject: boolean;
+  setShowCreateProject: (show: boolean) => void;
+  createProjectServerIndex: number | null;
   // UI
   showAddServer: boolean;
   setShowAddServer: (show: boolean) => void;
   editServerIndex: number | null;
   setEditServerIndex: (index: number | null) => void;
+}
+
+/** Recompute waiting counts from server projects + client-side question map, excluding dismissed */
+function computeWaitingCounts(servers: ServerState[], projectQuestions: Record<string, boolean>, dismissedProjects: Record<string, boolean> = {}): { waitingCounts: Record<number, number>; totalWaitingCount: number } {
+  const waitingCounts: Record<number, number> = {};
+  let totalWaitingCount = 0;
+  for (let i = 0; i < servers.length; i++) {
+    const count = servers[i].projects.filter(p =>
+      !dismissedProjects[p.Id] && (p.State === 'WaitingInput' || projectQuestions[p.Id])
+    ).length;
+    waitingCounts[i] = count;
+    totalWaitingCount += count;
+  }
+  return { waitingCounts, totalWaitingCount };
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -54,6 +113,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       connectionState: 'disconnected' as ConnectionState,
       projects: [],
       roots: [],
+      profiles: [],
     }));
     set({ servers });
   },
@@ -66,6 +126,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       connectionState: 'disconnected',
       projects: [],
       roots: [],
+      profiles: [],
     };
     set(state => {
       const servers = [...state.servers, serverState];
@@ -132,7 +193,8 @@ export const useAppStore = create<AppState>((set, get) => ({
               projects: [...servers[index].projects, summary],
             };
           }
-          return { servers };
+          const counts = computeWaitingCounts(servers, state.projectQuestions, state.dismissedProjects);
+          return { servers, ...counts };
         });
       },
       onProjectDeleted: (projectId) => {
@@ -144,10 +206,17 @@ export const useAppStore = create<AppState>((set, get) => ({
               projects: servers[index].projects.filter(p => p.Id !== projectId),
             };
           }
-          // Clear selection if deleted project was selected
           const sel = state.selectedProject;
           const clearSel = sel?.serverIndex === index && sel?.projectId === projectId;
-          return { servers, ...(clearSel ? { selectedProject: null, outputMessages: [] } : {}) };
+          const pq = { ...state.projectQuestions };
+          delete pq[projectId];
+          const counts = computeWaitingCounts(servers, pq, state.dismissedProjects);
+          return {
+            servers,
+            projectQuestions: pq,
+            ...counts,
+            ...(clearSel ? { selectedProject: null, outputMessages: [], question: emptyQuestion } : {}),
+          };
         });
       },
       onStatusChanged: (_projectId, status) => {
@@ -163,17 +232,89 @@ export const useAppStore = create<AppState>((set, get) => ({
               ),
             };
           }
-          return { servers };
+
+          // Question management for the selected project
+          const sel = state.selectedProject;
+          let questionUpdate: Partial<AppState> = {};
+          let pq = state.projectQuestions;
+          if (sel?.serverIndex === index && sel?.projectId === status.Id && !state.dismissedProjects[status.Id]) {
+            const isWaitingOrIdle = status.State === 'WaitingInput' || status.State === 'Idle';
+            if (isWaitingOrIdle) {
+              const project = servers[index]?.projects.find(p => p.Id === status.Id);
+              if (project) {
+                const detected = detectQuestionFromStatus(
+                  status.State,
+                  status.CurrentQuestion,
+                  project.Name,
+                  state.question,
+                  state.lastInputSentAt,
+                  state.outputMessages,
+                );
+                if (detected) {
+                  questionUpdate = { question: detected };
+                  pq = { ...pq, [status.Id]: detected.isActive };
+                }
+              }
+            } else if (state.question.isActive) {
+              questionUpdate = { question: emptyQuestion };
+              pq = { ...pq, [status.Id]: false };
+            }
+          }
+
+          // Clear projectQuestions and dismiss flag when project leaves waiting
+          let dp = state.dismissedProjects;
+          if (status.State === 'Running') {
+            pq = { ...pq, [status.Id]: false };
+            dp = { ...dp, [status.Id]: false };
+            saveDismissed(dp);
+          }
+
+          const counts = computeWaitingCounts(servers, pq, dp);
+          return { servers, projectQuestions: pq, dismissedProjects: dp, ...counts, ...questionUpdate };
         });
       },
       onOutputReceived: (projectId, message) => {
-        const sel = get().selectedProject;
+        const s = get();
+        const sel = s.selectedProject;
+
+        // Detect question from message for any project
+        // Skip if this project was explicitly dismissed
+        const isDismissed = s.dismissedProjects[projectId];
+        const isQuestion = !isDismissed && (
+          message.isQuestion ||
+          (message.type === 'assistant' && message.contentSummary && looksLikeQuestion(message.contentSummary))
+        );
+
+        // Update per-project question tracking
+        if (isQuestion) {
+          set(state => {
+            const pq = { ...state.projectQuestions, [projectId]: true };
+            const counts = computeWaitingCounts(state.servers, pq, state.dismissedProjects);
+            return { projectQuestions: pq, ...counts };
+          });
+        }
+
+        // Feed selected project output + question state
         if (sel?.serverIndex === index && sel?.projectId === projectId) {
-          set(state => ({ outputMessages: [...state.outputMessages, message] }));
+          const detected = detectQuestionFromMessage(message, s.question, s.lastInputSentAt, s.dismissedProjects[projectId]);
+          set(state => ({
+            outputMessages: [...state.outputMessages, message],
+            ...(detected ? { question: detected } : {}),
+          }));
+        }
+
+        // Feed tile messages when in tile view
+        if (s.isTileView) {
+          set(state => ({
+            tileMessages: {
+              ...state.tileMessages,
+              [projectId]: [...(state.tileMessages[projectId] ?? []), message],
+            },
+          }));
         }
       },
       onCreationProgress: (_projectId, _message) => {
-        // TODO: Phase 3 - surface creation progress in UI
+        // TODO: surface creation progress in UI
       },
     });
 
@@ -193,9 +334,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(state => {
         const servers = [...state.servers];
         if (servers[index]) {
-          servers[index] = { ...servers[index], projects: [], roots: [], connectionState: 'disconnected' };
+          servers[index] = { ...servers[index], projects: [], roots: [], profiles: [], connectionState: 'disconnected' };
         }
-        return { servers };
+        const counts = computeWaitingCounts(servers, state.projectQuestions, state.dismissedProjects);
+        return { servers, ...counts };
       });
     }
   },
@@ -205,16 +347,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!server || server.connectionState !== 'connected') return;
 
     try {
-      const [projects, roots] = await Promise.all([
+      const [projects, roots, profiles] = await Promise.all([
         server.hub.listProjects(),
         server.hub.listProjectRoots(),
+        server.hub.listProfiles(),
       ]);
       set(state => {
         const servers = [...state.servers];
         if (servers[index]) {
-          servers[index] = { ...servers[index], projects, roots };
+          servers[index] = { ...servers[index], projects, roots, profiles };
         }
-        return { servers };
+        const counts = computeWaitingCounts(servers, state.projectQuestions, state.dismissedProjects);
+        return { servers, ...counts };
       });
     } catch (err) {
       console.error('Failed to refresh projects:', err);
@@ -224,10 +368,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Selection
   selectedProject: null,
   selectProject: (serverIndex, projectId) => {
-    set({ selectedProject: { serverIndex, projectId }, outputMessages: [] });
+    set({ selectedProject: { serverIndex, projectId }, outputMessages: [], question: emptyQuestion });
   },
   clearSelection: () => {
-    set({ selectedProject: null, outputMessages: [] });
+    set({ selectedProject: null, outputMessages: [], question: emptyQuestion });
   },
 
   // Output
@@ -237,6 +381,68 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   clearOutput: () => set({ outputMessages: [] }),
 
+  // Question
+  question: emptyQuestion,
+  lastInputSentAt: 0,
+  setQuestion: (q) => set({ question: q }),
+  dismissQuestion: () => set(state => {
+    const sel = state.selectedProject;
+    const pq = sel ? { ...state.projectQuestions, [sel.projectId]: false } : state.projectQuestions;
+    const dp = sel ? { ...state.dismissedProjects, [sel.projectId]: true } : state.dismissedProjects;
+    saveDismissed(dp);
+    const counts = computeWaitingCounts(state.servers, pq, dp);
+    return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, ...counts };
+  }),
+  markInputSent: () => set(state => {
+    const sel = state.selectedProject;
+    const pq = sel ? { ...state.projectQuestions, [sel.projectId]: false } : state.projectQuestions;
+    const dp = sel ? { ...state.dismissedProjects, [sel.projectId]: false } : state.dismissedProjects;
+    saveDismissed(dp);
+    const counts = computeWaitingCounts(state.servers, pq, dp);
+    return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, ...counts };
+  }),
+
+  // Per-project questions
+  projectQuestions: {},
+  dismissedProjects: loadDismissed(),
+
+  // Notifications
+  waitingCounts: {},
+  totalWaitingCount: 0,
+
+  // Tile view
+  isTileView: false,
+  setTileView: (tile) => set({ isTileView: tile, tileMessages: {}, tileLoading: {}, selectedProject: null, outputMessages: [], question: emptyQuestion }),
+  tileMessages: {},
+  tileLoading: {},
+  appendTileMessage: (projectId, message) => {
+    set(state => ({
+      tileMessages: {
+        ...state.tileMessages,
+        [projectId]: [...(state.tileMessages[projectId] ?? []), message],
+      },
+    }));
+  },
+  setTileMessages: (projectId, messages) => {
+    set(state => ({
+      tileMessages: { ...state.tileMessages, [projectId]: messages },
+    }));
+  },
+  setTileLoading: (projectId, loading) => {
+    set(state => ({
+      tileLoading: { ...state.tileLoading, [projectId]: loading },
+    }));
+  },
+  clearTileMessages: () => set({ tileMessages: {}, tileLoading: {} }),
+
+  // Profile filter
+  profileFilter: 'All',
+  setProfileFilter: (filter) => set({ profileFilter: filter }),
+
+  // Create project / profile
+  showCreateProject: false,
+  setShowCreateProject: (show) => set({ showCreateProject: show, createProjectServerIndex: show ? null : null }),
+  createProjectServerIndex: null,
   // UI
   showAddServer: false,
   setShowAddServer: (show) => set({ showAddServer: show }),

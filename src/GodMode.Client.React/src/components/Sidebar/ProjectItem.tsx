@@ -1,4 +1,5 @@
 import type { ProjectSummary } from '../../signalr/types';
+import { useAppStore } from '../../store';
 
 interface Props {
   project: ProjectSummary;
@@ -8,20 +9,29 @@ interface Props {
 
 export function ProjectItem({ project, isSelected, onSelect }: Props) {
   const timeAgo = formatRelativeTime(project.UpdatedAt);
-  const stateLabel = project.State === 'WaitingInput' ? 'WAIT' : project.State.slice(0, 4).toUpperCase();
+  const clientQuestion = useAppStore(s => s.projectQuestions[project.Id]);
+  const isWaiting = project.State === 'WaitingInput' || clientQuestion;
+  const stateLabel = isWaiting ? 'WAIT' : project.State.slice(0, 4).toUpperCase();
 
   return (
     <div
-      className={`project-item ${isSelected ? 'selected' : ''}`}
+      className={`project-item ${isSelected ? 'selected' : ''} ${isWaiting ? 'waiting' : ''}`}
       onClick={onSelect}
     >
-      <span className={`project-state-badge ${project.State}`}>
+      <span className={`project-state-badge ${isWaiting ? 'WaitingInput' : project.State}`}>
         {stateLabel}
       </span>
       <div className="project-info">
         <div className="project-name">{project.Name}</div>
         <div className="project-meta">
           {project.RootName && `${project.RootName} · `}{timeAgo}
+          {isWaiting && project.CurrentQuestion && (
+            <span className="project-question-hint" title={project.CurrentQuestion}>
+              {' · '}{project.CurrentQuestion.length > 30
+                ? project.CurrentQuestion.slice(0, 30) + '...'
+                : project.CurrentQuestion}
+            </span>
+          )}
         </div>
       </div>
     </div>
