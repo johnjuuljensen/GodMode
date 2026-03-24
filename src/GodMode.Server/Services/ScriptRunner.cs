@@ -16,7 +16,7 @@ namespace GodMode.Server.Services;
 public class ScriptRunner : IScriptRunner
 {
     private static readonly string[] WindowsExtensions = [".ps1", ".cmd", ".bat"];
-    private static readonly string[] UnixExtensions = [".sh"];
+    private static readonly string[] UnixExtensions = [".sh", ".ps1"];
 
     private readonly ILogger<ScriptRunner> _logger;
 
