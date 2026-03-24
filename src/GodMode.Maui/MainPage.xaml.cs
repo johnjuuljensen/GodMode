@@ -1,18 +1,22 @@
-using GodMode.Maui.Bridge;
-
 namespace GodMode.Maui;
 
 public partial class MainPage : ContentPage
 {
-    private readonly HostBridge _bridge;
-
     public MainPage()
     {
         InitializeComponent();
-        _bridge = new HostBridge(WebView);
+
+        // Inject the local hub base URL after the WebView loads
+        Loaded += async (_, _) =>
+        {
+            // Small delay to ensure the WebView's JS runtime is ready
+            await Task.Delay(200);
+            await WebView.EvaluateJavaScriptAsync(
+                $"window.__GODMODE_BASE_URL__ = '{MauiProgram.LocalBaseUrl}'");
+        };
 
 #if WINDOWS
-        WebView.HandlerChanged += (s, e) =>
+        WebView.HandlerChanged += (_, _) =>
         {
             if (WebView.Handler?.PlatformView is Microsoft.UI.Xaml.Controls.WebView2 wv2)
             {
@@ -23,11 +27,5 @@ public partial class MainPage : ContentPage
             }
         };
 #endif
-    }
-
-    private void WebView_RawMessageReceived(object? sender, HybridWebViewRawMessageReceivedEventArgs e)
-    {
-        if (e.Message is not null)
-            _bridge.HandleMessageFromJs(e.Message);
     }
 }

@@ -33,12 +33,16 @@
 		<!-- MAUI packages (version managed by workload) -->
 		<PackageReference Include="Microsoft.Maui.Controls" VersionOverride="$(MauiVersion)" />
 
+		<!-- ASP.NET Core for embedded Kestrel + local SignalR hub -->
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+
 		<!-- Raw assets: wwwroot for HybridWebView (includes React build output) -->
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
+		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
 	</ItemGroup>
 
 	<!-- Track React sources for incremental build -->

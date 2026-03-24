@@ -5,7 +5,6 @@
 
     <HybridWebView x:Name="WebView"
                     HybridRoot="wwwroot"
-                    DefaultFile="index.html"
-                    RawMessageReceived="WebView_RawMessageReceived" />
+                    DefaultFile="index.html" />
 
 </ContentPage>
