@@ -1,0 +1,6 @@
+{
+  "description": ".NET project with NuGet restore",
+  "scriptsCreateFolder": true,
+  "create": "scripts/create",
+  "delete": "scripts/delete"
+}

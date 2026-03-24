@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GodMode.AI;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using GodMode.Server.Services;
@@ -12,11 +13,15 @@ namespace GodMode.Server.Hubs;
 public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
 {
     private readonly IProjectManager _projectManager;
+    private readonly InferenceRouter _inference;
+    private readonly IHostApplicationLifetime _appLifetime;
     private readonly ILogger<ProjectHub> _logger;
 
-    public ProjectHub(IProjectManager projectManager, ILogger<ProjectHub> logger)
+    public ProjectHub(IProjectManager projectManager, InferenceRouter inference, IHostApplicationLifetime appLifetime, ILogger<ProjectHub> logger)
     {
         _projectManager = projectManager;
+        _inference = inference;
+        _appLifetime = appLifetime;
         _logger = logger;
     }
 
@@ -177,6 +182,170 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} updating profile '{Profile}' description",
             Context.ConnectionId, profileName);
         await _projectManager.UpdateProfileDescriptionAsync(profileName, description);
+    }
+
+    // Root Creation & Management
+
+    public async Task<RootTemplate[]> ListRootTemplates()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested root templates", Context.ConnectionId);
+        return await _projectManager.ListRootTemplatesAsync();
+    }
+
+    public async Task<RootPreview> PreviewRootFromTemplate(string templateName, Dictionary<string, string> parameters)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing template '{Template}'",
+            Context.ConnectionId, templateName);
+        return await _projectManager.PreviewRootFromTemplateAsync(templateName, parameters);
+    }
+
+    public async Task<RootPreview> GenerateRootWithLlm(RootGenerationRequest request)
+    {
+        _logger.LogInformation("Client {ConnectionId} generating root with LLM", Context.ConnectionId);
+        return await _projectManager.GenerateRootWithLlmAsync(request);
+    }
+
+    public async Task CreateRoot(string profileName, string rootName, RootPreview preview)
+    {
+        _logger.LogInformation("Client {ConnectionId} creating root '{Root}' in profile '{Profile}'",
+            Context.ConnectionId, rootName, profileName);
+        await _projectManager.CreateRootAsync(profileName, rootName, preview);
+    }
+
+    public async Task<RootPreview> GetRootPreview(string profileName, string rootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} getting root preview for '{Root}'",
+            Context.ConnectionId, rootName);
+        return await _projectManager.GetRootPreviewAsync(profileName, rootName);
+    }
+
+    public async Task UpdateRoot(string profileName, string rootName, RootPreview preview)
+    {
+        _logger.LogInformation("Client {ConnectionId} updating root '{Root}'",
+            Context.ConnectionId, rootName);
+        await _projectManager.UpdateRootAsync(profileName, rootName, preview);
+    }
+
+    // Root Sharing
+
+    public async Task<byte[]> ExportRoot(string profileName, string rootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} exporting root '{Root}'",
+            Context.ConnectionId, rootName);
+        try
+        {
+            return await _projectManager.ExportRootAsync(profileName, rootName);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task<SharedRootPreview> PreviewImportFromBytes(byte[] packageBytes)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing root import from file", Context.ConnectionId);
+        return await _projectManager.PreviewImportFromBytesAsync(packageBytes);
+    }
+
+    public async Task<SharedRootPreview> PreviewImportFromUrl(string url)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing root import from URL: {Url}",
+            Context.ConnectionId, url);
+        return await _projectManager.PreviewImportFromUrlAsync(url);
+    }
+
+    public async Task<SharedRootPreview> PreviewImportFromGit(string repoUrl, string? subPath, string? gitRef)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing root import from git: {Url}",
+            Context.ConnectionId, repoUrl);
+        return await _projectManager.PreviewImportFromGitAsync(repoUrl, subPath, gitRef);
+    }
+
+    public async Task InstallSharedRoot(SharedRootPreview preview, string? localName)
+    {
+        _logger.LogInformation("Client {ConnectionId} installing shared root '{Name}'",
+            Context.ConnectionId, preview.Manifest.Name);
+        await _projectManager.InstallSharedRootAsync(preview, localName);
+    }
+
+    public async Task UninstallSharedRoot(string rootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} uninstalling root '{Name}'",
+            Context.ConnectionId, rootName);
+        await _projectManager.UninstallSharedRootAsync(rootName);
+    }
+
+    public async Task<InferenceStatus> GetInferenceStatus()
+    {
+        if (!_inference.IsLoaded)
+            await _inference.InitializeAsync();
+
+        if (_inference.IsLoaded)
+        {
+            return new InferenceStatus(
+                IsConfigured: true,
+                Provider: _inference.LastUsedProvider ?? _inference.TierProviderMap.Values.FirstOrDefault(),
+                Model: AIConfig.Load().Model);
+        }
+
+        return new InferenceStatus(IsConfigured: false);
+    }
+
+    public async Task<InferenceStatus> ConfigureInferenceApiKey(string apiKey)
+    {
+        _logger.LogInformation("Client {ConnectionId} configuring inference API key", Context.ConnectionId);
+
+        var config = AIConfig.Load();
+        config.ApiKey = apiKey.Trim();
+        config.Provider ??= "anthropic";
+        config.Model ??= "claude-sonnet-4-20250514";
+        config.Save();
+
+        // Reinitialize with the new key
+        await _inference.InitializeAsync();
+
+        if (_inference.IsLoaded)
+        {
+            return new InferenceStatus(
+                IsConfigured: true,
+                Provider: _inference.TierProviderMap.Values.FirstOrDefault(),
+                Model: config.Model);
+        }
+
+        return new InferenceStatus(IsConfigured: false, Error: "API key saved but provider failed to load. Check the key is valid.");
+    }
+
+    public Task RestartServer()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested server restart", Context.ConnectionId);
+
+        // Spawn a new server process, then stop the current one
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(500); // Give time for the response to reach the client
+
+            var exe = Environment.ProcessPath;
+            if (exe is not null)
+            {
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = exe,
+                    WorkingDirectory = Environment.CurrentDirectory,
+                    UseShellExecute = false,
+                };
+                // Forward original command-line args
+                foreach (var arg in Environment.GetCommandLineArgs().Skip(1))
+                    startInfo.ArgumentList.Add(arg);
+
+                _logger.LogInformation("Spawning new server process: {Exe}", exe);
+                System.Diagnostics.Process.Start(startInfo);
+            }
+
+            _appLifetime.StopApplication();
+        });
+
+        return Task.CompletedTask;
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

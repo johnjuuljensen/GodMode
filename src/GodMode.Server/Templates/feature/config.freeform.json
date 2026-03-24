@@ -1,0 +1,6 @@
+{
+  "description": "Implement a feature from a brief description",
+  "scriptsCreateFolder": true,
+  "create": "freeform/create",
+  "nameTemplate": "feature-{name}"
+}

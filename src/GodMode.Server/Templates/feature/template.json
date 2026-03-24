@@ -1,0 +1,10 @@
+{
+  "name": "feature",
+  "displayName": "Feature Branch (Worktree)",
+  "description": "Git worktree-based feature development. Each project gets a feature/ branch from a bare repo clone. Includes a freeform action and a spec-driven action.",
+  "icon": "git-branch",
+  "parameters": [
+    { "key": "repoUrl", "title": "Repository URL", "description": "HTTPS or SSH URL of the git repository", "required": true },
+    { "key": "defaultBranch", "title": "Default Branch", "description": "Base branch for new features", "defaultValue": "main" }
+  ]
+}

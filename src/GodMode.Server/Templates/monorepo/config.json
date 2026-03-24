@@ -1,0 +1,7 @@
+{
+  "description": "Work on a specific package in a monorepo",
+  "scriptsCreateFolder": true,
+  "create": "scripts/create",
+  "delete": "scripts/delete",
+  "promptTemplate": "You are working in a monorepo. Your primary focus is the package at: {packagePath}\n\nWork within that directory but be aware that shared code and other packages exist in the repo. Check the root package.json or workspace config for the project structure.\n\nTask: {prompt}"
+}

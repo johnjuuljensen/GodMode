@@ -108,4 +108,20 @@ public interface IProjectConnection : IDisposable
     // Profile Management
     Task CreateProfileAsync(string profileName, string? description);
     Task UpdateProfileDescriptionAsync(string profileName, string? description);
+
+    // Root Creation & Management
+    Task<RootTemplate[]> ListRootTemplatesAsync();
+    Task<RootPreview> PreviewRootFromTemplateAsync(string templateName, Dictionary<string, string> parameters);
+    Task<RootPreview> GenerateRootWithLlmAsync(RootGenerationRequest request);
+    Task CreateRootAsync(string profileName, string rootName, RootPreview preview);
+    Task<RootPreview> GetRootPreviewAsync(string profileName, string rootName);
+    Task UpdateRootAsync(string profileName, string rootName, RootPreview preview);
+
+    // Root Sharing
+    Task<byte[]> ExportRootAsync(string profileName, string rootName);
+    Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes);
+    Task<SharedRootPreview> PreviewImportFromUrlAsync(string url);
+    Task<SharedRootPreview> PreviewImportFromGitAsync(string repoUrl, string? subPath, string? gitRef);
+    Task InstallSharedRootAsync(SharedRootPreview preview, string? localName);
+    Task UninstallSharedRootAsync(string rootName);
 }

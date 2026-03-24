@@ -4,11 +4,12 @@ interface Props {
   server: ServerState;
   onConnect: () => void;
   onDisconnect: () => void;
+  onRestart: () => void;
   onEdit: () => void;
   onRemove: () => void;
 }
 
-export function ServerItem({ server, onConnect, onDisconnect, onEdit, onRemove }: Props) {
+export function ServerItem({ server, onConnect, onDisconnect, onRestart, onEdit, onRemove }: Props) {
   const { registration, connectionState } = server;
 
   const handleClick = () => {
@@ -29,13 +30,22 @@ export function ServerItem({ server, onConnect, onDisconnect, onEdit, onRemove }
       </div>
       <div className="server-actions">
         {connectionState === 'connected' && (
-          <button
-            className="server-action-btn"
-            onClick={(e) => { e.stopPropagation(); onDisconnect(); }}
-            title="Disconnect"
-          >
-            ⏏
-          </button>
+          <>
+            <button
+              className="server-action-btn"
+              onClick={(e) => { e.stopPropagation(); onRestart(); }}
+              title="Restart connection"
+            >
+              ↻
+            </button>
+            <button
+              className="server-action-btn"
+              onClick={(e) => { e.stopPropagation(); onDisconnect(); }}
+              title="Disconnect"
+            >
+              ⏏
+            </button>
+          </>
         )}
         {connectionState === 'connecting' || connectionState === 'reconnecting' ? (
           <span className="server-action-btn">{connectionState}…</span>

@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\GodMode.AI\GodMode.AI.csproj" />
     <ProjectReference Include="..\GodMode.ProjectFiles\GodMode.ProjectFiles.csproj" />
     <ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
   </ItemGroup>
@@ -25,6 +26,12 @@
     <Content Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Update="Templates\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <None Include="Templates\**\*.sh;Templates\**\*.ps1">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

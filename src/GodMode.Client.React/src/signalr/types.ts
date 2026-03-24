@@ -74,6 +74,7 @@ export interface ProjectRootInfo {
   Description?: string | null;
   Actions?: CreateActionInfo[] | null;
   ProfileName?: string | null;
+  HasConfig?: boolean;
 }
 
 export interface HostInfo {
@@ -138,6 +139,69 @@ export interface McpServerDetail {
   DeploymentUrl?: string | null;
   Connections?: McpServerConnection[] | null;
   Tools?: McpServerTool[] | null;
+}
+
+// --- Root Creation & Sharing models ---
+
+export interface RootTemplate {
+  Name: string;
+  DisplayName: string;
+  Description: string;
+  Icon?: string | null;
+  Parameters?: RootTemplateParameter[] | null;
+}
+
+export interface RootTemplateParameter {
+  Key: string;
+  Title: string;
+  Description?: string | null;
+  DefaultValue?: string | null;
+  Required: boolean;
+}
+
+export interface RootPreview {
+  Files: Record<string, string>;
+  ValidationError?: string | null;
+}
+
+export interface RootGenerationRequest {
+  UserInstruction: string;
+  CurrentFiles?: Record<string, string> | null;
+  SchemaFields?: SchemaFieldDefinition[] | null;
+}
+
+export interface SchemaFieldDefinition {
+  Key: string;
+  Title: string;
+  FieldType: string;
+  IsRequired: boolean;
+  IsMultiline: boolean;
+  EnumValues?: string[] | null;
+}
+
+export interface RootManifest {
+  Name: string;
+  DisplayName: string;
+  Description?: string | null;
+  Author?: string | null;
+  Version?: string | null;
+  Platforms?: string[] | null;
+  Tags?: string[] | null;
+  Source?: string | null;
+  MinGodModeVersion?: string | null;
+}
+
+export interface SharedRootPreview {
+  Manifest: RootManifest;
+  Files: Record<string, string>;
+  ScriptHashes?: Record<string, string> | null;
+}
+
+export interface InferenceStatus {
+  IsConfigured: boolean;
+  Provider?: string | null;
+  Model?: string | null;
+  Error?: string | null;
 }
 
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---

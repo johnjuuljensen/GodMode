@@ -171,6 +171,46 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         await _hubProxy.UpdateProfileDescription(profileName, description);
     }
 
+    // Root Creation & Management
+
+    public async Task<RootTemplate[]> ListRootTemplatesAsync()
+        => await _hubProxy.ListRootTemplates();
+
+    public async Task<RootPreview> PreviewRootFromTemplateAsync(string templateName, Dictionary<string, string> parameters)
+        => await _hubProxy.PreviewRootFromTemplate(templateName, parameters);
+
+    public async Task<RootPreview> GenerateRootWithLlmAsync(RootGenerationRequest request)
+        => await _hubProxy.GenerateRootWithLlm(request);
+
+    public async Task CreateRootAsync(string profileName, string rootName, RootPreview preview)
+        => await _hubProxy.CreateRoot(profileName, rootName, preview);
+
+    public async Task<RootPreview> GetRootPreviewAsync(string profileName, string rootName)
+        => await _hubProxy.GetRootPreview(profileName, rootName);
+
+    public async Task UpdateRootAsync(string profileName, string rootName, RootPreview preview)
+        => await _hubProxy.UpdateRoot(profileName, rootName, preview);
+
+    // Root Sharing
+
+    public async Task<byte[]> ExportRootAsync(string profileName, string rootName)
+        => await _hubProxy.ExportRoot(profileName, rootName);
+
+    public async Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes)
+        => await _hubProxy.PreviewImportFromBytes(packageBytes);
+
+    public async Task<SharedRootPreview> PreviewImportFromUrlAsync(string url)
+        => await _hubProxy.PreviewImportFromUrl(url);
+
+    public async Task<SharedRootPreview> PreviewImportFromGitAsync(string repoUrl, string? subPath, string? gitRef)
+        => await _hubProxy.PreviewImportFromGit(repoUrl, subPath, gitRef);
+
+    public async Task InstallSharedRootAsync(SharedRootPreview preview, string? localName)
+        => await _hubProxy.InstallSharedRoot(preview, localName);
+
+    public async Task UninstallSharedRootAsync(string rootName)
+        => await _hubProxy.UninstallSharedRoot(rootName);
+
     public void Disconnect()
     {
         _hubConnection.StopAsync().ConfigureAwait(false);

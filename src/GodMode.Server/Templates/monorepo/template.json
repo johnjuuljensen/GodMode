@@ -1,0 +1,9 @@
+{
+  "name": "monorepo",
+  "displayName": "Monorepo Package",
+  "description": "Clone a monorepo and focus Claude on a specific package or subdirectory. Installs dependencies for the whole repo.",
+  "icon": "layers",
+  "parameters": [
+    { "key": "repoUrl", "title": "Repository URL", "description": "HTTPS or SSH URL of the monorepo", "required": true }
+  ]
+}

@@ -6,43 +6,12 @@ import './Sidebar.css';
 
 export function Sidebar() {
   const servers = useAppStore(s => s.servers);
-  const setShowAddServer = useAppStore(s => s.setShowAddServer);
-  const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
   const profileFilter = useAppStore(s => s.profileFilter);
-
-  const hasRoots = servers.some(s => s.roots.length > 0);
 
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <span className="sidebar-title">GodMode</span>
-        <div className="sidebar-header-actions">
-          {hasRoots && (
-            <button
-              className="sidebar-add-btn"
-              onClick={() => setShowCreateProject(true)}
-              title="Create project"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                <line x1="12" y1="8" x2="12" y2="14" />
-                <line x1="9" y1="11" x2="15" y2="11" />
-              </svg>
-            </button>
-          )}
-          <button
-            className="sidebar-add-btn"
-            onClick={() => setShowAddServer(true)}
-            title="Add server"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-              <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-              <line x1="6" y1="6" x2="6.01" y2="6" />
-              <line x1="6" y1="18" x2="6.01" y2="18" />
-            </svg>
-          </button>
-        </div>
+        <img src="/godmodelogo.png" alt="GodMode" className="sidebar-logo" />
       </div>
 
       <div className="sidebar-content">
@@ -69,6 +38,7 @@ export function Sidebar() {
 function ServerSection({ server, index, profileFilter }: { server: ServerState; index: number; profileFilter: string }) {
   const connectServer = useAppStore(s => s.connectServer);
   const disconnectServer = useAppStore(s => s.disconnectServer);
+  const restartServer = useAppStore(s => s.restartServer);
   const removeServer = useAppStore(s => s.removeServer);
   const selectProject = useAppStore(s => s.selectProject);
   const selectedProject = useAppStore(s => s.selectedProject);
@@ -118,6 +88,7 @@ function ServerSection({ server, index, profileFilter }: { server: ServerState; 
         server={server}
         onConnect={() => connectServer(index)}
         onDisconnect={() => disconnectServer(index)}
+        onRestart={() => restartServer(index)}
         onEdit={() => setEditServerIndex(index)}
         onRemove={() => removeServer(index)}
       />

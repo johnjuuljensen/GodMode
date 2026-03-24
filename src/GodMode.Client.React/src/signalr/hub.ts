@@ -3,7 +3,7 @@
  * Mirrors the IProjectHub/IProjectHubClient contract from GodMode.Shared.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpRegistrySearchResult, McpServerDetail, McpServerConfig } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpRegistrySearchResult, McpServerDetail, McpServerConfig, RootTemplate, RootPreview, RootGenerationRequest, SharedRootPreview, InferenceStatus } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -183,5 +183,69 @@ export class GodModeHub {
 
   async updateProfileDescription(profileName: string, description?: string | null): Promise<void> {
     await this.connection!.invoke('UpdateProfileDescription', profileName, description ?? null);
+  }
+
+  // --- Root Creation & Management ---
+
+  async listRootTemplates(): Promise<RootTemplate[]> {
+    return await this.connection!.invoke('ListRootTemplates');
+  }
+
+  async previewRootFromTemplate(templateName: string, parameters: Record<string, string>): Promise<RootPreview> {
+    return await this.connection!.invoke('PreviewRootFromTemplate', templateName, parameters);
+  }
+
+  async generateRootWithLlm(request: RootGenerationRequest): Promise<RootPreview> {
+    return await this.connection!.invoke('GenerateRootWithLlm', request);
+  }
+
+  async createRoot(profileName: string, rootName: string, preview: RootPreview): Promise<void> {
+    await this.connection!.invoke('CreateRoot', profileName, rootName, preview);
+  }
+
+  async getRootPreview(profileName: string, rootName: string): Promise<RootPreview> {
+    return await this.connection!.invoke('GetRootPreview', profileName, rootName);
+  }
+
+  async updateRoot(profileName: string, rootName: string, preview: RootPreview): Promise<void> {
+    await this.connection!.invoke('UpdateRoot', profileName, rootName, preview);
+  }
+
+  // --- Root Sharing ---
+
+  async exportRoot(profileName: string, rootName: string): Promise<Uint8Array> {
+    return await this.connection!.invoke('ExportRoot', profileName, rootName);
+  }
+
+  async previewImportFromBytes(packageBytes: Uint8Array): Promise<SharedRootPreview> {
+    return await this.connection!.invoke('PreviewImportFromBytes', packageBytes);
+  }
+
+  async previewImportFromUrl(url: string): Promise<SharedRootPreview> {
+    return await this.connection!.invoke('PreviewImportFromUrl', url);
+  }
+
+  async previewImportFromGit(repoUrl: string, subPath?: string | null, gitRef?: string | null): Promise<SharedRootPreview> {
+    return await this.connection!.invoke('PreviewImportFromGit', repoUrl, subPath ?? null, gitRef ?? null);
+  }
+
+  async installSharedRoot(preview: SharedRootPreview, localName?: string | null): Promise<void> {
+    await this.connection!.invoke('InstallSharedRoot', preview, localName ?? null);
+  }
+
+  async uninstallSharedRoot(rootName: string): Promise<void> {
+    await this.connection!.invoke('UninstallSharedRoot', rootName);
+  }
+
+  async getInferenceStatus(): Promise<InferenceStatus> {
+    return await this.connection!.invoke('GetInferenceStatus');
+  }
+
+  async configureInferenceApiKey(apiKey: string): Promise<InferenceStatus> {
+    return await this.connection!.invoke('ConfigureInferenceApiKey', apiKey);
+  }
+
+  async restartServer(): Promise<void> {
+    await this.connection!.invoke('RestartServer');
   }
 }

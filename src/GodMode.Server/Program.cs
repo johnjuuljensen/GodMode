@@ -1,3 +1,4 @@
+using GodMode.AI;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
@@ -58,6 +59,12 @@ builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
 builder.Services.AddHttpClient<McpRegistryClient>();
 builder.Services.AddSingleton<ProfileOverrideStore>();
+builder.Services.AddGodModeAIServices();
+builder.Services.AddSingleton<RootTemplateService>();
+builder.Services.AddSingleton<RootCreator>();
+builder.Services.AddSingleton<RootGenerationService>();
+builder.Services.AddSingleton<RootPackager>();
+builder.Services.AddSingleton<RootInstaller>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();

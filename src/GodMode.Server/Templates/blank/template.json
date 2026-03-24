@@ -1,0 +1,7 @@
+{
+  "name": "blank",
+  "displayName": "Blank Root",
+  "description": "Empty root — start from scratch with just a basic config",
+  "icon": "file",
+  "parameters": []
+}

@@ -34,6 +34,7 @@ interface AppState {
   removeServer: (index: number) => void;
   connectServer: (index: number) => Promise<void>;
   disconnectServer: (index: number) => Promise<void>;
+  restartServer: (index: number) => Promise<void>;
   refreshProjects: (index: number) => Promise<void>;
 
   // Selected project
@@ -106,6 +107,12 @@ interface AppState {
   showCreateProfile: boolean;
   createProfileServerIndex: number | null;
   setShowCreateProfile: (show: boolean, serverIndex?: number | null) => void;
+
+  // Root manager dialog
+  showRootManager: boolean;
+  rootManagerServerIndex: number | null;
+  rootManagerInitialTab: 'roots' | 'create' | 'import' | null;
+  setShowRootManager: (show: boolean, serverIndex?: number | null, tab?: 'roots' | 'create' | 'import' | null) => void;
 }
 
 /** Recompute waiting counts from server projects + client-side question map, excluding dismissed */
@@ -362,6 +369,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  restartServer: async (index) => {
+    const server = get().servers[index];
+    if (!server) return;
+
+    try {
+      // Tell the server to restart its process
+      await server.hub.restartServer();
+    } catch {
+      // Server may have already shut down before responding
+    }
+
+    // Disconnect our side
+    await get().disconnectServer(index);
+
+    // Wait for the new server process to come up, then reconnect
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await get().connectServer(index);
+  },
+
   refreshProjects: async (index) => {
     const server = get().servers[index];
     if (!server || server.connectionState !== 'connected') return;
@@ -488,4 +514,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   showCreateProfile: false,
   createProfileServerIndex: null,
   setShowCreateProfile: (show, serverIndex) => set({ showCreateProfile: show, createProfileServerIndex: serverIndex ?? null }),
+
+  // Root manager dialog
+  showRootManager: false,
+  rootManagerServerIndex: null,
+  rootManagerInitialTab: null,
+  setShowRootManager: (show, serverIndex, tab) => set({
+    showRootManager: show,
+    rootManagerServerIndex: serverIndex ?? null,
+    rootManagerInitialTab: tab ?? null,
+  }),
 }));

@@ -1,0 +1,7 @@
+{
+  "description": "Git worktree projects",
+  "profileName": "{{profileName}}",
+  "environment": {},
+  "prepare": "scripts/prepare",
+  "delete": "scripts/delete"
+}

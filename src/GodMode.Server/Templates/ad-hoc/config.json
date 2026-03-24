@@ -1,0 +1,4 @@
+{
+  "description": "Ad-hoc tasks — just a folder with Claude, no VCS",
+  "model": "sonnet"
+}

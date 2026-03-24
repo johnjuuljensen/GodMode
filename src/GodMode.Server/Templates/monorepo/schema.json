@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Project Name" },
+    "branch": { "type": "string", "title": "Branch", "description": "Branch to clone (leave empty for default)" },
+    "packagePath": { "type": "string", "title": "Package Path", "description": "Relative path to the package directory (e.g. packages/api, apps/web)" },
+    "installDeps": { "type": "boolean", "title": "Install Dependencies", "description": "Run dependency install at the repo root", "default": "true" },
+    "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+  },
+  "required": ["name", "packagePath", "prompt"]
+}

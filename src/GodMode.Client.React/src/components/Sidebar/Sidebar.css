@@ -8,16 +8,17 @@
 .sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
+  justify-content: center;
+  padding: 4px 12px;
   border-bottom: 1px solid var(--glass-border);
+  min-height: 61px;
+  box-sizing: border-box;
 }
 
-.sidebar-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent);
-  letter-spacing: -0.02em;
+.sidebar-logo {
+  height: 38px;
+  width: auto;
+  object-fit: contain;
 }
 
 .sidebar-header-actions {

@@ -49,8 +49,8 @@ const MODEL_OPTIONS = ['opus', 'sonnet', 'haiku'];
 export function CreateProject() {
   const servers = useAppStore(s => s.servers);
   const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
+  const setShowMcpBrowser = useAppStore(s => s.setShowMcpBrowser);
 
-  // Find connected servers with roots
   const connectedServers = useMemo(
     () => servers
       .map((s, i) => ({ server: s, index: i }))
@@ -59,14 +59,13 @@ export function CreateProject() {
   );
 
   const [selectedServerIndex, setSelectedServerIndex] = useState<number>(connectedServers[0]?.index ?? -1);
-  const [selectedRootName, setSelectedRootName] = useState<string>('');
+  const [selectedRoot, setSelectedRoot] = useState<ProjectRootInfo | null>(null);
   const [selectedActionName, setSelectedActionName] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState('opus');
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [effectiveMcpServers, setEffectiveMcpServers] = useState<Record<string, McpServerConfig>>({});
-  const setShowMcpBrowser = useAppStore(s => s.setShowMcpBrowser);
 
   const server = servers[selectedServerIndex];
   const roots = server?.roots ?? [];
@@ -82,17 +81,16 @@ export function CreateProject() {
     return groups;
   }, [roots]);
 
-  const selectedRoot = roots.find(r => r.Name === selectedRootName);
+  // If there's only one root, auto-select it
+  useEffect(() => {
+    if (roots.length === 1 && !selectedRoot) {
+      setSelectedRoot(roots[0]);
+    }
+  }, [roots, selectedRoot]);
+
   const actions = selectedRoot?.Actions ?? [];
   const selectedAction = actions.find(a => a.Name === selectedActionName) ?? null;
   const formFields = useMemo(() => selectedAction?.InputSchema ? parseFormFields(selectedAction.InputSchema) : [], [selectedAction]);
-
-  // Auto-select first root when server changes
-  useEffect(() => {
-    if (roots.length > 0 && !roots.find(r => r.Name === selectedRootName)) {
-      setSelectedRootName(roots[0].Name);
-    }
-  }, [roots, selectedRootName]);
 
   // Auto-select first action when root changes
   useEffect(() => {
@@ -103,7 +101,7 @@ export function CreateProject() {
     }
   }, [actions, selectedActionName]);
 
-  // Reset form values when action changes, applying defaults
+  // Reset form values when action changes
   useEffect(() => {
     const defaults: Record<string, string> = {};
     for (const field of formFields) {
@@ -138,7 +136,6 @@ export function CreateProject() {
   const handleCreate = async () => {
     if (!server || !selectedRoot) return;
 
-    // Validate required fields
     for (const field of formFields) {
       if (field.isRequired && !formValues[field.key]?.trim()) {
         setError(`"${field.title}" is required`);
@@ -176,53 +173,79 @@ export function CreateProject() {
     }
   };
 
-  return (
-    <div className="modal-overlay" onClick={() => !creating && setShowCreateProject(false)}>
-      <div className="modal create-project-modal" onClick={e => e.stopPropagation()}>
-        <h2>New Project</h2>
+  const close = () => !creating && setShowCreateProject(false);
 
-        {/* Server selector (only if multiple) */}
-        {connectedServers.length > 1 && (
-          <div className="form-group">
-            <label>Server</label>
-            <select
-              value={selectedServerIndex}
-              onChange={e => setSelectedServerIndex(Number(e.target.value))}
-            >
-              {connectedServers.map(({ server: s, index: i }) => (
-                <option key={i} value={i}>
-                  {s.registration.displayName || s.registration.url}
-                </option>
-              ))}
-            </select>
+  // ─── Step 1: Root Selection ─────────────────────────────────────────────────
+  if (!selectedRoot) {
+    return (
+      <div className="modal-overlay" onClick={close}>
+        <div className="modal create-project-modal" onClick={e => e.stopPropagation()}>
+          <h2>New Project</h2>
+
+          {connectedServers.length > 1 && (
+            <div className="form-group">
+              <label>Server</label>
+              <select
+                value={selectedServerIndex}
+                onChange={e => { setSelectedServerIndex(Number(e.target.value)); setSelectedRoot(null); }}
+              >
+                {connectedServers.map(({ server: s, index: i }) => (
+                  <option key={i} value={i}>
+                    {s.registration.displayName || s.registration.url}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <p className="root-picker-hint">Choose a project root to get started:</p>
+
+          <div className="root-picker-grid">
+            {[...rootsByProfile.entries()].map(([profileName, profileRoots]) => (
+              profileRoots.map(root => (
+                <button
+                  key={`${profileName}/${root.Name}`}
+                  className="root-picker-card"
+                  onClick={() => setSelectedRoot(root)}
+                >
+                  <div className="root-picker-card-name">{root.Name}</div>
+                  {root.Description && (
+                    <div className="root-picker-card-desc">{root.Description}</div>
+                  )}
+                  {root.Actions && root.Actions.length > 0 && (
+                    <div className="root-picker-card-actions">
+                      {root.Actions.map(a => (
+                        <span key={a.Name} className="root-picker-action-badge">{a.Name}</span>
+                      ))}
+                    </div>
+                  )}
+                  {rootsByProfile.size > 1 && (
+                    <div className="root-picker-card-profile">{profileName}</div>
+                  )}
+                </button>
+              ))
+            ))}
           </div>
-        )}
 
-        {/* Root selector grouped by profile */}
-        <div className="form-group">
-          <label>Project Root</label>
-          <select
-            value={selectedRootName}
-            onChange={e => setSelectedRootName(e.target.value)}
-          >
-            {rootsByProfile.size <= 1 ? (
-              roots.map(r => (
-                <option key={r.Name} value={r.Name}>
-                  {r.Name}{r.Description ? ` — ${r.Description}` : ''}
-                </option>
-              ))
-            ) : (
-              Array.from(rootsByProfile.entries()).map(([profile, profileRoots]) => (
-                <optgroup key={profile} label={profile}>
-                  {profileRoots.map(r => (
-                    <option key={r.Name} value={r.Name}>
-                      {r.Name}{r.Description ? ` — ${r.Description}` : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              ))
-            )}
-          </select>
+          <div className="btn-group">
+            <button className="btn btn-secondary" onClick={close}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Step 2: Project Form ───────────────────────────────────────────────────
+  return (
+    <div className="modal-overlay" onClick={close}>
+      <div className="modal create-project-modal" onClick={e => e.stopPropagation()}>
+        <div className="create-project-header">
+          {roots.length > 1 && (
+            <button className="btn btn-secondary btn-sm" onClick={() => setSelectedRoot(null)}>
+              ← Back
+            </button>
+          )}
+          <h2>New Project — {selectedRoot.Name}</h2>
         </div>
 
         {/* Action selector (if multiple actions) */}
@@ -253,56 +276,54 @@ export function CreateProject() {
         </div>
 
         {/* MCP Servers panel */}
-        {selectedRoot && (
-          <div className="mcp-servers-panel">
-            <div className="mcp-servers-header">
-              <h4>
-                MCP Servers
-                {Object.keys(effectiveMcpServers).length > 0 && (
-                  <span className="mcp-count-badge">{Object.keys(effectiveMcpServers).length}</span>
-                )}
-              </h4>
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={() => setShowMcpBrowser(true, {
-                  serverIndex: selectedServerIndex,
-                  profileName: selectedRoot.ProfileName ?? 'Default',
-                  rootName: selectedRoot.Name,
-                  actionName: selectedActionName || undefined,
-                })}
-              >
-                Browse &amp; Add
-              </button>
-            </div>
-            {Object.keys(effectiveMcpServers).length > 0 && (
-              <div className="mcp-server-list">
-                {Object.entries(effectiveMcpServers).map(([name, config]) => (
-                  <div key={name} className="mcp-server-entry">
-                    <span>
-                      <span className="mcp-server-entry-name">{name}</span>
-                      <span className="mcp-type-badge">{config.Url ? 'remote' : 'stdio'}</span>
-                    </span>
-                    <button
-                      className="mcp-remove-btn"
-                      title="Remove"
-                      onClick={async () => {
-                        try {
-                          await server!.hub.removeMcpServer(name, 'profile', selectedRoot!.ProfileName ?? 'Default', selectedRoot!.Name);
-                          const updated = await server!.hub.getEffectiveMcpServers(
-                            selectedRoot!.ProfileName ?? 'Default', selectedRoot!.Name, selectedActionName || undefined,
-                          );
-                          setEffectiveMcpServers(updated);
-                        } catch { /* ignore */ }
-                      }}
-                    >
-                      &#x2715;
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
+        <div className="mcp-servers-panel">
+          <div className="mcp-servers-header">
+            <h4>
+              MCP Servers
+              {Object.keys(effectiveMcpServers).length > 0 && (
+                <span className="mcp-count-badge">{Object.keys(effectiveMcpServers).length}</span>
+              )}
+            </h4>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setShowMcpBrowser(true, {
+                serverIndex: selectedServerIndex,
+                profileName: selectedRoot.ProfileName ?? 'Default',
+                rootName: selectedRoot.Name,
+                actionName: selectedActionName || undefined,
+              })}
+            >
+              Browse &amp; Add
+            </button>
           </div>
-        )}
+          {Object.keys(effectiveMcpServers).length > 0 && (
+            <div className="mcp-server-list">
+              {Object.entries(effectiveMcpServers).map(([name, config]) => (
+                <div key={name} className="mcp-server-entry">
+                  <span>
+                    <span className="mcp-server-entry-name">{name}</span>
+                    <span className="mcp-type-badge">{config.Url ? 'remote' : 'stdio'}</span>
+                  </span>
+                  <button
+                    className="mcp-remove-btn"
+                    title="Remove"
+                    onClick={async () => {
+                      try {
+                        await server!.hub.removeMcpServer(name, 'profile', selectedRoot!.ProfileName ?? 'Default', selectedRoot!.Name);
+                        const updated = await server!.hub.getEffectiveMcpServers(
+                          selectedRoot!.ProfileName ?? 'Default', selectedRoot!.Name, selectedActionName || undefined,
+                        );
+                        setEffectiveMcpServers(updated);
+                      } catch { /* ignore */ }
+                    }}
+                  >
+                    &#x2715;
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Dynamic form fields */}
         {formFields.map(field => (
@@ -321,7 +342,8 @@ export function CreateProject() {
                   checked={formValues[field.key] === 'true'}
                   onChange={e => setFieldValue(field.key, e.target.checked ? 'true' : 'false')}
                 />
-                <span>{formValues[field.key] === 'true' ? 'Yes' : 'No'}</span>
+                <span className="toggle-track" />
+                <span className="toggle-label">{formValues[field.key] === 'true' ? 'On' : 'Off'}</span>
               </label>
             ) : field.fieldType === 'enum' ? (
               <select
@@ -361,7 +383,7 @@ export function CreateProject() {
           </button>
           <button
             className="btn btn-secondary"
-            onClick={() => setShowCreateProject(false)}
+            onClick={close}
             disabled={creating}
           >
             Cancel

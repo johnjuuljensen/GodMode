@@ -1,0 +1,10 @@
+{
+  "name": "bugfix",
+  "displayName": "Bugfix (Clone + Branch)",
+  "description": "Clone a repo and create a bugfix/ branch. Lightweight alternative to worktrees — each project gets a full clone with a dedicated branch.",
+  "icon": "alert-circle",
+  "parameters": [
+    { "key": "repoUrl", "title": "Repository URL", "description": "HTTPS or SSH URL of the git repository", "required": true },
+    { "key": "defaultBranch", "title": "Default Branch", "description": "Branch to base bugfixes on", "defaultValue": "main" }
+  ]
+}

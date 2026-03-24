@@ -1,0 +1,8 @@
+{
+  "description": "AI-assisted pull request review",
+  "scriptsCreateFolder": true,
+  "create": "scripts/create",
+  "delete": "scripts/delete",
+  "nameTemplate": "review-pr-{prNumber}",
+  "promptTemplate": "You are reviewing pull request #{prNumber} in this repository.\n\n{prContext}\n\nReview the changes thoroughly. Look for:\n- Bugs and logic errors\n- Security issues\n- Performance concerns\n- Code style and best practices\n- Missing tests\n- Edge cases\n\nAdditional review instructions: {prompt}"
+}
