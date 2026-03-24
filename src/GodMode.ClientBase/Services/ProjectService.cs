@@ -140,4 +140,49 @@ public class ProjectService : IProjectService
         _statusCache.TryRemove(cacheKey, out _);
         _lastStatusUpdate.TryRemove(cacheKey, out _);
     }
+
+    public async Task<McpRegistrySearchResult> SearchMcpServersAsync(string profileName, string hostId, string query, int pageSize = 20, int page = 1)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        return await connection.SearchMcpServersAsync(query, pageSize, page);
+    }
+
+    public async Task<McpServerDetail?> GetMcpServerDetailAsync(string profileName, string hostId, string qualifiedName)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        return await connection.GetMcpServerDetailAsync(qualifiedName);
+    }
+
+    public async Task AddMcpServerAsync(string profileName, string hostId, string serverName, McpServerConfig config,
+        string targetLevel, string? serverProfileName, string? rootName, string? actionName)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        await connection.AddMcpServerAsync(serverName, config, targetLevel, serverProfileName, rootName, actionName);
+    }
+
+    public async Task RemoveMcpServerAsync(string profileName, string hostId, string serverName,
+        string targetLevel, string? serverProfileName, string? rootName, string? actionName)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        await connection.RemoveMcpServerAsync(serverName, targetLevel, serverProfileName, rootName, actionName);
+    }
+
+    public async Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
+        string profileName, string hostId, string serverProfileName, string rootName, string? actionName)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        return await connection.GetEffectiveMcpServersAsync(serverProfileName, rootName, actionName);
+    }
+
+    public async Task CreateProfileAsync(string profileName, string hostId, string newProfileName, string? description)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        await connection.CreateProfileAsync(newProfileName, description);
+    }
+
+    public async Task UpdateProfileDescriptionAsync(string profileName, string hostId, string targetProfileName, string? description)
+    {
+        var connection = await _hostConnectionService.ConnectToHostAsync(profileName, hostId);
+        await connection.UpdateProfileDescriptionAsync(targetProfileName, description);
+    }
 }

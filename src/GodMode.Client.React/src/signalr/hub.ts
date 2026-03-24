@@ -3,7 +3,7 @@
  * Mirrors the IProjectHub/IProjectHubClient contract from GodMode.Shared.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpRegistrySearchResult, McpServerDetail, McpServerConfig } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -143,5 +143,45 @@ export class GodModeHub {
 
   async deleteProject(projectId: string, force: boolean = false): Promise<void> {
     await this.connection!.invoke('DeleteProject', projectId, force);
+  }
+
+  // --- MCP Server Discovery & Configuration ---
+
+  async searchMcpServers(query: string, pageSize: number = 20, page: number = 1): Promise<McpRegistrySearchResult> {
+    return await this.connection!.invoke('SearchMcpServers', query, pageSize, page);
+  }
+
+  async getMcpServerDetail(qualifiedName: string): Promise<McpServerDetail | null> {
+    return await this.connection!.invoke('GetMcpServerDetail', qualifiedName);
+  }
+
+  async addMcpServer(
+    serverName: string, config: McpServerConfig, targetLevel: string,
+    profileName?: string | null, rootName?: string | null, actionName?: string | null,
+  ): Promise<void> {
+    await this.connection!.invoke('AddMcpServer', serverName, config, targetLevel, profileName, rootName, actionName);
+  }
+
+  async removeMcpServer(
+    serverName: string, targetLevel: string,
+    profileName?: string | null, rootName?: string | null, actionName?: string | null,
+  ): Promise<void> {
+    await this.connection!.invoke('RemoveMcpServer', serverName, targetLevel, profileName, rootName, actionName);
+  }
+
+  async getEffectiveMcpServers(
+    profileName: string, rootName: string, actionName?: string | null,
+  ): Promise<Record<string, McpServerConfig>> {
+    return await this.connection!.invoke('GetEffectiveMcpServers', profileName, rootName, actionName);
+  }
+
+  // --- Profile Management ---
+
+  async createProfile(profileName: string, description?: string | null): Promise<void> {
+    await this.connection!.invoke('CreateProfile', profileName, description ?? null);
+  }
+
+  async updateProfileDescription(profileName: string, description?: string | null): Promise<void> {
+    await this.connection!.invoke('UpdateProfileDescription', profileName, description ?? null);
   }
 }

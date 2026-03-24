@@ -1,0 +1,54 @@
+.profile-settings-modal {
+  max-width: 560px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.profile-settings-section {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.profile-settings-section:last-of-type {
+  border-bottom: none;
+}
+
+.profile-settings-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.form-error {
+  color: var(--error);
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.form-textarea {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+  transition: border-color 0.15s;
+}
+
+.form-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.form-description {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-tertiary);
+}

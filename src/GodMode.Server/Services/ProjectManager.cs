@@ -2,6 +2,7 @@ using GodMode.Server.Models;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
+using GodMode.Shared.Services;
 using Microsoft.AspNetCore.SignalR;
 using GodMode.Server.Hubs;
 using System.Collections.Concurrent;
@@ -21,6 +22,8 @@ public class ProjectManager : IProjectManager
     private readonly IRootConfigReader _rootConfigReader;
     private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
+    private readonly McpRegistryClient _mcpRegistryClient;
+    private readonly ProfileOverrideStore _profileOverrideStore;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
@@ -61,6 +64,8 @@ public class ProjectManager : IProjectManager
         IRootConfigReader rootConfigReader,
         IScriptRunner scriptRunner,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
+        McpRegistryClient mcpRegistryClient,
+        ProfileOverrideStore profileOverrideStore,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -69,6 +74,8 @@ public class ProjectManager : IProjectManager
         _rootConfigReader = rootConfigReader;
         _scriptRunner = scriptRunner;
         _hubContext = hubContext;
+        _mcpRegistryClient = mcpRegistryClient;
+        _profileOverrideStore = profileOverrideStore;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -125,8 +132,20 @@ public class ProjectManager : IProjectManager
     /// </summary>
     private ProfileSnapshot BuildSnapshot()
     {
-        // Start with explicit profiles
-        var merged = new Dictionary<string, ProfileConfig>(_explicitProfiles, StringComparer.OrdinalIgnoreCase);
+        // Start with deep-cloned explicit profiles (so overrides don't mutate the originals)
+        var merged = new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, cfg) in _explicitProfiles)
+        {
+            merged[key] = new ProfileConfig
+            {
+                Roots = new Dictionary<string, string>(cfg.Roots),
+                Environment = cfg.Environment != null ? new Dictionary<string, string>(cfg.Environment) : null,
+                Description = cfg.Description,
+                McpServers = cfg.McpServers != null
+                    ? new Dictionary<string, McpServerConfig?>(cfg.McpServers)
+                    : null,
+            };
+        }
 
         // Discover roots from ProjectRootsDir (if configured)
         if (_projectRootsDir != null)
@@ -146,13 +165,35 @@ public class ProjectManager : IProjectManager
                     {
                         Roots = mergedRoots,
                         Environment = existing.Environment,
-                        Description = existing.Description ?? profileConfig.Description
+                        Description = existing.Description ?? profileConfig.Description,
+                        McpServers = existing.McpServers
                     };
                 }
                 else
                 {
                     merged[profileName] = profileConfig;
                 }
+            }
+        }
+
+        // Apply runtime profile overrides (MCP servers, descriptions from ~/.godmode/profiles.json)
+        var overrides = _profileOverrideStore.Load();
+        foreach (var (name, profileOverride) in overrides)
+        {
+            if (!merged.TryGetValue(name, out var profile))
+            {
+                // New profile created at runtime
+                profile = new ProfileConfig { Description = profileOverride.Description };
+                merged[name] = profile;
+            }
+            if (profileOverride.McpServers != null)
+            {
+                profile.McpServers = MergeMcpServers(profile.McpServers, profileOverride.McpServers)
+                    as Dictionary<string, McpServerConfig?>;
+            }
+            if (profileOverride.Description != null)
+            {
+                profile.Description = profileOverride.Description;
             }
         }
 
@@ -511,9 +552,9 @@ public class ProjectManager : IProjectManager
         // Resolve model: user input overrides action config default
         var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
 
-        // Build claude env/args from action config + project settings + profile env
+        // Build claude env/args from action config + project settings + profile env + MCP servers
         var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, model, profileEnv,
-            request.ProfileName, config.StripEnvVarProfile);
+            request.ProfileName, config.StripEnvVarProfile, profileConfig?.McpServers, projectPath);
 
         // Start Claude process
         project.ProcessCancellation = new CancellationTokenSource();
@@ -701,16 +742,19 @@ public class ProjectManager : IProjectManager
                 var action = config.ResolveAction(project.ActionName);
                 if (action != null)
                     (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, action.Model, profileEnv,
-                        resumeProfileName, config.StripEnvVarProfile);
+                        resumeProfileName, config.StripEnvVarProfile, profileCfg?.McpServers, project.ProjectPath);
                 else
                     (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings,
                         profileEnv: profileEnv, profileName: resumeProfileName,
-                        stripEnvVarProfile: config.StripEnvVarProfile);
+                        stripEnvVarProfile: config.StripEnvVarProfile,
+                        profileMcpServers: profileCfg?.McpServers, projectPath: project.ProjectPath);
             }
             else
             {
                 // No root config, just apply project settings
-                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, profileEnv: profileEnv);
+                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings,
+                    profileEnv: profileEnv, profileMcpServers: profileCfg?.McpServers,
+                    projectPath: project.ProjectPath);
             }
         }
         catch (Exception ex)
@@ -883,6 +927,135 @@ public class ProjectManager : IProjectManager
             }
         });
     }
+
+    #region MCP Server Discovery & Configuration
+
+    public Task<McpRegistrySearchResult> SearchMcpServersAsync(string query, int pageSize, int page)
+        => _mcpRegistryClient.SearchAsync(query, pageSize, page);
+
+    public Task<McpServerDetail?> GetMcpServerDetailAsync(string qualifiedName)
+        => _mcpRegistryClient.GetServerDetailAsync(qualifiedName);
+
+    public Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        switch (targetLevel.ToLowerInvariant())
+        {
+            case "profile":
+                ArgumentNullException.ThrowIfNull(profileName);
+                _profileOverrideStore.SetMcpServer(profileName, serverName, config);
+                RebuildSnapshot();
+                break;
+
+            case "root":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                var rootPath = _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+                var configPath = Path.Combine(rootPath, ".godmode-root", "config.json");
+                WriteMcpServerToConfigFile(configPath, serverName, config);
+                break;
+
+            case "action":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                ArgumentNullException.ThrowIfNull(actionName);
+                var actionRootPath = _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+                var actionConfigPath = Path.Combine(actionRootPath, ".godmode-root", $"config.{actionName}.json");
+                WriteMcpServerToConfigFile(actionConfigPath, serverName, config);
+                break;
+
+            default:
+                throw new ArgumentException($"Unknown target level: {targetLevel}");
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveMcpServerAsync(string serverName, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        switch (targetLevel.ToLowerInvariant())
+        {
+            case "profile":
+                ArgumentNullException.ThrowIfNull(profileName);
+                _profileOverrideStore.RemoveMcpServer(profileName, serverName);
+                RebuildSnapshot();
+                break;
+
+            case "root":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                var rootPath = _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+                WriteMcpServerToConfigFile(
+                    Path.Combine(rootPath, ".godmode-root", "config.json"), serverName, null);
+                break;
+
+            case "action":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                ArgumentNullException.ThrowIfNull(actionName);
+                var actionRootPath = _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+                WriteMcpServerToConfigFile(
+                    Path.Combine(actionRootPath, ".godmode-root", $"config.{actionName}.json"), serverName, null);
+                break;
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
+        string profileName, string rootName, string? actionName)
+    {
+        // Profile level
+        _snapshot.Profiles.TryGetValue(profileName, out var profileCfg);
+        var profileMcp = profileCfg?.McpServers;
+
+        // Root + action level (read fresh from config files) — skip if no root specified
+        Dictionary<string, McpServerConfig?>? actionMcp = null;
+        if (!string.IsNullOrEmpty(rootName))
+        {
+            try
+            {
+                var rootPath = _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+                var config = _rootConfigReader.ReadConfig(rootPath);
+                var action = config.ResolveAction(actionName);
+                actionMcp = action?.McpServers;
+            }
+            catch
+            {
+                // Root not found — just use profile-level servers
+            }
+        }
+
+        // Merge all levels
+        var merged = MergeMcpServers(profileMcp, actionMcp);
+
+        // Filter nulls and return non-nullable dict
+        var result = merged?
+            .Where(kv => kv.Value != null)
+            .ToDictionary(kv => kv.Key, kv => kv.Value!)
+            ?? new Dictionary<string, McpServerConfig>();
+
+        return Task.FromResult(result);
+    }
+
+    #endregion
+
+    #region Profile Management
+
+    public Task CreateProfileAsync(string profileName, string? description)
+    {
+        _profileOverrideStore.CreateProfile(profileName, description);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task UpdateProfileDescriptionAsync(string profileName, string? description)
+    {
+        _profileOverrideStore.UpdateProfileDescription(profileName, description);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    #endregion
 
     /// <summary>
     /// Robustly deletes a directory, handling read-only files and retrying on lock conflicts.
@@ -1097,7 +1270,9 @@ public class ProjectManager : IProjectManager
         string? model = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
-        bool stripEnvVarProfile = false)
+        bool stripEnvVarProfile = false,
+        Dictionary<string, McpServerConfig?>? profileMcpServers = null,
+        string? projectPath = null)
     {
         var env = MergeAndExpandEnvironment(profileEnv, action.Environment, profileName, stripEnvVarProfile);
 
@@ -1112,7 +1287,92 @@ public class ProjectManager : IProjectManager
             args.Add(model);
         }
 
+        // Merge MCP servers: profile → action (action wins per key, null = remove)
+        var mcpServers = MergeMcpServers(profileMcpServers, action.McpServers);
+        if (mcpServers is { Count: > 0 } && projectPath != null)
+        {
+            // Expand ${VAR} in MCP server env values
+            foreach (var (name, config) in mcpServers)
+            {
+                if (config?.Env != null)
+                {
+                    var expandedEnv = EnvironmentExpander.ExpandVariables(config.Env);
+                    if (expandedEnv != config.Env)
+                        mcpServers[name] = config with { Env = expandedEnv };
+                }
+            }
+
+            // Filter null entries (explicit removals)
+            var effective = mcpServers
+                .Where(kv => kv.Value != null)
+                .ToDictionary(kv => kv.Key, kv => kv.Value!);
+
+            if (effective.Count > 0)
+            {
+                var mcpConfigPath = Path.Combine(projectPath, ".godmode", "mcp-config.json");
+                var mcpPayload = new Dictionary<string, object> { ["mcpServers"] = effective };
+                var json = JsonSerializer.Serialize(mcpPayload, McpJsonOptions);
+                File.WriteAllText(mcpConfigPath, json);
+
+                args.Add("--mcp-config");
+                args.Add(Path.Combine(".godmode", "mcp-config.json"));
+            }
+        }
+
         return (env, args.Count > 0 ? args.ToArray() : null);
+    }
+
+    private static readonly JsonSerializerOptions McpJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
+    /// <summary>
+    /// Merges MCP server configs from two levels. Overlay wins per key.
+    /// </summary>
+    private static Dictionary<string, McpServerConfig?>? MergeMcpServers(
+        Dictionary<string, McpServerConfig?>? baseDict,
+        Dictionary<string, McpServerConfig?>? overrideDict)
+    {
+        if (baseDict == null && overrideDict == null) return null;
+
+        var merged = new Dictionary<string, McpServerConfig?>(StringComparer.OrdinalIgnoreCase);
+        if (baseDict != null)
+            foreach (var (k, v) in baseDict) merged[k] = v;
+        if (overrideDict != null)
+            foreach (var (k, v) in overrideDict) merged[k] = v;
+
+        return merged.Count > 0 ? merged : null;
+    }
+
+    /// <summary>
+    /// Adds or removes an MCP server in a .godmode-root config file.
+    /// </summary>
+    private static void WriteMcpServerToConfigFile(string configFilePath, string serverName, McpServerConfig? config)
+    {
+        var json = File.Exists(configFilePath) ? File.ReadAllText(configFilePath) : "{}";
+        var doc = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json, McpJsonOptions)
+            ?? new Dictionary<string, JsonElement>();
+
+        // Parse or create mcpServers section
+        var mcpServers = doc.ContainsKey("mcpServers")
+            ? JsonSerializer.Deserialize<Dictionary<string, McpServerConfig?>>(doc["mcpServers"].GetRawText(), McpJsonOptions)
+                ?? new Dictionary<string, McpServerConfig?>()
+            : new Dictionary<string, McpServerConfig?>();
+
+        if (config != null)
+            mcpServers[serverName] = config;
+        else
+            mcpServers.Remove(serverName);
+
+        if (mcpServers.Count > 0)
+            doc["mcpServers"] = JsonSerializer.SerializeToElement(mcpServers, McpJsonOptions);
+        else
+            doc.Remove("mcpServers");
+
+        File.WriteAllText(configFilePath, JsonSerializer.Serialize(doc, McpJsonOptions));
     }
 
     /// <summary>

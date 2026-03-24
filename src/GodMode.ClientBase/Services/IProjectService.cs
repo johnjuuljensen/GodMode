@@ -26,4 +26,18 @@ public interface IProjectService
     Task<string> GetMetricsHtmlAsync(string profileName, string hostId, string projectId);
     void ClearCache();
     void InvalidateProjectCache(string profileName, string hostId, string projectId);
+
+    // MCP Server Discovery & Configuration
+    Task<McpRegistrySearchResult> SearchMcpServersAsync(string profileName, string hostId, string query, int pageSize = 20, int page = 1);
+    Task<McpServerDetail?> GetMcpServerDetailAsync(string profileName, string hostId, string qualifiedName);
+    Task AddMcpServerAsync(string profileName, string hostId, string serverName, McpServerConfig config,
+        string targetLevel, string? serverProfileName, string? rootName, string? actionName);
+    Task RemoveMcpServerAsync(string profileName, string hostId, string serverName,
+        string targetLevel, string? serverProfileName, string? rootName, string? actionName);
+    Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
+        string profileName, string hostId, string serverProfileName, string rootName, string? actionName);
+
+    // Profile Management
+    Task CreateProfileAsync(string profileName, string hostId, string newProfileName, string? description);
+    Task UpdateProfileDescriptionAsync(string profileName, string hostId, string targetProfileName, string? description);
 }

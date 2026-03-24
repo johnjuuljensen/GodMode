@@ -86,6 +86,26 @@ interface AppState {
   setShowAddServer: (show: boolean) => void;
   editServerIndex: number | null;
   setEditServerIndex: (index: number | null) => void;
+
+  // MCP browser
+  showMcpBrowser: boolean;
+  mcpBrowserContext: { serverIndex: number; profileName: string; rootName: string; actionName?: string } | null;
+  setShowMcpBrowser: (show: boolean, context?: { serverIndex: number; profileName: string; rootName: string; actionName?: string } | null) => void;
+
+  // MCP profile panel
+  showMcpProfile: boolean;
+  mcpProfileContext: { serverIndex: number; profileName: string } | null;
+  setShowMcpProfile: (show: boolean, context?: { serverIndex: number; profileName: string } | null) => void;
+
+  // Profile settings panel
+  showProfileSettings: boolean;
+  profileSettingsContext: { serverIndex: number; profileName: string } | null;
+  setShowProfileSettings: (show: boolean, context?: { serverIndex: number; profileName: string } | null) => void;
+
+  // Create profile dialog
+  showCreateProfile: boolean;
+  createProfileServerIndex: number | null;
+  setShowCreateProfile: (show: boolean, serverIndex?: number | null) => void;
 }
 
 /** Recompute waiting counts from server projects + client-side question map, excluding dismissed */
@@ -448,4 +468,24 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowAddServer: (show) => set({ showAddServer: show }),
   editServerIndex: null,
   setEditServerIndex: (index) => set({ editServerIndex: index }),
+
+  // MCP browser
+  showMcpBrowser: false,
+  mcpBrowserContext: null,
+  setShowMcpBrowser: (show, context) => set({ showMcpBrowser: show, mcpBrowserContext: context ?? null }),
+
+  // MCP profile panel
+  showMcpProfile: false,
+  mcpProfileContext: null,
+  setShowMcpProfile: (show, context) => set({ showMcpProfile: show, mcpProfileContext: context ?? null }),
+
+  // Profile settings panel
+  showProfileSettings: false,
+  profileSettingsContext: null,
+  setShowProfileSettings: (show, context) => set({ showProfileSettings: show, profileSettingsContext: context ?? null }),
+
+  // Create profile dialog
+  showCreateProfile: false,
+  createProfileServerIndex: null,
+  setShowCreateProfile: (show, serverIndex) => set({ showCreateProfile: show, createProfileServerIndex: serverIndex ?? null }),
 }));

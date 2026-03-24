@@ -71,4 +71,46 @@ public interface IProjectHub
     /// Deletes a project, running teardown scripts and removing all files.
     /// </summary>
     Task DeleteProject(string projectId, bool force = false);
+
+    // MCP Server Discovery & Configuration
+
+    /// <summary>
+    /// Searches the Smithery MCP server registry.
+    /// </summary>
+    Task<McpRegistrySearchResult> SearchMcpServers(string query, int pageSize = 20, int page = 1);
+
+    /// <summary>
+    /// Gets full detail for a specific MCP server by qualified name.
+    /// </summary>
+    Task<McpServerDetail?> GetMcpServerDetail(string qualifiedName);
+
+    /// <summary>
+    /// Adds an MCP server configuration at the specified level (profile, root, or action).
+    /// </summary>
+    Task AddMcpServer(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName = null, string? rootName = null, string? actionName = null);
+
+    /// <summary>
+    /// Removes an MCP server from the specified level.
+    /// </summary>
+    Task RemoveMcpServer(string serverName, string targetLevel,
+        string? profileName = null, string? rootName = null, string? actionName = null);
+
+    /// <summary>
+    /// Gets the effective (merged) MCP servers for a given profile/root/action combination.
+    /// </summary>
+    Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServers(
+        string profileName, string rootName, string? actionName = null);
+
+    // Profile Management
+
+    /// <summary>
+    /// Creates a new profile with optional description.
+    /// </summary>
+    Task CreateProfile(string profileName, string? description = null);
+
+    /// <summary>
+    /// Updates a profile's description.
+    /// </summary>
+    Task UpdateProfileDescription(string profileName, string? description);
 }

@@ -125,6 +125,60 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await Clients.All.ProjectDeleted(projectId);
     }
 
+    public async Task<McpRegistrySearchResult> SearchMcpServers(string query, int pageSize, int page)
+    {
+        _logger.LogInformation("Client {ConnectionId} searching MCP servers: '{Query}'",
+            Context.ConnectionId, query);
+        return await _projectManager.SearchMcpServersAsync(query, pageSize, page);
+    }
+
+    public async Task<McpServerDetail?> GetMcpServerDetail(string qualifiedName)
+    {
+        _logger.LogInformation("Client {ConnectionId} getting MCP server detail: '{Name}'",
+            Context.ConnectionId, qualifiedName);
+        return await _projectManager.GetMcpServerDetailAsync(qualifiedName);
+    }
+
+    public async Task AddMcpServer(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        _logger.LogInformation("Client {ConnectionId} adding MCP server '{Server}' to {Level}",
+            Context.ConnectionId, serverName, targetLevel);
+        await _projectManager.AddMcpServerAsync(serverName, config, targetLevel,
+            profileName, rootName, actionName);
+    }
+
+    public async Task RemoveMcpServer(string serverName, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        _logger.LogInformation("Client {ConnectionId} removing MCP server '{Server}' from {Level}",
+            Context.ConnectionId, serverName, targetLevel);
+        await _projectManager.RemoveMcpServerAsync(serverName, targetLevel,
+            profileName, rootName, actionName);
+    }
+
+    public async Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServers(
+        string profileName, string rootName, string? actionName)
+    {
+        _logger.LogInformation("Client {ConnectionId} getting effective MCP servers for {Profile}/{Root}/{Action}",
+            Context.ConnectionId, profileName, rootName, actionName ?? "(all)");
+        return await _projectManager.GetEffectiveMcpServersAsync(profileName, rootName, actionName);
+    }
+
+    public async Task CreateProfile(string profileName, string? description)
+    {
+        _logger.LogInformation("Client {ConnectionId} creating profile '{Profile}'",
+            Context.ConnectionId, profileName);
+        await _projectManager.CreateProfileAsync(profileName, description);
+    }
+
+    public async Task UpdateProfileDescription(string profileName, string? description)
+    {
+        _logger.LogInformation("Client {ConnectionId} updating profile '{Profile}' description",
+            Context.ConnectionId, profileName);
+        await _projectManager.UpdateProfileDescriptionAsync(profileName, description);
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);

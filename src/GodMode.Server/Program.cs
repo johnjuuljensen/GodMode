@@ -2,6 +2,7 @@ using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
 using GodMode.Shared;
+using GodMode.Shared.Services;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -55,6 +56,8 @@ builder.Services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
 builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
 builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
+builder.Services.AddHttpClient<McpRegistryClient>();
+builder.Services.AddSingleton<ProfileOverrideStore>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();

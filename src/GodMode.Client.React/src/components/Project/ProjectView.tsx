@@ -31,6 +31,20 @@ export function ProjectView({ serverIndex, projectId }: Props) {
   const hub = server?.hub;
   const project = server?.projects.find(p => p.Id === projectId);
 
+  // MCP servers for this project's profile/root
+  const [mcpNames, setMcpNames] = useState<string[]>([]);
+  const [mcpTooltipOpen, setMcpTooltipOpen] = useState(false);
+
+  useEffect(() => {
+    if (!hub || !project?.ProfileName) {
+      setMcpNames([]);
+      return;
+    }
+    hub.getEffectiveMcpServers(project.ProfileName, project.RootName ?? '')
+      .then(result => setMcpNames(Object.keys(result).sort()))
+      .catch(() => setMcpNames([]));
+  }, [hub, project?.ProfileName, project?.RootName]);
+
   // Subscribe to project output on mount
   useEffect(() => {
     if (!hub || server?.connectionState !== 'connected') return;
@@ -136,7 +150,6 @@ export function ProjectView({ serverIndex, projectId }: Props) {
     <div className="project-view">
       <div className="project-header">
         <div className="project-header-info">
-          <span className={`project-state-badge ${state}`}>{state}</span>
           <span className="project-header-name">{projectName}</span>
           {(project?.ProfileName || project?.RootName) && (
             <span className="project-header-root">
@@ -147,6 +160,30 @@ export function ProjectView({ serverIndex, projectId }: Props) {
           )}
         </div>
         <div className="project-header-actions">
+          {mcpNames.length > 0 && (
+            mcpNames.length <= 3 ? (
+              <div className="mcp-badge-group">
+                {mcpNames.map(name => (
+                  <span key={name} className="mcp-badge-item">{name}</span>
+                ))}
+              </div>
+            ) : (
+              <div
+                className="mcp-badge-count"
+                onMouseEnter={() => setMcpTooltipOpen(true)}
+                onMouseLeave={() => setMcpTooltipOpen(false)}
+              >
+                <span className="mcp-badge-item">{mcpNames.length} MCP</span>
+                {mcpTooltipOpen && (
+                  <div className="mcp-badge-tooltip">
+                    {mcpNames.map(name => (
+                      <div key={name} className="mcp-badge-tooltip-item">{name}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          )}
           <button
             className={`btn btn-toggle ${simpleView ? 'active' : ''}`}
             onClick={toggleSimpleView}
@@ -154,12 +191,17 @@ export function ProjectView({ serverIndex, projectId }: Props) {
           >
             {simpleView ? 'Simple' : 'Full'}
           </button>
-          {canStop && (
-            <button className="btn btn-secondary" onClick={handleStop}>Stop</button>
-          )}
-          {canResume && (
-            <button className="btn btn-primary" onClick={handleResume}>Resume</button>
-          )}
+          <button
+            className={`project-status-btn ${state}`}
+            onClick={canStop ? handleStop : canResume ? handleResume : undefined}
+            disabled={!canStop && !canResume}
+            title={canStop ? 'Click to stop' : canResume ? 'Click to resume' : state}
+          >
+            <span className="project-status-dot" />
+            <span className="project-status-label">{state}</span>
+            {canStop && <span className="project-status-action">Stop</span>}
+            {canResume && <span className="project-status-action">Resume</span>}
+          </button>
         </div>
       </div>
 

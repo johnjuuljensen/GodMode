@@ -94,4 +94,18 @@ public interface IProjectConnection : IDisposable
     /// Disconnects from the host
     /// </summary>
     void Disconnect();
+
+    // MCP Server Discovery & Configuration
+    Task<McpRegistrySearchResult> SearchMcpServersAsync(string query, int pageSize = 20, int page = 1);
+    Task<McpServerDetail?> GetMcpServerDetailAsync(string qualifiedName);
+    Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName, string? rootName, string? actionName);
+    Task RemoveMcpServerAsync(string serverName, string targetLevel,
+        string? profileName, string? rootName, string? actionName);
+    Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
+        string profileName, string rootName, string? actionName);
+
+    // Profile Management
+    Task CreateProfileAsync(string profileName, string? description);
+    Task UpdateProfileDescriptionAsync(string profileName, string? description);
 }

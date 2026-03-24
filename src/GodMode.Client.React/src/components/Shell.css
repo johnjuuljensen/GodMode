@@ -213,6 +213,28 @@ body::after {
   border-color: var(--accent);
 }
 
+/* Small icon buttons next to profile filter */
+.shell-icon-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  padding: 0;
+}
+
+.shell-icon-btn:hover {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+  border-color: var(--glass-border-strong);
+}
+
 /* Theme toggle */
 .shell-theme-toggle,
 .shell-view-toggle {

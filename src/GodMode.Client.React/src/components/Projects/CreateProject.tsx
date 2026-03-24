@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '../../store';
-import type { ProjectRootInfo, CreateActionInfo } from '../../signalr/types';
+import type { ProjectRootInfo, CreateActionInfo, McpServerConfig } from '../../signalr/types';
 import './CreateProject.css';
+import '../Mcp/McpBrowser.css';
 
 interface FormField {
   key: string;
@@ -64,6 +65,8 @@ export function CreateProject() {
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [effectiveMcpServers, setEffectiveMcpServers] = useState<Record<string, McpServerConfig>>({});
+  const setShowMcpBrowser = useAppStore(s => s.setShowMcpBrowser);
 
   const server = servers[selectedServerIndex];
   const roots = server?.roots ?? [];
@@ -115,6 +118,18 @@ export function CreateProject() {
       setSelectedModel(selectedAction.Model);
     }
   }, [selectedAction]);
+
+  // Load effective MCP servers when root/action changes
+  useEffect(() => {
+    if (!server || !selectedRoot) {
+      setEffectiveMcpServers({});
+      return;
+    }
+    const profileName = selectedRoot.ProfileName ?? 'Default';
+    server.hub.getEffectiveMcpServers(profileName, selectedRoot.Name, selectedActionName || undefined)
+      .then(setEffectiveMcpServers)
+      .catch(() => setEffectiveMcpServers({}));
+  }, [server, selectedRoot, selectedActionName]);
 
   const setFieldValue = useCallback((key: string, value: string) => {
     setFormValues(prev => ({ ...prev, [key]: value }));
@@ -236,6 +251,58 @@ export function CreateProject() {
             ))}
           </select>
         </div>
+
+        {/* MCP Servers panel */}
+        {selectedRoot && (
+          <div className="mcp-servers-panel">
+            <div className="mcp-servers-header">
+              <h4>
+                MCP Servers
+                {Object.keys(effectiveMcpServers).length > 0 && (
+                  <span className="mcp-count-badge">{Object.keys(effectiveMcpServers).length}</span>
+                )}
+              </h4>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowMcpBrowser(true, {
+                  serverIndex: selectedServerIndex,
+                  profileName: selectedRoot.ProfileName ?? 'Default',
+                  rootName: selectedRoot.Name,
+                  actionName: selectedActionName || undefined,
+                })}
+              >
+                Browse &amp; Add
+              </button>
+            </div>
+            {Object.keys(effectiveMcpServers).length > 0 && (
+              <div className="mcp-server-list">
+                {Object.entries(effectiveMcpServers).map(([name, config]) => (
+                  <div key={name} className="mcp-server-entry">
+                    <span>
+                      <span className="mcp-server-entry-name">{name}</span>
+                      <span className="mcp-type-badge">{config.Url ? 'remote' : 'stdio'}</span>
+                    </span>
+                    <button
+                      className="mcp-remove-btn"
+                      title="Remove"
+                      onClick={async () => {
+                        try {
+                          await server!.hub.removeMcpServer(name, 'profile', selectedRoot!.ProfileName ?? 'Default', selectedRoot!.Name);
+                          const updated = await server!.hub.getEffectiveMcpServers(
+                            selectedRoot!.ProfileName ?? 'Default', selectedRoot!.Name, selectedActionName || undefined,
+                          );
+                          setEffectiveMcpServers(updated);
+                        } catch { /* ignore */ }
+                      }}
+                    >
+                      &#x2715;
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Dynamic form fields */}
         {formFields.map(field => (

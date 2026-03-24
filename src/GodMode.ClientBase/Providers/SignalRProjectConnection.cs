@@ -133,6 +133,44 @@ public class SignalRProjectConnection : IProjectConnection, IProjectHubClient
         return await _hubProxy.GetMetricsHtml(projectId);
     }
 
+    public async Task<McpRegistrySearchResult> SearchMcpServersAsync(string query, int pageSize = 20, int page = 1)
+    {
+        return await _hubProxy.SearchMcpServers(query, pageSize, page);
+    }
+
+    public async Task<McpServerDetail?> GetMcpServerDetailAsync(string qualifiedName)
+    {
+        return await _hubProxy.GetMcpServerDetail(qualifiedName);
+    }
+
+    public async Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        await _hubProxy.AddMcpServer(serverName, config, targetLevel, profileName, rootName, actionName);
+    }
+
+    public async Task RemoveMcpServerAsync(string serverName, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        await _hubProxy.RemoveMcpServer(serverName, targetLevel, profileName, rootName, actionName);
+    }
+
+    public async Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
+        string profileName, string rootName, string? actionName)
+    {
+        return await _hubProxy.GetEffectiveMcpServers(profileName, rootName, actionName);
+    }
+
+    public async Task CreateProfileAsync(string profileName, string? description)
+    {
+        await _hubProxy.CreateProfile(profileName, description);
+    }
+
+    public async Task UpdateProfileDescriptionAsync(string profileName, string? description)
+    {
+        await _hubProxy.UpdateProfileDescription(profileName, description);
+    }
+
     public void Disconnect()
     {
         _hubConnection.StopAsync().ConfigureAwait(false);

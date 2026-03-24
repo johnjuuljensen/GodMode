@@ -84,6 +84,62 @@ export interface HostInfo {
   Url?: string | null;
 }
 
+// --- MCP Server models ---
+
+export interface McpServerConfig {
+  Command?: string | null;
+  Args?: string[] | null;
+  Env?: Record<string, string> | null;
+  Url?: string | null;
+  Type?: string | null;
+}
+
+export interface McpRegistryServer {
+  QualifiedName: string;
+  DisplayName: string;
+  Description?: string | null;
+  IconUrl?: string | null;
+  Verified: boolean;
+  UseCount: number;
+  Remote: boolean;
+  IsDeployed: boolean;
+  Homepage?: string | null;
+}
+
+export interface McpRegistryPagination {
+  CurrentPage: number;
+  PageSize: number;
+  TotalPages: number;
+  TotalCount: number;
+}
+
+export interface McpRegistrySearchResult {
+  Servers: McpRegistryServer[];
+  Pagination: McpRegistryPagination;
+}
+
+export interface McpServerConnection {
+  Type: string;
+  DeploymentUrl?: string | null;
+  configSchema?: unknown | null;
+}
+
+export interface McpServerTool {
+  Name: string;
+  Description?: string | null;
+}
+
+export interface McpServerDetail {
+  QualifiedName: string;
+  DisplayName: string;
+  Description?: string | null;
+  IconUrl?: string | null;
+  Remote: boolean;
+  DeploymentUrl?: string | null;
+  Connections?: McpServerConnection[] | null;
+  Tools?: McpServerTool[] | null;
+}
+
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---
 
 export interface QuestionOptionData {
