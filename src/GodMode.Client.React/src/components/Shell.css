@@ -173,13 +173,12 @@ body::after {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
+  padding: 13px 16px;
   border-bottom: 1px solid var(--glass-border);
   background: var(--titlebar-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   flex-shrink: 0;
-  min-height: 44px;
 }
 
 .shell-header-left {
@@ -196,7 +195,8 @@ body::after {
 
 /* Profile filter in topbar */
 .shell-profile-filter {
-  padding: 5px 10px;
+  height: 34px;
+  padding: 0 10px;
   background: var(--glass);
   border: 1px solid var(--glass-border);
   border-radius: 8px;
@@ -216,13 +216,13 @@ body::after {
 /* Theme toggle */
 .shell-theme-toggle,
 .shell-view-toggle {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
   background: var(--glass);
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 18px;
   cursor: pointer;
   display: flex;
   align-items: center;
