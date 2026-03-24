@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '../../store';
-import type { ProjectRootInfo, CreateActionInfo } from '../../signalr/types';
+import type { ProjectRootInfo } from '../../signalr/types';
 import './CreateProject.css';
 
 interface FormField {
