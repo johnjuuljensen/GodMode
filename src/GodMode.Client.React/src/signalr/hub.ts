@@ -136,6 +136,7 @@ export class GodModeHub {
     await this.connection!.invoke('UnsubscribeProject', projectId);
   }
 
+
   async getMetricsHtml(projectId: string): Promise<string> {
     return await this.connection!.invoke('GetMetricsHtml', projectId);
   }
