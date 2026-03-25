@@ -1,4 +1,4 @@
-using GodMode.Maui.Services;
+using GodMode.ClientBase.Services;
 using Microsoft.AspNetCore.SignalR;
 
 namespace GodMode.Maui.Hubs;
@@ -8,13 +8,12 @@ namespace GodMode.Maui.Hubs;
 /// and forwards them to the remote GodMode.Server via the raw HubConnection.
 /// No method stubs needed — when IProjectHub changes, this just works.
 /// </summary>
-public class ProxyHubFilter(ServerConnectionManager connections) : IHubFilter
+public class ProxyHubFilter(IHostConnectionService connections) : IHubFilter
 {
     public async ValueTask<object?> InvokeMethodAsync(
         HubInvocationContext context,
         Func<HubInvocationContext, ValueTask<object?>> next)
     {
-        // Only proxy GodModeLocalHub invocations
         if (context.Hub is not GodModeLocalHub)
             return await next(context);
 
@@ -22,7 +21,7 @@ public class ProxyHubFilter(ServerConnectionManager connections) : IHubFilter
         if (string.IsNullOrEmpty(serverId))
             throw new HubException("Missing serverId query parameter");
 
-        var remote = connections.GetRemoteConnection(serverId)
+        var remote = connections.GetConnection(serverId)
             ?? throw new HubException($"Server '{serverId}' is not connected");
 
         return await remote.InvokeCoreAsync(

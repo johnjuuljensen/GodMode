@@ -28,11 +28,10 @@ public class HostConnectionService : IHostConnectionService
 
         for (int i = 0; i < servers.Count; i++)
         {
-            var server = servers[i];
-            var provider = CreateProvider(server);
+            var provider = CreateProvider(servers[i]);
             if (provider != null)
             {
-                var key = $"{server.Type}:{server.Username ?? server.Url}";
+                var key = $"{servers[i].Type}:{servers[i].Username ?? servers[i].Url}";
                 _providers[key] = provider;
                 providers.Add((provider, i));
             }
@@ -50,8 +49,7 @@ public class HostConnectionService : IHostConnectionService
         {
             try
             {
-                var hosts = await provider.ListHostsAsync();
-                allHosts.AddRange(hosts);
+                allHosts.AddRange(await provider.ListHostsAsync());
             }
             catch (Exception ex)
             {
@@ -61,6 +59,9 @@ public class HostConnectionService : IHostConnectionService
 
         return allHosts;
     }
+
+    public HubConnection? GetConnection(string hostId) =>
+        _activeConnections.TryGetValue(hostId, out var c) && c.State == HubConnectionState.Connected ? c : null;
 
     public async Task<HubConnection> ConnectToHostAsync(string hostId)
     {
@@ -94,7 +95,7 @@ public class HostConnectionService : IHostConnectionService
         return connection;
     }
 
-    public async Task DisconnectFromHost(string hostId)
+    public async Task DisconnectFromHostAsync(string hostId)
     {
         if (_activeConnections.TryGetValue(hostId, out var connection))
         {
@@ -103,7 +104,7 @@ public class HostConnectionService : IHostConnectionService
         }
     }
 
-    public async Task DisconnectAll()
+    public async Task DisconnectAllAsync()
     {
         foreach (var connection in _activeConnections.Values)
             await connection.DisposeAsync();
@@ -113,7 +114,7 @@ public class HostConnectionService : IHostConnectionService
     public bool IsConnected(string hostId) =>
         _activeConnections.TryGetValue(hostId, out var c) && c.State == HubConnectionState.Connected;
 
-    private async Task<HubConnection> ConnectWithRetryAsync(
+    private static async Task<HubConnection> ConnectWithRetryAsync(
         IHostProvider provider, string hostId, int maxRetries = 3)
     {
         Exception? lastException = null;
@@ -127,7 +128,6 @@ public class HostConnectionService : IHostConnectionService
             catch (Exception ex)
             {
                 lastException = ex;
-                Console.WriteLine($"Connection attempt {i + 1} failed: {ex.Message}");
                 if (i < maxRetries - 1)
                     await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, i)));
             }
