@@ -1,121 +1,71 @@
 using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
+using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Logging;
 
 namespace GodMode.ClientBase.Providers;
 
 /// <summary>
-/// Host provider for local server connections.
-/// All project operations go through the GodMode.Server via SignalR.
+/// Server provider for local GodMode.Server instances.
 /// </summary>
-public class LocalFolderProvider : IHostProvider
+public class LocalFolderProvider : IServerProvider
 {
     private readonly string _serverUrl;
-    private readonly string _hostId;
-    private readonly string _hostName;
+    private readonly string _serverId;
+    private readonly string _serverName;
+    private readonly ILogger _logger;
 
     public string Type => "local";
 
-    /// <summary>
-    /// Creates a new LocalFolderProvider that connects to a local GodMode.Server instance.
-    /// </summary>
-    /// <param name="serverUrl">The server URL (e.g., "http://localhost:31337").</param>
-    /// <param name="hostName">Optional display name for the host.</param>
-    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? hostName = null)
+    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? serverName = null,
+        ILoggerFactory? loggerFactory = null)
     {
         _serverUrl = serverUrl;
-        _hostId = "local-server";
-        _hostName = hostName ?? "Local Server";
+        _serverId = "local-server";
+        _serverName = serverName ?? "Local Server";
+        _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
+                  .CreateLogger<LocalFolderProvider>();
     }
 
-    public async Task<IEnumerable<HostInfo>> ListHostsAsync()
+    public async Task<IEnumerable<ServerInfo>> ListServersAsync()
     {
-        // Check if server is reachable (async to avoid blocking UI)
-        var state = await IsServerReachableAsync() ? HostState.Running : HostState.Stopped;
-
-        var hosts = new List<HostInfo>
-        {
-            new HostInfo(
-                _hostId,
-                _hostName,
-                "local",
-                state,
-                _serverUrl
-            )
-        };
-
-        return hosts;
+        var reachable = await IsServerReachableAsync();
+        var state = reachable ? ServerState.Running : ServerState.Stopped;
+        _logger.LogDebug("Local server {Url} reachable={Reachable} state={State}", _serverUrl, reachable, state);
+        return [new ServerInfo(_serverId, _serverName, "local", state, _serverUrl)];
     }
 
-    public async Task<HostStatus> GetHostStatusAsync(string hostId)
+    public async Task<ServerStatus> GetServerStatusAsync(string serverId)
     {
-        if (hostId != _hostId)
-        {
-            throw new ArgumentException($"Unknown host: {hostId}");
-        }
-
-        var state = await IsServerReachableAsync() ? HostState.Running : HostState.Stopped;
-
-        var status = new HostStatus(
-            _hostId,
-            _hostName,
-            "local",
-            state,
-            _serverUrl,
-            0, // Active projects - would need to query server
-            DateTime.UtcNow
-        );
-
-        return status;
+        var state = await IsServerReachableAsync() ? ServerState.Running : ServerState.Stopped;
+        return new ServerStatus(_serverId, _serverName, "local", state, _serverUrl, 0, DateTime.UtcNow);
     }
 
-    public Task StartHostAsync(string hostId)
+    public Task StartServerAsync(string serverId) => Task.CompletedTask;
+    public Task StopServerAsync(string serverId) => Task.CompletedTask;
+
+    public async Task<HubConnection> ConnectAsync(string serverId)
     {
-        // Local server must be started externally (e.g., via command line)
-        // This could potentially launch the server process in the future
-        return Task.CompletedTask;
-    }
+        if (serverId != _serverId)
+            throw new ArgumentException($"Unknown server: {serverId}");
 
-    public Task StopHostAsync(string hostId)
-    {
-        // Local server can't be stopped from the UI
-        return Task.CompletedTask;
-    }
-
-    public async Task<IProjectConnection> ConnectAsync(string hostId)
-    {
-        if (hostId != _hostId)
-        {
-            throw new ArgumentException($"Unknown host: {hostId}");
-        }
-
-        var hubUrl = $"{_serverUrl.TrimEnd('/')}/hubs/projects";
-        var connection = new SignalRProjectConnection(hubUrl);
-
-        try
-        {
-            await connection.ConnectAsync();
-            return connection;
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException(
-                $"Failed to connect to local server at {_serverUrl}. " +
-                "Make sure GodMode.Server is running.",
-                ex);
-        }
+        _logger.LogInformation("Connecting to local server at {Url}", _serverUrl);
+        return await HubConnectionFactory.CreateAndStartAsync(_serverUrl);
     }
 
     private async Task<bool> IsServerReachableAsync()
     {
         try
         {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             var response = await client.GetAsync($"{_serverUrl}/health");
+            _logger.LogDebug("Health check {Url}/health -> {StatusCode}", _serverUrl, response.StatusCode);
             return response.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogDebug("Health check {Url}/health failed: {Error}", _serverUrl, ex.Message);
             return false;
         }
     }

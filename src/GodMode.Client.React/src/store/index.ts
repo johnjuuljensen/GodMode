@@ -1,13 +1,24 @@
 /**
  * Global app state using Zustand.
- * Manages servers, connections, projects, and UI state.
+ * Matches Avalonia's data model: Profile → Root:Server → Projects.
  */
 import { create } from 'zustand';
 import { GodModeHub, type ConnectionState } from '../signalr/hub';
-import type { ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage } from '../signalr/types';
-import { loadServers, saveServers, type ServerRegistration } from '../services/serverRegistry';
-import { type QuestionState, emptyQuestion, detectQuestionFromMessage, detectQuestionFromStatus, looksLikeQuestion } from '../services/questionDetection';
+import type {
+  ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
+  ServerInfo, CreateActionInfo,
+} from '../signalr/types';
+import {
+  fetchServers, addServer as apiAddServer, removeServer as apiRemoveServer,
+  startServer as apiStartServer, waitForBaseUrl, subscribeEvents,
+  type AddServerRequest,
+} from '../services/api';
+import {
+  type QuestionState, emptyQuestion, detectQuestionFromMessage,
+  detectQuestionFromStatus, looksLikeQuestion,
+} from '../services/questionDetection';
 
+// ── Persisted dismiss tracking ─────────────────────────────────
 const DISMISSED_KEY = 'godmode-dismissed-projects';
 function loadDismissed(): Record<string, boolean> {
   try { return JSON.parse(localStorage.getItem(DISMISSED_KEY) || '{}'); } catch { return {}; }
@@ -16,8 +27,10 @@ function saveDismissed(dp: Record<string, boolean>) {
   localStorage.setItem(DISMISSED_KEY, JSON.stringify(dp));
 }
 
-export interface ServerState {
-  registration: ServerRegistration;
+// ── Computed view model types ──────────────────────────────────
+
+export interface ServerConnection {
+  serverInfo: ServerInfo;
   hub: GodModeHub;
   connectionState: ConnectionState;
   projects: ProjectSummary[];
@@ -25,42 +38,68 @@ export interface ServerState {
   profiles: ProfileInfo[];
 }
 
-interface AppState {
-  // Servers
-  servers: ServerState[];
-  loadServers: () => void;
-  addServer: (reg: ServerRegistration) => void;
-  updateServer: (index: number, reg: ServerRegistration) => void;
-  removeServer: (index: number) => void;
-  connectServer: (index: number) => Promise<void>;
-  disconnectServer: (index: number) => Promise<void>;
-  refreshProjects: (index: number) => Promise<void>;
+export interface RootGroup {
+  name: string;          // display name (qualified with server name if multi-server)
+  rootName: string;      // actual root name for API calls
+  profileName: string;
+  serverId: string;
+  serverName: string;
+  projects: ProjectSummary[];
+  actions: CreateActionInfo[];
+}
 
-  // Selected project
-  selectedProject: { serverIndex: number; projectId: string } | null;
-  selectProject: (serverIndex: number, projectId: string) => void;
+export interface ProfileGroup {
+  name: string;
+  rootGroups: RootGroup[];
+  projectCount: number;
+}
+
+// ── Store interface ────────────────────────────────────────────
+
+interface AppState {
+  // Raw server connections
+  serverConnections: ServerConnection[];
+  getConnection: (serverId: string) => ServerConnection | undefined;
+  getHub: (serverId: string) => GodModeHub | undefined;
+
+  // Computed hierarchy (rebuilt from serverConnections)
+  profileGroups: ProfileGroup[];
+  inactiveServers: ServerConnection[];
+  profileFilterOptions: string[];
+  profileFilter: string;
+  setProfileFilter: (filter: string) => void;
+
+  // Server lifecycle
+  loadServers: () => Promise<void>;
+  addServer: (req: AddServerRequest) => Promise<void>;
+  removeServer: (serverId: string) => Promise<void>;
+  connectServer: (serverId: string) => Promise<void>;
+  disconnectServer: (serverId: string) => Promise<void>;
+  startServer: (serverId: string) => Promise<void>;
+  refreshProjects: (serverId: string) => Promise<void>;
+
+  // Selected project (by serverId + projectId)
+  selectedProject: { serverId: string; projectId: string } | null;
+  selectProject: (serverId: string, projectId: string) => void;
   clearSelection: () => void;
 
-  // Project output (for the selected project)
+  // Project output
   outputMessages: ClaudeMessage[];
   appendOutput: (projectId: string, message: ClaudeMessage) => void;
   clearOutput: () => void;
 
-  // Question state (for the selected project's UI)
+  // Question state
   question: QuestionState;
   lastInputSentAt: number;
   setQuestion: (q: QuestionState) => void;
   dismissQuestion: () => void;
   markInputSent: () => void;
 
-  // Per-project client-side question detection (projectId → true if waiting)
+  // Per-project question tracking
   projectQuestions: Record<string, boolean>;
-
-  // Per-project dismiss tracking (projectId → true if dismissed, cleared on Running)
   dismissedProjects: Record<string, boolean>;
 
   // Notification badges
-  waitingCounts: Record<number, number>;
   totalWaitingCount: number;
 
   // Tile view
@@ -68,187 +107,298 @@ interface AppState {
   setTileView: (tile: boolean) => void;
   tileMessages: Record<string, ClaudeMessage[]>;
   tileLoading: Record<string, boolean>;
-  appendTileMessage: (projectId: string, message: ClaudeMessage) => void;
-  setTileMessages: (projectId: string, messages: ClaudeMessage[]) => void;
   setTileLoading: (projectId: string, loading: boolean) => void;
   clearTileMessages: () => void;
 
-  // Profile filter
-  profileFilter: string; // 'All' or a profile name
-  setProfileFilter: (filter: string) => void;
-
-  // Create project / profile dialogs
-  showCreateProject: boolean;
-  setShowCreateProject: (show: boolean) => void;
-  createProjectServerIndex: number | null;
-  // UI
+  // UI dialogs
   showAddServer: boolean;
   setShowAddServer: (show: boolean) => void;
-  editServerIndex: number | null;
-  setEditServerIndex: (index: number | null) => void;
+  showCreateProject: boolean;
+  createProjectContext: { serverId: string; rootName: string } | null;
+  setShowCreateProject: (show: boolean, context?: { serverId: string; rootName: string }) => void;
+  editServerId: string | null;
+  setEditServerId: (id: string | null) => void;
 }
 
-/** Recompute waiting counts from server projects + client-side question map, excluding dismissed */
-function computeWaitingCounts(servers: ServerState[], projectQuestions: Record<string, boolean>, dismissedProjects: Record<string, boolean> = {}): { waitingCounts: Record<number, number>; totalWaitingCount: number } {
-  const waitingCounts: Record<number, number> = {};
-  let totalWaitingCount = 0;
-  for (let i = 0; i < servers.length; i++) {
-    const count = servers[i].projects.filter(p =>
-      !dismissedProjects[p.Id] && (p.State === 'WaitingInput' || projectQuestions[p.Id])
-    ).length;
-    waitingCounts[i] = count;
-    totalWaitingCount += count;
+// ── Helper: rebuild profile hierarchy ──────────────────────────
+
+function rebuildHierarchy(
+  connections: ServerConnection[],
+  filter: string,
+): { profileGroups: ProfileGroup[]; inactiveServers: ServerConnection[]; profileFilterOptions: string[] } {
+  const profileDict = new Map<string, RootGroup[]>();
+  const allProfileNames = new Set<string>();
+  const multiServer = connections.filter(c => c.connectionState === 'connected').length > 1;
+  const representedServerIds = new Set<string>();
+
+  for (const conn of connections) {
+    if (conn.connectionState !== 'connected') continue;
+
+    // Group projects by root, then by profile
+    const projectsByRoot = new Map<string, ProjectSummary[]>();
+    for (const p of conn.projects) {
+      const rootName = p.RootName ?? 'default';
+      if (!projectsByRoot.has(rootName)) projectsByRoot.set(rootName, []);
+      projectsByRoot.get(rootName)!.push(p);
+    }
+
+    // Process each known root (includes empty roots)
+    for (const root of conn.roots) {
+      const profileName = root.ProfileName ?? 'Default';
+      allProfileNames.add(profileName);
+
+      const projects = projectsByRoot.get(root.Name) ?? [];
+      // Projects might have a different ProfileName than the root default
+      const projectsByProfile = new Map<string, ProjectSummary[]>();
+      projectsByProfile.set(profileName, []); // ensure root's profile exists even if empty
+      for (const p of projects) {
+        const pProfile = p.ProfileName ?? 'Default';
+        allProfileNames.add(pProfile);
+        if (!projectsByProfile.has(pProfile)) projectsByProfile.set(pProfile, []);
+        projectsByProfile.get(pProfile)!.push(p);
+      }
+
+      for (const [pName, pProjects] of projectsByProfile) {
+        if (!profileDict.has(pName)) profileDict.set(pName, []);
+        const rootList = profileDict.get(pName)!;
+
+        const existing = rootList.find(r => r.rootName === root.Name && r.serverId === conn.serverInfo.Id);
+        if (existing) {
+          for (const p of pProjects) {
+            if (!existing.projects.some(ep => ep.Id === p.Id))
+              existing.projects.push(p);
+          }
+        } else {
+          rootList.push({
+            name: multiServer ? `${root.Name} (${conn.serverInfo.Name})` : root.Name,
+            rootName: root.Name,
+            profileName: pName,
+            serverId: conn.serverInfo.Id,
+            serverName: conn.serverInfo.Name,
+            projects: [...pProjects],
+            actions: root.Actions ?? [],
+          });
+        }
+        representedServerIds.add(conn.serverInfo.Id);
+      }
+    }
   }
-  return { waitingCounts, totalWaitingCount };
+
+  // Apply filter
+  const filtered = filter === 'All'
+    ? [...profileDict.entries()]
+    : [...profileDict.entries()].filter(([name]) => name.toLowerCase() === filter.toLowerCase());
+
+  const profileGroups = filtered
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, rootGroups]) => ({
+      name,
+      rootGroups,
+      projectCount: rootGroups.reduce((sum, r) => sum + r.projects.length, 0),
+    }));
+
+  const inactiveServers = connections.filter(c => !representedServerIds.has(c.serverInfo.Id));
+
+  const profileFilterOptions = ['All', ...Array.from(allProfileNames).sort()];
+
+  return { profileGroups, inactiveServers, profileFilterOptions };
 }
+
+function computeTotalWaiting(connections: ServerConnection[], pq: Record<string, boolean>, dp: Record<string, boolean>): number {
+  let total = 0;
+  for (const conn of connections) {
+    for (const p of conn.projects) {
+      if (!dp[p.Id] && (p.State === 'WaitingInput' || pq[p.Id])) total++;
+    }
+  }
+  return total;
+}
+
+// ── Store ──────────────────────────────────────────────────────
 
 export const useAppStore = create<AppState>((set, get) => ({
-  servers: [],
+  serverConnections: [],
+  profileGroups: [],
+  inactiveServers: [],
+  profileFilterOptions: ['All'],
+  profileFilter: 'All',
 
-  loadServers: () => {
-    const registrations = loadServers();
-    const servers = registrations.map(reg => ({
-      registration: reg,
-      hub: new GodModeHub(),
-      connectionState: 'disconnected' as ConnectionState,
-      projects: [],
-      roots: [],
-      profiles: [],
-    }));
-    set({ servers });
+  getConnection: (serverId) => get().serverConnections.find(c => c.serverInfo.Id === serverId),
+  getHub: (serverId) => get().serverConnections.find(c => c.serverInfo.Id === serverId)?.hub,
+
+  setProfileFilter: (filter) => {
+    const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(get().serverConnections, filter);
+    set({ profileFilter: filter, profileGroups, inactiveServers, profileFilterOptions });
   },
 
-  addServer: (reg) => {
-    const hub = new GodModeHub();
-    const serverState: ServerState = {
-      registration: reg,
-      hub,
-      connectionState: 'disconnected',
-      projects: [],
-      roots: [],
-      profiles: [],
-    };
-    set(state => {
-      const servers = [...state.servers, serverState];
-      saveServers(servers.map(s => s.registration));
-      return { servers, showAddServer: false };
-    });
-  },
+  // ── Server lifecycle ──────────────────────────────────────
 
-  updateServer: (index, reg) => {
-    set(state => {
-      const servers = [...state.servers];
-      if (index >= 0 && index < servers.length) {
-        servers[index] = { ...servers[index], registration: reg };
-        saveServers(servers.map(s => s.registration));
-      }
-      return { servers, editServerIndex: null };
-    });
-  },
+  loadServers: async () => {
+    console.info('[store] loadServers: waiting for base URL');
+    await waitForBaseUrl();
+    try {
+      const servers = await fetchServers();
+      console.info(`[store] loadServers: fetched ${servers.length} servers:`, servers.map(s => `${s.Name}(${s.State})`));
+      const existing = get().serverConnections;
 
-  removeServer: (index) => {
-    const server = get().servers[index];
-    if (server) {
-      server.hub.disconnect();
-    }
-    set(state => {
-      const servers = state.servers.filter((_, i) => i !== index);
-      saveServers(servers.map(s => s.registration));
-      return { servers, editServerIndex: null };
-    });
-  },
-
-  connectServer: async (index) => {
-    const state = get();
-    const server = state.servers[index];
-    if (!server) return;
-
-    const updateConnectionState = (connectionState: ConnectionState) => {
-      set(state => {
-        const servers = [...state.servers];
-        if (servers[index]) {
-          servers[index] = { ...servers[index], connectionState };
+      // Preserve hubs and connection state for servers that are still present
+      const connections: ServerConnection[] = servers.map(s => {
+        const prev = existing.find(c => c.serverInfo.Id === s.Id);
+        if (prev) {
+          return { ...prev, serverInfo: s };
         }
-        return { servers };
+        return {
+          serverInfo: s,
+          hub: new GodModeHub(),
+          connectionState: 'disconnected' as ConnectionState,
+          projects: [],
+          roots: [],
+          profiles: [],
+        };
+      });
+
+      const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, get().profileFilter);
+      console.info(`[store] loadServers: ${profileGroups.length} profiles, ${inactiveServers.length} inactive`);
+      set({ serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions });
+
+      // Subscribe to SSE events (once)
+      if (existing.length === 0) {
+        console.info('[store] loadServers: subscribing to SSE');
+        subscribeEvents((type) => {
+          if (type === 'serversChanged') {
+            console.info('[store] SSE: serversChanged');
+            get().loadServers();
+          }
+        });
+      }
+
+      // Auto-connect to servers that aren't already connected
+      // Skip codespaces that are clearly stopped (they'd need starting first)
+      for (const conn of connections) {
+        if (conn.connectionState !== 'disconnected') continue;
+        if (conn.serverInfo.Type === 'github' && conn.serverInfo.State === 'Stopped') continue;
+        console.info(`[store] Auto-connecting to ${conn.serverInfo.Name} (${conn.serverInfo.Id})`);
+        get().connectServer(conn.serverInfo.Id).catch(err =>
+          console.warn(`[store] Auto-connect to ${conn.serverInfo.Name} failed:`, err)
+        );
+      }
+    } catch (err) {
+      console.error('[store] Failed to load servers:', err);
+    }
+  },
+
+  addServer: async (req) => {
+    try {
+      await apiAddServer(req);
+      await get().loadServers();
+      set({ showAddServer: false });
+    } catch (err) {
+      console.error('Failed to add server:', err);
+    }
+  },
+
+  removeServer: async (serverId) => {
+    const conn = get().getConnection(serverId);
+    if (conn) conn.hub.disconnect();
+    // Find index in the connections list to call REST delete
+    const idx = get().serverConnections.findIndex(c => c.serverInfo.Id === serverId);
+    if (idx >= 0) {
+      try {
+        await apiRemoveServer(idx);
+      } catch (err) {
+        console.error('Failed to remove server:', err);
+      }
+    }
+    await get().loadServers();
+    set({ editServerId: null });
+  },
+
+  startServer: async (serverId) => {
+    try {
+      await apiStartServer(serverId);
+      // SSE will push serversChanged events as the server transitions states
+    } catch (err) {
+      console.error('Failed to start server:', err);
+    }
+  },
+
+  connectServer: async (serverId) => {
+    console.info(`[store] connectServer: ${serverId}`);
+    const state = get();
+    const conn = state.serverConnections.find(c => c.serverInfo.Id === serverId);
+    if (!conn) { console.warn(`[store] connectServer: no connection found for ${serverId}`); return; }
+
+    const updateConn = (updates: Partial<ServerConnection>) => {
+      set(state => {
+        const connections = state.serverConnections.map(c =>
+          c.serverInfo.Id === serverId ? { ...c, ...updates } : c
+        );
+        const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter);
+        return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions };
       });
     };
 
-    server.hub.setCallbacks({
-      onStateChanged: updateConnectionState,
+    conn.hub.setCallbacks({
+      onStateChanged: (connectionState) => updateConn({ connectionState }),
       onProjectCreated: (status) => {
         set(state => {
-          const servers = [...state.servers];
-          if (servers[index]) {
-            const summary: ProjectSummary = {
-              Id: status.Id,
-              Name: status.Name,
-              State: status.State,
-              UpdatedAt: status.UpdatedAt,
-              CurrentQuestion: status.CurrentQuestion,
-              RootName: status.RootName,
-              ProfileName: status.ProfileName,
-            };
-            servers[index] = {
-              ...servers[index],
-              projects: [...servers[index].projects, summary],
-            };
-          }
-          const counts = computeWaitingCounts(servers, state.projectQuestions, state.dismissedProjects);
-          return { servers, ...counts };
+          const summary: ProjectSummary = {
+            Id: status.Id, Name: status.Name, State: status.State,
+            UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
+            RootName: status.RootName, ProfileName: status.ProfileName,
+          };
+          const connections = state.serverConnections.map(c =>
+            c.serverInfo.Id === serverId
+              ? { ...c, projects: [...c.projects, summary] }
+              : c
+          );
+          const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter);
+          const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
+          return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
         });
       },
       onProjectDeleted: (projectId) => {
         set(state => {
-          const servers = [...state.servers];
-          if (servers[index]) {
-            servers[index] = {
-              ...servers[index],
-              projects: servers[index].projects.filter(p => p.Id !== projectId),
-            };
-          }
+          const connections = state.serverConnections.map(c =>
+            c.serverInfo.Id === serverId
+              ? { ...c, projects: c.projects.filter(p => p.Id !== projectId) }
+              : c
+          );
           const sel = state.selectedProject;
-          const clearSel = sel?.serverIndex === index && sel?.projectId === projectId;
+          const clearSel = sel?.serverId === serverId && sel?.projectId === projectId;
           const pq = { ...state.projectQuestions };
           delete pq[projectId];
-          const counts = computeWaitingCounts(servers, pq, state.dismissedProjects);
+          const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter);
+          const total = computeTotalWaiting(connections, pq, state.dismissedProjects);
           return {
-            servers,
-            projectQuestions: pq,
-            ...counts,
+            serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
+            projectQuestions: pq, totalWaitingCount: total,
             ...(clearSel ? { selectedProject: null, outputMessages: [], question: emptyQuestion } : {}),
           };
         });
       },
       onStatusChanged: (_projectId, status) => {
         set(state => {
-          const servers = [...state.servers];
-          if (servers[index]) {
-            servers[index] = {
-              ...servers[index],
-              projects: servers[index].projects.map(p =>
-                p.Id === status.Id
+          const connections = state.serverConnections.map(c =>
+            c.serverInfo.Id === serverId
+              ? { ...c, projects: c.projects.map(p => p.Id === status.Id
                   ? { ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion }
-                  : p
-              ),
-            };
-          }
+                  : p) }
+              : c
+          );
+          const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter);
 
-          // Question management for the selected project
           const sel = state.selectedProject;
           let questionUpdate: Partial<AppState> = {};
           let pq = state.projectQuestions;
-          if (sel?.serverIndex === index && sel?.projectId === status.Id && !state.dismissedProjects[status.Id]) {
+          if (sel?.serverId === serverId && sel?.projectId === status.Id && !state.dismissedProjects[status.Id]) {
             const isWaitingOrIdle = status.State === 'WaitingInput' || status.State === 'Idle';
             if (isWaitingOrIdle) {
-              const project = servers[index]?.projects.find(p => p.Id === status.Id);
+              const project = connections.find(c => c.serverInfo.Id === serverId)?.projects.find(p => p.Id === status.Id);
               if (project) {
                 const detected = detectQuestionFromStatus(
-                  status.State,
-                  status.CurrentQuestion,
-                  project.Name,
-                  state.question,
-                  state.lastInputSentAt,
-                  state.outputMessages,
+                  status.State, status.CurrentQuestion, project.Name,
+                  state.question, state.lastInputSentAt, state.outputMessages,
                 );
                 if (detected) {
                   questionUpdate = { question: detected };
@@ -261,7 +411,6 @@ export const useAppStore = create<AppState>((set, get) => ({
             }
           }
 
-          // Clear projectQuestions and dismiss flag when project leaves waiting
           let dp = state.dismissedProjects;
           if (status.State === 'Running') {
             pq = { ...pq, [status.Id]: false };
@@ -269,33 +418,32 @@ export const useAppStore = create<AppState>((set, get) => ({
             saveDismissed(dp);
           }
 
-          const counts = computeWaitingCounts(servers, pq, dp);
-          return { servers, projectQuestions: pq, dismissedProjects: dp, ...counts, ...questionUpdate };
+          const total = computeTotalWaiting(connections, pq, dp);
+          return {
+            serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
+            projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total,
+            ...questionUpdate,
+          };
         });
       },
       onOutputReceived: (projectId, message) => {
         const s = get();
         const sel = s.selectedProject;
-
-        // Detect question from message for any project
-        // Skip if this project was explicitly dismissed
         const isDismissed = s.dismissedProjects[projectId];
         const isQuestion = !isDismissed && (
           message.isQuestion ||
           (message.type === 'assistant' && message.contentSummary && looksLikeQuestion(message.contentSummary))
         );
 
-        // Update per-project question tracking
         if (isQuestion) {
           set(state => {
             const pq = { ...state.projectQuestions, [projectId]: true };
-            const counts = computeWaitingCounts(state.servers, pq, state.dismissedProjects);
-            return { projectQuestions: pq, ...counts };
+            const total = computeTotalWaiting(state.serverConnections, pq, state.dismissedProjects);
+            return { projectQuestions: pq, totalWaitingCount: total };
           });
         }
 
-        // Feed selected project output + question state
-        if (sel?.serverIndex === index && sel?.projectId === projectId) {
+        if (sel?.serverId === serverId && sel?.projectId === projectId) {
           const detected = detectQuestionFromMessage(message, s.question, s.lastInputSentAt, s.dismissedProjects[projectId]);
           set(state => ({
             outputMessages: [...state.outputMessages, message],
@@ -303,7 +451,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           }));
         }
 
-        // Feed tile messages when in tile view
         if (s.isTileView) {
           set(state => ({
             tileMessages: {
@@ -313,75 +460,77 @@ export const useAppStore = create<AppState>((set, get) => ({
           }));
         }
       },
-      onCreationProgress: (_projectId, _message) => {
-        // TODO: surface creation progress in UI
-      },
+      onCreationProgress: () => {},
     });
 
     try {
-      await server.hub.connect(server.registration.url, server.registration.accessToken);
-      await get().refreshProjects(index);
+      console.info(`[store] connectServer: hub.connect(${serverId})...`);
+      await conn.hub.connect(serverId);
+      console.info(`[store] connectServer: connected, refreshing projects...`);
+      await get().refreshProjects(serverId);
+      console.info(`[store] connectServer: ${serverId} ready`);
     } catch (err) {
-      console.error('Failed to connect to server:', err);
-      updateConnectionState('disconnected');
+      console.error(`[store] connectServer ${serverId} failed:`, err);
+      updateConn({ connectionState: 'disconnected' });
     }
   },
 
-  disconnectServer: async (index) => {
-    const server = get().servers[index];
-    if (server) {
-      await server.hub.disconnect();
+  disconnectServer: async (serverId) => {
+    const conn = get().getConnection(serverId);
+    if (conn) {
+      await conn.hub.disconnect();
       set(state => {
-        const servers = [...state.servers];
-        if (servers[index]) {
-          servers[index] = { ...servers[index], projects: [], roots: [], profiles: [], connectionState: 'disconnected' };
-        }
-        const counts = computeWaitingCounts(servers, state.projectQuestions, state.dismissedProjects);
-        return { servers, ...counts };
+        const connections = state.serverConnections.map(c =>
+          c.serverInfo.Id === serverId
+            ? { ...c, projects: [], roots: [], profiles: [], connectionState: 'disconnected' as ConnectionState }
+            : c
+        );
+        const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter);
+        const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
+        return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
       });
     }
   },
 
-  refreshProjects: async (index) => {
-    const server = get().servers[index];
-    if (!server || server.connectionState !== 'connected') return;
-
+  refreshProjects: async (serverId) => {
+    const conn = get().getConnection(serverId);
+    if (!conn || conn.connectionState !== 'connected') return;
     try {
+      console.info(`[store] refreshProjects: ${serverId}`);
       const [projects, roots, profiles] = await Promise.all([
-        server.hub.listProjects(),
-        server.hub.listProjectRoots(),
-        server.hub.listProfiles(),
+        conn.hub.listProjects(),
+        conn.hub.listProjectRoots(),
+        conn.hub.listProfiles(),
       ]);
+      console.info(`[store] refreshProjects: ${serverId} -> ${projects.length} projects, ${roots.length} roots, ${profiles.length} profiles`);
+      if (projects.length > 0) console.debug('[store] projects sample:', JSON.stringify(projects[0]));
       set(state => {
-        const servers = [...state.servers];
-        if (servers[index]) {
-          servers[index] = { ...servers[index], projects, roots, profiles };
-        }
-        const counts = computeWaitingCounts(servers, state.projectQuestions, state.dismissedProjects);
-        return { servers, ...counts };
+        const connections = state.serverConnections.map(c =>
+          c.serverInfo.Id === serverId ? { ...c, projects, roots, profiles } : c
+        );
+        const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter);
+        const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
+        return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
       });
     } catch (err) {
       console.error('Failed to refresh projects:', err);
     }
   },
 
-  // Selection
-  selectedProject: null,
-  selectProject: (serverIndex, projectId) => {
-    set({ selectedProject: { serverIndex, projectId }, outputMessages: [], question: emptyQuestion });
-  },
-  clearSelection: () => {
-    set({ selectedProject: null, outputMessages: [], question: emptyQuestion });
-  },
+  // ── Selection ─────────────────────────────────────────────
 
-  // Output
+  selectedProject: null,
+  selectProject: (serverId, projectId) => set({ selectedProject: { serverId, projectId }, outputMessages: [], question: emptyQuestion }),
+  clearSelection: () => set({ selectedProject: null, outputMessages: [], question: emptyQuestion }),
+
+  // ── Output ────────────────────────────────────────────────
+
   outputMessages: [],
-  appendOutput: (_projectId, message) => {
-    set(state => ({ outputMessages: [...state.outputMessages, message] }));
-  },
+  appendOutput: (_projectId, message) => set(state => ({ outputMessages: [...state.outputMessages, message] })),
   clearOutput: () => set({ outputMessages: [] }),
 
-  // Question
+  // ── Questions ─────────────────────────────────────────────
+
   question: emptyQuestion,
   lastInputSentAt: 0,
   setQuestion: (q) => set({ question: q }),
@@ -390,62 +539,38 @@ export const useAppStore = create<AppState>((set, get) => ({
     const pq = sel ? { ...state.projectQuestions, [sel.projectId]: false } : state.projectQuestions;
     const dp = sel ? { ...state.dismissedProjects, [sel.projectId]: true } : state.dismissedProjects;
     saveDismissed(dp);
-    const counts = computeWaitingCounts(state.servers, pq, dp);
-    return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, ...counts };
+    const total = computeTotalWaiting(state.serverConnections, pq, dp);
+    return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total };
   }),
   markInputSent: () => set(state => {
     const sel = state.selectedProject;
     const pq = sel ? { ...state.projectQuestions, [sel.projectId]: false } : state.projectQuestions;
     const dp = sel ? { ...state.dismissedProjects, [sel.projectId]: false } : state.dismissedProjects;
     saveDismissed(dp);
-    const counts = computeWaitingCounts(state.servers, pq, dp);
-    return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, ...counts };
+    const total = computeTotalWaiting(state.serverConnections, pq, dp);
+    return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total };
   }),
 
-  // Per-project questions
   projectQuestions: {},
   dismissedProjects: loadDismissed(),
-
-  // Notifications
-  waitingCounts: {},
   totalWaitingCount: 0,
 
-  // Tile view
+  // ── Tile view ─────────────────────────────────────────────
+
   isTileView: false,
   setTileView: (tile) => set({ isTileView: tile, tileMessages: {}, tileLoading: {}, selectedProject: null, outputMessages: [], question: emptyQuestion }),
   tileMessages: {},
   tileLoading: {},
-  appendTileMessage: (projectId, message) => {
-    set(state => ({
-      tileMessages: {
-        ...state.tileMessages,
-        [projectId]: [...(state.tileMessages[projectId] ?? []), message],
-      },
-    }));
-  },
-  setTileMessages: (projectId, messages) => {
-    set(state => ({
-      tileMessages: { ...state.tileMessages, [projectId]: messages },
-    }));
-  },
-  setTileLoading: (projectId, loading) => {
-    set(state => ({
-      tileLoading: { ...state.tileLoading, [projectId]: loading },
-    }));
-  },
+  setTileLoading: (projectId, loading) => set(state => ({ tileLoading: { ...state.tileLoading, [projectId]: loading } })),
   clearTileMessages: () => set({ tileMessages: {}, tileLoading: {} }),
 
-  // Profile filter
-  profileFilter: 'All',
-  setProfileFilter: (filter) => set({ profileFilter: filter }),
+  // ── UI ────────────────────────────────────────────────────
 
-  // Create project / profile
-  showCreateProject: false,
-  setShowCreateProject: (show) => set({ showCreateProject: show, createProjectServerIndex: show ? null : null }),
-  createProjectServerIndex: null,
-  // UI
   showAddServer: false,
   setShowAddServer: (show) => set({ showAddServer: show }),
-  editServerIndex: null,
-  setEditServerIndex: (index) => set({ editServerIndex: index }),
+  showCreateProject: false,
+  createProjectContext: null,
+  setShowCreateProject: (show, context) => set({ showCreateProject: show, createProjectContext: context ?? null }),
+  editServerId: null,
+  setEditServerId: (id) => set({ editServerId: id }),
 }));

@@ -6,7 +6,7 @@
 // --- Enums (serialized as strings by JsonStringEnumConverter) ---
 
 export type ProjectState = 'Idle' | 'Running' | 'WaitingInput' | 'Error' | 'Stopped';
-export type HostState = 'Running' | 'Stopped' | 'Starting' | 'Stopping' | 'Unknown';
+export type ServerState = 'Running' | 'Stopped' | 'Starting' | 'Stopping' | 'Unknown';
 
 // --- Models (PascalCase properties matching server serialization) ---
 
@@ -76,12 +76,13 @@ export interface ProjectRootInfo {
   ProfileName?: string | null;
 }
 
-export interface HostInfo {
+export interface ServerInfo {
   Id: string;
   Name: string;
   Type: string;
-  State: HostState;
+  State: ServerState;
   Url?: string | null;
+  Description?: string | null;
 }
 
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---

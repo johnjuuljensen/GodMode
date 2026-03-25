@@ -7,12 +7,12 @@ import './ProjectView.css';
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
 
 interface Props {
-  serverIndex: number;
+  serverId: string;
   projectId: string;
 }
 
-export function ProjectView({ serverIndex, projectId }: Props) {
-  const server = useAppStore(s => s.servers[serverIndex]);
+export function ProjectView({ serverId, projectId }: Props) {
+  const conn = useAppStore(s => s.serverConnections.find(c => c.serverInfo.Id === serverId));
   const outputMessages = useAppStore(s => s.outputMessages);
   const clearOutput = useAppStore(s => s.clearOutput);
   const question = useAppStore(s => s.question);
@@ -24,20 +24,17 @@ export function ProjectView({ serverIndex, projectId }: Props) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Phase: 'loading' = messages streaming in (not rendered), 'ready' = render + show
   const [phase, setPhase] = useState<'loading' | 'ready'>('loading');
   const settleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const hub = server?.hub;
-  const project = server?.projects.find(p => p.Id === projectId);
+  const hub = conn?.hub;
+  const project = conn?.projects.find(p => p.Id === projectId);
 
-  // Subscribe to project output on mount
   useEffect(() => {
-    if (!hub || server?.connectionState !== 'connected') return;
+    if (!hub || conn?.connectionState !== 'connected') return;
     clearOutput();
     setPhase('loading');
 
-    // Give messages time to stream in before rendering them
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     settleTimerRef.current = setTimeout(() => setPhase('ready'), 800);
 
@@ -46,22 +43,16 @@ export function ProjectView({ serverIndex, projectId }: Props) {
       hub.unsubscribeProject(projectId).catch(console.error);
       if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     };
-  }, [hub, projectId, server?.connectionState, clearOutput]);
+  }, [hub, projectId, conn?.connectionState, clearOutput]);
 
-  // Update project name
   useEffect(() => {
     if (project) setProjectName(project.Name);
   }, [project]);
 
-  // When phase becomes 'ready', all messages render in one batch.
-  // useLayoutEffect fires BEFORE the browser paints — snap scroll to bottom.
-  // Also snaps on each new message after initial load.
   useLayoutEffect(() => {
     if (phase !== 'ready') return;
     const el = messagesRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-    }
+    if (el) el.scrollTop = el.scrollHeight;
   }, [phase, outputMessages.length]);
 
   const toggleSimpleView = useCallback(() => {
@@ -125,6 +116,11 @@ export function ProjectView({ serverIndex, projectId }: Props) {
     try { await hub.resumeProject(projectId); } catch (err) { console.error(err); }
   };
 
+  const handleDelete = async () => {
+    if (!hub || !confirm(`Delete project "${projectName}"?`)) return;
+    try { await hub.deleteProject(projectId, state === 'Running'); } catch (err) { console.error(err); }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -154,32 +150,24 @@ export function ProjectView({ serverIndex, projectId }: Props) {
           >
             {simpleView ? 'Simple' : 'Full'}
           </button>
-          {canStop && (
-            <button className="btn btn-secondary" onClick={handleStop}>Stop</button>
-          )}
-          {canResume && (
-            <button className="btn btn-primary" onClick={handleResume}>Resume</button>
-          )}
+          {canStop && <button className="btn btn-secondary" onClick={handleStop}>Stop</button>}
+          {canResume && <button className="btn btn-primary" onClick={handleResume}>Resume</button>}
+          <button className="btn btn-danger" onClick={handleDelete} title="Delete project">Delete</button>
         </div>
       </div>
 
       <div className="project-messages" ref={messagesRef}>
         {phase === 'loading' ? (
-          <div className="project-messages-empty">Loading…</div>
+          <div className="project-messages-empty">Loading...</div>
         ) : visibleMessages.length === 0 ? (
           <div className="project-messages-empty">
-            {server?.connectionState === 'connected'
-              ? 'Waiting for output...'
-              : 'Not connected'}
+            {conn?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
           </div>
         ) : (
-          visibleMessages.map((msg, i) => (
-            <ChatMessage key={i} message={msg} />
-          ))
+          visibleMessages.map((msg, i) => <ChatMessage key={i} message={msg} />)
         )}
       </div>
 
-      {/* Question prompt with option selector */}
       {question.isActive && (
         <QuestionPrompt
           text={question.text}
@@ -201,11 +189,7 @@ export function ProjectView({ serverIndex, projectId }: Props) {
           placeholder={canResume ? 'Type to resume...' : 'Type your response...'}
           disabled={!canSendInput}
         />
-        <button
-          className="btn btn-primary"
-          onClick={handleSendInput}
-          disabled={!canSendInput || !inputText.trim()}
-        >
+        <button className="btn btn-primary" onClick={handleSendInput} disabled={!canSendInput || !inputText.trim()}>
           Send
         </button>
       </div>

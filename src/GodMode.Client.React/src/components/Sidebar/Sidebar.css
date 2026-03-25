@@ -100,6 +100,15 @@
 .server-dot.disconnected {
   background: var(--text-tertiary);
 }
+.server-dot.running {
+  background: var(--success);
+}
+
+.server-status-text {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
 
 .server-info {
   flex: 1;
@@ -188,6 +197,64 @@
   border: 1px solid var(--glass-border);
   padding: 1px 5px;
   border-radius: 4px;
+}
+
+/* ── Root Groups ── */
+.root-group {
+  margin-bottom: 2px;
+}
+
+.root-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 16px 2px 20px;
+}
+
+.root-group-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.root-action-btn {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--glass-border);
+  border-radius: 4px;
+  background: var(--glass);
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.12s;
+}
+
+.root-group:hover .root-action-btn {
+  opacity: 1;
+}
+
+.root-action-btn:hover {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+}
+
+/* ── Inactive Section ── */
+.inactive-section {
+  margin-top: 8px;
+  border-top: 1px solid var(--glass-border);
+  padding-top: 4px;
+}
+
+.inactive-section .server-actions {
+  opacity: 1;
 }
 
 /* ── Project List ── */

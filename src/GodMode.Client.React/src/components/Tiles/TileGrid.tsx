@@ -4,7 +4,7 @@ import { ProjectTile } from './ProjectTile';
 import './TileGrid.css';
 
 export function TileGrid() {
-  const servers = useAppStore(s => s.servers);
+  const serverConnections = useAppStore(s => s.serverConnections);
   const selectedProject = useAppStore(s => s.selectedProject);
   const selectProject = useAppStore(s => s.selectProject);
   const tileMessages = useAppStore(s => s.tileMessages);
@@ -16,13 +16,13 @@ export function TileGrid() {
 
   useEffect(() => {
     clearTileMessages();
-    const toSubscribe: { hub: typeof servers[0]['hub']; projectId: string }[] = [];
+    const toSubscribe: { hub: typeof serverConnections[0]['hub']; projectId: string }[] = [];
 
-    for (const server of servers) {
-      if (server.connectionState !== 'connected') continue;
-      for (const project of server.projects) {
+    for (const conn of serverConnections) {
+      if (conn.connectionState !== 'connected') continue;
+      for (const project of conn.projects) {
         if (!subscribedRef.current.has(project.Id)) {
-          toSubscribe.push({ hub: server.hub, projectId: project.Id });
+          toSubscribe.push({ hub: conn.hub, projectId: project.Id });
         }
       }
     }
@@ -35,63 +35,53 @@ export function TileGrid() {
       setTimeout(() => setTileLoading(projectId, false), 2000);
     }
 
-    // Also keep existing subscriptions that are still valid
-    for (const server of servers) {
-      if (server.connectionState !== 'connected') continue;
-      for (const p of server.projects) newSubscribed.add(p.Id);
+    for (const conn of serverConnections) {
+      if (conn.connectionState !== 'connected') continue;
+      for (const p of conn.projects) newSubscribed.add(p.Id);
     }
     subscribedRef.current = newSubscribed;
 
     return () => {
-      // Unsubscribe all on unmount
-      for (const server of servers) {
-        if (server.connectionState !== 'connected') continue;
-        for (const project of server.projects) {
-          server.hub.unsubscribeProject(project.Id).catch(() => {});
+      for (const conn of serverConnections) {
+        if (conn.connectionState !== 'connected') continue;
+        for (const project of conn.projects) {
+          conn.hub.unsubscribeProject(project.Id).catch(() => {});
         }
       }
       subscribedRef.current.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [servers.map(s => `${s.connectionState}:${s.projects.map(p => p.Id).join(',')}`).join('|')]);
+  }, [serverConnections.map(s => `${s.connectionState}:${s.projects.map(p => p.Id).join(',')}`).join('|')]);
 
-  const hasConnected = servers.some(s => s.connectionState === 'connected');
-  const allProjects = servers.flatMap((server, si) =>
-    server.connectionState === 'connected'
-      ? server.projects.map(p => ({ serverIndex: si, project: p }))
+  const hasConnected = serverConnections.some(s => s.connectionState === 'connected');
+  const allProjects = serverConnections.flatMap(conn =>
+    conn.connectionState === 'connected'
+      ? conn.projects.map(p => ({ serverId: conn.serverInfo.Id, project: p }))
       : []
   );
 
   if (!hasConnected) {
-    return (
-      <div className="tile-grid-empty">
-        No connected servers
-      </div>
-    );
+    return <div className="tile-grid-empty">No connected servers</div>;
   }
 
   if (allProjects.length === 0) {
-    return (
-      <div className="tile-grid-empty">
-        No projects
-      </div>
-    );
+    return <div className="tile-grid-empty">No projects</div>;
   }
 
   return (
     <div className="tile-grid-scroll">
       <div className="tile-grid">
-        {allProjects.map(({ serverIndex, project }) => (
+        {allProjects.map(({ serverId, project }) => (
           <ProjectTile
             key={project.Id}
             project={project}
             messages={tileMessages[project.Id] ?? []}
             isLoading={tileLoading[project.Id] ?? false}
             isSelected={
-              selectedProject?.serverIndex === serverIndex &&
+              selectedProject?.serverId === serverId &&
               selectedProject?.projectId === project.Id
             }
-            onSelect={() => selectProject(serverIndex, project.Id)}
+            onSelect={() => selectProject(serverId, project.Id)}
           />
         ))}
       </div>

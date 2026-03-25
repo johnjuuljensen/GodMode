@@ -27,18 +27,20 @@
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.19041.0</TargetPlatformMinVersion>
 
 		<_ReactDir>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'GodMode.Client.React'))</_ReactDir>
+
 	</PropertyGroup>
 
 	<ItemGroup>
-		<!-- MAUI packages (version managed by workload) -->
 		<PackageReference Include="Microsoft.Maui.Controls" VersionOverride="$(MauiVersion)" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" />
 
-		<!-- Raw assets: wwwroot for HybridWebView (includes React build output) -->
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
+		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
+		<ProjectReference Include="..\SignalR.Proxy\SignalR.Proxy.csproj" />
 	</ItemGroup>
 
 	<!-- Track React sources for incremental build -->

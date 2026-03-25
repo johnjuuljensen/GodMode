@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '../store';
 import { Sidebar } from './Sidebar/Sidebar';
 import { ProjectView } from './Project/ProjectView';
@@ -6,6 +6,7 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
+import { openDevTools } from '../services/api';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -17,29 +18,17 @@ function getInitialTheme(): 'dark' | 'light' {
 export function Shell() {
   const selectedProject = useAppStore(s => s.selectedProject);
   const showAddServer = useAppStore(s => s.showAddServer);
-  const editServerIndex = useAppStore(s => s.editServerIndex);
+  const editServerId = useAppStore(s => s.editServerId);
   const showCreateProject = useAppStore(s => s.showCreateProject);
   const isTileView = useAppStore(s => s.isTileView);
   const setTileView = useAppStore(s => s.setTileView);
   const clearSelection = useAppStore(s => s.clearSelection);
   const totalWaitingCount = useAppStore(s => s.totalWaitingCount);
-  const servers = useAppStore(s => s.servers);
   const profileFilter = useAppStore(s => s.profileFilter);
   const setProfileFilter = useAppStore(s => s.setProfileFilter);
+  const profileFilterOptions = useAppStore(s => s.profileFilterOptions);
 
-  const allProfileNames = useMemo(() => {
-    const names = new Set<string>();
-    for (const server of servers) {
-      if (server.connectionState !== 'connected') continue;
-      for (const p of server.profiles) names.add(p.Name);
-      for (const p of server.projects) {
-        if (p.ProfileName) names.add(p.ProfileName);
-      }
-    }
-    return ['All', ...Array.from(names).sort()];
-  }, [servers]);
-
-  const showProfileFilter = allProfileNames.length > 1;
+  const showProfileFilter = profileFilterOptions.length > 2;
 
   const [theme, setTheme] = useState<'dark' | 'light'>(getInitialTheme);
 
@@ -48,9 +37,7 @@ export function Shell() {
     localStorage.setItem('godmode-theme', theme);
   }, [theme]);
 
-  const toggleTheme = useCallback(() => {
-    setTheme(t => t === 'dark' ? 'light' : 'dark');
-  }, []);
+  const toggleTheme = useCallback(() => setTheme(t => t === 'dark' ? 'light' : 'dark'), []);
 
   const isTileFullscreen = isTileView && selectedProject !== null;
 
@@ -62,69 +49,47 @@ export function Shell() {
         </div>
       )}
       <div className="shell-content">
-        {/* Header bar */}
         <div className="shell-header">
           <div className="shell-header-left">
             {isTileFullscreen && (
-              <button className="btn btn-secondary btn-sm" onClick={clearSelection}>
-                ← Tiles
-              </button>
+              <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Tiles</button>
             )}
             {totalWaitingCount > 0 && (
               <div className="shell-badge">
                 <span className="shell-badge-dot" />
-                <span className="shell-badge-text">
-                  {totalWaitingCount} waiting
-                </span>
+                <span className="shell-badge-text">{totalWaitingCount} waiting</span>
               </div>
             )}
           </div>
           <div className="shell-header-right">
             {showProfileFilter && (
-              <select
-                className="shell-profile-filter"
-                value={profileFilter}
-                onChange={e => setProfileFilter(e.target.value)}
-              >
-                {allProfileNames.map(name => (
-                  <option key={name} value={name}>{name}</option>
-                ))}
+              <select className="shell-profile-filter" value={profileFilter} onChange={e => setProfileFilter(e.target.value)}>
+                {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
             )}
-            <button
-              className="shell-theme-toggle"
-              onClick={toggleTheme}
-              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
+            <button className="shell-theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
               {theme === 'dark' ? '☀' : '☾'}
             </button>
-            <button
-              className="shell-view-toggle"
-              onClick={() => setTileView(!isTileView)}
-              title={isTileView ? 'List view' : 'Tile view'}
-            >
+            <button className="shell-view-toggle" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
               {isTileView ? '☰' : '⊞'}
+            </button>
+            <button className="shell-view-toggle" onClick={() => openDevTools()} title="Open DevTools">
+              {'{ }'}
             </button>
           </div>
         </div>
 
-        {/* Content area */}
         {isTileView && !isTileFullscreen ? (
           <TileGrid />
         ) : selectedProject ? (
-          <ProjectView
-            serverIndex={selectedProject.serverIndex}
-            projectId={selectedProject.projectId}
-          />
+          <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
         ) : (
-          <div className="shell-empty">
-            <p>Select a project from the sidebar</p>
-          </div>
+          <div className="shell-empty"><p>Select a project from the sidebar</p></div>
         )}
       </div>
 
       {showAddServer && <AddServer />}
-      {editServerIndex !== null && <EditServer index={editServerIndex} />}
+      {editServerId !== null && <EditServer serverId={editServerId} />}
       {showCreateProject && <CreateProject />}
     </div>
   );
