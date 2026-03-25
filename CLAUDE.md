@@ -278,6 +278,24 @@ gh secret set ANTHROPIC_API_KEY --repos johnjuuljensen/GodMode --app codespaces
 
 - Run all tests with `dotnet test`
 
+### Future: End-to-End React Store Testing
+
+The plan is to test the full Server→MAUI relay→React pipeline by having MAUI inject test specs into the WebView:
+
+1. MAUI starts with `--test test-spec.json` flag
+2. LocalServer + WebView start normally against a real (or stubbed) server
+3. After React loads, MAUI injects the test spec via `EvaluateJavaScriptAsync`
+4. A test runner in React executes actions against the real store (`connectServer`, `waitForState`, assertions)
+5. React serializes store state and POSTs to `POST /test/results`
+6. MAUI validates against expected state, exits with pass/fail code
+
+Server configs should be stubbable so tests don't depend on live codespaces:
+- **Stubbed codespace provider**: fake servers with various states (won't start, will start, already running) to test the full lifecycle UI without GitHub API calls
+- **Local server**: a real GodMode.Server instance for testing the happy path (connect, list projects, create, subscribe output)
+- **Stubbed config**: injected server registrations so tests don't touch `~/.godmode/servers.json`
+
+This approach tests production code paths end-to-end (real store, real relay, real SignalR) and is CI-friendly (`exit 0`/`exit 1`).
+
 ## GodMode Workflow
 
 When doing work initiated by GodMode, indicated by the presence of a `.godmode` folder:

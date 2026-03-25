@@ -48,14 +48,16 @@ const MODEL_OPTIONS = ['opus', 'sonnet', 'haiku'];
 export function CreateProject() {
   const serverConnections = useAppStore(s => s.serverConnections);
   const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
+  const createProjectContext = useAppStore(s => s.createProjectContext);
 
   const connectedServers = useMemo(
     () => serverConnections.filter(c => c.connectionState === 'connected' && c.roots.length > 0),
     [serverConnections],
   );
 
-  const [selectedServerId, setSelectedServerId] = useState<string>(connectedServers[0]?.serverInfo.Id ?? '');
-  const [selectedRootName, setSelectedRootName] = useState('');
+  const defaultServerId = createProjectContext?.serverId ?? connectedServers[0]?.serverInfo.Id ?? '';
+  const [selectedServerId, setSelectedServerId] = useState<string>(defaultServerId);
+  const [selectedRootName, setSelectedRootName] = useState(createProjectContext?.rootName ?? '');
   const [selectedActionName, setSelectedActionName] = useState('');
   const [selectedModel, setSelectedModel] = useState('opus');
   const [formValues, setFormValues] = useState<Record<string, string>>({});

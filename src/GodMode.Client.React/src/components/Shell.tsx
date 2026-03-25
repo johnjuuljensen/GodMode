@@ -6,6 +6,7 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
+import { openDevTools } from '../services/api';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -71,6 +72,9 @@ export function Shell() {
             </button>
             <button className="shell-view-toggle" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
               {isTileView ? '☰' : '⊞'}
+            </button>
+            <button className="shell-view-toggle" onClick={() => openDevTools()} title="Open DevTools">
+              {'{ }'}
             </button>
           </div>
         </div>

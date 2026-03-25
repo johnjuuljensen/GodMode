@@ -32,6 +32,7 @@
 
 	<ItemGroup>
 		<PackageReference Include="Microsoft.Maui.Controls" VersionOverride="$(MauiVersion)" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Debug" />
 
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>

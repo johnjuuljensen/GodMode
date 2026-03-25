@@ -100,6 +100,15 @@
 .server-dot.disconnected {
   background: var(--text-tertiary);
 }
+.server-dot.running {
+  background: var(--success);
+}
+
+.server-status-text {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
 
 .server-info {
   flex: 1;

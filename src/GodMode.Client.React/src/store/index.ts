@@ -114,7 +114,8 @@ interface AppState {
   showAddServer: boolean;
   setShowAddServer: (show: boolean) => void;
   showCreateProject: boolean;
-  setShowCreateProject: (show: boolean) => void;
+  createProjectContext: { serverId: string; rootName: string } | null;
+  setShowCreateProject: (show: boolean, context?: { serverId: string; rootName: string }) => void;
   editServerId: string | null;
   setEditServerId: (id: string | null) => void;
 }
@@ -233,9 +234,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Server lifecycle ──────────────────────────────────────
 
   loadServers: async () => {
+    console.info('[store] loadServers: waiting for base URL');
     await waitForBaseUrl();
     try {
       const servers = await fetchServers();
+      console.info(`[store] loadServers: fetched ${servers.length} servers:`, servers.map(s => `${s.Name}(${s.State})`));
       const existing = get().serverConnections;
 
       // Preserve hubs and connection state for servers that are still present
@@ -255,18 +258,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
 
       const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, get().profileFilter);
+      console.info(`[store] loadServers: ${profileGroups.length} profiles, ${inactiveServers.length} inactive`);
       set({ serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions });
 
       // Subscribe to SSE events (once)
       if (existing.length === 0) {
+        console.info('[store] loadServers: subscribing to SSE');
         subscribeEvents((type) => {
           if (type === 'serversChanged') {
+            console.info('[store] SSE: serversChanged');
             get().loadServers();
           }
         });
       }
+
+      // Auto-connect to servers that aren't already connected
+      // Skip codespaces that are clearly stopped (they'd need starting first)
+      for (const conn of connections) {
+        if (conn.connectionState !== 'disconnected') continue;
+        if (conn.serverInfo.Type === 'github' && conn.serverInfo.State === 'Stopped') continue;
+        console.info(`[store] Auto-connecting to ${conn.serverInfo.Name} (${conn.serverInfo.Id})`);
+        get().connectServer(conn.serverInfo.Id).catch(err =>
+          console.warn(`[store] Auto-connect to ${conn.serverInfo.Name} failed:`, err)
+        );
+      }
     } catch (err) {
-      console.error('Failed to load servers:', err);
+      console.error('[store] Failed to load servers:', err);
     }
   },
 
@@ -306,9 +323,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   connectServer: async (serverId) => {
+    console.info(`[store] connectServer: ${serverId}`);
     const state = get();
     const conn = state.serverConnections.find(c => c.serverInfo.Id === serverId);
-    if (!conn) return;
+    if (!conn) { console.warn(`[store] connectServer: no connection found for ${serverId}`); return; }
 
     const updateConn = (updates: Partial<ServerConnection>) => {
       set(state => {
@@ -446,10 +464,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     try {
+      console.info(`[store] connectServer: hub.connect(${serverId})...`);
       await conn.hub.connect(serverId);
+      console.info(`[store] connectServer: connected, refreshing projects...`);
       await get().refreshProjects(serverId);
+      console.info(`[store] connectServer: ${serverId} ready`);
     } catch (err) {
-      console.error('Failed to connect to server:', err);
+      console.error(`[store] connectServer ${serverId} failed:`, err);
       updateConn({ connectionState: 'disconnected' });
     }
   },
@@ -475,11 +496,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const conn = get().getConnection(serverId);
     if (!conn || conn.connectionState !== 'connected') return;
     try {
+      console.info(`[store] refreshProjects: ${serverId}`);
       const [projects, roots, profiles] = await Promise.all([
         conn.hub.listProjects(),
         conn.hub.listProjectRoots(),
         conn.hub.listProfiles(),
       ]);
+      console.info(`[store] refreshProjects: ${serverId} -> ${projects.length} projects, ${roots.length} roots, ${profiles.length} profiles`);
+      if (projects.length > 0) console.debug('[store] projects sample:', JSON.stringify(projects[0]));
       set(state => {
         const connections = state.serverConnections.map(c =>
           c.serverInfo.Id === serverId ? { ...c, projects, roots, profiles } : c
@@ -545,7 +569,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   showAddServer: false,
   setShowAddServer: (show) => set({ showAddServer: show }),
   showCreateProject: false,
-  setShowCreateProject: (show) => set({ showCreateProject: show }),
+  createProjectContext: null,
+  setShowCreateProject: (show, context) => set({ showCreateProject: show, createProjectContext: context ?? null }),
   editServerId: null,
   setEditServerId: (id) => set({ editServerId: id }),
 }));

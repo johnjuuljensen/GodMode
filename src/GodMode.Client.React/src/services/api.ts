@@ -62,6 +62,10 @@ export async function stopServer(serverId: string): Promise<void> {
   if (!res.ok) throw new Error(`Failed to stop server: ${res.status}`);
 }
 
+export async function openDevTools(): Promise<void> {
+  await fetch(`${getBaseUrl()}/devtools`, { method: 'POST' });
+}
+
 export function subscribeEvents(onEvent: (type: string, data: unknown) => void): () => void {
   const baseUrl = getBaseUrl();
   if (!baseUrl) return () => {};

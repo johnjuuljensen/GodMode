@@ -9,6 +9,7 @@ using GodMode.Shared;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using SignalR.Proxy;
 
 namespace GodMode.Maui;
@@ -21,15 +22,20 @@ namespace GodMode.Maui;
 public class LocalServer
 {
     private readonly IServiceProvider _services;
+    private readonly ILogger<LocalServer> _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private HttpListener? _listener;
     private readonly List<StreamWriter> _sseClients = new();
     private readonly Lock _sseLock = new();
+    private int _activeRelays;
 
     public string BaseUrl { get; private set; } = "";
 
     public LocalServer(IServiceProvider services)
     {
         _services = services;
+        _loggerFactory = services.GetRequiredService<ILoggerFactory>();
+        _logger = _loggerFactory.CreateLogger<LocalServer>();
     }
 
     public void Start()
@@ -39,6 +45,7 @@ public class LocalServer
         _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         _listener.Start();
         BaseUrl = $"http://127.0.0.1:{port}";
+        _logger.LogInformation("Listening on {BaseUrl}", BaseUrl);
 
         _ = Task.Run(ListenLoopAsync);
     }
@@ -62,7 +69,7 @@ public class LocalServer
                 _ = Task.Run(() => HandleRequestAsync(context));
             }
             catch (ObjectDisposedException) { break; }
-            catch (Exception ex) { Console.WriteLine($"Listener error: {ex.Message}"); }
+            catch (Exception ex) { _logger.LogError(ex, "Listener error"); }
         }
     }
 
@@ -88,7 +95,8 @@ public class LocalServer
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Request error: {ex.Message}");
+            _logger.LogError(ex, "Request error: {Method} {Path}", context.Request.HttpMethod,
+                context.Request.Url?.AbsolutePath);
             try { context.Response.StatusCode = 500; context.Response.Close(); } catch { }
         }
     }
@@ -107,22 +115,24 @@ public class LocalServer
         var serverId = context.Request.QueryString["serverId"];
         if (string.IsNullOrEmpty(serverId))
         {
+            _logger.LogWarning("WebSocket request missing serverId");
             context.Response.StatusCode = 400;
             context.Response.Close();
             return;
         }
 
-        Log($"[Relay] WebSocket request for serverId={serverId}");
+        _logger.LogInformation("WebSocket relay request for serverId={ServerId}", serverId);
         var info = await ResolveHubUrlAsync(serverId);
         if (info == null)
         {
-            Log($"[Relay] Could not resolve URL for serverId={serverId}");
+            _logger.LogWarning("Could not resolve hub URL for serverId={ServerId}", serverId);
             context.Response.StatusCode = 404;
             context.Response.Close();
             return;
         }
 
-        Log($"[Relay] Connecting to {info.Value.Url} (token: {(info.Value.Token != null ? "yes" : "no")})");
+        _logger.LogInformation("Relay connecting to {Url} (token: {HasToken})", info.Value.Url,
+            info.Value.Token != null ? "yes" : "no");
 
         var serverBuilder = new HubConnectionBuilder()
             .WithUrl(info.Value.Url, options =>
@@ -140,9 +150,17 @@ public class LocalServer
             });
 
         var wsContext = await context.AcceptWebSocketAsync(null);
-        var relay = await SignalRRelay.ConnectAsync(wsContext.WebSocket, serverBuilder, msg => Log($"[Relay] {msg}"));
+        var relayLogger = _loggerFactory.CreateLogger<SignalRRelay>();
+        var relay = await SignalRRelay.ConnectAsync(wsContext.WebSocket, serverBuilder, relayLogger);
 
-        if (relay == null) return;
+        if (relay == null)
+        {
+            _logger.LogWarning("Relay failed to connect for serverId={ServerId}", serverId);
+            return;
+        }
+
+        var count = Interlocked.Increment(ref _activeRelays);
+        _logger.LogInformation("Relay active for serverId={ServerId} (total active: {Count})", serverId, count);
 
         try
         {
@@ -151,6 +169,8 @@ public class LocalServer
         finally
         {
             await relay.DisposeAsync();
+            count = Interlocked.Decrement(ref _activeRelays);
+            _logger.LogInformation("Relay closed for serverId={ServerId} (total active: {Count})", serverId, count);
         }
     }
 
@@ -171,10 +191,17 @@ public class LocalServer
                 var reg = registrations[serverIndex];
                 var token = reg.Token != null ? registry.DecryptToken(reg.Token) : null;
                 var baseUrl = (server.Url ?? reg.Url)?.TrimEnd('/');
-                if (baseUrl == null) return null;
-                return ($"{baseUrl}/hubs/projects", token);
+                if (baseUrl == null)
+                {
+                    _logger.LogWarning("Server {ServerId} has no URL", serverId);
+                    return null;
+                }
+                var hubUrl = $"{baseUrl}/hubs/projects";
+                _logger.LogDebug("Resolved {ServerId} -> {HubUrl}", serverId, hubUrl);
+                return (hubUrl, token);
             }
         }
+        _logger.LogWarning("Server {ServerId} not found in any provider", serverId);
         return null;
     }
 
@@ -184,6 +211,8 @@ public class LocalServer
     {
         var path = context.Request.Url?.AbsolutePath ?? "";
         var method = context.Request.HttpMethod;
+
+        _logger.LogDebug("REST {Method} {Path}", method, path);
 
         switch (path, method)
         {
@@ -200,10 +229,15 @@ public class LocalServer
                 await HandleListDiscoveredServersAsync(context);
                 break;
             case (_, "POST") when path.StartsWith("/servers/") && path.EndsWith("/start"):
-                await HandleServerActionAsync(context, path, p => p.StartServerAsync);
+                await HandleServerActionAsync(context, path, p => p.StartServerAsync, "start");
                 break;
             case (_, "POST") when path.StartsWith("/servers/") && path.EndsWith("/stop"):
-                await HandleServerActionAsync(context, path, p => p.StopServerAsync);
+                await HandleServerActionAsync(context, path, p => p.StopServerAsync, "stop");
+                break;
+            case ("/devtools", "POST"):
+                MainPage.OpenDevTools();
+                context.Response.StatusCode = 200;
+                context.Response.Close();
                 break;
             default:
                 context.Response.StatusCode = 404;
@@ -224,6 +258,7 @@ public class LocalServer
             "unknown"
         ));
 
+        _logger.LogDebug("GET /servers/registrations -> {Count} registrations", list.Count);
         await WriteJsonAsync(context.Response, result);
     }
 
@@ -237,6 +272,7 @@ public class LocalServer
             return;
         }
 
+        _logger.LogInformation("Adding server registration: type={Type} name={Name}", req.Type, req.DisplayName);
         var registry = _services.GetRequiredService<IServerRegistryService>();
         var registration = new ServerRegistration
         {
@@ -264,6 +300,7 @@ public class LocalServer
             return;
         }
 
+        _logger.LogInformation("Removing server registration at index {Index}", index);
         var registry = _services.GetRequiredService<IServerRegistryService>();
         await registry.RemoveServerAsync(index);
         context.Response.StatusCode = 200;
@@ -273,15 +310,19 @@ public class LocalServer
 
     private async Task HandleListDiscoveredServersAsync(HttpListenerContext context)
     {
+        _logger.LogDebug("GET /servers — discovering servers...");
         var connections = _services.GetRequiredService<IServerConnectionService>();
-        var servers = await connections.ListAllServersAsync();
+        var servers = (await connections.ListAllServersAsync()).ToList();
+        _logger.LogInformation("GET /servers -> {Count} servers: [{Servers}]", servers.Count,
+            string.Join(", ", servers.Select(s => $"{s.Name}({s.State})")));
         await WriteJsonAsync(context.Response, servers);
     }
 
     private async Task HandleServerActionAsync(
         HttpListenerContext context,
         string path,
-        Func<IServerProvider, Func<string, Task>> getAction)
+        Func<IServerProvider, Func<string, Task>> getAction,
+        string actionName)
     {
         // Path: /servers/{serverId}/start or /servers/{serverId}/stop
         var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
@@ -293,6 +334,7 @@ public class LocalServer
         }
         var serverId = Uri.UnescapeDataString(segments[1]);
 
+        _logger.LogInformation("Server action: {Action} on {ServerId}", actionName, serverId);
         var connections = _services.GetRequiredService<IServerConnectionService>();
         var providers = await connections.GetAllProvidersAsync();
 
@@ -304,13 +346,14 @@ public class LocalServer
                 await getAction(provider)(serverId);
                 context.Response.StatusCode = 200;
                 context.Response.Close();
+                _logger.LogInformation("Server {Action} initiated for {ServerId}, starting poll", actionName, serverId);
                 BroadcastEvent("serversChanged");
-                // Poll for state change in background (e.g., codespace starting up)
                 _ = PollServerStateAsync(provider, serverId);
                 return;
             }
         }
 
+        _logger.LogWarning("Server {ServerId} not found for {Action}", serverId, actionName);
         context.Response.StatusCode = 404;
         context.Response.Close();
     }
@@ -319,7 +362,7 @@ public class LocalServer
 
     private async Task PollServerStateAsync(IServerProvider provider, string serverId)
     {
-        // Poll until the server reaches a stable state (Running or Stopped)
+        _logger.LogDebug("Poll started for {ServerId}", serverId);
         for (int i = 0; i < 30; i++)
         {
             await Task.Delay(2000);
@@ -327,14 +370,26 @@ public class LocalServer
             {
                 var servers = await provider.ListServersAsync();
                 var server = servers.FirstOrDefault(s => s.Id == serverId);
-                if (server == null) break;
+                if (server == null)
+                {
+                    _logger.LogDebug("Poll: {ServerId} no longer found, stopping", serverId);
+                    break;
+                }
 
+                _logger.LogDebug("Poll #{Iteration}: {ServerId} state={State}", i + 1, serverId, server.State);
                 BroadcastEvent("serversChanged");
 
                 if (server.State is Shared.Enums.ServerState.Running or Shared.Enums.ServerState.Stopped)
+                {
+                    _logger.LogInformation("Poll: {ServerId} reached stable state {State}", serverId, server.State);
                     break;
+                }
             }
-            catch { break; }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Poll error for {ServerId}", serverId);
+                break;
+            }
         }
     }
 
@@ -350,18 +405,28 @@ public class LocalServer
         var writer = new StreamWriter(context.Response.OutputStream, Encoding.UTF8) { AutoFlush = true };
         await writer.WriteLineAsync(": connected\n");
 
-        lock (_sseLock) _sseClients.Add(writer);
+        int clientCount;
+        lock (_sseLock)
+        {
+            _sseClients.Add(writer);
+            clientCount = _sseClients.Count;
+        }
+        _logger.LogInformation("SSE client connected (total: {Count})", clientCount);
 
         try
         {
-            // Keep connection open until client disconnects
             while (context.Response.OutputStream.CanWrite)
                 await Task.Delay(5000);
         }
         catch { /* client disconnected */ }
         finally
         {
-            lock (_sseLock) _sseClients.Remove(writer);
+            lock (_sseLock)
+            {
+                _sseClients.Remove(writer);
+                clientCount = _sseClients.Count;
+            }
+            _logger.LogInformation("SSE client disconnected (total: {Count})", clientCount);
             try { writer.Dispose(); } catch { }
             try { context.Response.Close(); } catch { }
         }
@@ -372,13 +437,14 @@ public class LocalServer
         var json = data != null ? JsonSerializer.Serialize(data, JsonDefaults.Compact) : "{}";
         var message = $"event: {eventType}\ndata: {json}\n\n";
 
+        int sent = 0, failed = 0;
         lock (_sseLock)
         {
             var dead = new List<StreamWriter>();
             foreach (var writer in _sseClients)
             {
-                try { writer.Write(message); }
-                catch { dead.Add(writer); }
+                try { writer.Write(message); sent++; }
+                catch { dead.Add(writer); failed++; }
             }
             foreach (var w in dead)
             {
@@ -386,14 +452,7 @@ public class LocalServer
                 try { w.Dispose(); } catch { }
             }
         }
-    }
-
-    // ── Logging ───────────────────────────────────────────────────
-
-    private static void Log(string message)
-    {
-        System.Diagnostics.Debug.WriteLine(message);
-        Console.WriteLine(message);
+        _logger.LogDebug("SSE broadcast: {EventType} (sent={Sent}, failed={Failed})", eventType, sent, failed);
     }
 
     // ── JSON helpers ─────────────────────────────────────────────

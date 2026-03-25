@@ -3,6 +3,7 @@ using GodMode.ClientBase.Providers;
 using GodMode.ClientBase.Services.Models;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Logging;
 
 namespace GodMode.ClientBase.Services;
 
@@ -13,18 +14,24 @@ namespace GodMode.ClientBase.Services;
 public class ServerConnectionService : IServerConnectionService
 {
     private readonly IServerRegistryService _serverRegistry;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly ILogger<ServerConnectionService> _logger;
     private readonly Dictionary<string, IServerProvider> _providers = new();
     private readonly Dictionary<string, HubConnection> _activeConnections = new();
 
-    public ServerConnectionService(IServerRegistryService serverRegistry)
+    public ServerConnectionService(IServerRegistryService serverRegistry,
+        ILoggerFactory loggerFactory, ILogger<ServerConnectionService> logger)
     {
         _serverRegistry = serverRegistry;
+        _loggerFactory = loggerFactory;
+        _logger = logger;
     }
 
     public async Task<IEnumerable<(IServerProvider Provider, int ServerIndex)>> GetAllProvidersAsync()
     {
         var servers = await _serverRegistry.GetServersAsync();
         var providers = new List<(IServerProvider Provider, int ServerIndex)>();
+        _logger.LogDebug("Building providers for {Count} server registrations", servers.Count);
 
         for (int i = 0; i < servers.Count; i++)
         {
@@ -34,6 +41,12 @@ public class ServerConnectionService : IServerConnectionService
                 var key = $"{servers[i].Type}:{servers[i].Username ?? servers[i].Url}";
                 _providers[key] = provider;
                 providers.Add((provider, i));
+                _logger.LogDebug("Created {Type} provider for registration {Index} (key={Key})", servers[i].Type, i, key);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to create provider for registration {Index} (type={Type}, url={Url})",
+                    i, servers[i].Type, servers[i].Url);
             }
         }
 
@@ -45,18 +58,23 @@ public class ServerConnectionService : IServerConnectionService
         var providers = await GetAllProvidersAsync();
         var allServers = new List<ServerInfo>();
 
-        foreach (var (provider, _) in providers)
+        foreach (var (provider, idx) in providers)
         {
             try
             {
-                allServers.AddRange(await provider.ListServersAsync());
+                var servers = (await provider.ListServersAsync()).ToList();
+                _logger.LogInformation("Provider {Type}[{Index}] discovered {Count} servers: [{Servers}]",
+                    provider.Type, idx, servers.Count,
+                    string.Join(", ", servers.Select(s => $"{s.Name}({s.State})")));
+                allServers.AddRange(servers);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error listing servers from provider {provider.Type}: {ex.Message}");
+                _logger.LogError(ex, "Error listing servers from provider {Type}[{Index}]", provider.Type, idx);
             }
         }
 
+        _logger.LogInformation("Total discovered: {Count} servers", allServers.Count);
         return allServers;
     }
 
@@ -65,11 +83,17 @@ public class ServerConnectionService : IServerConnectionService
 
     public async Task<HubConnection> ConnectToServerAsync(string serverId)
     {
+        _logger.LogInformation("ConnectToServer: {ServerId}", serverId);
+
         if (_activeConnections.TryGetValue(serverId, out var existing))
         {
             if (existing.State == HubConnectionState.Connected)
+            {
+                _logger.LogDebug("Already connected to {ServerId}", serverId);
                 return existing;
+            }
 
+            _logger.LogDebug("Disposing stale connection to {ServerId} (state={State})", serverId, existing.State);
             await existing.DisposeAsync();
             _activeConnections.Remove(serverId);
         }
@@ -92,6 +116,7 @@ public class ServerConnectionService : IServerConnectionService
 
         var connection = await ConnectWithRetryAsync(targetProvider, serverId);
         _activeConnections[serverId] = connection;
+        _logger.LogInformation("Connected to {ServerId} via {ProviderType}", serverId, targetProvider.Type);
         return connection;
     }
 
@@ -99,6 +124,7 @@ public class ServerConnectionService : IServerConnectionService
     {
         if (_activeConnections.TryGetValue(serverId, out var connection))
         {
+            _logger.LogInformation("Disconnecting from {ServerId}", serverId);
             await connection.DisposeAsync();
             _activeConnections.Remove(serverId);
         }
@@ -106,6 +132,7 @@ public class ServerConnectionService : IServerConnectionService
 
     public async Task DisconnectAllAsync()
     {
+        _logger.LogInformation("Disconnecting all ({Count} connections)", _activeConnections.Count);
         foreach (var connection in _activeConnections.Values)
             await connection.DisposeAsync();
         _activeConnections.Clear();
@@ -114,7 +141,7 @@ public class ServerConnectionService : IServerConnectionService
     public bool IsConnected(string serverId) =>
         _activeConnections.TryGetValue(serverId, out var c) && c.State == HubConnectionState.Connected;
 
-    private static async Task<HubConnection> ConnectWithRetryAsync(
+    private async Task<HubConnection> ConnectWithRetryAsync(
         IServerProvider provider, string serverId, int maxRetries = 3)
     {
         Exception? lastException = null;
@@ -123,11 +150,14 @@ public class ServerConnectionService : IServerConnectionService
         {
             try
             {
+                _logger.LogDebug("Connection attempt {Attempt}/{Max} to {ServerId}", i + 1, maxRetries, serverId);
                 return await provider.ConnectAsync(serverId);
             }
             catch (Exception ex)
             {
                 lastException = ex;
+                _logger.LogWarning(ex, "Connection attempt {Attempt}/{Max} to {ServerId} failed",
+                    i + 1, maxRetries, serverId);
                 if (i < maxRetries - 1)
                     await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, i)));
             }
@@ -151,7 +181,7 @@ public class ServerConnectionService : IServerConnectionService
             return null;
 
         var decryptedToken = _serverRegistry.DecryptToken(server.Token);
-        return new GitHubCodespaceProvider(decryptedToken, server.Username);
+        return new GitHubCodespaceProvider(decryptedToken, server.Username, _loggerFactory);
     }
 
     private IServerProvider? CreateLocalProvider(ServerRegistration server)
@@ -159,6 +189,6 @@ public class ServerConnectionService : IServerConnectionService
         if (string.IsNullOrEmpty(server.Url) || (!server.Url.StartsWith("http://") && !server.Url.StartsWith("https://")))
             return null;
 
-        return new LocalFolderProvider(server.Url, server.DisplayName ?? "Local Server");
+        return new LocalFolderProvider(server.Url, server.DisplayName ?? "Local Server", _loggerFactory);
     }
 }

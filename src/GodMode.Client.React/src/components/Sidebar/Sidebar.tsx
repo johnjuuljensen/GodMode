@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection } from '../../store';
 import { ProjectItem } from './ProjectItem';
 import './Sidebar.css';
@@ -82,7 +83,7 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
         {rootGroup.actions.length > 0 && (
           <button
             className="root-action-btn"
-            onClick={() => setShowCreateProject(true)}
+            onClick={() => setShowCreateProject(true, { serverId: rootGroup.serverId, rootName: rootGroup.rootName })}
             title="New project"
           >+</button>
         )}
@@ -112,6 +113,12 @@ function InactiveSection({ servers }: { servers: ServerConnection[] }) {
   const connectServer = useAppStore(s => s.connectServer);
   const startServer = useAppStore(s => s.startServer);
   const setEditServerId = useAppStore(s => s.setEditServerId);
+  const [pendingStarts, setPendingStarts] = useState<Set<string>>(new Set());
+
+  const handleStart = (serverId: string) => {
+    setPendingStarts(prev => new Set(prev).add(serverId));
+    startServer(serverId);
+  };
 
   return (
     <div className="inactive-section">
@@ -120,28 +127,33 @@ function InactiveSection({ servers }: { servers: ServerConnection[] }) {
       </div>
       {servers.map(conn => {
         const info = conn.serverInfo;
-        const isStartable = info.State === 'Stopped' && info.Type === 'github';
-        const isConnectable = info.State === 'Running' && conn.connectionState === 'disconnected';
         const isConnecting = conn.connectionState === 'connecting' || conn.connectionState === 'reconnecting';
-        const isStarting = info.State === 'Starting';
+        const isStarting = info.State === 'Starting' || pendingStarts.has(info.Id);
+        const isStopped = info.State === 'Stopped' || info.State === 'Unknown';
+        const canStart = isStopped && info.Type === 'github' && !isStarting;
+        const canConnect = !isConnecting && !isStarting
+          && !(info.Type === 'github' && isStopped);
+
+        // Clear pending once the server state catches up
+        if (info.State !== 'Stopped' && info.State !== 'Unknown' && pendingStarts.has(info.Id)) {
+          setPendingStarts(prev => { const next = new Set(prev); next.delete(info.Id); return next; });
+        }
 
         return (
           <div key={info.Id} className="server-item">
-            <div className={`server-dot ${conn.connectionState}`} />
+            <div className={`server-dot ${isConnecting ? 'connecting' : info.State === 'Running' ? 'running' : isStarting ? 'connecting' : conn.connectionState}`} />
             <div className="server-info">
               <div className="server-name">{info.Name}</div>
               <div className="server-url">{info.Description ?? info.Url ?? info.Type}</div>
             </div>
             <div className="server-actions" style={{ opacity: 1 }}>
-              {isStartable && (
-                <button className="server-action-btn" onClick={() => startServer(info.Id)} title="Start">
-                  {isStarting ? '...' : '▶'}
-                </button>
+              {isStarting && <span className="server-status-text">Starting...</span>}
+              {isConnecting && <span className="server-status-text">Connecting...</span>}
+              {canStart && (
+                <button className="server-action-btn" onClick={() => handleStart(info.Id)} title="Start">▶</button>
               )}
-              {isConnectable && (
-                <button className="server-action-btn" onClick={() => connectServer(info.Id)} title="Connect">
-                  {isConnecting ? '...' : '⚡'}
-                </button>
+              {canConnect && (
+                <button className="server-action-btn" onClick={() => connectServer(info.Id)} title="Connect">⚡</button>
               )}
               <button
                 className="server-action-btn"

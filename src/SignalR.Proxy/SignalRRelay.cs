@@ -7,6 +7,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SignalR.Proxy;
 
@@ -25,7 +27,7 @@ public class SignalRRelay : IAsyncDisposable
     private readonly IDuplexPipe _serverPipe;
     private readonly TeeConnection _tee;
     private readonly SemaphoreSlim _serverWriteLock = new(1, 1);
-    private readonly Action<string> _log;
+    private readonly ILogger _logger;
 
     public HubConnection HubConnection { get; }
 
@@ -35,14 +37,14 @@ public class SignalRRelay : IAsyncDisposable
         ConnectionContext serverConnection,
         TeeConnection tee,
         HubConnection hubConnection,
-        Action<string>? log)
+        ILogger logger)
     {
         _connectionId = connectionId;
         _clientWs = clientWs;
         _serverConnection = serverConnection;
         _serverPipe = serverConnection.Transport;
         _tee = tee;
-        _log = log ?? Console.WriteLine;
+        _logger = logger;
         HubConnection = hubConnection;
     }
 
@@ -52,25 +54,25 @@ public class SignalRRelay : IAsyncDisposable
     /// <param name="clientWs">WebSocket accepted from the local client (e.g. React WebView).</param>
     /// <param name="serverBuilder">Pre-configured HubConnectionBuilder with URL and auth.
     /// The builder's IConnectionFactory handles negotiate + WebSocket upgrade.</param>
-    /// <param name="log">Optional log callback.</param>
+    /// <param name="logger">Optional logger.</param>
     public static async Task<SignalRRelay?> ConnectAsync(
         WebSocket clientWs,
         IHubConnectionBuilder serverBuilder,
-        Action<string>? log = null)
+        ILogger? logger = null)
     {
+        var log = logger ?? NullLogger.Instance;
         var connectionId = Guid.NewGuid().ToString("N")[..8];
-        var logFn = log ?? Console.WriteLine;
 
-        logFn($"[{connectionId}] Client connected");
+        log.LogInformation("[{ConnId}] Client WebSocket connected", connectionId);
 
         // Step 1: Receive SignalR handshake from client
         var handshake = await ReceiveWsMessageAsync(clientWs);
         if (handshake == null)
         {
-            logFn($"[{connectionId}] No handshake received");
+            log.LogWarning("[{ConnId}] No handshake received from client", connectionId);
             return null;
         }
-        logFn($"[{connectionId}] Client handshake: {handshake.TrimEnd(RecordSeparator)}");
+        log.LogDebug("[{ConnId}] Client handshake: {Handshake}", connectionId, handshake.TrimEnd(RecordSeparator));
 
         // Step 2: Use the builder's factory to connect (handles negotiate + auth)
         var sp = serverBuilder.Services.BuildServiceProvider();
@@ -80,15 +82,16 @@ public class SignalRRelay : IAsyncDisposable
         ConnectionContext serverConnection;
         try
         {
+            log.LogDebug("[{ConnId}] Connecting to server endpoint...", connectionId);
             serverConnection = await factory.ConnectAsync(endpoint);
         }
         catch (Exception ex)
         {
-            logFn($"[{connectionId}] Failed to connect to server: {ex.Message}");
+            log.LogError(ex, "[{ConnId}] Failed to connect to server", connectionId);
             await SendWsMessageAsync(clientWs, "{\"error\":\"Failed to connect to upstream server\"}" + RecordSeparator);
             return null;
         }
-        logFn($"[{connectionId}] Server connection established (negotiate complete)");
+        log.LogInformation("[{ConnId}] Server connection established (negotiate complete)", connectionId);
 
         var serverPipe = serverConnection.Transport;
 
@@ -99,16 +102,16 @@ public class SignalRRelay : IAsyncDisposable
         var response = await ReadPipeUntilSeparatorAsync(serverPipe.Input);
         if (response == null)
         {
-            logFn($"[{connectionId}] No handshake response from server");
+            log.LogWarning("[{ConnId}] No handshake response from server", connectionId);
             if (serverConnection is IAsyncDisposable ad) await ad.DisposeAsync();
             return null;
         }
         await SendWsMessageAsync(clientWs, response);
-        logFn($"[{connectionId}] Handshake complete, relaying messages");
+        log.LogInformation("[{ConnId}] Handshake complete, relay active", connectionId);
 
         // Step 4: Create tee'd HubConnection for typed handlers
         var (tee, hubConnection) = await TeeConnection.CreateHubConnectionAsync();
-        logFn($"[{connectionId}] Tee'd HubConnection ready");
+        log.LogDebug("[{ConnId}] Tee'd HubConnection ready", connectionId);
 
         return new SignalRRelay(connectionId, clientWs, serverConnection, tee, hubConnection, log);
     }
@@ -128,7 +131,7 @@ public class SignalRRelay : IAsyncDisposable
         catch { /* one side closed */ }
 
         await cts.CancelAsync();
-        _log($"[{_connectionId}] Connection closed");
+        _logger.LogInformation("[{ConnId}] Relay closed", _connectionId);
 
         try { await HubConnection.StopAsync(); } catch { /* best effort */ }
         await _tee.DisposeAsync();
@@ -146,16 +149,18 @@ public class SignalRRelay : IAsyncDisposable
                 var (message, result) = await ReceiveFullWsMessageAsync(_clientWs, buffer, cts.Token);
                 if (result.MessageType == WebSocketMessageType.Close) break;
 
-                LogMessage(message, "C->S");
+                LogFrame(message, "C->S");
                 await WriteToServerPipeAsync(message, cts.Token);
             }
         }
         catch (OperationCanceledException) { }
-        catch (WebSocketException ex) { _log($"[{_connectionId}] C->S error: {ex.Message}"); }
+        catch (WebSocketException ex) { _logger.LogWarning("[{ConnId}] C->S error: {Error}", _connectionId, ex.Message); }
     }
 
     private async Task PumpServerToClientAsync(CancellationTokenSource cts)
     {
+        // Buffer partial SignalR messages — only forward complete ones (ending with \x1e)
+        byte[] pending = [];
         try
         {
             while (!cts.IsCancellationRequested)
@@ -163,21 +168,48 @@ public class SignalRRelay : IAsyncDisposable
                 var result = await _serverPipe.Input.ReadAsync(cts.Token);
                 if (result.IsCompleted || result.IsCanceled) break;
 
-                var bytes = result.Buffer.ToArray();
+                var newBytes = result.Buffer.ToArray();
                 _serverPipe.Input.AdvanceTo(result.Buffer.End);
-                if (bytes.Length == 0) continue;
+                if (newBytes.Length == 0) continue;
 
-                var segment = new ArraySegment<byte>(bytes);
-                LogMessage(segment, "S->C");
+                // Combine with any pending partial data
+                byte[] allBytes;
+                if (pending.Length > 0)
+                {
+                    allBytes = new byte[pending.Length + newBytes.Length];
+                    pending.CopyTo(allBytes, 0);
+                    newBytes.CopyTo(allBytes, pending.Length);
+                }
+                else
+                {
+                    allBytes = newBytes;
+                }
+
+                // Find the last record separator — only send complete messages
+                var lastSep = Array.LastIndexOf(allBytes, (byte)RecordSeparator);
+                if (lastSep < 0)
+                {
+                    pending = allBytes;
+                    _logger.LogTrace("[{ConnId}] S->C buffering {Len} bytes (no complete message yet)",
+                        _connectionId, allBytes.Length);
+                    continue;
+                }
+
+                var completeLen = lastSep + 1;
+                var segment = new ArraySegment<byte>(allBytes, 0, completeLen);
+                LogFrame(segment, "S->C");
 
                 await _clientWs.SendAsync(segment, WebSocketMessageType.Text, true, cts.Token);
 
-                await _tee.TeeWriter.WriteAsync(new ReadOnlyMemory<byte>(bytes), cts.Token);
+                await _tee.TeeWriter.WriteAsync(new ReadOnlyMemory<byte>(allBytes, 0, completeLen), cts.Token);
                 await _tee.TeeWriter.FlushAsync(cts.Token);
+
+                // Keep any remaining bytes for next iteration
+                pending = completeLen < allBytes.Length ? allBytes[completeLen..] : [];
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { _log($"[{_connectionId}] S->C error: {ex.Message}"); }
+        catch (Exception ex) { _logger.LogWarning("[{ConnId}] S->C error: {Error}", _connectionId, ex.Message); }
     }
 
     private async Task PumpProxyToServerAsync(CancellationTokenSource cts)
@@ -193,12 +225,12 @@ public class SignalRRelay : IAsyncDisposable
                 _tee.ProxyOutput.AdvanceTo(result.Buffer.End);
                 if (bytes.Length == 0) continue;
 
-                LogMessage(new ArraySegment<byte>(bytes), "P->S");
+                LogFrame(new ArraySegment<byte>(bytes), "P->S");
                 await WriteToServerPipeAsync(new ArraySegment<byte>(bytes), cts.Token);
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { _log($"[{_connectionId}] P->S error: {ex.Message}"); }
+        catch (Exception ex) { _logger.LogWarning("[{ConnId}] P->S error: {Error}", _connectionId, ex.Message); }
     }
 
     private async Task WriteToServerPipeAsync(ArraySegment<byte> data, CancellationToken ct)
@@ -235,8 +267,10 @@ public class SignalRRelay : IAsyncDisposable
         }
     }
 
-    private void LogMessage(ArraySegment<byte> data, string direction)
+    private void LogFrame(ArraySegment<byte> data, string direction)
     {
+        if (!_logger.IsEnabled(LogLevel.Debug)) return;
+
         var text = Encoding.UTF8.GetString(data.Array!, data.Offset, data.Count);
         foreach (var raw in text.Split(RecordSeparator))
         {
@@ -248,10 +282,32 @@ public class SignalRRelay : IAsyncDisposable
                 if (!root.TryGetProperty("type", out var typeProp)) continue;
                 switch (typeProp.GetInt32())
                 {
-                    case 1: _log($"[{_connectionId}] {direction} Invoke: {root.GetProperty("target").GetString()}"); break;
-                    case 3: _log($"[{_connectionId}] {direction} Completion: {root.GetProperty("invocationId").GetString()}"); break;
-                    case 6: break; // Ping
-                    default: _log($"[{_connectionId}] {direction} Type: {typeProp.GetInt32()}"); break;
+                    case 1: // Invocation
+                        var target = root.GetProperty("target").GetString();
+                        _logger.LogDebug("[{ConnId}] {Dir} Invoke: {Target}", _connectionId, direction, target);
+                        if (_logger.IsEnabled(LogLevel.Trace))
+                            _logger.LogTrace("[{ConnId}] {Dir} Frame: {Raw}", _connectionId, direction, raw);
+                        break;
+                    case 3: // Completion
+                        var invId = root.GetProperty("invocationId").GetString();
+                        var hasError = root.TryGetProperty("error", out var errorProp);
+                        if (hasError)
+                        {
+                            var errorMsg = errorProp.GetString();
+                            _logger.LogWarning("[{ConnId}] {Dir} Completion ERROR: invId={InvId} error={Error}",
+                                _connectionId, direction, invId, errorMsg);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("[{ConnId}] {Dir} Completion: invId={InvId}", _connectionId, direction, invId);
+                        }
+                        if (_logger.IsEnabled(LogLevel.Trace))
+                            _logger.LogTrace("[{ConnId}] {Dir} Frame: {Raw}", _connectionId, direction, raw);
+                        break;
+                    case 6: break; // Ping — suppress
+                    default:
+                        _logger.LogDebug("[{ConnId}] {Dir} Type={Type}", _connectionId, direction, typeProp.GetInt32());
+                        break;
                 }
             }
             catch { /* not JSON or missing fields */ }
