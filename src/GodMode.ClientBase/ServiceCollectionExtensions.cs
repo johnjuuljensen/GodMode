@@ -13,7 +13,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITokenProtector, TokenProtector>();
         services.AddSingleton<IServerRegistryService>(sp =>
             new ServerRegistryService(GodModePaths.AppDataDirectory, sp.GetRequiredService<ITokenProtector>()));
-        services.AddSingleton<IHostConnectionService, HostConnectionService>();
+        services.AddSingleton<IServerConnectionService, ServerConnectionService>();
         return services;
     }
 }

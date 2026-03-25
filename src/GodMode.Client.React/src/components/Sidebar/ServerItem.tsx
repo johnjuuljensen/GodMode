@@ -9,7 +9,7 @@ interface Props {
 }
 
 export function ServerItem({ server, onConnect, onDisconnect, onEdit, onRemove }: Props) {
-  const { registration, connectionState } = server;
+  const { serverInfo, connectionState } = server;
 
   const handleClick = () => {
     if (connectionState === 'disconnected') {
@@ -23,9 +23,9 @@ export function ServerItem({ server, onConnect, onDisconnect, onEdit, onRemove }
       <div className={`server-dot ${connectionState}`} />
       <div className="server-info">
         <div className="server-name">
-          {registration.displayName || registration.url}
+          {serverInfo.Name || serverInfo.Url}
         </div>
-        <div className="server-url">{registration.url}</div>
+        <div className="server-url">{serverInfo.Url}</div>
       </div>
       <div className="server-actions">
         {connectionState === 'connected' && (

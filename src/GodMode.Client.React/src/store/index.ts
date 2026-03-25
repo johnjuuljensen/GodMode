@@ -1,11 +1,12 @@
 /**
  * Global app state using Zustand.
- * Manages servers, connections, projects, and UI state.
+ * Manages hosts, connections, projects, and UI state.
+ * Hosts and servers are managed via REST calls to the local MAUI proxy.
  */
 import { create } from 'zustand';
 import { GodModeHub, type ConnectionState } from '../signalr/hub';
-import type { ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage } from '../signalr/types';
-import { loadServers, saveServers, type ServerRegistration } from '../services/serverRegistry';
+import type { ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage, ServerInfo } from '../signalr/types';
+import { fetchServers, addServer as apiAddServer, removeServer as apiRemoveServer, waitForBaseUrl, type AddServerRequest } from '../services/api';
 import { type QuestionState, emptyQuestion, detectQuestionFromMessage, detectQuestionFromStatus, looksLikeQuestion } from '../services/questionDetection';
 
 const DISMISSED_KEY = 'godmode-dismissed-projects';
@@ -17,7 +18,7 @@ function saveDismissed(dp: Record<string, boolean>) {
 }
 
 export interface ServerState {
-  registration: ServerRegistration;
+  serverInfo: ServerInfo;
   hub: GodModeHub;
   connectionState: ConnectionState;
   projects: ProjectSummary[];
@@ -26,12 +27,11 @@ export interface ServerState {
 }
 
 interface AppState {
-  // Servers
+  // Servers (backed by hosts from REST API)
   servers: ServerState[];
-  loadServers: () => void;
-  addServer: (reg: ServerRegistration) => void;
-  updateServer: (index: number, reg: ServerRegistration) => void;
-  removeServer: (index: number) => void;
+  loadServers: () => Promise<void>;
+  addServer: (req: AddServerRequest) => Promise<void>;
+  removeServer: (index: number) => Promise<void>;
   connectServer: (index: number) => Promise<void>;
   disconnectServer: (index: number) => Promise<void>;
   refreshProjects: (index: number) => Promise<void>;
@@ -105,57 +105,47 @@ function computeWaitingCounts(servers: ServerState[], projectQuestions: Record<s
 export const useAppStore = create<AppState>((set, get) => ({
   servers: [],
 
-  loadServers: () => {
-    const registrations = loadServers();
-    const servers = registrations.map(reg => ({
-      registration: reg,
-      hub: new GodModeHub(),
-      connectionState: 'disconnected' as ConnectionState,
-      projects: [],
-      roots: [],
-      profiles: [],
-    }));
-    set({ servers });
+  loadServers: async () => {
+    await waitForBaseUrl();
+    try {
+      const hosts = await fetchServers();
+      const servers = hosts.map(host => ({
+        serverInfo: host,
+        hub: new GodModeHub(),
+        connectionState: 'disconnected' as ConnectionState,
+        projects: [],
+        roots: [],
+        profiles: [],
+      }));
+      set({ servers });
+    } catch (err) {
+      console.error('Failed to load hosts:', err);
+    }
   },
 
-  addServer: (reg) => {
-    const hub = new GodModeHub();
-    const serverState: ServerState = {
-      registration: reg,
-      hub,
-      connectionState: 'disconnected',
-      projects: [],
-      roots: [],
-      profiles: [],
-    };
-    set(state => {
-      const servers = [...state.servers, serverState];
-      saveServers(servers.map(s => s.registration));
-      return { servers, showAddServer: false };
-    });
+  addServer: async (req) => {
+    try {
+      await apiAddServer(req);
+      // Reload hosts to pick up the new server
+      await get().loadServers();
+      set({ showAddServer: false });
+    } catch (err) {
+      console.error('Failed to add server:', err);
+    }
   },
 
-  updateServer: (index, reg) => {
-    set(state => {
-      const servers = [...state.servers];
-      if (index >= 0 && index < servers.length) {
-        servers[index] = { ...servers[index], registration: reg };
-        saveServers(servers.map(s => s.registration));
-      }
-      return { servers, editServerIndex: null };
-    });
-  },
-
-  removeServer: (index) => {
+  removeServer: async (index) => {
     const server = get().servers[index];
     if (server) {
       server.hub.disconnect();
     }
-    set(state => {
-      const servers = state.servers.filter((_, i) => i !== index);
-      saveServers(servers.map(s => s.registration));
-      return { servers, editServerIndex: null };
-    });
+    try {
+      await apiRemoveServer(index);
+      await get().loadServers();
+    } catch (err) {
+      console.error('Failed to remove server:', err);
+    }
+    set({ editServerIndex: null });
   },
 
   connectServer: async (index) => {
@@ -319,7 +309,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     try {
-      await server.hub.connect(server.registration.url, server.registration.accessToken);
+      await server.hub.connect(server.serverInfo.Id);
       await get().refreshProjects(index);
     } catch (err) {
       console.error('Failed to connect to server:', err);

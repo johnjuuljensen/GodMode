@@ -176,7 +176,7 @@ export function CreateProject() {
             >
               {connectedServers.map(({ server: s, index: i }) => (
                 <option key={i} value={i}>
-                  {s.registration.displayName || s.registration.url}
+                  {s.serverInfo.Name || s.serverInfo.Url}
                 </option>
               ))}
             </select>

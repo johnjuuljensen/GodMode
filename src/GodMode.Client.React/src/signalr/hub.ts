@@ -1,11 +1,12 @@
 /**
- * SignalR connection manager for GodMode.Server.
- * Mirrors the IProjectHub/IProjectHubClient contract from GodMode.Shared.
+ * SignalR connection manager.
+ * Connects to the local MAUI proxy which relays to the actual GodMode.Server.
  */
 import * as signalR from '@microsoft/signalr';
 import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
+import { getBaseUrl } from '../services/api';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
@@ -36,19 +37,28 @@ export class GodModeHub {
     this.callbacks = callbacks;
   }
 
-  async connect(serverUrl: string, accessToken?: string): Promise<void> {
+  /**
+   * Connect to a host via the local MAUI proxy.
+   * @param hostId The host ID (from GET /hosts) used as ?serverId for the relay.
+   */
+  async connect(hostId: string): Promise<void> {
     if (this.connection) {
       await this.disconnect();
     }
 
-    const hubUrl = serverUrl.replace(/\/$/, '') + '/hubs/projects';
+    const baseUrl = getBaseUrl();
+    if (!baseUrl) throw new Error('Base URL not configured — is this running inside MAUI?');
 
-    let builder = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl, accessToken ? { accessTokenFactory: () => accessToken } : {})
+    const hubUrl = `${baseUrl}/?serverId=${encodeURIComponent(hostId)}`;
+
+    this.connection = new signalR.HubConnectionBuilder()
+      .withUrl(hubUrl, {
+        skipNegotiation: true,
+        transport: signalR.HttpTransportType.WebSockets,
+      })
       .withAutomaticReconnect()
-      .configureLogging(signalR.LogLevel.Warning);
-
-    this.connection = builder.build();
+      .configureLogging(signalR.LogLevel.Warning)
+      .build();
 
     // Register server→client callbacks (IProjectHubClient)
     this.connection.on('OutputReceived', (projectId: string, rawJson: string) => {
@@ -135,7 +145,6 @@ export class GodModeHub {
   async unsubscribeProject(projectId: string): Promise<void> {
     await this.connection!.invoke('UnsubscribeProject', projectId);
   }
-
 
   async getMetricsHtml(projectId: string): Promise<string> {
     return await this.connection!.invoke('GetMetricsHtml', projectId);

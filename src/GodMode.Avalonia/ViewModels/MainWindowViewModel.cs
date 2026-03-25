@@ -11,7 +11,7 @@ public partial class MainWindowViewModel : ObservableObject
 {
 	private readonly IThemeService _themeService;
 	private readonly INotificationService _notificationService;
-	private readonly IHostConnectionService _hostConnectionService;
+	private readonly IServerConnectionService _hostConnectionService;
 	private readonly Dictionary<string, ProjectViewModel> _projectViewModels = new();
 
 	[ObservableProperty]
@@ -76,7 +76,7 @@ public partial class MainWindowViewModel : ObservableObject
 		MainViewModel mainViewModel,
 		IThemeService themeService,
 		INotificationService notificationService,
-		IHostConnectionService hostConnectionService)
+		IServerConnectionService hostConnectionService)
 	{
 		_themeService = themeService;
 		_notificationService = notificationService;

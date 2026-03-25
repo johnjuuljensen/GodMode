@@ -6,42 +6,42 @@ using Microsoft.AspNetCore.SignalR.Client;
 namespace GodMode.ClientBase.Providers;
 
 /// <summary>
-/// Host provider for local GodMode.Server instances.
+/// Server provider for local GodMode.Server instances.
 /// </summary>
-public class LocalFolderProvider : IHostProvider
+public class LocalFolderProvider : IServerProvider
 {
     private readonly string _serverUrl;
-    private readonly string _hostId;
-    private readonly string _hostName;
+    private readonly string _serverId;
+    private readonly string _serverName;
 
     public string Type => "local";
 
-    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? hostName = null)
+    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? serverName = null)
     {
         _serverUrl = serverUrl;
-        _hostId = "local-server";
-        _hostName = hostName ?? "Local Server";
+        _serverId = "local-server";
+        _serverName = serverName ?? "Local Server";
     }
 
-    public async Task<IEnumerable<HostInfo>> ListHostsAsync()
+    public async Task<IEnumerable<ServerInfo>> ListServersAsync()
     {
-        var state = await IsServerReachableAsync() ? HostState.Running : HostState.Stopped;
-        return [new HostInfo(_hostId, _hostName, "local", state, _serverUrl)];
+        var state = await IsServerReachableAsync() ? ServerState.Running : ServerState.Stopped;
+        return [new ServerInfo(_serverId, _serverName, "local", state, _serverUrl)];
     }
 
-    public async Task<HostStatus> GetHostStatusAsync(string hostId)
+    public async Task<ServerStatus> GetServerStatusAsync(string serverId)
     {
-        var state = await IsServerReachableAsync() ? HostState.Running : HostState.Stopped;
-        return new HostStatus(_hostId, _hostName, "local", state, _serverUrl, 0, DateTime.UtcNow);
+        var state = await IsServerReachableAsync() ? ServerState.Running : ServerState.Stopped;
+        return new ServerStatus(_serverId, _serverName, "local", state, _serverUrl, 0, DateTime.UtcNow);
     }
 
-    public Task StartHostAsync(string hostId) => Task.CompletedTask;
-    public Task StopHostAsync(string hostId) => Task.CompletedTask;
+    public Task StartServerAsync(string serverId) => Task.CompletedTask;
+    public Task StopServerAsync(string serverId) => Task.CompletedTask;
 
-    public async Task<HubConnection> ConnectAsync(string hostId)
+    public async Task<HubConnection> ConnectAsync(string serverId)
     {
-        if (hostId != _hostId)
-            throw new ArgumentException($"Unknown host: {hostId}");
+        if (serverId != _serverId)
+            throw new ArgumentException($"Unknown server: {serverId}");
 
         return await HubConnectionFactory.CreateAndStartAsync(_serverUrl);
     }

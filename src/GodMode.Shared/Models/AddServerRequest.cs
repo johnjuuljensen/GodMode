@@ -6,5 +6,7 @@ namespace GodMode.Shared.Models;
 public record AddServerRequest(
     string DisplayName,
     string Url,
-    string? AccessToken = null
+    string? AccessToken = null,
+    string Type = "local",
+    string? Username = null
 );

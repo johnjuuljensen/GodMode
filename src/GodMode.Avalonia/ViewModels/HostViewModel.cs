@@ -8,7 +8,7 @@ namespace GodMode.Avalonia.ViewModels;
 
 public partial class HostViewModel : ViewModelBase
 {
-	private readonly IHostConnectionService _hostConnectionService;
+	private readonly IServerConnectionService _hostConnectionService;
 	private readonly IProjectService _projectService;
 	private readonly INotificationService _notificationService;
 
@@ -19,7 +19,7 @@ public partial class HostViewModel : ViewModelBase
 	private string _hostId = string.Empty;
 
 	[ObservableProperty]
-	private HostStatus? _hostStatus;
+	private ServerStatus? _serverStatus;
 
 	[ObservableProperty]
 	private ObservableCollection<ProjectSummary> _projects = new();
@@ -35,7 +35,7 @@ public partial class HostViewModel : ViewModelBase
 
 	public HostViewModel(
 		INavigationService navigationService,
-		IHostConnectionService hostConnectionService,
+		IServerConnectionService hostConnectionService,
 		IProjectService projectService,
 		INotificationService notificationService)
 		: base(navigationService)
@@ -69,7 +69,7 @@ public partial class HostViewModel : ViewModelBase
 		try
 		{
 			IsConnected = _hostConnectionService.IsConnected(ProfileName, HostId);
-			await LoadHostStatusAsync();
+			await LoadServerStatusAsync();
 			await LoadProjectsAsync();
 			IsConnected = true;
 		}
@@ -91,9 +91,9 @@ public partial class HostViewModel : ViewModelBase
 	private async Task RefreshAsync() => await LoadAsync();
 
 	[RelayCommand]
-	private async Task StartHostAsync()
+	private async Task StartServerAsync()
 	{
-		if (HostStatus == null) return;
+		if (ServerStatus == null) return;
 
 		IsLoading = true;
 		ErrorMessage = null;
@@ -101,13 +101,13 @@ public partial class HostViewModel : ViewModelBase
 		try
 		{
 			var providers = await _hostConnectionService.GetProvidersForProfileAsync(ProfileName);
-			var provider = providers.FirstOrDefault(p => p.Provider.Type == HostStatus.Type.ToString().ToLower()).Provider;
+			var provider = providers.FirstOrDefault(p => p.Provider.Type == ServerStatus.Type.ToString().ToLower()).Provider;
 
 			if (provider != null)
 			{
-				await provider.StartHostAsync(HostId);
+				await provider.StartServerAsync(HostId);
 				await Task.Delay(2000);
-				await LoadHostStatusAsync();
+				await LoadServerStatusAsync();
 			}
 		}
 		catch (Exception ex)
@@ -121,9 +121,9 @@ public partial class HostViewModel : ViewModelBase
 	}
 
 	[RelayCommand]
-	private async Task StopHostAsync()
+	private async Task StopServerAsync()
 	{
-		if (HostStatus == null) return;
+		if (ServerStatus == null) return;
 
 		IsLoading = true;
 		ErrorMessage = null;
@@ -131,12 +131,12 @@ public partial class HostViewModel : ViewModelBase
 		try
 		{
 			var providers = await _hostConnectionService.GetProvidersForProfileAsync(ProfileName);
-			var provider = providers.FirstOrDefault(p => p.Provider.Type == HostStatus.Type.ToString().ToLower()).Provider;
+			var provider = providers.FirstOrDefault(p => p.Provider.Type == ServerStatus.Type.ToString().ToLower()).Provider;
 
 			if (provider != null)
 			{
-				await provider.StopHostAsync(HostId);
-				await LoadHostStatusAsync();
+				await provider.StopServerAsync(HostId);
+				await LoadServerStatusAsync();
 			}
 		}
 		catch (Exception ex)
@@ -174,7 +174,7 @@ public partial class HostViewModel : ViewModelBase
 		});
 	}
 
-	private async Task LoadHostStatusAsync()
+	private async Task LoadServerStatusAsync()
 	{
 		var providers = await _hostConnectionService.GetProvidersForProfileAsync(ProfileName);
 
@@ -182,12 +182,12 @@ public partial class HostViewModel : ViewModelBase
 		{
 			try
 			{
-				var hosts = await provider.ListHostsAsync();
+				var hosts = await provider.ListServersAsync();
 				var host = hosts.FirstOrDefault(h => h.Id == HostId);
 
 				if (host != null)
 				{
-					HostStatus = await provider.GetHostStatusAsync(HostId);
+					ServerStatus = await provider.GetServerStatusAsync(HostId);
 					return;
 				}
 			}
