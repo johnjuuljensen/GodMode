@@ -116,6 +116,11 @@ export function ProjectView({ serverId, projectId }: Props) {
     try { await hub.resumeProject(projectId); } catch (err) { console.error(err); }
   };
 
+  const handleDelete = async () => {
+    if (!hub || !confirm(`Delete project "${projectName}"?`)) return;
+    try { await hub.deleteProject(projectId, state === 'Running'); } catch (err) { console.error(err); }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -147,6 +152,7 @@ export function ProjectView({ serverId, projectId }: Props) {
           </button>
           {canStop && <button className="btn btn-secondary" onClick={handleStop}>Stop</button>}
           {canResume && <button className="btn btn-primary" onClick={handleResume}>Resume</button>}
+          <button className="btn btn-danger" onClick={handleDelete} title="Delete project">Delete</button>
         </div>
       </div>
 
