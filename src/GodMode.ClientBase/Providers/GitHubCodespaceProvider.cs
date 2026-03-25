@@ -82,8 +82,14 @@ public class GitHubCodespaceProvider : IServerProvider
         return await HubConnectionFactory.CreateAndStartAsync(serverUrl, _token);
     }
 
-    private static ServerInfo ToServerInfo(CodespaceInfo c, ServerState state) =>
-        new(c.Name, c.DisplayName ?? c.Name, "github", state, $"https://{c.Name}-31337.app.github.dev");
+    private static ServerInfo ToServerInfo(CodespaceInfo c, ServerState state)
+    {
+        var description = c.RepositoryFullName;
+        if (!string.IsNullOrEmpty(c.Branch))
+            description = $"{description} · {c.Branch}";
+        return new ServerInfo(c.Name, c.DisplayName ?? c.Name, "github", state,
+            $"https://{c.Name}-31337.app.github.dev", description);
+    }
 
     private static async Task<bool> ProbeGodModeServerAsync(string codespaceName, string token)
     {
@@ -136,5 +142,11 @@ public class GitHubCodespaceProvider : IServerProvider
         public string State { get; set; } = "";
         public string WebUrl { get; set; } = "";
         public DateTime? LastUsedAt { get; set; }
+        public CodespaceRepository? Repository { get; set; }
+        public CodespaceGitStatus? GitStatus { get; set; }
+        public string RepositoryFullName => Repository?.FullName ?? "";
+        public string? Branch => GitStatus?.Ref;
     }
+    private class CodespaceRepository { public string FullName { get; set; } = ""; }
+    private class CodespaceGitStatus { public string? Ref { get; set; } }
 }

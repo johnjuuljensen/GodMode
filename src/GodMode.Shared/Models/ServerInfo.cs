@@ -15,5 +15,6 @@ public record ServerInfo(
     string Name,
     string Type,
     ServerState State,
-    string? Url = null
+    string? Url = null,
+    string? Description = null
 );

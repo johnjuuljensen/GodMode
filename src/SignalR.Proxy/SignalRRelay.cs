@@ -1,15 +1,19 @@
+using System.Buffers;
 using System.IO.Pipelines;
+using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace SignalR.Proxy;
 
 /// <summary>
-/// Accepts a WebSocket from a client, connects to a SignalR server via raw WebSocket,
-/// and relays all messages bidirectionally. Exposes a tee'd HubConnection for
-/// typed callback handling (Register&lt;T&gt;) and server invocations (CreateHubProxy&lt;T&gt;).
+/// Accepts a WebSocket from a client, connects to a SignalR server via the builder's
+/// IConnectionFactory (which handles negotiate + auth), and relays all messages
+/// bidirectionally. Exposes a tee'd HubConnection for typed callback handling.
 /// </summary>
 public class SignalRRelay : IAsyncDisposable
 {
@@ -17,27 +21,26 @@ public class SignalRRelay : IAsyncDisposable
 
     private readonly string _connectionId;
     private readonly WebSocket _clientWs;
-    private readonly WebSocket _serverWs;
+    private readonly ConnectionContext _serverConnection;
+    private readonly IDuplexPipe _serverPipe;
     private readonly TeeConnection _tee;
+    private readonly SemaphoreSlim _serverWriteLock = new(1, 1);
     private readonly Action<string> _log;
 
-    /// <summary>
-    /// A HubConnection tee'd into the S→C message stream.
-    /// Use TypedSignalR Register&lt;T&gt;() to handle server callbacks.
-    /// </summary>
     public HubConnection HubConnection { get; }
 
     private SignalRRelay(
         string connectionId,
         WebSocket clientWs,
-        WebSocket serverWs,
+        ConnectionContext serverConnection,
         TeeConnection tee,
         HubConnection hubConnection,
         Action<string>? log)
     {
         _connectionId = connectionId;
         _clientWs = clientWs;
-        _serverWs = serverWs;
+        _serverConnection = serverConnection;
+        _serverPipe = serverConnection.Transport;
         _tee = tee;
         _log = log ?? Console.WriteLine;
         HubConnection = hubConnection;
@@ -47,13 +50,12 @@ public class SignalRRelay : IAsyncDisposable
     /// Connects to a SignalR server and sets up the relay.
     /// </summary>
     /// <param name="clientWs">WebSocket accepted from the local client (e.g. React WebView).</param>
-    /// <param name="serverUrl">SignalR hub URL (http/https — converted to ws/wss internally).</param>
-    /// <param name="configureServerWs">Optional callback to configure the server WebSocket (e.g. auth headers).</param>
+    /// <param name="serverBuilder">Pre-configured HubConnectionBuilder with URL and auth.
+    /// The builder's IConnectionFactory handles negotiate + WebSocket upgrade.</param>
     /// <param name="log">Optional log callback.</param>
     public static async Task<SignalRRelay?> ConnectAsync(
         WebSocket clientWs,
-        string serverUrl,
-        Action<ClientWebSocket>? configureServerWs = null,
+        IHubConnectionBuilder serverBuilder,
         Action<string>? log = null)
     {
         var connectionId = Guid.NewGuid().ToString("N")[..8];
@@ -62,7 +64,7 @@ public class SignalRRelay : IAsyncDisposable
         logFn($"[{connectionId}] Client connected");
 
         // Step 1: Receive SignalR handshake from client
-        var handshake = await ReceiveMessageAsync(clientWs);
+        var handshake = await ReceiveWsMessageAsync(clientWs);
         if (handshake == null)
         {
             logFn($"[{connectionId}] No handshake received");
@@ -70,39 +72,45 @@ public class SignalRRelay : IAsyncDisposable
         }
         logFn($"[{connectionId}] Client handshake: {handshake.TrimEnd(RecordSeparator)}");
 
-        // Step 2: Connect to the real server via raw WebSocket
-        var serverWs = new ClientWebSocket();
-        configureServerWs?.Invoke(serverWs);
-        var serverWsUrl = serverUrl.Replace("http://", "ws://").Replace("https://", "wss://");
+        // Step 2: Use the builder's factory to connect (handles negotiate + auth)
+        var sp = serverBuilder.Services.BuildServiceProvider();
+        var factory = sp.GetRequiredService<IConnectionFactory>();
+        var endpoint = sp.GetRequiredService<EndPoint>();
+
+        ConnectionContext serverConnection;
         try
         {
-            await serverWs.ConnectAsync(new Uri(serverWsUrl), CancellationToken.None);
+            serverConnection = await factory.ConnectAsync(endpoint);
         }
         catch (Exception ex)
         {
             logFn($"[{connectionId}] Failed to connect to server: {ex.Message}");
-            await SendMessageAsync(clientWs, "{\"error\":\"Failed to connect to upstream server\"}" + RecordSeparator);
+            await SendWsMessageAsync(clientWs, "{\"error\":\"Failed to connect to upstream server\"}" + RecordSeparator);
             return null;
         }
+        logFn($"[{connectionId}] Server connection established (negotiate complete)");
 
-        // Step 3: Forward handshake to server, relay response back
-        await SendMessageAsync(serverWs, handshake);
-        var response = await ReceiveMessageAsync(serverWs);
+        var serverPipe = serverConnection.Transport;
+
+        // Step 3: Forward SignalR protocol handshake through the pipe
+        await serverPipe.Output.WriteAsync(Encoding.UTF8.GetBytes(handshake));
+        await serverPipe.Output.FlushAsync();
+
+        var response = await ReadPipeUntilSeparatorAsync(serverPipe.Input);
         if (response == null)
         {
             logFn($"[{connectionId}] No handshake response from server");
-            serverWs.Dispose();
+            if (serverConnection is IAsyncDisposable ad) await ad.DisposeAsync();
             return null;
         }
-        await SendMessageAsync(clientWs, response);
+        await SendWsMessageAsync(clientWs, response);
         logFn($"[{connectionId}] Handshake complete, relaying messages");
 
-        // Step 4: Create tee'd HubConnection
+        // Step 4: Create tee'd HubConnection for typed handlers
         var (tee, hubConnection) = await TeeConnection.CreateHubConnectionAsync();
-
         logFn($"[{connectionId}] Tee'd HubConnection ready");
 
-        return new SignalRRelay(connectionId, clientWs, serverWs, tee, hubConnection, log);
+        return new SignalRRelay(connectionId, clientWs, serverConnection, tee, hubConnection, log);
     }
 
     /// <summary>
@@ -124,8 +132,8 @@ public class SignalRRelay : IAsyncDisposable
 
         try { await HubConnection.StopAsync(); } catch { /* best effort */ }
         await _tee.DisposeAsync();
-        await CloseGracefullyAsync(_clientWs);
-        await CloseGracefullyAsync(_serverWs);
+        await CloseWsGracefullyAsync(_clientWs);
+        if (_serverConnection is IAsyncDisposable ad) await ad.DisposeAsync();
     }
 
     private async Task PumpClientToServerAsync(CancellationTokenSource cts)
@@ -135,11 +143,11 @@ public class SignalRRelay : IAsyncDisposable
         {
             while (_clientWs.State == WebSocketState.Open && !cts.IsCancellationRequested)
             {
-                var (message, result) = await ReceiveFullMessageAsync(_clientWs, buffer, cts.Token);
+                var (message, result) = await ReceiveFullWsMessageAsync(_clientWs, buffer, cts.Token);
                 if (result.MessageType == WebSocketMessageType.Close) break;
 
                 LogMessage(message, "C->S");
-                await _serverWs.SendAsync(message, result.MessageType, true, cts.Token);
+                await WriteToServerPipeAsync(message, cts.Token);
             }
         }
         catch (OperationCanceledException) { }
@@ -148,26 +156,28 @@ public class SignalRRelay : IAsyncDisposable
 
     private async Task PumpServerToClientAsync(CancellationTokenSource cts)
     {
-        var buffer = new byte[4096];
         try
         {
-            while (_serverWs.State == WebSocketState.Open && !cts.IsCancellationRequested)
+            while (!cts.IsCancellationRequested)
             {
-                var (message, result) = await ReceiveFullMessageAsync(_serverWs, buffer, cts.Token);
-                if (result.MessageType == WebSocketMessageType.Close) break;
+                var result = await _serverPipe.Input.ReadAsync(cts.Token);
+                if (result.IsCompleted || result.IsCanceled) break;
 
-                LogMessage(message, "S->C");
+                var bytes = result.Buffer.ToArray();
+                _serverPipe.Input.AdvanceTo(result.Buffer.End);
+                if (bytes.Length == 0) continue;
 
-                // Forward to client
-                await _clientWs.SendAsync(message, result.MessageType, true, cts.Token);
+                var segment = new ArraySegment<byte>(bytes);
+                LogMessage(segment, "S->C");
 
-                // Tee into HubConnection
-                await _tee.TeeWriter.WriteAsync(message, cts.Token);
+                await _clientWs.SendAsync(segment, WebSocketMessageType.Text, true, cts.Token);
+
+                await _tee.TeeWriter.WriteAsync(new ReadOnlyMemory<byte>(bytes), cts.Token);
                 await _tee.TeeWriter.FlushAsync(cts.Token);
             }
         }
         catch (OperationCanceledException) { }
-        catch (WebSocketException ex) { _log($"[{_connectionId}] S->C error: {ex.Message}"); }
+        catch (Exception ex) { _log($"[{_connectionId}] S->C error: {ex.Message}"); }
     }
 
     private async Task PumpProxyToServerAsync(CancellationTokenSource cts)
@@ -179,23 +189,50 @@ public class SignalRRelay : IAsyncDisposable
                 var result = await _tee.ProxyOutput.ReadAsync(cts.Token);
                 if (result.IsCompleted) break;
 
-                foreach (var segment in result.Buffer)
-                {
-                    if (segment.Length > 0)
-                    {
-                        var bytes = segment.ToArray();
-                        LogMessage(new ArraySegment<byte>(bytes), "P->S");
-                        await _serverWs.SendAsync(
-                            new ArraySegment<byte>(bytes),
-                            WebSocketMessageType.Text, true, cts.Token);
-                    }
-                }
-
+                var bytes = result.Buffer.ToArray();
                 _tee.ProxyOutput.AdvanceTo(result.Buffer.End);
+                if (bytes.Length == 0) continue;
+
+                LogMessage(new ArraySegment<byte>(bytes), "P->S");
+                await WriteToServerPipeAsync(new ArraySegment<byte>(bytes), cts.Token);
             }
         }
         catch (OperationCanceledException) { }
-        catch (WebSocketException ex) { _log($"[{_connectionId}] P->S error: {ex.Message}"); }
+        catch (Exception ex) { _log($"[{_connectionId}] P->S error: {ex.Message}"); }
+    }
+
+    private async Task WriteToServerPipeAsync(ArraySegment<byte> data, CancellationToken ct)
+    {
+        await _serverWriteLock.WaitAsync(ct);
+        try
+        {
+            await _serverPipe.Output.WriteAsync(
+                new ReadOnlyMemory<byte>(data.Array!, data.Offset, data.Count), ct);
+            await _serverPipe.Output.FlushAsync(ct);
+        }
+        finally { _serverWriteLock.Release(); }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────
+
+    private static async Task<string?> ReadPipeUntilSeparatorAsync(PipeReader reader)
+    {
+        while (true)
+        {
+            var result = await reader.ReadAsync();
+            if (result.IsCompleted) return null;
+
+            var buffer = result.Buffer;
+            var position = buffer.PositionOf((byte)RecordSeparator);
+            if (position != null)
+            {
+                var end = buffer.GetPosition(1, position.Value);
+                var message = Encoding.UTF8.GetString(buffer.Slice(0, end).ToArray());
+                reader.AdvanceTo(end);
+                return message;
+            }
+            reader.AdvanceTo(buffer.Start, buffer.End);
+        }
     }
 
     private void LogMessage(ArraySegment<byte> data, string direction)
@@ -209,26 +246,19 @@ public class SignalRRelay : IAsyncDisposable
                 using var doc = JsonDocument.Parse(raw);
                 var root = doc.RootElement;
                 if (!root.TryGetProperty("type", out var typeProp)) continue;
-                var type = typeProp.GetInt32();
-                switch (type)
+                switch (typeProp.GetInt32())
                 {
-                    case 1:
-                        _log($"[{_connectionId}] {direction} Invoke: {root.GetProperty("target").GetString()}");
-                        break;
-                    case 3:
-                        _log($"[{_connectionId}] {direction} Completion: {root.GetProperty("invocationId").GetString()}");
-                        break;
+                    case 1: _log($"[{_connectionId}] {direction} Invoke: {root.GetProperty("target").GetString()}"); break;
+                    case 3: _log($"[{_connectionId}] {direction} Completion: {root.GetProperty("invocationId").GetString()}"); break;
                     case 6: break; // Ping
-                    default:
-                        _log($"[{_connectionId}] {direction} Type: {type}");
-                        break;
+                    default: _log($"[{_connectionId}] {direction} Type: {typeProp.GetInt32()}"); break;
                 }
             }
-            catch { /* not JSON or missing fields — skip */ }
+            catch { /* not JSON or missing fields */ }
         }
     }
 
-    private static async Task<(ArraySegment<byte> Message, WebSocketReceiveResult Result)> ReceiveFullMessageAsync(
+    private static async Task<(ArraySegment<byte> Message, WebSocketReceiveResult Result)> ReceiveFullWsMessageAsync(
         WebSocket ws, byte[] buffer, CancellationToken ct)
     {
         var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
@@ -245,21 +275,21 @@ public class SignalRRelay : IAsyncDisposable
         return (new ArraySegment<byte>(ms.ToArray()), result);
     }
 
-    private static async Task<string?> ReceiveMessageAsync(WebSocket ws)
+    private static async Task<string?> ReceiveWsMessageAsync(WebSocket ws)
     {
         var buffer = new byte[4096];
-        var (message, result) = await ReceiveFullMessageAsync(ws, buffer, CancellationToken.None);
+        var (message, result) = await ReceiveFullWsMessageAsync(ws, buffer, CancellationToken.None);
         if (result.MessageType == WebSocketMessageType.Close) return null;
         return Encoding.UTF8.GetString(message.Array!, message.Offset, message.Count);
     }
 
-    private static async Task SendMessageAsync(WebSocket ws, string message)
+    private static async Task SendWsMessageAsync(WebSocket ws, string message)
     {
         var bytes = Encoding.UTF8.GetBytes(message);
         await ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
     }
 
-    private static async Task CloseGracefullyAsync(WebSocket ws)
+    private static async Task CloseWsGracefullyAsync(WebSocket ws)
     {
         try
         {
@@ -274,5 +304,6 @@ public class SignalRRelay : IAsyncDisposable
     {
         try { await HubConnection.DisposeAsync(); } catch { /* best effort */ }
         await _tee.DisposeAsync();
+        _serverWriteLock.Dispose();
     }
 }

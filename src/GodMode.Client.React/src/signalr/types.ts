@@ -82,6 +82,7 @@ export interface ServerInfo {
   Type: string;
   State: ServerState;
   Url?: string | null;
+  Description?: string | null;
 }
 
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---

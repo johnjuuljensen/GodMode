@@ -7,6 +7,7 @@ using GodMode.ClientBase.Services;
 using GodMode.ClientBase.Services.Models;
 using GodMode.Shared;
 using GodMode.Shared.Models;
+using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using SignalR.Proxy;
 
@@ -123,12 +124,23 @@ public class LocalServer
 
         Log($"[Relay] Connecting to {info.Value.Url} (token: {(info.Value.Token != null ? "yes" : "no")})");
 
+        var serverBuilder = new HubConnectionBuilder()
+            .WithUrl(info.Value.Url, options =>
+            {
+                if (info.Value.Token != null)
+                    options.AccessTokenProvider = () => Task.FromResult<string?>(info.Value.Token);
+            })
+            .AddJsonProtocol(options =>
+            {
+                var defaults = JsonDefaults.Options;
+                options.PayloadSerializerOptions.PropertyNamingPolicy = defaults.PropertyNamingPolicy;
+                options.PayloadSerializerOptions.DefaultIgnoreCondition = defaults.DefaultIgnoreCondition;
+                foreach (var converter in defaults.Converters)
+                    options.PayloadSerializerOptions.Converters.Add(converter);
+            });
+
         var wsContext = await context.AcceptWebSocketAsync(null);
-        var relay = await SignalRRelay.ConnectAsync(wsContext.WebSocket, info.Value.Url, ws =>
-        {
-            if (info.Value.Token != null)
-                ws.Options.SetRequestHeader("Authorization", $"Bearer {info.Value.Token}");
-        }, msg => Log($"[Relay] {msg}"));
+        var relay = await SignalRRelay.ConnectAsync(wsContext.WebSocket, serverBuilder, msg => Log($"[Relay] {msg}"));
 
         if (relay == null) return;
 

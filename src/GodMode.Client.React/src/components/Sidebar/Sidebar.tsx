@@ -130,7 +130,7 @@ function InactiveSection({ servers }: { servers: ServerConnection[] }) {
             <div className={`server-dot ${conn.connectionState}`} />
             <div className="server-info">
               <div className="server-name">{info.Name}</div>
-              <div className="server-url">{info.Url ?? info.Type}</div>
+              <div className="server-url">{info.Description ?? info.Url ?? info.Type}</div>
             </div>
             <div className="server-actions" style={{ opacity: 1 }}>
               {isStartable && (
