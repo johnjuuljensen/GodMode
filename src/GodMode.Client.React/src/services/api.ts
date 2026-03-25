@@ -51,3 +51,25 @@ export async function removeServer(index: number): Promise<void> {
   const res = await fetch(`${getBaseUrl()}/servers/registrations/${index}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`Failed to remove server: ${res.status}`);
 }
+
+export async function startServer(serverId: string): Promise<void> {
+  const res = await fetch(`${getBaseUrl()}/servers/${encodeURIComponent(serverId)}/start`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to start server: ${res.status}`);
+}
+
+export async function stopServer(serverId: string): Promise<void> {
+  const res = await fetch(`${getBaseUrl()}/servers/${encodeURIComponent(serverId)}/stop`, { method: 'POST' });
+  if (!res.ok) throw new Error(`Failed to stop server: ${res.status}`);
+}
+
+export function subscribeEvents(onEvent: (type: string, data: unknown) => void): () => void {
+  const baseUrl = getBaseUrl();
+  if (!baseUrl) return () => {};
+
+  const source = new EventSource(`${baseUrl}/events`);
+  source.addEventListener('serversChanged', () => onEvent('serversChanged', null));
+  source.onerror = () => {
+    // Auto-reconnects by default; suppress console noise
+  };
+  return () => source.close();
+}

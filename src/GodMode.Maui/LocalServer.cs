@@ -21,6 +21,8 @@ public class LocalServer
 {
     private readonly IServiceProvider _services;
     private HttpListener? _listener;
+    private readonly List<StreamWriter> _sseClients = new();
+    private readonly Lock _sseLock = new();
 
     public string BaseUrl { get; private set; } = "";
 
@@ -78,6 +80,8 @@ public class LocalServer
 
             if (context.Request.IsWebSocketRequest)
                 await HandleWebSocketAsync(context);
+            else if (context.Request.Url?.AbsolutePath == "/events" && context.Request.HttpMethod == "GET")
+                await HandleSseAsync(context);
             else
                 await HandleRestAsync(context);
         }
@@ -235,6 +239,7 @@ public class LocalServer
         await registry.AddServerAsync(registration);
         context.Response.StatusCode = 201;
         context.Response.Close();
+        BroadcastEvent("serversChanged");
     }
 
     private async Task HandleRemoveRegistrationAsync(HttpListenerContext context, string path)
@@ -251,6 +256,7 @@ public class LocalServer
         await registry.RemoveServerAsync(index);
         context.Response.StatusCode = 200;
         context.Response.Close();
+        BroadcastEvent("serversChanged");
     }
 
     private async Task HandleListDiscoveredServersAsync(HttpListenerContext context)
@@ -286,12 +292,88 @@ public class LocalServer
                 await getAction(provider)(serverId);
                 context.Response.StatusCode = 200;
                 context.Response.Close();
+                BroadcastEvent("serversChanged");
+                // Poll for state change in background (e.g., codespace starting up)
+                _ = PollServerStateAsync(provider, serverId);
                 return;
             }
         }
 
         context.Response.StatusCode = 404;
         context.Response.Close();
+    }
+
+    // ── Background state polling ────────────────────────────────
+
+    private async Task PollServerStateAsync(IServerProvider provider, string serverId)
+    {
+        // Poll until the server reaches a stable state (Running or Stopped)
+        for (int i = 0; i < 30; i++)
+        {
+            await Task.Delay(2000);
+            try
+            {
+                var servers = await provider.ListServersAsync();
+                var server = servers.FirstOrDefault(s => s.Id == serverId);
+                if (server == null) break;
+
+                BroadcastEvent("serversChanged");
+
+                if (server.State is Shared.Enums.ServerState.Running or Shared.Enums.ServerState.Stopped)
+                    break;
+            }
+            catch { break; }
+        }
+    }
+
+    // ── Server-Sent Events ────────────────────────────────────────
+
+    private async Task HandleSseAsync(HttpListenerContext context)
+    {
+        context.Response.ContentType = "text/event-stream";
+        context.Response.Headers.Add("Cache-Control", "no-cache");
+        context.Response.Headers.Add("Connection", "keep-alive");
+        context.Response.StatusCode = 200;
+
+        var writer = new StreamWriter(context.Response.OutputStream, Encoding.UTF8) { AutoFlush = true };
+        await writer.WriteLineAsync(": connected\n");
+
+        lock (_sseLock) _sseClients.Add(writer);
+
+        try
+        {
+            // Keep connection open until client disconnects
+            while (context.Response.OutputStream.CanWrite)
+                await Task.Delay(5000);
+        }
+        catch { /* client disconnected */ }
+        finally
+        {
+            lock (_sseLock) _sseClients.Remove(writer);
+            try { writer.Dispose(); } catch { }
+            try { context.Response.Close(); } catch { }
+        }
+    }
+
+    private void BroadcastEvent(string eventType, object? data = null)
+    {
+        var json = data != null ? JsonSerializer.Serialize(data, JsonDefaults.Compact) : "{}";
+        var message = $"event: {eventType}\ndata: {json}\n\n";
+
+        lock (_sseLock)
+        {
+            var dead = new List<StreamWriter>();
+            foreach (var writer in _sseClients)
+            {
+                try { writer.Write(message); }
+                catch { dead.Add(writer); }
+            }
+            foreach (var w in dead)
+            {
+                _sseClients.Remove(w);
+                try { w.Dispose(); } catch { }
+            }
+        }
     }
 
     // ── Logging ───────────────────────────────────────────────────
