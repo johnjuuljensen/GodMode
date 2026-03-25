@@ -4,28 +4,32 @@ using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
-using TypedSignalR.Client;
 
 namespace GodMode.Maui.Services;
 
 /// <summary>
 /// Manages outbound SignalR connections to remote GodMode.Server instances.
-/// Each server gets its own HubConnection. Callbacks from remote servers
-/// are forwarded to local React clients in the appropriate group.
+/// Provides raw HubConnection access for the proxy filter, and forwards
+/// remote callbacks to local React clients via group-based routing.
 /// </summary>
 public class ServerConnectionManager
 {
     private readonly ConcurrentDictionary<string, ManagedServer> _servers = new();
-    private readonly IHubContext<Hubs.GodModeLocalHub, IProjectHubClient> _hubContext;
+    private readonly IHubContext<Hubs.GodModeLocalHub> _hubContext;
     private readonly string _registryPath;
 
-    public ServerConnectionManager(IHubContext<Hubs.GodModeLocalHub, IProjectHubClient> hubContext)
+    public ServerConnectionManager(IHubContext<Hubs.GodModeLocalHub> hubContext)
     {
         _hubContext = hubContext;
         _registryPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "GodMode", "servers.json");
     }
+
+    public HubConnection? GetRemoteConnection(string serverId) =>
+        _servers.TryGetValue(serverId, out var server) && server.IsConnected
+            ? server.RemoteConnection
+            : null;
 
     public ServerInfo[] ListServers() =>
         _servers.Values.Select(s => s.ToServerInfo()).ToArray();
@@ -74,11 +78,6 @@ public class ServerConnectionManager
             await server.DisconnectAsync();
     }
 
-    public IProjectHub? GetHubProxy(string serverId) =>
-        _servers.TryGetValue(serverId, out var server) && server.IsConnected
-            ? server.HubProxy
-            : null;
-
     public void LoadRegistry()
     {
         if (!File.Exists(_registryPath)) return;
@@ -108,9 +107,6 @@ public class ServerConnectionManager
     private record ServerEntry(string Id, string DisplayName, string Url, string? AccessToken);
 }
 
-/// <summary>
-/// Holds the state for a single registered server: metadata + optional active connection.
-/// </summary>
 internal class ManagedServer
 {
     public string Id { get; }
@@ -118,11 +114,8 @@ internal class ManagedServer
     public string Url { get; }
     public string? AccessToken { get; }
 
-    private HubConnection? _hubConnection;
-    private IDisposable? _clientRegistration;
-
-    public IProjectHub? HubProxy { get; private set; }
-    public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
+    public HubConnection? RemoteConnection { get; private set; }
+    public bool IsConnected => RemoteConnection?.State == HubConnectionState.Connected;
 
     public ManagedServer(string id, string displayName, string url, string? accessToken)
     {
@@ -132,7 +125,7 @@ internal class ManagedServer
         AccessToken = accessToken;
     }
 
-    public async Task ConnectAsync(IHubContext<Hubs.GodModeLocalHub, IProjectHubClient> hubContext, string serverId)
+    public async Task ConnectAsync(IHubContext<Hubs.GodModeLocalHub> hubContext, string serverId)
     {
         if (IsConnected) return;
 
@@ -153,59 +146,28 @@ internal class ManagedServer
                     options.PayloadSerializerOptions.Converters.Add(converter);
             });
 
-        _hubConnection = builder.Build();
-        HubProxy = _hubConnection.CreateHubProxy<IProjectHub>();
+        RemoteConnection = builder.Build();
 
-        // Forward remote callbacks to local React clients in this server's group
-        var forwarder = new CallbackForwarder(hubContext, serverId);
-        _clientRegistration = _hubConnection.Register<IProjectHubClient>(forwarder);
+        // Forward all IProjectHubClient callbacks to local React clients in this server's group
+        foreach (var method in typeof(IProjectHubClient).GetMethods())
+        {
+            var methodName = method.Name;
+            var paramTypes = method.GetParameters().Select(p => p.ParameterType).ToArray();
+            RemoteConnection.On(methodName, paramTypes, args =>
+                hubContext.Clients.Group($"server-{serverId}").SendCoreAsync(methodName, args));
+        }
 
-        await _hubConnection.StartAsync();
+        await RemoteConnection.StartAsync();
     }
 
     public async Task DisconnectAsync()
     {
-        _clientRegistration?.Dispose();
-        _clientRegistration = null;
-        HubProxy = null;
-
-        if (_hubConnection is not null)
+        if (RemoteConnection is not null)
         {
-            await _hubConnection.DisposeAsync();
-            _hubConnection = null;
+            await RemoteConnection.DisposeAsync();
+            RemoteConnection = null;
         }
     }
 
-    public ServerInfo ToServerInfo() => new(
-        Id,
-        DisplayName,
-        Url,
-        IsConnected ? "connected" : "disconnected"
-    );
-}
-
-/// <summary>
-/// Receives IProjectHubClient callbacks from a remote server and forwards
-/// them to all local hub clients in the server's group.
-/// </summary>
-internal class CallbackForwarder(
-    IHubContext<Hubs.GodModeLocalHub, IProjectHubClient> hubContext,
-    string serverId) : IProjectHubClient
-{
-    private IProjectHubClient Group => hubContext.Clients.Group($"server-{serverId}");
-
-    public Task OutputReceived(string projectId, string rawJson) =>
-        Group.OutputReceived(projectId, rawJson);
-
-    public Task StatusChanged(string projectId, ProjectStatus status) =>
-        Group.StatusChanged(projectId, status);
-
-    public Task ProjectCreated(ProjectStatus status) =>
-        Group.ProjectCreated(status);
-
-    public Task CreationProgress(string projectId, string message) =>
-        Group.CreationProgress(projectId, message);
-
-    public Task ProjectDeleted(string projectId) =>
-        Group.ProjectDeleted(projectId);
+    public ServerInfo ToServerInfo() => new(Id, DisplayName, Url, IsConnected ? "connected" : "disconnected");
 }

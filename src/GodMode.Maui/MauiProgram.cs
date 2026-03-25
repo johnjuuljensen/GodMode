@@ -5,6 +5,7 @@ using GodMode.Shared.Models;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GodMode.Maui;
@@ -41,6 +42,7 @@ public static class MauiProgram
 
         kestrelBuilder.Services.AddSingleton<ServerConnectionManager>();
 
+        kestrelBuilder.Services.AddSingleton<IHubFilter, Hubs.ProxyHubFilter>();
         kestrelBuilder.Services.AddSignalR()
             .AddJsonProtocol(options =>
             {
