@@ -2,18 +2,19 @@ using GodMode.ClientBase.Abstractions;
 using GodMode.ClientBase.Providers;
 using GodMode.ClientBase.Services.Models;
 using GodMode.Shared.Models;
+using Microsoft.AspNetCore.SignalR.Client;
 
 namespace GodMode.ClientBase.Services;
 
 /// <summary>
-/// Manages connections to hosts and tracks their status.
-/// Now uses IServerRegistryService (flat server list) instead of IProfileService.
+/// Manages HubConnections to hosts. Creates providers from server registrations,
+/// handles connection lifecycle with retry logic.
 /// </summary>
 public class HostConnectionService : IHostConnectionService
 {
     private readonly IServerRegistryService _serverRegistry;
     private readonly Dictionary<string, IHostProvider> _providers = new();
-    private readonly Dictionary<string, IProjectConnection> _activeConnections = new();
+    private readonly Dictionary<string, HubConnection> _activeConnections = new();
 
     public HostConnectionService(IServerRegistryService serverRegistry)
     {
@@ -61,19 +62,17 @@ public class HostConnectionService : IHostConnectionService
         return allHosts;
     }
 
-    public async Task<IProjectConnection> ConnectToHostAsync(string hostId)
+    public async Task<HubConnection> ConnectToHostAsync(string hostId)
     {
-        // Return existing connection if still active
-        if (_activeConnections.TryGetValue(hostId, out var existingConnection))
+        if (_activeConnections.TryGetValue(hostId, out var existing))
         {
-            if (existingConnection.IsConnected)
-                return existingConnection;
+            if (existing.State == HubConnectionState.Connected)
+                return existing;
 
-            existingConnection.Dispose();
+            await existing.DisposeAsync();
             _activeConnections.Remove(hostId);
         }
 
-        // Find the provider that owns this host
         var providers = await GetAllProvidersAsync();
         IHostProvider? targetProvider = null;
 
@@ -95,49 +94,26 @@ public class HostConnectionService : IHostConnectionService
         return connection;
     }
 
-    public void DisconnectFromHost(string hostId)
+    public async Task DisconnectFromHost(string hostId)
     {
         if (_activeConnections.TryGetValue(hostId, out var connection))
         {
-            connection.Disconnect();
-            connection.Dispose();
+            await connection.DisposeAsync();
             _activeConnections.Remove(hostId);
         }
     }
 
-    public void DisconnectAll()
+    public async Task DisconnectAll()
     {
         foreach (var connection in _activeConnections.Values)
-        {
-            connection.Disconnect();
-            connection.Dispose();
-        }
+            await connection.DisposeAsync();
         _activeConnections.Clear();
     }
 
-    public bool IsConnected(string hostId)
-    {
-        return _activeConnections.TryGetValue(hostId, out var connection) && connection.IsConnected;
-    }
+    public bool IsConnected(string hostId) =>
+        _activeConnections.TryGetValue(hostId, out var c) && c.State == HubConnectionState.Connected;
 
-    // Backward-compat overloads — profileName is ignored
-
-    public Task<IEnumerable<(IHostProvider Provider, int ServerIndex)>> GetProvidersForProfileAsync(string profileName)
-        => GetAllProvidersAsync();
-
-    public Task<IEnumerable<HostInfo>> ListAllHostsAsync(string profileName)
-        => ListAllHostsAsync();
-
-    public Task<IProjectConnection> ConnectToHostAsync(string profileName, string hostId)
-        => ConnectToHostAsync(hostId);
-
-    public void DisconnectFromHost(string profileName, string hostId)
-        => DisconnectFromHost(hostId);
-
-    public bool IsConnected(string profileName, string hostId)
-        => IsConnected(hostId);
-
-    private async Task<IProjectConnection> ConnectWithRetryAsync(
+    private async Task<HubConnection> ConnectWithRetryAsync(
         IHostProvider provider, string hostId, int maxRetries = 3)
     {
         Exception? lastException = null;
@@ -162,15 +138,12 @@ public class HostConnectionService : IHostConnectionService
             lastException);
     }
 
-    private IHostProvider? CreateProvider(ServerRegistration server)
+    private IHostProvider? CreateProvider(ServerRegistration server) => server.Type switch
     {
-        return server.Type switch
-        {
-            "github" => CreateGitHubProvider(server),
-            "local" => CreateLocalProvider(server),
-            _ => null
-        };
-    }
+        "github" => CreateGitHubProvider(server),
+        "local" => CreateLocalProvider(server),
+        _ => null
+    };
 
     private IHostProvider? CreateGitHubProvider(ServerRegistration server)
     {
@@ -184,13 +157,9 @@ public class HostConnectionService : IHostConnectionService
     private IHostProvider? CreateLocalProvider(ServerRegistration server)
     {
         var serverUrl = server.Url;
-
-        if (string.IsNullOrEmpty(serverUrl))
-            serverUrl = "http://localhost:31337";
-        else if (!serverUrl.StartsWith("http://") && !serverUrl.StartsWith("https://"))
+        if (string.IsNullOrEmpty(serverUrl) || (!serverUrl.StartsWith("http://") && !serverUrl.StartsWith("https://")))
             serverUrl = "http://localhost:31337";
 
-        var hostName = server.DisplayName ?? "Local Server";
-        return new LocalFolderProvider(serverUrl, hostName);
+        return new LocalFolderProvider(serverUrl, server.DisplayName ?? "Local Server");
     }
 }

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
-using GodMode.Shared;
+using GodMode.ClientBase.Providers;
+using GodMode.ClientBase.Services;
+using GodMode.ClientBase.Services.Models;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR;
@@ -9,165 +11,94 @@ namespace GodMode.Maui.Services;
 
 /// <summary>
 /// Manages outbound SignalR connections to remote GodMode.Server instances.
-/// Provides raw HubConnection access for the proxy filter, and forwards
-/// remote callbacks to local React clients via group-based routing.
+/// Delegates persistence to IServerRegistryService (ClientBase) and connection
+/// building to HubConnectionFactory. Adds proxy-specific callback forwarding.
 /// </summary>
 public class ServerConnectionManager
 {
-    private readonly ConcurrentDictionary<string, ManagedServer> _servers = new();
+    private readonly IServerRegistryService _registry;
     private readonly IHubContext<Hubs.GodModeLocalHub> _hubContext;
-    private readonly string _registryPath;
+    private readonly ConcurrentDictionary<string, HubConnection> _connections = new();
 
-    public ServerConnectionManager(IHubContext<Hubs.GodModeLocalHub> hubContext)
+    public ServerConnectionManager(IServerRegistryService registry, IHubContext<Hubs.GodModeLocalHub> hubContext)
     {
+        _registry = registry;
         _hubContext = hubContext;
-        _registryPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "GodMode", "servers.json");
     }
 
-    public HubConnection? GetRemoteConnection(string serverId) =>
-        _servers.TryGetValue(serverId, out var server) && server.IsConnected
-            ? server.RemoteConnection
+    public HubConnection? GetRemoteConnection(string serverId)
+    {
+        _connections.TryGetValue(serverId, out var conn);
+        return conn?.State == HubConnectionState.Connected ? conn : null;
+    }
+
+    public async Task<ServerInfo[]> ListServersAsync()
+    {
+        var servers = await _registry.GetServersAsync();
+        return servers.Select((s, i) => ToServerInfo(s, i)).ToArray();
+    }
+
+    public async Task<ServerInfo> AddServerAsync(AddServerRequest request)
+    {
+        var registration = new ServerRegistration
+        {
+            Type = "local",
+            Url = request.Url,
+            DisplayName = request.DisplayName,
+            Token = request.AccessToken
+        };
+        await _registry.AddServerAsync(registration);
+
+        var servers = await _registry.GetServersAsync();
+        return ToServerInfo(servers[^1], servers.Count - 1);
+    }
+
+    public async Task RemoveServerAsync(int index)
+    {
+        var serverId = index.ToString();
+        if (_connections.TryRemove(serverId, out var conn))
+            await conn.DisposeAsync();
+        await _registry.RemoveServerAsync(index);
+    }
+
+    public async Task ConnectServerAsync(int index)
+    {
+        var serverId = index.ToString();
+        var servers = await _registry.GetServersAsync();
+        if (index < 0 || index >= servers.Count)
+            throw new ArgumentOutOfRangeException(nameof(index));
+
+        var server = servers[index];
+        var accessToken = !string.IsNullOrEmpty(server.Token)
+            ? _registry.DecryptToken(server.Token)
             : null;
 
-    public ServerInfo[] ListServers() =>
-        _servers.Values.Select(s => s.ToServerInfo()).ToArray();
+        var connection = await HubConnectionFactory.CreateAndStartAsync(
+            server.Url ?? "http://localhost:31337", accessToken);
 
-    public ServerInfo AddServer(AddServerRequest request)
-    {
-        var id = Guid.NewGuid().ToString("N")[..8];
-        var server = new ManagedServer(id, request.DisplayName, request.Url, request.AccessToken);
-        _servers[id] = server;
-        SaveRegistry();
-        return server.ToServerInfo();
-    }
-
-    public void UpdateServer(string serverId, AddServerRequest request)
-    {
-        if (!_servers.TryGetValue(serverId, out var existing))
-            throw new KeyNotFoundException($"Server '{serverId}' not found");
-
-        if (existing.IsConnected)
-            throw new InvalidOperationException("Disconnect before updating");
-
-        _servers[serverId] = new ManagedServer(serverId, request.DisplayName, request.Url, request.AccessToken);
-        SaveRegistry();
-    }
-
-    public async Task RemoveServer(string serverId)
-    {
-        if (_servers.TryRemove(serverId, out var server))
-        {
-            await server.DisconnectAsync();
-            SaveRegistry();
-        }
-    }
-
-    public async Task ConnectServer(string serverId)
-    {
-        if (!_servers.TryGetValue(serverId, out var server))
-            throw new KeyNotFoundException($"Server '{serverId}' not found");
-
-        await server.ConnectAsync(_hubContext, serverId);
-    }
-
-    public async Task DisconnectServer(string serverId)
-    {
-        if (_servers.TryGetValue(serverId, out var server))
-            await server.DisconnectAsync();
-    }
-
-    public void LoadRegistry()
-    {
-        if (!File.Exists(_registryPath)) return;
-
-        try
-        {
-            var json = File.ReadAllText(_registryPath);
-            var entries = System.Text.Json.JsonSerializer.Deserialize<ServerEntry[]>(json, JsonDefaults.Options);
-            if (entries is null) return;
-
-            foreach (var entry in entries)
-                _servers[entry.Id] = new ManagedServer(entry.Id, entry.DisplayName, entry.Url, entry.AccessToken);
-        }
-        catch { /* corrupt file, start fresh */ }
-    }
-
-    private void SaveRegistry()
-    {
-        var dir = Path.GetDirectoryName(_registryPath)!;
-        Directory.CreateDirectory(dir);
-
-        var entries = _servers.Values.Select(s => new ServerEntry(s.Id, s.DisplayName, s.Url, s.AccessToken)).ToArray();
-        var json = System.Text.Json.JsonSerializer.Serialize(entries, JsonDefaults.Options);
-        File.WriteAllText(_registryPath, json);
-    }
-
-    private record ServerEntry(string Id, string DisplayName, string Url, string? AccessToken);
-}
-
-internal class ManagedServer
-{
-    public string Id { get; }
-    public string DisplayName { get; }
-    public string Url { get; }
-    public string? AccessToken { get; }
-
-    public HubConnection? RemoteConnection { get; private set; }
-    public bool IsConnected => RemoteConnection?.State == HubConnectionState.Connected;
-
-    public ManagedServer(string id, string displayName, string url, string? accessToken)
-    {
-        Id = id;
-        DisplayName = displayName;
-        Url = url;
-        AccessToken = accessToken;
-    }
-
-    public async Task ConnectAsync(IHubContext<Hubs.GodModeLocalHub> hubContext, string serverId)
-    {
-        if (IsConnected) return;
-
-        var hubUrl = Url.TrimEnd('/') + "/hubs/projects";
-        var builder = new HubConnectionBuilder()
-            .WithUrl(hubUrl, options =>
-            {
-                if (!string.IsNullOrEmpty(AccessToken))
-                    options.AccessTokenProvider = () => Task.FromResult<string?>(AccessToken);
-            })
-            .WithAutomaticReconnect()
-            .AddJsonProtocol(options =>
-            {
-                var defaults = JsonDefaults.Options;
-                options.PayloadSerializerOptions.PropertyNamingPolicy = defaults.PropertyNamingPolicy;
-                options.PayloadSerializerOptions.DefaultIgnoreCondition = defaults.DefaultIgnoreCondition;
-                foreach (var converter in defaults.Converters)
-                    options.PayloadSerializerOptions.Converters.Add(converter);
-            });
-
-        RemoteConnection = builder.Build();
-
-        // Forward all IProjectHubClient callbacks to local React clients in this server's group
+        // Forward all IProjectHubClient callbacks to local React clients
         foreach (var method in typeof(IProjectHubClient).GetMethods())
         {
             var methodName = method.Name;
             var paramTypes = method.GetParameters().Select(p => p.ParameterType).ToArray();
-            RemoteConnection.On(methodName, paramTypes, args =>
-                hubContext.Clients.Group($"server-{serverId}").SendCoreAsync(methodName, args));
+            connection.On(methodName, paramTypes, args =>
+                _hubContext.Clients.Group($"server-{serverId}").SendCoreAsync(methodName, args));
         }
 
-        await RemoteConnection.StartAsync();
+        _connections[serverId] = connection;
     }
 
-    public async Task DisconnectAsync()
+    public async Task DisconnectServerAsync(int index)
     {
-        if (RemoteConnection is not null)
-        {
-            await RemoteConnection.DisposeAsync();
-            RemoteConnection = null;
-        }
+        var serverId = index.ToString();
+        if (_connections.TryRemove(serverId, out var conn))
+            await conn.DisposeAsync();
     }
 
-    public ServerInfo ToServerInfo() => new(Id, DisplayName, Url, IsConnected ? "connected" : "disconnected");
+    private ServerInfo ToServerInfo(ServerRegistration reg, int index)
+    {
+        var serverId = index.ToString();
+        var isConnected = _connections.TryGetValue(serverId, out var c) && c.State == HubConnectionState.Connected;
+        return new ServerInfo(serverId, reg.DisplayName ?? reg.Url ?? "Server", reg.Url ?? "", isConnected ? "connected" : "disconnected");
+    }
 }

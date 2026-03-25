@@ -36,15 +36,13 @@
 		<!-- ASP.NET Core for embedded Kestrel + local SignalR hub -->
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 
-		<!-- SignalR client for outbound connections to remote servers -->
-		<PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
-
 		<!-- Raw assets: wwwroot for HybridWebView (includes React build output) -->
 		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
+		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
 	</ItemGroup>
 
 	<!-- Track React sources for incremental build -->

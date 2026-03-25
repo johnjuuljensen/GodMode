@@ -1,3 +1,4 @@
+using GodMode.ClientBase;
 using GodMode.Maui.Hubs;
 using GodMode.Maui.Services;
 using GodMode.Shared;
@@ -12,7 +13,6 @@ namespace GodMode.Maui;
 
 public static class MauiProgram
 {
-    internal static string LocalHubUrl { get; private set; } = "";
     internal static string LocalBaseUrl { get; private set; } = "";
 
     public static MauiApp CreateMauiApp()
@@ -40,9 +40,13 @@ public static class MauiProgram
         var kestrelBuilder = WebApplication.CreateSlimBuilder();
         kestrelBuilder.WebHost.UseUrls("http://127.0.0.1:0");
 
-        kestrelBuilder.Services.AddSingleton<ServerConnectionManager>();
+        // ClientBase services (server registry with encrypted tokens, host providers)
+        kestrelBuilder.Services.AddGodModeClientServices();
 
-        kestrelBuilder.Services.AddSingleton<IHubFilter, Hubs.ProxyHubFilter>();
+        // Local proxy services
+        kestrelBuilder.Services.AddSingleton<ServerConnectionManager>();
+        kestrelBuilder.Services.AddSingleton<IHubFilter, ProxyHubFilter>();
+
         kestrelBuilder.Services.AddSignalR()
             .AddJsonProtocol(options =>
             {
@@ -60,46 +64,38 @@ public static class MauiProgram
         var app = kestrelBuilder.Build();
         app.UseCors();
 
-        // SignalR hub — React connects per server: /hubs/projects?serverId=xxx
+        // SignalR hub — React connects per server: /hubs/projects?serverId={index}
         app.MapHub<GodModeLocalHub>("/hubs/projects");
 
         // REST: server management
-        app.MapGet("/servers", (ServerConnectionManager mgr) => mgr.ListServers());
+        var servers = app.MapGroup("/servers");
 
-        app.MapPost("/servers", (AddServerRequest req, ServerConnectionManager mgr) => mgr.AddServer(req));
+        servers.MapGet("/", async (ServerConnectionManager mgr) =>
+            await mgr.ListServersAsync());
 
-        app.MapPut("/servers/{serverId}", (string serverId, AddServerRequest req, ServerConnectionManager mgr) =>
+        servers.MapPost("/", async (AddServerRequest req, ServerConnectionManager mgr) =>
+            await mgr.AddServerAsync(req));
+
+        servers.MapDelete("/{index:int}", async (int index, ServerConnectionManager mgr) =>
         {
-            mgr.UpdateServer(serverId, req);
+            await mgr.RemoveServerAsync(index);
             return Results.Ok();
         });
 
-        app.MapDelete("/servers/{serverId}", async (string serverId, ServerConnectionManager mgr) =>
+        servers.MapPost("/{index:int}/connect", async (int index, ServerConnectionManager mgr) =>
         {
-            await mgr.RemoveServer(serverId);
+            await mgr.ConnectServerAsync(index);
             return Results.Ok();
         });
 
-        app.MapPost("/servers/{serverId}/connect", async (string serverId, ServerConnectionManager mgr) =>
+        servers.MapPost("/{index:int}/disconnect", async (int index, ServerConnectionManager mgr) =>
         {
-            await mgr.ConnectServer(serverId);
+            await mgr.DisconnectServerAsync(index);
             return Results.Ok();
         });
-
-        app.MapPost("/servers/{serverId}/disconnect", async (string serverId, ServerConnectionManager mgr) =>
-        {
-            await mgr.DisconnectServer(serverId);
-            return Results.Ok();
-        });
-
-        // Load saved servers and start
-        var connectionManager = app.Services.GetRequiredService<ServerConnectionManager>();
-        connectionManager.LoadRegistry();
 
         app.StartAsync().GetAwaiter().GetResult();
 
-        var address = app.Urls.First();
-        LocalBaseUrl = address;
-        LocalHubUrl = $"{address}/hubs/projects";
+        LocalBaseUrl = app.Urls.First();
     }
 }
