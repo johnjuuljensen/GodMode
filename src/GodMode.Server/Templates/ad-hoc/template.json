@@ -1,0 +1,7 @@
+{
+  "name": "ad-hoc",
+  "displayName": "Ad-hoc Tasks",
+  "description": "Simple folder with Claude, no version control. Good for quick tasks and experiments.",
+  "icon": "folder",
+  "parameters": []
+}

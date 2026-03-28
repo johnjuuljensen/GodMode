@@ -1,0 +1,9 @@
+{
+  "name": "git-clone",
+  "displayName": "Git Clone",
+  "description": "Clones a repository for each project. Simple setup for repos where you don't need worktrees.",
+  "icon": "git",
+  "parameters": [
+    { "key": "repoUrl", "title": "Repository URL", "description": "HTTPS or SSH URL of the git repository", "required": true }
+  ]
+}

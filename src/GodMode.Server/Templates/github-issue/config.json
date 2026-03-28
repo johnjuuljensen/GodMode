@@ -1,0 +1,8 @@
+{
+  "description": "Work on GitHub issues with auto-branching",
+  "scriptsCreateFolder": true,
+  "create": "scripts/create",
+  "delete": "scripts/delete",
+  "nameTemplate": "issue-{issueNumber}-{name}",
+  "promptTemplate": "You are working on GitHub issue #{issueNumber}.\n\nIssue title: {issueTitle}\n\nIssue body:\n{issueBody}\n\nAdditional instructions: {prompt}"
+}

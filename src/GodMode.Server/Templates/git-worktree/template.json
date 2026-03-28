@@ -1,0 +1,10 @@
+{
+  "name": "git-worktree",
+  "displayName": "Git Worktree Projects",
+  "description": "Creates projects as git worktrees from a bare repository clone. Each project gets its own branch.",
+  "icon": "git",
+  "parameters": [
+    { "key": "repoUrl", "title": "Repository URL", "description": "HTTPS or SSH URL of the git repository", "required": true },
+    { "key": "profileName", "title": "Profile Name", "description": "Name for the GodMode profile", "defaultValue": "Development" }
+  ]
+}

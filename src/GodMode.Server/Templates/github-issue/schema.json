@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Project Name", "description": "Short name for this project (used in folder and branch name)" },
+    "issueNumber": { "type": "string", "title": "Issue Number", "description": "GitHub issue number (e.g. 42)" },
+    "issueTitle": { "type": "string", "title": "Issue Title", "description": "Title of the GitHub issue (auto-filled by script if gh CLI is available)" },
+    "issueBody": { "type": "string", "title": "Issue Body", "x-multiline": true, "description": "Body of the issue (auto-filled by script if gh CLI is available, or paste manually)" },
+    "baseBranch": { "type": "string", "title": "Base Branch", "description": "Branch to base off (default: main or master)" },
+    "prompt": { "type": "string", "title": "Additional Instructions", "x-multiline": true, "description": "Extra instructions for Claude beyond the issue body" },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+  },
+  "required": ["name", "issueNumber"]
+}

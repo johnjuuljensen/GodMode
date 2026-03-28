@@ -1,0 +1,7 @@
+{
+  "description": "Implement a feature from a detailed specification",
+  "scriptsCreateFolder": true,
+  "create": "from-spec/create",
+  "nameTemplate": "feature-{name}",
+  "promptTemplate": "Implement the following feature according to this specification:\n\n# {featureTitle}\n\n{specification}\n\nAcceptance criteria:\n{acceptanceCriteria}\n\nAdditional notes: {prompt}"
+}

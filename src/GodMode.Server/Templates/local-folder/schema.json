@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Project Name" },
+    "path": { "type": "string", "title": "Folder Path", "description": "Absolute path to the local directory to work in" },
+    "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions", "default": "true" }
+  },
+  "required": ["name", "path", "prompt"]
+}

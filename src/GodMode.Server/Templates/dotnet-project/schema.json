@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Project Name" },
+    "branch": { "type": "string", "title": "Branch", "description": "Branch to clone (leave empty for default)" },
+    "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
+    "runBuild": { "type": "boolean", "title": "Run Build", "description": "Run dotnet build after restore to verify compilation", "default": "true" },
+    "solutionPath": { "type": "string", "title": "Solution/Project Path", "description": "Path to .sln or .csproj file (auto-detected if empty)" },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+  },
+  "required": ["name", "prompt"]
+}

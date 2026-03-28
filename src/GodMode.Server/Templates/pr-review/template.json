@@ -1,0 +1,9 @@
+{
+  "name": "pr-review",
+  "displayName": "PR Code Review",
+  "description": "Clone a repo and check out a pull request branch for AI-assisted code review.",
+  "icon": "git-pull-request",
+  "parameters": [
+    { "key": "repoUrl", "title": "Repository URL", "description": "HTTPS or SSH URL of the git repository", "required": true }
+  ]
+}

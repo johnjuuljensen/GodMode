@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Project Name" },
+    "branch": { "type": "string", "title": "Branch", "description": "Branch to clone (leave empty for default branch)" },
+    "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+  },
+  "required": ["name", "prompt"]
+}

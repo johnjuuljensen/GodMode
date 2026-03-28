@@ -1,0 +1,9 @@
+{
+  "name": "github-issue",
+  "displayName": "GitHub Issue",
+  "description": "Clone a repo and create a branch for a GitHub issue. Fetches issue title and body as context for Claude.",
+  "icon": "github",
+  "parameters": [
+    { "key": "repoUrl", "title": "Repository URL", "description": "HTTPS or SSH URL of the git repository", "required": true }
+  ]
+}

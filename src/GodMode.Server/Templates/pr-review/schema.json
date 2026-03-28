@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Project Name" },
+    "prNumber": { "type": "string", "title": "PR Number", "description": "Pull request number to review" },
+    "prContext": { "type": "string", "title": "PR Context", "x-multiline": true, "description": "Auto-filled from gh CLI if available, or paste PR description here" },
+    "prompt": { "type": "string", "title": "Review Focus", "x-multiline": true, "description": "Specific areas to focus the review on (optional)" },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "false" }
+  },
+  "required": ["name", "prNumber"]
+}

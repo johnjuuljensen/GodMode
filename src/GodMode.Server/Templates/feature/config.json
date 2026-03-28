@@ -1,0 +1,6 @@
+{
+  "description": "Feature development with git worktrees",
+  "environment": {},
+  "prepare": "scripts/prepare",
+  "delete": "scripts/delete"
+}
