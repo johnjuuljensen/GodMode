@@ -158,8 +158,8 @@
 
 /* ── Delete Button ── */
 .project-delete-btn {
+  align-self: stretch;
   width: 28px;
-  height: 28px;
   border: 1px solid var(--glass-border);
   border-radius: 5px;
   background: var(--glass);
