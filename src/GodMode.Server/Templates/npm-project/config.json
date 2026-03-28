@@ -1,0 +1,6 @@
+{
+  "description": "Node.js project with auto dependency install",
+  "scriptsCreateFolder": true,
+  "create": "scripts/create",
+  "delete": "scripts/delete"
+}

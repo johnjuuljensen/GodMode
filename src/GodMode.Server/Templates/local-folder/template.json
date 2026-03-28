@@ -1,0 +1,7 @@
+{
+  "name": "local-folder",
+  "displayName": "Local Folder",
+  "description": "Work in an existing local directory. User provides the folder path when creating a project.",
+  "icon": "folder-open",
+  "parameters": []
+}

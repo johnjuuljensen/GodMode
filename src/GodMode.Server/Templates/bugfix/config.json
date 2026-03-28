@@ -1,0 +1,8 @@
+{
+  "description": "Clone-based bugfix workflow",
+  "scriptsCreateFolder": true,
+  "create": "scripts/create",
+  "delete": "scripts/delete",
+  "nameTemplate": "bugfix-{name}",
+  "promptTemplate": "You are fixing a bug.\n\nBug description: {bugDescription}\n\nSteps to reproduce:\n{stepsToReproduce}\n\nExpected behavior: {expectedBehavior}\n\nAdditional context: {prompt}\n\nFix the bug, add a test that reproduces it, and verify the fix works."
+}

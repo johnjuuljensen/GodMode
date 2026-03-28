@@ -1,0 +1,6 @@
+{
+  "description": "Clone-based projects",
+  "scriptsCreateFolder": true,
+  "create": "scripts/create",
+  "delete": "scripts/delete"
+}

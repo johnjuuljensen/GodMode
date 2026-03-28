@@ -1,0 +1,9 @@
+{
+  "name": "npm-project",
+  "displayName": "Node.js / npm Project",
+  "description": "Clone a Node.js repository and install dependencies. Supports npm, yarn, and pnpm with auto-detection.",
+  "icon": "package",
+  "parameters": [
+    { "key": "repoUrl", "title": "Repository URL", "description": "HTTPS or SSH URL of the git repository", "required": true }
+  ]
+}

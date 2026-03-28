@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Bug Name", "description": "Short name for the bug (used in branch name, e.g. 'null-pointer-login')" },
+    "bugDescription": { "type": "string", "title": "Bug Description", "x-multiline": true, "description": "What is broken?" },
+    "stepsToReproduce": { "type": "string", "title": "Steps to Reproduce", "x-multiline": true, "description": "How to trigger the bug (one step per line)" },
+    "expectedBehavior": { "type": "string", "title": "Expected Behavior", "description": "What should happen instead?" },
+    "prompt": { "type": "string", "title": "Additional Context", "x-multiline": true, "description": "Stack traces, logs, related files, etc." },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+  },
+  "required": ["name", "bugDescription"]
+}

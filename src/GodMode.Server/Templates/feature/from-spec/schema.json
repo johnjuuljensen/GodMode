@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Feature Name", "description": "Short name (used in branch name)" },
+    "featureTitle": { "type": "string", "title": "Feature Title", "description": "Human-readable title for the feature" },
+    "specification": { "type": "string", "title": "Specification", "x-multiline": true, "description": "Detailed technical specification of the feature" },
+    "acceptanceCriteria": { "type": "string", "title": "Acceptance Criteria", "x-multiline": true, "description": "List of criteria that must be met (one per line)" },
+    "prompt": { "type": "string", "title": "Additional Instructions", "x-multiline": true },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+  },
+  "required": ["name", "featureTitle", "specification"]
+}

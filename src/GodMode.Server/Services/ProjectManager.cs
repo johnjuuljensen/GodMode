@@ -24,6 +24,11 @@ public class ProjectManager : IProjectManager
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly McpRegistryClient _mcpRegistryClient;
     private readonly ProfileOverrideStore _profileOverrideStore;
+    private readonly RootTemplateService _rootTemplateService;
+    private readonly RootCreator _rootCreator;
+    private readonly RootGenerationService _rootGenerationService;
+    private readonly RootPackager _rootPackager;
+    private readonly RootInstaller _rootInstaller;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
@@ -66,6 +71,11 @@ public class ProjectManager : IProjectManager
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
         McpRegistryClient mcpRegistryClient,
         ProfileOverrideStore profileOverrideStore,
+        RootTemplateService rootTemplateService,
+        RootCreator rootCreator,
+        RootGenerationService rootGenerationService,
+        RootPackager rootPackager,
+        RootInstaller rootInstaller,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -76,6 +86,11 @@ public class ProjectManager : IProjectManager
         _hubContext = hubContext;
         _mcpRegistryClient = mcpRegistryClient;
         _profileOverrideStore = profileOverrideStore;
+        _rootTemplateService = rootTemplateService;
+        _rootCreator = rootCreator;
+        _rootGenerationService = rootGenerationService;
+        _rootPackager = rootPackager;
+        _rootInstaller = rootInstaller;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -1676,43 +1691,96 @@ public class ProjectManager : IProjectManager
 
     #endregion
 
-    // ── Root Creation & Management (stubs — implemented in PR 6) ──
+    #region Root Creation & Management
 
     public Task<RootTemplate[]> ListRootTemplatesAsync()
-        => throw new NotImplementedException("Root templates not yet implemented");
+        => Task.FromResult(_rootTemplateService.ListTemplates());
 
     public Task<RootPreview> PreviewRootFromTemplateAsync(string templateName, Dictionary<string, string> parameters)
-        => throw new NotImplementedException("Root template preview not yet implemented");
+        => Task.FromResult(_rootTemplateService.InstantiateTemplate(templateName, parameters));
 
-    public Task<RootPreview> GenerateRootWithLlmAsync(RootGenerationRequest request)
-        => throw new NotImplementedException("LLM root generation not yet implemented");
+    public async Task<RootPreview> GenerateRootWithLlmAsync(RootGenerationRequest request)
+        => await _rootGenerationService.GenerateAsync(request);
 
     public Task CreateRootAsync(string profileName, string rootName, RootPreview preview)
-        => throw new NotImplementedException("Root creation not yet implemented");
+    {
+        var validation = _rootCreator.Validate(preview);
+        if (validation != null)
+            throw new InvalidOperationException(validation);
+
+        var rootsDir = _projectRootsDir
+            ?? throw new InvalidOperationException("ProjectRootsDir not configured — cannot create roots");
+        var rootPath = Path.Combine(rootsDir, rootName);
+
+        if (Directory.Exists(Path.Combine(rootPath, ".godmode-root")))
+            throw new InvalidOperationException($"Root '{rootName}' already exists");
+
+        Directory.CreateDirectory(rootPath);
+        _rootCreator.WriteRoot(rootPath, preview);
+
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
 
     public Task<RootPreview> GetRootPreviewAsync(string profileName, string rootName)
-        => throw new NotImplementedException("Root preview not yet implemented");
+    {
+        var rootPath = ResolveRootPath(profileName, rootName);
+        return Task.FromResult(_rootCreator.ReadExistingRoot(rootPath));
+    }
 
     public Task UpdateRootAsync(string profileName, string rootName, RootPreview preview)
-        => throw new NotImplementedException("Root update not yet implemented");
+    {
+        var validation = _rootCreator.Validate(preview);
+        if (validation != null)
+            throw new InvalidOperationException(validation);
 
-    // ── Root Sharing (stubs — implemented in PR 6) ──
+        var rootPath = ResolveRootPath(profileName, rootName);
+        _rootCreator.WriteRoot(rootPath, preview);
+
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    private string ResolveRootPath(string profileName, string rootName)
+    {
+        var snapshot = _snapshot;
+        if (snapshot.RootLookup.TryGetValue((profileName, rootName), out var rootPath))
+            return rootPath;
+        throw new KeyNotFoundException($"Root '{rootName}' not found in profile '{profileName}'");
+    }
+
+    #endregion
+
+    #region Root Sharing
 
     public Task<byte[]> ExportRootAsync(string profileName, string rootName)
-        => throw new NotImplementedException("Root export not yet implemented");
+    {
+        var rootPath = ResolveRootPath(profileName, rootName);
+        return Task.FromResult(_rootPackager.Export(rootPath));
+    }
 
     public Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes)
-        => throw new NotImplementedException("Root import preview not yet implemented");
+        => Task.FromResult(_rootInstaller.PreviewFromBytes(packageBytes));
 
-    public Task<SharedRootPreview> PreviewImportFromUrlAsync(string url)
-        => throw new NotImplementedException("Root import from URL not yet implemented");
+    public async Task<SharedRootPreview> PreviewImportFromUrlAsync(string url)
+        => await _rootInstaller.PreviewFromUrlAsync(url);
 
-    public Task<SharedRootPreview> PreviewImportFromGitAsync(string repoUrl, string? subPath, string? gitRef)
-        => throw new NotImplementedException("Root import from git not yet implemented");
+    public async Task<SharedRootPreview> PreviewImportFromGitAsync(string repoUrl, string? subPath, string? gitRef)
+        => await _rootInstaller.PreviewFromGitAsync(repoUrl, subPath, gitRef);
 
     public Task InstallSharedRootAsync(SharedRootPreview preview, string? localName)
-        => throw new NotImplementedException("Shared root install not yet implemented");
+    {
+        _rootInstaller.Install(preview, localName);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
 
     public Task UninstallSharedRootAsync(string rootName)
-        => throw new NotImplementedException("Shared root uninstall not yet implemented");
+    {
+        _rootInstaller.Uninstall(rootName);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    #endregion
 }

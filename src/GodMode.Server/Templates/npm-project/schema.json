@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Project Name" },
+    "branch": { "type": "string", "title": "Branch", "description": "Branch to clone (leave empty for default)" },
+    "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
+    "runBuild": { "type": "boolean", "title": "Run Build", "description": "Run the build script after install (npm run build)", "default": "false" },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+  },
+  "required": ["name", "prompt"]
+}

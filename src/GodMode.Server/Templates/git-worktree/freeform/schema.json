@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Project Name" },
+    "branch": { "type": "string", "title": "Branch", "description": "Existing branch to check out (leave empty to create new branch from master)" },
+    "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions", "default": "true" }
+  },
+  "required": ["name", "prompt"]
+}

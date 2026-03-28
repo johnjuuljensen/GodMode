@@ -1,3 +1,4 @@
+using GodMode.AI;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
@@ -50,6 +51,9 @@ if (requireAuth)
     builder.Services.AddAuthorization();
 }
 
+// Register AI services (inference for LLM-assisted root generation)
+builder.Services.AddGodModeAIServices();
+
 // Register application services
 builder.Services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
 builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
@@ -57,6 +61,11 @@ builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
 builder.Services.AddHttpClient<GodMode.Shared.Services.McpRegistryClient>();
 builder.Services.AddSingleton<GodMode.Server.Services.ProfileOverrideStore>();
+builder.Services.AddSingleton<GodMode.Server.Services.RootTemplateService>();
+builder.Services.AddSingleton<GodMode.Server.Services.RootCreator>();
+builder.Services.AddSingleton<GodMode.Server.Services.RootGenerationService>();
+builder.Services.AddSingleton<GodMode.Server.Services.RootPackager>();
+builder.Services.AddSingleton<GodMode.Server.Services.RootInstaller>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();

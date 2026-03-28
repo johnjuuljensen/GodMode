@@ -1,0 +1,9 @@
+{
+  "name": "dotnet-project",
+  "displayName": ".NET Project",
+  "description": "Clone a .NET repository and restore NuGet packages. Optionally runs dotnet build to verify the project compiles.",
+  "icon": "code",
+  "parameters": [
+    { "key": "repoUrl", "title": "Repository URL", "description": "HTTPS or SSH URL of the git repository", "required": true }
+  ]
+}

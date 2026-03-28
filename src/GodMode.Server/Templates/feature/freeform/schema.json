@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Feature Name", "description": "Short name for the feature (used in branch name)" },
+    "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+  },
+  "required": ["name", "prompt"]
+}
