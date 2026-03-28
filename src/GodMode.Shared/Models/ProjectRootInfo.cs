@@ -8,5 +8,6 @@ public record ProjectRootInfo(
     string Name,
     string? Description = null,
     CreateActionInfo[]? Actions = null,
-    string? ProfileName = null
+    string? ProfileName = null,
+    bool HasConfig = false
 );

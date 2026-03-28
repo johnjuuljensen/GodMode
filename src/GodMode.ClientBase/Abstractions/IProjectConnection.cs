@@ -1,39 +1,46 @@
+using System.Text.Json;
 using GodMode.Shared.Models;
 
-namespace GodMode.Server.Services;
+namespace GodMode.ClientBase.Abstractions;
 
 /// <summary>
-/// Interface for managing projects and their lifecycle.
+/// Represents a connection to a host for managing projects.
 /// </summary>
-public interface IProjectManager
+public interface IProjectConnection : IDisposable
 {
     /// <summary>
-    /// Lists all server-defined profiles.
+    /// Gets whether the connection is currently active.
     /// </summary>
-    Task<ProfileInfo[]> ListProfilesAsync();
+    bool IsConnected { get; }
+
+    /// <summary>
+    /// Lists all server-defined profiles.
+    /// Returns empty for servers that don't support profiles.
+    /// </summary>
+    Task<IEnumerable<ProfileInfo>> ListProfilesAsync();
 
     /// <summary>
     /// Lists all available project roots with their input schemas.
     /// </summary>
-    Task<ProjectRootInfo[]> ListProjectRootsAsync();
+    Task<IEnumerable<ProjectRootInfo>> ListProjectRootsAsync();
 
     /// <summary>
-    /// Lists all projects across all project roots.
+    /// Lists all projects on the connected host.
     /// </summary>
-    Task<ProjectSummary[]> ListProjectsAsync();
+    Task<IEnumerable<ProjectSummary>> ListProjectsAsync();
 
     /// <summary>
-    /// Gets the status of a specific project.
+    /// Gets the current status of a specific project.
     /// </summary>
     Task<ProjectStatus> GetStatusAsync(string projectId);
 
     /// <summary>
-    /// Creates a new project using the config-driven workflow.
+    /// Creates a new project with the specified parameters.
     /// </summary>
-    Task<ProjectStatus> CreateProjectAsync(CreateProjectRequest request);
+    Task<ProjectStatus> CreateProjectAsync(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
 
     /// <summary>
-    /// Sends input to a running project.
+    /// Sends user input to a project waiting for input.
     /// </summary>
     Task SendInputAsync(string projectId, string input);
 
@@ -48,14 +55,9 @@ public interface IProjectManager
     Task ResumeProjectAsync(string projectId);
 
     /// <summary>
-    /// Subscribes a client connection to project output.
+    /// Subscribes to output messages from a project, starting from a specific offset.
     /// </summary>
-    Task SubscribeProjectAsync(string projectId, long outputOffset, string connectionId);
-
-    /// <summary>
-    /// Unsubscribes a client connection from project output.
-    /// </summary>
-    Task UnsubscribeProjectAsync(string projectId, string connectionId);
+    IObservable<ClaudeMessage> SubscribeOutput(string projectId, long fromOffset = 0);
 
     /// <summary>
     /// Gets the metrics HTML for a project.
@@ -68,17 +70,26 @@ public interface IProjectManager
     Task DeleteProjectAsync(string projectId, bool force = false);
 
     /// <summary>
-    /// Cleans up resources for a disconnected client.
+    /// Event raised when the server streams creation progress for a project.
     /// </summary>
-    Task CleanupConnectionAsync(string connectionId);
+    event Action<string, string>? CreationProgressReceived;
 
     /// <summary>
-    /// Recovers projects from disk on startup.
+    /// Event raised when a new project is created (broadcast from server).
     /// </summary>
-    Task RecoverProjectsAsync();
+    event Action<ProjectStatus>? ProjectCreatedReceived;
+
+    /// <summary>
+    /// Event raised when a project is deleted (broadcast from server).
+    /// </summary>
+    event Action<string>? ProjectDeletedReceived;
+
+    /// <summary>
+    /// Disconnects from the host.
+    /// </summary>
+    void Disconnect();
 
     // MCP Server Discovery & Configuration
-
     Task<McpRegistrySearchResult> SearchMcpServersAsync(string query, int pageSize = 20, int page = 1);
     Task<McpServerDetail?> GetMcpServerDetailAsync(string qualifiedName);
     Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
