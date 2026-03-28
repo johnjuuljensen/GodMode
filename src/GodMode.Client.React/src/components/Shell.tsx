@@ -6,6 +6,10 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
+import { McpBrowser } from './Mcp/McpBrowser';
+import { McpProfilePanel } from './Mcp/McpProfilePanel';
+import { ProfileSettings } from './Profiles/ProfileSettings';
+import { CreateProfile } from './Profiles/CreateProfile';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -28,6 +32,14 @@ export function Shell() {
   const servers = useAppStore(s => s.servers);
   const profileFilter = useAppStore(s => s.profileFilter);
   const setProfileFilter = useAppStore(s => s.setProfileFilter);
+  const showMcpBrowser = useAppStore(s => s.showMcpBrowser);
+  const showMcpProfile = useAppStore(s => s.showMcpProfile);
+  const mcpProfileContext = useAppStore(s => s.mcpProfileContext);
+  const showProfileSettings = useAppStore(s => s.showProfileSettings);
+  const profileSettingsContext = useAppStore(s => s.profileSettingsContext);
+  const showCreateProfile = useAppStore(s => s.showCreateProfile);
+  const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
+  const setShowCreateProfile = useAppStore(s => s.setShowCreateProfile);
 
   const allProfileNames = useMemo(() => {
     const names = new Set<string>();
@@ -42,7 +54,20 @@ export function Shell() {
   }, [servers]);
 
   const hasRoots = servers.some(s => s.connectionState === 'connected' && s.roots.length > 0);
+  const hasConnectedServers = servers.some(s => s.connectionState === 'connected');
   const showProfileFilter = allProfileNames.length > 2;
+  const realProfileNames = allProfileNames.filter(n => n !== 'All');
+  const activeProfileName = profileFilter !== 'All'
+    ? profileFilter
+    : realProfileNames.length === 1 ? realProfileNames[0] : null;
+  const profileServerIndex = useMemo(() => {
+    if (!activeProfileName) return null;
+    for (let i = 0; i < servers.length; i++) {
+      if (servers[i].connectionState !== 'connected') continue;
+      if (servers[i].profiles.some(p => p.Name === activeProfileName)) return i;
+    }
+    return null;
+  }, [servers, activeProfileName]);
 
   const [theme, setTheme] = useState<'dark' | 'light'>(getInitialTheme);
 
@@ -119,6 +144,30 @@ export function Shell() {
                 ))}
               </select>
             )}
+            {hasConnectedServers && activeProfileName && profileServerIndex !== null && (
+              <button
+                className="shell-icon-btn"
+                onClick={() => setShowProfileSettings(true, { serverIndex: profileServerIndex, profileName: activeProfileName })}
+                title={`Settings for ${activeProfileName}`}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+              </button>
+            )}
+            {hasConnectedServers && (
+              <button
+                className="shell-icon-btn"
+                onClick={() => setShowCreateProfile(true)}
+                title="Create new profile"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+            )}
             <button
               className="shell-theme-toggle"
               onClick={toggleTheme}
@@ -154,6 +203,14 @@ export function Shell() {
       {showAddServer && <AddServer />}
       {editServerIndex !== null && <EditServer index={editServerIndex} />}
       {showCreateProject && <CreateProject />}
+      {showMcpBrowser && <McpBrowser />}
+      {showMcpProfile && mcpProfileContext && (
+        <McpProfilePanel serverIndex={mcpProfileContext.serverIndex} profileName={mcpProfileContext.profileName} />
+      )}
+      {showProfileSettings && profileSettingsContext && (
+        <ProfileSettings serverIndex={profileSettingsContext.serverIndex} profileName={profileSettingsContext.profileName} />
+      )}
+      {showCreateProfile && <CreateProfile />}
     </div>
   );
 }
