@@ -109,6 +109,25 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadServers: () => {
     const registrations = loadServers();
+
+    // Auto-detect hosted mode: if served from an http(s) origin, check for the server API
+    const origin = window.location.origin;
+    const isHttp = origin.startsWith('http');
+    if (isHttp && !registrations.some(r => r.url.replace(/\/$/, '') === origin)) {
+      // Probe the server info endpoint to confirm we're hosted
+      fetch(`${origin}/api/info`).then(res => {
+        if (res.ok) return res.json();
+        throw new Error('Not hosted');
+      }).then((info: Record<string, unknown>) => {
+        if (info.hosted) {
+          const reg: ServerRegistration = { url: origin, displayName: 'This Server' };
+          get().addServer(reg);
+          const idx = get().servers.findIndex(s => s.registration.url === origin);
+          if (idx >= 0) get().connectServer(idx);
+        }
+      }).catch(() => { /* Not hosted — use localStorage servers */ });
+    }
+
     const servers = registrations.map(reg => ({
       registration: reg,
       hub: new GodModeHub(),

@@ -27,4 +27,25 @@
     </Content>
   </ItemGroup>
 
+  <!-- Copy React client build output to wwwroot on Publish -->
+  <PropertyGroup>
+    <ReactClientDir>$(MSBuildThisFileDirectory)..\GodMode.Client.React</ReactClientDir>
+  </PropertyGroup>
+
+  <Target Name="BuildReactClient" AfterTargets="Build" Condition="'$(BuildReactClient)' == 'true'">
+    <Exec Command="npm run build" WorkingDirectory="$(ReactClientDir)" />
+    <ItemGroup>
+      <ReactDistFiles Include="$(ReactClientDir)\dist\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ReactDistFiles)" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\%(RecursiveDir)" />
+  </Target>
+
+  <Target Name="PublishReactClient" BeforeTargets="Build" Condition="'$(PublishReactClient)' != 'false' AND ('$(DeployOnBuild)' == 'true' OR '$(PublishDir)' != '')">
+    <Exec Command="npm run build" WorkingDirectory="$(ReactClientDir)" />
+    <ItemGroup>
+      <ReactDistFiles Include="$(ReactClientDir)\dist\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ReactDistFiles)" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\%(RecursiveDir)" />
+  </Target>
+
 </Project>

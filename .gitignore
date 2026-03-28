@@ -1,6 +1,7 @@
 # Build results
 [Dd]ebug/
 [Rr]elease/
+src/GodMode.Server/wwwroot/
 x64/
 x86/
 [Bb]in/

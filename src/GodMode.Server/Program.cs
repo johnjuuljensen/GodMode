@@ -62,17 +62,22 @@ var app = builder.Build();
 // Configure the HTTP request pipeline
 app.UseCors();
 
+// Serve React static files from wwwroot (before auth so assets don't require auth)
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 if (requireAuth)
 {
     app.UseAuthentication();
     app.UseAuthorization();
 }
 
-app.MapGet("/", () => new
+app.MapGet("/api/info", () => new
 {
     service = "GodMode.Server",
     version = "1.0.0",
-    status = "running"
+    status = "running",
+    hosted = true
 }).AllowAnonymous();
 
 app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
@@ -80,6 +85,9 @@ app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
 var hub = app.MapHub<ProjectHub>("/hubs/projects");
 if (requireAuth)
     hub.RequireAuthorization();
+
+// SPA fallback — serve index.html for any unmatched routes (client-side routing)
+app.MapFallbackToFile("index.html");
 
 // Log auth mode
 var authMode = isCodespace ? "Codespace (GitHub PAT)" :
