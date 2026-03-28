@@ -10,6 +10,7 @@ import { McpBrowser } from './Mcp/McpBrowser';
 import { McpProfilePanel } from './Mcp/McpProfilePanel';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { CreateProfile } from './Profiles/CreateProfile';
+import { RootManager } from './Roots/RootManager';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -38,6 +39,7 @@ export function Shell() {
   const showProfileSettings = useAppStore(s => s.showProfileSettings);
   const profileSettingsContext = useAppStore(s => s.profileSettingsContext);
   const showCreateProfile = useAppStore(s => s.showCreateProfile);
+  const showRootManager = useAppStore(s => s.showRootManager);
 
   const allProfileNames = useMemo(() => {
     const names = new Set<string>();
@@ -172,6 +174,7 @@ export function Shell() {
         <ProfileSettings serverIndex={profileSettingsContext.serverIndex} profileName={profileSettingsContext.profileName} />
       )}
       {showCreateProfile && <CreateProfile />}
+      {showRootManager && <RootManager />}
     </div>
   );
 }

@@ -108,6 +108,12 @@ interface AppState {
   showCreateProfile: boolean;
   createProfileServerIndex: number | null;
   setShowCreateProfile: (show: boolean, serverIndex?: number) => void;
+
+  // Root Manager
+  showRootManager: boolean;
+  rootManagerServerIndex: number | null;
+  rootManagerInitialTab: 'create' | 'import' | null;
+  setShowRootManager: (show: boolean, serverIndex?: number, initialTab?: 'create' | 'import') => void;
 }
 
 /** Recompute waiting counts from server projects + client-side question map, excluding dismissed */
@@ -496,4 +502,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   showCreateProfile: false,
   createProfileServerIndex: null,
   setShowCreateProfile: (show, serverIndex) => set({ showCreateProfile: show, createProfileServerIndex: serverIndex ?? null }),
+
+  // Root Manager
+  showRootManager: false,
+  rootManagerServerIndex: null,
+  rootManagerInitialTab: null,
+  setShowRootManager: (show, serverIndex, initialTab) => set({ showRootManager: show, rootManagerServerIndex: serverIndex ?? null, rootManagerInitialTab: initialTab ?? null }),
 }));
