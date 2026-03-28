@@ -154,7 +154,8 @@ public class RootConfigReader : IRootConfigReader
         NameTemplate = overlay.NameTemplate ?? baseConfig.NameTemplate,
         PromptTemplate = overlay.PromptTemplate ?? baseConfig.PromptTemplate,
         ScriptsCreateFolder = overlay.ScriptsCreateFolder ?? baseConfig.ScriptsCreateFolder,
-        Model = overlay.Model ?? baseConfig.Model
+        Model = overlay.Model ?? baseConfig.Model,
+        McpServers = MergeMcpServers(baseConfig.McpServers, overlay.McpServers)
     };
 
     /// <summary>
@@ -175,7 +176,8 @@ public class RootConfigReader : IRootConfigReader
             NameTemplate: raw.NameTemplate,
             PromptTemplate: raw.PromptTemplate,
             ScriptsCreateFolder: raw.ScriptsCreateFolder ?? false,
-            Model: raw.Model
+            Model: raw.Model,
+            McpServers: raw.McpServers
         );
     }
 
@@ -232,6 +234,23 @@ public class RootConfigReader : IRootConfigReader
         return paths.Select(p => Path.Combine(GodModeRootDir, p)).ToArray();
     }
 
+    /// <summary>
+    /// Merges MCP server dictionaries. Overlay servers override base by name.
+    /// Null values in overlay explicitly remove inherited servers.
+    /// </summary>
+    private static Dictionary<string, McpServerConfig?>? MergeMcpServers(
+        Dictionary<string, McpServerConfig?>? baseDict,
+        Dictionary<string, McpServerConfig?>? overrideDict)
+    {
+        if (baseDict == null) return overrideDict;
+        if (overrideDict == null) return baseDict;
+
+        var merged = new Dictionary<string, McpServerConfig?>(baseDict, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in overrideDict)
+            merged[key] = value;
+        return merged;
+    }
+
     private static Dictionary<string, string>? MergeDictionaries(
         Dictionary<string, string>? baseDict, Dictionary<string, string>? overrideDict)
     {
@@ -269,5 +288,6 @@ public class RootConfigReader : IRootConfigReader
         public bool? ScriptsCreateFolder { get; init; }
         public bool? StripEnvVarProfile { get; init; }
         public string? Model { get; init; }
+        public Dictionary<string, McpServerConfig?>? McpServers { get; init; }
     }
 }
