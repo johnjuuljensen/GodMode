@@ -55,6 +55,8 @@ builder.Services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
 builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
 builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
+builder.Services.AddHttpClient<GodMode.Shared.Services.McpRegistryClient>();
+builder.Services.AddSingleton<GodMode.Server.Services.ProfileOverrideStore>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();

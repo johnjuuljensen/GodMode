@@ -1,3 +1,5 @@
+using GodMode.Shared.Models;
+
 namespace GodMode.Server.Models;
 
 /// <summary>
@@ -21,4 +23,10 @@ public class ProfileConfig
     /// Optional description of the profile.
     /// </summary>
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Profile-scoped MCP servers merged into all projects in this profile.
+    /// Action-level mcpServers override these on conflict. Null values remove inherited servers.
+    /// </summary>
+    public Dictionary<string, McpServerConfig?>? McpServers { get; set; }
 }
