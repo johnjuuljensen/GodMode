@@ -288,20 +288,20 @@ public partial class MainViewModel : ViewModelBase
 	{
 		try
 		{
-			server.State = ServerState.Starting;
+			server.State = HostState.Starting;
 			var providers = await _hostConnectionService.GetAllProvidersAsync();
 			var provider = providers.FirstOrDefault(p => p.Provider.Type == server.Type).Provider;
 
 			if (provider != null)
 			{
-				await provider.StartServerAsync(server.Id);
-				server.State = ServerState.Running;
+				await provider.StartHostAsync(server.Id);
+				server.State = HostState.Running;
 				await LoadServerProjectsAsync(server);
 			}
 		}
 		catch (Exception ex)
 		{
-			server.State = ServerState.Unknown;
+			server.State = HostState.Unknown;
 			server.ErrorMessage = ex.Message;
 		}
 	}
@@ -311,14 +311,14 @@ public partial class MainViewModel : ViewModelBase
 	{
 		try
 		{
-			server.State = ServerState.Stopping;
+			server.State = HostState.Stopping;
 			var providers = await _hostConnectionService.GetAllProvidersAsync();
 			var provider = providers.FirstOrDefault(p => p.Provider.Type == server.Type).Provider;
 
 			if (provider != null)
 			{
-				await provider.StopServerAsync(server.Id);
-				server.State = ServerState.Stopped;
+				await provider.StopHostAsync(server.Id);
+				server.State = HostState.Stopped;
 				server.Projects.Clear();
 				server.IsConnected = false;
 				RebuildProfileGroups();
@@ -326,7 +326,7 @@ public partial class MainViewModel : ViewModelBase
 		}
 		catch (Exception ex)
 		{
-			server.State = ServerState.Unknown;
+			server.State = HostState.Unknown;
 			server.ErrorMessage = ex.Message;
 		}
 	}
@@ -348,10 +348,10 @@ public partial class MainViewModel : ViewModelBase
 			{
 				try
 				{
-					var hosts = await provider.ListServersAsync();
+					var hosts = await provider.ListHostsAsync();
 					foreach (var host in hosts)
 					{
-						var server = ServerGroupViewModel.FromServerInfo(host, "", serverIndex);
+						var server = ServerGroupViewModel.FromHostInfo(host, "", serverIndex);
 						server.IsConnected = _hostConnectionService.IsConnected(host.Id);
 						serverList.Add(server);
 					}
@@ -387,7 +387,7 @@ public partial class MainViewModel : ViewModelBase
 		{
 			var connection = await _hostConnectionService.ConnectToHostAsync(server.Id);
 			server.IsConnected = true;
-			server.State = ServerState.Running;
+			server.State = HostState.Running;
 			ConnectionStateChanged?.Invoke(true);
 
 			// Subscribe to project creation events (once per connection)
@@ -446,8 +446,8 @@ public partial class MainViewModel : ViewModelBase
 		{
 			System.Diagnostics.Debug.WriteLine($"LoadServerProjectsAsync error for {server.Name}: {ex.Message}");
 			server.IsConnected = false;
-			if (server.State is ServerState.Running or ServerState.Unknown)
-				server.State = ServerState.Stopped;
+			if (server.State is HostState.Running or HostState.Unknown)
+				server.State = HostState.Stopped;
 		}
 		finally
 		{

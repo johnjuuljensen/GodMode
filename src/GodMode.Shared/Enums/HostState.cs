@@ -5,8 +5,8 @@ namespace GodMode.Shared.Enums;
 /// <summary>
 /// Represents the current state of a host provider.
 /// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter<ServerState>))]
-public enum ServerState
+[JsonConverter(typeof(JsonStringEnumConverter<HostState>))]
+public enum HostState
 {
     /// <summary>
     /// Host is running and active.

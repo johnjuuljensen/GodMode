@@ -5,16 +5,16 @@ using Microsoft.AspNetCore.SignalR.Client;
 namespace GodMode.ClientBase.Services;
 
 /// <summary>
-/// Manages HubConnections to servers via IServerProviders.
+/// Manages HubConnections to hosts via IHostProviders.
 /// Returns raw HubConnection — consumers decide how to use it.
 /// </summary>
 public interface IServerConnectionService
 {
-    Task<IEnumerable<(IServerProvider Provider, int ServerIndex)>> GetAllProvidersAsync();
-    Task<IEnumerable<ServerInfo>> ListAllServersAsync();
-    HubConnection? GetConnection(string serverId);
-    Task<HubConnection> ConnectToServerAsync(string serverId);
-    Task DisconnectFromServerAsync(string serverId);
+    Task<IEnumerable<(IHostProvider Provider, int ServerIndex)>> GetAllProvidersAsync();
+    Task<IEnumerable<HostInfo>> ListAllHostsAsync();
+    HubConnection? GetConnection(string hostId);
+    Task<HubConnection> ConnectToHostAsync(string hostId);
+    Task DisconnectFromHost(string hostId);
     Task DisconnectAllAsync();
-    bool IsConnected(string serverId);
+    bool IsConnected(string hostId);
 }

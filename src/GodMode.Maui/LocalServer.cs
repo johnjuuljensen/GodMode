@@ -6,7 +6,6 @@ using GodMode.ClientBase.Abstractions;
 using GodMode.ClientBase.Services;
 using GodMode.ClientBase.Services.Models;
 using GodMode.Shared;
-using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -184,7 +183,7 @@ public class LocalServer
 
         foreach (var (provider, serverIndex) in providers)
         {
-            var servers = await provider.ListServersAsync();
+            var servers = await provider.ListHostsAsync();
             var server = servers.FirstOrDefault(s => s.Id == serverId);
             if (server != null)
             {
@@ -229,10 +228,10 @@ public class LocalServer
                 await HandleListDiscoveredServersAsync(context);
                 break;
             case (_, "POST") when path.StartsWith("/servers/") && path.EndsWith("/start"):
-                await HandleServerActionAsync(context, path, p => p.StartServerAsync, "start");
+                await HandleServerActionAsync(context, path, p => p.StartHostAsync, "start");
                 break;
             case (_, "POST") when path.StartsWith("/servers/") && path.EndsWith("/stop"):
-                await HandleServerActionAsync(context, path, p => p.StopServerAsync, "stop");
+                await HandleServerActionAsync(context, path, p => p.StopHostAsync, "stop");
                 break;
             case ("/devtools", "POST"):
                 MainPage.OpenDevTools();
@@ -251,12 +250,13 @@ public class LocalServer
         var registry = _services.GetRequiredService<IServerRegistryService>();
         var list = await registry.GetServersAsync();
 
-        var result = list.Select((s, i) => new ServerRegistrationInfo(
-            i.ToString(),
-            s.DisplayName ?? s.Url ?? "Server",
-            s.Url ?? "",
-            "unknown"
-        ));
+        var result = list.Select((s, i) => new
+        {
+            Id = i.ToString(),
+            DisplayName = s.DisplayName ?? s.Url ?? "Server",
+            Url = s.Url ?? "",
+            ConnectionState = "unknown"
+        });
 
         _logger.LogDebug("GET /servers/registrations -> {Count} registrations", list.Count);
         await WriteJsonAsync(context.Response, result);
@@ -264,7 +264,7 @@ public class LocalServer
 
     private async Task HandleAddRegistrationAsync(HttpListenerContext context)
     {
-        var req = await ReadJsonAsync<AddServerRequest>(context.Request);
+        var req = await ReadJsonAsync<AddHostRequest>(context.Request);
         if (req == null)
         {
             context.Response.StatusCode = 400;
@@ -312,7 +312,7 @@ public class LocalServer
     {
         _logger.LogDebug("GET /servers — discovering servers...");
         var connections = _services.GetRequiredService<IServerConnectionService>();
-        var servers = (await connections.ListAllServersAsync()).ToList();
+        var servers = (await connections.ListAllHostsAsync()).ToList();
         _logger.LogInformation("GET /servers -> {Count} servers: [{Servers}]", servers.Count,
             string.Join(", ", servers.Select(s => $"{s.Name}({s.State})")));
         await WriteJsonAsync(context.Response, servers);
@@ -321,7 +321,7 @@ public class LocalServer
     private async Task HandleServerActionAsync(
         HttpListenerContext context,
         string path,
-        Func<IServerProvider, Func<string, Task>> getAction,
+        Func<IHostProvider, Func<string, Task>> getAction,
         string actionName)
     {
         // Path: /servers/{serverId}/start or /servers/{serverId}/stop
@@ -340,7 +340,7 @@ public class LocalServer
 
         foreach (var (provider, _) in providers)
         {
-            var servers = await provider.ListServersAsync();
+            var servers = await provider.ListHostsAsync();
             if (servers.Any(s => s.Id == serverId))
             {
                 await getAction(provider)(serverId);
@@ -360,7 +360,7 @@ public class LocalServer
 
     // ── Background state polling ────────────────────────────────
 
-    private async Task PollServerStateAsync(IServerProvider provider, string serverId)
+    private async Task PollServerStateAsync(IHostProvider provider, string serverId)
     {
         _logger.LogDebug("Poll started for {ServerId}", serverId);
         for (int i = 0; i < 30; i++)
@@ -368,7 +368,7 @@ public class LocalServer
             await Task.Delay(2000);
             try
             {
-                var servers = await provider.ListServersAsync();
+                var servers = await provider.ListHostsAsync();
                 var server = servers.FirstOrDefault(s => s.Id == serverId);
                 if (server == null)
                 {
@@ -379,7 +379,7 @@ public class LocalServer
                 _logger.LogDebug("Poll #{Iteration}: {ServerId} state={State}", i + 1, serverId, server.State);
                 BroadcastEvent("serversChanged");
 
-                if (server.State is Shared.Enums.ServerState.Running or Shared.Enums.ServerState.Stopped)
+                if (server.State is Shared.Enums.HostState.Running or Shared.Enums.HostState.Stopped)
                 {
                     _logger.LogInformation("Poll: {ServerId} reached stable state {State}", serverId, server.State);
                     break;
@@ -472,4 +472,12 @@ public class LocalServer
         await response.OutputStream.WriteAsync(json);
         response.Close();
     }
+
+    private record AddHostRequest(
+        string DisplayName,
+        string Url,
+        string? AccessToken = null,
+        string Type = "local",
+        string? Username = null
+    );
 }

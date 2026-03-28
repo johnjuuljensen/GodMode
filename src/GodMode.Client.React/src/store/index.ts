@@ -6,11 +6,12 @@ import { create } from 'zustand';
 import { GodModeHub, type ConnectionState } from '../signalr/hub';
 import type {
   ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
-  ServerInfo, CreateActionInfo,
+  HostInfo, CreateActionInfo,
 } from '../signalr/types';
 import {
   fetchServers, addServer as apiAddServer, removeServer as apiRemoveServer,
   startServer as apiStartServer, waitForBaseUrl, subscribeEvents,
+  isStandalone as isStandaloneMode,
   type AddServerRequest,
 } from '../services/api';
 import {
@@ -30,7 +31,7 @@ function saveDismissed(dp: Record<string, boolean>) {
 // ── Computed view model types ──────────────────────────────────
 
 export interface ServerConnection {
-  serverInfo: ServerInfo;
+  serverInfo: HostInfo;
   hub: GodModeHub;
   connectionState: ConnectionState;
   projects: ProjectSummary[];
@@ -300,14 +301,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   removeServer: async (serverId) => {
     const conn = get().getConnection(serverId);
     if (conn) conn.hub.disconnect();
-    // Find index in the connections list to call REST delete
-    const idx = get().serverConnections.findIndex(c => c.serverInfo.Id === serverId);
-    if (idx >= 0) {
-      try {
-        await apiRemoveServer(idx);
-      } catch (err) {
-        console.error('Failed to remove server:', err);
-      }
+    try {
+      // In standalone mode, serverId is the URL; in MAUI mode, use index
+      const idx = get().serverConnections.findIndex(c => c.serverInfo.Id === serverId);
+      await apiRemoveServer(isStandaloneMode() ? serverId : idx);
+    } catch (err) {
+      console.error('Failed to remove server:', err);
     }
     await get().loadServers();
     set({ editServerId: null });

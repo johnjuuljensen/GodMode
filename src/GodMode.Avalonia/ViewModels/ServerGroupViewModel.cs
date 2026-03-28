@@ -17,7 +17,7 @@ public partial class ServerGroupViewModel : ObservableObject
 	private string _type = string.Empty;
 
 	[ObservableProperty]
-	private ServerState _state;
+	private HostState _state;
 
 	[ObservableProperty]
 	private string? _url;
@@ -56,15 +56,15 @@ public partial class ServerGroupViewModel : ObservableObject
 
 	public string StatusDisplay => IsConnected ? "Online" : State switch
 	{
-		ServerState.Running => "Online",
-		ServerState.Stopped => "Offline",
-		ServerState.Starting => "Starting...",
-		ServerState.Stopping => "Stopping...",
-		ServerState.Unknown => "Unknown",
+		HostState.Running => "Online",
+		HostState.Stopped => "Offline",
+		HostState.Starting => "Starting...",
+		HostState.Stopping => "Stopping...",
+		HostState.Unknown => "Unknown",
 		_ => "Unknown"
 	};
 
-	public bool CanConnect => IsConnected || State == ServerState.Running;
+	public bool CanConnect => IsConnected || State == HostState.Running;
 
 	public string ProjectCountDisplay => Projects.Count switch
 	{
@@ -73,7 +73,7 @@ public partial class ServerGroupViewModel : ObservableObject
 		_ => $"{Projects.Count} projects"
 	};
 
-	public static ServerGroupViewModel FromServerInfo(ServerInfo host, string profileName, int accountIndex) => new()
+	public static ServerGroupViewModel FromHostInfo(HostInfo host, string profileName, int accountIndex) => new()
 	{
 		Id = host.Id,
 		Name = host.Name,

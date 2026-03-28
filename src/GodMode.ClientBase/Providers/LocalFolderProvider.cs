@@ -2,56 +2,73 @@ using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace GodMode.ClientBase.Providers;
 
 /// <summary>
-/// Server provider for local GodMode.Server instances.
+/// Host provider for local GodMode.Server instances.
 /// </summary>
-public class LocalFolderProvider : IServerProvider
+public class LocalFolderProvider : IHostProvider
 {
     private readonly string _serverUrl;
-    private readonly string _serverId;
-    private readonly string _serverName;
+    private readonly string _hostId;
+    private readonly string _hostName;
     private readonly ILogger _logger;
 
     public string Type => "local";
 
-    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? serverName = null,
+    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? hostName = null,
         ILoggerFactory? loggerFactory = null)
     {
         _serverUrl = serverUrl;
-        _serverId = "local-server";
-        _serverName = serverName ?? "Local Server";
+        _hostId = "local-server";
+        _hostName = hostName ?? "Local Server";
         _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
                   .CreateLogger<LocalFolderProvider>();
     }
 
-    public async Task<IEnumerable<ServerInfo>> ListServersAsync()
+    public async Task<IEnumerable<HostInfo>> ListHostsAsync()
     {
         var reachable = await IsServerReachableAsync();
-        var state = reachable ? ServerState.Running : ServerState.Stopped;
+        var state = reachable ? HostState.Running : HostState.Stopped;
         _logger.LogDebug("Local server {Url} reachable={Reachable} state={State}", _serverUrl, reachable, state);
-        return [new ServerInfo(_serverId, _serverName, "local", state, _serverUrl)];
+        return [new HostInfo(_hostId, _hostName, "local", state, _serverUrl)];
     }
 
-    public async Task<ServerStatus> GetServerStatusAsync(string serverId)
+    public async Task<HostStatus> GetHostStatusAsync(string hostId)
     {
-        var state = await IsServerReachableAsync() ? ServerState.Running : ServerState.Stopped;
-        return new ServerStatus(_serverId, _serverName, "local", state, _serverUrl, 0, DateTime.UtcNow);
+        var state = await IsServerReachableAsync() ? HostState.Running : HostState.Stopped;
+        return new HostStatus(_hostId, _hostName, "local", state, _serverUrl, 0, DateTime.UtcNow);
     }
 
-    public Task StartServerAsync(string serverId) => Task.CompletedTask;
-    public Task StopServerAsync(string serverId) => Task.CompletedTask;
+    public Task StartHostAsync(string hostId) => Task.CompletedTask;
+    public Task StopHostAsync(string hostId) => Task.CompletedTask;
 
-    public async Task<HubConnection> ConnectAsync(string serverId)
+    public async Task<HubConnection> ConnectAsync(string hostId)
     {
-        if (serverId != _serverId)
-            throw new ArgumentException($"Unknown server: {serverId}");
+        if (hostId != _hostId)
+            throw new ArgumentException($"Unknown host: {hostId}");
 
         _logger.LogInformation("Connecting to local server at {Url}", _serverUrl);
-        return await HubConnectionFactory.CreateAndStartAsync(_serverUrl);
+
+        var hubUrl = _serverUrl.TrimEnd('/') + "/hubs/projects";
+        var builder = new HubConnectionBuilder()
+            .WithUrl(hubUrl)
+            .WithAutomaticReconnect()
+            .AddJsonProtocol(options =>
+            {
+                var defaults = GodMode.Shared.JsonDefaults.Options;
+                options.PayloadSerializerOptions.PropertyNamingPolicy = defaults.PropertyNamingPolicy;
+                options.PayloadSerializerOptions.DefaultIgnoreCondition = defaults.DefaultIgnoreCondition;
+                foreach (var converter in defaults.Converters)
+                    options.PayloadSerializerOptions.Converters.Add(converter);
+            });
+
+        var connection = builder.Build();
+        await connection.StartAsync();
+        return connection;
     }
 
     private async Task<bool> IsServerReachableAsync()

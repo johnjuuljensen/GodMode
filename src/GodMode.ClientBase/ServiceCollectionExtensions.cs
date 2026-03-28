@@ -1,4 +1,3 @@
-using GodMode.ClientBase.Logging;
 using GodMode.ClientBase.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -12,12 +11,9 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddGodModeClientServices(this IServiceCollection services)
     {
-        // Logging: file sink (host can add more sinks like AddDebug)
-        var logDir = Path.Combine(GodModePaths.AppDataDirectory, "logs");
         services.AddLogging(builder =>
         {
             builder.SetMinimumLevel(LogLevel.Debug);
-            builder.AddProvider(new FileLoggerProvider(logDir));
         });
 
         services.AddSingleton<ITokenProtector, TokenProtector>();

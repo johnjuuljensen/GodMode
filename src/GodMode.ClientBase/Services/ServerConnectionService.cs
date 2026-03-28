@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 namespace GodMode.ClientBase.Services;
 
 /// <summary>
-/// Manages HubConnections to servers. Creates providers from server registrations,
+/// Manages HubConnections to hosts. Creates providers from server registrations,
 /// handles connection lifecycle with retry logic.
 /// </summary>
 public class ServerConnectionService : IServerConnectionService
@@ -16,7 +16,7 @@ public class ServerConnectionService : IServerConnectionService
     private readonly IServerRegistryService _serverRegistry;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<ServerConnectionService> _logger;
-    private readonly Dictionary<string, IServerProvider> _providers = new();
+    private readonly Dictionary<string, IHostProvider> _providers = new();
     private readonly Dictionary<string, HubConnection> _activeConnections = new();
 
     public ServerConnectionService(IServerRegistryService serverRegistry,
@@ -27,10 +27,10 @@ public class ServerConnectionService : IServerConnectionService
         _logger = logger;
     }
 
-    public async Task<IEnumerable<(IServerProvider Provider, int ServerIndex)>> GetAllProvidersAsync()
+    public async Task<IEnumerable<(IHostProvider Provider, int ServerIndex)>> GetAllProvidersAsync()
     {
         var servers = await _serverRegistry.GetServersAsync();
-        var providers = new List<(IServerProvider Provider, int ServerIndex)>();
+        var providers = new List<(IHostProvider Provider, int ServerIndex)>();
         _logger.LogDebug("Building providers for {Count} server registrations", servers.Count);
 
         for (int i = 0; i < servers.Count; i++)
@@ -53,58 +53,58 @@ public class ServerConnectionService : IServerConnectionService
         return providers;
     }
 
-    public async Task<IEnumerable<ServerInfo>> ListAllServersAsync()
+    public async Task<IEnumerable<HostInfo>> ListAllHostsAsync()
     {
         var providers = await GetAllProvidersAsync();
-        var allServers = new List<ServerInfo>();
+        var allHosts = new List<HostInfo>();
 
         foreach (var (provider, idx) in providers)
         {
             try
             {
-                var servers = (await provider.ListServersAsync()).ToList();
-                _logger.LogInformation("Provider {Type}[{Index}] discovered {Count} servers: [{Servers}]",
-                    provider.Type, idx, servers.Count,
-                    string.Join(", ", servers.Select(s => $"{s.Name}({s.State})")));
-                allServers.AddRange(servers);
+                var hosts = (await provider.ListHostsAsync()).ToList();
+                _logger.LogInformation("Provider {Type}[{Index}] discovered {Count} hosts: [{Hosts}]",
+                    provider.Type, idx, hosts.Count,
+                    string.Join(", ", hosts.Select(h => $"{h.Name}({h.State})")));
+                allHosts.AddRange(hosts);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error listing servers from provider {Type}[{Index}]", provider.Type, idx);
+                _logger.LogError(ex, "Error listing hosts from provider {Type}[{Index}]", provider.Type, idx);
             }
         }
 
-        _logger.LogInformation("Total discovered: {Count} servers", allServers.Count);
-        return allServers;
+        _logger.LogInformation("Total discovered: {Count} hosts", allHosts.Count);
+        return allHosts;
     }
 
-    public HubConnection? GetConnection(string serverId) =>
-        _activeConnections.TryGetValue(serverId, out var c) && c.State == HubConnectionState.Connected ? c : null;
+    public HubConnection? GetConnection(string hostId) =>
+        _activeConnections.TryGetValue(hostId, out var c) && c.State == HubConnectionState.Connected ? c : null;
 
-    public async Task<HubConnection> ConnectToServerAsync(string serverId)
+    public async Task<HubConnection> ConnectToHostAsync(string hostId)
     {
-        _logger.LogInformation("ConnectToServer: {ServerId}", serverId);
+        _logger.LogInformation("ConnectToHost: {HostId}", hostId);
 
-        if (_activeConnections.TryGetValue(serverId, out var existing))
+        if (_activeConnections.TryGetValue(hostId, out var existing))
         {
             if (existing.State == HubConnectionState.Connected)
             {
-                _logger.LogDebug("Already connected to {ServerId}", serverId);
+                _logger.LogDebug("Already connected to {HostId}", hostId);
                 return existing;
             }
 
-            _logger.LogDebug("Disposing stale connection to {ServerId} (state={State})", serverId, existing.State);
+            _logger.LogDebug("Disposing stale connection to {HostId} (state={State})", hostId, existing.State);
             await existing.DisposeAsync();
-            _activeConnections.Remove(serverId);
+            _activeConnections.Remove(hostId);
         }
 
         var providers = await GetAllProvidersAsync();
-        IServerProvider? targetProvider = null;
+        IHostProvider? targetProvider = null;
 
         foreach (var (provider, _) in providers)
         {
-            var servers = await provider.ListServersAsync();
-            if (servers.Any(s => s.Id == serverId))
+            var hosts = await provider.ListHostsAsync();
+            if (hosts.Any(h => h.Id == hostId))
             {
                 targetProvider = provider;
                 break;
@@ -112,21 +112,21 @@ public class ServerConnectionService : IServerConnectionService
         }
 
         if (targetProvider == null)
-            throw new InvalidOperationException($"Server {serverId} not found in any registered provider");
+            throw new InvalidOperationException($"Host {hostId} not found in any registered provider");
 
-        var connection = await ConnectWithRetryAsync(targetProvider, serverId);
-        _activeConnections[serverId] = connection;
-        _logger.LogInformation("Connected to {ServerId} via {ProviderType}", serverId, targetProvider.Type);
+        var connection = await ConnectWithRetryAsync(targetProvider, hostId);
+        _activeConnections[hostId] = connection;
+        _logger.LogInformation("Connected to {HostId} via {ProviderType}", hostId, targetProvider.Type);
         return connection;
     }
 
-    public async Task DisconnectFromServerAsync(string serverId)
+    public async Task DisconnectFromHost(string hostId)
     {
-        if (_activeConnections.TryGetValue(serverId, out var connection))
+        if (_activeConnections.TryGetValue(hostId, out var connection))
         {
-            _logger.LogInformation("Disconnecting from {ServerId}", serverId);
+            _logger.LogInformation("Disconnecting from {HostId}", hostId);
             await connection.DisposeAsync();
-            _activeConnections.Remove(serverId);
+            _activeConnections.Remove(hostId);
         }
     }
 
@@ -138,11 +138,11 @@ public class ServerConnectionService : IServerConnectionService
         _activeConnections.Clear();
     }
 
-    public bool IsConnected(string serverId) =>
-        _activeConnections.TryGetValue(serverId, out var c) && c.State == HubConnectionState.Connected;
+    public bool IsConnected(string hostId) =>
+        _activeConnections.TryGetValue(hostId, out var c) && c.State == HubConnectionState.Connected;
 
     private async Task<HubConnection> ConnectWithRetryAsync(
-        IServerProvider provider, string serverId, int maxRetries = 3)
+        IHostProvider provider, string hostId, int maxRetries = 3)
     {
         Exception? lastException = null;
 
@@ -150,32 +150,32 @@ public class ServerConnectionService : IServerConnectionService
         {
             try
             {
-                _logger.LogDebug("Connection attempt {Attempt}/{Max} to {ServerId}", i + 1, maxRetries, serverId);
-                return await provider.ConnectAsync(serverId);
+                _logger.LogDebug("Connection attempt {Attempt}/{Max} to {HostId}", i + 1, maxRetries, hostId);
+                return await provider.ConnectAsync(hostId);
             }
             catch (Exception ex)
             {
                 lastException = ex;
-                _logger.LogWarning(ex, "Connection attempt {Attempt}/{Max} to {ServerId} failed",
-                    i + 1, maxRetries, serverId);
+                _logger.LogWarning(ex, "Connection attempt {Attempt}/{Max} to {HostId} failed",
+                    i + 1, maxRetries, hostId);
                 if (i < maxRetries - 1)
                     await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, i)));
             }
         }
 
         throw new InvalidOperationException(
-            $"Failed to connect to server {serverId} after {maxRetries} attempts",
+            $"Failed to connect to host {hostId} after {maxRetries} attempts",
             lastException);
     }
 
-    private IServerProvider? CreateProvider(ServerRegistration server) => server.Type switch
+    private IHostProvider? CreateProvider(ServerRegistration server) => server.Type switch
     {
         "github" => CreateGitHubProvider(server),
         "local" => CreateLocalProvider(server),
         _ => null
     };
 
-    private IServerProvider? CreateGitHubProvider(ServerRegistration server)
+    private IHostProvider? CreateGitHubProvider(ServerRegistration server)
     {
         if (string.IsNullOrEmpty(server.Token) || string.IsNullOrEmpty(server.Username))
             return null;
@@ -184,7 +184,7 @@ public class ServerConnectionService : IServerConnectionService
         return new GitHubCodespaceProvider(decryptedToken, server.Username, _loggerFactory);
     }
 
-    private IServerProvider? CreateLocalProvider(ServerRegistration server)
+    private IHostProvider? CreateLocalProvider(ServerRegistration server)
     {
         if (string.IsNullOrEmpty(server.Url) || (!server.Url.StartsWith("http://") && !server.Url.StartsWith("https://")))
             return null;

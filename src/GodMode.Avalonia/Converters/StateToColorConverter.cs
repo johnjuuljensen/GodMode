@@ -28,14 +28,14 @@ public class StateToColorConverter : IValueConverter
 				_ => DefaultGray
 			};
 		}
-		if (value is ServerState hostState)
+		if (value is HostState hostState)
 		{
 			return hostState switch
 			{
-				ServerState.Running => Running,
-				ServerState.Stopped => Stopped,
-				ServerState.Starting => Waiting,
-				ServerState.Stopping => Waiting,
+				HostState.Running => Running,
+				HostState.Stopped => Stopped,
+				HostState.Starting => Waiting,
+				HostState.Stopping => Waiting,
 				_ => DefaultGray
 			};
 		}

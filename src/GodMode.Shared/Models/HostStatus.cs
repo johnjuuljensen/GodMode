@@ -12,11 +12,11 @@ namespace GodMode.Shared.Models;
 /// <param name="Url">The URL to connect to the host, if available.</param>
 /// <param name="ProjectCount">Number of projects on this host.</param>
 /// <param name="LastSeen">Last time the host was seen online.</param>
-public record ServerStatus(
+public record HostStatus(
     string Id,
     string Name,
     string Type,
-    ServerState State,
+    HostState State,
     string? Url = null,
     int ProjectCount = 0,
     DateTime? LastSeen = null
