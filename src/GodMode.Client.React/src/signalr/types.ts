@@ -74,6 +74,7 @@ export interface ProjectRootInfo {
   Description?: string | null;
   Actions?: CreateActionInfo[] | null;
   ProfileName?: string | null;
+  HasConfig?: boolean;
 }
 
 export interface HostInfo {
@@ -83,6 +84,125 @@ export interface HostInfo {
   State: HostState;
   Url?: string | null;
   Description?: string | null;
+}
+
+// --- MCP Server models ---
+
+export interface McpServerConfig {
+  Command?: string | null;
+  Args?: string[] | null;
+  Env?: Record<string, string> | null;
+  Url?: string | null;
+  Type?: string | null;
+}
+
+export interface McpRegistryServer {
+  QualifiedName: string;
+  DisplayName: string;
+  Description?: string | null;
+  IconUrl?: string | null;
+  Verified: boolean;
+  UseCount: number;
+  Remote: boolean;
+  IsDeployed: boolean;
+  Homepage?: string | null;
+}
+
+export interface McpRegistryPagination {
+  CurrentPage: number;
+  PageSize: number;
+  TotalPages: number;
+  TotalCount: number;
+}
+
+export interface McpRegistrySearchResult {
+  Servers: McpRegistryServer[];
+  Pagination: McpRegistryPagination;
+}
+
+export interface McpServerConnection {
+  Type: string;
+  DeploymentUrl?: string | null;
+  configSchema?: unknown | null;
+}
+
+export interface McpServerTool {
+  Name: string;
+  Description?: string | null;
+}
+
+export interface McpServerDetail {
+  QualifiedName: string;
+  DisplayName: string;
+  Description?: string | null;
+  IconUrl?: string | null;
+  Remote: boolean;
+  DeploymentUrl?: string | null;
+  Connections?: McpServerConnection[] | null;
+  Tools?: McpServerTool[] | null;
+}
+
+// --- Root Creation & Sharing models ---
+
+export interface RootTemplate {
+  Name: string;
+  DisplayName: string;
+  Description: string;
+  Icon?: string | null;
+  Parameters?: RootTemplateParameter[] | null;
+}
+
+export interface RootTemplateParameter {
+  Key: string;
+  Title: string;
+  Description?: string | null;
+  DefaultValue?: string | null;
+  Required: boolean;
+}
+
+export interface RootPreview {
+  Files: Record<string, string>;
+  ValidationError?: string | null;
+}
+
+export interface RootGenerationRequest {
+  UserInstruction: string;
+  CurrentFiles?: Record<string, string> | null;
+  SchemaFields?: SchemaFieldDefinition[] | null;
+}
+
+export interface SchemaFieldDefinition {
+  Key: string;
+  Title: string;
+  FieldType: string;
+  IsRequired: boolean;
+  IsMultiline: boolean;
+  EnumValues?: string[] | null;
+}
+
+export interface RootManifest {
+  Name: string;
+  DisplayName: string;
+  Description?: string | null;
+  Author?: string | null;
+  Version?: string | null;
+  Platforms?: string[] | null;
+  Tags?: string[] | null;
+  Source?: string | null;
+  MinGodModeVersion?: string | null;
+}
+
+export interface SharedRootPreview {
+  Manifest: RootManifest;
+  Files: Record<string, string>;
+  ScriptHashes?: Record<string, string> | null;
+}
+
+export interface InferenceStatus {
+  IsConfigured: boolean;
+  Provider?: string | null;
+  Model?: string | null;
+  Error?: string | null;
 }
 
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---

@@ -1415,4 +1415,72 @@ public class ProjectManager : IProjectManager
 </body>
 </html>";
     }
+
+    // ── MCP Server Discovery & Configuration (stubs — implemented in PR 5) ──
+
+    public Task<McpRegistrySearchResult> SearchMcpServersAsync(string query, int pageSize = 20, int page = 1)
+        => throw new NotImplementedException("MCP registry search not yet implemented");
+
+    public Task<McpServerDetail?> GetMcpServerDetailAsync(string qualifiedName)
+        => throw new NotImplementedException("MCP server detail not yet implemented");
+
+    public Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+        => throw new NotImplementedException("MCP server add not yet implemented");
+
+    public Task RemoveMcpServerAsync(string serverName, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+        => throw new NotImplementedException("MCP server remove not yet implemented");
+
+    public Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
+        string profileName, string rootName, string? actionName)
+        => throw new NotImplementedException("MCP effective servers not yet implemented");
+
+    // ── Profile Management (stubs — implemented in PR 5) ──
+
+    public Task CreateProfileAsync(string profileName, string? description)
+        => throw new NotImplementedException("Profile creation not yet implemented");
+
+    public Task UpdateProfileDescriptionAsync(string profileName, string? description)
+        => throw new NotImplementedException("Profile update not yet implemented");
+
+    // ── Root Creation & Management (stubs — implemented in PR 6) ──
+
+    public Task<RootTemplate[]> ListRootTemplatesAsync()
+        => throw new NotImplementedException("Root templates not yet implemented");
+
+    public Task<RootPreview> PreviewRootFromTemplateAsync(string templateName, Dictionary<string, string> parameters)
+        => throw new NotImplementedException("Root template preview not yet implemented");
+
+    public Task<RootPreview> GenerateRootWithLlmAsync(RootGenerationRequest request)
+        => throw new NotImplementedException("LLM root generation not yet implemented");
+
+    public Task CreateRootAsync(string profileName, string rootName, RootPreview preview)
+        => throw new NotImplementedException("Root creation not yet implemented");
+
+    public Task<RootPreview> GetRootPreviewAsync(string profileName, string rootName)
+        => throw new NotImplementedException("Root preview not yet implemented");
+
+    public Task UpdateRootAsync(string profileName, string rootName, RootPreview preview)
+        => throw new NotImplementedException("Root update not yet implemented");
+
+    // ── Root Sharing (stubs — implemented in PR 6) ──
+
+    public Task<byte[]> ExportRootAsync(string profileName, string rootName)
+        => throw new NotImplementedException("Root export not yet implemented");
+
+    public Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes)
+        => throw new NotImplementedException("Root import preview not yet implemented");
+
+    public Task<SharedRootPreview> PreviewImportFromUrlAsync(string url)
+        => throw new NotImplementedException("Root import from URL not yet implemented");
+
+    public Task<SharedRootPreview> PreviewImportFromGitAsync(string repoUrl, string? subPath, string? gitRef)
+        => throw new NotImplementedException("Root import from git not yet implemented");
+
+    public Task InstallSharedRootAsync(SharedRootPreview preview, string? localName)
+        => throw new NotImplementedException("Shared root install not yet implemented");
+
+    public Task UninstallSharedRootAsync(string rootName)
+        => throw new NotImplementedException("Shared root uninstall not yet implemented");
 }

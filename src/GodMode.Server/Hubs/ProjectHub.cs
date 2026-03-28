@@ -125,6 +125,169 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await Clients.All.ProjectDeleted(projectId);
     }
 
+    // MCP Server Discovery & Configuration (stubs — implemented in PR 5)
+
+    public async Task<McpRegistrySearchResult> SearchMcpServers(string query, int pageSize, int page)
+    {
+        _logger.LogInformation("Client {ConnectionId} searching MCP servers: '{Query}'",
+            Context.ConnectionId, query);
+        return await _projectManager.SearchMcpServersAsync(query, pageSize, page);
+    }
+
+    public async Task<McpServerDetail?> GetMcpServerDetail(string qualifiedName)
+    {
+        _logger.LogInformation("Client {ConnectionId} getting MCP server detail: '{Name}'",
+            Context.ConnectionId, qualifiedName);
+        return await _projectManager.GetMcpServerDetailAsync(qualifiedName);
+    }
+
+    public async Task AddMcpServer(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        _logger.LogInformation("Client {ConnectionId} adding MCP server '{Server}' to {Level}",
+            Context.ConnectionId, serverName, targetLevel);
+        await _projectManager.AddMcpServerAsync(serverName, config, targetLevel,
+            profileName, rootName, actionName);
+    }
+
+    public async Task RemoveMcpServer(string serverName, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        _logger.LogInformation("Client {ConnectionId} removing MCP server '{Server}' from {Level}",
+            Context.ConnectionId, serverName, targetLevel);
+        await _projectManager.RemoveMcpServerAsync(serverName, targetLevel,
+            profileName, rootName, actionName);
+    }
+
+    public async Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServers(
+        string profileName, string rootName, string? actionName)
+    {
+        _logger.LogInformation("Client {ConnectionId} getting effective MCP servers for {Profile}/{Root}/{Action}",
+            Context.ConnectionId, profileName, rootName, actionName ?? "(all)");
+        return await _projectManager.GetEffectiveMcpServersAsync(profileName, rootName, actionName);
+    }
+
+    // Profile Management (stubs — implemented in PR 5)
+
+    public async Task CreateProfile(string profileName, string? description)
+    {
+        _logger.LogInformation("Client {ConnectionId} creating profile '{Profile}'",
+            Context.ConnectionId, profileName);
+        await _projectManager.CreateProfileAsync(profileName, description);
+    }
+
+    public async Task UpdateProfileDescription(string profileName, string? description)
+    {
+        _logger.LogInformation("Client {ConnectionId} updating profile '{Profile}' description",
+            Context.ConnectionId, profileName);
+        await _projectManager.UpdateProfileDescriptionAsync(profileName, description);
+    }
+
+    // Root Creation & Management (stubs — implemented in PR 6)
+
+    public async Task<RootTemplate[]> ListRootTemplates()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested root templates", Context.ConnectionId);
+        return await _projectManager.ListRootTemplatesAsync();
+    }
+
+    public async Task<RootPreview> PreviewRootFromTemplate(string templateName, Dictionary<string, string> parameters)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing template '{Template}'",
+            Context.ConnectionId, templateName);
+        return await _projectManager.PreviewRootFromTemplateAsync(templateName, parameters);
+    }
+
+    public async Task<RootPreview> GenerateRootWithLlm(RootGenerationRequest request)
+    {
+        _logger.LogInformation("Client {ConnectionId} generating root with LLM", Context.ConnectionId);
+        return await _projectManager.GenerateRootWithLlmAsync(request);
+    }
+
+    public async Task CreateRoot(string profileName, string rootName, RootPreview preview)
+    {
+        _logger.LogInformation("Client {ConnectionId} creating root '{Root}' in profile '{Profile}'",
+            Context.ConnectionId, rootName, profileName);
+        await _projectManager.CreateRootAsync(profileName, rootName, preview);
+    }
+
+    public async Task<RootPreview> GetRootPreview(string profileName, string rootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} getting root preview for '{Root}'",
+            Context.ConnectionId, rootName);
+        return await _projectManager.GetRootPreviewAsync(profileName, rootName);
+    }
+
+    public async Task UpdateRoot(string profileName, string rootName, RootPreview preview)
+    {
+        _logger.LogInformation("Client {ConnectionId} updating root '{Root}'",
+            Context.ConnectionId, rootName);
+        await _projectManager.UpdateRootAsync(profileName, rootName, preview);
+    }
+
+    // Root Sharing (stubs — implemented in PR 6)
+
+    public async Task<byte[]> ExportRoot(string profileName, string rootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} exporting root '{Root}'",
+            Context.ConnectionId, rootName);
+        return await _projectManager.ExportRootAsync(profileName, rootName);
+    }
+
+    public async Task<SharedRootPreview> PreviewImportFromBytes(byte[] packageBytes)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing root import from file", Context.ConnectionId);
+        return await _projectManager.PreviewImportFromBytesAsync(packageBytes);
+    }
+
+    public async Task<SharedRootPreview> PreviewImportFromUrl(string url)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing root import from URL: {Url}",
+            Context.ConnectionId, url);
+        return await _projectManager.PreviewImportFromUrlAsync(url);
+    }
+
+    public async Task<SharedRootPreview> PreviewImportFromGit(string repoUrl, string? subPath, string? gitRef)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing root import from git: {Url}",
+            Context.ConnectionId, repoUrl);
+        return await _projectManager.PreviewImportFromGitAsync(repoUrl, subPath, gitRef);
+    }
+
+    public async Task InstallSharedRoot(SharedRootPreview preview, string? localName)
+    {
+        _logger.LogInformation("Client {ConnectionId} installing shared root '{Name}'",
+            Context.ConnectionId, preview.Manifest.Name);
+        await _projectManager.InstallSharedRootAsync(preview, localName);
+    }
+
+    public async Task UninstallSharedRoot(string rootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} uninstalling root '{Name}'",
+            Context.ConnectionId, rootName);
+        await _projectManager.UninstallSharedRootAsync(rootName);
+    }
+
+    // Server Management (stubs — implemented in PR 5/6)
+
+    public Task<InferenceStatus> GetInferenceStatus()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested inference status", Context.ConnectionId);
+        return Task.FromResult(new InferenceStatus(IsConfigured: false));
+    }
+
+    public Task<InferenceStatus> ConfigureInferenceApiKey(string apiKey)
+    {
+        _logger.LogInformation("Client {ConnectionId} configuring inference API key", Context.ConnectionId);
+        throw new NotImplementedException("Inference configuration requires GodMode.AI (PR 5/6)");
+    }
+
+    public Task RestartServer()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested server restart", Context.ConnectionId);
+        throw new NotImplementedException("Server restart not yet implemented");
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);

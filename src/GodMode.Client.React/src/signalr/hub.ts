@@ -1,11 +1,13 @@
 /**
- * SignalR connection manager for GodMode.Server.
- * Mirrors the IProjectHub/IProjectHubClient contract from GodMode.Shared.
+ * SignalR connection manager.
+ * In MAUI mode: connects via the local proxy relay.
+ * In standalone mode: connects directly to GodMode.Server SignalR hubs.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpRegistrySearchResult, McpServerDetail, McpServerConfig, RootTemplate, RootPreview, RootGenerationRequest, SharedRootPreview, InferenceStatus } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
+import { getBaseUrl, isStandalone, getServerAccessToken } from '../services/api';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
@@ -36,19 +38,43 @@ export class GodModeHub {
     this.callbacks = callbacks;
   }
 
-  async connect(serverUrl: string, accessToken?: string): Promise<void> {
+  /**
+   * Connect to a GodMode server.
+   * In MAUI mode: hostId is used as ?serverId for the relay proxy.
+   * In standalone mode: hostId is the server URL — connects directly to its /hubs/projects endpoint.
+   */
+  async connect(hostId: string): Promise<void> {
     if (this.connection) {
       await this.disconnect();
     }
 
-    const hubUrl = serverUrl.replace(/\/$/, '') + '/hubs/projects';
+    let hubUrl: string;
+    let options: signalR.IHttpConnectionOptions;
 
-    let builder = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl, accessToken ? { accessTokenFactory: () => accessToken } : {})
+    if (isStandalone()) {
+      // Direct connection to GodMode.Server
+      const serverUrl = hostId.replace(/\/+$/, '');
+      hubUrl = `${serverUrl}/hubs/projects`;
+      const token = getServerAccessToken(hostId);
+      options = {
+        ...(token ? { accessTokenFactory: () => token } : {}),
+      };
+    } else {
+      // MAUI relay proxy
+      const baseUrl = getBaseUrl();
+      if (!baseUrl) throw new Error('Base URL not configured — is this running inside MAUI?');
+      hubUrl = `${baseUrl}/?serverId=${encodeURIComponent(hostId)}`;
+      options = {
+        skipNegotiation: true,
+        transport: signalR.HttpTransportType.WebSockets,
+      };
+    }
+
+    this.connection = new signalR.HubConnectionBuilder()
+      .withUrl(hubUrl, options)
       .withAutomaticReconnect()
-      .configureLogging(signalR.LogLevel.Warning);
-
-    this.connection = builder.build();
+      .configureLogging(signalR.LogLevel.Warning)
+      .build();
 
     // Register server→client callbacks (IProjectHubClient)
     this.connection.on('OutputReceived', (projectId: string, rawJson: string) => {
@@ -142,5 +168,109 @@ export class GodModeHub {
 
   async deleteProject(projectId: string, force: boolean = false): Promise<void> {
     await this.connection!.invoke('DeleteProject', projectId, force);
+  }
+
+  // --- MCP Server Discovery & Configuration ---
+
+  async searchMcpServers(query: string, pageSize: number = 20, page: number = 1): Promise<McpRegistrySearchResult> {
+    return await this.connection!.invoke('SearchMcpServers', query, pageSize, page);
+  }
+
+  async getMcpServerDetail(qualifiedName: string): Promise<McpServerDetail | null> {
+    return await this.connection!.invoke('GetMcpServerDetail', qualifiedName);
+  }
+
+  async addMcpServer(
+    serverName: string, config: McpServerConfig, targetLevel: string,
+    profileName?: string | null, rootName?: string | null, actionName?: string | null,
+  ): Promise<void> {
+    await this.connection!.invoke('AddMcpServer', serverName, config, targetLevel, profileName, rootName, actionName);
+  }
+
+  async removeMcpServer(
+    serverName: string, targetLevel: string,
+    profileName?: string | null, rootName?: string | null, actionName?: string | null,
+  ): Promise<void> {
+    await this.connection!.invoke('RemoveMcpServer', serverName, targetLevel, profileName, rootName, actionName);
+  }
+
+  async getEffectiveMcpServers(
+    profileName: string, rootName: string, actionName?: string | null,
+  ): Promise<Record<string, McpServerConfig>> {
+    return await this.connection!.invoke('GetEffectiveMcpServers', profileName, rootName, actionName);
+  }
+
+  // --- Profile Management ---
+
+  async createProfile(profileName: string, description?: string | null): Promise<void> {
+    await this.connection!.invoke('CreateProfile', profileName, description ?? null);
+  }
+
+  async updateProfileDescription(profileName: string, description?: string | null): Promise<void> {
+    await this.connection!.invoke('UpdateProfileDescription', profileName, description ?? null);
+  }
+
+  // --- Root Creation & Management ---
+
+  async listRootTemplates(): Promise<RootTemplate[]> {
+    return await this.connection!.invoke('ListRootTemplates');
+  }
+
+  async previewRootFromTemplate(templateName: string, parameters: Record<string, string>): Promise<RootPreview> {
+    return await this.connection!.invoke('PreviewRootFromTemplate', templateName, parameters);
+  }
+
+  async generateRootWithLlm(request: RootGenerationRequest): Promise<RootPreview> {
+    return await this.connection!.invoke('GenerateRootWithLlm', request);
+  }
+
+  async createRoot(profileName: string, rootName: string, preview: RootPreview): Promise<void> {
+    await this.connection!.invoke('CreateRoot', profileName, rootName, preview);
+  }
+
+  async getRootPreview(profileName: string, rootName: string): Promise<RootPreview> {
+    return await this.connection!.invoke('GetRootPreview', profileName, rootName);
+  }
+
+  async updateRoot(profileName: string, rootName: string, preview: RootPreview): Promise<void> {
+    await this.connection!.invoke('UpdateRoot', profileName, rootName, preview);
+  }
+
+  // --- Root Sharing ---
+
+  async exportRoot(profileName: string, rootName: string): Promise<Uint8Array> {
+    return await this.connection!.invoke('ExportRoot', profileName, rootName);
+  }
+
+  async previewImportFromBytes(packageBytes: Uint8Array): Promise<SharedRootPreview> {
+    return await this.connection!.invoke('PreviewImportFromBytes', packageBytes);
+  }
+
+  async previewImportFromUrl(url: string): Promise<SharedRootPreview> {
+    return await this.connection!.invoke('PreviewImportFromUrl', url);
+  }
+
+  async previewImportFromGit(repoUrl: string, subPath?: string | null, gitRef?: string | null): Promise<SharedRootPreview> {
+    return await this.connection!.invoke('PreviewImportFromGit', repoUrl, subPath ?? null, gitRef ?? null);
+  }
+
+  async installSharedRoot(preview: SharedRootPreview, localName?: string | null): Promise<void> {
+    await this.connection!.invoke('InstallSharedRoot', preview, localName ?? null);
+  }
+
+  async uninstallSharedRoot(rootName: string): Promise<void> {
+    await this.connection!.invoke('UninstallSharedRoot', rootName);
+  }
+
+  async getInferenceStatus(): Promise<InferenceStatus> {
+    return await this.connection!.invoke('GetInferenceStatus');
+  }
+
+  async configureInferenceApiKey(apiKey: string): Promise<InferenceStatus> {
+    return await this.connection!.invoke('ConfigureInferenceApiKey', apiKey);
+  }
+
+  async restartServer(): Promise<void> {
+    await this.connection!.invoke('RestartServer');
   }
 }
