@@ -11,8 +11,7 @@ export function ProjectItem({ project, isSelected, onSelect }: Props) {
   const timeAgo = formatRelativeTime(project.UpdatedAt);
   const clientQuestion = useAppStore(s => s.projectQuestions[project.Id]);
   const isWaiting = project.State === 'WaitingInput' || clientQuestion;
-  const stateStr = String(project.State ?? 'Idle');
-  const stateLabel = isWaiting ? 'WAIT' : stateStr.slice(0, 4).toUpperCase();
+  const stateLabel = isWaiting ? 'WAIT' : project.State.slice(0, 4).toUpperCase();
 
   return (
     <div

@@ -46,25 +46,25 @@ function parseFormFields(schema: unknown): FormField[] {
 const MODEL_OPTIONS = ['opus', 'sonnet', 'haiku'];
 
 export function CreateProject() {
-  const serverConnections = useAppStore(s => s.serverConnections);
+  const servers = useAppStore(s => s.servers);
   const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
-  const createProjectContext = useAppStore(s => s.createProjectContext);
 
   const connectedServers = useMemo(
-    () => serverConnections.filter(c => c.connectionState === 'connected' && c.roots.length > 0),
-    [serverConnections],
+    () => servers
+      .map((s, i) => ({ server: s, index: i }))
+      .filter(s => s.server.connectionState === 'connected' && s.server.roots.length > 0),
+    [servers],
   );
 
-  const defaultServerId = createProjectContext?.serverId ?? connectedServers[0]?.serverInfo.Id ?? '';
-  const [selectedServerId, setSelectedServerId] = useState<string>(defaultServerId);
-  const [selectedRootName, setSelectedRootName] = useState(createProjectContext?.rootName ?? '');
+  const [selectedServerIdx, setSelectedServerIdx] = useState<number>(connectedServers[0]?.index ?? 0);
+  const [selectedRootName, setSelectedRootName] = useState('');
   const [selectedActionName, setSelectedActionName] = useState('');
   const [selectedModel, setSelectedModel] = useState('opus');
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const server = connectedServers.find(c => c.serverInfo.Id === selectedServerId);
+  const server = servers[selectedServerIdx];
   const roots = server?.roots ?? [];
 
   const rootsByProfile = useMemo(() => {
@@ -143,10 +143,10 @@ export function CreateProject() {
         {connectedServers.length > 1 && (
           <div className="form-group">
             <label>Server</label>
-            <select value={selectedServerId} onChange={e => setSelectedServerId(e.target.value)}>
-              {connectedServers.map(c => (
-                <option key={c.serverInfo.Id} value={c.serverInfo.Id}>
-                  {c.serverInfo.Name || c.serverInfo.Url}
+            <select value={selectedServerIdx} onChange={e => setSelectedServerIdx(Number(e.target.value))}>
+              {connectedServers.map(s => (
+                <option key={s.index} value={s.index}>
+                  {s.server.registration.displayName || s.server.registration.url}
                 </option>
               ))}
             </select>

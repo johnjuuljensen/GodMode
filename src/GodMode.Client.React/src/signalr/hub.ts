@@ -1,12 +1,11 @@
 /**
- * SignalR connection manager.
- * Connects to the local MAUI proxy which relays to the actual GodMode.Server.
+ * SignalR connection manager for GodMode.Server.
+ * Mirrors the IProjectHub/IProjectHubClient contract from GodMode.Shared.
  */
 import * as signalR from '@microsoft/signalr';
 import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
-import { getBaseUrl } from '../services/api';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
@@ -37,28 +36,19 @@ export class GodModeHub {
     this.callbacks = callbacks;
   }
 
-  /**
-   * Connect to a host via the local MAUI proxy.
-   * @param hostId The host ID (from GET /hosts) used as ?serverId for the relay.
-   */
-  async connect(hostId: string): Promise<void> {
+  async connect(serverUrl: string, accessToken?: string): Promise<void> {
     if (this.connection) {
       await this.disconnect();
     }
 
-    const baseUrl = getBaseUrl();
-    if (!baseUrl) throw new Error('Base URL not configured — is this running inside MAUI?');
+    const hubUrl = serverUrl.replace(/\/$/, '') + '/hubs/projects';
 
-    const hubUrl = `${baseUrl}/?serverId=${encodeURIComponent(hostId)}`;
-
-    this.connection = new signalR.HubConnectionBuilder()
-      .withUrl(hubUrl, {
-        skipNegotiation: true,
-        transport: signalR.HttpTransportType.WebSockets,
-      })
+    let builder = new signalR.HubConnectionBuilder()
+      .withUrl(hubUrl, accessToken ? { accessTokenFactory: () => accessToken } : {})
       .withAutomaticReconnect()
-      .configureLogging(signalR.LogLevel.Warning)
-      .build();
+      .configureLogging(signalR.LogLevel.Warning);
+
+    this.connection = builder.build();
 
     // Register server→client callbacks (IProjectHubClient)
     this.connection.on('OutputReceived', (projectId: string, rawJson: string) => {

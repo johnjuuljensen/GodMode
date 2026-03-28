@@ -7,12 +7,12 @@ import './ProjectView.css';
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
 
 interface Props {
-  serverId: string;
+  serverIndex: number;
   projectId: string;
 }
 
-export function ProjectView({ serverId, projectId }: Props) {
-  const conn = useAppStore(s => s.serverConnections.find(c => c.serverInfo.Id === serverId));
+export function ProjectView({ serverIndex, projectId }: Props) {
+  const server = useAppStore(s => s.servers[serverIndex]);
   const outputMessages = useAppStore(s => s.outputMessages);
   const clearOutput = useAppStore(s => s.clearOutput);
   const question = useAppStore(s => s.question);
@@ -27,11 +27,11 @@ export function ProjectView({ serverId, projectId }: Props) {
   const [phase, setPhase] = useState<'loading' | 'ready'>('loading');
   const settleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const hub = conn?.hub;
-  const project = conn?.projects.find(p => p.Id === projectId);
+  const hub = server?.hub;
+  const project = server?.projects.find(p => p.Id === projectId);
 
   useEffect(() => {
-    if (!hub || conn?.connectionState !== 'connected') return;
+    if (!hub || server?.connectionState !== 'connected') return;
     clearOutput();
     setPhase('loading');
 
@@ -43,7 +43,7 @@ export function ProjectView({ serverId, projectId }: Props) {
       hub.unsubscribeProject(projectId).catch(console.error);
       if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     };
-  }, [hub, projectId, conn?.connectionState, clearOutput]);
+  }, [hub, projectId, server?.connectionState, clearOutput]);
 
   useEffect(() => {
     if (project) setProjectName(project.Name);
@@ -161,7 +161,7 @@ export function ProjectView({ serverId, projectId }: Props) {
           <div className="project-messages-empty">Loading...</div>
         ) : visibleMessages.length === 0 ? (
           <div className="project-messages-empty">
-            {conn?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
+            {server?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
           </div>
         ) : (
           visibleMessages.map((msg, i) => <ChatMessage key={i} message={msg} />)

@@ -6,7 +6,7 @@ export default function App() {
   const loadServers = useAppStore(s => s.loadServers);
 
   useEffect(() => {
-    loadServers().catch(console.error);
+    loadServers();
   }, [loadServers]);
 
   return <Shell />;
