@@ -10,6 +10,7 @@ import { McpBrowser } from './Mcp/McpBrowser';
 import { McpProfilePanel } from './Mcp/McpProfilePanel';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { CreateProfile } from './Profiles/CreateProfile';
+import { RootManager } from './Roots/RootManager';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -38,6 +39,8 @@ export function Shell() {
   const showProfileSettings = useAppStore(s => s.showProfileSettings);
   const profileSettingsContext = useAppStore(s => s.profileSettingsContext);
   const showCreateProfile = useAppStore(s => s.showCreateProfile);
+  const showRootManager = useAppStore(s => s.showRootManager);
+  const setShowRootManager = useAppStore(s => s.setShowRootManager);
   const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
   const setShowCreateProfile = useAppStore(s => s.setShowCreateProfile);
 
@@ -53,13 +56,15 @@ export function Shell() {
     return ['All', ...Array.from(names).sort()];
   }, [servers]);
 
-  const hasRoots = servers.some(s => s.connectionState === 'connected' && s.roots.length > 0);
   const hasConnectedServers = servers.some(s => s.connectionState === 'connected');
+  const hasRoots = servers.some(s => s.connectionState === 'connected' && s.roots.length > 0);
   const showProfileFilter = allProfileNames.length > 2;
   const realProfileNames = allProfileNames.filter(n => n !== 'All');
+
   const activeProfileName = profileFilter !== 'All'
     ? profileFilter
     : realProfileNames.length === 1 ? realProfileNames[0] : null;
+
   const profileServerIndex = useMemo(() => {
     if (!activeProfileName) return null;
     for (let i = 0; i < servers.length; i++) {
@@ -108,6 +113,17 @@ export function Shell() {
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                   <line x1="12" y1="8" x2="12" y2="14" />
                   <line x1="9" y1="11" x2="15" y2="11" />
+                </svg>
+              </button>
+            )}
+            {hasConnectedServers && (
+              <button
+                className="shell-icon-btn"
+                onClick={() => setShowRootManager(true, servers.findIndex(s => s.connectionState === 'connected'))}
+                title="Manage roots"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
                 </svg>
               </button>
             )}
@@ -160,11 +176,13 @@ export function Shell() {
               <button
                 className="shell-icon-btn"
                 onClick={() => setShowCreateProfile(true)}
-                title="Create new profile"
+                title="Create profile"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="8.5" cy="7" r="4" />
+                  <line x1="20" y1="8" x2="20" y2="14" />
+                  <line x1="23" y1="11" x2="17" y2="11" />
                 </svg>
               </button>
             )}
@@ -211,6 +229,7 @@ export function Shell() {
         <ProfileSettings serverIndex={profileSettingsContext.serverIndex} profileName={profileSettingsContext.profileName} />
       )}
       {showCreateProfile && <CreateProfile />}
+      {showRootManager && <RootManager />}
     </div>
   );
 }

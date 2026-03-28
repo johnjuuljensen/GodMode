@@ -1,7 +1,89 @@
 .create-project-modal {
-  max-width: 480px;
+  width: 700px;
   max-height: 85vh;
   overflow-y: auto;
+}
+
+/* Header with back button */
+.create-project-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.create-project-header h2 {
+  margin: 0;
+}
+
+/* Root picker */
+.root-picker-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 12px;
+}
+
+.root-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.root-picker-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  padding: 16px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+  min-height: 80px;
+}
+
+.root-picker-card:hover {
+  background: var(--glass-hover);
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.root-picker-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.root-picker-card-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+  margin-bottom: 6px;
+}
+
+.root-picker-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+
+.root-picker-action-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: var(--accent-soft, rgba(99, 102, 241, 0.1));
+  color: var(--accent);
+}
+
+.root-picker-card-profile {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 6px;
+  opacity: 0.7;
 }
 
 .form-required {
@@ -35,19 +117,72 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.form-toggle {
+.form-group .form-toggle {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   font-size: 13px;
   color: var(--text-secondary);
+  user-select: none;
+  margin-bottom: 0;
 }
 
 .form-toggle input[type="checkbox"] {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.toggle-track {
+  display: block;
+  position: relative;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  background: var(--glass-hover);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  transition: background 0.2s, border-color 0.2s;
+  overflow: hidden;
+}
+
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
   width: 16px;
   height: 16px;
-  accent-color: var(--accent);
+  background: var(--text-tertiary);
+  border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.form-toggle input:checked + .toggle-track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.form-toggle input:checked + .toggle-track::after {
+  transform: translateX(20px);
+  background: #fff;
+}
+
+.toggle-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  min-width: 24px;
+}
+
+.form-toggle input:focus-visible + .toggle-track {
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .form-error {
