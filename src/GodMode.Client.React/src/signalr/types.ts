@@ -126,3 +126,61 @@ export interface ClaudeMessage {
   questionOptions: QuestionOptionData[];
   questionHeader?: string | null;
 }
+
+// ── MCP Registry Types ──
+
+export interface McpRegistryServer {
+  qualifiedName: string;
+  displayName: string;
+  description?: string | null;
+  homepage?: string | null;
+  useCount?: number;
+  isVerified?: boolean;
+  createdAt?: string;
+}
+
+export interface McpRegistrySearchResult {
+  servers: McpRegistryServer[];
+  pagination: McpRegistryPagination;
+}
+
+export interface McpRegistryPagination {
+  currentPage: number;
+  pageSize: number;
+  totalPages: number;
+  totalCount: number;
+}
+
+export interface McpServerDetail {
+  qualifiedName: string;
+  displayName: string;
+  description?: string | null;
+  homepage?: string | null;
+  connections?: McpServerConnection[];
+  tools?: McpServerTool[];
+}
+
+export interface McpServerConnection {
+  type: string;
+  url?: string | null;
+  configSchema?: unknown;
+}
+
+export interface McpServerTool {
+  name: string;
+  description?: string | null;
+}
+
+export interface McpServerConfig {
+  command?: string | null;
+  args?: string[] | null;
+  env?: Record<string, string> | null;
+  url?: string | null;
+  type?: string | null;
+}
+
+export interface InferenceStatus {
+  isAvailable: boolean;
+  provider?: string | null;
+  model?: string | null;
+}

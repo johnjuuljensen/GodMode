@@ -6,6 +6,10 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
+import { McpBrowser } from './Mcp/McpBrowser';
+import { McpProfilePanel } from './Mcp/McpProfilePanel';
+import { ProfileSettings } from './Profiles/ProfileSettings';
+import { CreateProfile } from './Profiles/CreateProfile';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -28,6 +32,12 @@ export function Shell() {
   const servers = useAppStore(s => s.servers);
   const profileFilter = useAppStore(s => s.profileFilter);
   const setProfileFilter = useAppStore(s => s.setProfileFilter);
+  const showMcpBrowser = useAppStore(s => s.showMcpBrowser);
+  const showMcpProfile = useAppStore(s => s.showMcpProfile);
+  const mcpProfileContext = useAppStore(s => s.mcpProfileContext);
+  const showProfileSettings = useAppStore(s => s.showProfileSettings);
+  const profileSettingsContext = useAppStore(s => s.profileSettingsContext);
+  const showCreateProfile = useAppStore(s => s.showCreateProfile);
 
   const allProfileNames = useMemo(() => {
     const names = new Set<string>();
@@ -154,6 +164,14 @@ export function Shell() {
       {showAddServer && <AddServer />}
       {editServerIndex !== null && <EditServer index={editServerIndex} />}
       {showCreateProject && <CreateProject />}
+      {showMcpBrowser && <McpBrowser />}
+      {showMcpProfile && mcpProfileContext && (
+        <McpProfilePanel serverIndex={mcpProfileContext.serverIndex} profileName={mcpProfileContext.profileName} />
+      )}
+      {showProfileSettings && profileSettingsContext && (
+        <ProfileSettings serverIndex={profileSettingsContext.serverIndex} profileName={profileSettingsContext.profileName} />
+      )}
+      {showCreateProfile && <CreateProfile />}
     </div>
   );
 }

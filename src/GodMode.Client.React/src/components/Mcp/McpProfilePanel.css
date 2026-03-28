@@ -1,0 +1,71 @@
+.mcp-profile-modal {
+  max-width: 560px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.mcp-profile-subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: -4px 0 14px;
+}
+
+.mcp-profile-list {
+  margin-bottom: 14px;
+}
+
+.mcp-server-entry-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.mcp-server-entry-detail {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcp-manual-add {
+  padding: 14px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+
+.mcp-manual-add h4 {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.mcp-profile-actions {
+  flex-wrap: wrap;
+}
+
+/* MCP button in profile group header */
+.profile-mcp-btn {
+  background: none;
+  border: 1px solid var(--glass-border);
+  border-radius: 5px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+.profile-mcp-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
