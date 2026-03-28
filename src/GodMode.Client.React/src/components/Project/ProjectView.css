@@ -156,6 +156,28 @@
 .project-status-btn.Error { color: var(--error); border-color: rgba(248,113,113,0.2); }
 .project-status-btn.Error .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); }
 
+/* ── Delete Button ── */
+.project-delete-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--glass-border);
+  border-radius: 5px;
+  background: var(--glass);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  padding: 0;
+}
+
+.project-delete-btn:hover {
+  background: var(--error-soft);
+  color: var(--error);
+  border-color: rgba(248,113,113,0.2);
+}
+
 @keyframes status-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }

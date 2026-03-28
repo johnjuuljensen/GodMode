@@ -10,6 +10,9 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
+  height: 61px;
+  box-sizing: border-box;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--glass-border);
 }
 
