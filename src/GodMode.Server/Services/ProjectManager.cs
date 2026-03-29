@@ -221,6 +221,19 @@ public class ProjectManager : IProjectManager
             };
         }
 
+        // Distribute profileless roots into every named profile so they're available everywhere
+        if (merged.TryGetValue("", out var unassigned) && unassigned.Roots.Count > 0)
+        {
+            foreach (var (profileName, profileConfig) in merged)
+            {
+                if (string.IsNullOrEmpty(profileName)) continue;
+                foreach (var (rootName, rootPath) in unassigned.Roots)
+                {
+                    profileConfig.Roots.TryAdd(rootName, rootPath);
+                }
+            }
+        }
+
         var (rootLookup, pathToProfileRoot) = BuildRootLookups(merged);
 
         // Build ProjectFiles.ProjectManager with the merged root set
@@ -861,7 +874,7 @@ public class ProjectManager : IProjectManager
         var recoverSnap = _snapshot;
         _logger.LogInformation("Recovering projects from all project roots");
 
-        var projectPaths = recoverSnap.ProjectFiles.ListProjectPaths().ToList();
+        var projectPaths = recoverSnap.ProjectFiles.ListProjectPaths().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         // Process all projects in parallel for faster startup
         await Parallel.ForEachAsync(projectPaths, async (projectPath, ct) =>
@@ -884,25 +897,26 @@ public class ProjectManager : IProjectManager
                 var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput;
 
                 // Determine which profile and root this project belongs to
+                // Prefer named profiles over the empty-string profile
                 string? rootName = null;
                 string? profileName = null;
                 foreach (var (rn, rp) in recoverSnap.ProjectFiles.ProjectRoots)
                 {
-                    if (projectPath.StartsWith(rp, StringComparison.OrdinalIgnoreCase))
+                    if (!projectPath.StartsWith(rp, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    var slashIdx = rn.IndexOf('/');
+                    var candidateProfile = slashIdx >= 0 ? rn[..slashIdx] : null;
+                    var candidateRoot = slashIdx >= 0 ? rn[(slashIdx + 1)..] : rn;
+
+                    // Take first match, but keep looking for a named profile
+                    if (rootName == null || (string.IsNullOrEmpty(profileName) && !string.IsNullOrEmpty(candidateProfile)))
                     {
-                        // Composite key is "profile/root" — split to extract both
-                        var slashIdx = rn.IndexOf('/');
-                        if (slashIdx >= 0)
-                        {
-                            profileName = rn[..slashIdx];
-                            rootName = rn[(slashIdx + 1)..];
-                        }
-                        else
-                        {
-                            rootName = rn;
-                        }
-                        break;
+                        profileName = candidateProfile;
+                        rootName = candidateRoot;
                     }
+                    if (!string.IsNullOrEmpty(profileName))
+                        break;
                 }
 
                 var correctedStatus = stateChanged
