@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAppStore } from '../../store';
+import { hostApi } from '../../services/hostApi';
 
 export function AddServer() {
   const addServer = useAppStore(s => s.addServer);
@@ -36,13 +37,15 @@ export function AddServer() {
     <div className="modal-overlay" onClick={() => setShowAddServer(false)}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <h2>Add Server</h2>
-        <div className="form-group">
-          <label>Type</label>
-          <select value={type} onChange={e => setType(e.target.value as 'local' | 'github')}>
-            <option value="local">Local Server</option>
-            <option value="github">GitHub Codespaces</option>
-          </select>
-        </div>
+        {!hostApi.isStandalone && (
+          <div className="form-group">
+            <label>Type</label>
+            <select value={type} onChange={e => setType(e.target.value as 'local' | 'github')}>
+              <option value="local">Local Server</option>
+              <option value="github">GitHub Codespaces</option>
+            </select>
+          </div>
+        )}
         {type === 'local' ? (
           <>
             <div className="form-group">
