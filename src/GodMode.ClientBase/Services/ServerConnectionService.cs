@@ -16,7 +16,7 @@ public class ServerConnectionService : IServerConnectionService
     private readonly IServerRegistryService _serverRegistry;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<ServerConnectionService> _logger;
-    private readonly Dictionary<string, IHostProvider> _providers = new();
+    private readonly Dictionary<string, IServerProvider> _providers = new();
     private readonly Dictionary<string, HubConnection> _activeConnections = new();
 
     public ServerConnectionService(IServerRegistryService serverRegistry,
@@ -27,10 +27,10 @@ public class ServerConnectionService : IServerConnectionService
         _logger = logger;
     }
 
-    public async Task<IEnumerable<(IHostProvider Provider, int ServerIndex)>> GetAllProvidersAsync()
+    public async Task<IEnumerable<(IServerProvider Provider, int ServerIndex)>> GetAllProvidersAsync()
     {
         var servers = await _serverRegistry.GetServersAsync();
-        var providers = new List<(IHostProvider Provider, int ServerIndex)>();
+        var providers = new List<(IServerProvider Provider, int ServerIndex)>();
         _logger.LogDebug("Building providers for {Count} server registrations", servers.Count);
 
         for (int i = 0; i < servers.Count; i++)
@@ -53,10 +53,10 @@ public class ServerConnectionService : IServerConnectionService
         return providers;
     }
 
-    public async Task<IEnumerable<HostInfo>> ListAllHostsAsync()
+    public async Task<IEnumerable<ServerInfo>> ListAllHostsAsync()
     {
         var providers = await GetAllProvidersAsync();
-        var allHosts = new List<HostInfo>();
+        var allHosts = new List<ServerInfo>();
 
         foreach (var (provider, idx) in providers)
         {
@@ -99,7 +99,7 @@ public class ServerConnectionService : IServerConnectionService
         }
 
         var providers = await GetAllProvidersAsync();
-        IHostProvider? targetProvider = null;
+        IServerProvider? targetProvider = null;
 
         foreach (var (provider, _) in providers)
         {
@@ -142,7 +142,7 @@ public class ServerConnectionService : IServerConnectionService
         _activeConnections.TryGetValue(hostId, out var c) && c.State == HubConnectionState.Connected;
 
     private async Task<HubConnection> ConnectWithRetryAsync(
-        IHostProvider provider, string hostId, int maxRetries = 3)
+        IServerProvider provider, string hostId, int maxRetries = 3)
     {
         Exception? lastException = null;
 
@@ -168,14 +168,14 @@ public class ServerConnectionService : IServerConnectionService
             lastException);
     }
 
-    private IHostProvider? CreateProvider(ServerRegistration server) => server.Type switch
+    private IServerProvider? CreateProvider(ServerRegistration server) => server.Type switch
     {
         "github" => CreateGitHubProvider(server),
         "local" => CreateLocalProvider(server),
         _ => null
     };
 
-    private IHostProvider? CreateGitHubProvider(ServerRegistration server)
+    private IServerProvider? CreateGitHubProvider(ServerRegistration server)
     {
         if (string.IsNullOrEmpty(server.Token) || string.IsNullOrEmpty(server.Username))
             return null;
@@ -184,7 +184,7 @@ public class ServerConnectionService : IServerConnectionService
         return new GitHubCodespaceProvider(decryptedToken, server.Username, _loggerFactory);
     }
 
-    private IHostProvider? CreateLocalProvider(ServerRegistration server)
+    private IServerProvider? CreateLocalProvider(ServerRegistration server)
     {
         if (string.IsNullOrEmpty(server.Url) || (!server.Url.StartsWith("http://") && !server.Url.StartsWith("https://")))
             return null;

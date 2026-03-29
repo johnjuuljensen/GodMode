@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import { GodModeHub, type ConnectionState } from '../signalr/hub';
 import type {
   ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
-  HostInfo, CreateActionInfo,
+  ServerInfo, CreateActionInfo,
 } from '../signalr/types';
 import {
   fetchServers, addServer as apiAddServer, removeServer as apiRemoveServer,
@@ -31,7 +31,7 @@ function saveDismissed(dp: Record<string, boolean>) {
 // ── Computed view model types ──────────────────────────────────
 
 export interface ServerConnection {
-  serverInfo: HostInfo;
+  serverInfo: ServerInfo;
   hub: GodModeHub;
   connectionState: ConnectionState;
   projects: ProjectSummary[];

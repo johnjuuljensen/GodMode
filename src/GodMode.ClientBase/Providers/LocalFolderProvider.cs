@@ -10,7 +10,7 @@ namespace GodMode.ClientBase.Providers;
 /// <summary>
 /// Host provider for local GodMode.Server instances.
 /// </summary>
-public class LocalFolderProvider : IHostProvider
+public class LocalFolderProvider : IServerProvider
 {
     private readonly string _serverUrl;
     private readonly string _hostId;
@@ -29,18 +29,18 @@ public class LocalFolderProvider : IHostProvider
                   .CreateLogger<LocalFolderProvider>();
     }
 
-    public async Task<IEnumerable<HostInfo>> ListHostsAsync()
+    public async Task<IEnumerable<ServerInfo>> ListHostsAsync()
     {
         var reachable = await IsServerReachableAsync();
-        var state = reachable ? HostState.Running : HostState.Stopped;
+        var state = reachable ? ServerState.Running : ServerState.Stopped;
         _logger.LogDebug("Local server {Url} reachable={Reachable} state={State}", _serverUrl, reachable, state);
-        return [new HostInfo(_hostId, _hostName, "local", state, _serverUrl)];
+        return [new ServerInfo(_hostId, _hostName, "local", state, _serverUrl)];
     }
 
-    public async Task<HostStatus> GetHostStatusAsync(string hostId)
+    public async Task<ServerStatus> GetServerStatusAsync(string hostId)
     {
-        var state = await IsServerReachableAsync() ? HostState.Running : HostState.Stopped;
-        return new HostStatus(_hostId, _hostName, "local", state, _serverUrl, 0, DateTime.UtcNow);
+        var state = await IsServerReachableAsync() ? ServerState.Running : ServerState.Stopped;
+        return new ServerStatus(_hostId, _hostName, "local", state, _serverUrl, 0, DateTime.UtcNow);
     }
 
     public Task StartHostAsync(string hostId) => Task.CompletedTask;

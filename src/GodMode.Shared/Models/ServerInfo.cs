@@ -10,11 +10,11 @@ namespace GodMode.Shared.Models;
 /// <param name="Type">Type of host (e.g., "github", "local").</param>
 /// <param name="State">Current state of the host.</param>
 /// <param name="Url">Optional URL to connect to the host.</param>
-public record HostInfo(
+public record ServerInfo(
     string Id,
     string Name,
     string Type,
-    HostState State,
+    ServerState State,
     string? Url = null,
     string? Description = null
 );
