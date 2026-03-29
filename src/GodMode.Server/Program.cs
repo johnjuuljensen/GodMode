@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
@@ -17,11 +18,16 @@ builder.Host.UseSerilog((context, configuration) =>
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 31));
 
-// Detect auth mode
+// Detect auth mode (exactly one, first match wins)
+var googleClientId = builder.Configuration["Authentication:Google:ClientId"];
 var isCodespace = string.Equals(
     Environment.GetEnvironmentVariable("CODESPACES"), "true", StringComparison.OrdinalIgnoreCase);
 var apiKey = builder.Configuration["Authentication:ApiKey"];
-var requireAuth = isCodespace || !string.IsNullOrEmpty(apiKey);
+
+var authMode = !string.IsNullOrEmpty(googleClientId) ? "google"
+    : isCodespace                                     ? "codespace"
+    : !string.IsNullOrEmpty(apiKey)                   ? "apikey"
+    :                                                   "none";
 
 // Add services to the container
 builder.Services.AddSignalR()
@@ -34,22 +40,33 @@ builder.Services.AddSignalR()
             options.PayloadSerializerOptions.Converters.Add(converter);
     });
 
-builder.Services.AddCors(options =>
+// CORS: not needed in production (React is same-origin, MAUI proxy is server-to-server).
+// Only allow cross-origin in development (vite dev server on a different port).
+if (builder.Environment.IsDevelopment())
 {
-    options.AddDefaultPolicy(policy =>
+    builder.Services.AddCors(options =>
     {
-        policy.AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials()
-              .SetIsOriginAllowed(_ => true);
+        options.AddDefaultPolicy(policy =>
+        {
+            policy.AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials()
+                  .WithOrigins("http://localhost:5173", "https://localhost:5173");
+        });
     });
-});
+}
 
-if (requireAuth)
+builder.Services.AddHttpClient();
+
+switch (authMode)
 {
-    builder.Services.AddHttpClient();
-    builder.Services.AddAuthentication(GodModeAuthExtensions.SchemeName).AddGodModeAuth();
-    builder.Services.AddAuthorization();
+    case "google":
+        builder.Services.AddGoogleAuth(builder.Configuration);
+        break;
+    case "codespace" or "apikey":
+        builder.Services.AddAuthentication(GodModeAuthExtensions.SchemeName).AddGodModeAuth();
+        builder.Services.AddAuthorization();
+        break;
 }
 
 // Register application services
@@ -62,9 +79,10 @@ builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
-app.UseCors();
+if (app.Environment.IsDevelopment())
+    app.UseCors();
 
-if (requireAuth)
+if (authMode != "none")
 {
     app.UseAuthentication();
     app.UseAuthorization();
@@ -73,6 +91,33 @@ if (requireAuth)
 // Serve the React client from wwwroot/ (if present)
 app.UseDefaultFiles();
 app.UseStaticFiles();
+
+// ── Auth endpoints (/api/auth/*) ───────────────────────────────
+
+var auth = app.MapGroup("/api/auth");
+
+// Challenge: tells the React client what auth method is required
+auth.MapGet("/challenge", (HttpContext ctx, IServiceProvider sp) =>
+{
+    var googleOptions = sp.GetService<GoogleAuthOptions>();
+    return Results.Ok(new
+    {
+        method = authMode,
+        clientId = googleOptions?.ClientId,
+        authenticated = ctx.User.Identity?.IsAuthenticated == true || authMode == "none",
+    });
+}).AllowAnonymous();
+
+// Logout (shared across auth methods)
+auth.MapPost("/logout", async (HttpContext ctx) =>
+{
+    await ctx.SignOutAsync();
+    return Results.Ok(new { success = true });
+}).AllowAnonymous();
+
+// Method-specific endpoints
+if (authMode == "google")
+    auth.MapGoogleLoginEndpoint();
 
 app.MapGet("/api/status", () => new
 {
@@ -104,15 +149,12 @@ app.MapGet("/events", async (HttpContext ctx) =>
 });
 
 var hub = app.MapHub<ProjectHub>("/hubs/projects");
-if (requireAuth)
+if (authMode != "none")
     hub.RequireAuthorization();
 
 // SPA fallback: serve index.html for non-API/non-hub routes (React client routing)
 app.MapFallbackToFile("index.html");
 
-// Log auth mode
-var authMode = isCodespace ? "Codespace (GitHub PAT)" :
-    !string.IsNullOrEmpty(apiKey) ? "API Key" : "None (local)";
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authMode);
 
 // Recover existing projects AFTER server starts (non-blocking)
