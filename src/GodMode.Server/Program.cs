@@ -61,7 +61,7 @@ builder.Services.AddHttpClient();
 switch (authMode)
 {
     case "google":
-        builder.Services.AddGoogleAuth(googleClientId!);
+        builder.Services.AddGoogleAuth(builder.Configuration);
         break;
     case "codespace" or "apikey":
         builder.Services.AddAuthentication(GodModeAuthExtensions.SchemeName).AddGodModeAuth();
@@ -97,12 +97,16 @@ app.UseStaticFiles();
 var auth = app.MapGroup("/api/auth");
 
 // Challenge: tells the React client what auth method is required
-auth.MapGet("/challenge", (HttpContext ctx) => Results.Ok(new
+auth.MapGet("/challenge", (HttpContext ctx, IServiceProvider sp) =>
 {
-    method = authMode,
-    clientId = authMode == "google" ? googleClientId : null,
-    authenticated = ctx.User.Identity?.IsAuthenticated == true || authMode == "none",
-})).AllowAnonymous();
+    var googleOptions = sp.GetService<GoogleAuthOptions>();
+    return Results.Ok(new
+    {
+        method = authMode,
+        clientId = googleOptions?.ClientId,
+        authenticated = ctx.User.Identity?.IsAuthenticated == true || authMode == "none",
+    });
+}).AllowAnonymous();
 
 // Logout (shared across auth methods)
 auth.MapPost("/logout", async (HttpContext ctx) =>
@@ -152,8 +156,6 @@ if (authMode != "none")
 app.MapFallbackToFile("index.html");
 
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authMode);
-if (authMode == "google" && string.IsNullOrEmpty(builder.Configuration["Authentication:Google:AllowedEmail"]))
-    app.Logger.LogWarning("Google auth enabled but Authentication:Google:AllowedEmail is not configured — all logins will be rejected");
 
 // Recover existing projects AFTER server starts (non-blocking)
 var projectManager = app.Services.GetRequiredService<IProjectManager>();

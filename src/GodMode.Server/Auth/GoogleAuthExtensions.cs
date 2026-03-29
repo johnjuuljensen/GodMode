@@ -4,23 +4,44 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 
 namespace GodMode.Server.Auth;
 
+/// <summary>
+/// Validated Google auth configuration, loaded once at startup.
+/// </summary>
+public record GoogleAuthOptions(string ClientId, string? AllowedEmail);
+
 public static class GoogleAuthExtensions
 {
     /// <summary>
-    /// Registers Google OAuth services: token validator, cookie authentication.
+    /// Reads and validates Google auth config, registers services.
+    /// Throws on missing or malformed config — fail fast at startup.
     /// </summary>
     public static IServiceCollection AddGoogleAuth(
-        this IServiceCollection services, string clientId)
+        this IServiceCollection services, IConfiguration config)
     {
+        var section = config.GetSection("Authentication:Google");
+        var clientId = section["ClientId"];
+        var allowedEmail = section["AllowedEmail"]?.Trim().ToLowerInvariant();
+
+        if (string.IsNullOrEmpty(clientId))
+            throw new InvalidOperationException(
+                "Authentication:Google:ClientId is required when Google auth is enabled");
+
+        if (string.IsNullOrEmpty(allowedEmail) || !allowedEmail.Contains('@'))
+            throw new InvalidOperationException(
+                "Authentication:Google:AllowedEmail must be a valid email address");
+
+        var options = new GoogleAuthOptions(clientId, allowedEmail);
+        services.AddSingleton(options);
+
         services.AddSingleton(sp => new GoogleTokenValidator(
-            clientId, sp.GetRequiredService<ILogger<GoogleTokenValidator>>()));
+            options.ClientId, sp.GetRequiredService<ILogger<GoogleTokenValidator>>()));
         services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-            .AddCookie(options =>
+            .AddCookie(cookieOptions =>
             {
-                options.Cookie.Name = "GodMode.Auth";
-                options.Cookie.SameSite = SameSiteMode.Lax;
-                options.Cookie.HttpOnly = true;
-                options.Events.OnRedirectToLogin = context =>
+                cookieOptions.Cookie.Name = "GodMode.Auth";
+                cookieOptions.Cookie.SameSite = SameSiteMode.Lax;
+                cookieOptions.Cookie.HttpOnly = true;
+                cookieOptions.Events.OnRedirectToLogin = context =>
                 {
                     context.Response.StatusCode = 401;
                     return Task.CompletedTask;
@@ -37,7 +58,7 @@ public static class GoogleAuthExtensions
     {
         group.MapPost("/google/login", async (
             GoogleTokenValidator validator,
-            IConfiguration config,
+            GoogleAuthOptions options,
             HttpContext ctx,
             GoogleLoginRequest request) =>
         {
@@ -46,9 +67,8 @@ public static class GoogleAuthExtensions
                 return Results.Unauthorized();
 
             var email = payload.Email?.ToLowerInvariant();
-            var allowedEmail = config["Authentication:Google:AllowedEmail"]?.Trim().ToLowerInvariant();
 
-            if (string.IsNullOrEmpty(email) || email != allowedEmail)
+            if (string.IsNullOrEmpty(email) || email != options.AllowedEmail)
                 return Results.Json(new { error = "access_denied" }, statusCode: 403);
 
             var claims = new[]
