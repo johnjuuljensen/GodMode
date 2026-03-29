@@ -2,6 +2,8 @@ using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
 using GodMode.Shared;
+using GodMode.Shared.Enums;
+using GodMode.Shared.Models;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -80,6 +82,26 @@ app.MapGet("/api/status", () => new
 }).AllowAnonymous();
 
 app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
+
+// ── React client API surface (matches MAUI LocalServer) ────────
+
+// Server list: return this server as the only entry
+app.MapGet("/servers", () => new[]
+{
+    new ServerInfo("self", "Local Server", "local", ServerState.Running)
+});
+
+// SSE event stream (placeholder — no dynamic server changes in single-server mode)
+app.MapGet("/events", async (HttpContext ctx) =>
+{
+    ctx.Response.ContentType = "text/event-stream";
+    ctx.Response.Headers.CacheControl = "no-cache";
+    ctx.Response.Headers.Connection = "keep-alive";
+    await ctx.Response.Body.FlushAsync();
+    // Keep connection open until client disconnects
+    try { await Task.Delay(Timeout.Infinite, ctx.RequestAborted); }
+    catch (OperationCanceledException) { }
+});
 
 var hub = app.MapHub<ProjectHub>("/hubs/projects");
 if (requireAuth)

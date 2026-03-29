@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "build:server": "tsc -b && vite build --outDir ../GodMode.Server/wwwroot --emptyOutDir",
     "lint": "eslint .",
     "preview": "vite preview"
   },

@@ -6,7 +6,7 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
-import { hostApi } from '../services/hostApi';
+import { isMaui, openDevTools } from '../services/hostApi';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -73,8 +73,8 @@ export function Shell() {
             <button className="shell-view-toggle" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
               {isTileView ? '☰' : '⊞'}
             </button>
-            {!hostApi.isStandalone && (
-              <button className="shell-view-toggle" onClick={() => hostApi.openDevTools()} title="Open DevTools">
+            {isMaui && (
+              <button className="shell-view-toggle" onClick={() => openDevTools()} title="Open DevTools">
                 {'{ }'}
               </button>
             )}
