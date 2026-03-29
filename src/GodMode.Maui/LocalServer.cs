@@ -321,7 +321,7 @@ public class LocalServer
     private async Task HandleServerActionAsync(
         HttpListenerContext context,
         string path,
-        Func<IHostProvider, Func<string, Task>> getAction,
+        Func<IServerProvider, Func<string, Task>> getAction,
         string actionName)
     {
         // Path: /servers/{serverId}/start or /servers/{serverId}/stop
@@ -360,7 +360,7 @@ public class LocalServer
 
     // ── Background state polling ────────────────────────────────
 
-    private async Task PollServerStateAsync(IHostProvider provider, string serverId)
+    private async Task PollServerStateAsync(IServerProvider provider, string serverId)
     {
         _logger.LogDebug("Poll started for {ServerId}", serverId);
         for (int i = 0; i < 30; i++)
@@ -379,7 +379,7 @@ public class LocalServer
                 _logger.LogDebug("Poll #{Iteration}: {ServerId} state={State}", i + 1, serverId, server.State);
                 BroadcastEvent("serversChanged");
 
-                if (server.State is Shared.Enums.HostState.Running or Shared.Enums.HostState.Stopped)
+                if (server.State is Shared.Enums.ServerState.Running or Shared.Enums.ServerState.Stopped)
                 {
                     _logger.LogInformation("Poll: {ServerId} reached stable state {State}", serverId, server.State);
                     break;
