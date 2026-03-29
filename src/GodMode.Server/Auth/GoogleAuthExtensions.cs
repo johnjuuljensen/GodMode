@@ -7,7 +7,7 @@ namespace GodMode.Server.Auth;
 /// <summary>
 /// Validated Google auth configuration, loaded once at startup.
 /// </summary>
-public record GoogleAuthOptions(string ClientId, string? AllowedEmail);
+public record GoogleAuthOptions(string ClientId, string AllowedEmail);
 
 public static class GoogleAuthExtensions
 {
