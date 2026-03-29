@@ -31,8 +31,23 @@ export function RootManager() {
     rootManagerServerId ?? connectedServers[0]?.registration.url ?? ''
   );
   const selectedServer = servers.find(s => s.registration.url === selectedServerId);
+  const profileFilter = useAppStore(s => s.profileFilter);
   const hub = selectedServer?.hub;
-  const roots = selectedServer?.roots ?? [];
+  const allRoots = selectedServer?.roots ?? [];
+
+  // Filter roots by active profile and deduplicate by name
+  const roots = useMemo(() => {
+    const seen = new Set<string>();
+    const result: ProjectRootInfo[] = [];
+    for (const root of allRoots) {
+      const profile = root.ProfileName ?? '';
+      if (profileFilter !== 'All' && profile !== profileFilter && profile !== '') continue;
+      if (seen.has(root.Name)) continue;
+      seen.add(root.Name);
+      result.push(root);
+    }
+    return result;
+  }, [allRoots, profileFilter]);
 
   const [view, setView] = useState<View>(rootManagerInitialTab === 'create' ? 'create' : rootManagerInitialTab === 'import' ? 'import' : 'list');
   const [footerAction, setFooterAction] = useState<FooterAction | null>(null);
@@ -69,6 +84,7 @@ export function RootManager() {
               <RootList
                 roots={roots}
                 hub={hub}
+                onDeleted={() => refreshProjects(selectedServerId)}
               />
               <div className="root-manager-actions">
                 <button className="btn btn-primary" onClick={() => setView('create')}>
@@ -115,11 +131,39 @@ export function RootManager() {
 
 // ─── Root List Tab ───────────────────────────────────────────────────────────
 
-function RootList({ roots, hub }: {
+function RootList({ roots, hub, onDeleted }: {
   roots: ProjectRootInfo[];
   hub: InstanceType<typeof import('../../signalr/hub').GodModeHub>;
+  onDeleted: () => void;
 }) {
   const [exporting, setExporting] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const handleDelete = async (root: ProjectRootInfo) => {
+    const profileName = root.ProfileName ?? '';
+    if (!confirm(`Delete root "${root.Name}"? This removes its .godmode-root config.`)) return;
+    setDeleting(root.Name);
+    try {
+      await hub.deleteRoot(profileName, root.Name);
+      onDeleted();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const clean = msg.replace(/^.*?HubException:\s*/i, '');
+      if (clean.includes('project(s)') && confirm(`${clean}\n\nForce delete anyway?`)) {
+        try {
+          await hub.deleteRoot(profileName, root.Name, true);
+          onDeleted();
+        } catch (err2: unknown) {
+          const msg2 = err2 instanceof Error ? err2.message : String(err2);
+          alert(msg2.replace(/^.*?HubException:\s*/i, '') || 'Delete failed');
+        }
+      } else if (!clean.includes('project(s)')) {
+        alert(clean || 'Delete failed');
+      }
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   const handleExport = async (root: ProjectRootInfo) => {
     const profileName = root.ProfileName ?? '';
@@ -198,6 +242,14 @@ function RootList({ roots, hub }: {
                     {exporting === root.Name ? '...' : 'Export'}
                   </button>
                 )}
+                <button
+                  className="btn btn-danger btn-sm"
+                  onClick={() => handleDelete(root)}
+                  disabled={deleting === root.Name}
+                  title="Delete root"
+                >
+                  {deleting === root.Name ? '...' : 'Delete'}
+                </button>
               </div>
             </div>
           ))}

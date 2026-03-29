@@ -48,6 +48,7 @@ const MODEL_OPTIONS = ['opus', 'sonnet', 'haiku'];
 
 export function CreateProject() {
   const servers = useAppStore(s => s.servers);
+  const profileFilter = useAppStore(s => s.profileFilter);
   const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
   const setShowMcpBrowser = useAppStore(s => s.setShowMcpBrowser);
 
@@ -68,23 +69,38 @@ export function CreateProject() {
   const server = servers.find(s => s.registration.url === selectedServerId);
   const roots = server?.roots ?? [];
 
-  // Group roots by profile
+  // Filter roots by active profile and deduplicate by name.
+  // Show roots that match the selected profile OR have no profile (available everywhere).
+  const filteredRoots = useMemo(() => {
+    const seen = new Set<string>();
+    const result: ProjectRootInfo[] = [];
+    for (const root of roots) {
+      const profile = root.ProfileName ?? '';
+      if (profileFilter !== 'All' && profile !== profileFilter && profile !== '') continue;
+      if (seen.has(root.Name)) continue;
+      seen.add(root.Name);
+      result.push(root);
+    }
+    return result;
+  }, [roots, profileFilter]);
+
+  // Group filtered roots by profile
   const rootsByProfile = useMemo(() => {
     const groups = new Map<string, ProjectRootInfo[]>();
-    for (const root of roots) {
+    for (const root of filteredRoots) {
       const profile = root.ProfileName ?? '';
       if (!groups.has(profile)) groups.set(profile, []);
       groups.get(profile)!.push(root);
     }
     return groups;
-  }, [roots]);
+  }, [filteredRoots]);
 
-  // If there's only one root, auto-select it
+  // If there's only one filtered root, auto-select it
   useEffect(() => {
-    if (roots.length === 1 && !selectedRoot) {
-      setSelectedRoot(roots[0]);
+    if (filteredRoots.length === 1 && !selectedRoot) {
+      setSelectedRoot(filteredRoots[0]);
     }
-  }, [roots, selectedRoot]);
+  }, [filteredRoots, selectedRoot]);
 
   const actions = selectedRoot?.Actions ?? [];
   const selectedAction = actions.find((a: CreateActionInfo) => a.Name === selectedActionName) ?? null;
@@ -238,7 +254,7 @@ export function CreateProject() {
     <div className="modal-overlay" onClick={close}>
       <div className="modal create-project-modal" onClick={e => e.stopPropagation()}>
         <div className="create-project-header">
-          {roots.length > 1 && (
+          {filteredRoots.length > 1 && (
             <button className="btn btn-secondary btn-sm" onClick={() => setSelectedRoot(null)}>
               ← Back
             </button>

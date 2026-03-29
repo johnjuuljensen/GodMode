@@ -57,7 +57,7 @@ function ServerSection({ server, profileFilter }: { server: ServerState; profile
 
     for (const project of server.projects) {
       const name = project.ProfileName ?? '';
-      if (profileFilter !== 'All' && name !== profileFilter) continue;
+      if (profileFilter !== 'All' && name !== profileFilter && name !== '') continue;
       if (!groups.has(name)) {
         groups.set(name, { description: null, projects: [] });
       }
@@ -80,7 +80,7 @@ function ServerSection({ server, profileFilter }: { server: ServerState; profile
   const hasMultipleProfiles = profileGroups.length > 1 || (profileGroups.length === 1 && profileGroups[0].profileName !== '');
   const filteredProjects = profileFilter === 'All'
     ? server.projects
-    : server.projects.filter(p => (p.ProfileName ?? '') === profileFilter);
+    : server.projects.filter(p => { const n = p.ProfileName ?? ''; return n === profileFilter || n === ''; });
 
   return (
     <div className="server-section">
