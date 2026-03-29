@@ -27,4 +27,41 @@
     </Content>
   </ItemGroup>
 
+  <!-- ── React client build (same pattern as GodMode.Maui) ──── -->
+
+  <PropertyGroup>
+    <_ReactDir>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'GodMode.Client.React'))</_ReactDir>
+  </PropertyGroup>
+
+  <!-- Track React sources for incremental build -->
+  <ItemGroup>
+    <_ReactSource Include="$(_ReactDir)\src\**\*" />
+    <_ReactSource Include="$(_ReactDir)\index.html" />
+    <_ReactSource Include="$(_ReactDir)\package.json" />
+    <_ReactSource Include="$(_ReactDir)\vite.config.ts" />
+    <_ReactSource Include="$(_ReactDir)\tsconfig*.json" />
+  </ItemGroup>
+
+  <!-- Build React and copy to wwwroot (incremental: skipped when sources unchanged) -->
+  <Target Name="BuildReact"
+          BeforeTargets="PrepareForBuild"
+          Inputs="@(_ReactSource)"
+          Outputs="$(_ReactDir)\dist\index.html">
+    <Message Importance="high" Text="Building React client..." />
+    <Exec Command="npm run build" WorkingDirectory="$(_ReactDir)" />
+  </Target>
+
+  <Target Name="CopyReactToWwwroot"
+          DependsOnTargets="BuildReact"
+          BeforeTargets="PrepareForBuild"
+          Inputs="$(_ReactDir)\dist\index.html"
+          Outputs="wwwroot\index.html">
+    <ItemGroup>
+      <_ReactDist Include="$(_ReactDir)\dist\**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ReactDist)"
+          DestinationFiles="@(_ReactDist->'wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>
