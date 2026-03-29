@@ -68,7 +68,11 @@ if (requireAuth)
     app.UseAuthorization();
 }
 
-app.MapGet("/", () => new
+// Serve the React client from wwwroot/ (if present)
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
+app.MapGet("/api/status", () => new
 {
     service = "GodMode.Server",
     version = "1.0.0",
@@ -80,6 +84,9 @@ app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
 var hub = app.MapHub<ProjectHub>("/hubs/projects");
 if (requireAuth)
     hub.RequireAuthorization();
+
+// SPA fallback: serve index.html for non-API/non-hub routes (React client routing)
+app.MapFallbackToFile("index.html");
 
 // Log auth mode
 var authMode = isCodespace ? "Codespace (GitHub PAT)" :
