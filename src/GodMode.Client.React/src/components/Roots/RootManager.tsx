@@ -321,7 +321,7 @@ function CreateRootPane({ hub, profiles, onCreated, onFooterAction }: {
   const [selectedTemplate, setSelectedTemplate] = useState<RootTemplate | null>(null);
   const [templateParams, setTemplateParams] = useState<Record<string, string>>({});
   const [rootName, setRootName] = useState('');
-  const [profileName, setProfileName] = useState(profiles[0]?.Name ?? 'Default');
+  const [profileName, setProfileName] = useState(profiles[0]?.Name ?? '');
   const [schemaFields, setSchemaFields] = useState<SchemaField[]>([]);
   const [preview, setPreview] = useState<RootPreview | null>(null);
   const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({});
@@ -541,13 +541,10 @@ function CreateRootPane({ hub, profiles, onCreated, onFooterAction }: {
             </div>
             <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
               <label>Profile</label>
-              {profiles.length > 1 ? (
-                <select value={profileName} onChange={e => setProfileName(e.target.value)}>
-                  {profiles.map(p => <option key={p.Name} value={p.Name}>{p.Name}</option>)}
-                </select>
-              ) : (
-                <input type="text" value={profileName} onChange={e => setProfileName(e.target.value)} />
-              )}
+              <select value={profileName} onChange={e => setProfileName(e.target.value)}>
+                <option value="">(None)</option>
+                {profiles.map(p => <option key={p.Name} value={p.Name}>{p.Name}</option>)}
+              </select>
             </div>
           </div>
 
@@ -572,7 +569,7 @@ function CreateRootPane({ hub, profiles, onCreated, onFooterAction }: {
           <div className="selected-template-info">
             <span className="selected-template-name">{rootName}</span>
             <span className="selected-template-desc">
-              {profileName}{templateParameters.length > 0 ? ` · ${templateParameters.map(p => templateParams[p.Key] || p.Key).join(', ')}` : ''}
+              {profileName || '(No profile)'}{templateParameters.length > 0 ? ` · ${templateParameters.map(p => templateParams[p.Key] || p.Key).join(', ')}` : ''}
             </span>
           </div>
           <button className="btn btn-secondary btn-sm" onClick={() => { setPreview(null); setFieldsConfirmed(false); setScriptsConfirmed(false); }}>Edit</button>

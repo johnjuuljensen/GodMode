@@ -279,7 +279,7 @@ public class ProjectManager : IProjectManager
             try
             {
                 var config = _rootConfigReader.ReadConfig(subDir);
-                var profileName = config.ProfileName ?? dirName;
+                var profileName = config.ProfileName ?? "";
 
                 if (!profiles.TryGetValue(profileName, out var existingProfile))
                 {
@@ -292,7 +292,7 @@ public class ProjectManager : IProjectManager
                 }
 
                 existingProfile.Roots[dirName] = subDir;
-                _logger.LogDebug("Discovered root '{RootName}' → profile '{ProfileName}' at {Path}", dirName, profileName, subDir);
+                _logger.LogDebug("Discovered root '{RootName}' → profile '{ProfileName}' at {Path}", dirName, profileName == "" ? "(none)" : profileName, subDir);
             }
             catch (Exception ex)
             {
@@ -345,9 +345,10 @@ public class ProjectManager : IProjectManager
             RebuildSnapshot();
 
         var snap = _snapshot;
-        var profiles = snap.Profiles.Select(kvp =>
-            new ProfileInfo(kvp.Key, kvp.Value.Description)
-        ).ToArray();
+        var profiles = snap.Profiles
+            .Where(kvp => !string.IsNullOrEmpty(kvp.Key))
+            .Select(kvp => new ProfileInfo(kvp.Key, kvp.Value.Description))
+            .ToArray();
 
         return Task.FromResult(profiles);
     }
@@ -1715,11 +1716,49 @@ public class ProjectManager : IProjectManager
         if (Directory.Exists(Path.Combine(rootPath, ".godmode-root")))
             throw new InvalidOperationException($"Root '{rootName}' already exists");
 
+        // Inject profileName into config.json if provided
+        if (!string.IsNullOrEmpty(profileName))
+            preview = InjectProfileName(preview, profileName);
+
         Directory.CreateDirectory(rootPath);
         _rootCreator.WriteRoot(rootPath, preview);
 
         RebuildSnapshot();
         return Task.CompletedTask;
+    }
+
+    private static RootPreview InjectProfileName(RootPreview preview, string profileName)
+    {
+        var files = new Dictionary<string, string>(preview.Files);
+        const string configKey = "config.json";
+
+        if (files.TryGetValue(configKey, out var existing))
+        {
+            try
+            {
+                var doc = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(existing);
+                var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(existing)
+                    ?? new Dictionary<string, System.Text.Json.JsonElement>();
+                dict["profileName"] = System.Text.Json.JsonSerializer.SerializeToElement(profileName);
+                files[configKey] = System.Text.Json.JsonSerializer.Serialize(dict,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            }
+            catch
+            {
+                // If config.json isn't valid JSON, create a new one
+                files[configKey] = System.Text.Json.JsonSerializer.Serialize(
+                    new { profileName },
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            }
+        }
+        else
+        {
+            files[configKey] = System.Text.Json.JsonSerializer.Serialize(
+                new { profileName },
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+
+        return preview with { Files = files };
     }
 
     public Task<RootPreview> GetRootPreviewAsync(string profileName, string rootName)
