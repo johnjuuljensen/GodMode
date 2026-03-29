@@ -72,7 +72,7 @@ export function CreateProject() {
   const rootsByProfile = useMemo(() => {
     const groups = new Map<string, ProjectRootInfo[]>();
     for (const root of roots) {
-      const profile = root.ProfileName ?? 'Default';
+      const profile = root.ProfileName ?? '';
       if (!groups.has(profile)) groups.set(profile, []);
       groups.get(profile)!.push(root);
     }
@@ -121,7 +121,7 @@ export function CreateProject() {
       setEffectiveMcpServers({});
       return;
     }
-    const profileName = selectedRoot.ProfileName ?? 'Default';
+    const profileName = selectedRoot.ProfileName ?? '';
     server.hub.getEffectiveMcpServers(profileName, selectedRoot.Name, selectedActionName || undefined)
       .then(setEffectiveMcpServers)
       .catch(() => setEffectiveMcpServers({}));
@@ -145,7 +145,7 @@ export function CreateProject() {
     setError(null);
 
     try {
-      const profileName = selectedRoot.ProfileName ?? 'Default';
+      const profileName = selectedRoot.ProfileName ?? '';
       const inputs: Record<string, unknown> = { model: selectedModel };
       for (const field of formFields) {
         const val = formValues[field.key];
@@ -286,7 +286,7 @@ export function CreateProject() {
               className="btn btn-secondary btn-sm"
               onClick={() => setShowMcpBrowser(true, {
                 serverId: selectedServerId,
-                profileName: selectedRoot.ProfileName ?? 'Default',
+                profileName: selectedRoot.ProfileName ?? '',
                 rootName: selectedRoot.Name,
                 actionName: selectedActionName || undefined,
               })}
@@ -307,9 +307,9 @@ export function CreateProject() {
                     title="Remove"
                     onClick={async () => {
                       try {
-                        await server!.hub.removeMcpServer(name, 'profile', selectedRoot!.ProfileName ?? 'Default', selectedRoot!.Name);
+                        await server!.hub.removeMcpServer(name, 'profile', selectedRoot!.ProfileName ?? '', selectedRoot!.Name);
                         const updated = await server!.hub.getEffectiveMcpServers(
-                          selectedRoot!.ProfileName ?? 'Default', selectedRoot!.Name, selectedActionName || undefined,
+                          selectedRoot!.ProfileName ?? '', selectedRoot!.Name, selectedActionName || undefined,
                         );
                         setEffectiveMcpServers(updated);
                       } catch { /* ignore */ }

@@ -18,7 +18,7 @@ export function McpProfilePanel({ serverId, profileName }: McpProfilePanelProps)
   const hub = server?.hub;
   const roots = server?.roots ?? [];
   // Pick the first root from this profile for the GetEffectiveMcpServers call
-  const profileRoot = roots.find(r => (r.ProfileName ?? 'Default') === profileName);
+  const profileRoot = roots.find(r => (r.ProfileName ?? '') === profileName);
 
   const [mcpServers, setMcpServers] = useState<Record<string, McpServerConfig>>({});
   const [loading, setLoading] = useState(true);

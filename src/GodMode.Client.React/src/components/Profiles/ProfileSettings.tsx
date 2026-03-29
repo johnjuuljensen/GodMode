@@ -18,7 +18,7 @@ export function ProfileSettings({ serverId, profileName }: ProfileSettingsProps)
   const server = servers.find(s => s.registration.url === serverId);
   const hub = server?.hub;
   const roots = server?.roots ?? [];
-  const profileRoot = roots.find(r => (r.ProfileName ?? 'Default') === profileName);
+  const profileRoot = roots.find(r => (r.ProfileName ?? '') === profileName);
   const rootName = profileRoot?.Name ?? '';
 
   // MCP servers state

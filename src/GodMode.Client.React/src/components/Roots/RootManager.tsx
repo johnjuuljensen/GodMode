@@ -122,7 +122,7 @@ function RootList({ roots, hub }: {
   const [exporting, setExporting] = useState<string | null>(null);
 
   const handleExport = async (root: ProjectRootInfo) => {
-    const profileName = root.ProfileName ?? 'Default';
+    const profileName = root.ProfileName ?? '';
     setExporting(root.Name);
     try {
       const bytes = await hub.exportRoot(profileName, root.Name);
@@ -147,7 +147,7 @@ function RootList({ roots, hub }: {
   const grouped = useMemo(() => {
     const map = new Map<string, ProjectRootInfo[]>();
     for (const r of roots) {
-      const p = r.ProfileName ?? 'Default';
+      const p = r.ProfileName ?? '';
       if (!map.has(p)) map.set(p, []);
       map.get(p)!.push(r);
     }

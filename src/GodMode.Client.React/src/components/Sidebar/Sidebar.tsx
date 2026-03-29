@@ -56,7 +56,7 @@ function ServerSection({ server, profileFilter }: { server: ServerState; profile
     }
 
     for (const project of server.projects) {
-      const name = project.ProfileName ?? 'Default';
+      const name = project.ProfileName ?? '';
       if (profileFilter !== 'All' && name !== profileFilter) continue;
       if (!groups.has(name)) {
         groups.set(name, { description: null, projects: [] });
@@ -77,10 +77,10 @@ function ServerSection({ server, profileFilter }: { server: ServerState; profile
     }));
   }, [server.projects, server.profiles, profileFilter]);
 
-  const hasMultipleProfiles = profileGroups.length > 1 || (profileGroups.length === 1 && profileGroups[0].profileName !== 'Default');
+  const hasMultipleProfiles = profileGroups.length > 1 || (profileGroups.length === 1 && profileGroups[0].profileName !== '');
   const filteredProjects = profileFilter === 'All'
     ? server.projects
-    : server.projects.filter(p => (p.ProfileName ?? 'Default') === profileFilter);
+    : server.projects.filter(p => (p.ProfileName ?? '') === profileFilter);
 
   return (
     <div className="server-section">

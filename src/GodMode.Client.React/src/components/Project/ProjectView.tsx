@@ -149,8 +149,8 @@ export function ProjectView({ serverId, projectId }: Props) {
           <span className="project-header-name">{projectName}</span>
           {(project?.ProfileName || project?.RootName) && (
             <span className="project-header-root">
-              {project?.ProfileName && project.ProfileName !== 'Default' ? project.ProfileName : ''}
-              {project?.ProfileName && project.ProfileName !== 'Default' && project?.RootName ? ' / ' : ''}
+              {project?.ProfileName && project.ProfileName ? project.ProfileName : ''}
+              {project?.ProfileName && project.ProfileName && project?.RootName ? ' / ' : ''}
               {project?.RootName ?? ''}
             </span>
           )}

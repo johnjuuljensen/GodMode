@@ -39,7 +39,7 @@ export function ProjectTile({ project, messages, isLoading, isSelected, onSelect
         </div>
         <span className="tile-time">{relativeTime(project.UpdatedAt)}</span>
       </div>
-      {project.ProfileName && project.ProfileName !== 'Default' && (
+      {project.ProfileName && project.ProfileName && (
         <div className="tile-profile">{project.ProfileName}{project.RootName ? ` / ${project.RootName}` : ''}</div>
       )}
 
