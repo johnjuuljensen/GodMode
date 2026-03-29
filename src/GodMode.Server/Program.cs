@@ -19,8 +19,7 @@ builder.Host.UseSerilog((context, configuration) =>
             retainedFileCountLimit: 31));
 
 // Detect auth mode (exactly one, first match wins)
-var googleClientId = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")
-    ?? builder.Configuration["Authentication:Google:ClientId"];
+var googleClientId = builder.Configuration["Authentication:Google:ClientId"];
 var isCodespace = string.Equals(
     Environment.GetEnvironmentVariable("CODESPACES"), "true", StringComparison.OrdinalIgnoreCase);
 var apiKey = builder.Configuration["Authentication:ApiKey"];
@@ -62,7 +61,6 @@ builder.Services.AddHttpClient();
 switch (authMode)
 {
     case "google":
-        builder.Services.AddSingleton<GoogleAuthConfig>();
         builder.Services.AddGoogleAuth(googleClientId!);
         break;
     case "codespace" or "apikey":
@@ -154,13 +152,8 @@ if (authMode != "none")
 app.MapFallbackToFile("index.html");
 
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authMode);
-if (authMode == "google")
-{
-    var googleAuth = app.Services.GetRequiredService<GoogleAuthConfig>();
-    if (!googleAuth.IsConfigured)
-        app.Logger.LogWarning("Google auth enabled but no allowed email configured. "
-            + "Set GODMODE_ALLOWED_EMAIL env var or create ~/.godmode/auth.json");
-}
+if (authMode == "google" && string.IsNullOrEmpty(builder.Configuration["Authentication:Google:AllowedEmail"]))
+    app.Logger.LogWarning("Google auth enabled but Authentication:Google:AllowedEmail is not configured — all logins will be rejected");
 
 // Recover existing projects AFTER server starts (non-blocking)
 var projectManager = app.Services.GetRequiredService<IProjectManager>();

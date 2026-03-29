@@ -37,7 +37,7 @@ public static class GoogleAuthExtensions
     {
         group.MapPost("/google/login", async (
             GoogleTokenValidator validator,
-            GoogleAuthConfig googleAuth,
+            IConfiguration config,
             HttpContext ctx,
             GoogleLoginRequest request) =>
         {
@@ -46,7 +46,7 @@ public static class GoogleAuthExtensions
                 return Results.Unauthorized();
 
             var email = payload.Email?.ToLowerInvariant();
-            var allowedEmail = googleAuth.GetAllowedEmail();
+            var allowedEmail = config["Authentication:Google:AllowedEmail"]?.Trim().ToLowerInvariant();
 
             if (string.IsNullOrEmpty(email) || email != allowedEmail)
                 return Results.Json(new { error = "access_denied" }, statusCode: 403);
