@@ -52,13 +52,11 @@ export function CreateProject() {
   const setShowMcpBrowser = useAppStore(s => s.setShowMcpBrowser);
 
   const connectedServers = useMemo(
-    () => servers
-      .map((s, i) => ({ server: s, index: i }))
-      .filter(({ server }) => server.connectionState === 'connected' && server.roots.length > 0),
+    () => servers.filter(s => s.connectionState === 'connected' && s.roots.length > 0),
     [servers],
   );
 
-  const [selectedServerIndex, setSelectedServerIndex] = useState<number>(connectedServers[0]?.index ?? -1);
+  const [selectedServerId, setSelectedServerId] = useState<string>(connectedServers[0]?.registration.url ?? '');
   const [selectedRoot, setSelectedRoot] = useState<ProjectRootInfo | null>(null);
   const [selectedActionName, setSelectedActionName] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState('opus');
@@ -67,7 +65,7 @@ export function CreateProject() {
   const [error, setError] = useState<string | null>(null);
   const [effectiveMcpServers, setEffectiveMcpServers] = useState<Record<string, McpServerConfig>>({});
 
-  const server = servers[selectedServerIndex];
+  const server = servers.find(s => s.registration.url === selectedServerId);
   const roots = server?.roots ?? [];
 
   // Group roots by profile
@@ -186,11 +184,11 @@ export function CreateProject() {
             <div className="form-group">
               <label>Server</label>
               <select
-                value={selectedServerIndex}
-                onChange={e => { setSelectedServerIndex(Number(e.target.value)); setSelectedRoot(null); }}
+                value={selectedServerId}
+                onChange={e => { setSelectedServerId(e.target.value); setSelectedRoot(null); }}
               >
-                {connectedServers.map(({ server: s, index: i }) => (
-                  <option key={i} value={i}>
+                {connectedServers.map(s => (
+                  <option key={s.registration.url} value={s.registration.url}>
                     {s.registration.displayName || s.registration.url}
                   </option>
                 ))}
@@ -287,7 +285,7 @@ export function CreateProject() {
             <button
               className="btn btn-secondary btn-sm"
               onClick={() => setShowMcpBrowser(true, {
-                serverIndex: selectedServerIndex,
+                serverId: selectedServerId,
                 profileName: selectedRoot.ProfileName ?? 'Default',
                 rootName: selectedRoot.Name,
                 actionName: selectedActionName || undefined,

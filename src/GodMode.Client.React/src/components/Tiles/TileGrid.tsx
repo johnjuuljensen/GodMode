@@ -54,9 +54,9 @@ export function TileGrid() {
   }, [servers.map(s => `${s.connectionState}:${s.projects.map(p => p.Id).join(',')}`).join('|')]);
 
   const hasConnected = servers.some(s => s.connectionState === 'connected');
-  const allProjects = servers.flatMap((server, index) =>
+  const allProjects = servers.flatMap(server =>
     server.connectionState === 'connected'
-      ? server.projects.map(p => ({ serverIndex: index, project: p }))
+      ? server.projects.map(p => ({ serverId: server.registration.url, project: p }))
       : []
   );
 
@@ -71,17 +71,17 @@ export function TileGrid() {
   return (
     <div className="tile-grid-scroll">
       <div className="tile-grid">
-        {allProjects.map(({ serverIndex, project }) => (
+        {allProjects.map(({ serverId, project }) => (
           <ProjectTile
             key={project.Id}
             project={project}
             messages={tileMessages[project.Id] ?? []}
             isLoading={tileLoading[project.Id] ?? false}
             isSelected={
-              selectedProject?.serverIndex === serverIndex &&
+              selectedProject?.serverId === serverId &&
               selectedProject?.projectId === project.Id
             }
-            onSelect={() => selectProject(serverIndex, project.Id)}
+            onSelect={() => selectProject(serverId, project.Id)}
           />
         ))}
       </div>

@@ -6,17 +6,18 @@ import '../Mcp/McpProfilePanel.css';
 import './ProfileSettings.css';
 
 interface ProfileSettingsProps {
-  serverIndex: number;
+  serverId: string;
   profileName: string;
 }
 
-export function ProfileSettings({ serverIndex, profileName }: ProfileSettingsProps) {
+export function ProfileSettings({ serverId, profileName }: ProfileSettingsProps) {
   const servers = useAppStore(s => s.servers);
   const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
   const setShowMcpBrowser = useAppStore(s => s.setShowMcpBrowser);
 
-  const hub = servers[serverIndex]?.hub;
-  const roots = servers[serverIndex]?.roots ?? [];
+  const server = servers.find(s => s.registration.url === serverId);
+  const hub = server?.hub;
+  const roots = server?.roots ?? [];
   const profileRoot = roots.find(r => (r.ProfileName ?? 'Default') === profileName);
   const rootName = profileRoot?.Name ?? '';
 
@@ -218,7 +219,7 @@ export function ProfileSettings({ serverIndex, profileName }: ProfileSettingsPro
                 className="btn btn-primary"
                 onClick={() => {
                   setShowMcpBrowser(true, {
-                    serverIndex,
+                    serverId,
                     profileName,
                     rootName,
                   });

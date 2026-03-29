@@ -7,12 +7,12 @@ import './ProjectView.css';
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
 
 interface Props {
-  serverIndex: number;
+  serverId: string;
   projectId: string;
 }
 
-export function ProjectView({ serverIndex, projectId }: Props) {
-  const server = useAppStore(s => s.servers[serverIndex]);
+export function ProjectView({ serverId, projectId }: Props) {
+  const server = useAppStore(s => s.servers.find(sv => sv.registration.url === serverId));
   const outputMessages = useAppStore(s => s.outputMessages);
   const clearOutput = useAppStore(s => s.clearOutput);
   const question = useAppStore(s => s.question);

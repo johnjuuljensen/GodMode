@@ -2,14 +2,14 @@ import { useState } from 'react';
 import { useAppStore } from '../../store';
 
 interface Props {
-  index: number;
+  serverId: string;
 }
 
-export function EditServer({ index }: Props) {
-  const server = useAppStore(s => s.servers[index]);
+export function EditServer({ serverId }: Props) {
+  const server = useAppStore(s => s.servers.find(sv => sv.registration.url === serverId));
   const updateServer = useAppStore(s => s.updateServer);
   const removeServer = useAppStore(s => s.removeServer);
-  const setEditServerIndex = useAppStore(s => s.setEditServerIndex);
+  const setEditServerId = useAppStore(s => s.setEditServerId);
 
   const [url, setUrl] = useState(server?.registration.url ?? '');
   const [displayName, setDisplayName] = useState(server?.registration.displayName ?? '');
@@ -19,7 +19,7 @@ export function EditServer({ index }: Props) {
 
   const handleSave = () => {
     if (!url.trim()) return;
-    updateServer(index, {
+    updateServer(serverId, {
       url: url.trim(),
       displayName: displayName.trim() || url.trim(),
       accessToken: accessToken.trim() || undefined,
@@ -28,12 +28,12 @@ export function EditServer({ index }: Props) {
 
   const handleDelete = () => {
     if (confirm('Remove this server?')) {
-      removeServer(index);
+      removeServer(serverId);
     }
   };
 
   return (
-    <div className="modal-overlay" onClick={() => setEditServerIndex(null)}>
+    <div className="modal-overlay" onClick={() => setEditServerId(null)}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <h2>Edit Server</h2>
         <div className="form-group">
@@ -64,7 +64,7 @@ export function EditServer({ index }: Props) {
         <div className="btn-group">
           <button className="btn btn-primary" onClick={handleSave}>Save</button>
           <button className="btn btn-danger" onClick={handleDelete}>Delete</button>
-          <button className="btn btn-secondary" onClick={() => setEditServerIndex(null)}>Cancel</button>
+          <button className="btn btn-secondary" onClick={() => setEditServerId(null)}>Cancel</button>
         </div>
       </div>
     </div>

@@ -27,8 +27,8 @@ export function Sidebar() {
             </button>
           </div>
         ) : (
-          servers.map((server, index) => (
-            <ServerSection key={index} server={server} index={index} profileFilter={profileFilter} />
+          servers.map(server => (
+            <ServerSection key={server.registration.url} server={server} profileFilter={profileFilter} />
           ))
         )}
       </div>
@@ -36,14 +36,16 @@ export function Sidebar() {
   );
 }
 
-function ServerSection({ server, index, profileFilter }: { server: ServerState; index: number; profileFilter: string }) {
+function ServerSection({ server, profileFilter }: { server: ServerState; profileFilter: string }) {
   const connectServer = useAppStore(s => s.connectServer);
   const disconnectServer = useAppStore(s => s.disconnectServer);
   const restartServer = useAppStore(s => s.restartServer);
   const removeServer = useAppStore(s => s.removeServer);
   const selectProject = useAppStore(s => s.selectProject);
   const selectedProject = useAppStore(s => s.selectedProject);
-  const setEditServerIndex = useAppStore(s => s.setEditServerIndex);
+  const setEditServerId = useAppStore(s => s.setEditServerId);
+
+  const serverId = server.registration.url;
 
   // Group projects by profile, applying filter
   const profileGroups = useMemo(() => {
@@ -84,11 +86,11 @@ function ServerSection({ server, index, profileFilter }: { server: ServerState; 
     <div className="server-section">
       <ServerItem
         server={server}
-        onConnect={() => connectServer(index)}
-        onDisconnect={() => disconnectServer(index)}
-        onRestart={() => restartServer(index)}
-        onEdit={() => setEditServerIndex(index)}
-        onRemove={() => removeServer(index)}
+        onConnect={() => connectServer(serverId)}
+        onDisconnect={() => disconnectServer(serverId)}
+        onRestart={() => restartServer(serverId)}
+        onEdit={() => setEditServerId(serverId)}
+        onRemove={() => removeServer(serverId)}
       />
       {server.connectionState === 'connected' && (
         <div className="project-list">
@@ -102,10 +104,10 @@ function ServerSection({ server, index, profileFilter }: { server: ServerState; 
                     key={project.Id}
                     project={project}
                     isSelected={
-                      selectedProject?.serverIndex === index &&
+                      selectedProject?.serverId === serverId &&
                       selectedProject?.projectId === project.Id
                     }
-                    onSelect={() => selectProject(index, project.Id)}
+                    onSelect={() => selectProject(serverId, project.Id)}
                   />
                 ))}
               </ProfileSection>
@@ -116,10 +118,10 @@ function ServerSection({ server, index, profileFilter }: { server: ServerState; 
                 key={project.Id}
                 project={project}
                 isSelected={
-                  selectedProject?.serverIndex === index &&
+                  selectedProject?.serverId === serverId &&
                   selectedProject?.projectId === project.Id
                 }
-                onSelect={() => selectProject(index, project.Id)}
+                onSelect={() => selectProject(serverId, project.Id)}
               />
             ))
           )}

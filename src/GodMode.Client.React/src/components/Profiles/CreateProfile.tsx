@@ -4,7 +4,7 @@ import './ProfileSettings.css';
 
 export function CreateProfile() {
   const servers = useAppStore(s => s.servers);
-  const createProfileServerIndex = useAppStore(s => s.createProfileServerIndex);
+  const createProfileServerId = useAppStore(s => s.createProfileServerId);
   const setShowCreateProfile = useAppStore(s => s.setShowCreateProfile);
   const refreshProjects = useAppStore(s => s.refreshProjects);
 
@@ -14,15 +14,13 @@ export function CreateProfile() {
   const [creating, setCreating] = useState(false);
 
   // If multiple servers, let user pick; otherwise use the first connected one
-  const connectedServers = servers
-    .map((s, i) => ({ server: s, index: i }))
-    .filter(s => s.server.connectionState === 'connected');
+  const connectedServers = servers.filter(s => s.connectionState === 'connected');
 
-  const [selectedServerIndex, setSelectedServerIndex] = useState<number>(
-    createProfileServerIndex ?? connectedServers[0]?.index ?? 0
+  const [selectedServerId, setSelectedServerId] = useState<string>(
+    createProfileServerId ?? connectedServers[0]?.registration.url ?? ''
   );
 
-  const hub = servers[selectedServerIndex]?.hub;
+  const hub = servers.find(s => s.registration.url === selectedServerId)?.hub;
 
   const handleCreate = async () => {
     if (!hub || !name.trim()) return;
@@ -30,7 +28,7 @@ export function CreateProfile() {
     setCreating(true);
     try {
       await hub.createProfile(name.trim(), description.trim() || null);
-      await refreshProjects(selectedServerIndex);
+      await refreshProjects(selectedServerId);
       setShowCreateProfile(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create profile');
@@ -50,12 +48,12 @@ export function CreateProfile() {
           <div className="form-group">
             <label>Server</label>
             <select
-              value={selectedServerIndex}
-              onChange={e => setSelectedServerIndex(Number(e.target.value))}
+              value={selectedServerId}
+              onChange={e => setSelectedServerId(e.target.value)}
             >
               {connectedServers.map(s => (
-                <option key={s.index} value={s.index}>
-                  {s.server.registration.url}
+                <option key={s.registration.url} value={s.registration.url}>
+                  {s.registration.url}
                 </option>
               ))}
             </select>

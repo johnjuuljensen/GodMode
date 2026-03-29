@@ -292,17 +292,50 @@ public class LocalServer
 
     private async Task HandleRemoveRegistrationAsync(HttpListenerContext context, string path)
     {
-        var indexStr = path["/servers/registrations/".Length..];
-        if (!int.TryParse(indexStr, out var index))
+        var idOrIndex = Uri.UnescapeDataString(path["/servers/registrations/".Length..]);
+        var registry = _services.GetRequiredService<IServerRegistryService>();
+
+        if (int.TryParse(idOrIndex, out var index))
         {
-            context.Response.StatusCode = 400;
-            context.Response.Close();
-            return;
+            _logger.LogInformation("Removing server registration at index {Index}", index);
+            await registry.RemoveServerAsync(index);
+        }
+        else
+        {
+            // Resolve serverId to registration index via providers
+            _logger.LogInformation("Removing server registration by ID {ServerId}", idOrIndex);
+            var connectionService = _services.GetRequiredService<IServerConnectionService>();
+            var providers = await connectionService.GetAllProvidersAsync();
+            int? resolvedIndex = null;
+
+            foreach (var (provider, serverIndex) in providers)
+            {
+                try
+                {
+                    var servers = await provider.ListServersAsync();
+                    if (servers.Any(s => s.Id == idOrIndex))
+                    {
+                        resolvedIndex = serverIndex;
+                        break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error scanning provider at index {Index} for serverId {ServerId}", serverIndex, idOrIndex);
+                }
+            }
+
+            if (resolvedIndex is null)
+            {
+                _logger.LogWarning("Server ID {ServerId} not found in any provider", idOrIndex);
+                context.Response.StatusCode = 404;
+                context.Response.Close();
+                return;
+            }
+
+            await registry.RemoveServerAsync(resolvedIndex.Value);
         }
 
-        _logger.LogInformation("Removing server registration at index {Index}", index);
-        var registry = _services.GetRequiredService<IServerRegistryService>();
-        await registry.RemoveServerAsync(index);
         context.Response.StatusCode = 200;
         context.Response.Close();
         BroadcastEvent("serversChanged");

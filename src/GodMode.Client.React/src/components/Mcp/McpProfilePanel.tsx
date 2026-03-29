@@ -5,17 +5,18 @@ import './McpBrowser.css';
 import './McpProfilePanel.css';
 
 interface McpProfilePanelProps {
-  serverIndex: number;
+  serverId: string;
   profileName: string;
 }
 
-export function McpProfilePanel({ serverIndex, profileName }: McpProfilePanelProps) {
+export function McpProfilePanel({ serverId, profileName }: McpProfilePanelProps) {
   const servers = useAppStore(s => s.servers);
   const setShowMcpBrowser = useAppStore(s => s.setShowMcpBrowser);
   const setShowMcpProfile = useAppStore(s => s.setShowMcpProfile);
 
-  const hub = servers[serverIndex]?.hub;
-  const roots = servers[serverIndex]?.roots ?? [];
+  const server = servers.find(s => s.registration.url === serverId);
+  const hub = server?.hub;
+  const roots = server?.roots ?? [];
   // Pick the first root from this profile for the GetEffectiveMcpServers call
   const profileRoot = roots.find(r => (r.ProfileName ?? 'Default') === profileName);
 
@@ -217,7 +218,7 @@ export function McpProfilePanel({ serverIndex, profileName }: McpProfilePanelPro
               onClick={() => {
                 if (!profileRoot) return;
                 setShowMcpBrowser(true, {
-                  serverIndex,
+                  serverId,
                   profileName,
                   rootName: profileRoot.Name,
                 });

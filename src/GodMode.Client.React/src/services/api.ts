@@ -95,19 +95,17 @@ export async function addServer(req: AddServerRequest): Promise<void> {
   if (!res.ok) throw new Error(`Failed to add server: ${res.status}`);
 }
 
-export async function removeServer(indexOrId: number | string): Promise<void> {
+export async function removeServer(serverId: string): Promise<void> {
   if (isStandalone()) {
     const servers = loadStoredServers();
-    const idx = typeof indexOrId === 'string'
-      ? servers.findIndex(s => s.Url === indexOrId)
-      : indexOrId;
+    const idx = servers.findIndex(s => s.Url === serverId);
     if (idx >= 0) {
       servers.splice(idx, 1);
       saveStoredServers(servers);
     }
     return;
   }
-  const res = await fetch(`${getBaseUrl()}/servers/registrations/${indexOrId}`, { method: 'DELETE' });
+  const res = await fetch(`${getBaseUrl()}/servers/registrations/${encodeURIComponent(serverId)}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(`Failed to remove server: ${res.status}`);
 }
 

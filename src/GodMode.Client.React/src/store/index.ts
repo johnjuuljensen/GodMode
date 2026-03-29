@@ -25,21 +25,34 @@ export interface ServerState {
   profiles: ProfileInfo[];
 }
 
+/** The serverId is the server's registration URL */
+function getServerId(server: ServerState): string {
+  return server.registration.url;
+}
+
+function findServer(servers: ServerState[], serverId: string): ServerState | undefined {
+  return servers.find(s => s.registration.url === serverId);
+}
+
+function mapServer(servers: ServerState[], serverId: string, fn: (s: ServerState) => ServerState): ServerState[] {
+  return servers.map(s => s.registration.url === serverId ? fn(s) : s);
+}
+
 interface AppState {
   // Servers
   servers: ServerState[];
   loadServers: () => void;
   addServer: (reg: ServerRegistration) => void;
-  updateServer: (index: number, reg: ServerRegistration) => void;
-  removeServer: (index: number) => void;
-  connectServer: (index: number) => Promise<void>;
-  disconnectServer: (index: number) => Promise<void>;
-  restartServer: (index: number) => Promise<void>;
-  refreshProjects: (index: number) => Promise<void>;
+  updateServer: (serverId: string, reg: ServerRegistration) => void;
+  removeServer: (serverId: string) => void;
+  connectServer: (serverId: string) => Promise<void>;
+  disconnectServer: (serverId: string) => Promise<void>;
+  restartServer: (serverId: string) => Promise<void>;
+  refreshProjects: (serverId: string) => Promise<void>;
 
   // Selected project
-  selectedProject: { serverIndex: number; projectId: string } | null;
-  selectProject: (serverIndex: number, projectId: string) => void;
+  selectedProject: { serverId: string; projectId: string } | null;
+  selectProject: (serverId: string, projectId: string) => void;
   clearSelection: () => void;
 
   // Project output (for the selected project)
@@ -61,7 +74,7 @@ interface AppState {
   dismissedProjects: Record<string, boolean>;
 
   // Notification badges
-  waitingCounts: Record<number, number>;
+  waitingCounts: Record<string, number>;
   totalWaitingCount: number;
 
   // Tile view
@@ -81,39 +94,39 @@ interface AppState {
   // Create project
   showCreateProject: boolean;
   setShowCreateProject: (show: boolean) => void;
-  createProjectServerIndex: number | null;
+  createProjectServerId: string | null;
 
   // UI
   showAddServer: boolean;
   setShowAddServer: (show: boolean) => void;
-  editServerIndex: number | null;
-  setEditServerIndex: (index: number | null) => void;
+  editServerId: string | null;
+  setEditServerId: (id: string | null) => void;
 
   // MCP Browser
   showMcpBrowser: boolean;
-  mcpBrowserContext: { serverIndex: number; profileName: string; rootName?: string; actionName?: string } | null;
-  setShowMcpBrowser: (show: boolean, context?: { serverIndex: number; profileName: string; rootName?: string; actionName?: string }) => void;
+  mcpBrowserContext: { serverId: string; profileName: string; rootName?: string; actionName?: string } | null;
+  setShowMcpBrowser: (show: boolean, context?: { serverId: string; profileName: string; rootName?: string; actionName?: string }) => void;
 
   // MCP Profile Panel
   showMcpProfile: boolean;
-  mcpProfileContext: { serverIndex: number; profileName: string } | null;
-  setShowMcpProfile: (show: boolean, context?: { serverIndex: number; profileName: string }) => void;
+  mcpProfileContext: { serverId: string; profileName: string } | null;
+  setShowMcpProfile: (show: boolean, context?: { serverId: string; profileName: string }) => void;
 
   // Profile Settings
   showProfileSettings: boolean;
-  profileSettingsContext: { serverIndex: number; profileName: string } | null;
-  setShowProfileSettings: (show: boolean, context?: { serverIndex: number; profileName: string }) => void;
+  profileSettingsContext: { serverId: string; profileName: string } | null;
+  setShowProfileSettings: (show: boolean, context?: { serverId: string; profileName: string }) => void;
 
   // Create Profile
   showCreateProfile: boolean;
-  createProfileServerIndex: number | null;
-  setShowCreateProfile: (show: boolean, serverIndex?: number) => void;
+  createProfileServerId: string | null;
+  setShowCreateProfile: (show: boolean, serverId?: string) => void;
 
   // Root Manager
   showRootManager: boolean;
-  rootManagerServerIndex: number | null;
+  rootManagerServerId: string | null;
   rootManagerInitialTab: 'create' | 'import' | null;
-  setShowRootManager: (show: boolean, serverIndex?: number, initialTab?: 'create' | 'import') => void;
+  setShowRootManager: (show: boolean, serverId?: string, initialTab?: 'create' | 'import') => void;
 
   // App Settings
   showAppSettings: boolean;
@@ -127,14 +140,15 @@ interface AppState {
 }
 
 /** Recompute waiting counts from server projects + client-side question map, excluding dismissed */
-function computeWaitingCounts(servers: ServerState[], projectQuestions: Record<string, boolean>, dismissedProjects: Record<string, boolean> = {}): { waitingCounts: Record<number, number>; totalWaitingCount: number } {
-  const waitingCounts: Record<number, number> = {};
+function computeWaitingCounts(servers: ServerState[], projectQuestions: Record<string, boolean>, dismissedProjects: Record<string, boolean> = {}): { waitingCounts: Record<string, number>; totalWaitingCount: number } {
+  const waitingCounts: Record<string, number> = {};
   let totalWaitingCount = 0;
-  for (let i = 0; i < servers.length; i++) {
-    const count = servers[i].projects.filter(p =>
+  for (const server of servers) {
+    const id = getServerId(server);
+    const count = server.projects.filter(p =>
       !dismissedProjects[p.Id] && (p.State === 'WaitingInput' || projectQuestions[p.Id])
     ).length;
-    waitingCounts[i] = count;
+    waitingCounts[id] = count;
     totalWaitingCount += count;
   }
   return { waitingCounts, totalWaitingCount };
@@ -158,8 +172,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (info.hosted) {
           const reg: ServerRegistration = { url: origin, displayName: 'This Server' };
           get().addServer(reg);
-          const idx = get().servers.findIndex(s => s.registration.url === origin);
-          if (idx >= 0) get().connectServer(idx);
+          get().connectServer(origin);
         }
       }).catch(() => { /* Not hosted — use localStorage servers */ });
     }
@@ -192,40 +205,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  updateServer: (index, reg) => {
+  updateServer: (serverId, reg) => {
     set(state => {
-      const servers = [...state.servers];
-      if (index >= 0 && index < servers.length) {
-        servers[index] = { ...servers[index], registration: reg };
-        saveServers(servers.map(s => s.registration));
-      }
-      return { servers, editServerIndex: null };
+      const servers = mapServer(state.servers, serverId, s => ({ ...s, registration: reg }));
+      saveServers(servers.map(s => s.registration));
+      return { servers, editServerId: null };
     });
   },
 
-  removeServer: (index) => {
-    const server = get().servers[index];
+  removeServer: (serverId) => {
+    const server = findServer(get().servers, serverId);
     if (server) {
       server.hub.disconnect();
     }
     set(state => {
-      const servers = state.servers.filter((_, i) => i !== index);
+      const servers = state.servers.filter(s => s.registration.url !== serverId);
       saveServers(servers.map(s => s.registration));
-      return { servers, editServerIndex: null };
+      return { servers, editServerId: null };
     });
   },
 
-  connectServer: async (index) => {
+  connectServer: async (serverId) => {
     const state = get();
-    const server = state.servers[index];
+    const server = findServer(state.servers, serverId);
     if (!server) return;
 
     const updateConnectionState = (connectionState: ConnectionState) => {
       set(state => {
-        const servers = [...state.servers];
-        if (servers[index]) {
-          servers[index] = { ...servers[index], connectionState };
-        }
+        const servers = mapServer(state.servers, serverId, s => ({ ...s, connectionState }));
         return { servers };
       });
     };
@@ -234,37 +241,31 @@ export const useAppStore = create<AppState>((set, get) => ({
       onStateChanged: updateConnectionState,
       onProjectCreated: (status) => {
         set(state => {
-          const servers = [...state.servers];
-          if (servers[index]) {
-            const summary: ProjectSummary = {
-              Id: status.Id,
-              Name: status.Name,
-              State: status.State,
-              UpdatedAt: status.UpdatedAt,
-              CurrentQuestion: status.CurrentQuestion,
-              RootName: status.RootName,
-              ProfileName: status.ProfileName,
-            };
-            servers[index] = {
-              ...servers[index],
-              projects: [...servers[index].projects, summary],
-            };
-          }
+          const summary: ProjectSummary = {
+            Id: status.Id,
+            Name: status.Name,
+            State: status.State,
+            UpdatedAt: status.UpdatedAt,
+            CurrentQuestion: status.CurrentQuestion,
+            RootName: status.RootName,
+            ProfileName: status.ProfileName,
+          };
+          const servers = mapServer(state.servers, serverId, s => ({
+            ...s,
+            projects: [...s.projects, summary],
+          }));
           const counts = computeWaitingCounts(servers, state.projectQuestions, state.dismissedProjects);
           return { servers, ...counts };
         });
       },
       onProjectDeleted: (projectId) => {
         set(state => {
-          const servers = [...state.servers];
-          if (servers[index]) {
-            servers[index] = {
-              ...servers[index],
-              projects: servers[index].projects.filter(p => p.Id !== projectId),
-            };
-          }
+          const servers = mapServer(state.servers, serverId, s => ({
+            ...s,
+            projects: s.projects.filter(p => p.Id !== projectId),
+          }));
           const sel = state.selectedProject;
-          const clearSel = sel?.serverIndex === index && sel?.projectId === projectId;
+          const clearSel = sel?.serverId === serverId && sel?.projectId === projectId;
           const pq = { ...state.projectQuestions };
           delete pq[projectId];
           const counts = computeWaitingCounts(servers, pq, state.dismissedProjects);
@@ -278,26 +279,24 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
       onStatusChanged: (_projectId, status) => {
         set(state => {
-          const servers = [...state.servers];
-          if (servers[index]) {
-            servers[index] = {
-              ...servers[index],
-              projects: servers[index].projects.map(p =>
-                p.Id === status.Id
-                  ? { ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion }
-                  : p
-              ),
-            };
-          }
+          const servers = mapServer(state.servers, serverId, s => ({
+            ...s,
+            projects: s.projects.map(p =>
+              p.Id === status.Id
+                ? { ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion }
+                : p
+            ),
+          }));
 
           // Question management for the selected project
           const sel = state.selectedProject;
           let questionUpdate: Partial<AppState> = {};
           let pq = state.projectQuestions;
-          if (sel?.serverIndex === index && sel?.projectId === status.Id && !state.dismissedProjects[status.Id]) {
+          if (sel?.serverId === serverId && sel?.projectId === status.Id && !state.dismissedProjects[status.Id]) {
             const isWaitingOrIdle = status.State === 'WaitingInput' || status.State === 'Idle';
             if (isWaitingOrIdle) {
-              const project = servers[index]?.projects.find(p => p.Id === status.Id);
+              const currentServer = findServer(servers, serverId);
+              const project = currentServer?.projects.find(p => p.Id === status.Id);
               if (project) {
                 const detected = detectQuestionFromStatus(
                   status.State,
@@ -351,7 +350,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
 
         // Feed selected project output + question state
-        if (sel?.serverIndex === index && sel?.projectId === projectId) {
+        if (sel?.serverId === serverId && sel?.projectId === projectId) {
           const detected = detectQuestionFromMessage(message, s.question, s.lastInputSentAt, s.dismissedProjects[projectId]);
           set(state => ({
             outputMessages: [...state.outputMessages, message],
@@ -376,36 +375,35 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     try {
       await server.hub.connect(server.registration.url, server.registration.accessToken);
-      await get().refreshProjects(index);
+      await get().refreshProjects(serverId);
     } catch (err) {
       console.error('Failed to connect to server:', err);
       updateConnectionState('disconnected');
     }
   },
 
-  disconnectServer: async (index) => {
-    const server = get().servers[index];
+  disconnectServer: async (serverId) => {
+    const server = findServer(get().servers, serverId);
     if (server) {
       await server.hub.disconnect();
       set(state => {
-        const servers = [...state.servers];
-        if (servers[index]) {
-          servers[index] = { ...servers[index], projects: [], roots: [], profiles: [], connectionState: 'disconnected' };
-        }
+        const servers = mapServer(state.servers, serverId, s => ({
+          ...s, projects: [], roots: [], profiles: [], connectionState: 'disconnected',
+        }));
         const counts = computeWaitingCounts(servers, state.projectQuestions, state.dismissedProjects);
         return { servers, ...counts };
       });
     }
   },
 
-  restartServer: async (index) => {
-    await get().disconnectServer(index);
+  restartServer: async (serverId) => {
+    await get().disconnectServer(serverId);
     await new Promise(resolve => setTimeout(resolve, 2000));
-    await get().connectServer(index);
+    await get().connectServer(serverId);
   },
 
-  refreshProjects: async (index) => {
-    const server = get().servers[index];
+  refreshProjects: async (serverId) => {
+    const server = findServer(get().servers, serverId);
     if (!server || server.connectionState !== 'connected') return;
 
     try {
@@ -415,10 +413,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         server.hub.listProfiles(),
       ]);
       set(state => {
-        const servers = [...state.servers];
-        if (servers[index]) {
-          servers[index] = { ...servers[index], projects, roots, profiles };
-        }
+        const servers = mapServer(state.servers, serverId, s => ({ ...s, projects, roots, profiles }));
         const counts = computeWaitingCounts(servers, state.projectQuestions, state.dismissedProjects);
         return { servers, ...counts };
       });
@@ -429,8 +424,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Selection
   selectedProject: null,
-  selectProject: (serverIndex, projectId) => {
-    set({ selectedProject: { serverIndex, projectId }, outputMessages: [], question: emptyQuestion });
+  selectProject: (serverId, projectId) => {
+    set({ selectedProject: { serverId, projectId }, outputMessages: [], question: emptyQuestion });
   },
   clearSelection: () => {
     set({ selectedProject: null, outputMessages: [], question: emptyQuestion });
@@ -503,14 +498,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Create project
   showCreateProject: false,
-  setShowCreateProject: (show) => set({ showCreateProject: show, createProjectServerIndex: show ? null : null }),
-  createProjectServerIndex: null,
+  setShowCreateProject: (show) => set({ showCreateProject: show, createProjectServerId: show ? null : null }),
+  createProjectServerId: null,
 
   // UI
   showAddServer: false,
   setShowAddServer: (show) => set({ showAddServer: show }),
-  editServerIndex: null,
-  setEditServerIndex: (index) => set({ editServerIndex: index }),
+  editServerId: null,
+  setEditServerId: (id) => set({ editServerId: id }),
 
   // MCP Browser
   showMcpBrowser: false,
@@ -529,14 +524,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Create Profile
   showCreateProfile: false,
-  createProfileServerIndex: null,
-  setShowCreateProfile: (show, serverIndex) => set({ showCreateProfile: show, createProfileServerIndex: serverIndex ?? null }),
+  createProfileServerId: null,
+  setShowCreateProfile: (show, serverId) => set({ showCreateProfile: show, createProfileServerId: serverId ?? null }),
 
   // Root Manager
   showRootManager: false,
-  rootManagerServerIndex: null,
+  rootManagerServerId: null,
   rootManagerInitialTab: null,
-  setShowRootManager: (show, serverIndex, initialTab) => set({ showRootManager: show, rootManagerServerIndex: serverIndex ?? null, rootManagerInitialTab: initialTab ?? null }),
+  setShowRootManager: (show, serverId, initialTab) => set({ showRootManager: show, rootManagerServerId: serverId ?? null, rootManagerInitialTab: initialTab ?? null }),
 
   // App Settings
   showAppSettings: false,

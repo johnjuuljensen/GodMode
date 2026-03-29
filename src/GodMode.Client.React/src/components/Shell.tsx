@@ -23,7 +23,7 @@ function getInitialTheme(): 'dark' | 'light' {
 export function Shell() {
   const selectedProject = useAppStore(s => s.selectedProject);
   const showAddServer = useAppStore(s => s.showAddServer);
-  const editServerIndex = useAppStore(s => s.editServerIndex);
+  const editServerId = useAppStore(s => s.editServerId);
   const showCreateProject = useAppStore(s => s.showCreateProject);
   const setShowAddServer = useAppStore(s => s.setShowAddServer);
   const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
@@ -69,11 +69,11 @@ export function Shell() {
     ? profileFilter
     : realProfileNames.length === 1 ? realProfileNames[0] : null;
 
-  const profileServerIndex = useMemo(() => {
+  const profileServerId = useMemo(() => {
     if (!activeProfileName) return null;
-    for (let i = 0; i < servers.length; i++) {
-      if (servers[i].connectionState !== 'connected') continue;
-      if (servers[i].profiles.some(p => p.Name === activeProfileName)) return i;
+    for (const s of servers) {
+      if (s.connectionState !== 'connected') continue;
+      if (s.profiles.some(p => p.Name === activeProfileName)) return s.registration.url;
     }
     return null;
   }, [servers, activeProfileName]);
@@ -123,7 +123,10 @@ export function Shell() {
             {featureVisibility.roots && hasConnectedServers && (
               <button
                 className="shell-icon-btn"
-                onClick={() => setShowRootManager(true, servers.findIndex(s => s.connectionState === 'connected'))}
+                onClick={() => {
+                const first = servers.find(s => s.connectionState === 'connected');
+                if (first) setShowRootManager(true, first.registration.url);
+              }}
                 title="Manage roots"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -164,10 +167,10 @@ export function Shell() {
                 ))}
               </select>
             )}
-            {featureVisibility.profiles && hasConnectedServers && activeProfileName && profileServerIndex !== null && (
+            {featureVisibility.profiles && hasConnectedServers && activeProfileName && profileServerId !== null && (
               <button
                 className="shell-icon-btn"
-                onClick={() => setShowProfileSettings(true, { serverIndex: profileServerIndex, profileName: activeProfileName })}
+                onClick={() => setShowProfileSettings(true, { serverId: profileServerId, profileName: activeProfileName })}
                 title={`Settings for ${activeProfileName}`}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -229,7 +232,7 @@ export function Shell() {
           <TileGrid />
         ) : selectedProject ? (
           <ProjectView
-            serverIndex={selectedProject.serverIndex}
+            serverId={selectedProject.serverId}
             projectId={selectedProject.projectId}
           />
         ) : (
@@ -240,14 +243,14 @@ export function Shell() {
       </div>
 
       {showAddServer && <AddServer />}
-      {editServerIndex !== null && <EditServer index={editServerIndex} />}
+      {editServerId !== null && <EditServer serverId={editServerId} />}
       {showCreateProject && <CreateProject />}
       {showMcpBrowser && <McpBrowser />}
       {showMcpProfile && mcpProfileContext && (
-        <McpProfilePanel serverIndex={mcpProfileContext.serverIndex} profileName={mcpProfileContext.profileName} />
+        <McpProfilePanel serverId={mcpProfileContext.serverId} profileName={mcpProfileContext.profileName} />
       )}
       {showProfileSettings && profileSettingsContext && (
-        <ProfileSettings serverIndex={profileSettingsContext.serverIndex} profileName={profileSettingsContext.profileName} />
+        <ProfileSettings serverId={profileSettingsContext.serverId} profileName={profileSettingsContext.profileName} />
       )}
       {showCreateProfile && <CreateProfile />}
       {showRootManager && <RootManager />}

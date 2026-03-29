@@ -46,7 +46,7 @@ export function McpBrowser() {
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const hub = context ? servers[context.serverIndex]?.hub : null;
+  const hub = context ? servers.find(s => s.registration.url === context.serverId)?.hub : null;
 
   // Config fields from the selected server's connection schema
   const configFields = useMemo(() => {

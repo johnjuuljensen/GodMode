@@ -17,21 +17,22 @@ interface FooterAction {
 
 export function RootManager() {
   const servers = useAppStore(s => s.servers);
-  const rootManagerServerIndex = useAppStore(s => s.rootManagerServerIndex);
+  const rootManagerServerId = useAppStore(s => s.rootManagerServerId);
   const rootManagerInitialTab = useAppStore(s => s.rootManagerInitialTab);
   const setShowRootManager = useAppStore(s => s.setShowRootManager);
   const refreshProjects = useAppStore(s => s.refreshProjects);
 
   const connectedServers = useMemo(
-    () => servers.map((s, i) => ({ server: s, index: i })).filter(s => s.server.connectionState === 'connected'),
+    () => servers.filter(s => s.connectionState === 'connected'),
     [servers],
   );
 
-  const [selectedServerIndex, setSelectedServerIndex] = useState<number>(
-    rootManagerServerIndex ?? connectedServers[0]?.index ?? 0
+  const [selectedServerId, setSelectedServerId] = useState<string>(
+    rootManagerServerId ?? connectedServers[0]?.registration.url ?? ''
   );
-  const hub = servers[selectedServerIndex]?.hub;
-  const roots = servers[selectedServerIndex]?.roots ?? [];
+  const selectedServer = servers.find(s => s.registration.url === selectedServerId);
+  const hub = selectedServer?.hub;
+  const roots = selectedServer?.roots ?? [];
 
   const [view, setView] = useState<View>(rootManagerInitialTab === 'create' ? 'create' : rootManagerInitialTab === 'import' ? 'import' : 'list');
   const [footerAction, setFooterAction] = useState<FooterAction | null>(null);
@@ -50,12 +51,12 @@ export function RootManager() {
           {view === 'list' && connectedServers.length > 1 && (
             <select
               className="root-manager-server-select"
-              value={selectedServerIndex}
-              onChange={e => setSelectedServerIndex(Number(e.target.value))}
+              value={selectedServerId}
+              onChange={e => setSelectedServerId(e.target.value)}
             >
               {connectedServers.map(s => (
-                <option key={s.index} value={s.index}>
-                  {s.server.registration.displayName || s.server.registration.url}
+                <option key={s.registration.url} value={s.registration.url}>
+                  {s.registration.displayName || s.registration.url}
                 </option>
               ))}
             </select>
@@ -82,15 +83,15 @@ export function RootManager() {
           {view === 'create' && hub && (
             <CreateRootPane
               hub={hub}
-              profiles={servers[selectedServerIndex]?.profiles ?? []}
-              onCreated={() => { refreshProjects(selectedServerIndex); backToList(); }}
+              profiles={selectedServer?.profiles ?? []}
+              onCreated={() => { refreshProjects(selectedServerId); backToList(); }}
               onFooterAction={setFooterAction}
             />
           )}
           {view === 'import' && hub && (
             <ImportRootPane
               hub={hub}
-              onInstalled={() => { refreshProjects(selectedServerIndex); setView('list'); }}
+              onInstalled={() => { refreshProjects(selectedServerId); setView('list'); }}
             />
           )}
         </div>

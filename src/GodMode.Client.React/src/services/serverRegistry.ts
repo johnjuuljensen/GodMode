@@ -32,18 +32,20 @@ export function addServer(server: ServerRegistration): ServerRegistration[] {
   return servers;
 }
 
-export function updateServer(index: number, server: ServerRegistration): ServerRegistration[] {
+export function updateServer(url: string, server: ServerRegistration): ServerRegistration[] {
   const servers = loadServers();
-  if (index >= 0 && index < servers.length) {
+  const index = servers.findIndex(s => s.url === url);
+  if (index >= 0) {
     servers[index] = server;
     saveServers(servers);
   }
   return servers;
 }
 
-export function removeServer(index: number): ServerRegistration[] {
+export function removeServer(url: string): ServerRegistration[] {
   const servers = loadServers();
-  if (index >= 0 && index < servers.length) {
+  const index = servers.findIndex(s => s.url === url);
+  if (index >= 0) {
     servers.splice(index, 1);
     saveServers(servers);
   }
