@@ -12,7 +12,8 @@ public static class GoogleAuthExtensions
     public static IServiceCollection AddGoogleAuth(
         this IServiceCollection services, string clientId)
     {
-        services.AddSingleton(new GoogleTokenValidator(clientId));
+        services.AddSingleton(sp => new GoogleTokenValidator(
+            clientId, sp.GetRequiredService<ILogger<GoogleTokenValidator>>()));
         services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(options =>
             {

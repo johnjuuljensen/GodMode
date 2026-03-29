@@ -1,5 +1,4 @@
 using System.IdentityModel.Tokens.Jwt;
-using System.Text.Json;
 using Microsoft.IdentityModel.Tokens;
 
 namespace GodMode.Server.Auth;
@@ -11,13 +10,15 @@ namespace GodMode.Server.Auth;
 public class GoogleTokenValidator
 {
     private readonly string _clientId;
-    private static readonly HttpClient Http = new();
+    private readonly ILogger<GoogleTokenValidator> _logger;
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
     private static JsonWebKeySet? _cachedKeys;
     private static DateTime _cacheExpiry;
 
-    public GoogleTokenValidator(string clientId)
+    public GoogleTokenValidator(string clientId, ILogger<GoogleTokenValidator> logger)
     {
         _clientId = clientId;
+        _logger = logger;
     }
 
     public async Task<GoogleTokenPayload?> ValidateAsync(string idToken)
@@ -47,7 +48,7 @@ public class GoogleTokenValidator
             var sub = principal.FindFirst("sub")?.Value;
             var name = principal.FindFirst("name")?.Value;
 
-            if (emailVerified != "true" && emailVerified != "True")
+            if (emailVerified != "true")
                 return null;
 
             return new GoogleTokenPayload
@@ -58,8 +59,9 @@ public class GoogleTokenValidator
                 EmailVerified = true
             };
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Google token validation failed");
             return null;
         }
     }

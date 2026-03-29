@@ -41,16 +41,21 @@ builder.Services.AddSignalR()
             options.PayloadSerializerOptions.Converters.Add(converter);
     });
 
-builder.Services.AddCors(options =>
+// CORS: not needed in production (React is same-origin, MAUI proxy is server-to-server).
+// Only allow cross-origin in development (vite dev server on a different port).
+if (builder.Environment.IsDevelopment())
 {
-    options.AddDefaultPolicy(policy =>
+    builder.Services.AddCors(options =>
     {
-        policy.AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials()
-              .SetIsOriginAllowed(_ => true);
+        options.AddDefaultPolicy(policy =>
+        {
+            policy.AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials()
+                  .WithOrigins("http://localhost:5173", "https://localhost:5173");
+        });
     });
-});
+}
 
 builder.Services.AddHttpClient();
 
@@ -76,7 +81,8 @@ builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
-app.UseCors();
+if (app.Environment.IsDevelopment())
+    app.UseCors();
 
 if (authMode != "none")
 {
@@ -148,6 +154,13 @@ if (authMode != "none")
 app.MapFallbackToFile("index.html");
 
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authMode);
+if (authMode == "google")
+{
+    var googleAuth = app.Services.GetRequiredService<GoogleAuthConfig>();
+    if (!googleAuth.IsConfigured)
+        app.Logger.LogWarning("Google auth enabled but no allowed email configured. "
+            + "Set GODMODE_ALLOWED_EMAIL env var or create ~/.godmode/auth.json");
+}
 
 // Recover existing projects AFTER server starts (non-blocking)
 var projectManager = app.Services.GetRequiredService<IProjectManager>();
