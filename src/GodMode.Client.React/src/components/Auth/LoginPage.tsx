@@ -13,7 +13,7 @@ export function LoginPage({ clientId, error, onLogin }: LoginPageProps) {
 
   const handleCredentialResponse = useCallback(async (response: { credential: string }) => {
     try {
-      const res = await fetch('/api/auth/google-login', {
+      const res = await fetch('/api/auth/google/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credential: response.credential }),

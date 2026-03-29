@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
@@ -17,14 +18,17 @@ builder.Host.UseSerilog((context, configuration) =>
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 31));
 
-// Detect auth mode
+// Detect auth mode (exactly one, first match wins)
+var googleClientId = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")
+    ?? builder.Configuration["Authentication:Google:ClientId"];
 var isCodespace = string.Equals(
     Environment.GetEnvironmentVariable("CODESPACES"), "true", StringComparison.OrdinalIgnoreCase);
 var apiKey = builder.Configuration["Authentication:ApiKey"];
-var googleClientId = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")
-    ?? builder.Configuration["Authentication:Google:ClientId"];
-var useGoogleAuth = !string.IsNullOrEmpty(googleClientId);
-var requireAuth = isCodespace || !string.IsNullOrEmpty(apiKey) || useGoogleAuth;
+
+var authMode = !string.IsNullOrEmpty(googleClientId) ? "google"
+    : isCodespace                                     ? "codespace"
+    : !string.IsNullOrEmpty(apiKey)                   ? "apikey"
+    :                                                   "none";
 
 // Add services to the container
 builder.Services.AddSignalR()
@@ -48,17 +52,18 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddSingleton<GoogleAuthConfig>();
 builder.Services.AddHttpClient();
 
-if (useGoogleAuth)
+switch (authMode)
 {
-    builder.Services.AddGoogleAuth(googleClientId!);
-}
-else if (isCodespace || !string.IsNullOrEmpty(apiKey))
-{
-    builder.Services.AddAuthentication(GodModeAuthExtensions.SchemeName).AddGodModeAuth();
-    builder.Services.AddAuthorization();
+    case "google":
+        builder.Services.AddSingleton<GoogleAuthConfig>();
+        builder.Services.AddGoogleAuth(googleClientId!);
+        break;
+    case "codespace" or "apikey":
+        builder.Services.AddAuthentication(GodModeAuthExtensions.SchemeName).AddGodModeAuth();
+        builder.Services.AddAuthorization();
+        break;
 }
 
 // Register application services
@@ -73,7 +78,7 @@ var app = builder.Build();
 // Configure the HTTP request pipeline
 app.UseCors();
 
-if (requireAuth)
+if (authMode != "none")
 {
     app.UseAuthentication();
     app.UseAuthorization();
@@ -83,8 +88,28 @@ if (requireAuth)
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-if (useGoogleAuth)
-    app.MapGoogleAuthEndpoints(googleClientId!);
+// ── Auth endpoints (/api/auth/*) ───────────────────────────────
+
+var auth = app.MapGroup("/api/auth");
+
+// Challenge: tells the React client what auth method is required
+auth.MapGet("/challenge", (HttpContext ctx) => Results.Ok(new
+{
+    method = authMode,
+    clientId = authMode == "google" ? googleClientId : null,
+    authenticated = ctx.User.Identity?.IsAuthenticated == true || authMode == "none",
+})).AllowAnonymous();
+
+// Logout (shared across auth methods)
+auth.MapPost("/logout", async (HttpContext ctx) =>
+{
+    await ctx.SignOutAsync();
+    return Results.Ok(new { success = true });
+}).AllowAnonymous();
+
+// Method-specific endpoints
+if (authMode == "google")
+    auth.MapGoogleLoginEndpoint();
 
 app.MapGet("/api/status", () => new
 {
@@ -116,16 +141,12 @@ app.MapGet("/events", async (HttpContext ctx) =>
 });
 
 var hub = app.MapHub<ProjectHub>("/hubs/projects");
-if (requireAuth)
+if (authMode != "none")
     hub.RequireAuthorization();
 
 // SPA fallback: serve index.html for non-API/non-hub routes (React client routing)
 app.MapFallbackToFile("index.html");
 
-// Log auth mode
-var authMode = useGoogleAuth ? "Google OAuth (client-side)" :
-    isCodespace ? "Codespace (GitHub PAT)" :
-    !string.IsNullOrEmpty(apiKey) ? "API Key" : "None (local)";
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authMode);
 
 // Recover existing projects AFTER server starts (non-blocking)

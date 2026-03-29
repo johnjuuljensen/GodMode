@@ -7,7 +7,7 @@ namespace GodMode.Server.Auth;
 public static class GoogleAuthExtensions
 {
     /// <summary>
-    /// Registers Google OAuth services: config, token validator, cookie authentication.
+    /// Registers Google OAuth services: token validator, cookie authentication.
     /// </summary>
     public static IServiceCollection AddGoogleAuth(
         this IServiceCollection services, string clientId)
@@ -30,28 +30,11 @@ public static class GoogleAuthExtensions
     }
 
     /// <summary>
-    /// Maps Google OAuth endpoints under /api/auth.
+    /// Maps the Google-specific login endpoint onto an existing route group.
     /// </summary>
-    public static WebApplication MapGoogleAuthEndpoints(
-        this WebApplication app, string clientId)
+    public static RouteGroupBuilder MapGoogleLoginEndpoint(this RouteGroupBuilder group)
     {
-        var group = app.MapGroup("/api/auth");
-
-        // Auth challenge — tells the client what auth method is required.
-        // Only exposes the method type and public client ID (no sensitive config).
-        group.MapGet("/challenge", (HttpContext ctx) =>
-        {
-            var isAuthenticated = ctx.User.Identity?.IsAuthenticated == true;
-            return Results.Ok(new
-            {
-                method = "google",
-                clientId,
-                authenticated = isAuthenticated,
-            });
-        }).AllowAnonymous();
-
-        // Google ID token login — client sends token from GIS, server validates and issues cookie
-        group.MapPost("/google-login", async (
+        group.MapPost("/google/login", async (
             GoogleTokenValidator validator,
             GoogleAuthConfig googleAuth,
             HttpContext ctx,
@@ -80,14 +63,7 @@ public static class GoogleAuthExtensions
             return Results.Ok(new { success = true, email });
         }).AllowAnonymous();
 
-        // Logout
-        group.MapPost("/logout", async (HttpContext ctx) =>
-        {
-            await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-            return Results.Ok(new { success = true });
-        }).AllowAnonymous();
-
-        return app;
+        return group;
     }
 }
 
