@@ -11,6 +11,7 @@ import { McpProfilePanel } from './Mcp/McpProfilePanel';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { CreateProfile } from './Profiles/CreateProfile';
 import { RootManager } from './Roots/RootManager';
+import { AppSettings } from './Settings/AppSettings';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -43,6 +44,9 @@ export function Shell() {
   const setShowRootManager = useAppStore(s => s.setShowRootManager);
   const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
   const setShowCreateProfile = useAppStore(s => s.setShowCreateProfile);
+  const showAppSettings = useAppStore(s => s.showAppSettings);
+  const setShowAppSettings = useAppStore(s => s.setShowAppSettings);
+  const featureVisibility = useAppStore(s => s.featureVisibility);
 
   const allProfileNames = useMemo(() => {
     const names = new Set<string>();
@@ -116,7 +120,7 @@ export function Shell() {
                 </svg>
               </button>
             )}
-            {hasConnectedServers && (
+            {featureVisibility.roots && hasConnectedServers && (
               <button
                 className="shell-icon-btn"
                 onClick={() => setShowRootManager(true, servers.findIndex(s => s.connectionState === 'connected'))}
@@ -149,7 +153,7 @@ export function Shell() {
             )}
           </div>
           <div className="shell-header-right">
-            {showProfileFilter && (
+            {featureVisibility.profiles && showProfileFilter && (
               <select
                 className="shell-profile-filter"
                 value={profileFilter}
@@ -160,7 +164,7 @@ export function Shell() {
                 ))}
               </select>
             )}
-            {hasConnectedServers && activeProfileName && profileServerIndex !== null && (
+            {featureVisibility.profiles && hasConnectedServers && activeProfileName && profileServerIndex !== null && (
               <button
                 className="shell-icon-btn"
                 onClick={() => setShowProfileSettings(true, { serverIndex: profileServerIndex, profileName: activeProfileName })}
@@ -172,7 +176,7 @@ export function Shell() {
                 </svg>
               </button>
             )}
-            {hasConnectedServers && (
+            {featureVisibility.profiles && hasConnectedServers && (
               <button
                 className="shell-icon-btn"
                 onClick={() => setShowCreateProfile(true)}
@@ -186,6 +190,23 @@ export function Shell() {
                 </svg>
               </button>
             )}
+            <button
+              className="shell-icon-btn"
+              onClick={() => setShowAppSettings(true)}
+              title="Settings"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="4" y1="21" x2="4" y2="14" />
+                <line x1="4" y1="10" x2="4" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12" y2="3" />
+                <line x1="20" y1="21" x2="20" y2="16" />
+                <line x1="20" y1="12" x2="20" y2="3" />
+                <line x1="1" y1="14" x2="7" y2="14" />
+                <line x1="9" y1="8" x2="15" y2="8" />
+                <line x1="17" y1="16" x2="23" y2="16" />
+              </svg>
+            </button>
             <button
               className="shell-theme-toggle"
               onClick={toggleTheme}
@@ -230,6 +251,7 @@ export function Shell() {
       )}
       {showCreateProfile && <CreateProfile />}
       {showRootManager && <RootManager />}
+      {showAppSettings && <AppSettings />}
     </div>
   );
 }

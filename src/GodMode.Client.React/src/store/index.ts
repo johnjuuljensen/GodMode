@@ -114,6 +114,16 @@ interface AppState {
   rootManagerServerIndex: number | null;
   rootManagerInitialTab: 'create' | 'import' | null;
   setShowRootManager: (show: boolean, serverIndex?: number, initialTab?: 'create' | 'import') => void;
+
+  // App Settings
+  showAppSettings: boolean;
+  setShowAppSettings: (show: boolean) => void;
+  featureVisibility: {
+    roots: boolean;
+    mcp: boolean;
+    profiles: boolean;
+  };
+  setFeatureVisibility: (key: 'roots' | 'mcp' | 'profiles', visible: boolean) => void;
 }
 
 /** Recompute waiting counts from server projects + client-side question map, excluding dismissed */
@@ -527,4 +537,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   rootManagerServerIndex: null,
   rootManagerInitialTab: null,
   setShowRootManager: (show, serverIndex, initialTab) => set({ showRootManager: show, rootManagerServerIndex: serverIndex ?? null, rootManagerInitialTab: initialTab ?? null }),
+
+  // App Settings
+  showAppSettings: false,
+  setShowAppSettings: (show) => set({ showAppSettings: show }),
+  featureVisibility: (() => {
+    try {
+      const stored = localStorage.getItem('godmode-feature-visibility');
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
+    return { roots: true, mcp: true, profiles: true };
+  })(),
+  setFeatureVisibility: (key, visible) => set(state => {
+    const next = { ...state.featureVisibility, [key]: visible };
+    localStorage.setItem('godmode-feature-visibility', JSON.stringify(next));
+    return { featureVisibility: next };
+  }),
 }));
