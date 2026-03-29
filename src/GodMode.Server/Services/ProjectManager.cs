@@ -892,7 +892,7 @@ public class ProjectManager : IProjectManager
                     {
                         // Composite key is "profile/root" — split to extract both
                         var slashIdx = rn.IndexOf('/');
-                        if (slashIdx > 0)
+                        if (slashIdx >= 0)
                         {
                             profileName = rn[..slashIdx];
                             rootName = rn[(slashIdx + 1)..];
