@@ -3,12 +3,11 @@ import './Auth.css';
 
 interface LoginPageProps {
   clientId: string;
-  allowedEmail: string;
   error?: string;
   onLogin: () => void;
 }
 
-export function LoginPage({ clientId, allowedEmail, error, onLogin }: LoginPageProps) {
+export function LoginPage({ clientId, error, onLogin }: LoginPageProps) {
   const btnRef = useRef<HTMLDivElement>(null);
   const initialized = useRef(false);
 
@@ -23,9 +22,7 @@ export function LoginPage({ clientId, allowedEmail, error, onLogin }: LoginPageP
       if (res.ok) {
         onLogin();
       } else {
-        const data = await res.json();
-        // Reload with error
-        window.location.href = `/?error=${data.error || 'unknown'}`;
+        window.location.href = '/?error=access_denied';
       }
     } catch {
       window.location.href = '/?error=network';
@@ -80,8 +77,8 @@ export function LoginPage({ clientId, allowedEmail, error, onLogin }: LoginPageP
 
         {error && (
           <div className="auth-error">
-            {error === 'unauthorized'
-              ? `Access denied. Only ${allowedEmail} is allowed to sign in.`
+            {error === 'access_denied'
+              ? 'Access denied. You are not authorized to sign in.'
               : error === 'network'
               ? 'Network error. Please try again.'
               : 'An error occurred during sign in.'}
@@ -89,10 +86,6 @@ export function LoginPage({ clientId, allowedEmail, error, onLogin }: LoginPageP
         )}
 
         <div ref={btnRef} className="auth-google-container" />
-
-        <p className="auth-hint">
-          Authorized: {allowedEmail}
-        </p>
       </div>
     </div>
   );

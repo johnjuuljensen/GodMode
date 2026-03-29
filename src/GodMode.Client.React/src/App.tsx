@@ -2,33 +2,30 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from './store';
 import { Shell } from './components/Shell';
 import { LoginPage } from './components/Auth/LoginPage';
-import { ConfigPage } from './components/Auth/ConfigPage';
 
-interface AuthStatus {
-  googleAuthEnabled: boolean;
-  googleClientId: string | null;
-  configured: boolean;
-  allowedEmail: string | null;
+interface AuthChallenge {
+  method: string;
+  clientId?: string;
   authenticated: boolean;
-  email: string | null;
 }
 
 export default function App() {
   const loadServers = useAppStore(s => s.loadServers);
-  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
+  const [challenge, setChallenge] = useState<AuthChallenge | null>(null);
   const [loading, setLoading] = useState(true);
 
   const checkAuth = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/status');
+      const res = await fetch('/api/auth/challenge');
       if (res.ok) {
-        const data: AuthStatus = await res.json();
-        setAuthStatus(data);
+        setChallenge(await res.json());
       } else {
-        setAuthStatus({ googleAuthEnabled: false, googleClientId: null, configured: false, allowedEmail: null, authenticated: false, email: null });
+        // No auth endpoints available — no auth required
+        setChallenge({ method: 'none', authenticated: true });
       }
     } catch {
-      setAuthStatus({ googleAuthEnabled: false, googleClientId: null, configured: false, allowedEmail: null, authenticated: false, email: null });
+      // Server unreachable or no auth — proceed without auth
+      setChallenge({ method: 'none', authenticated: true });
     } finally {
       setLoading(false);
     }
@@ -39,30 +36,23 @@ export default function App() {
   }, [checkAuth]);
 
   useEffect(() => {
-    if (authStatus && (!authStatus.googleAuthEnabled || authStatus.authenticated)) {
+    if (challenge && (challenge.method === 'none' || challenge.authenticated)) {
       loadServers().catch(console.error);
     }
-  }, [authStatus, loadServers]);
+  }, [challenge, loadServers]);
 
   if (loading) return null;
 
-  if (authStatus?.googleAuthEnabled) {
-    if (!authStatus.configured) {
-      return <ConfigPage onConfigured={checkAuth} />;
-    }
-
-    if (!authStatus.authenticated) {
-      const params = new URLSearchParams(window.location.search);
-      const error = params.get('error') ?? undefined;
-      return (
-        <LoginPage
-          clientId={authStatus.googleClientId!}
-          allowedEmail={authStatus.allowedEmail!}
-          error={error}
-          onLogin={checkAuth}
-        />
-      );
-    }
+  if (challenge?.method === 'google' && !challenge.authenticated) {
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get('error') ?? undefined;
+    return (
+      <LoginPage
+        clientId={challenge.clientId!}
+        error={error}
+        onLogin={checkAuth}
+      />
+    );
   }
 
   return <Shell />;

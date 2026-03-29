@@ -1,10 +1,7 @@
-using System.Security.Claims;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
 using GodMode.Shared;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.Cookies;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -54,27 +51,7 @@ builder.Services.AddHttpClient();
 
 if (useGoogleAuth)
 {
-    builder.Services.AddSingleton(new GoogleTokenValidator(googleClientId!));
-    builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-        .AddCookie(options =>
-        {
-            options.Cookie.Name = "GodMode.Auth";
-            options.Cookie.SameSite = SameSiteMode.Lax;
-            options.Cookie.HttpOnly = true;
-            options.Events.OnRedirectToLogin = context =>
-            {
-                // Return 401 for API/SignalR requests instead of redirect
-                if (context.Request.Path.StartsWithSegments("/api") ||
-                    context.Request.Path.StartsWithSegments("/hubs"))
-                {
-                    context.Response.StatusCode = 401;
-                    return Task.CompletedTask;
-                }
-                context.Response.StatusCode = 401;
-                return Task.CompletedTask;
-            };
-        });
-    builder.Services.AddAuthorization();
+    builder.Services.AddGoogleAuth(googleClientId!);
 }
 else if (isCodespace || !string.IsNullOrEmpty(apiKey))
 {
@@ -100,73 +77,8 @@ if (requireAuth)
     app.UseAuthorization();
 }
 
-// Auth status endpoint — tells React what auth state we're in
-app.MapGet("/api/auth/status", (GoogleAuthConfig googleAuth, HttpContext ctx) =>
-{
-    var isAuthenticated = ctx.User.Identity?.IsAuthenticated == true;
-    var email = ctx.User.FindFirstValue(ClaimTypes.Email);
-
-    return new
-    {
-        googleAuthEnabled = useGoogleAuth,
-        googleClientId = useGoogleAuth ? googleClientId : null,
-        configured = googleAuth.IsConfigured,
-        allowedEmail = googleAuth.GetAllowedEmail(),
-        authenticated = isAuthenticated,
-        email
-    };
-}).AllowAnonymous();
-
-// Configure allowed email (only when not yet configured)
-app.MapPost("/api/auth/configure", (GoogleAuthConfig googleAuth, ConfigureEmailRequest request) =>
-{
-    if (googleAuth.IsConfigured)
-        return Results.BadRequest(new { error = "Already configured" });
-
-    if (string.IsNullOrWhiteSpace(request.Email) || !request.Email.Contains('@'))
-        return Results.BadRequest(new { error = "Invalid email address" });
-
-    googleAuth.SetAllowedEmail(request.Email);
-    return Results.Ok(new { success = true, email = googleAuth.GetAllowedEmail() });
-}).AllowAnonymous();
-
-// Google ID token login — client sends token from GIS, server validates and issues cookie
-app.MapPost("/api/auth/google-login", async (
-    GoogleTokenValidator validator,
-    GoogleAuthConfig googleAuth,
-    HttpContext ctx,
-    GoogleLoginRequest request) =>
-{
-    var payload = await validator.ValidateAsync(request.Credential);
-    if (payload == null)
-        return Results.Unauthorized();
-
-    var email = payload.Email?.ToLowerInvariant();
-    var allowedEmail = googleAuth.GetAllowedEmail();
-
-    if (string.IsNullOrEmpty(email) || email != allowedEmail)
-        return Results.Json(new { error = "unauthorized", message = $"Access denied. Only {allowedEmail} is allowed." }, statusCode: 403);
-
-    // Issue cookie
-    var claims = new[]
-    {
-        new Claim(ClaimTypes.NameIdentifier, payload.Subject),
-        new Claim(ClaimTypes.Email, email),
-        new Claim(ClaimTypes.Name, payload.Name ?? email),
-    };
-    var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
-    var principal = new ClaimsPrincipal(identity);
-    await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
-
-    return Results.Ok(new { success = true, email });
-}).AllowAnonymous();
-
-// Logout
-app.MapPost("/api/auth/logout", async (HttpContext ctx) =>
-{
-    await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
-    return Results.Ok(new { success = true });
-}).AllowAnonymous();
+if (useGoogleAuth)
+    app.MapGoogleAuthEndpoints(googleClientId!);
 
 app.MapGet("/", () => new
 {
@@ -205,6 +117,3 @@ app.Lifetime.ApplicationStarted.Register(() =>
 });
 
 app.Run();
-
-record ConfigureEmailRequest(string Email);
-record GoogleLoginRequest(string Credential);

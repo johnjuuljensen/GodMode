@@ -48,21 +48,5 @@ public class GoogleAuthConfig
         return null;
     }
 
-    public void SetAllowedEmail(string email)
-    {
-        var dir = Path.GetDirectoryName(ConfigPath)!;
-        Directory.CreateDirectory(dir);
-
-        var normalized = email.Trim().ToLowerInvariant();
-        var json = JsonSerializer.Serialize(new { allowedEmail = normalized },
-            new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(ConfigPath, json);
-        _cachedEmail = normalized;
-    }
-
     public bool IsConfigured => !string.IsNullOrEmpty(GetAllowedEmail());
-
-    public bool IsGoogleOAuthConfigured =>
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID")) &&
-        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET"));
 }
