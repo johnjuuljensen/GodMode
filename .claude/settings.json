@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -n \"CurrentQuestion\\\\|ProjectState\\\\|ProjectStatus\\\\|ProjectSummary\" /Users/mortenkremmer/Kode/GodMode/GodMode/src/GodMode.Shared/Models/*.cs)",
+      "Bash(npx tsc:*)",
+      "WebFetch(domain:smithery.ai)",
+      "WebFetch(domain:registry.smithery.ai)",
+      "Bash(grep \"\\\\.cs$\")",
+      "Read(//Users/mortenkremmer/.godmode/**)",
+      "Bash(curl -s http://localhost:31337/)",
+      "Bash(find /Users/mortenkremmer/Kode/GodMode/GodMode/src/GodMode.Shared -name ServerState* -o -name ServerInfo* -o -name ServerStatus* -o -name AddServerRequest* -o -name ServerRegistrationInfo*)",
+      "Bash(find /Users/mortenkremmer/Kode/GodMode/GodMode/src/GodMode.ClientBase -name IServerProvider* -o -name FileLoggerProvider* -o -name HubConnectionFactory*)",
+      "Bash(grep -n \"import.*ServerState\\\\|import.*ServerInfo\\\\|import.*ServerStatus\" /Users/mortenkremmer/Kode/GodMode/GodMode/src/GodMode.Client.React/src/**/*.ts)",
+      "Bash(npm run:*)",
+      "Bash(dotnet test:*)",
+      "Bash(find . -name *.Tests.csproj -o -name *Tests.csproj)",
+      "Bash(git fetch:*)",
+      "Bash(git ls-tree:*)",
+      "Bash(git merge:*)",
+      "Read(//tmp/**)",
+      "Bash(curl -s http://localhost:31337/api/info)",
+      "Bash(curl -s http://localhost:31337/health)",
+      "Bash(git -C /Users/mortenkremmer/Kode/GodMode/GodMode status)",
+      "Bash(git -C /Users/mortenkremmer/Kode/GodMode/GodMode diff --stat)",
+      "Bash(git -C /Users/mortenkremmer/Kode/GodMode/GodMode log --oneline -5)",
+      "Bash(git -C /Users/mortenkremmer/Kode/GodMode/GodMode diff)",
+      "Bash(git -C /Users/mortenkremmer/Kode/GodMode/GodMode add Directory.Packages.props src/GodMode.Client.React/src/App.tsx src/GodMode.Client.React/src/components/Auth/ src/GodMode.Server/GodMode.Server.csproj src/GodMode.Server/Program.cs src/GodMode.Server/appsettings.json src/GodMode.Server/Auth/GoogleAuthConfig.cs src/GodMode.Server/Auth/GoogleTokenValidator.cs)",
+      "Bash(git -C:*)",
+      "Bash(find /Users/mortenkremmer/Kode/GodMode/GodMode/src -name \"*.csproj\" -exec grep -l \"TargetFramework\" {})",
+      "Bash(git stash:*)"
+    ]
+  }
+}

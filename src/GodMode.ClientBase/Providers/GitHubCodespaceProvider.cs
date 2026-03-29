@@ -12,7 +12,7 @@ namespace GodMode.ClientBase.Providers;
 /// <summary>
 /// Host provider for GitHub Codespaces running GodMode.Server.
 /// </summary>
-public class GitHubCodespaceProvider : IHostProvider
+public class GitHubCodespaceProvider : IServerProvider
 {
     private readonly GitHubClient _client;
     private readonly string _token;
@@ -31,9 +31,9 @@ public class GitHubCodespaceProvider : IHostProvider
         };
     }
 
-    public async Task<IEnumerable<HostInfo>> ListHostsAsync()
+    public async Task<IEnumerable<ServerInfo>> ListHostsAsync()
     {
-        var hosts = new List<HostInfo>();
+        var hosts = new List<ServerInfo>();
 
         try
         {
@@ -53,11 +53,11 @@ public class GitHubCodespaceProvider : IHostProvider
                 _logger.LogDebug("  Probe {Name}: hasGodMode={HasGodMode}", codespace.Name, hasGodMode);
 
             foreach (var (codespace, _) in probeResults.Where(r => r.HasGodMode))
-                hosts.Add(ToHostInfo(codespace, HostState.Running));
+                hosts.Add(ToServerInfo(codespace, ServerState.Running));
 
             foreach (var (codespace, _) in probeResults.Where(r =>
                 !r.HasGodMode && (r.Codespace.DisplayName ?? r.Codespace.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
-                hosts.Add(ToHostInfo(codespace, HostState.Running));
+                hosts.Add(ToServerInfo(codespace, ServerState.Running));
 
             foreach (var codespace in notRunning.Where(c =>
                 (c.DisplayName ?? c.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
@@ -65,7 +65,7 @@ public class GitHubCodespaceProvider : IHostProvider
                 var mapped = MapCodespaceState(codespace.State);
                 _logger.LogDebug("  Non-running godmode codespace: {Name} ghState={GhState} mapped={Mapped}",
                     codespace.Name, codespace.State, mapped);
-                hosts.Add(ToHostInfo(codespace, mapped));
+                hosts.Add(ToServerInfo(codespace, mapped));
             }
         }
         catch (Exception ex)
@@ -77,12 +77,12 @@ public class GitHubCodespaceProvider : IHostProvider
         return hosts;
     }
 
-    public async Task<HostStatus> GetHostStatusAsync(string hostId)
+    public async Task<ServerStatus> GetServerStatusAsync(string hostId)
     {
         var codespace = await GetCodespaceByName(hostId)
             ?? throw new InvalidOperationException($"Codespace {hostId} not found");
 
-        return new HostStatus(codespace.Name, codespace.DisplayName ?? codespace.Name,
+        return new ServerStatus(codespace.Name, codespace.DisplayName ?? codespace.Name,
             "github", MapCodespaceState(codespace.State), codespace.WebUrl, 0, codespace.LastUsedAt);
     }
 
@@ -130,12 +130,12 @@ public class GitHubCodespaceProvider : IHostProvider
         return connection;
     }
 
-    private static HostInfo ToHostInfo(CodespaceInfo c, HostState state)
+    private static ServerInfo ToServerInfo(CodespaceInfo c, ServerState state)
     {
         var description = c.RepositoryFullName;
         if (!string.IsNullOrEmpty(c.Branch))
             description = $"{description} · {c.Branch}";
-        return new HostInfo(c.Name, c.DisplayName ?? c.Name, "github", state,
+        return new ServerInfo(c.Name, c.DisplayName ?? c.Name, "github", state,
             $"https://{c.Name}-31337.app.github.dev", description);
     }
 
@@ -153,13 +153,13 @@ public class GitHubCodespaceProvider : IHostProvider
         catch { return false; }
     }
 
-    private static HostState MapCodespaceState(string state) => state switch
+    private static ServerState MapCodespaceState(string state) => state switch
     {
-        "Available" => HostState.Running,
-        "Shutdown" or "Unavailable" => HostState.Stopped,
-        "Starting" or "Queued" or "Created" or "Provisioning" or "Rebuilding" => HostState.Starting,
-        "ShuttingDown" or "Stopping" => HostState.Stopping,
-        _ => HostState.Unknown
+        "Available" => ServerState.Running,
+        "Shutdown" or "Unavailable" => ServerState.Stopped,
+        "Starting" or "Queued" or "Created" or "Provisioning" or "Rebuilding" => ServerState.Starting,
+        "ShuttingDown" or "Stopping" => ServerState.Stopping,
+        _ => ServerState.Unknown
     };
 
     private async Task<List<CodespaceInfo>> GetCodespacesViaRestApi()

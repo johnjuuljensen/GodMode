@@ -1,0 +1,44 @@
+{
+  "hash": "60034a6a",
+  "configHash": "3d1487c2",
+  "lockfileHash": "f956a2d0",
+  "browserHash": "61f087a4",
+  "optimized": {
+    "@microsoft/signalr": {
+      "src": "../../node_modules/@microsoft/signalr/dist/esm/index.js",
+      "file": "@microsoft_signalr.js",
+      "fileHash": "313a682f",
+      "needsInterop": false
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "ba1552e9",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "88abd7de",
+      "needsInterop": true
+    },
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "89464e0a",
+      "needsInterop": true
+    },
+    "zustand": {
+      "src": "../../node_modules/zustand/esm/index.mjs",
+      "file": "zustand.js",
+      "fileHash": "2edf9a2b",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-CRPLlQ3x": {
+      "file": "chunk-CRPLlQ3x.js",
+      "isDynamicEntry": false
+    }
+  }
+}
