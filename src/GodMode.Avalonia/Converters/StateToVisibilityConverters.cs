@@ -21,8 +21,8 @@ public class StateToStartVisibilityConverter : IValueConverter
 {
 	public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
 	{
-		if (value is HostState state)
-			return state is HostState.Stopped or HostState.Unknown;
+		if (value is ServerState state)
+			return state is ServerState.Stopped or ServerState.Unknown;
 		return false;
 	}
 
@@ -34,8 +34,8 @@ public class StateToStopVisibilityConverter : IValueConverter
 {
 	public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
 	{
-		if (value is HostState state)
-			return state == HostState.Running;
+		if (value is ServerState state)
+			return state == ServerState.Running;
 		return false;
 	}
 
