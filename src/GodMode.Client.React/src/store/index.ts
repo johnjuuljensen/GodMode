@@ -8,7 +8,8 @@ import type {
   ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
   ServerInfo, CreateActionInfo,
 } from '../signalr/types';
-import { hostApi, type AddServerRequest } from '../services/hostApi';
+import * as api from '../services/hostApi';
+import type { AddServerRequest } from '../services/hostApi';
 import {
   type QuestionState, emptyQuestion, detectQuestionFromMessage,
   detectQuestionFromStatus, looksLikeQuestion,
@@ -231,9 +232,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadServers: async () => {
     console.info('[store] loadServers: waiting for host API');
-    await hostApi.waitUntilReady();
+    await api.waitUntilReady();
     try {
-      const servers = await hostApi.fetchServers();
+      const servers = await api.fetchServers();
       console.info(`[store] loadServers: fetched ${servers.length} servers:`, servers.map(s => `${s.Name}(${s.State})`));
       const existing = get().serverConnections;
 
@@ -260,7 +261,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Subscribe to SSE events (once)
       if (existing.length === 0) {
         console.info('[store] loadServers: subscribing to events');
-        hostApi.subscribeEvents((type) => {
+        api.subscribeEvents((type) => {
           if (type === 'serversChanged') {
             console.info('[store] SSE: serversChanged');
             get().loadServers();
@@ -285,7 +286,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addServer: async (req) => {
     try {
-      await hostApi.addServer(req);
+      await api.addServer(req);
       await get().loadServers();
       set({ showAddServer: false });
     } catch (err) {
@@ -297,7 +298,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const conn = get().getConnection(serverId);
     if (conn) conn.hub.disconnect();
     try {
-      await hostApi.removeServer(serverId);
+      await api.removeServer(serverId);
     } catch (err) {
       console.error('Failed to remove server:', err);
     }
@@ -307,7 +308,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   startServer: async (serverId) => {
     try {
-      await hostApi.startServer(serverId);
+      await api.startServer(serverId);
       // SSE will push serversChanged events as the server transitions states
     } catch (err) {
       console.error('Failed to start server:', err);
@@ -456,8 +457,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     try {
-      const hubUrl = hostApi.getHubUrl(serverId);
-      const hubOptions = hostApi.getHubOptions(serverId);
+      const hubUrl = api.getHubUrl(serverId);
+      const hubOptions = api.getHubOptions(serverId);
       console.info(`[store] connectServer: hub.connect(${hubUrl})...`);
       await conn.hub.connect(hubUrl, hubOptions);
       console.info(`[store] connectServer: connected, refreshing projects...`);
