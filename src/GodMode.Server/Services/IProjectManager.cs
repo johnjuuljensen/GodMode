@@ -97,6 +97,7 @@ public interface IProjectManager
     Task<RootPreview> PreviewRootFromTemplateAsync(string templateName, Dictionary<string, string> parameters);
     Task<RootPreview> GenerateRootWithLlmAsync(RootGenerationRequest request);
     Task CreateRootAsync(string profileName, string rootName, RootPreview preview);
+    Task DeleteRootAsync(string profileName, string rootName, bool force = false);
     Task<RootPreview> GetRootPreviewAsync(string profileName, string rootName);
     Task UpdateRootAsync(string profileName, string rootName, RootPreview preview);
 

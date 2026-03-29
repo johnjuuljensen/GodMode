@@ -202,6 +202,10 @@ export class GodModeHub {
     await this.connection!.invoke('CreateRoot', profileName, rootName, preview);
   }
 
+  async deleteRoot(profileName: string, rootName: string, force = false): Promise<void> {
+    await this.connection!.invoke('DeleteRoot', profileName, rootName, force);
+  }
+
   async exportRoot(profileName: string, rootName: string): Promise<Uint8Array> {
     return await this.connection!.invoke('ExportRoot', profileName, rootName);
   }

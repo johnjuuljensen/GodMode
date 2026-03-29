@@ -1741,6 +1741,48 @@ public class ProjectManager : IProjectManager
         return Task.CompletedTask;
     }
 
+    public Task DeleteRootAsync(string profileName, string rootName, bool force = false)
+    {
+        var rootsDir = _projectRootsDir
+            ?? throw new InvalidOperationException("ProjectRootsDir not configured — cannot delete roots");
+
+        var snap = _snapshot;
+        var compositeKey = CompositeKey(profileName, rootName);
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(compositeKey);
+        if (rootPath == null || !Directory.Exists(rootPath))
+            throw new InvalidOperationException($"Root '{rootName}' not found");
+
+        var configPath = Path.Combine(rootPath, ".godmode-root");
+        if (!Directory.Exists(configPath))
+            throw new InvalidOperationException($"Root '{rootName}' has no .godmode-root config");
+
+        // Check for existing projects under this root
+        if (!force)
+        {
+            var projectDirs = Directory.GetDirectories(rootPath)
+                .Where(d => !Path.GetFileName(d).StartsWith('.'))
+                .Where(d => Directory.Exists(Path.Combine(d, ".godmode")))
+                .ToList();
+
+            if (projectDirs.Count > 0)
+                throw new InvalidOperationException(
+                    $"Root '{rootName}' has {projectDirs.Count} project(s). Delete them first or use force=true.");
+        }
+
+        // Delete the .godmode-root config directory
+        Directory.Delete(configPath, recursive: true);
+
+        // If the root directory is now empty (or only has hidden files), remove it too
+        var remaining = Directory.GetFileSystemEntries(rootPath)
+            .Where(e => !Path.GetFileName(e).StartsWith('.'))
+            .ToList();
+        if (remaining.Count == 0)
+            Directory.Delete(rootPath, recursive: true);
+
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
     private static RootPreview InjectProfileName(RootPreview preview, string profileName)
     {
         var files = new Dictionary<string, string>(preview.Files);

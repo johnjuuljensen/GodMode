@@ -128,6 +128,9 @@ public interface IProjectHub
     /// <summary>Creates a new root from a preview.</summary>
     Task CreateRoot(string profileName, string rootName, RootPreview preview);
 
+    /// <summary>Deletes a root and its .godmode-root config. Fails if projects still exist under it.</summary>
+    Task DeleteRoot(string profileName, string rootName, bool force = false);
+
     /// <summary>Gets an existing root's files as a preview for editing.</summary>
     Task<RootPreview> GetRootPreview(string profileName, string rootName);
 

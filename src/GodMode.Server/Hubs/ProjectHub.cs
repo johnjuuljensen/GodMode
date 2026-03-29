@@ -211,6 +211,13 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.CreateRootAsync(profileName, rootName, preview);
     }
 
+    public async Task DeleteRoot(string profileName, string rootName, bool force = false)
+    {
+        _logger.LogInformation("Client {ConnectionId} deleting root '{Root}' in profile '{Profile}' (force={Force})",
+            Context.ConnectionId, rootName, profileName, force);
+        await _projectManager.DeleteRootAsync(profileName, rootName, force);
+    }
+
     public async Task<RootPreview> GetRootPreview(string profileName, string rootName)
     {
         _logger.LogInformation("Client {ConnectionId} getting root preview for '{Root}'",
