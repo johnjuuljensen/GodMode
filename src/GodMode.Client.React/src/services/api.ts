@@ -3,7 +3,7 @@
  * When running inside MAUI, calls the local proxy server.
  * When running standalone in a browser, uses localStorage for server management.
  */
-import type { HostInfo } from '../signalr/types';
+import type { ServerInfo } from '../signalr/types';
 
 declare global {
   interface Window {
@@ -58,7 +58,7 @@ function saveStoredServers(servers: StoredServer[]) {
   localStorage.setItem(SERVERS_KEY, JSON.stringify(servers));
 }
 
-function storedToHostInfo(s: StoredServer, _index: number): HostInfo {
+function storedToServerInfo(s: StoredServer, _index: number): ServerInfo {
   return {
     Id: s.Url, // use URL as stable ID
     Name: s.DisplayName || s.Url,
@@ -71,9 +71,9 @@ function storedToHostInfo(s: StoredServer, _index: number): HostInfo {
 
 // ── Unified API (delegates to MAUI proxy or localStorage) ──────
 
-export async function fetchServers(): Promise<HostInfo[]> {
+export async function fetchServers(): Promise<ServerInfo[]> {
   if (isStandalone()) {
-    return loadStoredServers().map(storedToHostInfo);
+    return loadStoredServers().map(storedToServerInfo);
   }
   const res = await fetch(`${getBaseUrl()}/servers`);
   if (!res.ok) throw new Error(`Failed to fetch servers: ${res.status}`);
