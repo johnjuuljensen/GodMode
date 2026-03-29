@@ -59,12 +59,19 @@ builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();
 
+// Frontend hosting (opt-in via EnableFrontend config, default false)
+var enableFrontend = string.Equals(
+    builder.Configuration["EnableFrontend"], "true", StringComparison.OrdinalIgnoreCase);
+
 // Configure the HTTP request pipeline
 app.UseCors();
 
-// Serve React static files from wwwroot (before auth so assets don't require auth)
-app.UseDefaultFiles();
-app.UseStaticFiles();
+if (enableFrontend)
+{
+    // Serve React static files from wwwroot (before auth so assets don't require auth)
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+}
 
 if (requireAuth)
 {
@@ -77,7 +84,7 @@ app.MapGet("/api/info", () => new
     service = "GodMode.Server",
     version = "1.0.0",
     status = "running",
-    hosted = true
+    hosted = enableFrontend
 }).AllowAnonymous();
 
 app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
@@ -86,13 +93,17 @@ var hub = app.MapHub<ProjectHub>("/hubs/projects");
 if (requireAuth)
     hub.RequireAuthorization();
 
-// SPA fallback — serve index.html for any unmatched routes (client-side routing)
-app.MapFallbackToFile("index.html");
+if (enableFrontend)
+{
+    // SPA fallback — serve index.html for any unmatched routes (client-side routing)
+    app.MapFallbackToFile("index.html");
+}
 
 // Log auth mode
 var authMode = isCodespace ? "Codespace (GitHub PAT)" :
     !string.IsNullOrEmpty(apiKey) ? "API Key" : "None (local)";
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authMode);
+app.Logger.LogInformation("Frontend hosting: {FrontendMode}", enableFrontend ? "Enabled" : "Disabled");
 
 // Recover existing projects AFTER server starts (non-blocking)
 var projectManager = app.Services.GetRequiredService<IProjectManager>();
