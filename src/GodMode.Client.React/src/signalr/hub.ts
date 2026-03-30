@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -147,5 +147,46 @@ export class GodModeHub {
 
   async deleteProject(projectId: string, force: boolean = false): Promise<void> {
     await this.connection!.invoke('DeleteProject', projectId, force);
+  }
+
+  // --- MCP Server Management ---
+
+  async addMcpServer(
+    serverName: string,
+    config: McpServerConfig,
+    targetLevel: string,
+    profileName?: string | null,
+    rootName?: string | null,
+    actionName?: string | null,
+  ): Promise<void> {
+    await this.connection!.invoke('AddMcpServer', serverName, config, targetLevel, profileName, rootName, actionName);
+  }
+
+  async removeMcpServer(
+    serverName: string,
+    targetLevel: string,
+    profileName?: string | null,
+    rootName?: string | null,
+    actionName?: string | null,
+  ): Promise<void> {
+    await this.connection!.invoke('RemoveMcpServer', serverName, targetLevel, profileName, rootName, actionName);
+  }
+
+  async getEffectiveMcpServers(
+    profileName: string,
+    rootName: string,
+    actionName?: string | null,
+  ): Promise<Record<string, McpServerConfig>> {
+    return await this.connection!.invoke('GetEffectiveMcpServers', profileName, rootName, actionName);
+  }
+
+  // --- Profile Management ---
+
+  async createProfile(name: string, description?: string | null): Promise<void> {
+    await this.connection!.invoke('CreateProfile', name, description);
+  }
+
+  async updateProfileDescription(name: string, description?: string | null): Promise<void> {
+    await this.connection!.invoke('UpdateProfileDescription', name, description);
   }
 }

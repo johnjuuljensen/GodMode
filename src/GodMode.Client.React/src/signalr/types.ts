@@ -85,6 +85,14 @@ export interface ServerInfo {
   Description?: string | null;
 }
 
+// --- MCP Server Configuration ---
+
+export interface McpServerConfig {
+  Command: string;
+  Args?: string[] | null;
+  Env?: Record<string, string> | null;
+}
+
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---
 
 export interface QuestionOptionData {
