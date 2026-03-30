@@ -134,4 +134,9 @@ public interface IProjectHub
     /// Uninstalls a shared root.
     /// </summary>
     Task UninstallSharedRoot(string rootName);
+
+    /// <summary>
+    /// Applies a manifest to converge the server to the declared state.
+    /// </summary>
+    Task<ConvergenceResult> ApplyManifest(string manifestContent, bool force = false);
 }
