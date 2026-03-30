@@ -23,6 +23,8 @@ public class ProjectManager : IProjectManager
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ConfigFileWriter _configFileWriter;
     private readonly RootCreator _rootCreator;
+    private readonly RootPackager _rootPackager;
+    private readonly RootInstaller _rootInstaller;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
@@ -65,6 +67,8 @@ public class ProjectManager : IProjectManager
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
         ConfigFileWriter configFileWriter,
         RootCreator rootCreator,
+        RootPackager rootPackager,
+        RootInstaller rootInstaller,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -75,6 +79,8 @@ public class ProjectManager : IProjectManager
         _hubContext = hubContext;
         _configFileWriter = configFileWriter;
         _rootCreator = rootCreator;
+        _rootPackager = rootPackager;
+        _rootInstaller = rootInstaller;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -878,6 +884,43 @@ public class ProjectManager : IProjectManager
     public Task UpdateProfileDescriptionAsync(string name, string? description)
     {
         _configFileWriter.UpdateProfileDescription(name, description);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task<byte[]> ExportRootAsync(string profileName, string rootName)
+    {
+        var snap = _snapshot;
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+        var bytes = _rootPackager.Export(rootPath, rootName);
+        return Task.FromResult(bytes);
+    }
+
+    public Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes) =>
+        Task.FromResult(RootPackager.PreviewFromBytes(packageBytes));
+
+    public Task<SharedRootPreview> PreviewImportFromUrlAsync(string url) =>
+        _rootInstaller.PreviewFromUrlAsync(url);
+
+    public Task<SharedRootPreview> PreviewImportFromGitAsync(string gitUrl, string? path, string? gitRef) =>
+        _rootInstaller.PreviewFromGitAsync(gitUrl, path, gitRef);
+
+    public Task InstallSharedRootAsync(string rootName, SharedRootPreview preview)
+    {
+        if (_projectRootsDir == null)
+            throw new InvalidOperationException("ProjectRootsDir is not configured.");
+
+        _rootInstaller.Install(_projectRootsDir, rootName, preview);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task UninstallSharedRootAsync(string rootName)
+    {
+        if (_projectRootsDir == null)
+            throw new InvalidOperationException("ProjectRootsDir is not configured.");
+
+        _rootInstaller.Uninstall(_projectRootsDir, rootName);
         RebuildSnapshot();
         return Task.CompletedTask;
     }

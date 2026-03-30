@@ -167,6 +167,42 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.UpdateProfileDescriptionAsync(name, description);
     }
 
+    public async Task<byte[]> ExportRoot(string profileName, string rootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} exporting root '{RootName}'", Context.ConnectionId, rootName);
+        return await _projectManager.ExportRootAsync(profileName, rootName);
+    }
+
+    public async Task<SharedRootPreview> PreviewImportFromBytes(byte[] packageBytes)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing import from bytes", Context.ConnectionId);
+        return await _projectManager.PreviewImportFromBytesAsync(packageBytes);
+    }
+
+    public async Task<SharedRootPreview> PreviewImportFromUrl(string url)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing import from URL", Context.ConnectionId);
+        return await _projectManager.PreviewImportFromUrlAsync(url);
+    }
+
+    public async Task<SharedRootPreview> PreviewImportFromGit(string gitUrl, string? path = null, string? gitRef = null)
+    {
+        _logger.LogInformation("Client {ConnectionId} previewing import from git {Url}", Context.ConnectionId, gitUrl);
+        return await _projectManager.PreviewImportFromGitAsync(gitUrl, path, gitRef);
+    }
+
+    public async Task InstallSharedRoot(string rootName, SharedRootPreview preview)
+    {
+        _logger.LogInformation("Client {ConnectionId} installing shared root '{RootName}'", Context.ConnectionId, rootName);
+        await _projectManager.InstallSharedRootAsync(rootName, preview);
+    }
+
+    public async Task UninstallSharedRoot(string rootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} uninstalling shared root '{RootName}'", Context.ConnectionId, rootName);
+        await _projectManager.UninstallSharedRootAsync(rootName);
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);

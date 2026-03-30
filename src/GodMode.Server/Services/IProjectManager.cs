@@ -106,4 +106,11 @@ public interface IProjectManager
     /// Updates a profile's description in appsettings.json.
     /// </summary>
     Task UpdateProfileDescriptionAsync(string name, string? description);
+
+    Task<byte[]> ExportRootAsync(string profileName, string rootName);
+    Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes);
+    Task<SharedRootPreview> PreviewImportFromUrlAsync(string url);
+    Task<SharedRootPreview> PreviewImportFromGitAsync(string gitUrl, string? path, string? gitRef);
+    Task InstallSharedRootAsync(string rootName, SharedRootPreview preview);
+    Task UninstallSharedRootAsync(string rootName);
 }
