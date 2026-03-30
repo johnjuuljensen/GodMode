@@ -6,6 +6,8 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
+import { RootManager } from './Roots/RootManager';
+import { ProfileSettings } from './Profiles/ProfileSettings';
 import { isMaui, openDevTools } from '../services/hostApi';
 import './Shell.css';
 
@@ -27,6 +29,10 @@ export function Shell() {
   const profileFilter = useAppStore(s => s.profileFilter);
   const setProfileFilter = useAppStore(s => s.setProfileFilter);
   const profileFilterOptions = useAppStore(s => s.profileFilterOptions);
+  const showRootManager = useAppStore(s => s.showRootManager);
+  const setShowRootManager = useAppStore(s => s.setShowRootManager);
+  const showProfileSettings = useAppStore(s => s.showProfileSettings);
+  const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
 
   const showProfileFilter = profileFilterOptions.length > 2;
 
@@ -67,6 +73,12 @@ export function Shell() {
                 {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
             )}
+            <button className="shell-view-toggle" onClick={() => setShowRootManager(true)} title="Root Manager">
+              Roots
+            </button>
+            <button className="shell-view-toggle" onClick={() => setShowProfileSettings(true)} title="Profile Settings">
+              Profiles
+            </button>
             <button className="shell-theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
               {theme === 'dark' ? '☀' : '☾'}
             </button>
@@ -93,6 +105,8 @@ export function Shell() {
       {showAddServer && <AddServer />}
       {editServerId !== null && <EditServer serverId={editServerId} />}
       {showCreateProject && <CreateProject />}
+      {showRootManager && <RootManager />}
+      {showProfileSettings && <ProfileSettings />}
     </div>
   );
 }
