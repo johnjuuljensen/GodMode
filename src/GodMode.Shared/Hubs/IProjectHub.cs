@@ -73,6 +73,31 @@ public interface IProjectHub
     Task DeleteProject(string projectId, bool force = false);
 
     /// <summary>
+    /// Adds an MCP server at the specified level (profile, root, or action).
+    /// </summary>
+    /// <param name="serverName">MCP server name.</param>
+    /// <param name="config">MCP server configuration.</param>
+    /// <param name="targetLevel">Target level: "profile", "root", or "action".</param>
+    /// <param name="profileName">Required for profile-level writes.</param>
+    /// <param name="rootName">Required for root/action-level writes.</param>
+    /// <param name="actionName">Required for action-level writes.</param>
+    Task AddMcpServer(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName = null, string? rootName = null, string? actionName = null);
+
+    /// <summary>
+    /// Removes an MCP server at the specified level.
+    /// </summary>
+    Task RemoveMcpServer(string serverName, string targetLevel,
+        string? profileName = null, string? rootName = null, string? actionName = null);
+
+    /// <summary>
+    /// Gets the effective MCP servers for a given profile/root/action combination
+    /// after three-level merge (profile -> root -> action).
+    /// </summary>
+    Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServers(
+        string profileName, string rootName, string? actionName = null);
+
+    /// <summary>
     /// Creates a new profile with an optional description.
     /// </summary>
     Task CreateProfile(string name, string? description);

@@ -793,6 +793,135 @@ public class ProjectManager : IProjectManager
         await Task.CompletedTask;
     }
 
+    public Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        switch (targetLevel.ToLowerInvariant())
+        {
+            case "profile":
+                ArgumentNullException.ThrowIfNull(profileName);
+                _configFileWriter.AddMcpServerToProfile(profileName, serverName, config);
+                break;
+            case "root":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                var rootPath = ResolveRootPath(profileName, rootName);
+                MutateRootConfigMcpServers(rootPath, null, (servers) => servers[serverName] = config);
+                break;
+            case "action":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                ArgumentNullException.ThrowIfNull(actionName);
+                var actionRootPath = ResolveRootPath(profileName, rootName);
+                MutateRootConfigMcpServers(actionRootPath, actionName, (servers) => servers[serverName] = config);
+                break;
+            default:
+                throw new ArgumentException($"Unknown target level '{targetLevel}'. Must be 'profile', 'root', or 'action'.");
+        }
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveMcpServerAsync(string serverName, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        switch (targetLevel.ToLowerInvariant())
+        {
+            case "profile":
+                ArgumentNullException.ThrowIfNull(profileName);
+                _configFileWriter.RemoveMcpServerFromProfile(profileName, serverName);
+                break;
+            case "root":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                var rootPath = ResolveRootPath(profileName, rootName);
+                MutateRootConfigMcpServers(rootPath, null, (servers) => servers.Remove(serverName));
+                break;
+            case "action":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                ArgumentNullException.ThrowIfNull(actionName);
+                var actionRootPath = ResolveRootPath(profileName, rootName);
+                MutateRootConfigMcpServers(actionRootPath, actionName, (servers) => servers.Remove(serverName));
+                break;
+            default:
+                throw new ArgumentException($"Unknown target level '{targetLevel}'.");
+        }
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
+        string profileName, string rootName, string? actionName)
+    {
+        var snap = _snapshot;
+        snap.Profiles.TryGetValue(profileName, out var profileConfig);
+
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+        var config = _rootConfigReader.ReadConfig(rootPath);
+        var action = config.ResolveAction(actionName);
+
+        // Three-level merge: profile -> root base -> action
+        var result = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase);
+        if (profileConfig?.McpServers != null)
+            foreach (var (k, v) in profileConfig.McpServers)
+                result[k] = v;
+        // Root-level MCP servers come through action (since RootConfigReader already merges base+overlay)
+        if (action?.McpServers != null)
+            foreach (var (k, v) in action.McpServers)
+                result[k] = v;
+
+        return Task.FromResult(result);
+    }
+
+    private string ResolveRootPath(string profileName, string rootName) =>
+        _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+
+    /// <summary>
+    /// Reads a root or action config.json, mutates the mcpServers section, and writes back.
+    /// </summary>
+    private static void MutateRootConfigMcpServers(string rootPath, string? actionName,
+        Action<Dictionary<string, McpServerConfig>> mutate)
+    {
+        var godModeRootPath = Path.Combine(rootPath, ".godmode-root");
+        var configFileName = actionName != null ? $"config.{actionName}.json" : "config.json";
+        var configPath = Path.Combine(godModeRootPath, configFileName);
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = true,
+            AllowTrailingCommas = true,
+            ReadCommentHandling = JsonCommentHandling.Skip
+        };
+
+        Dictionary<string, object?>? raw = null;
+        if (File.Exists(configPath))
+        {
+            var json = File.ReadAllText(configPath);
+            raw = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, options);
+        }
+        raw ??= new Dictionary<string, object?>();
+
+        // Parse existing mcpServers or create empty
+        var mcpServers = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase);
+        if (raw.TryGetValue("mcpServers", out var existing) && existing is JsonElement elem)
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, McpServerConfig>>(elem.GetRawText(), options);
+            if (parsed != null)
+                foreach (var (k, v) in parsed)
+                    mcpServers[k] = v;
+        }
+
+        mutate(mcpServers);
+
+        // Update raw and write back
+        raw["mcpServers"] = mcpServers;
+        var output = JsonSerializer.Serialize(raw, options);
+        Directory.CreateDirectory(godModeRootPath);
+        File.WriteAllText(configPath, output);
+    }
+
     public Task CreateProfileAsync(string name, string? description)
     {
         _configFileWriter.CreateProfile(name, description);

@@ -78,6 +78,24 @@ public interface IProjectManager
     Task RecoverProjectsAsync();
 
     /// <summary>
+    /// Adds an MCP server at the specified level.
+    /// </summary>
+    Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName, string? rootName, string? actionName);
+
+    /// <summary>
+    /// Removes an MCP server at the specified level.
+    /// </summary>
+    Task RemoveMcpServerAsync(string serverName, string targetLevel,
+        string? profileName, string? rootName, string? actionName);
+
+    /// <summary>
+    /// Gets effective MCP servers after three-level merge.
+    /// </summary>
+    Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
+        string profileName, string rootName, string? actionName);
+
+    /// <summary>
     /// Creates a new profile and persists it to appsettings.json.
     /// </summary>
     Task CreateProfileAsync(string name, string? description);
