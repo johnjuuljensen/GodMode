@@ -1,41 +1,50 @@
-# Build stage
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+# ── Build React client ──
+FROM node:22-slim AS react-build
+WORKDIR /app
+COPY src/GodMode.Client.React/package.json src/GodMode.Client.React/package-lock.json* ./
+RUN npm ci
+COPY src/GodMode.Client.React/ .
+RUN npm run build
+
+# ── Build .NET server ──
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
 WORKDIR /src
 
-# Copy project files
-COPY ["GodMode.Server/GodMode.Server.csproj", "GodMode.Server/"]
-COPY ["GodMode.Shared/GodMode.Shared.csproj", "GodMode.Shared/"]
+# Copy project files for restore (layer caching)
+COPY Directory.Packages.props ./
+COPY src/Directory.Build.props src/
+COPY src/GodMode.Server/GodMode.Server.csproj src/GodMode.Server/
+COPY src/GodMode.Shared/GodMode.Shared.csproj src/GodMode.Shared/
+COPY src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj src/GodMode.ProjectFiles/
+COPY src/GodMode.AI/GodMode.AI.csproj src/GodMode.AI/
+RUN dotnet restore src/GodMode.Server/GodMode.Server.csproj
 
-# Restore dependencies
-RUN dotnet restore "GodMode.Server/GodMode.Server.csproj"
+# Copy source and publish
+COPY src/GodMode.Server/ src/GodMode.Server/
+COPY src/GodMode.Shared/ src/GodMode.Shared/
+COPY src/GodMode.ProjectFiles/ src/GodMode.ProjectFiles/
+COPY src/GodMode.AI/ src/GodMode.AI/
+RUN dotnet publish src/GodMode.Server/GodMode.Server.csproj -c Release -o /app/publish -p:PublishReactClient=false
 
-# Copy source code
-COPY . .
+# Copy React build output into wwwroot
+COPY --from=react-build /app/dist /app/publish/wwwroot/
 
-# Build and publish
-WORKDIR "/src/GodMode.Server"
-RUN dotnet publish "GodMode.Server.csproj" -c Release -o /app/publish
+# ── Runtime ──
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
 
-# Runtime stage
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS final
+RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
 
-# Install git and claude CLI (if available via package manager)
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install Claude Code CLI
+RUN curl -fsSL https://claude.ai/install.sh | sh || true
 
 WORKDIR /app
-COPY --from=build /app/publish .
+COPY --from=dotnet-build /app/publish .
 
-# Create projects directory
-RUN mkdir -p /app/projects
+RUN mkdir -p /app/projects /data
 
-# Expose port
 EXPOSE 31337
 
-# Set environment variables
 ENV ASPNETCORE_URLS=http://+:31337
-ENV ProjectsPath=/app/projects
+ENV HOME=/root
 
 ENTRYPOINT ["dotnet", "GodMode.Server.dll"]
