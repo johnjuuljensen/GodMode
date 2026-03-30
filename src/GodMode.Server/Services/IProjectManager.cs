@@ -78,6 +78,26 @@ public interface IProjectManager
     Task RecoverProjectsAsync();
 
     /// <summary>
+    /// Creates a new project root on disk.
+    /// </summary>
+    Task CreateRootAsync(string rootName, RootPreview preview, string? profileName);
+
+    /// <summary>
+    /// Deletes a project root from disk.
+    /// </summary>
+    Task DeleteRootAsync(string profileName, string rootName, bool force);
+
+    /// <summary>
+    /// Gets a preview of an existing root.
+    /// </summary>
+    Task<RootPreview?> GetRootPreviewAsync(string profileName, string rootName);
+
+    /// <summary>
+    /// Updates a root's .godmode-root/ contents.
+    /// </summary>
+    Task UpdateRootAsync(string profileName, string rootName, RootPreview preview);
+
+    /// <summary>
     /// Creates a new profile and persists it to appsettings.json.
     /// </summary>
     Task CreateProfileAsync(string name, string? description);

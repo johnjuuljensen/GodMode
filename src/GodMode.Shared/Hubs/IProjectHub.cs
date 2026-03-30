@@ -73,6 +73,29 @@ public interface IProjectHub
     Task DeleteProject(string projectId, bool force = false);
 
     /// <summary>
+    /// Creates a new project root on disk with the given files.
+    /// </summary>
+    /// <param name="rootName">Name for the root directory.</param>
+    /// <param name="preview">File contents to write into .godmode-root/.</param>
+    /// <param name="profileName">Optional profile to associate with (for autodiscovery).</param>
+    Task CreateRoot(string rootName, RootPreview preview, string? profileName = null);
+
+    /// <summary>
+    /// Deletes a project root from disk.
+    /// </summary>
+    Task DeleteRoot(string profileName, string rootName, bool force = false);
+
+    /// <summary>
+    /// Gets a preview of an existing root's .godmode-root/ contents.
+    /// </summary>
+    Task<RootPreview?> GetRootPreview(string profileName, string rootName);
+
+    /// <summary>
+    /// Updates a root by overwriting its .godmode-root/ contents.
+    /// </summary>
+    Task UpdateRoot(string profileName, string rootName, RootPreview preview);
+
+    /// <summary>
     /// Creates a new profile with an optional description.
     /// </summary>
     Task CreateProfile(string name, string? description);

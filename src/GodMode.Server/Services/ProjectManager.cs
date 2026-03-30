@@ -22,6 +22,7 @@ public class ProjectManager : IProjectManager
     private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ConfigFileWriter _configFileWriter;
+    private readonly RootCreator _rootCreator;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
@@ -63,6 +64,7 @@ public class ProjectManager : IProjectManager
         IScriptRunner scriptRunner,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
         ConfigFileWriter configFileWriter,
+        RootCreator rootCreator,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -72,6 +74,7 @@ public class ProjectManager : IProjectManager
         _scriptRunner = scriptRunner;
         _hubContext = hubContext;
         _configFileWriter = configFileWriter;
+        _rootCreator = rootCreator;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -791,6 +794,78 @@ public class ProjectManager : IProjectManager
             project.SubscribedConnections.Remove(connectionId);
         }
         await Task.CompletedTask;
+    }
+
+    public Task CreateRootAsync(string rootName, RootPreview preview, string? profileName)
+    {
+        var error = _rootCreator.Validate(preview);
+        if (error != null)
+            throw new ArgumentException(error);
+
+        if (_projectRootsDir == null)
+            throw new InvalidOperationException("ProjectRootsDir is not configured. Cannot create roots without autodiscovery.");
+
+        var rootPath = Path.Combine(Path.GetFullPath(_projectRootsDir), rootName);
+        if (Directory.Exists(Path.Combine(rootPath, ".godmode-root")))
+            throw new InvalidOperationException($"Root '{rootName}' already exists.");
+
+        Directory.CreateDirectory(rootPath);
+        _rootCreator.WriteRoot(rootPath, preview);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteRootAsync(string profileName, string rootName, bool force)
+    {
+        var snap = _snapshot;
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+
+        // Safety check: refuse to delete if projects exist under this root
+        if (!force)
+        {
+            var hasActiveProjects = _projects.Values.Any(p =>
+                p.ProjectPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase));
+            if (hasActiveProjects)
+                throw new InvalidOperationException($"Root '{rootName}' has active projects. Use force=true to delete anyway.");
+        }
+
+        var godModeRootPath = Path.Combine(rootPath, ".godmode-root");
+        if (Directory.Exists(godModeRootPath))
+            Directory.Delete(godModeRootPath, recursive: true);
+
+        // Clean up empty root directory
+        if (Directory.Exists(rootPath) && !Directory.EnumerateFileSystemEntries(rootPath).Any())
+            Directory.Delete(rootPath);
+
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task<RootPreview?> GetRootPreviewAsync(string profileName, string rootName)
+    {
+        var snap = _snapshot;
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+        var preview = _rootCreator.ReadExistingRoot(rootPath);
+        return Task.FromResult(preview);
+    }
+
+    public Task UpdateRootAsync(string profileName, string rootName, RootPreview preview)
+    {
+        var error = _rootCreator.Validate(preview);
+        if (error != null)
+            throw new ArgumentException(error);
+
+        var snap = _snapshot;
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+
+        // Clear existing .godmode-root/ and rewrite
+        var godModeRootPath = Path.Combine(rootPath, ".godmode-root");
+        if (Directory.Exists(godModeRootPath))
+            Directory.Delete(godModeRootPath, recursive: true);
+
+        _rootCreator.WriteRoot(rootPath, preview);
+        RebuildSnapshot();
+        return Task.CompletedTask;
     }
 
     public Task CreateProfileAsync(string name, string? description)
