@@ -18,5 +18,6 @@ public record CreateAction(
     string? NameTemplate = null,
     string? PromptTemplate = null,
     bool ScriptsCreateFolder = false,
-    string? Model = null
+    string? Model = null,
+    Dictionary<string, McpServerConfig>? McpServers = null
 );

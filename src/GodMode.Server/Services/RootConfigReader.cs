@@ -154,7 +154,8 @@ public class RootConfigReader : IRootConfigReader
         NameTemplate = overlay.NameTemplate ?? baseConfig.NameTemplate,
         PromptTemplate = overlay.PromptTemplate ?? baseConfig.PromptTemplate,
         ScriptsCreateFolder = overlay.ScriptsCreateFolder ?? baseConfig.ScriptsCreateFolder,
-        Model = overlay.Model ?? baseConfig.Model
+        Model = overlay.Model ?? baseConfig.Model,
+        McpServers = MergeMcpServers(baseConfig.McpServers, overlay.McpServers)
     };
 
     /// <summary>
@@ -175,7 +176,8 @@ public class RootConfigReader : IRootConfigReader
             NameTemplate: raw.NameTemplate,
             PromptTemplate: raw.PromptTemplate,
             ScriptsCreateFolder: raw.ScriptsCreateFolder ?? false,
-            Model: raw.Model
+            Model: raw.Model,
+            McpServers: raw.McpServers
         );
     }
 
@@ -244,6 +246,22 @@ public class RootConfigReader : IRootConfigReader
         return merged;
     }
 
+    /// <summary>
+    /// Merges MCP server dictionaries. Overlay wins on conflict.
+    /// A null value in the overlay removes the server (convention: explicit removal).
+    /// </summary>
+    private static Dictionary<string, McpServerConfig>? MergeMcpServers(
+        Dictionary<string, McpServerConfig>? baseServers, Dictionary<string, McpServerConfig>? overlayServers)
+    {
+        if (baseServers == null) return overlayServers;
+        if (overlayServers == null) return baseServers;
+
+        var merged = new Dictionary<string, McpServerConfig>(baseServers, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in overlayServers)
+            merged[key] = value;
+        return merged;
+    }
+
     private static string[]? ConcatArrays(string[]? baseArr, string[]? additionalArr)
     {
         if (baseArr == null) return additionalArr;
@@ -269,5 +287,6 @@ public class RootConfigReader : IRootConfigReader
         public bool? ScriptsCreateFolder { get; init; }
         public bool? StripEnvVarProfile { get; init; }
         public string? Model { get; init; }
+        public Dictionary<string, McpServerConfig>? McpServers { get; init; }
     }
 }
