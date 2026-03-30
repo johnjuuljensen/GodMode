@@ -21,11 +21,12 @@ public class ProjectManager : IProjectManager
     private readonly IRootConfigReader _rootConfigReader;
     private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
+    private readonly ConfigFileWriter _configFileWriter;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
     /// <summary>
-    /// Profiles loaded from appsettings.json (static, never changes at runtime).
+    /// Profiles loaded from appsettings.json. Rebuilt via RebuildSnapshot() after mutations.
     /// </summary>
     private readonly Dictionary<string, ProfileConfig> _explicitProfiles;
 
@@ -61,6 +62,7 @@ public class ProjectManager : IProjectManager
         IRootConfigReader rootConfigReader,
         IScriptRunner scriptRunner,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
+        ConfigFileWriter configFileWriter,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -69,6 +71,7 @@ public class ProjectManager : IProjectManager
         _rootConfigReader = rootConfigReader;
         _scriptRunner = scriptRunner;
         _hubContext = hubContext;
+        _configFileWriter = configFileWriter;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -788,6 +791,20 @@ public class ProjectManager : IProjectManager
             project.SubscribedConnections.Remove(connectionId);
         }
         await Task.CompletedTask;
+    }
+
+    public Task CreateProfileAsync(string name, string? description)
+    {
+        _configFileWriter.CreateProfile(name, description);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task UpdateProfileDescriptionAsync(string name, string? description)
+    {
+        _configFileWriter.UpdateProfileDescription(name, description);
+        RebuildSnapshot();
+        return Task.CompletedTask;
     }
 
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
