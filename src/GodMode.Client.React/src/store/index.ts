@@ -115,6 +115,14 @@ interface AppState {
   setShowCreateProject: (show: boolean, context?: { serverId: string; rootName: string }) => void;
   editServerId: string | null;
   setEditServerId: (id: string | null) => void;
+  showAppSettings: boolean;
+  setShowAppSettings: (show: boolean) => void;
+
+  // Feature visibility
+  featureRoots: boolean;
+  featureMcp: boolean;
+  featureProfiles: boolean;
+  setFeatureFlag: (flag: 'featureRoots' | 'featureMcp' | 'featureProfiles', value: boolean) => void;
 }
 
 // ── Helper: rebuild profile hierarchy ──────────────────────────
@@ -149,10 +157,18 @@ function rebuildHierarchy(
       const projectsByProfile = new Map<string, ProjectSummary[]>();
       projectsByProfile.set(profileName, []); // ensure root's profile exists even if empty
       for (const p of projects) {
-        const pProfile = p.ProfileName ?? 'Default';
-        allProfileNames.add(pProfile);
-        if (!projectsByProfile.has(pProfile)) projectsByProfile.set(pProfile, []);
-        projectsByProfile.get(pProfile)!.push(p);
+        if (!p.ProfileName) {
+          // Projects with no profile appear under the root's profile (and all profiles when filtering)
+          if (!projectsByProfile.has(profileName)) projectsByProfile.set(profileName, []);
+          projectsByProfile.get(profileName)!.push(p);
+          // Also flag as "global" so it appears in all filtered views
+          (p as unknown as Record<string, unknown>)._noProfile = true;
+        } else {
+          const pProfile = p.ProfileName;
+          allProfileNames.add(pProfile);
+          if (!projectsByProfile.has(pProfile)) projectsByProfile.set(pProfile, []);
+          projectsByProfile.get(pProfile)!.push(p);
+        }
       }
 
       for (const [pName, pProjects] of projectsByProfile) {
@@ -181,10 +197,31 @@ function rebuildHierarchy(
     }
   }
 
-  // Apply filter
-  const filtered = filter === 'All'
-    ? [...profileDict.entries()]
-    : [...profileDict.entries()].filter(([name]) => name.toLowerCase() === filter.toLowerCase());
+  // Apply filter — when filtering to a specific profile, also include no-profile projects
+  let filtered: [string, RootGroup[]][];
+  if (filter === 'All') {
+    filtered = [...profileDict.entries()];
+  } else {
+    filtered = [...profileDict.entries()].filter(([name]) => name.toLowerCase() === filter.toLowerCase());
+    // Add no-profile projects from other profile groups to the filtered view
+    for (const [name, rootGroups] of profileDict) {
+      if (name.toLowerCase() === filter.toLowerCase()) continue;
+      for (const rg of rootGroups) {
+        const noProfileProjects = rg.projects.filter(p => (p as unknown as Record<string, unknown>)._noProfile);
+        if (noProfileProjects.length === 0) continue;
+        // Add to existing filtered root group or create one
+        const targetGroups = filtered.find(([n]) => n.toLowerCase() === filter.toLowerCase())?.[1];
+        if (targetGroups) {
+          const existing = targetGroups.find(r => r.rootName === rg.rootName && r.serverId === rg.serverId);
+          if (existing) {
+            for (const p of noProfileProjects) {
+              if (!existing.projects.some(ep => ep.Id === p.Id)) existing.projects.push(p);
+            }
+          }
+        }
+      }
+    }
+  }
 
   const profileGroups = filtered
     .sort(([a], [b]) => a.localeCompare(b))
@@ -568,4 +605,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowCreateProject: (show, context) => set({ showCreateProject: show, createProjectContext: context ?? null }),
   editServerId: null,
   setEditServerId: (id) => set({ editServerId: id }),
+  showAppSettings: false,
+  setShowAppSettings: (show) => set({ showAppSettings: show }),
+
+  // Feature visibility (persisted to localStorage)
+  featureRoots: localStorage.getItem('godmode-feature-roots') !== 'false',
+  featureMcp: localStorage.getItem('godmode-feature-mcp') !== 'false',
+  featureProfiles: localStorage.getItem('godmode-feature-profiles') !== 'false',
+  setFeatureFlag: (flag, value) => {
+    localStorage.setItem(`godmode-${flag.replace('feature', 'feature-').toLowerCase()}`, String(value));
+    set({ [flag]: value });
+  },
 }));

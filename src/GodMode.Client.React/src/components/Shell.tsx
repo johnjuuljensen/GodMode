@@ -6,6 +6,7 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
+import { AppSettings } from './AppSettings';
 import { isMaui, openDevTools } from '../services/hostApi';
 import './Shell.css';
 
@@ -27,8 +28,11 @@ export function Shell() {
   const profileFilter = useAppStore(s => s.profileFilter);
   const setProfileFilter = useAppStore(s => s.setProfileFilter);
   const profileFilterOptions = useAppStore(s => s.profileFilterOptions);
+  const showAppSettings = useAppStore(s => s.showAppSettings);
+  const setShowAppSettings = useAppStore(s => s.setShowAppSettings);
+  const featureProfiles = useAppStore(s => s.featureProfiles);
 
-  const showProfileFilter = profileFilterOptions.length > 2;
+  const showProfileFilter = featureProfiles && profileFilterOptions.length > 2;
 
   const [theme, setTheme] = useState<'dark' | 'light'>(getInitialTheme);
 
@@ -67,6 +71,9 @@ export function Shell() {
                 {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
             )}
+            <button className="shell-view-toggle" onClick={() => setShowAppSettings(true)} title="Settings">
+              {'⚙'}
+            </button>
             <button className="shell-theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
               {theme === 'dark' ? '☀' : '☾'}
             </button>
@@ -93,6 +100,7 @@ export function Shell() {
       {showAddServer && <AddServer />}
       {editServerId !== null && <EditServer serverId={editServerId} />}
       {showCreateProject && <CreateProject />}
+      {showAppSettings && <AppSettings />}
     </div>
   );
 }
