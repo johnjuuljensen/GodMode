@@ -85,6 +85,13 @@ export interface ServerInfo {
   Description?: string | null;
 }
 
+// --- Root Management ---
+
+export interface RootPreview {
+  Files: Record<string, string>;
+  ValidationError?: string | null;
+}
+
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---
 
 export interface QuestionOptionData {

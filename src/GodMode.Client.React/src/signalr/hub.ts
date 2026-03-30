@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, RootPreview } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -147,5 +147,9 @@ export class GodModeHub {
 
   async deleteProject(projectId: string, force: boolean = false): Promise<void> {
     await this.connection!.invoke('DeleteProject', projectId, force);
+  }
+
+  async generateRootWithLlm(request: { Instruction: string; CurrentFiles?: Record<string, string>; SchemaFields?: string[] }): Promise<RootPreview> {
+    return await this.connection!.invoke('GenerateRootWithLlm', request);
   }
 }

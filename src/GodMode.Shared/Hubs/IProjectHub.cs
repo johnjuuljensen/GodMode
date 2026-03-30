@@ -104,4 +104,9 @@ public interface IProjectHub
     /// Updates a profile's description.
     /// </summary>
     Task UpdateProfileDescription(string name, string? description);
+
+    /// <summary>
+    /// Generates a root configuration using LLM inference from a natural language instruction.
+    /// </summary>
+    Task<RootPreview> GenerateRootWithLlm(RootGenerationRequest request);
 }
