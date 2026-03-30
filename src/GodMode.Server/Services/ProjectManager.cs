@@ -511,9 +511,12 @@ public class ProjectManager : IProjectManager
         // Resolve model: user input overrides action config default
         var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
 
+        // Write MCP config (merges profile + action MCP servers)
+        var mcpConfigPath = WriteMcpConfig(projectPath, profileConfig?.McpServers, action.McpServers);
+
         // Build claude env/args from action config + project settings + profile env
         var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, model, profileEnv,
-            request.ProfileName, config.StripEnvVarProfile);
+            request.ProfileName, config.StripEnvVarProfile, mcpConfigPath);
 
         // Start Claude process
         project.ProcessCancellation = new CancellationTokenSource();
@@ -700,8 +703,11 @@ public class ProjectManager : IProjectManager
                 var config = _rootConfigReader.ReadConfig(rootPath);
                 var action = config.ResolveAction(project.ActionName);
                 if (action != null)
+                {
+                    var mcpPath = WriteMcpConfig(project.ProjectPath, profileCfg?.McpServers, action.McpServers);
                     (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, action.Model, profileEnv,
-                        resumeProfileName, config.StripEnvVarProfile);
+                        resumeProfileName, config.StripEnvVarProfile, mcpPath);
+                }
                 else
                     (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings,
                         profileEnv: profileEnv, profileName: resumeProfileName,
@@ -1097,7 +1103,8 @@ public class ProjectManager : IProjectManager
         string? model = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
-        bool stripEnvVarProfile = false)
+        bool stripEnvVarProfile = false,
+        string? mcpConfigPath = null)
     {
         var env = MergeAndExpandEnvironment(profileEnv, action.Environment, profileName, stripEnvVarProfile);
 
@@ -1111,8 +1118,77 @@ public class ProjectManager : IProjectManager
             args.Add("--model");
             args.Add(model);
         }
+        if (!string.IsNullOrWhiteSpace(mcpConfigPath))
+        {
+            args.Add("--mcp-config");
+            args.Add(mcpConfigPath);
+        }
 
         return (env, args.Count > 0 ? args.ToArray() : null);
+    }
+
+    /// <summary>
+    /// Merges MCP servers from profile and action levels and writes .godmode/mcp-config.json.
+    /// Returns the file path if MCP servers were written, null otherwise.
+    /// Merge order: profile → action (action wins on conflict).
+    /// Expands ${VAR} references in env values.
+    /// </summary>
+    private static string? WriteMcpConfig(
+        string projectPath,
+        Dictionary<string, McpServerConfig>? profileMcpServers,
+        Dictionary<string, McpServerConfig>? actionMcpServers)
+    {
+        // Merge: profile is the base, action overrides
+        Dictionary<string, McpServerConfig>? merged = null;
+        if (profileMcpServers != null || actionMcpServers != null)
+        {
+            merged = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase);
+            if (profileMcpServers != null)
+                foreach (var (k, v) in profileMcpServers)
+                    merged[k] = v;
+            if (actionMcpServers != null)
+                foreach (var (k, v) in actionMcpServers)
+                    merged[k] = v;
+        }
+
+        if (merged is not { Count: > 0 })
+            return null;
+
+        // Build Claude MCP config format: { "mcpServers": { ... } }
+        var mcpConfig = new Dictionary<string, object>
+        {
+            ["mcpServers"] = merged.ToDictionary(
+                kvp => kvp.Key,
+                kvp => new
+                {
+                    command = kvp.Value.Command,
+                    args = kvp.Value.Args ?? [],
+                    env = ExpandEnvVars(kvp.Value.Env)
+                })
+        };
+
+        var configPath = Path.Combine(projectPath, ".godmode", "mcp-config.json");
+        var json = JsonSerializer.Serialize(mcpConfig, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(configPath, json);
+
+        return configPath;
+    }
+
+    /// <summary>
+    /// Expands ${VAR} references in dictionary values using the current process environment.
+    /// </summary>
+    private static Dictionary<string, string>? ExpandEnvVars(Dictionary<string, string>? env)
+    {
+        if (env is null or { Count: 0 }) return env;
+
+        var expanded = new Dictionary<string, string>(env.Count);
+        foreach (var (key, value) in env)
+        {
+            expanded[key] = System.Text.RegularExpressions.Regex.Replace(
+                value, @"\$\{(\w+)\}",
+                m => Environment.GetEnvironmentVariable(m.Groups[1].Value) ?? m.Value);
+        }
+        return expanded;
     }
 
     /// <summary>
