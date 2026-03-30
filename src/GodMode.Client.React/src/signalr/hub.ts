@@ -148,4 +148,8 @@ export class GodModeHub {
   async deleteProject(projectId: string, force: boolean = false): Promise<void> {
     await this.connection!.invoke('DeleteProject', projectId, force);
   }
+
+  async exportManifest(): Promise<string> {
+    return await this.connection!.invoke('ExportManifest');
+  }
 }

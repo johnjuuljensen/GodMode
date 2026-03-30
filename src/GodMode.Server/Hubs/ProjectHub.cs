@@ -14,14 +14,16 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     private readonly IProjectManager _projectManager;
     private readonly IConvergenceEngine _convergenceEngine;
     private readonly IManifestParser _manifestParser;
+    private readonly IManifestExporter _manifestExporter;
     private readonly ILogger<ProjectHub> _logger;
 
     public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
-        IManifestParser manifestParser, ILogger<ProjectHub> logger)
+        IManifestParser manifestParser, IManifestExporter manifestExporter, ILogger<ProjectHub> logger)
     {
         _projectManager = projectManager;
         _convergenceEngine = convergenceEngine;
         _manifestParser = manifestParser;
+        _manifestExporter = manifestExporter;
         _logger = logger;
     }
 
@@ -213,6 +215,13 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} applying manifest", Context.ConnectionId);
         var manifest = _manifestParser.Parse(manifestContent);
         return await _convergenceEngine.ConvergeAsync(manifest, force);
+    }
+
+    public Task<string> ExportManifest()
+    {
+        _logger.LogInformation("Client {ConnectionId} exporting manifest", Context.ConnectionId);
+        var manifest = _manifestExporter.Export();
+        return Task.FromResult(_manifestExporter.Serialize(manifest));
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

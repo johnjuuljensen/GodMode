@@ -80,6 +80,7 @@ builder.Services.AddSingleton<RootPackager>();
 builder.Services.AddSingleton<RootInstaller>();
 builder.Services.AddSingleton<IManifestParser, ManifestParser>();
 builder.Services.AddSingleton<IConvergenceEngine, ConvergenceEngine>();
+builder.Services.AddSingleton<IManifestExporter, ManifestExporter>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();

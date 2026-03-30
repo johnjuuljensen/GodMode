@@ -139,4 +139,9 @@ public interface IProjectHub
     /// Applies a manifest to converge the server to the declared state.
     /// </summary>
     Task<ConvergenceResult> ApplyManifest(string manifestContent, bool force = false);
+
+    /// <summary>
+    /// Exports the current server state as a manifest JSON string.
+    /// </summary>
+    Task<string> ExportManifest();
 }
