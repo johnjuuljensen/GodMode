@@ -58,3 +58,89 @@
   border-radius: 6px;
   margin-bottom: 8px;
 }
+
+/* ── Root Picker Grid ── */
+.root-picker-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.root-picker-profile {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 0;
+  margin-top: 4px;
+}
+
+.root-picker-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: left;
+  color: var(--text-primary);
+  width: 100%;
+}
+
+.root-picker-card:hover {
+  background: var(--glass-hover);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.root-picker-card-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.root-picker-card-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.root-picker-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.root-picker-action-tag {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.root-picker-card-profile {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  align-self: flex-end;
+}
+
+/* ── Selected Root Header ── */
+.selected-root-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selected-root-name {
+  font-weight: 600;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
