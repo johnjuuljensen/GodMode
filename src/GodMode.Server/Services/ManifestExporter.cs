@@ -1,15 +1,15 @@
 using System.Text.Json;
-using GodMode.Server.Models;
 using GodMode.Shared.Models;
 
 namespace GodMode.Server.Services;
 
 /// <summary>
 /// Exports the current server configuration as a GodMode manifest.
-/// Reads profiles from appsettings.json and roots from disk.
+/// Reads profiles from .profiles/ directory and roots from disk.
 /// </summary>
 public class ManifestExporter : IManifestExporter
 {
+    private readonly ProfileFileManager _profileFileManager;
     private readonly IConfiguration _configuration;
     private readonly ILogger<ManifestExporter> _logger;
 
@@ -20,8 +20,12 @@ public class ManifestExporter : IManifestExporter
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
-    public ManifestExporter(IConfiguration configuration, ILogger<ManifestExporter> logger)
+    public ManifestExporter(
+        ProfileFileManager profileFileManager,
+        IConfiguration configuration,
+        ILogger<ManifestExporter> logger)
     {
+        _profileFileManager = profileFileManager;
         _configuration = configuration;
         _logger = logger;
     }
@@ -29,7 +33,6 @@ public class ManifestExporter : IManifestExporter
     public GodModeManifest Export()
     {
         var projectRootsDir = _configuration["ProjectRootsDir"];
-        var profiles = _configuration.GetSection("Profiles").Get<Dictionary<string, ProfileConfig>>();
 
         // Build roots from ProjectRootsDir
         Dictionary<string, ManifestRoot>? roots = null;
@@ -39,27 +42,20 @@ public class ManifestExporter : IManifestExporter
             if (Directory.Exists(fullPath))
             {
                 roots = new Dictionary<string, ManifestRoot>();
-                // Check installed.json for git sources
-                var installedPath = Path.Combine(fullPath, "installed.json");
-                var installed = new Dictionary<string, InstalledRootInfo>();
-                if (File.Exists(installedPath))
-                {
-                    var json = File.ReadAllText(installedPath);
-                    installed = JsonSerializer.Deserialize<Dictionary<string, InstalledRootInfo>>(json,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
-                }
 
                 foreach (var dir in Directory.GetDirectories(fullPath))
                 {
                     if (!Directory.Exists(Path.Combine(dir, ".godmode-root"))) continue;
                     var rootName = Path.GetFileName(dir)!;
 
-                    if (installed.TryGetValue(rootName, out var info) && info.GitUrl != null)
+                    // Read per-root source.json for provenance (self-describing)
+                    var source = RootInstaller.ReadSourceJson(dir);
+                    if (source?.Git != null)
                     {
                         roots[rootName] = new ManifestRoot(
-                            Git: info.GitUrl,
-                            Ref: info.GitRef,
-                            GitPath: info.GitPath);
+                            Git: source.Git,
+                            Ref: source.Ref,
+                            GitPath: source.Path);
                     }
                     else
                     {
@@ -70,18 +66,18 @@ public class ManifestExporter : IManifestExporter
             }
         }
 
-        // Build profiles
+        // Build profiles from .profiles/ directory (self-describing)
         Dictionary<string, ManifestProfile>? manifestProfiles = null;
-        if (profiles is { Count: > 0 })
+        var fileProfiles = _profileFileManager.ReadAllProfiles();
+        if (fileProfiles.Count > 0)
         {
             manifestProfiles = new Dictionary<string, ManifestProfile>();
-            foreach (var (name, config) in profiles)
+            foreach (var (name, data) in fileProfiles)
             {
                 manifestProfiles[name] = new ManifestProfile(
-                    Roots: config.Roots.Count > 0 ? config.Roots.Keys.ToArray() : null,
-                    Description: config.Description,
-                    McpServers: config.McpServers,
-                    Environment: config.Environment);
+                    Description: data.Description,
+                    McpServers: data.McpServers,
+                    Environment: data.Environment);
             }
         }
 

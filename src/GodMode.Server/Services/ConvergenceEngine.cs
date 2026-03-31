@@ -8,20 +8,20 @@ namespace GodMode.Server.Services;
 /// </summary>
 public class ConvergenceEngine : IConvergenceEngine
 {
-    private readonly ConfigFileWriter _configFileWriter;
+    private readonly ProfileFileManager _profileFileManager;
     private readonly RootCreator _rootCreator;
     private readonly IManifestParser _manifestParser;
     private readonly IConfiguration _configuration;
     private readonly ILogger<ConvergenceEngine> _logger;
 
     public ConvergenceEngine(
-        ConfigFileWriter configFileWriter,
+        ProfileFileManager profileFileManager,
         RootCreator rootCreator,
         IManifestParser manifestParser,
         IConfiguration configuration,
         ILogger<ConvergenceEngine> logger)
     {
-        _configFileWriter = configFileWriter;
+        _profileFileManager = profileFileManager;
         _rootCreator = rootCreator;
         _manifestParser = manifestParser;
         _configuration = configuration;
@@ -86,6 +86,12 @@ public class ConvergenceEngine : IConvergenceEngine
 
                             Directory.CreateDirectory(rootPath);
                             _rootCreator.WriteRoot(rootPath, preview);
+
+                            // Write source.json so the root is self-describing
+                            RootInstaller.WriteSourceJson(rootPath, new RootSourceInfo(
+                                Git: rootDef.Git, Ref: rootDef.Ref, Path: rootDef.GitPath,
+                                InstalledAt: DateTime.UtcNow));
+
                             actions.Add($"Synced root '{rootName}' from {rootDef.Git}");
                         }
                         finally
@@ -144,48 +150,61 @@ public class ConvergenceEngine : IConvergenceEngine
             }
         }
 
-        // Phase 2: Profiles
+        // Phase 2: Profiles — copy profile directories from manifest sources into .profiles/
         if (manifest.Profiles != null)
         {
             foreach (var (profileName, profileDef) in manifest.Profiles)
             {
                 try
                 {
-                    _configFileWriter.CreateProfile(profileName, profileDef.Description);
-                    actions.Add($"Created/updated profile '{profileName}'");
-                }
-                catch (InvalidOperationException)
-                {
-                    // Profile already exists — update description if needed
-                    if (profileDef.Description != null)
+                    if (profileDef.Git != null)
                     {
+                        // Git source — clone and copy profile directory
+                        var tempDir = Path.Combine(Path.GetTempPath(), $"godmode-profile-{Guid.NewGuid():N}");
                         try
                         {
-                            _configFileWriter.UpdateProfileDescription(profileName, profileDef.Description);
+                            await GitFetcher.CloneOrPullAsync(profileDef.Git, tempDir, profileDef.Ref);
+                            var sourcePath = profileDef.GitPath != null
+                                ? Path.Combine(tempDir, profileDef.GitPath)
+                                : tempDir;
+
+                            CopyProfileDirectory(sourcePath, Path.Combine(_profileFileManager.ProfilesDir, profileName));
+                            actions.Add($"Synced profile '{profileName}' from {profileDef.Git}");
                         }
-                        catch { /* already up to date */ }
+                        finally
+                        {
+                            if (Directory.Exists(tempDir))
+                                Directory.Delete(tempDir, recursive: true);
+                        }
+                    }
+                    else if (profileDef.Path != null)
+                    {
+                        // Local path — copy profile directory
+                        var targetDir = Path.Combine(_profileFileManager.ProfilesDir, profileName);
+                        if (Path.GetFullPath(profileDef.Path) != Path.GetFullPath(targetDir))
+                        {
+                            CopyProfileDirectory(profileDef.Path, targetDir);
+                            actions.Add($"Copied profile '{profileName}' from {profileDef.Path}");
+                        }
+                    }
+                    else
+                    {
+                        // Inline profile definition (description, MCP servers, environment in manifest)
+                        _profileFileManager.CreateProfile(profileName, profileDef.Description);
+                        if (profileDef.McpServers != null)
+                        {
+                            foreach (var (serverName, config) in profileDef.McpServers)
+                                _profileFileManager.AddMcpServerToProfile(profileName, serverName, config);
+                        }
+                        if (profileDef.Environment is { Count: > 0 })
+                            _profileFileManager.SetProfileEnvironment(profileName, profileDef.Environment);
+
+                        actions.Add($"Created profile '{profileName}' from manifest");
                     }
                 }
-            }
-        }
-
-        // Phase 3: MCP servers (profile-level)
-        if (manifest.Profiles != null)
-        {
-            foreach (var (profileName, profileDef) in manifest.Profiles)
-            {
-                if (profileDef.McpServers == null) continue;
-                foreach (var (serverName, config) in profileDef.McpServers)
+                catch (Exception ex)
                 {
-                    try
-                    {
-                        _configFileWriter.AddMcpServerToProfile(profileName, serverName, config);
-                        actions.Add($"Added MCP server '{serverName}' to profile '{profileName}'");
-                    }
-                    catch (Exception ex)
-                    {
-                        errors.Add($"MCP server '{serverName}' in profile '{profileName}': {ex.Message}");
-                    }
+                    errors.Add($"Profile '{profileName}': {ex.Message}");
                 }
             }
         }
@@ -194,5 +213,21 @@ public class ConvergenceEngine : IConvergenceEngine
             actions.Count, errors.Count, warnings.Count);
 
         return new ConvergenceResult(actions, errors, warnings);
+    }
+
+    private static void CopyProfileDirectory(string source, string target)
+    {
+        if (Directory.Exists(target))
+            Directory.Delete(target, recursive: true);
+
+        Directory.CreateDirectory(target);
+        foreach (var file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(source, file);
+            var targetPath = Path.Combine(target, relativePath);
+            var targetDir = Path.GetDirectoryName(targetPath);
+            if (targetDir != null) Directory.CreateDirectory(targetDir);
+            File.Copy(file, targetPath, overwrite: true);
+        }
     }
 }
