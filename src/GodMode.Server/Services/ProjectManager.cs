@@ -21,13 +21,14 @@ public class ProjectManager : IProjectManager
     private readonly IRootConfigReader _rootConfigReader;
     private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
+    private readonly ProfileFileManager _profileFileManager;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
     /// <summary>
-    /// Profiles loaded from appsettings.json (static, never changes at runtime).
+    /// Legacy profiles loaded from appsettings.json at startup (before .profiles/ migration).
     /// </summary>
-    private readonly Dictionary<string, ProfileConfig> _explicitProfiles;
+    private readonly Dictionary<string, ProfileConfig> _legacyProfiles;
 
     /// <summary>
     /// Optional directory to scan for autodiscovered roots.
@@ -61,6 +62,7 @@ public class ProjectManager : IProjectManager
         IRootConfigReader rootConfigReader,
         IScriptRunner scriptRunner,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
+        ProfileFileManager profileFileManager,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -69,6 +71,7 @@ public class ProjectManager : IProjectManager
         _rootConfigReader = rootConfigReader;
         _scriptRunner = scriptRunner;
         _hubContext = hubContext;
+        _profileFileManager = profileFileManager;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -78,8 +81,11 @@ public class ProjectManager : IProjectManager
         var rawDir = configuration["ProjectRootsDir"];
         _projectRootsDir = string.IsNullOrWhiteSpace(rawDir) ? null : rawDir;
 
-        // Load explicit profiles from configuration (with backward compat for ProjectRoots)
-        _explicitProfiles = LoadProfiles(configuration, hasAutoDiscovery: _projectRootsDir != null);
+        // Migrate legacy profiles from appsettings.json to .profiles/ (one-time)
+        _profileFileManager.MigrateFromAppSettings(configuration);
+
+        // Load legacy profiles from configuration (with backward compat for ProjectRoots)
+        _legacyProfiles = LoadProfiles(configuration, hasAutoDiscovery: _projectRootsDir != null);
 
         if (_projectRootsDir != null)
             _logger.LogInformation("Autodiscovery enabled: scanning {ProjectRootsDir} for .godmode-root/ directories", _projectRootsDir);
@@ -125,10 +131,42 @@ public class ProjectManager : IProjectManager
     /// </summary>
     private ProfileSnapshot BuildSnapshot()
     {
-        // Start with explicit profiles
-        var merged = new Dictionary<string, ProfileConfig>(_explicitProfiles, StringComparer.OrdinalIgnoreCase);
+        // Layer 1: Legacy profiles from appsettings.json (only if .profiles/ doesn't exist yet)
+        // Once .profiles/ exists (migration has run), legacy is ignored — .profiles/ is authoritative.
+        var profilesDirExists = Directory.Exists(_profileFileManager.ProfilesDir);
+        var merged = profilesDirExists
+            ? new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, ProfileConfig>(_legacyProfiles, StringComparer.OrdinalIgnoreCase);
 
-        // Discover roots from ProjectRootsDir (if configured)
+        // Layer 2: File-based profiles from .profiles/ directory
+        var fileProfiles = _profileFileManager.ReadAllProfiles();
+        foreach (var (name, data) in fileProfiles)
+        {
+            if (merged.TryGetValue(name, out var existing))
+            {
+                // File-based profile fully replaces legacy environment/MCP/description.
+                // No fallback to legacy — once .profiles/{name}/ exists, it is authoritative.
+                merged[name] = new ProfileConfig
+                {
+                    Roots = existing.Roots,
+                    Environment = data.Environment,
+                    Description = data.Description ?? existing.Description,
+                    McpServers = data.McpServers
+                };
+            }
+            else
+            {
+                merged[name] = new ProfileConfig
+                {
+                    Roots = new Dictionary<string, string>(),
+                    Environment = data.Environment,
+                    Description = data.Description,
+                    McpServers = data.McpServers
+                };
+            }
+        }
+
+        // Layer 3: Autodiscovered roots from ProjectRootsDir
         if (_projectRootsDir != null)
         {
             var discovered = DiscoverProfiles(_projectRootsDir);
@@ -146,7 +184,8 @@ public class ProjectManager : IProjectManager
                     {
                         Roots = mergedRoots,
                         Environment = existing.Environment,
-                        Description = existing.Description ?? profileConfig.Description
+                        Description = existing.Description ?? profileConfig.Description,
+                        McpServers = existing.McpServers
                     };
                 }
                 else
@@ -794,6 +833,76 @@ public class ProjectManager : IProjectManager
             project.SubscribedConnections.Remove(connectionId);
         }
         await Task.CompletedTask;
+    }
+
+    public Task CreateProfileAsync(string name, string? description)
+    {
+        _profileFileManager.CreateProfile(name, description);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteProfileAsync(string name, bool deleteContents = false)
+    {
+        _profileFileManager.DeleteProfile(name);
+
+        var snap = _snapshot;
+        var profileRoots = snap.RootLookup
+            .Where(kvp => string.Equals(kvp.Key.Item1, name, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (deleteContents)
+        {
+            // Cascade: stop processes, remove tracking, delete root directories
+            foreach (var ((_, rootName), rootPath) in profileRoots)
+            {
+                // Stop and remove all projects under this root
+                var projectsInRoot = _projects.Values
+                    .Where(p => p.ProjectPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                foreach (var project in projectsInRoot)
+                {
+                    project.ProcessCancellation?.Cancel();
+                    _projects.TryRemove(project.Status.Id, out _);
+                }
+
+                // Delete the entire root directory (including projects)
+                if (Directory.Exists(rootPath))
+                {
+                    _logger.LogInformation("Cascade deleting root '{RootName}' at {RootPath}", rootName, rootPath);
+                    Directory.Delete(rootPath, recursive: true);
+                }
+            }
+        }
+        else
+        {
+            // Move roots to Default profile by clearing profileName from config
+            foreach (var ((_, _), rootPath) in profileRoots)
+            {
+                var configPath = Path.Combine(rootPath, ".godmode-root", "config.json");
+                if (!File.Exists(configPath)) continue;
+                try
+                {
+                    var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(configPath))?.AsObject();
+                    if (json != null)
+                    {
+                        json.Remove("profileName");
+                        File.WriteAllText(configPath, json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                    }
+                }
+                catch { /* skip unparseable configs */ }
+            }
+        }
+
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task UpdateProfileDescriptionAsync(string name, string? description)
+    {
+        _profileFileManager.UpdateProfileDescription(name, description);
+        RebuildSnapshot();
+        return Task.CompletedTask;
     }
 
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };

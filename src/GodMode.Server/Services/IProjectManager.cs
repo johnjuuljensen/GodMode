@@ -76,4 +76,20 @@ public interface IProjectManager
     /// Recovers projects from disk on startup.
     /// </summary>
     Task RecoverProjectsAsync();
+
+    /// <summary>
+    /// Creates a new profile and persists it to appsettings.json.
+    /// </summary>
+    Task CreateProfileAsync(string name, string? description);
+
+    /// <summary>
+    /// Deletes a profile. When deleteContents is true, cascade-deletes all root directories
+    /// and their projects; otherwise reassigns roots to the Default profile.
+    /// </summary>
+    Task DeleteProfileAsync(string name, bool deleteContents = false);
+
+    /// <summary>
+    /// Updates a profile's description in appsettings.json.
+    /// </summary>
+    Task UpdateProfileDescriptionAsync(string name, string? description);
 }

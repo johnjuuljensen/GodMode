@@ -125,6 +125,35 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await Clients.All.ProjectDeleted(projectId);
     }
 
+    public async Task CreateProfile(string name, string? description)
+    {
+        _logger.LogInformation("Client {ConnectionId} creating profile '{ProfileName}'",
+            Context.ConnectionId, name);
+        await _projectManager.CreateProfileAsync(name, description);
+    }
+
+    public async Task DeleteProfile(string name, bool deleteContents = false)
+    {
+        _logger.LogInformation("Client {ConnectionId} deleting profile '{ProfileName}' (deleteContents={DeleteContents})",
+            Context.ConnectionId, name, deleteContents);
+        try
+        {
+            await _projectManager.DeleteProfileAsync(name, deleteContents);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete profile '{ProfileName}'", name);
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task UpdateProfileDescription(string name, string? description)
+    {
+        _logger.LogInformation("Client {ConnectionId} updating profile description '{ProfileName}'",
+            Context.ConnectionId, name);
+        await _projectManager.UpdateProfileDescriptionAsync(name, description);
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);

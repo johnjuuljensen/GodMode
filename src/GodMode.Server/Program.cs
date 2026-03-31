@@ -74,6 +74,7 @@ builder.Services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
 builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
 builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
+builder.Services.AddSingleton<ProfileFileManager>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();
