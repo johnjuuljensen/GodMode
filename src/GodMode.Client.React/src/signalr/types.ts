@@ -93,6 +93,38 @@ export interface McpServerConfig {
   Env?: Record<string, string> | null;
 }
 
+// --- Root Management ---
+
+export interface RootPreview {
+  Files: Record<string, string>;
+  ValidationError?: string | null;
+}
+
+export interface RootManifest {
+  Name: string;
+  Description?: string | null;
+  Author?: string | null;
+  Version?: string | null;
+  ExportedAt?: string | null;
+  ScriptHashes?: Record<string, string> | null;
+}
+
+export interface SharedRootPreview {
+  Manifest: RootManifest;
+  Preview: RootPreview;
+  Source?: string | null;
+}
+
+export interface InstalledRootInfo {
+  RootName: string;
+  Source: string;
+  GitUrl?: string | null;
+  GitRef?: string | null;
+  GitPath?: string | null;
+  InstalledAt: string;
+  ManifestVersion?: string | null;
+}
+
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---
 
 export interface QuestionOptionData {

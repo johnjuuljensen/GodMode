@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -192,5 +192,49 @@ export class GodModeHub {
 
   async updateProfileDescription(name: string, description?: string | null): Promise<void> {
     await this.connection!.invoke('UpdateProfileDescription', name, description);
+  }
+
+  // --- Root Management ---
+
+  async createRoot(rootName: string, preview: RootPreview, profileName?: string | null): Promise<void> {
+    await this.connection!.invoke('CreateRoot', rootName, preview, profileName);
+  }
+
+  async deleteRoot(profileName: string, rootName: string, force: boolean = false): Promise<void> {
+    await this.connection!.invoke('DeleteRoot', profileName, rootName, force);
+  }
+
+  async getRootPreview(profileName: string, rootName: string): Promise<RootPreview | null> {
+    return await this.connection!.invoke('GetRootPreview', profileName, rootName);
+  }
+
+  async updateRoot(profileName: string, rootName: string, preview: RootPreview): Promise<void> {
+    await this.connection!.invoke('UpdateRoot', profileName, rootName, preview);
+  }
+
+  // --- Root Sharing ---
+
+  async exportRoot(profileName: string, rootName: string): Promise<Uint8Array> {
+    return await this.connection!.invoke('ExportRoot', profileName, rootName);
+  }
+
+  async previewImportFromBytes(packageBytes: Uint8Array): Promise<SharedRootPreview> {
+    return await this.connection!.invoke('PreviewImportFromBytes', packageBytes);
+  }
+
+  async previewImportFromUrl(url: string): Promise<SharedRootPreview> {
+    return await this.connection!.invoke('PreviewImportFromUrl', url);
+  }
+
+  async previewImportFromGit(gitUrl: string, path?: string | null, gitRef?: string | null): Promise<SharedRootPreview> {
+    return await this.connection!.invoke('PreviewImportFromGit', gitUrl, path, gitRef);
+  }
+
+  async installSharedRoot(rootName: string, preview: SharedRootPreview): Promise<void> {
+    await this.connection!.invoke('InstallSharedRoot', rootName, preview);
+  }
+
+  async uninstallSharedRoot(rootName: string): Promise<void> {
+    await this.connection!.invoke('UninstallSharedRoot', rootName);
   }
 }
