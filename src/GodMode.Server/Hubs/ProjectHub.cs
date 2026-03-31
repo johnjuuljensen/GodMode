@@ -125,6 +125,30 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await Clients.All.ProjectDeleted(projectId);
     }
 
+    public async Task AddMcpServer(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName = null, string? rootName = null, string? actionName = null)
+    {
+        _logger.LogInformation("Client {ConnectionId} adding MCP server '{ServerName}' at {Level}",
+            Context.ConnectionId, serverName, targetLevel);
+        await _projectManager.AddMcpServerAsync(serverName, config, targetLevel, profileName, rootName, actionName);
+    }
+
+    public async Task RemoveMcpServer(string serverName, string targetLevel,
+        string? profileName = null, string? rootName = null, string? actionName = null)
+    {
+        _logger.LogInformation("Client {ConnectionId} removing MCP server '{ServerName}' at {Level}",
+            Context.ConnectionId, serverName, targetLevel);
+        await _projectManager.RemoveMcpServerAsync(serverName, targetLevel, profileName, rootName, actionName);
+    }
+
+    public async Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServers(
+        string profileName, string rootName, string? actionName = null)
+    {
+        _logger.LogInformation("Client {ConnectionId} requesting effective MCP servers for {Profile}/{Root}/{Action}",
+            Context.ConnectionId, profileName, rootName, actionName ?? "(all)");
+        return await _projectManager.GetEffectiveMcpServersAsync(profileName, rootName, actionName);
+    }
+
     public async Task CreateProfile(string name, string? description)
     {
         _logger.LogInformation("Client {ConnectionId} creating profile '{ProfileName}'",
