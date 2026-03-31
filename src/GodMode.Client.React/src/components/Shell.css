@@ -216,18 +216,27 @@ body::after {
 /* Theme toggle */
 .shell-theme-toggle,
 .shell-view-toggle {
-  width: 34px;
+  min-width: 34px;
   height: 34px;
+  padding: 0 10px;
   border: 1px solid var(--glass-border);
   border-radius: 8px;
   background: var(--glass);
   color: var(--text-secondary);
-  font-size: 18px;
+  font-size: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+
+/* Icon-only buttons (single character) get square sizing */
+.shell-theme-toggle {
+  width: 34px;
+  padding: 0;
+  font-size: 18px;
 }
 
 .shell-theme-toggle:hover,

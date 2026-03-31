@@ -41,8 +41,21 @@
 
 .root-item-actions {
   display: flex;
+  align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.root-profile-select {
+  height: 28px;
+  padding: 0 8px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  cursor: pointer;
 }
 
 .root-tabs {

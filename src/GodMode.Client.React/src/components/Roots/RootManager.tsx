@@ -3,16 +3,24 @@ import { useAppStore } from '../../store';
 import type { SharedRootPreview } from '../../signalr/types';
 import './RootManager.css';
 
+const refresh = () => useAppStore.getState().refreshFirstConnected();
+
 type Tab = 'list' | 'create' | 'import';
 
 export function RootManager() {
   const setShowRootManager = useAppStore(s => s.setShowRootManager);
   const serverConnections = useAppStore(s => s.serverConnections);
+  const profileFilter = useAppStore(s => s.profileFilter);
 
   const conn = serverConnections.find(c => c.connectionState === 'connected');
   const hub = conn?.hub;
-  const roots = conn?.roots ?? [];
+  const allRoots = conn?.roots ?? [];
   const profiles = conn?.profiles ?? [];
+
+  // Filter roots by selected profile
+  const roots = profileFilter !== 'All'
+    ? allRoots.filter(r => (r.ProfileName ?? 'Default').toLowerCase() === profileFilter.toLowerCase())
+    : allRoots;
 
   const [tab, setTab] = useState<Tab>('list');
   const [error, setError] = useState<string | null>(null);
@@ -20,6 +28,7 @@ export function RootManager() {
 
   // Create form
   const [newRootName, setNewRootName] = useState('');
+  const [newRootProfile, setNewRootProfile] = useState('');
   const [newConfigJson, setNewConfigJson] = useState('{\n  "description": "",\n  "nameTemplate": "{name}",\n  "promptTemplate": "{prompt}"\n}');
 
   // Import form
@@ -34,9 +43,20 @@ export function RootManager() {
     setError(null);
     setLoading(true);
     try {
-      const files: Record<string, string> = { 'config.json': newConfigJson };
+      // Inject profileName into config.json if a specific profile is selected
+      let configJson = newConfigJson;
+      if (newRootProfile) {
+        try {
+          const parsed = JSON.parse(configJson);
+          parsed.profileName = newRootProfile;
+          configJson = JSON.stringify(parsed, null, 2);
+        } catch { /* leave as-is if JSON is invalid — server will validate */ }
+      }
+      const files: Record<string, string> = { 'config.json': configJson };
       await hub.createRoot(newRootName.trim(), { Files: files });
+      await refresh();
       setNewRootName('');
+      setNewRootProfile('');
       setTab('list');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create root');
@@ -45,13 +65,54 @@ export function RootManager() {
     }
   };
 
+  const handleChangeProfile = async (rootProfileName: string, rootName: string, newProfile: string) => {
+    if (!hub) return;
+    setError(null);
+    try {
+      const preview = await hub.getRootPreview(rootProfileName, rootName);
+      if (!preview) return;
+      // Update profileName in config.json
+      const configStr = preview.Files['config.json'];
+      if (configStr) {
+        try {
+          const parsed = JSON.parse(configStr);
+          if (newProfile) {
+            parsed.profileName = newProfile;
+          } else {
+            delete parsed.profileName;
+          }
+          preview.Files['config.json'] = JSON.stringify(parsed, null, 2);
+        } catch { /* skip if unparseable */ }
+      }
+      await hub.updateRoot(rootProfileName, rootName, preview);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to change profile');
+    }
+  };
+
   const handleDelete = async (profileName: string, rootName: string) => {
     if (!hub || !confirm(`Delete root "${rootName}"?`)) return;
     setError(null);
     try {
-      await hub.deleteRoot(profileName, rootName);
+      await hub.deleteRoot(profileName, rootName, true);
+      await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete root');
+    }
+  };
+
+  const handleCopy = async (profileName: string, rootName: string) => {
+    if (!hub) return;
+    setError(null);
+    try {
+      const preview = await hub.getRootPreview(profileName, rootName);
+      if (!preview) { setError('Could not read root'); return; }
+      const copyName = `${rootName}-copy`;
+      await hub.createRoot(copyName, preview, profileName);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to copy root');
     }
   };
 
@@ -80,6 +141,7 @@ export function RootManager() {
     setLoading(true);
     try {
       await hub.installSharedRoot(importRootName.trim(), importPreview);
+      await refresh();
       setImportPreview(null);
       setGitUrl('');
       setGitPath('');
@@ -116,10 +178,18 @@ export function RootManager() {
                     <div className="root-item-info">
                       <span className="root-item-name">{r.Name}</span>
                       {r.Description && <span className="root-item-desc">{r.Description}</span>}
-                      {r.ProfileName && <span className="root-item-desc">Profile: {r.ProfileName}</span>}
                     </div>
                     <div className="root-item-actions">
-                      <button className="btn btn-danger btn-sm" onClick={() => handleDelete(r.ProfileName ?? profiles[0]?.Name ?? '', r.Name)}>Delete</button>
+                      <select
+                        className="root-profile-select"
+                        value={r.ProfileName === 'Default' ? '' : (r.ProfileName ?? '')}
+                        onChange={e => handleChangeProfile(r.ProfileName ?? 'Default', r.Name, e.target.value)}
+                      >
+                        <option value="">All profiles</option>
+                        {profiles.map(p => <option key={p.Name} value={p.Name}>{p.Name}</option>)}
+                      </select>
+                      <button className="btn btn-secondary btn-sm" onClick={() => handleCopy(r.ProfileName ?? 'Default', r.Name)}>Copy</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => handleDelete(r.ProfileName ?? 'Default', r.Name)}>Delete</button>
                     </div>
                   </div>
                 ))}
@@ -136,6 +206,13 @@ export function RootManager() {
             <div className="form-group">
               <label>Root Name</label>
               <input type="text" value={newRootName} onChange={e => setNewRootName(e.target.value)} placeholder="my-root" />
+            </div>
+            <div className="form-group">
+              <label>Profile</label>
+              <select value={newRootProfile} onChange={e => setNewRootProfile(e.target.value)}>
+                <option value="">All profiles</option>
+                {profiles.map(p => <option key={p.Name} value={p.Name}>{p.Name}</option>)}
+              </select>
             </div>
             <div className="form-group">
               <label>config.json</label>

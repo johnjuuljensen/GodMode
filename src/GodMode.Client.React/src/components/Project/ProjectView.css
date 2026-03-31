@@ -40,11 +40,144 @@
   gap: 6px;
 }
 
+/* ── MCP Badges ── */
+.mcp-badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.mcp-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.mcp-badge-count {
+  cursor: help;
+  background: var(--accent-soft);
+  border-color: rgba(94,158,255,0.2);
+  color: var(--accent);
+}
+
+/* ── Status Button ── */
+.status-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  transition: all 0.15s;
+}
+
+.status-btn:hover:not(:disabled) {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+}
+
+.status-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.status-btn-Running:hover:not(:disabled),
+.status-btn-WaitingInput:hover:not(:disabled) {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.status-btn-Stopped:hover:not(:disabled),
+.status-btn-Idle:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot-Running {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+.status-dot-WaitingInput {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+.status-dot-Stopped,
+.status-dot-Idle {
+  background: var(--text-tertiary);
+}
+
+.status-dot-Error {
+  background: var(--error);
+  box-shadow: 0 0 6px var(--error);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.status-btn-label {
+  opacity: 0;
+  max-width: 0;
+  overflow: hidden;
+  transition: opacity 0.15s, max-width 0.2s;
+  white-space: nowrap;
+}
+
+.status-btn:hover .status-btn-label {
+  opacity: 1;
+  max-width: 60px;
+}
+
+/* ── Delete Button ── */
+.delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.delete-btn:hover {
+  background: var(--error-soft);
+  border-color: var(--error);
+  color: var(--error);
+}
+
 /* ── View Toggle ── */
 .btn-toggle {
   font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 5px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
   background: var(--glass);
   border: 1px solid var(--glass-border);
   color: var(--text-secondary);

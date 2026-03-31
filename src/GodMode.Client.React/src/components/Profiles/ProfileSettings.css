@@ -12,10 +12,17 @@
 }
 
 .profile-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 10px 12px;
   background: var(--glass);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius);
+}
+
+.profile-item-info {
+  min-width: 0;
 }
 
 .profile-item-name {

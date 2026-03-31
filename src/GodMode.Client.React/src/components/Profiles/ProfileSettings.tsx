@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useAppStore } from '../../store';
 import './ProfileSettings.css';
 
+const refresh = () => useAppStore.getState().refreshFirstConnected();
+
 export function ProfileSettings() {
   const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
   const serverConnections = useAppStore(s => s.serverConnections);
@@ -19,11 +21,22 @@ export function ProfileSettings() {
     setError(null);
     try {
       await hub.createProfile(newName.trim(), newDescription.trim() || null);
+      await refresh();
       setNewName('');
       setNewDescription('');
-      // Refresh will happen via server reconnect/reload
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create profile');
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    if (!hub || !confirm(`Delete profile "${name}"? This will not delete its roots or projects.`)) return;
+    setError(null);
+    try {
+      await hub.deleteProfile(name);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete profile');
     }
   };
 
@@ -37,8 +50,11 @@ export function ProfileSettings() {
         <div className="profile-list">
           {profiles.map(p => (
             <div key={p.Name} className="profile-item">
-              <div className="profile-item-name">{p.Name}</div>
-              {p.Description && <div className="profile-item-desc">{p.Description}</div>}
+              <div className="profile-item-info">
+                <div className="profile-item-name">{p.Name}</div>
+                {p.Description && <div className="profile-item-desc">{p.Description}</div>}
+              </div>
+              <button className="btn btn-danger btn-sm" onClick={() => handleDelete(p.Name)}>Delete</button>
             </div>
           ))}
         </div>

@@ -1,8 +1,15 @@
 import { useState } from 'react';
-import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection } from '../../store';
+import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy } from '../../store';
 import { ProjectItem } from './ProjectItem';
 import { isMaui } from '../../services/hostApi';
 import './Sidebar.css';
+
+const GROUP_LABELS: Record<SidebarGroupBy, string> = {
+  profile: 'Profile',
+  root: 'Root',
+  recent: 'Recent',
+  status: 'Status',
+};
 
 export function Sidebar() {
   const profileGroups = useAppStore(s => s.profileGroups);
@@ -10,6 +17,8 @@ export function Sidebar() {
   const setShowAddServer = useAppStore(s => s.setShowAddServer);
   const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
   const serverConnections = useAppStore(s => s.serverConnections);
+  const sidebarGroupBy = useAppStore(s => s.sidebarGroupBy);
+  const cycleSidebarGroupBy = useAppStore(s => s.cycleSidebarGroupBy);
 
   const hasRoots = serverConnections.some(c => c.roots.length > 0);
   const hasAnything = profileGroups.length > 0 || inactiveServers.length > 0;
@@ -19,6 +28,13 @@ export function Sidebar() {
       <div className="sidebar-header">
         <span className="sidebar-title">GodMode</span>
         <div className="sidebar-header-actions">
+          <button
+            className="sidebar-group-btn"
+            onClick={cycleSidebarGroupBy}
+            title={`Group by: ${GROUP_LABELS[sidebarGroupBy]} (click to cycle)`}
+          >
+            {GROUP_LABELS[sidebarGroupBy]}
+          </button>
           {hasRoots && (
             <button className="sidebar-add-btn" onClick={() => setShowCreateProject(true)} title="Create project">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -81,24 +97,27 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
 
   return (
     <div className="root-group">
-      <div className="root-group-header">
-        <span className="root-group-name">{rootGroup.name}</span>
-        {rootGroup.actions.length > 0 && (
-          <button
-            className="root-action-btn"
-            onClick={() => setShowCreateProject(true, { serverId: rootGroup.serverId, rootName: rootGroup.rootName })}
-            title="New project"
-          >+</button>
-        )}
-      </div>
-      <div className="project-list">
+      {!rootGroup.flat && (
+        <div className="root-group-header">
+          <span className="root-group-name">{rootGroup.name}</span>
+          {rootGroup.actions.length > 0 && (
+            <button
+              className="root-action-btn"
+              onClick={() => setShowCreateProject(true, { serverId: rootGroup.serverId, rootName: rootGroup.rootName })}
+              title="New project"
+            >+</button>
+          )}
+        </div>
+      )}
+      <div className={rootGroup.flat ? 'project-list project-list-flat' : 'project-list'}>
         {rootGroup.projects.length === 0 ? (
-          <div className="project-list-empty">No projects</div>
+          !rootGroup.flat && <div className="project-list-empty">No projects</div>
         ) : (
           rootGroup.projects.map(project => (
             <ProjectItem
               key={project.Id}
               project={project}
+              serverId={rootGroup.serverId}
               isSelected={
                 selectedProject?.serverId === rootGroup.serverId &&
                 selectedProject?.projectId === project.Id
