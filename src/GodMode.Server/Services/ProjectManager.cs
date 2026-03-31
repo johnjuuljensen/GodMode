@@ -857,7 +857,11 @@ public class ProjectManager : IProjectManager
         var snap = _snapshot;
         snap.Profiles.TryGetValue(profileName, out var profileConfig);
 
-        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+        var key = CompositeKey(profileName, rootName);
+        if (!snap.ProjectFiles.ProjectRoots.ContainsKey(key))
+            return Task.FromResult(new Dictionary<string, McpServerConfig>());
+
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(key);
         var config = _rootConfigReader.ReadConfig(rootPath);
         var action = config.ResolveAction(actionName);
 
