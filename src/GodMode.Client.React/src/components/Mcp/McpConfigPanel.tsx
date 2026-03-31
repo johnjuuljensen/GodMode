@@ -6,15 +6,21 @@ import './McpConfigPanel.css';
 export function McpConfigPanel() {
   const setShowMcpConfig = useAppStore(s => s.setShowMcpConfig);
   const serverConnections = useAppStore(s => s.serverConnections);
+  const profileFilter = useAppStore(s => s.profileFilter);
 
-  // Use the first connected server
   const conn = serverConnections.find(c => c.connectionState === 'connected');
   const hub = conn?.hub;
   const profiles = conn?.profiles ?? [];
   const roots = conn?.roots ?? [];
 
-  const [selectedProfile, setSelectedProfile] = useState(profiles[0]?.Name ?? '');
-  const [selectedRoot, setSelectedRoot] = useState('');
+  // If a profile is selected globally, default to it; otherwise use first profile
+  const defaultProfile = profileFilter !== 'All' ? profileFilter : (profiles[0]?.Name ?? '');
+  const [selectedProfile, setSelectedProfile] = useState(defaultProfile);
+  // Filter profiles shown in dropdown when global filter is active
+  const visibleProfiles = profileFilter !== 'All'
+    ? profiles.filter(p => p.Name.toLowerCase() === profileFilter.toLowerCase())
+    : profiles;
+
   const [servers, setServers] = useState<Record<string, McpServerConfig>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,28 +31,22 @@ export function McpConfigPanel() {
   const [newArgs, setNewArgs] = useState('');
   const [newEnvPairs, setNewEnvPairs] = useState<{ key: string; value: string }[]>([]);
 
-  // Filter roots by selected profile
-  const profileRoots = roots.filter(r => r.ProfileName === selectedProfile || !r.ProfileName);
-
-  useEffect(() => {
-    if (profileRoots.length > 0 && !selectedRoot) {
-      setSelectedRoot(profileRoots[0].Name);
-    }
-  }, [profileRoots, selectedRoot]);
+  // Pick any root in this profile to call getEffectiveMcpServers (profile-level servers are the same for all roots)
+  const anyRoot = roots.find(r => r.ProfileName === selectedProfile || r.ProfileName === 'Default')?.Name;
 
   const loadServers = useCallback(async () => {
-    if (!hub || !selectedProfile || !selectedRoot) return;
+    if (!hub || !selectedProfile || !anyRoot) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await hub.getEffectiveMcpServers(selectedProfile, selectedRoot);
+      const result = await hub.getEffectiveMcpServers(selectedProfile, anyRoot);
       setServers(result);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load MCP servers');
     } finally {
       setLoading(false);
     }
-  }, [hub, selectedProfile, selectedRoot]);
+  }, [hub, selectedProfile, anyRoot]);
 
   useEffect(() => {
     loadServers();
@@ -104,15 +104,8 @@ export function McpConfigPanel() {
 
         <div className="form-group">
           <label>Profile</label>
-          <select value={selectedProfile} onChange={e => { setSelectedProfile(e.target.value); setSelectedRoot(''); }}>
-            {profiles.map(p => <option key={p.Name} value={p.Name}>{p.Name}</option>)}
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label>Root</label>
-          <select value={selectedRoot} onChange={e => setSelectedRoot(e.target.value)}>
-            {profileRoots.map(r => <option key={r.Name} value={r.Name}>{r.Name}</option>)}
+          <select value={selectedProfile} onChange={e => setSelectedProfile(e.target.value)}>
+            {visibleProfiles.map(p => <option key={p.Name} value={p.Name}>{p.Name}</option>)}
           </select>
         </div>
 
@@ -121,7 +114,7 @@ export function McpConfigPanel() {
         {loading ? (
           <div className="mcp-empty">Loading...</div>
         ) : Object.keys(servers).length === 0 ? (
-          <div className="mcp-empty">No MCP servers configured</div>
+          <div className="mcp-empty">No MCP servers configured for this profile</div>
         ) : (
           <div className="mcp-server-list">
             {Object.entries(servers).map(([name, config]) => (
