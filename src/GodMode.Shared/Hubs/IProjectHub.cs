@@ -78,9 +78,10 @@ public interface IProjectHub
     Task CreateProfile(string name, string? description);
 
     /// <summary>
-    /// Deletes a profile.
+    /// Deletes a profile. When deleteContents is true, cascade-deletes all root directories
+    /// and their projects; otherwise reassigns roots to the Default profile.
     /// </summary>
-    Task DeleteProfile(string name);
+    Task DeleteProfile(string name, bool deleteContents = false);
 
     /// <summary>
     /// Updates a profile's description.

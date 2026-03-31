@@ -83,9 +83,10 @@ public interface IProjectManager
     Task CreateProfileAsync(string name, string? description);
 
     /// <summary>
-    /// Deletes a profile from appsettings.json.
+    /// Deletes a profile. When deleteContents is true, cascade-deletes all root directories
+    /// and their projects; otherwise reassigns roots to the Default profile.
     /// </summary>
-    Task DeleteProfileAsync(string name);
+    Task DeleteProfileAsync(string name, bool deleteContents = false);
 
     /// <summary>
     /// Updates a profile's description in appsettings.json.
