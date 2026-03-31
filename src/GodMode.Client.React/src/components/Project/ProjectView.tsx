@@ -70,6 +70,19 @@ export function ProjectView({ serverId, projectId }: Props) {
     [outputMessages, simpleView],
   );
 
+  // MCP badges — try to load effective MCP servers (available when PR4+ merged)
+  const [mcpServers, setMcpServers] = useState<string[]>([]);
+  useEffect(() => {
+    if (!hub || !project?.ProfileName || !project?.RootName) return;
+    // getEffectiveMcpServers may not exist yet — gracefully handle
+    const fn = (hub as unknown as Record<string, unknown>)['getEffectiveMcpServers'];
+    if (typeof fn !== 'function') return;
+    (fn as (p: string, r: string) => Promise<Record<string, unknown>>)
+      .call(hub, project.ProfileName, project.RootName)
+      .then(result => setMcpServers(Object.keys(result)))
+      .catch(() => {});
+  }, [hub, project?.ProfileName, project?.RootName]);
+
   const state = project?.State ?? 'Idle';
   const canSendInput = state === 'WaitingInput' || state === 'Running' || state === 'Stopped' || state === 'Idle';
   const canResume = state === 'Stopped' || state === 'Idle';
@@ -141,6 +154,18 @@ export function ProjectView({ serverId, projectId }: Props) {
               {project?.RootName ?? ''}
             </span>
           )}
+          {mcpServers.length > 0 && (
+            <div className="mcp-badges">
+              {mcpServers.length <= 3 ? (
+                mcpServers.map(name => <span key={name} className="mcp-badge">{name}</span>)
+              ) : (
+                <>
+                  {mcpServers.slice(0, 2).map(name => <span key={name} className="mcp-badge">{name}</span>)}
+                  <span className="mcp-badge mcp-badge-count" title={mcpServers.join(', ')}>+{mcpServers.length - 2}</span>
+                </>
+              )}
+            </div>
+          )}
         </div>
         <div className="project-header-actions">
           <button
@@ -150,9 +175,20 @@ export function ProjectView({ serverId, projectId }: Props) {
           >
             {simpleView ? 'Simple' : 'Full'}
           </button>
-          {canStop && <button className="btn btn-secondary" onClick={handleStop}>Stop</button>}
-          {canResume && <button className="btn btn-primary" onClick={handleResume}>Resume</button>}
-          <button className="btn btn-danger" onClick={handleDelete} title="Delete project">Delete</button>
+          <button
+            className={`status-btn status-btn-${state}`}
+            onClick={canStop ? handleStop : canResume ? handleResume : undefined}
+            disabled={!canStop && !canResume}
+            title={canStop ? 'Stop' : canResume ? 'Resume' : state}
+          >
+            <span className={`status-dot status-dot-${state}`} />
+            <span className="status-btn-label">{canStop ? 'Stop' : canResume ? 'Resume' : state}</span>
+          </button>
+          <button className="delete-btn" onClick={handleDelete} title="Delete project">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+          </button>
         </div>
       </div>
 
