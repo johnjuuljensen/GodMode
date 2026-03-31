@@ -136,7 +136,15 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     {
         _logger.LogInformation("Client {ConnectionId} deleting root '{RootName}' (force={Force})",
             Context.ConnectionId, rootName, force);
-        await _projectManager.DeleteRootAsync(profileName, rootName, force);
+        try
+        {
+            await _projectManager.DeleteRootAsync(profileName, rootName, force);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete root '{RootName}'", rootName);
+            throw new HubException(ex.Message);
+        }
     }
 
     public async Task<RootPreview?> GetRootPreview(string profileName, string rootName)
