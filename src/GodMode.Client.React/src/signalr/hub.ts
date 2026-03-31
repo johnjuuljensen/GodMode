@@ -149,7 +149,6 @@ export class GodModeHub {
     await this.connection!.invoke('DeleteProject', projectId, force);
   }
 
-<<<<<<< HEAD
   // --- MCP Server Management ---
 
   async addMcpServer(
@@ -241,5 +240,11 @@ export class GodModeHub {
 
   async exportManifest(): Promise<string> {
     return await this.connection!.invoke('ExportManifest');
+  }
+
+  // --- LLM Root Generation ---
+
+  async generateRootWithLlm(request: { Instruction: string; CurrentFiles?: Record<string, string>; SchemaFields?: string[] }): Promise<RootPreview> {
+    return await this.connection!.invoke('GenerateRootWithLlm', request);
   }
 }

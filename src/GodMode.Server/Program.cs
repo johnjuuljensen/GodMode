@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication;
+using GodMode.AI;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
@@ -81,6 +82,8 @@ builder.Services.AddSingleton<RootInstaller>();
 builder.Services.AddSingleton<IManifestParser, ManifestParser>();
 builder.Services.AddSingleton<IConvergenceEngine, ConvergenceEngine>();
 builder.Services.AddSingleton<IManifestExporter, ManifestExporter>();
+builder.Services.AddGodModeAIServices();
+builder.Services.AddSingleton<RootGenerationService>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();

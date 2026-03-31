@@ -175,4 +175,9 @@ public interface IProjectHub
     /// Exports the current server state as a manifest JSON string.
     /// </summary>
     Task<string> ExportManifest();
+
+    /// <summary>
+    /// Generates a root configuration using LLM inference from a natural language instruction.
+    /// </summary>
+    Task<RootPreview> GenerateRootWithLlm(RootGenerationRequest request);
 }

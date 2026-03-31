@@ -15,15 +15,18 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     private readonly IConvergenceEngine _convergenceEngine;
     private readonly IManifestParser _manifestParser;
     private readonly IManifestExporter _manifestExporter;
+    private readonly RootGenerationService? _rootGenerationService;
     private readonly ILogger<ProjectHub> _logger;
 
     public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
-        IManifestParser manifestParser, IManifestExporter manifestExporter, ILogger<ProjectHub> logger)
+        IManifestParser manifestParser, IManifestExporter manifestExporter, ILogger<ProjectHub> logger,
+        RootGenerationService? rootGenerationService = null)
     {
         _projectManager = projectManager;
         _convergenceEngine = convergenceEngine;
         _manifestParser = manifestParser;
         _manifestExporter = manifestExporter;
+        _rootGenerationService = rootGenerationService;
         _logger = logger;
     }
 
@@ -269,6 +272,16 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} exporting manifest", Context.ConnectionId);
         var manifest = _manifestExporter.Export();
         return Task.FromResult(_manifestExporter.Serialize(manifest));
+    }
+
+    public async Task<RootPreview> GenerateRootWithLlm(RootGenerationRequest request)
+    {
+        if (_rootGenerationService == null)
+            throw new HubException("LLM root generation is not available. Configure inference in ~/.godmode/inference.json.");
+
+        _logger.LogInformation("Client {ConnectionId} generating root with LLM: {Instruction}",
+            Context.ConnectionId, request.Instruction);
+        return await _rootGenerationService.GenerateAsync(request);
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

@@ -1,0 +1,123 @@
+using System.Text.Json;
+using GodMode.AI;
+using GodMode.Shared.Models;
+
+namespace GodMode.Server.Services;
+
+/// <summary>
+/// Generates root configurations from natural language using the inference system.
+/// </summary>
+public class RootGenerationService
+{
+    private readonly InferenceRouter _inferenceRouter;
+    private readonly ILogger<RootGenerationService> _logger;
+
+    private const string SystemPrompt = """
+        You are a GodMode root configuration generator. Given a user's description,
+        generate the files needed for a .godmode-root/ directory.
+
+        ## Root directory structure
+        A root contains a .godmode-root/ folder with:
+        - config.json (required): Base configuration
+        - config.{action}.json (optional): Per-action overlays
+        - schema.json or {action}/schema.json: Input schema for the UI form
+        - scripts/*.sh or scripts/*.ps1: Prepare/create/delete scripts
+
+        ## config.json format
+        {
+          "description": "Human-readable description",
+          "nameTemplate": "{name}",
+          "promptTemplate": "{prompt}",
+          "prepare": "scripts/prepare.sh",
+          "create": "scripts/create.sh",
+          "delete": "scripts/delete.sh",
+          "environment": { "KEY": "value" },
+          "claudeArgs": ["--flag"],
+          "scriptsCreateFolder": false,
+          "model": null
+        }
+
+        ## schema.json format (JSON Schema)
+        {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "title": "Project Name" },
+            "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
+            "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+          },
+          "required": ["name", "prompt"]
+        }
+
+        ## Script environment variables
+        Scripts receive: GODMODE_ROOT_PATH, GODMODE_PROJECT_PATH, GODMODE_PROJECT_ID,
+        GODMODE_PROJECT_NAME, GODMODE_RESULT_FILE, and GODMODE_INPUT_* for each form field.
+
+        ## Cross-platform scripts
+        Provide both .sh (Linux/macOS) and .ps1 (Windows) variants when the root
+        should work cross-platform. The script runner auto-selects by platform.
+
+        ## Response format
+        Return ONLY a JSON object mapping file paths to contents.
+        Example: {"config.json": "...", "schema.json": "...", "scripts/create.sh": "..."}
+        """;
+
+    public RootGenerationService(InferenceRouter inferenceRouter, ILogger<RootGenerationService> logger)
+    {
+        _inferenceRouter = inferenceRouter;
+        _logger = logger;
+    }
+
+    public async Task<RootPreview> GenerateAsync(RootGenerationRequest request, CancellationToken ct = default)
+    {
+        if (!_inferenceRouter.IsLoaded)
+            throw new InvalidOperationException("Inference is not available. Configure an API key or local model.");
+
+        var userMessage = BuildUserMessage(request);
+
+        _logger.LogInformation("Generating root from instruction: {Instruction}", request.Instruction);
+        var response = await _inferenceRouter.GenerateAsync(InferenceTier.Heavy, SystemPrompt, userMessage, ct);
+
+        // Parse the JSON response
+        try
+        {
+            // Try to extract JSON from markdown code blocks if present
+            var json = response;
+            var jsonStart = response.IndexOf('{');
+            var jsonEnd = response.LastIndexOf('}');
+            if (jsonStart >= 0 && jsonEnd > jsonStart)
+                json = response[jsonStart..(jsonEnd + 1)];
+
+            var files = JsonSerializer.Deserialize<Dictionary<string, string>>(json,
+                new JsonSerializerOptions { AllowTrailingCommas = true })
+                ?? throw new InvalidOperationException("LLM returned empty response.");
+
+            return new RootPreview(files);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse LLM response as JSON");
+            return new RootPreview(
+                new Dictionary<string, string>(),
+                ValidationError: $"Failed to parse LLM response: {ex.Message}. Raw response: {response[..Math.Min(500, response.Length)]}");
+        }
+    }
+
+    private static string BuildUserMessage(RootGenerationRequest request)
+    {
+        var parts = new List<string> { $"Create a GodMode root configuration for: {request.Instruction}" };
+
+        if (request.CurrentFiles is { Count: > 0 })
+        {
+            parts.Add("\nExisting files to modify/extend:");
+            foreach (var (path, content) in request.CurrentFiles)
+                parts.Add($"\n--- {path} ---\n{content}");
+        }
+
+        if (request.SchemaFields is { Length: > 0 })
+        {
+            parts.Add($"\nThe form should include these fields: {string.Join(", ", request.SchemaFields)}");
+        }
+
+        return string.Join("\n", parts);
+    }
+}
