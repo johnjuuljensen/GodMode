@@ -42,6 +42,21 @@ public class ConfigFileWriter
         _logger.LogInformation("Created profile '{ProfileName}' in appsettings.json", name);
     }
 
+    public void DeleteProfile(string name)
+    {
+        lock (_writeLock)
+        {
+            var root = ReadConfig();
+            var profiles = EnsureProfilesSection(root);
+
+            // Remove from appsettings if it exists there (may be auto-discovered only)
+            profiles.Remove(name);
+            WriteConfig(root);
+        }
+
+        _logger.LogInformation("Deleted profile '{ProfileName}' from appsettings.json", name);
+    }
+
     public void UpdateProfileDescription(string name, string? description)
     {
         lock (_writeLock)
@@ -68,8 +83,13 @@ public class ConfigFileWriter
         {
             var root = ReadConfig();
             var profiles = EnsureProfilesSection(root);
-            var profile = profiles[profileName]?.AsObject()
-                ?? throw new KeyNotFoundException($"Profile '{profileName}' not found.");
+            var profile = profiles[profileName]?.AsObject();
+            if (profile == null)
+            {
+                // Auto-create profile section for auto-discovered profiles
+                profile = new JsonObject { ["Roots"] = new JsonObject() };
+                profiles[profileName] = profile;
+            }
 
             var mcpServers = profile["McpServers"]?.AsObject() ?? new JsonObject();
             profile["McpServers"] = mcpServers;

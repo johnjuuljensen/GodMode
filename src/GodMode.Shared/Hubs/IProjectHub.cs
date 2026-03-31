@@ -78,6 +78,11 @@ public interface IProjectHub
     Task CreateProfile(string name, string? description);
 
     /// <summary>
+    /// Deletes a profile.
+    /// </summary>
+    Task DeleteProfile(string name);
+
+    /// <summary>
     /// Updates a profile's description.
     /// </summary>
     Task UpdateProfileDescription(string name, string? description);

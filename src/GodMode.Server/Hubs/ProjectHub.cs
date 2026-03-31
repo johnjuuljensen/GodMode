@@ -132,6 +132,21 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.CreateProfileAsync(name, description);
     }
 
+    public async Task DeleteProfile(string name)
+    {
+        _logger.LogInformation("Client {ConnectionId} deleting profile '{ProfileName}'",
+            Context.ConnectionId, name);
+        try
+        {
+            await _projectManager.DeleteProfileAsync(name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete profile '{ProfileName}'", name);
+            throw new HubException(ex.Message);
+        }
+    }
+
     public async Task UpdateProfileDescription(string name, string? description)
     {
         _logger.LogInformation("Client {ConnectionId} updating profile description '{ProfileName}'",

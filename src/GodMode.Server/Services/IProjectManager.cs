@@ -83,6 +83,11 @@ public interface IProjectManager
     Task CreateProfileAsync(string name, string? description);
 
     /// <summary>
+    /// Deletes a profile from appsettings.json.
+    /// </summary>
+    Task DeleteProfileAsync(string name);
+
+    /// <summary>
     /// Updates a profile's description in appsettings.json.
     /// </summary>
     Task UpdateProfileDescriptionAsync(string name, string? description);

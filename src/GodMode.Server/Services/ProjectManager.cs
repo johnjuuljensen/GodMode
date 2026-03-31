@@ -800,6 +800,34 @@ public class ProjectManager : IProjectManager
         return Task.CompletedTask;
     }
 
+    public Task DeleteProfileAsync(string name)
+    {
+        _configFileWriter.DeleteProfile(name);
+
+        // Clear profileName from any roots that reference this profile
+        var snap = _snapshot;
+        foreach (var ((profileName, _), rootPath) in snap.RootLookup)
+        {
+            if (!string.Equals(profileName, name, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var configPath = Path.Combine(rootPath, ".godmode-root", "config.json");
+            if (!File.Exists(configPath)) continue;
+            try
+            {
+                var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(configPath))?.AsObject();
+                if (json != null)
+                {
+                    json.Remove("profileName");
+                    File.WriteAllText(configPath, json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                }
+            }
+            catch { /* skip unparseable configs */ }
+        }
+
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
     public Task UpdateProfileDescriptionAsync(string name, string? description)
     {
         _configFileWriter.UpdateProfileDescription(name, description);
