@@ -6,6 +6,7 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
+import { McpConfigPanel } from './Mcp/McpConfigPanel';
 import { isMaui, openDevTools } from '../services/hostApi';
 import './Shell.css';
 
@@ -27,6 +28,8 @@ export function Shell() {
   const profileFilter = useAppStore(s => s.profileFilter);
   const setProfileFilter = useAppStore(s => s.setProfileFilter);
   const profileFilterOptions = useAppStore(s => s.profileFilterOptions);
+  const showMcpConfig = useAppStore(s => s.showMcpConfig);
+  const setShowMcpConfig = useAppStore(s => s.setShowMcpConfig);
 
   const showProfileFilter = profileFilterOptions.length > 2;
 
@@ -67,6 +70,9 @@ export function Shell() {
                 {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
             )}
+            <button className="shell-view-toggle" onClick={() => setShowMcpConfig(true)} title="MCP Servers">
+              MCP
+            </button>
             <button className="shell-theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
               {theme === 'dark' ? '☀' : '☾'}
             </button>
@@ -93,6 +99,7 @@ export function Shell() {
       {showAddServer && <AddServer />}
       {editServerId !== null && <EditServer serverId={editServerId} />}
       {showCreateProject && <CreateProject />}
+      {showMcpConfig && <McpConfigPanel />}
     </div>
   );
 }

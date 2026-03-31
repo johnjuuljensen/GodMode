@@ -115,6 +115,8 @@ interface AppState {
   setShowCreateProject: (show: boolean, context?: { serverId: string; rootName: string }) => void;
   editServerId: string | null;
   setEditServerId: (id: string | null) => void;
+  showMcpConfig: boolean;
+  setShowMcpConfig: (show: boolean) => void;
 }
 
 // ── Helper: rebuild profile hierarchy ──────────────────────────
@@ -568,4 +570,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowCreateProject: (show, context) => set({ showCreateProject: show, createProjectContext: context ?? null }),
   editServerId: null,
   setEditServerId: (id) => set({ editServerId: id }),
+  showMcpConfig: false,
+  setShowMcpConfig: (show) => set({ showMcpConfig: show }),
 }));
