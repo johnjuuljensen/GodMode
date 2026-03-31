@@ -20,13 +20,12 @@ public record SharedRootPreview(
     string? Source = null);
 
 /// <summary>
-/// Tracks an installed shared root's origin for update detection.
+/// Per-root provenance metadata stored in .godmode-root/source.json.
+/// Self-describing — lives with the root, not in a centralized file.
 /// </summary>
-public record InstalledRootInfo(
-    string RootName,
-    string Source,
-    string? GitUrl = null,
-    string? GitRef = null,
-    string? GitPath = null,
+public record RootSourceInfo(
+    string? Git = null,
+    string? Ref = null,
+    string? Path = null,
     DateTime InstalledAt = default,
-    string? ManifestVersion = null);
+    string? Version = null);

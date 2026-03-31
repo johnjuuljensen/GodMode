@@ -48,9 +48,12 @@ public class RootPackager
             var manifestJson = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
             WriteEntry(archive, "manifest.json", manifestJson);
 
-            // Write all root files
+            // Write all root files (exclude source.json — it's installation metadata, not portable content)
             foreach (var (path, content) in preview.Files)
+            {
+                if (path.Equals("source.json", StringComparison.OrdinalIgnoreCase)) continue;
                 WriteEntry(archive, $".godmode-root/{path}", content);
+            }
         }
 
         ms.Position = 0;
