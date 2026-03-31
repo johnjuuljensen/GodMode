@@ -223,14 +223,16 @@ body::after {
   border-radius: 8px;
   background: var(--glass);
   color: var(--text-secondary);
-  font-size: 18px;
+  font-size: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
 }
 
+/* Icon-only buttons (single character) get square sizing */
 .shell-theme-toggle {
   width: 34px;
   padding: 0;

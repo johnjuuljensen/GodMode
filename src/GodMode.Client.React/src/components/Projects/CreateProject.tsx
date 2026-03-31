@@ -49,6 +49,7 @@ export function CreateProject() {
   const serverConnections = useAppStore(s => s.serverConnections);
   const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
   const createProjectContext = useAppStore(s => s.createProjectContext);
+  const profileFilter = useAppStore(s => s.profileFilter);
 
   const connectedServers = useMemo(
     () => serverConnections.filter(c => c.connectionState === 'connected' && c.roots.length > 0),
@@ -67,7 +68,13 @@ export function CreateProject() {
   const [error, setError] = useState<string | null>(null);
 
   const server = connectedServers.find(c => c.serverInfo.Id === selectedServerId);
-  const roots = server?.roots ?? [];
+  const allRoots = server?.roots ?? [];
+
+  // Filter roots by active profile filter
+  const roots = useMemo(() => {
+    if (profileFilter === 'All') return allRoots;
+    return allRoots.filter(r => (r.ProfileName ?? 'Default').toLowerCase() === profileFilter.toLowerCase());
+  }, [allRoots, profileFilter]);
 
   const rootsByProfile = useMemo(() => {
     const groups = new Map<string, ProjectRootInfo[]>();
