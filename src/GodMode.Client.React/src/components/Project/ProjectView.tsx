@@ -145,7 +145,6 @@ export function ProjectView({ serverId, projectId }: Props) {
     <div className="project-view">
       <div className="project-header">
         <div className="project-header-info">
-          <span className={`project-state-badge ${state}`}>{state}</span>
           <span className="project-header-name">{projectName}</span>
           {(project?.ProfileName || project?.RootName) && (
             <span className="project-header-root">
@@ -176,13 +175,15 @@ export function ProjectView({ serverId, projectId }: Props) {
             {simpleView ? 'Simple' : 'Full'}
           </button>
           <button
-            className={`status-btn status-btn-${state}`}
+            className={`project-status-btn ${state}`}
             onClick={canStop ? handleStop : canResume ? handleResume : undefined}
             disabled={!canStop && !canResume}
-            title={canStop ? 'Stop' : canResume ? 'Resume' : state}
+            title={canStop ? 'Click to stop' : canResume ? 'Click to resume' : state}
           >
-            <span className={`status-dot status-dot-${state}`} />
-            <span className="status-btn-label">{canStop ? 'Stop' : canResume ? 'Resume' : state}</span>
+            <span className="project-status-dot" />
+            <span className="project-status-label">{state}</span>
+            {canStop && <span className="project-status-action">Stop</span>}
+            {canResume && <span className="project-status-action">Resume</span>}
           </button>
           <button className="delete-btn" onClick={handleDelete} title="Delete project">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
