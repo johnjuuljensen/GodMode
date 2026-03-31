@@ -149,6 +149,42 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.GetEffectiveMcpServersAsync(profileName, rootName, actionName);
     }
 
+    public async Task CreateRoot(string rootName, RootPreview preview, string? profileName = null)
+    {
+        _logger.LogInformation("Client {ConnectionId} creating root '{RootName}'",
+            Context.ConnectionId, rootName);
+        await _projectManager.CreateRootAsync(rootName, preview, profileName);
+    }
+
+    public async Task DeleteRoot(string profileName, string rootName, bool force = false)
+    {
+        _logger.LogInformation("Client {ConnectionId} deleting root '{RootName}' (force={Force})",
+            Context.ConnectionId, rootName, force);
+        try
+        {
+            await _projectManager.DeleteRootAsync(profileName, rootName, force);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete root '{RootName}'", rootName);
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task<RootPreview?> GetRootPreview(string profileName, string rootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} getting root preview for '{RootName}'",
+            Context.ConnectionId, rootName);
+        return await _projectManager.GetRootPreviewAsync(profileName, rootName);
+    }
+
+    public async Task UpdateRoot(string profileName, string rootName, RootPreview preview)
+    {
+        _logger.LogInformation("Client {ConnectionId} updating root '{RootName}'",
+            Context.ConnectionId, rootName);
+        await _projectManager.UpdateRootAsync(profileName, rootName, preview);
+    }
+
     public async Task CreateProfile(string name, string? description)
     {
         _logger.LogInformation("Client {ConnectionId} creating profile '{ProfileName}'",
