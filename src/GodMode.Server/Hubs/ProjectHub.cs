@@ -12,11 +12,16 @@ namespace GodMode.Server.Hubs;
 public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
 {
     private readonly IProjectManager _projectManager;
+    private readonly IConvergenceEngine _convergenceEngine;
+    private readonly IManifestParser _manifestParser;
     private readonly ILogger<ProjectHub> _logger;
 
-    public ProjectHub(IProjectManager projectManager, ILogger<ProjectHub> logger)
+    public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
+        IManifestParser manifestParser, ILogger<ProjectHub> logger)
     {
         _projectManager = projectManager;
+        _convergenceEngine = convergenceEngine;
+        _manifestParser = manifestParser;
         _logger = logger;
     }
 
@@ -248,6 +253,13 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     {
         _logger.LogInformation("Client {ConnectionId} uninstalling shared root '{RootName}'", Context.ConnectionId, rootName);
         await _projectManager.UninstallSharedRootAsync(rootName);
+    }
+
+    public async Task<ConvergenceResult> ApplyManifest(string manifestContent, bool force = false)
+    {
+        _logger.LogInformation("Client {ConnectionId} applying manifest", Context.ConnectionId);
+        var manifest = _manifestParser.Parse(manifestContent);
+        return await _convergenceEngine.ConvergeAsync(manifest, force);
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
