@@ -135,4 +135,34 @@ public interface IProjectHub
     /// Updates a profile's description.
     /// </summary>
     Task UpdateProfileDescription(string name, string? description);
+
+    /// <summary>
+    /// Exports a root as a .gmroot ZIP package.
+    /// </summary>
+    Task<byte[]> ExportRoot(string profileName, string rootName);
+
+    /// <summary>
+    /// Previews a .gmroot package from raw bytes before installation.
+    /// </summary>
+    Task<SharedRootPreview> PreviewImportFromBytes(byte[] packageBytes);
+
+    /// <summary>
+    /// Previews a .gmroot package from a URL before installation.
+    /// </summary>
+    Task<SharedRootPreview> PreviewImportFromUrl(string url);
+
+    /// <summary>
+    /// Previews a root from a git repo before installation.
+    /// </summary>
+    Task<SharedRootPreview> PreviewImportFromGit(string gitUrl, string? path = null, string? gitRef = null);
+
+    /// <summary>
+    /// Installs a previously previewed shared root.
+    /// </summary>
+    Task InstallSharedRoot(string rootName, SharedRootPreview preview);
+
+    /// <summary>
+    /// Uninstalls a shared root.
+    /// </summary>
+    Task UninstallSharedRoot(string rootName);
 }

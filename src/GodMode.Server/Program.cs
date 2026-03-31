@@ -76,6 +76,8 @@ builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
 builder.Services.AddSingleton<ProfileFileManager>();
 builder.Services.AddSingleton<RootCreator>();
+builder.Services.AddSingleton<RootPackager>();
+builder.Services.AddSingleton<RootInstaller>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();
