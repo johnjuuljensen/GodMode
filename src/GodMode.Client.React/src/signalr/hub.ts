@@ -186,6 +186,10 @@ export class GodModeHub {
     await this.connection!.invoke('CreateProfile', name, description);
   }
 
+  async deleteProfile(name: string): Promise<void> {
+    await this.connection!.invoke('DeleteProfile', name);
+  }
+
   async updateProfileDescription(name: string, description?: string | null): Promise<void> {
     await this.connection!.invoke('UpdateProfileDescription', name, description);
   }
