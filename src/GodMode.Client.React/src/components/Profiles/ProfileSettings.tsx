@@ -15,6 +15,7 @@ export function ProfileSettings() {
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const handleCreate = async () => {
     if (!hub || !newName.trim()) return;
@@ -29,11 +30,12 @@ export function ProfileSettings() {
     }
   };
 
-  const handleDelete = async (name: string) => {
-    if (!hub || !confirm(`Delete profile "${name}"? This will not delete its roots or projects.`)) return;
+  const handleDelete = async (name: string, deleteContents: boolean) => {
+    if (!hub) return;
     setError(null);
+    setDeleteConfirm(null);
     try {
-      await hub.deleteProfile(name);
+      await hub.deleteProfile(name, deleteContents);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete profile');
@@ -54,7 +56,16 @@ export function ProfileSettings() {
                 <div className="profile-item-name">{p.Name}</div>
                 {p.Description && <div className="profile-item-desc">{p.Description}</div>}
               </div>
-              <button className="btn btn-danger btn-sm" onClick={() => handleDelete(p.Name)}>Delete</button>
+              {deleteConfirm === p.Name ? (
+                <div className="delete-confirm-actions">
+                  <span className="delete-confirm-label">Delete roots &amp; projects?</span>
+                  <button className="btn btn-danger btn-sm" onClick={() => handleDelete(p.Name, true)}>Delete All</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => handleDelete(p.Name, false)}>Move to Default</button>
+                  <button className="btn btn-sm" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+                </div>
+              ) : (
+                <button className="btn btn-danger btn-sm" onClick={() => setDeleteConfirm(p.Name)}>Delete</button>
+              )}
             </div>
           ))}
         </div>

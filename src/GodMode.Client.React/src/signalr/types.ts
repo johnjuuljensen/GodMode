@@ -115,14 +115,12 @@ export interface SharedRootPreview {
   Source?: string | null;
 }
 
-export interface InstalledRootInfo {
-  RootName: string;
-  Source: string;
-  GitUrl?: string | null;
-  GitRef?: string | null;
-  GitPath?: string | null;
+export interface RootSourceInfo {
+  Git?: string | null;
+  Ref?: string | null;
+  Path?: string | null;
   InstalledAt: string;
-  ManifestVersion?: string | null;
+  Version?: string | null;
 }
 
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---

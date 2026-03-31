@@ -117,7 +117,6 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
             <ProjectItem
               key={project.Id}
               project={project}
-              serverId={rootGroup.serverId}
               isSelected={
                 selectedProject?.serverId === rootGroup.serverId &&
                 selectedProject?.projectId === project.Id
