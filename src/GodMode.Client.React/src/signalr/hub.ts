@@ -149,6 +149,7 @@ export class GodModeHub {
     await this.connection!.invoke('DeleteProject', projectId, force);
   }
 
+<<<<<<< HEAD
   // --- MCP Server Management ---
 
   async addMcpServer(
@@ -236,5 +237,9 @@ export class GodModeHub {
 
   async uninstallSharedRoot(rootName: string): Promise<void> {
     await this.connection!.invoke('UninstallSharedRoot', rootName);
+  }
+
+  async exportManifest(): Promise<string> {
+    return await this.connection!.invoke('ExportManifest');
   }
 }
