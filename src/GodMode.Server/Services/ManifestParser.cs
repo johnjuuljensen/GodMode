@@ -63,16 +63,12 @@ public class ManifestParser : IManifestParser
             }
         }
 
-        if (manifest.Profiles is { Count: > 0 } && manifest.Roots != null)
+        if (manifest.Profiles is { Count: > 0 })
         {
-            foreach (var (profileName, profile) in manifest.Profiles)
+            foreach (var (name, profile) in manifest.Profiles)
             {
-                if (profile.Roots == null) continue;
-                foreach (var rootRef in profile.Roots)
-                {
-                    if (!manifest.Roots.ContainsKey(rootRef))
-                        return $"Profile '{profileName}' references unknown root '{rootRef}'.";
-                }
+                if (!string.IsNullOrWhiteSpace(profile.Path) && !string.IsNullOrWhiteSpace(profile.Git))
+                    return $"Profile '{name}' cannot specify both 'path' and 'git'.";
             }
         }
 
@@ -81,21 +77,30 @@ public class ManifestParser : IManifestParser
 
     private static GodModeManifest ResolveRelativePaths(GodModeManifest manifest, string baseDir)
     {
-        if (manifest.Roots == null) return manifest;
-
-        var resolved = new Dictionary<string, ManifestRoot>();
-        foreach (var (name, root) in manifest.Roots)
+        Dictionary<string, ManifestRoot>? resolvedRoots = null;
+        if (manifest.Roots != null)
         {
-            if (root.Path != null && !Path.IsPathRooted(root.Path))
+            resolvedRoots = new Dictionary<string, ManifestRoot>();
+            foreach (var (name, root) in manifest.Roots)
             {
-                resolved[name] = root with { Path = Path.GetFullPath(Path.Combine(baseDir, root.Path)) };
-            }
-            else
-            {
-                resolved[name] = root;
+                resolvedRoots[name] = root.Path != null && !Path.IsPathRooted(root.Path)
+                    ? root with { Path = Path.GetFullPath(Path.Combine(baseDir, root.Path)) }
+                    : root;
             }
         }
 
-        return manifest with { Roots = resolved };
+        Dictionary<string, ManifestProfile>? resolvedProfiles = null;
+        if (manifest.Profiles != null)
+        {
+            resolvedProfiles = new Dictionary<string, ManifestProfile>();
+            foreach (var (name, profile) in manifest.Profiles)
+            {
+                resolvedProfiles[name] = profile.Path != null && !Path.IsPathRooted(profile.Path)
+                    ? profile with { Path = Path.GetFullPath(Path.Combine(baseDir, profile.Path)) }
+                    : profile;
+            }
+        }
+
+        return manifest with { Roots = resolvedRoots ?? manifest.Roots, Profiles = resolvedProfiles ?? manifest.Profiles };
     }
 }

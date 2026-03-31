@@ -19,10 +19,14 @@ public record ManifestRoot(
     string? GitPath = null);
 
 /// <summary>
-/// A profile entry in the manifest.
+/// A profile entry in the manifest. Can be a local directory or from a git source.
+/// Profile contents (profile.json, env.json, mcp/*.json) are copied into .profiles/.
 /// </summary>
 public record ManifestProfile(
-    string[]? Roots = null,
+    string? Path = null,
+    string? Git = null,
+    string? Ref = null,
+    string? GitPath = null,
     string? Description = null,
     Dictionary<string, McpServerConfig>? McpServers = null,
     Dictionary<string, string>? Environment = null);
