@@ -50,13 +50,18 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} creating project in profile '{Profile}' root '{Root}' action '{Action}' with {InputCount} inputs",
             Context.ConnectionId, profileName, projectRootName, actionName ?? "(default)", inputs.Count);
 
-        var request = new CreateProjectRequest(profileName, projectRootName, inputs, actionName);
-        var status = await _projectManager.CreateProjectAsync(request);
-
-        // Notify all clients about the new project
-        await Clients.All.ProjectCreated(status);
-
-        return status;
+        try
+        {
+            var request = new CreateProjectRequest(profileName, projectRootName, inputs, actionName);
+            var status = await _projectManager.CreateProjectAsync(request);
+            await Clients.All.ProjectCreated(status);
+            return status;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create project in root '{Root}'", projectRootName);
+            throw new HubException(ex.Message);
+        }
     }
 
     public async Task SendInput(string projectId, string input)

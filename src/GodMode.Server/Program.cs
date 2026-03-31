@@ -40,6 +40,15 @@ builder.Services.AddSignalR()
             options.PayloadSerializerOptions.Converters.Add(converter);
     });
 
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    var defaults = JsonDefaults.Options;
+    options.SerializerOptions.PropertyNamingPolicy = defaults.PropertyNamingPolicy;
+    options.SerializerOptions.DefaultIgnoreCondition = defaults.DefaultIgnoreCondition;
+    foreach (var converter in defaults.Converters)
+        options.SerializerOptions.Converters.Add(converter);
+});
+
 // CORS: not needed in production (React is same-origin, MAUI proxy is server-to-server).
 // Only allow cross-origin in development (vite dev server on a different port).
 if (builder.Environment.IsDevelopment())
@@ -134,7 +143,7 @@ app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
 app.MapGet("/servers", () => new[]
 {
     new ServerInfo("self", "Local Server", "local", ServerState.Running)
-});
+}).AllowAnonymous();
 
 // SSE event stream (placeholder — no dynamic server changes in single-server mode)
 app.MapGet("/events", async (HttpContext ctx) =>
@@ -146,7 +155,7 @@ app.MapGet("/events", async (HttpContext ctx) =>
     // Keep connection open until client disconnects
     try { await Task.Delay(Timeout.Infinite, ctx.RequestAborted); }
     catch (OperationCanceledException) { }
-});
+}).AllowAnonymous();
 
 var hub = app.MapHub<ProjectHub>("/hubs/projects");
 if (authMode != "none")

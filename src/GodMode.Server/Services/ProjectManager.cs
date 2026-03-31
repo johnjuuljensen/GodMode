@@ -223,7 +223,7 @@ public class ProjectManager : IProjectManager
             try
             {
                 var config = _rootConfigReader.ReadConfig(subDir);
-                var profileName = config.ProfileName ?? dirName;
+                var profileName = config.ProfileName ?? "Default";
 
                 if (!profiles.TryGetValue(profileName, out var existingProfile))
                 {
