@@ -20,7 +20,6 @@ export function McpConfigPanel() {
   const visibleProfiles = profileFilter !== 'All'
     ? profiles.filter(p => p.Name.toLowerCase() === profileFilter.toLowerCase())
     : profiles;
-
   const [servers, setServers] = useState<Record<string, McpServerConfig>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
