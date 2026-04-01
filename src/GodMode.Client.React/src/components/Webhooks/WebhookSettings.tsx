@@ -231,8 +231,8 @@ export function WebhookSettings() {
         <>
           <div className="settings-list">
             {webhooks.map(w => (
-              <div key={w.Keyword} className="settings-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div key={w.Keyword} className="settings-item settings-item-stacked">
+                <div className="settings-item-row">
                   <div className="settings-item-info">
                     <div className="settings-item-name">
                       {w.Keyword}

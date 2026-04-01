@@ -564,10 +564,14 @@ public class ProjectManager : IProjectManager
 
         // Build MCP config JSON (merges profile + action MCP servers)
         var mcpConfigJson = BuildMcpConfigJson(profileConfig?.McpServers, action.McpServers);
+        if (mcpConfigJson != null)
+            _logger.LogInformation("MCP config JSON: {McpConfig}", mcpConfigJson);
 
         // Build claude env/args from action config + project settings + profile env
         var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, model, profileEnv,
             request.ProfileName, config.StripEnvVarProfile, mcpConfigJson);
+        if (claudeArgs != null)
+            _logger.LogInformation("Claude args: {Args}", string.Join(" ", claudeArgs));
 
         // Start Claude process
         project.ProcessCancellation = new CancellationTokenSource();
@@ -1524,8 +1528,11 @@ public class ProjectManager : IProjectManager
         }
         if (!string.IsNullOrWhiteSpace(mcpConfigJson))
         {
+            // Write to a temp file — --mcp-config expects a file path, not inline JSON
+            var mcpConfigPath = Path.Combine(Path.GetTempPath(), $"godmode-mcp-{Guid.NewGuid():N}.json");
+            File.WriteAllText(mcpConfigPath, mcpConfigJson);
             args.Add("--mcp-config");
-            args.Add(mcpConfigJson);
+            args.Add(mcpConfigPath);
         }
 
         return (env, args.Count > 0 ? args.ToArray() : null);
@@ -1558,15 +1565,31 @@ public class ProjectManager : IProjectManager
             return null;
 
         // Build Claude MCP config format: { "mcpServers": { ... } }
+        // Stdio servers → { command, args, env }; SSE servers → { url, headers }
         var mcpConfig = new Dictionary<string, object>
         {
             ["mcpServers"] = merged.ToDictionary(
                 kvp => kvp.Key,
-                kvp => new
+                kvp =>
                 {
-                    command = kvp.Value.Command,
-                    args = kvp.Value.Args ?? [],
-                    env = ExpandEnvVars(kvp.Value.Env)
+                    if (!string.IsNullOrEmpty(kvp.Value.Url))
+                    {
+                        var sse = new Dictionary<string, object>
+                        {
+                            ["type"] = "sse",
+                            ["url"] = kvp.Value.Url
+                        };
+                        var headers = ExpandEnvVars(kvp.Value.Headers);
+                        if (headers is { Count: > 0 })
+                            sse["headers"] = headers;
+                        return (object)sse;
+                    }
+                    return (object)new
+                    {
+                        command = kvp.Value.Command ?? "",
+                        args = kvp.Value.Args ?? [],
+                        env = ExpandEnvVars(kvp.Value.Env)
+                    };
                 })
         };
 

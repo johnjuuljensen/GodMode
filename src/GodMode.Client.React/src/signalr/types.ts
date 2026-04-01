@@ -89,9 +89,11 @@ export interface ServerInfo {
 // --- MCP Server Configuration ---
 
 export interface McpServerConfig {
-  Command: string;
+  Command?: string | null;
   Args?: string[] | null;
   Env?: Record<string, string> | null;
+  Url?: string | null;
+  Headers?: Record<string, string> | null;
 }
 
 // --- Root Management ---

@@ -703,7 +703,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Selection ─────────────────────────────────────────────
 
   selectedProject: null,
-  selectProject: (serverId, projectId) => set({ selectedProject: { serverId, projectId }, outputMessages: [], question: emptyQuestion }),
+  selectProject: (serverId, projectId) => set({ selectedProject: { serverId, projectId }, activePage: null, showGodModeChat: false, outputMessages: [], question: emptyQuestion }),
   clearSelection: () => set({ selectedProject: null, outputMessages: [], question: emptyQuestion }),
 
   // ── Output ────────────────────────────────────────────────
