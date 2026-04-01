@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
 import { Sidebar } from './Sidebar/Sidebar';
 import { ProjectView } from './Project/ProjectView';
@@ -28,31 +28,17 @@ export function Shell() {
   const setTileView = useAppStore(s => s.setTileView);
   const clearSelection = useAppStore(s => s.clearSelection);
   const totalWaitingCount = useAppStore(s => s.totalWaitingCount);
-  const profileFilter = useAppStore(s => s.profileFilter);
-  const setProfileFilter = useAppStore(s => s.setProfileFilter);
-  const profileFilterOptions = useAppStore(s => s.profileFilterOptions);
   const showMcpConfig = useAppStore(s => s.showMcpConfig);
-  const setShowMcpConfig = useAppStore(s => s.setShowMcpConfig);
   const showRootManager = useAppStore(s => s.showRootManager);
-  const setShowRootManager = useAppStore(s => s.setShowRootManager);
   const showProfileSettings = useAppStore(s => s.showProfileSettings);
-  const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
   const showAppSettings = useAppStore(s => s.showAppSettings);
-  const setShowAppSettings = useAppStore(s => s.setShowAppSettings);
-  const featureRoots = useAppStore(s => s.featureRoots);
-  const featureMcp = useAppStore(s => s.featureMcp);
-  const featureProfiles = useAppStore(s => s.featureProfiles);
 
-  const showProfileFilter = featureProfiles && profileFilterOptions.length > 1;
-
-  const [theme, setTheme] = useState<'dark' | 'light'>(getInitialTheme);
+  const [theme] = useState<'dark' | 'light'>(getInitialTheme);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('godmode-theme', theme);
   }, [theme]);
-
-  const toggleTheme = useCallback(() => setTheme(t => t === 'dark' ? 'light' : 'dark'), []);
 
   const isTileFullscreen = isTileView && selectedProject !== null;
 
@@ -77,32 +63,6 @@ export function Shell() {
             )}
           </div>
           <div className="shell-header-right">
-            {showProfileFilter && (
-              <select className="shell-profile-filter" value={profileFilter} onChange={e => setProfileFilter(e.target.value)}>
-                {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
-              </select>
-            )}
-            {featureMcp && (
-              <button className="shell-view-toggle" onClick={() => setShowMcpConfig(true)} title="MCP Servers">
-                MCP
-              </button>
-            )}
-            {featureRoots && (
-              <button className="shell-view-toggle" onClick={() => setShowRootManager(true)} title="Root Manager">
-                Roots
-              </button>
-            )}
-            {featureProfiles && (
-              <button className="shell-view-toggle" onClick={() => setShowProfileSettings(true)} title="Profile Settings">
-                Profiles
-              </button>
-            )}
-            <button className="shell-view-toggle" onClick={() => setShowAppSettings(true)} title="Settings">
-              {'⚙'}
-            </button>
-            <button className="shell-theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
-              {theme === 'dark' ? '☀' : '☾'}
-            </button>
             <button className="shell-view-toggle" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
               {isTileView ? '☰' : '⊞'}
             </button>

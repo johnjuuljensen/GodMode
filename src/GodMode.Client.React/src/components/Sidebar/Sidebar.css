@@ -373,13 +373,36 @@
   font-family: var(--font-mono);
 }
 
-/* ── Group By Toggle ── */
-.sidebar-group-btn {
+/* ── Profile Filter (in sidebar header) ── */
+.sidebar-profile-filter {
   height: 32px;
   padding: 0 8px;
+  background: var(--glass);
   border: 1px solid var(--glass-border);
   border-radius: 6px;
-  background: var(--glass);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  max-width: 100px;
+}
+
+.sidebar-profile-filter:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* ── Sort Bar (below header) ── */
+.sidebar-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 16px;
+  border: none;
+  border-bottom: 1px solid var(--glass-border);
+  background: transparent;
   color: var(--text-tertiary);
   font-family: var(--font-sans);
   font-size: 10px;
@@ -390,9 +413,131 @@
   transition: background 0.15s, color 0.15s;
 }
 
-.sidebar-group-btn:hover {
+.sidebar-sort-bar:hover {
   background: var(--glass-hover);
   color: var(--text-secondary);
+}
+
+/* ── Sidebar Footer ── */
+.sidebar-footer {
+  position: relative;
+  border-top: 1px solid var(--glass-border);
+  padding: 8px 10px;
+}
+
+.sidebar-footer-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.sidebar-settings-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  border: 1px solid var(--glass-border);
+  border-radius: 7px;
+  background: var(--glass);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.sidebar-settings-btn:hover {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+  border-color: var(--glass-border-strong);
+}
+
+/* ── GodMode Button ── */
+.sidebar-godmode-btn {
+  position: relative;
+  flex: 1;
+  height: 32px;
+  border: 1px solid rgba(167,139,250,0.25);
+  border-radius: 7px;
+  background: linear-gradient(135deg, rgba(167,139,250,0.12), rgba(94,158,255,0.08));
+  color: var(--purple);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+}
+
+.sidebar-godmode-btn:hover {
+  background: linear-gradient(135deg, rgba(167,139,250,0.20), rgba(94,158,255,0.14));
+  border-color: rgba(167,139,250,0.40);
+  box-shadow: 0 0 12px rgba(167,139,250,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+.sidebar-godmode-shine {
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+  animation: godmode-shine 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes godmode-shine {
+  0% { left: -100%; }
+  50% { left: 100%; }
+  100% { left: 100%; }
+}
+
+/* ── Footer Menu (opens upward) ── */
+.sidebar-footer-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 10px;
+  right: 10px;
+  margin-bottom: 4px;
+  background: var(--glass-strong);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border-strong);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.2), 0 0 0 0.5px rgba(0,0,0,0.1);
+  z-index: 50;
+}
+
+.sidebar-footer-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.sidebar-footer-menu-item:hover {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-footer-menu-sep {
+  height: 1px;
+  background: var(--glass-border);
+  margin: 4px 8px;
 }
 
 /* ── Flat project list (no root header indentation) ── */
