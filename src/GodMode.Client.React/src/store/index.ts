@@ -56,9 +56,23 @@ export interface ProfileGroup {
   projectCount: number;
 }
 
+// ── Active page (replaces modal booleans) ─────────────────────
+export type ActivePage =
+  | { type: 'mcpConfig' }
+  | { type: 'rootManager' }
+  | { type: 'profileSettings' }
+  | { type: 'appSettings' }
+  | { type: 'webhookSettings' }
+  | { type: 'addServer' }
+  | { type: 'editServer'; serverId: string }
+  | { type: 'createProject'; context?: { serverId: string; rootName: string } };
+
 // ── Store interface ────────────────────────────────────────────
 
 interface AppState {
+  // Mobile detection
+  isMobile: boolean;
+  setIsMobile: (mobile: boolean) => void;
   // Raw server connections
   serverConnections: ServerConnection[];
   getConnection: (serverId: string) => ServerConnection | undefined;
@@ -121,23 +135,19 @@ interface AppState {
   setTileLoading: (projectId: string, loading: boolean) => void;
   clearTileMessages: () => void;
 
-  // UI dialogs
-  showAddServer: boolean;
+  // UI pages (replaces modals)
+  activePage: ActivePage | null;
+  setActivePage: (page: ActivePage | null) => void;
+  closePage: () => void;
+
+  // Backward-compat setters (delegate to activePage)
   setShowAddServer: (show: boolean) => void;
-  showCreateProject: boolean;
-  createProjectContext: { serverId: string; rootName: string } | null;
   setShowCreateProject: (show: boolean, context?: { serverId: string; rootName: string }) => void;
-  editServerId: string | null;
   setEditServerId: (id: string | null) => void;
-  showMcpConfig: boolean;
   setShowMcpConfig: (show: boolean) => void;
-  showRootManager: boolean;
   setShowRootManager: (show: boolean) => void;
-  showProfileSettings: boolean;
   setShowProfileSettings: (show: boolean) => void;
-  showAppSettings: boolean;
   setShowAppSettings: (show: boolean) => void;
-  showWebhookSettings: boolean;
   setShowWebhookSettings: (show: boolean) => void;
 
   // GodMode chat
@@ -338,6 +348,10 @@ function loadGroupBy(): SidebarGroupBy {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
+  // Mobile detection
+  isMobile: false,
+  setIsMobile: (mobile) => set({ isMobile: mobile }),
+
   serverConnections: [],
   profileGroups: [],
   inactiveServers: [],
@@ -427,7 +441,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await api.addServer(req);
       await get().loadServers();
-      set({ showAddServer: false });
+      set({ activePage: null });
     } catch (err) {
       console.error('Failed to add server:', err);
     }
@@ -442,7 +456,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       console.error('Failed to remove server:', err);
     }
     await get().loadServers();
-    set({ editServerId: null });
+    set({ activePage: null });
   },
 
   startServer: async (serverId) => {
@@ -733,25 +747,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   setTileLoading: (projectId, loading) => set(state => ({ tileLoading: { ...state.tileLoading, [projectId]: loading } })),
   clearTileMessages: () => set({ tileMessages: {}, tileLoading: {} }),
 
-  // ── UI ────────────────────────────────────────────────────
+  // ── UI pages ────────────────────────────────────────────────
 
-  showAddServer: false,
-  setShowAddServer: (show) => set({ showAddServer: show }),
-  showCreateProject: false,
-  createProjectContext: null,
-  setShowCreateProject: (show, context) => set({ showCreateProject: show, createProjectContext: context ?? null }),
-  editServerId: null,
-  setEditServerId: (id) => set({ editServerId: id }),
-  showMcpConfig: false,
-  setShowMcpConfig: (show) => set({ showMcpConfig: show }),
-  showRootManager: false,
-  setShowRootManager: (show) => set({ showRootManager: show }),
-  showProfileSettings: false,
-  setShowProfileSettings: (show) => set({ showProfileSettings: show }),
-  showAppSettings: false,
-  setShowAppSettings: (show) => set({ showAppSettings: show }),
-  showWebhookSettings: false,
-  setShowWebhookSettings: (show) => set({ showWebhookSettings: show }),
+  activePage: null,
+  setActivePage: (page) => set({ activePage: page }),
+  closePage: () => set({ activePage: null }),
+
+  // Backward-compat setters (delegate to activePage)
+  setShowAddServer: (show) => set({ activePage: show ? { type: 'addServer' } : null }),
+  setShowCreateProject: (show, context) => set({ activePage: show ? { type: 'createProject', context } : null }),
+  setEditServerId: (id) => set({ activePage: id ? { type: 'editServer', serverId: id } : null }),
+  setShowMcpConfig: (show) => set({ activePage: show ? { type: 'mcpConfig' } : null }),
+  setShowRootManager: (show) => set({ activePage: show ? { type: 'rootManager' } : null }),
+  setShowProfileSettings: (show) => set({ activePage: show ? { type: 'profileSettings' } : null }),
+  setShowAppSettings: (show) => set({ activePage: show ? { type: 'appSettings' } : null }),
+  setShowWebhookSettings: (show) => set({ activePage: show ? { type: 'webhookSettings' } : null }),
 
   // GodMode chat
   showGodModeChat: false,

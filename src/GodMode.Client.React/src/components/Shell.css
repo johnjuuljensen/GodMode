@@ -194,6 +194,87 @@ body::after {
   flex-shrink: 0;
 }
 
+/* ── Page View (replaces modals) ── */
+.page-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.page-back-bar {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--glass-border);
+  flex-shrink: 0;
+  background: var(--glass);
+}
+
+.page-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+/* ── Mobile Layout ── */
+.shell.shell-mobile {
+  flex-direction: column;
+}
+
+.shell.shell-mobile > .sidebar {
+  width: 100%;
+  height: 100vh;
+  border-right: none;
+}
+
+.shell-mobile-project {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.shell-mobile-project > .page-back-bar {
+  flex-shrink: 0;
+}
+
+.shell-mobile-project > .project-view {
+  flex: 1;
+  overflow: hidden;
+}
+
+.shell-mobile-tiles {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.shell-mobile-tiles > .sidebar-header {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.shell-mobile-tiles > .sidebar-footer {
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.shell-mobile-tiles > .tile-grid-scroll {
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 768px) {
+  .page-body {
+    padding: 16px;
+  }
+}
+
 .shell-empty {
   flex: 1;
   display: flex;

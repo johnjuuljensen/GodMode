@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '../../store';
 import type { ProjectRootInfo } from '../../signalr/types';
+import '../settings-common.css';
 import './CreateProject.css';
 
 interface FormField {
@@ -47,8 +48,9 @@ const MODEL_OPTIONS = ['opus', 'sonnet', 'haiku'];
 
 export function CreateProject() {
   const serverConnections = useAppStore(s => s.serverConnections);
-  const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
-  const createProjectContext = useAppStore(s => s.createProjectContext);
+  const closePage = useAppStore(s => s.closePage);
+  const activePage = useAppStore(s => s.activePage);
+  const createProjectContext = activePage?.type === 'createProject' ? activePage.context ?? null : null;
   const profileFilter = useAppStore(s => s.profileFilter);
 
   const connectedServers = useMemo(
@@ -136,7 +138,7 @@ export function CreateProject() {
         else if (val) inputs[field.key] = val;
       }
       await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs);
-      setShowCreateProject(false);
+      closePage();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {
@@ -150,11 +152,10 @@ export function CreateProject() {
   }, [step, roots, selectRoot]);
 
   return (
-    <div className="modal-overlay" onClick={() => !creating && setShowCreateProject(false)}>
-      <div className="modal create-project-modal" onClick={e => e.stopPropagation()}>
-        {step === 1 ? (
+    <>
+      {step === 1 ? (
           <>
-            <h2>Choose Root</h2>
+            <div className="settings-header"><h2>Choose Root</h2></div>
 
             {connectedServers.length > 1 && (
               <div className="form-group">
@@ -195,13 +196,10 @@ export function CreateProject() {
               ))}
             </div>
 
-            <div className="btn-group">
-              <button className="btn btn-secondary" onClick={() => setShowCreateProject(false)}>Cancel</button>
-            </div>
           </>
         ) : (
           <>
-            <h2>New Project</h2>
+            <div className="settings-header"><h2>New Project</h2></div>
 
             <div className="form-group">
               <label>Root</label>
@@ -258,11 +256,9 @@ export function CreateProject() {
               <button className="btn btn-primary" onClick={handleCreate} disabled={creating || !selectedRoot}>
                 {creating ? 'Creating...' : 'Create'}
               </button>
-              <button className="btn btn-secondary" onClick={() => setShowCreateProject(false)} disabled={creating}>Cancel</button>
             </div>
           </>
         )}
-      </div>
-    </div>
+    </>
   );
 }

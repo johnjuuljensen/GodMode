@@ -1,45 +1,37 @@
 import { useAppStore } from '../store';
+import { Toggle } from './settings-shared';
+import './settings-common.css';
+
+const FLAGS: { key: 'featureRoots' | 'featureMcp' | 'featureProfiles'; label: string; desc: string }[] = [
+  { key: 'featureRoots',    label: 'Root Manager',  desc: 'Show Root Manager in settings menu' },
+  { key: 'featureMcp',      label: 'MCP Servers',   desc: 'Show MCP config and badges' },
+  { key: 'featureProfiles', label: 'Profiles',      desc: 'Show profile filter and settings' },
+];
 
 export function AppSettings() {
-  const setShowAppSettings = useAppStore(s => s.setShowAppSettings);
   const featureRoots = useAppStore(s => s.featureRoots);
   const featureMcp = useAppStore(s => s.featureMcp);
   const featureProfiles = useAppStore(s => s.featureProfiles);
   const setFeatureFlag = useAppStore(s => s.setFeatureFlag);
 
+  const values: Record<string, boolean> = { featureRoots, featureMcp, featureProfiles };
+
   return (
-    <div className="modal-overlay" onClick={() => setShowAppSettings(false)}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 360 }}>
+    <>
+      <div className="settings-header">
         <h2>Settings</h2>
-
-        <div className="form-group">
-          <label className="form-toggle">
-            <input type="checkbox" checked={featureRoots} onChange={e => setFeatureFlag('featureRoots', e.target.checked)} />
-            <span>Root Manager</span>
-          </label>
-          <div className="form-description">Show Root Manager button in header</div>
-        </div>
-
-        <div className="form-group">
-          <label className="form-toggle">
-            <input type="checkbox" checked={featureMcp} onChange={e => setFeatureFlag('featureMcp', e.target.checked)} />
-            <span>MCP Servers</span>
-          </label>
-          <div className="form-description">Show MCP config button and badges</div>
-        </div>
-
-        <div className="form-group">
-          <label className="form-toggle">
-            <input type="checkbox" checked={featureProfiles} onChange={e => setFeatureFlag('featureProfiles', e.target.checked)} />
-            <span>Profiles</span>
-          </label>
-          <div className="form-description">Show profile filter and settings</div>
-        </div>
-
-        <div className="btn-group">
-          <button className="btn btn-secondary" onClick={() => setShowAppSettings(false)}>Close</button>
-        </div>
       </div>
-    </div>
+      <div className="settings-list">
+        {FLAGS.map(f => (
+          <div key={f.key} className="settings-item">
+            <div className="settings-item-info">
+              <div className="settings-item-name">{f.label}</div>
+              <div className="settings-item-desc">{f.desc}</div>
+            </div>
+            <Toggle checked={values[f.key]} onChange={v => setFeatureFlag(f.key, v)} />
+          </div>
+        ))}
+      </div>
+    </>
   );
 }

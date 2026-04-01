@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAppStore } from '../store';
+import { useAppStore, type ActivePage } from '../store';
 import { Sidebar, SidebarHeader, SidebarFooter } from './Sidebar/Sidebar';
 import { ProjectView } from './Project/ProjectView';
 import { TileGrid } from './Tiles/TileGrid';
@@ -20,19 +20,35 @@ function getInitialTheme(): 'dark' | 'light' {
   return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
+function PageContent({ page }: { page: ActivePage }) {
+  const closePage = useAppStore(s => s.closePage);
+  return (
+    <div className="page-view">
+      <div className="page-back-bar">
+        <button className="btn btn-secondary btn-sm" onClick={closePage}>← Back</button>
+      </div>
+      <div className="page-body">
+        {page.type === 'mcpConfig' && <McpConfigPanel />}
+        {page.type === 'rootManager' && <RootManager />}
+        {page.type === 'profileSettings' && <ProfileSettings />}
+        {page.type === 'appSettings' && <AppSettings />}
+        {page.type === 'webhookSettings' && <WebhookSettings />}
+        {page.type === 'addServer' && <AddServer />}
+        {page.type === 'editServer' && <EditServer serverId={page.serverId} />}
+        {page.type === 'createProject' && <CreateProject />}
+      </div>
+    </div>
+  );
+}
+
 export function Shell() {
   const selectedProject = useAppStore(s => s.selectedProject);
-  const showAddServer = useAppStore(s => s.showAddServer);
-  const editServerId = useAppStore(s => s.editServerId);
-  const showCreateProject = useAppStore(s => s.showCreateProject);
   const isTileView = useAppStore(s => s.isTileView);
   const clearSelection = useAppStore(s => s.clearSelection);
-  const showMcpConfig = useAppStore(s => s.showMcpConfig);
-  const showRootManager = useAppStore(s => s.showRootManager);
-  const showProfileSettings = useAppStore(s => s.showProfileSettings);
-  const showAppSettings = useAppStore(s => s.showAppSettings);
-  const showWebhookSettings = useAppStore(s => s.showWebhookSettings);
   const showGodModeChat = useAppStore(s => s.showGodModeChat);
+  const activePage = useAppStore(s => s.activePage);
+  const isMobile = useAppStore(s => s.isMobile);
+  const setIsMobile = useAppStore(s => s.setIsMobile);
 
   const [theme] = useState<'dark' | 'light'>(getInitialTheme);
 
@@ -41,8 +57,46 @@ export function Shell() {
     localStorage.setItem('godmode-theme', theme);
   }, [theme]);
 
+  // Mobile detection
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [setIsMobile]);
+
   const isTileFullscreen = isTileView && selectedProject !== null;
 
+  // ── Mobile layout ──
+  if (isMobile) {
+    return (
+      <div className="shell shell-mobile">
+        {activePage ? (
+          <PageContent page={activePage} />
+        ) : selectedProject ? (
+          <div className="shell-mobile-project">
+            <div className="page-back-bar">
+              <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Back</button>
+            </div>
+            <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
+          </div>
+        ) : showGodModeChat ? (
+          <GodModeChat />
+        ) : isTileView ? (
+          <div className="shell-mobile-tiles">
+            <SidebarHeader />
+            <TileGrid />
+            <SidebarFooter />
+          </div>
+        ) : (
+          <Sidebar />
+        )}
+      </div>
+    );
+  }
+
+  // ── Desktop layout ──
   return (
     <div className={`shell ${isTileView ? 'shell-tile-mode' : ''}`}>
       {!isTileView ? (
@@ -51,7 +105,9 @@ export function Shell() {
             <Sidebar />
           </div>
           <div className="shell-content">
-            {showGodModeChat ? (
+            {activePage ? (
+              <PageContent page={activePage} />
+            ) : showGodModeChat ? (
               <GodModeChat />
             ) : selectedProject ? (
               <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
@@ -64,31 +120,28 @@ export function Shell() {
         <>
           <SidebarHeader />
           <div className="shell-content">
-            {isTileFullscreen && (
-              <div className="shell-back-bar">
-                <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Tiles</button>
-              </div>
-            )}
-            {showGodModeChat ? (
-              <GodModeChat />
-            ) : isTileFullscreen ? (
-              <ProjectView serverId={selectedProject!.serverId} projectId={selectedProject!.projectId} />
+            {activePage ? (
+              <PageContent page={activePage} />
             ) : (
-              <TileGrid />
+              <>
+                {isTileFullscreen && (
+                  <div className="shell-back-bar">
+                    <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Tiles</button>
+                  </div>
+                )}
+                {showGodModeChat ? (
+                  <GodModeChat />
+                ) : isTileFullscreen ? (
+                  <ProjectView serverId={selectedProject!.serverId} projectId={selectedProject!.projectId} />
+                ) : (
+                  <TileGrid />
+                )}
+              </>
             )}
           </div>
           <SidebarFooter />
         </>
       )}
-
-      {showAddServer && <AddServer />}
-      {editServerId !== null && <EditServer serverId={editServerId} />}
-      {showCreateProject && <CreateProject />}
-      {showMcpConfig && <McpConfigPanel />}
-      {showRootManager && <RootManager />}
-      {showProfileSettings && <ProfileSettings />}
-      {showAppSettings && <AppSettings />}
-      {showWebhookSettings && <WebhookSettings />}
     </div>
   );
 }
