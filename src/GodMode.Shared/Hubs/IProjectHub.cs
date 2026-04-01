@@ -180,4 +180,14 @@ public interface IProjectHub
     /// Generates a root configuration using LLM inference from a natural language instruction.
     /// </summary>
     Task<RootPreview> GenerateRootWithLlm(RootGenerationRequest request);
+
+    /// <summary>
+    /// Sends a message to the GodMode AI chat (meta-management).
+    /// </summary>
+    Task SendChatMessage(string message);
+
+    /// <summary>
+    /// Clears the GodMode chat history for this connection.
+    /// </summary>
+    Task ClearChatHistory();
 }

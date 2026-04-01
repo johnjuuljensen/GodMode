@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, ChatResponseMessage } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -18,6 +18,9 @@ export interface HubCallbacks {
   onProjectCreated?: (status: ProjectStatus) => void;
   onCreationProgress?: (projectId: string, message: string) => void;
   onProjectDeleted?: (projectId: string) => void;
+  onChatResponse?: (message: ChatResponseMessage) => void;
+  onRootsChanged?: () => void;
+  onProfilesChanged?: () => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -75,6 +78,18 @@ export class GodModeHub {
 
     this.connection.on('ProjectDeleted', (projectId: string) => {
       this.callbacks.onProjectDeleted?.(projectId);
+    });
+
+    this.connection.on('ChatResponse', (message: ChatResponseMessage) => {
+      this.callbacks.onChatResponse?.(message);
+    });
+
+    this.connection.on('RootsChanged', () => {
+      this.callbacks.onRootsChanged?.();
+    });
+
+    this.connection.on('ProfilesChanged', () => {
+      this.callbacks.onProfilesChanged?.();
     });
 
     this.connection.onreconnecting(() => this.setState('reconnecting'));
@@ -246,5 +261,15 @@ export class GodModeHub {
 
   async generateRootWithLlm(request: { Instruction: string; CurrentFiles?: Record<string, string>; SchemaFields?: string[] }): Promise<RootPreview> {
     return await this.connection!.invoke('GenerateRootWithLlm', request);
+  }
+
+  // --- GodMode Chat ---
+
+  async sendChatMessage(message: string): Promise<void> {
+    await this.connection!.invoke('SendChatMessage', message);
+  }
+
+  async clearChatHistory(): Promise<void> {
+    await this.connection!.invoke('ClearChatHistory');
   }
 }

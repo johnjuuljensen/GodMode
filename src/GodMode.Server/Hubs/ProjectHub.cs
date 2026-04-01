@@ -16,17 +16,20 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     private readonly IManifestParser _manifestParser;
     private readonly IManifestExporter _manifestExporter;
     private readonly RootGenerationService? _rootGenerationService;
+    private readonly GodModeChatService? _chatService;
     private readonly ILogger<ProjectHub> _logger;
 
     public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
         IManifestParser manifestParser, IManifestExporter manifestExporter, ILogger<ProjectHub> logger,
-        RootGenerationService? rootGenerationService = null)
+        RootGenerationService? rootGenerationService = null,
+        GodModeChatService? chatService = null)
     {
         _projectManager = projectManager;
         _convergenceEngine = convergenceEngine;
         _manifestParser = manifestParser;
         _manifestExporter = manifestExporter;
         _rootGenerationService = rootGenerationService;
+        _chatService = chatService;
         _logger = logger;
     }
 
@@ -169,6 +172,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} creating root '{RootName}'",
             Context.ConnectionId, rootName);
         await _projectManager.CreateRootAsync(rootName, preview, profileName);
+        await Clients.All.RootsChanged();
     }
 
     public async Task DeleteRoot(string profileName, string rootName, bool force = false)
@@ -184,6 +188,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
             _logger.LogError(ex, "Failed to delete root '{RootName}'", rootName);
             throw new HubException(ex.Message);
         }
+        await Clients.All.RootsChanged();
     }
 
     public async Task<RootPreview?> GetRootPreview(string profileName, string rootName)
@@ -198,6 +203,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} updating root '{RootName}'",
             Context.ConnectionId, rootName);
         await _projectManager.UpdateRootAsync(profileName, rootName, preview);
+        await Clients.All.RootsChanged();
     }
 
     public async Task CreateProfile(string name, string? description)
@@ -205,6 +211,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} creating profile '{ProfileName}'",
             Context.ConnectionId, name);
         await _projectManager.CreateProfileAsync(name, description);
+        await Clients.All.ProfilesChanged();
     }
 
     public async Task DeleteProfile(string name, bool deleteContents = false)
@@ -220,6 +227,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
             _logger.LogError(ex, "Failed to delete profile '{ProfileName}'", name);
             throw new HubException(ex.Message);
         }
+        await Clients.All.ProfilesChanged();
     }
 
     public async Task UpdateProfileDescription(string name, string? description)
@@ -227,6 +235,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} updating profile description '{ProfileName}'",
             Context.ConnectionId, name);
         await _projectManager.UpdateProfileDescriptionAsync(name, description);
+        await Clients.All.ProfilesChanged();
     }
 
     public async Task<byte[]> ExportRoot(string profileName, string rootName)
@@ -289,9 +298,28 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _rootGenerationService.GenerateAsync(request);
     }
 
+    public async Task SendChatMessage(string message)
+    {
+        if (_chatService == null)
+            throw new HubException("GodMode chat is not available. Configure inference in ~/.godmode/inference.json.");
+
+        _logger.LogInformation("Client {ConnectionId} sending chat message", Context.ConnectionId);
+        await _chatService.ProcessMessageAsync(
+            Context.ConnectionId,
+            message,
+            async msg => await Clients.Caller.ChatResponse(msg));
+    }
+
+    public Task ClearChatHistory()
+    {
+        _chatService?.RemoveSession(Context.ConnectionId);
+        return Task.CompletedTask;
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);
+        _chatService?.RemoveSession(Context.ConnectionId);
         await _projectManager.CleanupConnectionAsync(Context.ConnectionId);
         await base.OnDisconnectedAsync(exception);
     }

@@ -7,6 +7,7 @@
 
 export type ProjectState = 'Idle' | 'Running' | 'WaitingInput' | 'Error' | 'Stopped';
 export type ServerState = 'Running' | 'Stopped' | 'Starting' | 'Stopping' | 'Unknown';
+export type ChatResponseType = 'Text' | 'ToolCall' | 'ToolResult' | 'Error';
 
 // --- Models (PascalCase properties matching server serialization) ---
 
@@ -121,6 +122,14 @@ export interface RootSourceInfo {
   Path?: string | null;
   InstalledAt: string;
   Version?: string | null;
+}
+
+// --- GodMode Chat (PascalCase from server) ---
+
+export interface ChatResponseMessage {
+  Type: ChatResponseType;
+  Content: string;
+  ToolName?: string | null;
 }
 
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---

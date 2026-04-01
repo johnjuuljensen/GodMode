@@ -93,6 +93,7 @@ builder.Services.AddSingleton<IConvergenceEngine, ConvergenceEngine>();
 builder.Services.AddSingleton<IManifestExporter, ManifestExporter>();
 builder.Services.AddGodModeAIServices();
 builder.Services.AddSingleton<RootGenerationService>();
+builder.Services.AddSingleton<GodModeChatService>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();
@@ -193,6 +194,18 @@ if (!string.IsNullOrEmpty(manifestPath))
     {
         app.Logger.LogError(ex, "Failed to apply manifest from {ManifestPath}", manifestPath);
     }
+}
+
+// Initialize inference router (loads AI providers)
+var inferenceRouter = app.Services.GetRequiredService<InferenceRouter>();
+try
+{
+    await inferenceRouter.InitializeAsync();
+    app.Logger.LogInformation("Inference router initialized: {Status}", inferenceRouter.IsLoaded ? "ready" : "no providers");
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "Failed to initialize inference router");
 }
 
 // Recover existing projects AFTER server starts (non-blocking)

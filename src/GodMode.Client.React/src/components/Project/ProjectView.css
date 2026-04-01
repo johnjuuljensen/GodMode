@@ -66,89 +66,72 @@
 }
 
 /* ── Status Button ── */
-.status-btn {
+.project-status-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 12px;
-  border-radius: 6px;
+  padding: 3px 10px;
+  border-radius: 5px;
   background: var(--glass);
   border: 1px solid var(--glass-border);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 11px;
   font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
   transition: all 0.15s;
+  text-transform: uppercase;
 }
 
-.status-btn:hover:not(:disabled) {
-  background: var(--glass-hover);
-  color: var(--text-primary);
-}
-
-.status-btn:disabled {
-  opacity: 0.5;
+.project-status-btn:disabled {
   cursor: default;
 }
 
-.status-btn-Running:hover:not(:disabled),
-.status-btn-WaitingInput:hover:not(:disabled) {
-  border-color: var(--error);
-  color: var(--error);
-}
-
-.status-btn-Stopped:hover:not(:disabled),
-.status-btn-Idle:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
+.project-status-dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.status-dot-Running {
-  background: var(--success);
-  box-shadow: 0 0 6px var(--success);
-  animation: pulse-dot 2s ease-in-out infinite;
+.project-status-action {
+  margin-left: 2px;
+  padding-left: 6px;
+  border-left: 1px solid var(--glass-border);
+  font-weight: 600;
 }
 
-.status-dot-WaitingInput {
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
-  animation: pulse-dot 1.5s ease-in-out infinite;
-}
+/* Running */
+.project-status-btn.Running { color: var(--success); border-color: rgba(52,211,153,0.2); }
+.project-status-btn.Running .project-status-dot { background: var(--success); box-shadow: 0 0 4px var(--success); animation: status-pulse 2s ease-in-out infinite; }
+.project-status-btn.Running .project-status-action { color: var(--text-secondary); border-color: rgba(52,211,153,0.2); }
+.project-status-btn.Running:hover { background: var(--error-soft); color: var(--error); border-color: rgba(248,113,113,0.2); }
+.project-status-btn.Running:hover .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); animation: none; }
+.project-status-btn.Running:hover .project-status-action { color: var(--error); border-color: rgba(248,113,113,0.2); }
 
-.status-dot-Stopped,
-.status-dot-Idle {
-  background: var(--text-tertiary);
-}
+/* WaitingInput */
+.project-status-btn.WaitingInput { color: var(--accent); border-color: rgba(94,158,255,0.2); }
+.project-status-btn.WaitingInput .project-status-dot { background: var(--accent); box-shadow: 0 0 4px var(--accent); animation: status-pulse 2s ease-in-out infinite; }
+.project-status-btn.WaitingInput .project-status-action { color: var(--text-secondary); border-color: rgba(94,158,255,0.2); }
+.project-status-btn.WaitingInput:hover { background: var(--error-soft); color: var(--error); border-color: rgba(248,113,113,0.2); }
+.project-status-btn.WaitingInput:hover .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); animation: none; }
+.project-status-btn.WaitingInput:hover .project-status-action { color: var(--error); border-color: rgba(248,113,113,0.2); }
 
-.status-dot-Error {
-  background: var(--error);
-  box-shadow: 0 0 6px var(--error);
-}
+/* Stopped / Idle */
+.project-status-btn.Stopped, .project-status-btn.Idle { color: var(--text-tertiary); }
+.project-status-btn.Stopped .project-status-dot, .project-status-btn.Idle .project-status-dot { background: var(--text-tertiary); }
+.project-status-btn.Stopped .project-status-action, .project-status-btn.Idle .project-status-action { color: var(--text-secondary); }
+.project-status-btn.Stopped:hover, .project-status-btn.Idle:hover { background: var(--accent-soft); color: var(--accent); border-color: rgba(94,158,255,0.2); }
+.project-status-btn.Stopped:hover .project-status-dot, .project-status-btn.Idle:hover .project-status-dot { background: var(--accent); box-shadow: 0 0 4px var(--accent); }
+.project-status-btn.Stopped:hover .project-status-action, .project-status-btn.Idle:hover .project-status-action { color: var(--accent); border-color: rgba(94,158,255,0.2); }
 
-@keyframes pulse-dot {
+/* Error */
+.project-status-btn.Error { color: var(--error); border-color: rgba(248,113,113,0.2); }
+.project-status-btn.Error .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); }
+
+@keyframes status-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
-}
-
-.status-btn-label {
-  opacity: 0;
-  max-width: 0;
-  overflow: hidden;
-  transition: opacity 0.15s, max-width 0.2s;
-  white-space: nowrap;
-}
-
-.status-btn:hover .status-btn-label {
-  opacity: 1;
-  max-width: 60px;
 }
 
 /* ── Delete Button ── */

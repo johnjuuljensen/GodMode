@@ -8,6 +8,7 @@ import type {
   ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
   ServerInfo, CreateActionInfo, McpServerConfig,
 } from '../signalr/types';
+import type { GodModeChatEntry } from '../components/GodModeChat/GodModeChat';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../services/hostApi';
 import {
@@ -136,6 +137,15 @@ interface AppState {
   setShowProfileSettings: (show: boolean) => void;
   showAppSettings: boolean;
   setShowAppSettings: (show: boolean) => void;
+
+  // GodMode chat
+  showGodModeChat: boolean;
+  setShowGodModeChat: (show: boolean) => void;
+  godModeChatMessages: GodModeChatEntry[];
+  godModeChatLoading: boolean;
+  appendGodModeChatMessage: (entry: GodModeChatEntry) => void;
+  clearGodModeChat: () => void;
+  setGodModeChatLoading: (loading: boolean) => void;
 
   // Feature visibility
   featureRoots: boolean;
@@ -581,6 +591,19 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       },
       onCreationProgress: () => {},
+      onRootsChanged: () => {
+        get().refreshProjects(serverId);
+      },
+      onProfilesChanged: () => {
+        get().refreshProjects(serverId);
+      },
+      onChatResponse: (message) => {
+        const entry: GodModeChatEntry = { role: 'server', message };
+        set(state => ({
+          godModeChatMessages: [...state.godModeChatMessages, entry],
+          godModeChatLoading: message.Type === 'ToolCall', // still processing if tool call
+        }));
+      },
     });
 
     try {
@@ -722,6 +745,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowProfileSettings: (show) => set({ showProfileSettings: show }),
   showAppSettings: false,
   setShowAppSettings: (show) => set({ showAppSettings: show }),
+
+  // GodMode chat
+  showGodModeChat: false,
+  setShowGodModeChat: (show) => set({ showGodModeChat: show }),
+  godModeChatMessages: [],
+  godModeChatLoading: false,
+  appendGodModeChatMessage: (entry) => set(state => ({ godModeChatMessages: [...state.godModeChatMessages, entry] })),
+  clearGodModeChat: () => set({ godModeChatMessages: [], godModeChatLoading: false }),
+  setGodModeChatLoading: (loading) => set({ godModeChatLoading: loading }),
 
   // Feature visibility (persisted to localStorage)
   featureRoots: localStorage.getItem('godmode-feature-roots') !== 'false',
