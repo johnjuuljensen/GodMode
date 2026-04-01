@@ -25,6 +25,7 @@ public class ProjectManager : IProjectManager
     private readonly RootCreator _rootCreator;
     private readonly RootPackager _rootPackager;
     private readonly RootInstaller _rootInstaller;
+    private readonly WebhookFileManager _webhookFileManager;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
@@ -69,6 +70,7 @@ public class ProjectManager : IProjectManager
         RootCreator rootCreator,
         RootPackager rootPackager,
         RootInstaller rootInstaller,
+        WebhookFileManager webhookFileManager,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -81,6 +83,7 @@ public class ProjectManager : IProjectManager
         _rootCreator = rootCreator;
         _rootPackager = rootPackager;
         _rootInstaller = rootInstaller;
+        _webhookFileManager = webhookFileManager;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -1154,6 +1157,47 @@ public class ProjectManager : IProjectManager
         _rootInstaller.Uninstall(_projectRootsDir, rootName);
         RebuildSnapshot();
         return Task.CompletedTask;
+    }
+
+    // ── Webhooks ──
+
+    public Task<WebhookInfo[]> ListWebhooksAsync()
+    {
+        var all = _webhookFileManager.ReadAll();
+        var result = all.Select(kv => WebhookFileManager.ToInfo(kv.Key, kv.Value)).ToArray();
+        return Task.FromResult(result);
+    }
+
+    public Task<WebhookInfo> CreateWebhookAsync(string keyword, string profileName, string rootName,
+        string? actionName = null, string? description = null,
+        Dictionary<string, string>? inputMapping = null,
+        Dictionary<string, JsonElement>? staticInputs = null)
+    {
+        var config = _webhookFileManager.Create(keyword, profileName, rootName, actionName, description, inputMapping, staticInputs);
+        return Task.FromResult(WebhookFileManager.ToInfo(keyword, config));
+    }
+
+    public Task DeleteWebhookAsync(string keyword)
+    {
+        _webhookFileManager.Delete(keyword);
+        return Task.CompletedTask;
+    }
+
+    public Task<WebhookInfo> UpdateWebhookAsync(string keyword, string? description = null,
+        Dictionary<string, string>? inputMapping = null,
+        Dictionary<string, JsonElement>? staticInputs = null,
+        bool? enabled = null)
+    {
+        _webhookFileManager.Update(keyword, description, inputMapping, staticInputs, enabled);
+        var updated = _webhookFileManager.Read(keyword)
+            ?? throw new KeyNotFoundException($"Webhook '{keyword}' not found.");
+        return Task.FromResult(WebhookFileManager.ToInfo(keyword, updated));
+    }
+
+    public Task<string> RegenerateWebhookTokenAsync(string keyword)
+    {
+        var newToken = _webhookFileManager.RegenerateToken(keyword);
+        return Task.FromResult(newToken);
     }
 
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };

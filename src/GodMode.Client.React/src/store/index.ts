@@ -137,6 +137,8 @@ interface AppState {
   setShowProfileSettings: (show: boolean) => void;
   showAppSettings: boolean;
   setShowAppSettings: (show: boolean) => void;
+  showWebhookSettings: boolean;
+  setShowWebhookSettings: (show: boolean) => void;
 
   // GodMode chat
   showGodModeChat: boolean;
@@ -597,6 +599,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       onProfilesChanged: () => {
         get().refreshProjects(serverId);
       },
+      onWebhooksChanged: () => {
+        // Webhooks changed — could refresh a webhook list if UI shows one
+      },
       onChatResponse: (message) => {
         const entry: GodModeChatEntry = { role: 'server', message };
         set(state => ({
@@ -745,6 +750,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowProfileSettings: (show) => set({ showProfileSettings: show }),
   showAppSettings: false,
   setShowAppSettings: (show) => set({ showAppSettings: show }),
+  showWebhookSettings: false,
+  setShowWebhookSettings: (show) => set({ showWebhookSettings: show }),
 
   // GodMode chat
   showGodModeChat: false,

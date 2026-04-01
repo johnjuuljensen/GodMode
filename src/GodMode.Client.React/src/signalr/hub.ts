@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, ChatResponseMessage } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, ChatResponseMessage, WebhookInfo } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -21,6 +21,7 @@ export interface HubCallbacks {
   onChatResponse?: (message: ChatResponseMessage) => void;
   onRootsChanged?: () => void;
   onProfilesChanged?: () => void;
+  onWebhooksChanged?: () => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -90,6 +91,10 @@ export class GodModeHub {
 
     this.connection.on('ProfilesChanged', () => {
       this.callbacks.onProfilesChanged?.();
+    });
+
+    this.connection.on('WebhooksChanged', () => {
+      this.callbacks.onWebhooksChanged?.();
     });
 
     this.connection.onreconnecting(() => this.setState('reconnecting'));
@@ -271,5 +276,42 @@ export class GodModeHub {
 
   async clearChatHistory(): Promise<void> {
     await this.connection!.invoke('ClearChatHistory');
+  }
+
+  // --- Webhooks ---
+
+  async listWebhooks(): Promise<WebhookInfo[]> {
+    return await this.connection!.invoke('ListWebhooks');
+  }
+
+  async createWebhook(
+    keyword: string,
+    profileName: string,
+    rootName: string,
+    actionName?: string | null,
+    description?: string | null,
+    inputMapping?: Record<string, string> | null,
+    staticInputs?: Record<string, unknown> | null,
+  ): Promise<WebhookInfo> {
+    return await this.connection!.invoke('CreateWebhook', keyword, profileName, rootName,
+      actionName, description, inputMapping, staticInputs);
+  }
+
+  async deleteWebhook(keyword: string): Promise<void> {
+    await this.connection!.invoke('DeleteWebhook', keyword);
+  }
+
+  async updateWebhook(
+    keyword: string,
+    description?: string | null,
+    inputMapping?: Record<string, string> | null,
+    staticInputs?: Record<string, unknown> | null,
+    enabled?: boolean | null,
+  ): Promise<WebhookInfo> {
+    return await this.connection!.invoke('UpdateWebhook', keyword, description, inputMapping, staticInputs, enabled);
+  }
+
+  async regenerateWebhookToken(keyword: string): Promise<string> {
+    return await this.connection!.invoke('RegenerateWebhookToken', keyword);
   }
 }

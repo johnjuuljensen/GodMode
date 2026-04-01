@@ -124,6 +124,24 @@ export interface RootSourceInfo {
   Version?: string | null;
 }
 
+// --- Webhooks (PascalCase from server) ---
+
+export interface WebhookInfo {
+  Keyword: string;
+  ProfileName: string;
+  RootName: string;
+  ActionName?: string | null;
+  Description?: string | null;
+  Enabled: boolean;
+  TokenPrefix?: string | null;
+}
+
+export interface WebhookResult {
+  ProjectId: string;
+  ProjectName: string;
+  Status: string;
+}
+
 // --- GodMode Chat (PascalCase from server) ---
 
 export interface ChatResponseMessage {

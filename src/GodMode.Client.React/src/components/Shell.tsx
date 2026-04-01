@@ -10,6 +10,7 @@ import { McpConfigPanel } from './Mcp/McpConfigPanel';
 import { RootManager } from './Roots/RootManager';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
+import { WebhookSettings } from './Webhooks/WebhookSettings';
 import { GodModeChat } from './GodModeChat/GodModeChat';
 import { isMaui, openDevTools } from '../services/hostApi';
 import './Shell.css';
@@ -33,6 +34,7 @@ export function Shell() {
   const showRootManager = useAppStore(s => s.showRootManager);
   const showProfileSettings = useAppStore(s => s.showProfileSettings);
   const showAppSettings = useAppStore(s => s.showAppSettings);
+  const showWebhookSettings = useAppStore(s => s.showWebhookSettings);
   const showGodModeChat = useAppStore(s => s.showGodModeChat);
 
   const [theme] = useState<'dark' | 'light'>(getInitialTheme);
@@ -94,6 +96,7 @@ export function Shell() {
       {showRootManager && <RootManager />}
       {showProfileSettings && <ProfileSettings />}
       {showAppSettings && <AppSettings />}
+      {showWebhookSettings && <WebhookSettings />}
     </div>
   );
 }

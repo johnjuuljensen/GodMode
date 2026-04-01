@@ -316,6 +316,51 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return Task.CompletedTask;
     }
 
+    // ── Webhooks ──
+
+    public async Task<WebhookInfo[]> ListWebhooks()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested webhooks", Context.ConnectionId);
+        return await _projectManager.ListWebhooksAsync();
+    }
+
+    public async Task<WebhookInfo> CreateWebhook(string keyword, string profileName, string rootName,
+        string? actionName = null, string? description = null,
+        Dictionary<string, string>? inputMapping = null,
+        Dictionary<string, JsonElement>? staticInputs = null)
+    {
+        _logger.LogInformation("Client {ConnectionId} creating webhook '{Keyword}'", Context.ConnectionId, keyword);
+        var info = await _projectManager.CreateWebhookAsync(keyword, profileName, rootName, actionName, description, inputMapping, staticInputs);
+        await Clients.All.WebhooksChanged();
+        return info;
+    }
+
+    public async Task DeleteWebhook(string keyword)
+    {
+        _logger.LogInformation("Client {ConnectionId} deleting webhook '{Keyword}'", Context.ConnectionId, keyword);
+        await _projectManager.DeleteWebhookAsync(keyword);
+        await Clients.All.WebhooksChanged();
+    }
+
+    public async Task<WebhookInfo> UpdateWebhook(string keyword, string? description = null,
+        Dictionary<string, string>? inputMapping = null,
+        Dictionary<string, JsonElement>? staticInputs = null,
+        bool? enabled = null)
+    {
+        _logger.LogInformation("Client {ConnectionId} updating webhook '{Keyword}'", Context.ConnectionId, keyword);
+        var info = await _projectManager.UpdateWebhookAsync(keyword, description, inputMapping, staticInputs, enabled);
+        await Clients.All.WebhooksChanged();
+        return info;
+    }
+
+    public async Task<string> RegenerateWebhookToken(string keyword)
+    {
+        _logger.LogInformation("Client {ConnectionId} regenerating token for webhook '{Keyword}'", Context.ConnectionId, keyword);
+        var token = await _projectManager.RegenerateWebhookTokenAsync(keyword);
+        await Clients.All.WebhooksChanged();
+        return token;
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);

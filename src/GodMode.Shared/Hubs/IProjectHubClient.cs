@@ -50,4 +50,10 @@ public interface IProjectHubClient
     /// Clients should refresh their profile list.
     /// </summary>
     Task ProfilesChanged();
+
+    /// <summary>
+    /// Called when webhooks change (created, updated, or deleted).
+    /// Clients should refresh their webhook list.
+    /// </summary>
+    Task WebhooksChanged();
 }

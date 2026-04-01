@@ -20,6 +20,7 @@ public sealed class GodModeChatService
     private readonly InferenceRouter _inference;
     private readonly IProjectManager _projectManager;
     private readonly ProfileFileManager _profileFileManager;
+    private readonly WebhookFileManager _webhookFileManager;
     private readonly RootGenerationService _rootGenService;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ILogger<GodModeChatService> _logger;
@@ -52,6 +53,12 @@ public sealed class GodModeChatService
 
         **Projects** — Running Claude Code instances. Created from a root template.
         Each project has a state (Idle, Running, WaitingInput, Stopped, Error).
+
+        **Webhooks** — HTTP triggers that create projects from external systems or other agents.
+        Each webhook has a keyword (URL slug), maps to a profile/root/action, and has a bearer token.
+        Endpoint: POST /webhook/{keyword} with Authorization: Bearer {token}.
+        The payload is mapped to project inputs via inputMapping or passed as-is as the prompt.
+        Webhooks are stored as files in .webhooks/{keyword}.json and survive Docker rebuilds.
 
         ## Your role
 
@@ -105,6 +112,7 @@ public sealed class GodModeChatService
         InferenceRouter inference,
         IProjectManager projectManager,
         ProfileFileManager profileFileManager,
+        WebhookFileManager webhookFileManager,
         RootGenerationService rootGenService,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
         ILogger<GodModeChatService> logger)
@@ -112,6 +120,7 @@ public sealed class GodModeChatService
         _inference = inference;
         _projectManager = projectManager;
         _profileFileManager = profileFileManager;
+        _webhookFileManager = webhookFileManager;
         _rootGenService = rootGenService;
         _hubContext = hubContext;
         _logger = logger;
@@ -231,6 +240,7 @@ public sealed class GodModeChatService
             var profiles = await _projectManager.ListProfilesAsync();
             var roots = await _projectManager.ListProjectRootsAsync();
             var projects = await _projectManager.ListProjectsAsync();
+            var webhooks = await _projectManager.ListWebhooksAsync();
 
             return $"""
                 ## Current GodMode State
@@ -242,6 +252,9 @@ public sealed class GodModeChatService
 
                 **Projects** ({projects.Length}):
                 {string.Join("\n", projects.Select(p => $"- {p.Name} [{p.State}] (root: {p.RootName}, profile: {p.ProfileName})"))}
+
+                **Webhooks** ({webhooks.Length}):
+                {(webhooks.Length > 0 ? string.Join("\n", webhooks.Select(w => $"- {w.Keyword} → {w.ProfileName}/{w.RootName}{(w.ActionName != null ? $"/{w.ActionName}" : "")} {(w.Enabled ? "" : "[DISABLED]")} {(w.Description != null ? $"— {w.Description}" : "")}")) : "None configured")}
                 """;
         }
         catch (Exception ex)
@@ -384,6 +397,44 @@ public sealed class GodModeChatService
                     return $"Generation failed: {preview.ValidationError}";
                 return JsonSerializer.Serialize(preview.Files, new JsonSerializerOptions { WriteIndented = true });
             }, "generate_root_files", "Use LLM to generate root config files from a natural language instruction. Returns the files as JSON — use create_root to save them."),
+
+            // ── Webhooks ──
+            AIFunctionFactory.Create(async () =>
+            {
+                var webhooks = await _projectManager.ListWebhooksAsync();
+                return JsonSerializer.Serialize(webhooks);
+            }, "list_webhooks", "List all configured webhooks (tokens redacted)."),
+
+            AIFunctionFactory.Create(async (string keyword, string profileName, string rootName, string? actionName, string? description) =>
+            {
+                var info = await _projectManager.CreateWebhookAsync(keyword, profileName, rootName, actionName, description);
+                await _hubContext.Clients.All.WebhooksChanged();
+                // Read the full config to return the token (shown once)
+                var config = _webhookFileManager.Read(keyword);
+                return $"Created webhook '{keyword}'. Token (save this — it's shown only once): {config?.Token ?? "unknown"}\n" +
+                       $"Endpoint: POST /webhook/{keyword}\nAuthorization: Bearer {config?.Token}";
+            }, "create_webhook", "Create a webhook trigger. Maps a keyword to a profile/root/action. Returns the bearer token (shown once — save it)."),
+
+            AIFunctionFactory.Create(async (string keyword) =>
+            {
+                await _projectManager.DeleteWebhookAsync(keyword);
+                await _hubContext.Clients.All.WebhooksChanged();
+                return $"Deleted webhook '{keyword}'.";
+            }, "delete_webhook", "Delete a webhook."),
+
+            AIFunctionFactory.Create(async (string keyword, string? description, bool? enabled) =>
+            {
+                var info = await _projectManager.UpdateWebhookAsync(keyword, description, enabled: enabled);
+                await _hubContext.Clients.All.WebhooksChanged();
+                return $"Updated webhook '{keyword}'.";
+            }, "update_webhook", "Update a webhook's description or enabled state."),
+
+            AIFunctionFactory.Create(async (string keyword) =>
+            {
+                var newToken = await _projectManager.RegenerateWebhookTokenAsync(keyword);
+                await _hubContext.Clients.All.WebhooksChanged();
+                return $"Regenerated token for webhook '{keyword}'. New token (save this): {newToken}";
+            }, "regenerate_webhook_token", "Regenerate the bearer token for a webhook. Returns the new token (shown once)."),
         ];
     }
 }
