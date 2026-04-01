@@ -11,56 +11,79 @@ const GROUP_LABELS: Record<SidebarGroupBy, string> = {
   status: 'Status',
 };
 
-export function Sidebar() {
-  const profileGroups = useAppStore(s => s.profileGroups);
-  const inactiveServers = useAppStore(s => s.inactiveServers);
+export function SidebarHeader() {
   const setShowAddServer = useAppStore(s => s.setShowAddServer);
   const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
   const serverConnections = useAppStore(s => s.serverConnections);
-  const sidebarGroupBy = useAppStore(s => s.sidebarGroupBy);
-  const cycleSidebarGroupBy = useAppStore(s => s.cycleSidebarGroupBy);
   const profileFilter = useAppStore(s => s.profileFilter);
   const setProfileFilter = useAppStore(s => s.setProfileFilter);
   const profileFilterOptions = useAppStore(s => s.profileFilterOptions);
   const featureProfiles = useAppStore(s => s.featureProfiles);
+  const isTileView = useAppStore(s => s.isTileView);
+  const setTileView = useAppStore(s => s.setTileView);
 
   const showProfileFilter = featureProfiles && profileFilterOptions.length > 1;
   const hasRoots = serverConnections.some(c => c.roots.length > 0);
+
+  return (
+    <div className="sidebar-header">
+      <span className="sidebar-title">GodMode</span>
+      <div className="sidebar-header-actions">
+        {showProfileFilter && (
+          <select
+            className="sidebar-profile-filter"
+            value={profileFilter}
+            onChange={e => setProfileFilter(e.target.value)}
+          >
+            {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
+          </select>
+        )}
+        {hasRoots && (
+          <button className="sidebar-add-btn" onClick={() => setShowCreateProject(true)} title="Create project">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <line x1="12" y1="8" x2="12" y2="14" /><line x1="9" y1="11" x2="15" y2="11" />
+            </svg>
+          </button>
+        )}
+        {isMaui && (
+          <button className="sidebar-add-btn" onClick={() => setShowAddServer(true)} title="Add server">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+              <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+            </svg>
+          </button>
+        )}
+        <button className="sidebar-add-btn" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
+          {isTileView ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function Sidebar() {
+  const profileGroups = useAppStore(s => s.profileGroups);
+  const inactiveServers = useAppStore(s => s.inactiveServers);
+  const setShowAddServer = useAppStore(s => s.setShowAddServer);
+  const sidebarGroupBy = useAppStore(s => s.sidebarGroupBy);
+  const cycleSidebarGroupBy = useAppStore(s => s.cycleSidebarGroupBy);
+
   const hasAnything = profileGroups.length > 0 || inactiveServers.length > 0;
 
   return (
     <div className="sidebar">
-      <div className="sidebar-header">
-        <span className="sidebar-title">GodMode</span>
-        <div className="sidebar-header-actions">
-          {showProfileFilter && (
-            <select
-              className="sidebar-profile-filter"
-              value={profileFilter}
-              onChange={e => setProfileFilter(e.target.value)}
-            >
-              {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
-            </select>
-          )}
-          {hasRoots && (
-            <button className="sidebar-add-btn" onClick={() => setShowCreateProject(true)} title="Create project">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                <line x1="12" y1="8" x2="12" y2="14" /><line x1="9" y1="11" x2="15" y2="11" />
-              </svg>
-            </button>
-          )}
-          {isMaui && (
-            <button className="sidebar-add-btn" onClick={() => setShowAddServer(true)} title="Add server">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-                <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-                <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
+      <SidebarHeader />
 
       <button
         className="sidebar-sort-bar"
@@ -98,7 +121,7 @@ export function Sidebar() {
   );
 }
 
-function SidebarFooter() {
+export function SidebarFooter() {
   const setShowMcpConfig = useAppStore(s => s.setShowMcpConfig);
   const setShowRootManager = useAppStore(s => s.setShowRootManager);
   const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
@@ -140,15 +163,6 @@ function SidebarFooter() {
     <div className="sidebar-footer" ref={menuRef}>
       {menuOpen && (
         <div className="sidebar-footer-menu">
-          {featureMcp && (
-            <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowMcpConfig)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-                <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
-              </svg>
-              MCP Servers
-            </button>
-          )}
           {featureProfiles && (
             <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowProfileSettings)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -164,6 +178,15 @@ function SidebarFooter() {
                 <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
               </svg>
               Roots
+            </button>
+          )}
+          {featureMcp && (
+            <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowMcpConfig)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+              </svg>
+              Connectors (MCP)
             </button>
           )}
           <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowWebhookSettings)}>

@@ -186,7 +186,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--text-tertiary);
+  color: rgb(94 158 255);
 }
 
 .profile-group-count {

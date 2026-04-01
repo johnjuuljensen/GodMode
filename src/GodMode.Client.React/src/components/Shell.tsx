@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
-import { Sidebar } from './Sidebar/Sidebar';
+import { Sidebar, SidebarHeader, SidebarFooter } from './Sidebar/Sidebar';
 import { ProjectView } from './Project/ProjectView';
 import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
@@ -12,7 +12,6 @@ import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
 import { WebhookSettings } from './Webhooks/WebhookSettings';
 import { GodModeChat } from './GodModeChat/GodModeChat';
-import { isMaui, openDevTools } from '../services/hostApi';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -27,9 +26,7 @@ export function Shell() {
   const editServerId = useAppStore(s => s.editServerId);
   const showCreateProject = useAppStore(s => s.showCreateProject);
   const isTileView = useAppStore(s => s.isTileView);
-  const setTileView = useAppStore(s => s.setTileView);
   const clearSelection = useAppStore(s => s.clearSelection);
-  const totalWaitingCount = useAppStore(s => s.totalWaitingCount);
   const showMcpConfig = useAppStore(s => s.showMcpConfig);
   const showRootManager = useAppStore(s => s.showRootManager);
   const showProfileSettings = useAppStore(s => s.showProfileSettings);
@@ -47,47 +44,42 @@ export function Shell() {
   const isTileFullscreen = isTileView && selectedProject !== null;
 
   return (
-    <div className="shell">
-      {!isTileView && (
-        <div className="shell-sidebar">
-          <Sidebar />
-        </div>
-      )}
-      <div className="shell-content">
-        <div className="shell-header">
-          <div className="shell-header-left">
-            {isTileFullscreen && (
-              <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Tiles</button>
+    <div className={`shell ${isTileView ? 'shell-tile-mode' : ''}`}>
+      {!isTileView ? (
+        <>
+          <div className="shell-sidebar">
+            <Sidebar />
+          </div>
+          <div className="shell-content">
+            {showGodModeChat ? (
+              <GodModeChat />
+            ) : selectedProject ? (
+              <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
+            ) : (
+              <div className="shell-empty"><p>Select a project from the sidebar</p></div>
             )}
-            {totalWaitingCount > 0 && (
-              <div className="shell-badge">
-                <span className="shell-badge-dot" />
-                <span className="shell-badge-text">{totalWaitingCount} waiting</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <SidebarHeader />
+          <div className="shell-content">
+            {isTileFullscreen && (
+              <div className="shell-back-bar">
+                <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Tiles</button>
               </div>
             )}
-          </div>
-          <div className="shell-header-right">
-            <button className="shell-view-toggle" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
-              {isTileView ? '☰' : '⊞'}
-            </button>
-            {isMaui && (
-              <button className="shell-view-toggle" onClick={() => openDevTools()} title="Open DevTools">
-                {'{ }'}
-              </button>
+            {showGodModeChat ? (
+              <GodModeChat />
+            ) : isTileFullscreen ? (
+              <ProjectView serverId={selectedProject!.serverId} projectId={selectedProject!.projectId} />
+            ) : (
+              <TileGrid />
             )}
           </div>
-        </div>
-
-        {showGodModeChat ? (
-          <GodModeChat />
-        ) : isTileView && !isTileFullscreen ? (
-          <TileGrid />
-        ) : selectedProject ? (
-          <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
-        ) : (
-          <div className="shell-empty"><p>Select a project from the sidebar</p></div>
-        )}
-      </div>
+          <SidebarFooter />
+        </>
+      )}
 
       {showAddServer && <AddServer />}
       {editServerId !== null && <EditServer serverId={editServerId} />}
