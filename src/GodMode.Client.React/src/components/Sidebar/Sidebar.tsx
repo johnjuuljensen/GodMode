@@ -1,43 +1,102 @@
-import { useState } from 'react';
-import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection } from '../../store';
+import { useState, useRef, useEffect } from 'react';
+import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy } from '../../store';
 import { ProjectItem } from './ProjectItem';
 import { isMaui } from '../../services/hostApi';
 import './Sidebar.css';
+
+const GROUP_LABELS: Record<SidebarGroupBy, string> = {
+  profile: 'Profile',
+  root: 'Root',
+  recent: 'Recent',
+  status: 'Status',
+};
+
+export function SidebarHeader() {
+  const setShowAddServer = useAppStore(s => s.setShowAddServer);
+  const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
+  const serverConnections = useAppStore(s => s.serverConnections);
+  const profileFilter = useAppStore(s => s.profileFilter);
+  const setProfileFilter = useAppStore(s => s.setProfileFilter);
+  const profileFilterOptions = useAppStore(s => s.profileFilterOptions);
+  const featureProfiles = useAppStore(s => s.featureProfiles);
+  const isTileView = useAppStore(s => s.isTileView);
+  const setTileView = useAppStore(s => s.setTileView);
+
+  const showProfileFilter = featureProfiles && profileFilterOptions.length > 1;
+  const hasRoots = serverConnections.some(c => c.roots.length > 0);
+
+  return (
+    <div className="sidebar-header">
+      <span className="sidebar-title">GodMode</span>
+      <div className="sidebar-header-actions">
+        {showProfileFilter && (
+          <select
+            className="sidebar-profile-filter"
+            value={profileFilter}
+            onChange={e => setProfileFilter(e.target.value)}
+          >
+            {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
+          </select>
+        )}
+        {hasRoots && (
+          <button className="sidebar-add-btn" onClick={() => setShowCreateProject(true)} title="Create project">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <line x1="12" y1="8" x2="12" y2="14" /><line x1="9" y1="11" x2="15" y2="11" />
+            </svg>
+          </button>
+        )}
+        {isMaui && (
+          <button className="sidebar-add-btn" onClick={() => setShowAddServer(true)} title="Add server">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+              <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+            </svg>
+          </button>
+        )}
+        <button className="sidebar-add-btn" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
+          {isTileView ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+            </svg>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function Sidebar() {
   const profileGroups = useAppStore(s => s.profileGroups);
   const inactiveServers = useAppStore(s => s.inactiveServers);
   const setShowAddServer = useAppStore(s => s.setShowAddServer);
-  const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
-  const serverConnections = useAppStore(s => s.serverConnections);
+  const sidebarGroupBy = useAppStore(s => s.sidebarGroupBy);
+  const cycleSidebarGroupBy = useAppStore(s => s.cycleSidebarGroupBy);
 
-  const hasRoots = serverConnections.some(c => c.roots.length > 0);
   const hasAnything = profileGroups.length > 0 || inactiveServers.length > 0;
 
   return (
     <div className="sidebar">
-      <div className="sidebar-header">
-        <span className="sidebar-title">GodMode</span>
-        <div className="sidebar-header-actions">
-          {hasRoots && (
-            <button className="sidebar-add-btn" onClick={() => setShowCreateProject(true)} title="Create project">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                <line x1="12" y1="8" x2="12" y2="14" /><line x1="9" y1="11" x2="15" y2="11" />
-              </svg>
-            </button>
-          )}
-          {isMaui && (
-            <button className="sidebar-add-btn" onClick={() => setShowAddServer(true)} title="Add server">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-                <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-                <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
-              </svg>
-            </button>
-          )}
-        </div>
-      </div>
+      <SidebarHeader />
+
+      <button
+        className="sidebar-sort-bar"
+        onClick={cycleSidebarGroupBy}
+        title={`Group by: ${GROUP_LABELS[sidebarGroupBy]} (click to cycle)`}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="15" y2="12" />
+          <line x1="3" y1="18" x2="9" y2="18" />
+        </svg>
+        <span>{GROUP_LABELS[sidebarGroupBy]}</span>
+      </button>
 
       <div className="sidebar-content">
         {!hasAnything ? (
@@ -55,6 +114,125 @@ export function Sidebar() {
             )}
           </>
         )}
+      </div>
+
+      <SidebarFooter />
+    </div>
+  );
+}
+
+export function SidebarFooter() {
+  const setShowMcpConfig = useAppStore(s => s.setShowMcpConfig);
+  const setShowRootManager = useAppStore(s => s.setShowRootManager);
+  const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
+  const setShowAppSettings = useAppStore(s => s.setShowAppSettings);
+  const setShowWebhookSettings = useAppStore(s => s.setShowWebhookSettings);
+  const featureRoots = useAppStore(s => s.featureRoots);
+  const featureMcp = useAppStore(s => s.featureMcp);
+  const featureProfiles = useAppStore(s => s.featureProfiles);
+  const showGodModeChat = useAppStore(s => s.showGodModeChat);
+  const setShowGodModeChat = useAppStore(s => s.setShowGodModeChat);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
+  const [theme, setThemeState] = useState(() => document.documentElement.getAttribute('data-theme') || 'dark');
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('godmode-theme', next);
+    setThemeState(next);
+  };
+
+  const openAndClose = (fn: (v: boolean) => void) => {
+    fn(true);
+    setMenuOpen(false);
+  };
+
+  return (
+    <div className="sidebar-footer" ref={menuRef}>
+      {menuOpen && (
+        <div className="sidebar-footer-menu">
+          {featureProfiles && (
+            <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowProfileSettings)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                <circle cx="12" cy="7" r="4" />
+              </svg>
+              Profiles
+            </button>
+          )}
+          {featureRoots && (
+            <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowRootManager)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+              Roots
+            </button>
+          )}
+          {featureMcp && (
+            <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowMcpConfig)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+                <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+              </svg>
+              Connectors
+            </button>
+          )}
+          <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowWebhookSettings)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            Webhooks
+          </button>
+          <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowAppSettings)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            View Settings
+          </button>
+          <div className="sidebar-footer-menu-sep" />
+          <button className="sidebar-footer-menu-item" onClick={toggleTheme}>
+            {theme === 'dark' ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="5" /><line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            )}
+            {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+          </button>
+        </div>
+      )}
+      <div className="sidebar-footer-buttons">
+        <button className="sidebar-settings-btn" onClick={() => setMenuOpen(!menuOpen)}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          Settings
+        </button>
+        <button className={`sidebar-godmode-btn ${showGodModeChat ? 'active' : ''}`} onClick={() => setShowGodModeChat(!showGodModeChat)} title="GodMode">
+          <span className="sidebar-godmode-shine" />
+          GodMode
+        </button>
       </div>
     </div>
   );
@@ -81,24 +259,27 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
 
   return (
     <div className="root-group">
-      <div className="root-group-header">
-        <span className="root-group-name">{rootGroup.name}</span>
-        {rootGroup.actions.length > 0 && (
-          <button
-            className="root-action-btn"
-            onClick={() => setShowCreateProject(true, { serverId: rootGroup.serverId, rootName: rootGroup.rootName })}
-            title="New project"
-          >+</button>
-        )}
-      </div>
-      <div className="project-list">
+      {!rootGroup.flat && (
+        <div className="root-group-header">
+          <span className="root-group-name">{rootGroup.name}</span>
+          {rootGroup.actions.length > 0 && (
+            <button
+              className="root-action-btn"
+              onClick={() => setShowCreateProject(true, { serverId: rootGroup.serverId, rootName: rootGroup.rootName })}
+              title="New project"
+            >+</button>
+          )}
+        </div>
+      )}
+      <div className={rootGroup.flat ? 'project-list project-list-flat' : 'project-list'}>
         {rootGroup.projects.length === 0 ? (
-          <div className="project-list-empty">No projects</div>
+          !rootGroup.flat && <div className="project-list-empty">No projects</div>
         ) : (
           rootGroup.projects.map(project => (
             <ProjectItem
               key={project.Id}
               project={project}
+              serverId={rootGroup.serverId}
               isSelected={
                 selectedProject?.serverId === rootGroup.serverId &&
                 selectedProject?.projectId === project.Id

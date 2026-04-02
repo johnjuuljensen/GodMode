@@ -70,6 +70,19 @@ export function ProjectView({ serverId, projectId }: Props) {
     [outputMessages, simpleView],
   );
 
+  // MCP badges — try to load effective MCP servers (available when PR4+ merged)
+  const [mcpServers, setMcpServers] = useState<string[]>([]);
+  useEffect(() => {
+    if (!hub || !project?.ProfileName || !project?.RootName) return;
+    // getEffectiveMcpServers may not exist yet — gracefully handle
+    const fn = (hub as unknown as Record<string, unknown>)['getEffectiveMcpServers'];
+    if (typeof fn !== 'function') return;
+    (fn as (p: string, r: string) => Promise<Record<string, unknown>>)
+      .call(hub, project.ProfileName, project.RootName)
+      .then(result => setMcpServers(Object.keys(result)))
+      .catch(() => {});
+  }, [hub, project?.ProfileName, project?.RootName]);
+
   const state = project?.State ?? 'Idle';
   const canSendInput = state === 'WaitingInput' || state === 'Running' || state === 'Stopped' || state === 'Idle';
   const canResume = state === 'Stopped' || state === 'Idle';
@@ -132,7 +145,6 @@ export function ProjectView({ serverId, projectId }: Props) {
     <div className="project-view">
       <div className="project-header">
         <div className="project-header-info">
-          <span className={`project-state-badge ${state}`}>{state}</span>
           <span className="project-header-name">{projectName}</span>
           {(project?.ProfileName || project?.RootName) && (
             <span className="project-header-root">
@@ -140,6 +152,18 @@ export function ProjectView({ serverId, projectId }: Props) {
               {project?.ProfileName && project.ProfileName !== 'Default' && project?.RootName ? ' / ' : ''}
               {project?.RootName ?? ''}
             </span>
+          )}
+          {mcpServers.length > 0 && (
+            <div className="mcp-badges">
+              {mcpServers.length <= 3 ? (
+                mcpServers.map(name => <span key={name} className="mcp-badge">{name}</span>)
+              ) : (
+                <>
+                  {mcpServers.slice(0, 2).map(name => <span key={name} className="mcp-badge">{name}</span>)}
+                  <span className="mcp-badge mcp-badge-count" title={mcpServers.join(', ')}>+{mcpServers.length - 2}</span>
+                </>
+              )}
+            </div>
           )}
         </div>
         <div className="project-header-actions">
@@ -150,9 +174,22 @@ export function ProjectView({ serverId, projectId }: Props) {
           >
             {simpleView ? 'Simple' : 'Full'}
           </button>
-          {canStop && <button className="btn btn-secondary" onClick={handleStop}>Stop</button>}
-          {canResume && <button className="btn btn-primary" onClick={handleResume}>Resume</button>}
-          <button className="btn btn-danger" onClick={handleDelete} title="Delete project">Delete</button>
+          <button
+            className={`project-status-btn ${state}`}
+            onClick={canStop ? handleStop : canResume ? handleResume : undefined}
+            disabled={!canStop && !canResume}
+            title={canStop ? 'Click to stop' : canResume ? 'Click to resume' : state}
+          >
+            <span className="project-status-dot" />
+            <span className="project-status-label">{state}</span>
+            {canStop && <span className="project-status-action">Stop</span>}
+            {canResume && <span className="project-status-action">Resume</span>}
+          </button>
+          <button className="delete-btn" onClick={handleDelete} title="Delete project">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+          </button>
         </div>
       </div>
 

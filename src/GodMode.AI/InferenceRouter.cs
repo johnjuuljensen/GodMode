@@ -113,6 +113,50 @@ public sealed class InferenceRouter
         return string.Empty;
     }
 
+    /// <summary>
+    /// Multi-turn generation: accepts full message history and chat options (including tools).
+    /// Returns the full ChatResponse for tool call inspection.
+    /// </summary>
+    public async Task<ChatResponse?> GenerateAsync(InferenceTier tier, IList<ChatMessage> messages, ChatOptions? options = null, CancellationToken ct = default)
+    {
+        LastUsedTier = tier;
+        var client = ResolveClient(tier);
+        if (client == null) return null;
+
+        return await client.GetResponseAsync(messages, options, ct);
+    }
+
+    /// <summary>
+    /// Resolves the best available IChatClient for the given tier (with fallback).
+    /// </summary>
+    private IChatClient? ResolveClient(InferenceTier tier)
+    {
+        if (_tierProviderMap.TryGetValue(tier, out var provider) &&
+            _loadedClients.TryGetValue(provider, out var client))
+        {
+            LastUsedProvider = provider;
+            return client;
+        }
+
+        foreach (var fallback in DefaultFallbackOrder)
+        {
+            if (_loadedClients.TryGetValue(fallback, out var fbClient))
+            {
+                LastUsedProvider = fallback;
+                return fbClient;
+            }
+        }
+
+        foreach (var (key, c) in _loadedClients)
+        {
+            LastUsedProvider = key;
+            return c;
+        }
+
+        LastUsedProvider = "none";
+        return null;
+    }
+
     private async Task<string> CallClientAsync(IChatClient client, string provider, string systemPrompt, string userMessage, CancellationToken ct)
     {
         var messages = new List<ChatMessage>

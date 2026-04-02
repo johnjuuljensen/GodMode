@@ -1,9 +1,13 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.SignalR;
+using GodMode.AI;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
+using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using Serilog;
 
@@ -40,6 +44,15 @@ builder.Services.AddSignalR()
             options.PayloadSerializerOptions.Converters.Add(converter);
     });
 
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    var defaults = JsonDefaults.Options;
+    options.SerializerOptions.PropertyNamingPolicy = defaults.PropertyNamingPolicy;
+    options.SerializerOptions.DefaultIgnoreCondition = defaults.DefaultIgnoreCondition;
+    foreach (var converter in defaults.Converters)
+        options.SerializerOptions.Converters.Add(converter);
+});
+
 // CORS: not needed in production (React is same-origin, MAUI proxy is server-to-server).
 // Only allow cross-origin in development (vite dev server on a different port).
 if (builder.Environment.IsDevelopment())
@@ -74,6 +87,17 @@ builder.Services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
 builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
 builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
+builder.Services.AddSingleton<ProfileFileManager>();
+builder.Services.AddSingleton<RootCreator>();
+builder.Services.AddSingleton<RootPackager>();
+builder.Services.AddSingleton<RootInstaller>();
+builder.Services.AddSingleton<IManifestParser, ManifestParser>();
+builder.Services.AddSingleton<IConvergenceEngine, ConvergenceEngine>();
+builder.Services.AddSingleton<IManifestExporter, ManifestExporter>();
+builder.Services.AddGodModeAIServices();
+builder.Services.AddSingleton<RootGenerationService>();
+builder.Services.AddSingleton<GodModeChatService>();
+builder.Services.AddSingleton<WebhookFileManager>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();
@@ -134,7 +158,7 @@ app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
 app.MapGet("/servers", () => new[]
 {
     new ServerInfo("self", "Local Server", "local", ServerState.Running)
-});
+}).AllowAnonymous();
 
 // SSE event stream (placeholder — no dynamic server changes in single-server mode)
 app.MapGet("/events", async (HttpContext ctx) =>
@@ -146,16 +170,107 @@ app.MapGet("/events", async (HttpContext ctx) =>
     // Keep connection open until client disconnects
     try { await Task.Delay(Timeout.Infinite, ctx.RequestAborted); }
     catch (OperationCanceledException) { }
-});
+}).AllowAnonymous();
 
 var hub = app.MapHub<ProjectHub>("/hubs/projects");
 if (authMode != "none")
     hub.RequireAuthorization();
 
+// ── Webhook endpoint (uses per-webhook token auth, not server auth) ──
+
+app.MapPost("/webhook/{keyword}", async (string keyword, HttpContext ctx,
+    WebhookFileManager webhookManager, IProjectManager pm,
+    IHubContext<ProjectHub, IProjectHubClient> hubContext, ILogger<Program> logger) =>
+{
+    // Read webhook config
+    var config = webhookManager.Read(keyword);
+    if (config == null)
+        return Results.NotFound(new { error = $"Webhook '{keyword}' not found." });
+
+    // Validate bearer token
+    var authHeader = ctx.Request.Headers.Authorization.ToString();
+    if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        return Results.Json(new { error = "Missing webhook token. Use: Authorization: Bearer <token>" }, statusCode: 401);
+
+    var token = authHeader["Bearer ".Length..].Trim();
+    if (!webhookManager.ValidateToken(keyword, token))
+        return Results.Json(new { error = "Invalid webhook token." }, statusCode: 401);
+
+    if (!config.Enabled)
+        return Results.Json(new { error = $"Webhook '{keyword}' is disabled." }, statusCode: 403);
+
+    // Parse payload
+    JsonElement? payload = null;
+    if (ctx.Request.ContentLength > 0 || ctx.Request.ContentType?.Contains("json") == true)
+    {
+        try
+        {
+            payload = await JsonSerializer.DeserializeAsync<JsonElement>(ctx.Request.Body);
+        }
+        catch (JsonException)
+        {
+            return Results.BadRequest(new { error = "Invalid JSON payload." });
+        }
+    }
+
+    // Map payload to inputs
+    var inputs = WebhookPayloadMapper.MapPayload(config, payload);
+
+    // Create project
+    try
+    {
+        var request = new CreateProjectRequest(config.ProfileName, config.RootName, inputs, config.ActionName);
+        var status = await pm.CreateProjectAsync(request);
+        await hubContext.Clients.All.ProjectCreated(status);
+
+        logger.LogInformation("Webhook '{Keyword}' triggered project '{ProjectName}' ({ProjectId})",
+            keyword, status.Name, status.Id);
+
+        return Results.Json(new WebhookResult(status.Id, status.Name, status.State.ToString()),
+            statusCode: 202);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Webhook '{Keyword}' failed to create project", keyword);
+        return Results.Json(new { error = $"Project creation failed: {ex.Message}" }, statusCode: 500);
+    }
+}).AllowAnonymous();
+
 // SPA fallback: serve index.html for non-API/non-hub routes (React client routing)
 app.MapFallbackToFile("index.html");
 
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authMode);
+
+// Apply manifest on startup if configured
+var manifestPath = builder.Configuration["Manifest"];
+if (!string.IsNullOrEmpty(manifestPath))
+{
+    var parser = app.Services.GetRequiredService<IManifestParser>();
+    var engine = app.Services.GetRequiredService<IConvergenceEngine>();
+    try
+    {
+        var manifest = parser.ParseFile(manifestPath);
+        var result = engine.ConvergeAsync(manifest).GetAwaiter().GetResult();
+        app.Logger.LogInformation("Startup convergence: {Actions} actions, {Errors} errors",
+            result.Actions.Count, result.Errors.Count);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex, "Failed to apply manifest from {ManifestPath}", manifestPath);
+    }
+}
+
+// Initialize inference router (loads AI providers)
+var inferenceRouter = app.Services.GetRequiredService<InferenceRouter>();
+try
+{
+    await inferenceRouter.InitializeAsync();
+    app.Logger.LogInformation("Inference router initialized: {Status}", inferenceRouter.IsLoaded ? "ready" : "no providers");
+}
+catch (Exception ex)
+{
+    app.Logger.LogWarning(ex, "Failed to initialize inference router");
+}
 
 // Recover existing projects AFTER server starts (non-blocking)
 var projectManager = app.Services.GetRequiredService<IProjectManager>();

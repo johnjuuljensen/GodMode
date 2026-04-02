@@ -25,6 +25,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
     private readonly ConcurrentDictionary<string, Process> _processes = new();
 
     public event OutputReceivedHandler? OnOutputReceived;
+    public event ProcessExitedHandler? OnProcessExited;
 
     public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger)
     {
@@ -172,11 +173,12 @@ public class ClaudeProcessManager : IClaudeProcessManager
         var exitedTcs = new TaskCompletionSource<int>();
 
         // Handle process exit event
-        process.Exited += (sender, e) =>
+        process.Exited += async (sender, e) =>
         {
+            var exitCode = process.ExitCode;
             _logger.LogInformation(
                 "Claude process exited for project {ProjectId} with exit code {ExitCode} (PID {ProcessId})",
-                project.Status.Id, process.ExitCode, process.Id);
+                project.Status.Id, exitCode, process.Id);
 
             _processes.TryRemove(project.Status.Id, out _);
 
@@ -186,7 +188,14 @@ public class ClaudeProcessManager : IClaudeProcessManager
             stderrWriter.Dispose();
             stderrStream.Dispose();
 
-            exitedTcs.TrySetResult(process.ExitCode);
+            exitedTcs.TrySetResult(exitCode);
+
+            // Notify listeners so ProjectManager can update status
+            if (OnProcessExited != null)
+            {
+                try { await OnProcessExited(project, exitCode); }
+                catch (Exception ex) { _logger.LogError(ex, "Error in OnProcessExited handler for project {ProjectId}", project.Status.Id); }
+            }
         };
 
         // Handle stdout data received
@@ -222,7 +231,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         };
 
         // Handle stderr data received
-        process.ErrorDataReceived += (sender, e) =>
+        process.ErrorDataReceived += async (sender, e) =>
         {
             if (e.Data == null) return;
 
@@ -232,6 +241,22 @@ public class ClaudeProcessManager : IClaudeProcessManager
                 _logger.LogWarning("Claude stderr [{ProjectId}]: {Error}", project.Status.Id, e.Data);
 
                 onStderrLine?.Invoke(e.Data);
+
+                // Surface error lines to the UI as synthetic error output events
+                if (e.Data.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var errorJson = JsonSerializer.Serialize(new { type = "error", error = e.Data });
+
+                    // Write to output.jsonl so it persists for backfill on refresh
+                    try { outputWriter.WriteLine(errorJson); }
+                    catch { /* stream may be disposed if process exited */ }
+
+                    if (OnOutputReceived != null)
+                    {
+                        try { await OnOutputReceived(project, errorJson); }
+                        catch (Exception eventEx) { _logger.LogError(eventEx, "Error in OnOutputReceived for stderr"); }
+                    }
+                }
             }
             catch (Exception ex)
             {

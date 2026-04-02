@@ -10,11 +10,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  height: 61px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--glass-border);
   background: var(--glass);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  flex-shrink: 0;
 }
 
 .project-header-info {
@@ -40,11 +42,127 @@
   gap: 6px;
 }
 
+/* ── MCP Badges ── */
+.mcp-badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.mcp-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.mcp-badge-count {
+  cursor: help;
+  background: var(--accent-soft);
+  border-color: rgba(94,158,255,0.2);
+  color: var(--accent);
+}
+
+/* ── Status Button ── */
+.project-status-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-transform: uppercase;
+}
+
+.project-status-btn:disabled {
+  cursor: default;
+}
+
+.project-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.project-status-action {
+  margin-left: 2px;
+  padding-left: 6px;
+  border-left: 1px solid var(--glass-border);
+  font-weight: 600;
+}
+
+/* Running */
+.project-status-btn.Running { color: var(--success); border-color: rgba(52,211,153,0.2); }
+.project-status-btn.Running .project-status-dot { background: var(--success); box-shadow: 0 0 4px var(--success); animation: status-pulse 2s ease-in-out infinite; }
+.project-status-btn.Running .project-status-action { color: var(--text-secondary); border-color: rgba(52,211,153,0.2); }
+.project-status-btn.Running:hover { background: var(--error-soft); color: var(--error); border-color: rgba(248,113,113,0.2); }
+.project-status-btn.Running:hover .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); animation: none; }
+.project-status-btn.Running:hover .project-status-action { color: var(--error); border-color: rgba(248,113,113,0.2); }
+
+/* WaitingInput */
+.project-status-btn.WaitingInput { color: var(--accent); border-color: rgba(94,158,255,0.2); }
+.project-status-btn.WaitingInput .project-status-dot { background: var(--accent); box-shadow: 0 0 4px var(--accent); animation: status-pulse 2s ease-in-out infinite; }
+.project-status-btn.WaitingInput .project-status-action { color: var(--text-secondary); border-color: rgba(94,158,255,0.2); }
+.project-status-btn.WaitingInput:hover { background: var(--error-soft); color: var(--error); border-color: rgba(248,113,113,0.2); }
+.project-status-btn.WaitingInput:hover .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); animation: none; }
+.project-status-btn.WaitingInput:hover .project-status-action { color: var(--error); border-color: rgba(248,113,113,0.2); }
+
+/* Stopped / Idle */
+.project-status-btn.Stopped, .project-status-btn.Idle { color: var(--text-tertiary); }
+.project-status-btn.Stopped .project-status-dot, .project-status-btn.Idle .project-status-dot { background: var(--text-tertiary); }
+.project-status-btn.Stopped .project-status-action, .project-status-btn.Idle .project-status-action { color: var(--text-secondary); }
+.project-status-btn.Stopped:hover, .project-status-btn.Idle:hover { background: var(--accent-soft); color: var(--accent); border-color: rgba(94,158,255,0.2); }
+.project-status-btn.Stopped:hover .project-status-dot, .project-status-btn.Idle:hover .project-status-dot { background: var(--accent); box-shadow: 0 0 4px var(--accent); }
+.project-status-btn.Stopped:hover .project-status-action, .project-status-btn.Idle:hover .project-status-action { color: var(--accent); border-color: rgba(94,158,255,0.2); }
+
+/* Error */
+.project-status-btn.Error { color: var(--error); border-color: rgba(248,113,113,0.2); }
+.project-status-btn.Error .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); }
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Delete Button ── */
+.delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.delete-btn:hover {
+  background: var(--error-soft);
+  border-color: var(--error);
+  color: var(--error);
+}
+
 /* ── View Toggle ── */
 .btn-toggle {
   font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 5px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
   background: var(--glass);
   border: 1px solid var(--glass-border);
   color: var(--text-secondary);

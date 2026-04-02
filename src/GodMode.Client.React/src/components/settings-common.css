@@ -1,0 +1,613 @@
+/* ═══════════════════════════════════════════════════════════════
+   Unified Settings Pages — Shared Styles
+   Card-based list + detail pattern for all settings views
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── Page Header ── */
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.settings-add-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.settings-add-btn:hover {
+  background: var(--glass-hover);
+  border-color: var(--glass-border-strong);
+}
+
+.settings-add-btn .plus {
+  font-size: 17px;
+  line-height: 1;
+  margin-top: -1px;
+}
+
+/* ── Back Link (detail views) ── */
+.settings-back-link {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 14px;
+  padding: 4px 0;
+  font-family: var(--font-sans);
+  transition: color 0.15s;
+}
+
+.settings-back-link:hover {
+  color: var(--text-primary);
+}
+
+/* ── Card List ── */
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-empty {
+  text-align: center;
+  padding: 48px 0;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+.settings-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 12px;
+  text-align: center;
+}
+
+/* ── Card Item ── */
+.settings-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+.settings-item-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  font-size: 15px;
+}
+
+.settings-item-icon.accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: rgba(94,158,255,0.15);
+}
+
+.settings-item-icon.success {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: rgba(52,211,153,0.15);
+}
+
+.settings-item-icon.warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: rgba(251,191,36,0.15);
+}
+
+.settings-item-icon.error {
+  background: var(--error-soft);
+  color: var(--error);
+  border-color: rgba(248,113,113,0.15);
+}
+
+.settings-item-icon.purple {
+  background: rgba(167,139,250,0.12);
+  color: var(--purple);
+  border-color: rgba(167,139,250,0.15);
+}
+
+.settings-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-item-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.settings-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.settings-item-meta span.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-item-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ── Badges ── */
+.settings-badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  flex-shrink: 0;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
+
+.settings-badge.disabled {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-tertiary);
+}
+
+/* ── Status Dot ── */
+.settings-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.settings-dot.on {
+  background: var(--success);
+}
+
+.settings-dot.off {
+  background: var(--glass-border-strong);
+}
+
+/* ── Item Actions ── */
+.settings-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+/* Icon button (edit, delete, etc.) */
+.settings-icon-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.settings-icon-btn:hover {
+  background: var(--glass);
+  border-color: var(--glass-border-strong);
+}
+
+.settings-icon-btn.danger {
+  color: var(--error);
+}
+
+.settings-icon-btn.danger:hover {
+  background: var(--error-soft);
+}
+
+/* Inline confirm (cancel + delete) */
+.settings-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.settings-confirm-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* ── Toggle Switch ── */
+.settings-toggle {
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.2s;
+  border: none;
+  padding: 0;
+}
+
+.settings-toggle.on {
+  background: var(--accent);
+}
+
+.settings-toggle.off {
+  background: var(--glass-border-strong);
+}
+
+.settings-toggle-knob {
+  position: absolute;
+  top: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  transition: left 0.2s;
+}
+
+.settings-toggle.on .settings-toggle-knob {
+  left: 23px;
+}
+
+.settings-toggle.off .settings-toggle-knob {
+  left: 3px;
+}
+
+/* ── Form Section (below list, for add/create forms) ── */
+.settings-form-section {
+  border-top: 1px solid var(--glass-border);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+
+.settings-form-section h3 {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.settings-form-row {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-form-row .form-group {
+  flex: 1;
+}
+
+.settings-form-actions {
+  margin-top: 20px;
+}
+
+.settings-form-actions .btn {
+  width: 100%;
+  padding: 11px;
+  font-size: 14px;
+}
+
+/* ── Endpoint / Code Block ── */
+.settings-code-block {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-code-block code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.settings-copy-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+}
+
+.settings-copy-btn:hover {
+  background: var(--glass);
+}
+
+/* ── Key-Value Rows (env vars, mappings) ── */
+.settings-kv-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  align-items: center;
+}
+
+.settings-kv-row input {
+  flex: 1;
+}
+
+.settings-kv-row .kv-arrow {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.settings-kv-add {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 4px 0;
+  font-family: var(--font-sans);
+}
+
+.settings-kv-add:hover {
+  text-decoration: underline;
+}
+
+/* ── Token Reveal Banner ── */
+.settings-token-reveal {
+  margin-bottom: 12px;
+  padding: 12px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: var(--radius);
+}
+
+.settings-token-reveal p {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.settings-token-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-token-value code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-all;
+  flex: 1;
+}
+
+.settings-token-dismiss {
+  margin-top: 8px;
+}
+
+/* ── Tabs ── */
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.settings-tab {
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  transition: color 0.15s;
+}
+
+.settings-tab:hover {
+  color: var(--text-secondary);
+}
+
+.settings-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Collapsible Details ── */
+.settings-details {
+  margin-top: 4px;
+}
+
+.settings-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  user-select: none;
+  font-family: var(--font-sans);
+}
+
+.settings-details summary:hover {
+  color: var(--text-primary);
+}
+
+.settings-details-body {
+  margin-top: 8px;
+}
+
+/* ── Error ── */
+.settings-error {
+  padding: 8px 12px;
+  background: var(--error-soft);
+  border: 1px solid rgba(248,113,113,0.2);
+  border-radius: var(--radius);
+  color: var(--error);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+/* ── Form description/hint ── */
+.form-description {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+.form-required {
+  color: var(--error);
+  margin-left: 2px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.form-error {
+  padding: 8px 12px;
+  background: var(--error-soft);
+  border: 1px solid rgba(248,113,113,0.2);
+  border-radius: var(--radius);
+  color: var(--error);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+/* Textarea */
+.form-textarea {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  resize: vertical;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.form-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ── Stacked Item (webhook-style: header row + code block) ── */
+.settings-item.settings-item-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.settings-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ── Mobile Responsive ── */
+@media (max-width: 768px) {
+  .settings-form-row {
+    flex-direction: column;
+  }
+
+  .settings-kv-row {
+    flex-wrap: wrap;
+  }
+
+  .settings-item {
+    flex-wrap: wrap;
+  }
+
+  .settings-item-actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 4px;
+    border-top: 1px solid var(--glass-border);
+    margin-top: 4px;
+  }
+
+  .settings-code-block {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .settings-code-block code {
+    white-space: normal;
+    word-break: break-all;
+  }
+
+  .settings-token-value {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .settings-item-row {
+    flex-wrap: wrap;
+  }
+
+  .settings-item-row .settings-item-actions {
+    width: 100%;
+    justify-content: flex-end;
+    padding-top: 4px;
+    border-top: 1px solid var(--glass-border);
+    margin-top: 4px;
+  }
+}

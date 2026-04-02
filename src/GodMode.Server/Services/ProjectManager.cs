@@ -21,13 +21,18 @@ public class ProjectManager : IProjectManager
     private readonly IRootConfigReader _rootConfigReader;
     private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
+    private readonly ProfileFileManager _profileFileManager;
+    private readonly RootCreator _rootCreator;
+    private readonly RootPackager _rootPackager;
+    private readonly RootInstaller _rootInstaller;
+    private readonly WebhookFileManager _webhookFileManager;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
     /// <summary>
-    /// Profiles loaded from appsettings.json (static, never changes at runtime).
+    /// Legacy profiles loaded from appsettings.json at startup (before .profiles/ migration).
     /// </summary>
-    private readonly Dictionary<string, ProfileConfig> _explicitProfiles;
+    private readonly Dictionary<string, ProfileConfig> _legacyProfiles;
 
     /// <summary>
     /// Optional directory to scan for autodiscovered roots.
@@ -61,6 +66,11 @@ public class ProjectManager : IProjectManager
         IRootConfigReader rootConfigReader,
         IScriptRunner scriptRunner,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
+        ProfileFileManager profileFileManager,
+        RootCreator rootCreator,
+        RootPackager rootPackager,
+        RootInstaller rootInstaller,
+        WebhookFileManager webhookFileManager,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -69,6 +79,11 @@ public class ProjectManager : IProjectManager
         _rootConfigReader = rootConfigReader;
         _scriptRunner = scriptRunner;
         _hubContext = hubContext;
+        _profileFileManager = profileFileManager;
+        _rootCreator = rootCreator;
+        _rootPackager = rootPackager;
+        _rootInstaller = rootInstaller;
+        _webhookFileManager = webhookFileManager;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -78,8 +93,11 @@ public class ProjectManager : IProjectManager
         var rawDir = configuration["ProjectRootsDir"];
         _projectRootsDir = string.IsNullOrWhiteSpace(rawDir) ? null : rawDir;
 
-        // Load explicit profiles from configuration (with backward compat for ProjectRoots)
-        _explicitProfiles = LoadProfiles(configuration, hasAutoDiscovery: _projectRootsDir != null);
+        // Migrate legacy profiles from appsettings.json to .profiles/ (one-time)
+        _profileFileManager.MigrateFromAppSettings(configuration);
+
+        // Load legacy profiles from configuration (with backward compat for ProjectRoots)
+        _legacyProfiles = LoadProfiles(configuration, hasAutoDiscovery: _projectRootsDir != null);
 
         if (_projectRootsDir != null)
             _logger.LogInformation("Autodiscovery enabled: scanning {ProjectRootsDir} for .godmode-root/ directories", _projectRootsDir);
@@ -125,10 +143,42 @@ public class ProjectManager : IProjectManager
     /// </summary>
     private ProfileSnapshot BuildSnapshot()
     {
-        // Start with explicit profiles
-        var merged = new Dictionary<string, ProfileConfig>(_explicitProfiles, StringComparer.OrdinalIgnoreCase);
+        // Layer 1: Legacy profiles from appsettings.json (only if .profiles/ doesn't exist yet)
+        // Once .profiles/ exists (migration has run), legacy is ignored — .profiles/ is authoritative.
+        var profilesDirExists = Directory.Exists(_profileFileManager.ProfilesDir);
+        var merged = profilesDirExists
+            ? new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, ProfileConfig>(_legacyProfiles, StringComparer.OrdinalIgnoreCase);
 
-        // Discover roots from ProjectRootsDir (if configured)
+        // Layer 2: File-based profiles from .profiles/ directory
+        var fileProfiles = _profileFileManager.ReadAllProfiles();
+        foreach (var (name, data) in fileProfiles)
+        {
+            if (merged.TryGetValue(name, out var existing))
+            {
+                // File-based profile fully replaces legacy environment/MCP/description.
+                // No fallback to legacy — once .profiles/{name}/ exists, it is authoritative.
+                merged[name] = new ProfileConfig
+                {
+                    Roots = existing.Roots,
+                    Environment = data.Environment,
+                    Description = data.Description ?? existing.Description,
+                    McpServers = data.McpServers
+                };
+            }
+            else
+            {
+                merged[name] = new ProfileConfig
+                {
+                    Roots = new Dictionary<string, string>(),
+                    Environment = data.Environment,
+                    Description = data.Description,
+                    McpServers = data.McpServers
+                };
+            }
+        }
+
+        // Layer 3: Autodiscovered roots from ProjectRootsDir
         if (_projectRootsDir != null)
         {
             var discovered = DiscoverProfiles(_projectRootsDir);
@@ -146,7 +196,8 @@ public class ProjectManager : IProjectManager
                     {
                         Roots = mergedRoots,
                         Environment = existing.Environment,
-                        Description = existing.Description ?? profileConfig.Description
+                        Description = existing.Description ?? profileConfig.Description,
+                        McpServers = existing.McpServers
                     };
                 }
                 else
@@ -223,7 +274,7 @@ public class ProjectManager : IProjectManager
             try
             {
                 var config = _rootConfigReader.ReadConfig(subDir);
-                var profileName = config.ProfileName ?? dirName;
+                var profileName = config.ProfileName ?? "Default";
 
                 if (!profiles.TryGetValue(profileName, out var existingProfile))
                 {
@@ -513,10 +564,14 @@ public class ProjectManager : IProjectManager
 
         // Build MCP config JSON (merges profile + action MCP servers)
         var mcpConfigJson = BuildMcpConfigJson(profileConfig?.McpServers, action.McpServers);
+        if (mcpConfigJson != null)
+            _logger.LogInformation("MCP config JSON: {McpConfig}", mcpConfigJson);
 
         // Build claude env/args from action config + project settings + profile env
         var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, model, profileEnv,
             request.ProfileName, config.StripEnvVarProfile, mcpConfigJson);
+        if (claudeArgs != null)
+            _logger.LogInformation("Claude args: {Args}", string.Join(" ", claudeArgs));
 
         // Start Claude process
         project.ProcessCancellation = new CancellationTokenSource();
@@ -794,6 +849,359 @@ public class ProjectManager : IProjectManager
             project.SubscribedConnections.Remove(connectionId);
         }
         await Task.CompletedTask;
+    }
+
+    public Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        switch (targetLevel.ToLowerInvariant())
+        {
+            case "profile":
+                ArgumentNullException.ThrowIfNull(profileName);
+                _profileFileManager.AddMcpServerToProfile(profileName, serverName, config);
+                break;
+            case "root":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                var rootPath = ResolveRootPath(profileName, rootName);
+                MutateRootConfigMcpServers(rootPath, null, (servers) => servers[serverName] = config);
+                break;
+            case "action":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                ArgumentNullException.ThrowIfNull(actionName);
+                var actionRootPath = ResolveRootPath(profileName, rootName);
+                MutateRootConfigMcpServers(actionRootPath, actionName, (servers) => servers[serverName] = config);
+                break;
+            default:
+                throw new ArgumentException($"Unknown target level '{targetLevel}'. Must be 'profile', 'root', or 'action'.");
+        }
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task CreateRootAsync(string rootName, RootPreview preview, string? profileName)
+    {
+        var error = _rootCreator.Validate(preview);
+        if (error != null)
+            throw new ArgumentException(error);
+
+        if (_projectRootsDir == null)
+            throw new InvalidOperationException("ProjectRootsDir is not configured. Cannot create roots without autodiscovery.");
+
+        var rootPath = Path.Combine(Path.GetFullPath(_projectRootsDir), rootName);
+        if (Directory.Exists(Path.Combine(rootPath, ".godmode-root")))
+            throw new InvalidOperationException($"Root '{rootName}' already exists.");
+
+        Directory.CreateDirectory(rootPath);
+        _rootCreator.WriteRoot(rootPath, preview);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveMcpServerAsync(string serverName, string targetLevel,
+        string? profileName, string? rootName, string? actionName)
+    {
+        switch (targetLevel.ToLowerInvariant())
+        {
+            case "profile":
+                ArgumentNullException.ThrowIfNull(profileName);
+                _profileFileManager.RemoveMcpServerFromProfile(profileName, serverName);
+                break;
+            case "root":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                var rootPath = ResolveRootPath(profileName, rootName);
+                MutateRootConfigMcpServers(rootPath, null, (servers) => servers.Remove(serverName));
+                break;
+            case "action":
+                ArgumentNullException.ThrowIfNull(profileName);
+                ArgumentNullException.ThrowIfNull(rootName);
+                ArgumentNullException.ThrowIfNull(actionName);
+                var actionRootPath = ResolveRootPath(profileName, rootName);
+                MutateRootConfigMcpServers(actionRootPath, actionName, (servers) => servers.Remove(serverName));
+                break;
+            default:
+                throw new ArgumentException($"Unknown target level '{targetLevel}'.");
+        }
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
+        string profileName, string rootName, string? actionName)
+    {
+        var snap = _snapshot;
+        snap.Profiles.TryGetValue(profileName, out var profileConfig);
+
+        var key = CompositeKey(profileName, rootName);
+        if (!snap.ProjectFiles.ProjectRoots.ContainsKey(key))
+            return Task.FromResult(new Dictionary<string, McpServerConfig>());
+
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(key);
+        var config = _rootConfigReader.ReadConfig(rootPath);
+        var action = config.ResolveAction(actionName);
+
+        // Three-level merge: profile -> root base -> action
+        var result = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase);
+        if (profileConfig?.McpServers != null)
+            foreach (var (k, v) in profileConfig.McpServers)
+                result[k] = v;
+        // Root-level MCP servers come through action (since RootConfigReader already merges base+overlay)
+        if (action?.McpServers != null)
+            foreach (var (k, v) in action.McpServers)
+                result[k] = v;
+
+        return Task.FromResult(result);
+    }
+
+    private string ResolveRootPath(string profileName, string rootName) =>
+        _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+
+    /// <summary>
+    /// Reads a root or action config.json, mutates the mcpServers section, and writes back.
+    /// </summary>
+    private static void MutateRootConfigMcpServers(string rootPath, string? actionName,
+        Action<Dictionary<string, McpServerConfig>> mutate)
+    {
+        var godModeRootPath = Path.Combine(rootPath, ".godmode-root");
+        var configFileName = actionName != null ? $"config.{actionName}.json" : "config.json";
+        var configPath = Path.Combine(godModeRootPath, configFileName);
+
+        var options = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            WriteIndented = true,
+            AllowTrailingCommas = true,
+            ReadCommentHandling = JsonCommentHandling.Skip
+        };
+
+        Dictionary<string, object?>? raw = null;
+        if (File.Exists(configPath))
+        {
+            var json = File.ReadAllText(configPath);
+            raw = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, options);
+        }
+        raw ??= new Dictionary<string, object?>();
+
+        // Parse existing mcpServers or create empty
+        var mcpServers = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase);
+        if (raw.TryGetValue("mcpServers", out var existing) && existing is JsonElement elem)
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, McpServerConfig>>(elem.GetRawText(), options);
+            if (parsed != null)
+                foreach (var (k, v) in parsed)
+                    mcpServers[k] = v;
+        }
+
+        mutate(mcpServers);
+
+        // Update raw and write back
+        raw["mcpServers"] = mcpServers;
+        var output = JsonSerializer.Serialize(raw, options);
+        Directory.CreateDirectory(godModeRootPath);
+        File.WriteAllText(configPath, output);
+    }
+
+    public Task DeleteRootAsync(string profileName, string rootName, bool force)
+    {
+        var snap = _snapshot;
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+
+        // Safety check: refuse to delete if projects exist under this root
+        if (!force)
+        {
+            var hasActiveProjects = _projects.Values.Any(p =>
+                p.ProjectPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase));
+            if (hasActiveProjects)
+                throw new InvalidOperationException($"Root '{rootName}' has active projects. Use force=true to delete anyway.");
+        }
+
+        var godModeRootPath = Path.Combine(rootPath, ".godmode-root");
+        if (Directory.Exists(godModeRootPath))
+            Directory.Delete(godModeRootPath, recursive: true);
+
+        // Clean up empty root directory
+        if (Directory.Exists(rootPath) && !Directory.EnumerateFileSystemEntries(rootPath).Any())
+            Directory.Delete(rootPath);
+
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task<RootPreview?> GetRootPreviewAsync(string profileName, string rootName)
+    {
+        var snap = _snapshot;
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+        var preview = _rootCreator.ReadExistingRoot(rootPath);
+        return Task.FromResult(preview);
+    }
+
+    public Task UpdateRootAsync(string profileName, string rootName, RootPreview preview)
+    {
+        var error = _rootCreator.Validate(preview);
+        if (error != null)
+            throw new ArgumentException(error);
+
+        var snap = _snapshot;
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+
+        // Clear existing .godmode-root/ and rewrite
+        var godModeRootPath = Path.Combine(rootPath, ".godmode-root");
+        if (Directory.Exists(godModeRootPath))
+            Directory.Delete(godModeRootPath, recursive: true);
+
+        _rootCreator.WriteRoot(rootPath, preview);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task CreateProfileAsync(string name, string? description)
+    {
+        _profileFileManager.CreateProfile(name, description);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteProfileAsync(string name, bool deleteContents = false)
+    {
+        _profileFileManager.DeleteProfile(name);
+
+        var snap = _snapshot;
+        var profileRoots = snap.RootLookup
+            .Where(kvp => string.Equals(kvp.Key.Item1, name, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (deleteContents)
+        {
+            // Cascade: stop processes, remove tracking, delete root directories
+            foreach (var ((_, rootName), rootPath) in profileRoots)
+            {
+                // Stop and remove all projects under this root
+                var projectsInRoot = _projects.Values
+                    .Where(p => p.ProjectPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                foreach (var project in projectsInRoot)
+                {
+                    project.ProcessCancellation?.Cancel();
+                    _projects.TryRemove(project.Status.Id, out _);
+                }
+
+                // Delete the entire root directory (including projects)
+                if (Directory.Exists(rootPath))
+                {
+                    _logger.LogInformation("Cascade deleting root '{RootName}' at {RootPath}", rootName, rootPath);
+                    Directory.Delete(rootPath, recursive: true);
+                }
+            }
+        }
+        else
+        {
+            // Move roots to Default profile by clearing profileName from config
+            foreach (var ((_, _), rootPath) in profileRoots)
+            {
+                var configPath = Path.Combine(rootPath, ".godmode-root", "config.json");
+                if (!File.Exists(configPath)) continue;
+                try
+                {
+                    var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(configPath))?.AsObject();
+                    if (json != null)
+                    {
+                        json.Remove("profileName");
+                        File.WriteAllText(configPath, json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                    }
+                }
+                catch { /* skip unparseable configs */ }
+            }
+        }
+
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task UpdateProfileDescriptionAsync(string name, string? description)
+    {
+        _profileFileManager.UpdateProfileDescription(name, description);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task<byte[]> ExportRootAsync(string profileName, string rootName)
+    {
+        var snap = _snapshot;
+        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
+        var bytes = _rootPackager.Export(rootPath, rootName);
+        return Task.FromResult(bytes);
+    }
+
+    public Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes) =>
+        Task.FromResult(RootPackager.PreviewFromBytes(packageBytes));
+
+    public Task<SharedRootPreview> PreviewImportFromUrlAsync(string url) =>
+        _rootInstaller.PreviewFromUrlAsync(url);
+
+    public Task<SharedRootPreview> PreviewImportFromGitAsync(string gitUrl, string? path, string? gitRef) =>
+        _rootInstaller.PreviewFromGitAsync(gitUrl, path, gitRef);
+
+    public Task InstallSharedRootAsync(string rootName, SharedRootPreview preview)
+    {
+        if (_projectRootsDir == null)
+            throw new InvalidOperationException("ProjectRootsDir is not configured.");
+
+        _rootInstaller.Install(_projectRootsDir, rootName, preview);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    public Task UninstallSharedRootAsync(string rootName)
+    {
+        if (_projectRootsDir == null)
+            throw new InvalidOperationException("ProjectRootsDir is not configured.");
+
+        _rootInstaller.Uninstall(_projectRootsDir, rootName);
+        RebuildSnapshot();
+        return Task.CompletedTask;
+    }
+
+    // ── Webhooks ──
+
+    public Task<WebhookInfo[]> ListWebhooksAsync()
+    {
+        var all = _webhookFileManager.ReadAll();
+        var result = all.Select(kv => WebhookFileManager.ToInfo(kv.Key, kv.Value)).ToArray();
+        return Task.FromResult(result);
+    }
+
+    public Task<WebhookInfo> CreateWebhookAsync(string keyword, string profileName, string rootName,
+        string? actionName = null, string? description = null,
+        Dictionary<string, string>? inputMapping = null,
+        Dictionary<string, JsonElement>? staticInputs = null)
+    {
+        var config = _webhookFileManager.Create(keyword, profileName, rootName, actionName, description, inputMapping, staticInputs);
+        return Task.FromResult(WebhookFileManager.ToInfo(keyword, config));
+    }
+
+    public Task DeleteWebhookAsync(string keyword)
+    {
+        _webhookFileManager.Delete(keyword);
+        return Task.CompletedTask;
+    }
+
+    public Task<WebhookInfo> UpdateWebhookAsync(string keyword, string? description = null,
+        Dictionary<string, string>? inputMapping = null,
+        Dictionary<string, JsonElement>? staticInputs = null,
+        bool? enabled = null)
+    {
+        _webhookFileManager.Update(keyword, description, inputMapping, staticInputs, enabled);
+        var updated = _webhookFileManager.Read(keyword)
+            ?? throw new KeyNotFoundException($"Webhook '{keyword}' not found.");
+        return Task.FromResult(WebhookFileManager.ToInfo(keyword, updated));
+    }
+
+    public Task<string> RegenerateWebhookTokenAsync(string keyword)
+    {
+        var newToken = _webhookFileManager.RegenerateToken(keyword);
+        return Task.FromResult(newToken);
     }
 
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
@@ -1120,8 +1528,11 @@ public class ProjectManager : IProjectManager
         }
         if (!string.IsNullOrWhiteSpace(mcpConfigJson))
         {
+            // Write to a temp file — --mcp-config expects a file path, not inline JSON
+            var mcpConfigPath = Path.Combine(Path.GetTempPath(), $"godmode-mcp-{Guid.NewGuid():N}.json");
+            File.WriteAllText(mcpConfigPath, mcpConfigJson);
             args.Add("--mcp-config");
-            args.Add(mcpConfigJson);
+            args.Add(mcpConfigPath);
         }
 
         return (env, args.Count > 0 ? args.ToArray() : null);
@@ -1154,15 +1565,31 @@ public class ProjectManager : IProjectManager
             return null;
 
         // Build Claude MCP config format: { "mcpServers": { ... } }
+        // Stdio servers → { command, args, env }; SSE servers → { url, headers }
         var mcpConfig = new Dictionary<string, object>
         {
             ["mcpServers"] = merged.ToDictionary(
                 kvp => kvp.Key,
-                kvp => new
+                kvp =>
                 {
-                    command = kvp.Value.Command,
-                    args = kvp.Value.Args ?? [],
-                    env = ExpandEnvVars(kvp.Value.Env)
+                    if (!string.IsNullOrEmpty(kvp.Value.Url))
+                    {
+                        var sse = new Dictionary<string, object>
+                        {
+                            ["type"] = "sse",
+                            ["url"] = kvp.Value.Url
+                        };
+                        var headers = ExpandEnvVars(kvp.Value.Headers);
+                        if (headers is { Count: > 0 })
+                            sse["headers"] = headers;
+                        return (object)sse;
+                    }
+                    return (object)new
+                    {
+                        command = kvp.Value.Command ?? "",
+                        args = kvp.Value.Args ?? [],
+                        env = ExpandEnvVars(kvp.Value.Env)
+                    };
                 })
         };
 

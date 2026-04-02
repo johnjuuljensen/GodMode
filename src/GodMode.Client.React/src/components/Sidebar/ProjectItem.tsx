@@ -3,6 +3,7 @@ import { useAppStore } from '../../store';
 
 interface Props {
   project: ProjectSummary;
+  serverId: string;
   isSelected: boolean;
   onSelect: () => void;
 }
@@ -15,24 +16,26 @@ export function ProjectItem({ project, isSelected, onSelect }: Props) {
   const stateLabel = isWaiting ? 'WAIT' : stateStr.slice(0, 4).toUpperCase();
 
   return (
-    <div
-      className={`project-item ${isSelected ? 'selected' : ''} ${isWaiting ? 'waiting' : ''}`}
-      onClick={onSelect}
-    >
-      <span className={`project-state-badge ${isWaiting ? 'WaitingInput' : project.State}`}>
-        {stateLabel}
-      </span>
-      <div className="project-info">
-        <div className="project-name">{project.Name}</div>
-        <div className="project-meta">
-          {project.RootName && `${project.RootName} · `}{timeAgo}
-          {isWaiting && project.CurrentQuestion && (
-            <span className="project-question-hint" title={project.CurrentQuestion}>
-              {' · '}{project.CurrentQuestion.length > 30
-                ? project.CurrentQuestion.slice(0, 30) + '...'
-                : project.CurrentQuestion}
-            </span>
-          )}
+    <div className="project-item-wrapper">
+      <div
+        className={`project-item ${isSelected ? 'selected' : ''} ${isWaiting ? 'waiting' : ''}`}
+        onClick={onSelect}
+      >
+        <span className={`project-state-badge ${isWaiting ? 'WaitingInput' : project.State}`}>
+          {stateLabel}
+        </span>
+        <div className="project-info">
+          <div className="project-name">{project.Name}</div>
+          <div className="project-meta">
+            {project.RootName && `${project.RootName} · `}{timeAgo}
+            {isWaiting && project.CurrentQuestion && (
+              <span className="project-question-hint" title={project.CurrentQuestion}>
+                {' · '}{project.CurrentQuestion.length > 30
+                  ? project.CurrentQuestion.slice(0, 30) + '...'
+                  : project.CurrentQuestion}
+              </span>
+            )}
+          </div>
         </div>
       </div>
     </div>
