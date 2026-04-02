@@ -2,59 +2,61 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## MUST READ: Architecture Document
+
+**Before starting any non-trivial work, read `docs/UNIFIED-ARCHITECTURE.md`.** It describes the full system architecture, design principles, deployment strategy, and where to place new code. Violating its principles (especially the declarative configuration rules in Section 5) will result in work that needs to be redone.
+
 ## Project Overview
 
-GodMode is a Claude Autonomous Development System - a multi-project .NET 10 solution for managing Claude Code instances across local machines and GitHub Codespaces. It provides an Avalonia control plane app that communicates with remote servers via strongly-typed SignalR.
+GodMode is a Claude Autonomous Development System — a multi-project .NET 10 solution for managing Claude Code instances across local machines and GitHub Codespaces. It provides two UI surfaces:
 
-This is a **cross-platform application** targeting Windows, macOS, Android, and iOS.
+1. **React SPA** — served directly by GodMode.Server, accessed via browser
+2. **MAUI app** — hosts the same React SPA in a HybridWebView, with a local proxy for multi-server connectivity
+
+**All UI work is done in React.** The MAUI app is a thin shell — it hosts the React SPA and provides a WebSocket relay for multi-server connectivity. There is no native .NET UI.
 
 ## Build Commands
 
 ```bash
-# Build entire solution
-dotnet build
-
-# Build specific project
+# Build server (includes React SPA build)
 dotnet build src/GodMode.Server/GodMode.Server.csproj
-dotnet build src/GodMode.Avalonia.Desktop/GodMode.Avalonia.Desktop.csproj
 
 # Run server (port 31337)
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
-# Run Desktop app
-dotnet run --project src/GodMode.Avalonia.Desktop/GodMode.Avalonia.Desktop.csproj
-
-# Build Android app (requires Android workload)
-dotnet build src/GodMode.Avalonia.Android/GodMode.Avalonia.Android.csproj
+# Build MAUI app (requires MAUI workload)
+dotnet build src/GodMode.Maui/GodMode.Maui.csproj
 
 # Run all tests
 dotnet test
+
+# React dev server (hot reload, proxies to running GodMode.Server)
+cd src/GodMode.Client.React && npm run dev
 ```
 
-**Running/Debugging**: The server and Avalonia app are separate processes — the server is **not** embedded in the Avalonia app. To debug, start both projects concurrently (e.g., "Multiple Startup Projects" in Visual Studio, or compound launch configurations in VS Code).
+**Running/Debugging**: The server and MAUI app are separate processes. The server serves the React SPA and manages Claude Code processes. The MAUI app connects to one or more servers via its local proxy. To develop React, run the server and use `npm run dev` for hot reload.
 
 ## Architecture
 
 ### Projects
 
-- **GodMode.Shared** - Shared types, models, enums, and SignalR hub interfaces (`IProjectHub`, `IProjectHubClient`)
-- **GodMode.Server** - ASP.NET SignalR server that spawns/manages Claude Code processes
-- **GodMode.Avalonia** - Shared UI class library (views, view models, converters, styles) — referenced by Desktop and Android heads
-- **GodMode.Avalonia.Desktop** - Desktop entry point (WinExe, Program.cs, platform project refs)
-- **GodMode.Avalonia.Android** - Android entry point (MainActivity, AndroidManifest)
-- **GodMode.ClientBase** - Shared client abstractions, services, and models used by the Avalonia app
-- **GodMode.ProjectFiles** - File system utilities for project folders (status.json, JSONL streams)
-- **GodMode.AI** - Cross-platform AI abstractions (IChatClientFactory, IChatClient, tools, tool call parsing, AIConfig, Anthropic provider)
-- **GodMode.AI.LocalInference.Windows** - Windows DirectML ONNX local inference (Phi-4 mini)
-- **GodMode.AI.LocalInference.Mac** - macOS CPU ONNX local inference
+- **GodMode.Shared** — Shared types, models, enums, and SignalR hub interfaces (`IProjectHub`, `IProjectHubClient`)
+- **GodMode.Server** — ASP.NET SignalR server that spawns/manages Claude Code processes, serves React SPA
+- **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation
+- **GodMode.ClientBase** — Shared .NET client abstractions (host providers, server registry, token protection)
+- **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React
+- **GodMode.AI** — Cross-platform AI abstractions (IChatClientFactory, IChatClient, Anthropic provider)
+- **GodMode.ProjectFiles** — File system utilities for project folders (status.json, JSONL streams)
+- **GodMode.Mcp** — AWS Lambda MCP server (separate deployment)
+- **SignalR.Proxy** — SignalR WebSocket relay used by MAUI for multi-server connectivity
 
 ### Key Patterns
 
 **SignalR Communication (Strongly Typed)**
-- `IProjectHub` (Shared) - Client→Server methods
-- `IProjectHubClient` (Shared) - Server→Client callbacks (including `CreationProgress`)
-- `ProjectHub` (Server) - Implements `Hub<IProjectHubClient>, IProjectHub`
-- `SignalRProjectConnection` (ClientBase) - Uses `TypedSignalR.Client` source generator
+- `IProjectHub` (Shared) — Client→Server methods
+- `IProjectHubClient` (Shared) — Server→Client callbacks (including `CreationProgress`)
+- `ProjectHub` (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
+- `SignalRProjectConnection` (ClientBase) — Uses `TypedSignalR.Client` source generator
 
 **Config-Driven Project Roots (Multi-File)**
 - Each project root directory can contain a `.godmode-root/` folder with config files
@@ -66,11 +68,12 @@ dotnet test
 - `TemplateResolver` resolves `{fieldName}` placeholders in name/prompt templates
 - UIs render dynamic forms from the JSON Schema (string, multiline, boolean, enum fields)
 
-**Client Abstractions**
-- `IHostProvider` - Host environment abstraction (GitHub Codespaces, local folders)
-- `IProjectConnection` - Project management operations with `IObservable<OutputEvent>` for streaming
-- `FormField` / `FormFieldParser` - Dynamic form model parsed from JSON Schema for UI rendering
-- Implementations: `GitHubCodespaceProvider`, `LocalFolderProvider`, `SignalRProjectConnection`
+**React + MAUI Hosting**
+- React is the single UI — all UI changes go in `GodMode.Client.React/`
+- In browser mode: React connects directly to GodMode.Server via SignalR
+- In MAUI mode: React connects via a local proxy (`LocalServer`) that relays WebSocket to remote servers
+- React detects hosting mode via `window.location.hostname === '0.0.0.1'` (HybridWebView address)
+- Use `getBaseUrl()`, `getHubUrl()`, `getHubOptions()` from `hostApi.ts` — never hardcode URLs
 
 **Process Management**
 - `ClaudeProcessManager` uses `System.Diagnostics.Process` directly (not CliWrap) for proper stdin handling
@@ -128,76 +131,29 @@ dotnet test
 - Use consistent naming/terminology across the project.
 - Server is VCS-agnostic — all VCS operations live in scripts, not server code.
 
-### Cross-Platform Rules
-This is a cross-platform application (Windows, macOS, Android, iOS). Follow these rules strictly:
-
-- **All platform-specific code lives in platform projects** (e.g., `GodMode.AI.LocalInference.Mac`). App projects like `GodMode.Avalonia` must only depend on cross-platform abstractions.
-- **Define common interfaces in cross-platform projects** (`GodMode.AI`) and implement them per-platform. Register via `IPlatformServiceRegistrar` for automatic discovery, or use `TryAddSingleton` for fallback defaults.
-- **No `#if` preprocessor directives or `<Compile Remove>` in app projects.** All app code must compile on every platform. If you need platform-specific behavior, define an interface, implement it per-platform, and inject it.
-- **Pragmas and conditionals are a last resort** — only use them when there is genuinely no other way (e.g., suppressing an unavoidable compiler warning on a no-op interface implementation). Never use them to gate features.
-- **Platform projects use conditional csproj patterns** for stub builds on non-target platforms: `<Compile Remove="**/*.cs" />` with an OS condition so they produce empty assemblies elsewhere.
-- **Null/no-op implementations** (`NullChatClient`, etc.) ensure the app runs gracefully on platforms where a capability isn't yet available.
+### UI Rules
+- **All UI lives in React** (`GodMode.Client.React/`). No native .NET UI.
+- When changing React, consider MAUI constraints (see `docs/UNIFIED-ARCHITECTURE.md` Section 3.5):
+  - Use `hostApi.ts` helpers for URLs — never hardcode server paths
+  - Support multi-server (don't assume single server)
+  - Bundle all assets — no CDN dependencies
+  - Test in browser; be aware of MAUI differences
 
 ## Inference Configuration
 
 All inference config lives in `~/.godmode/inference.json`.
 
-### Config File Structure (`~/.godmode/inference.json`)
 ```json
 {
   "api_key": "sk-ant-...",
   "provider": "anthropic",
   "model": "claude-sonnet-4-20250514",
-  "phi4_model_path": "~/.godmode/models/phi-4-mini-instruct-onnx-gpu",
   "max_tokens": 256,
-  "temperature": 0.3,
-  "tiers": {
-    "Light": { "provider": "anthropic" },
-    "Medium": { "provider": "anthropic" },
-    "Heavy": { "provider": "anthropic" }
-  }
+  "temperature": 0.3
 }
 ```
 
-### Key Fields
-
-| Field | Owner | Description |
-|-------|-------|-------------|
-| `api_key` | AIConfig | API key for remote providers (env var `ANTHROPIC_API_KEY` as fallback) |
-| `provider` | AIConfig | Active provider: `"anthropic"`, `"directml"`, `"cpu"`, `"none"` (default: auto-detect) |
-| `model` | AIConfig | Model ID for remote providers (e.g., `"claude-sonnet-4-20250514"`) |
-| `phi4_model_path` | AIConfig | Path to Phi-4-mini ONNX model dir (must contain `genai_config.json`) |
-| `max_tokens` | AIConfig | Max generation tokens (default: 256) |
-| `temperature` | AIConfig | Sampling temperature (default: 0.3) |
-| `tiers` | AIConfig | Optional tier→provider mapping (auto-detected if absent) |
-
-### Inference Tier System
-
-The `InferenceRouter` maps task tiers (Light/Medium/Heavy) to execution providers via `IChatClientFactory`:
-
-- **Auto-detect mode** (no `tiers` section): If `api_key` or `ANTHROPIC_API_KEY` env var is set, uses Anthropic for all tiers. Otherwise falls back to local DirectML/CPU if a model path is configured.
-- **Explicit tiers**: Add a `tiers` section to override auto-detection. Provider values: `"anthropic"`, `"directml"`, `"cpu"`, `"auto"`, `"none"`.
-- **Fallback chain**: If a tier's provider fails, falls back through anthropic→directml→cpu→any loaded client.
-- **Client sharing**: If multiple tiers map to the same provider, they share one `IChatClient` instance.
-- **NPU is disabled**: NPU/VitisAI support has been removed.
-
-### IChatClientFactory Pattern
-
-Inference providers implement `IChatClientFactory` and are registered as keyed DI services:
-- `AnthropicChatClientFactory` ("anthropic") — remote inference via Anthropic API (lives in GodMode.AI)
-- `Phi4ChatClientFactory` ("directml") — local ONNX via DirectML (lives in GodMode.AI.LocalInference.Windows)
-- `OnnxChatClientFactory` ("cpu") — local ONNX on CPU (lives in GodMode.AI.LocalInference.Mac)
-
-The `InferenceRouter` resolves factories from DI by provider key, calls `CreateAsync()`, and stores the resulting `IChatClient` instances.
-
-### Model Downloads
-
-Run `scripts/download-models.ps1` to download local models to `~/.godmode/models/`:
-- **Phi-4-mini** (DirectML GPU): `phi-4-mini-instruct-onnx-gpu/` — requires `genai_config.json`
-
-### Platform Service Discovery
-
-Platform-specific implementations (AI inference) are registered via `IPlatformServiceRegistrar` discovered at startup by scanning `GodMode.*.dll` assemblies. Platform assemblies are preloaded from the output directory before scanning to avoid lazy-loading gaps.
+The `InferenceRouter` in `GodMode.AI` maps inference requests to the Anthropic provider. The `api_key` field (or `ANTHROPIC_API_KEY` env var) is required for AI features (GodMode Chat, root generation).
 
 ## GitHub Codespaces (GodMode Server)
 
@@ -227,23 +183,6 @@ gh codespace delete -c <codespace-name>
 
 The devcontainer must exist on the target branch — GitHub reads it from the repo at that ref.
 
-### SSH access
-
-An SSH config wildcard (`~/.ssh/config`) enables passwordless SSH to any GodMode codespace using the ssh-agent:
-
-```
-Host godmode-*
-    User vscode
-    ProxyCommand C:\Program Files\GitHub CLI\gh.exe cs ssh -c %n --stdio -- -i C:\Users\JJJ\.ssh\id_ed25519
-    UserKnownHostsFile=/dev/null
-    StrictHostKeyChecking no
-    LogLevel quiet
-    ControlMaster auto
-    IdentityFile C:\Users\JJJ\.ssh\id_ed25519
-```
-
-Then: `ssh <codespace-name>` (e.g., `ssh godmode-p6gpgg6v7539xpx`).
-
 ### Checking codespace health
 
 ```bash
@@ -262,9 +201,7 @@ ssh <codespace-name> 'which claude || ~/.local/bin/claude --version'  # claude i
 
 ### Port forwarding
 
-Port 31337 is forwarded automatically. The `postStartCommand` sets it to public via `gh codespace ports visibility`. The `portsAttributes.visibility` field in devcontainer.json does NOT work (GitHub backlog since 2022, see github/community#4068).
-
-The authenticated probe (`Bearer` token from `gh auth token`) bypasses both private-port login redirects and public-port interstitial warnings, so port visibility is not critical for the Avalonia client.
+Port 31337 is forwarded automatically. The `postStartCommand` sets it to public via `gh codespace ports visibility`.
 
 Server URL pattern: `https://<codespace-name>-31337.app.github.dev/`
 
@@ -289,11 +226,6 @@ The plan is to test the full Server→MAUI relay→React pipeline by having MAUI
 5. React serializes store state and POSTs to `POST /test/results`
 6. MAUI validates against expected state, exits with pass/fail code
 
-Server configs should be stubbable so tests don't depend on live codespaces:
-- **Stubbed codespace provider**: fake servers with various states (won't start, will start, already running) to test the full lifecycle UI without GitHub API calls
-- **Local server**: a real GodMode.Server instance for testing the happy path (connect, list projects, create, subscribe output)
-- **Stubbed config**: injected server registrations so tests don't touch `~/.godmode/servers.json`
-
 This approach tests production code paths end-to-end (real store, real relay, real SignalR) and is CI-friendly (`exit 0`/`exit 1`).
 
 ## GodMode Workflow
@@ -303,7 +235,7 @@ When doing work initiated by GodMode, indicated by the presence of a `.godmode` 
 - Do not enter plan mode, just plan and execute.
 - Commit and push at regular/relevant intervals.
 - Create a PR when work is completed.
-- Any uncertainties or questions can be posed in the PR. 
+- Any uncertainties or questions can be posed in the PR.
 - If the solution needs user attention create the PR as draft and start the description with !!Attention needed!!
 - Make sure to maintain slnx file
 - When asked to merge master into a branch always use origin/master as local master is likely stale
