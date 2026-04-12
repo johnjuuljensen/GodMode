@@ -281,6 +281,8 @@ export function ScheduleSettings() {
   const [formEnabled, setFormEnabled] = useState(true);
   const [formRootName, setFormRootName] = useState('');
   const [formActionName, setFormActionName] = useState('');
+  const [formProjectName, setFormProjectName] = useState('');
+  const [formPrompt, setFormPrompt] = useState('');
 
   const filteredRoots = roots.filter(r => r.ProfileName === formProfile);
 
@@ -320,6 +322,8 @@ export function ScheduleSettings() {
     setFormEnabled(true);
     setFormRootName(filteredRoots[0]?.Name ?? '');
     setFormActionName('');
+    setFormProjectName('');
+    setFormPrompt('');
     setEditingSchedule(null);
   };
 
@@ -340,13 +344,20 @@ export function ScheduleSettings() {
     setFormEnabled(s.Enabled);
     setFormRootName(s.Target?.RootName ?? '');
     setFormActionName(s.Target?.ActionName ?? '');
+    const inputs = s.Target?.Inputs as Record<string, unknown> | undefined;
+    setFormProjectName((inputs?.name as string) ?? '');
+    setFormPrompt((inputs?.prompt as string) ?? '');
     setView('edit');
   };
 
   const buildConfig = (): ScheduleConfig => {
+    const inputs: Record<string, unknown> = {};
+    if (formProjectName.trim()) inputs.name = formProjectName.trim();
+    if (formPrompt.trim()) inputs.prompt = formPrompt.trim();
     const target: ScheduleTarget = {
       RootName: formRootName || null,
       ActionName: formActionName || null,
+      Inputs: Object.keys(inputs).length > 0 ? inputs : null,
     };
     return {
       Description: formDescription.trim() || null,
@@ -419,24 +430,18 @@ export function ScheduleSettings() {
         <div className="settings-header"><h2>{isEdit ? 'Edit Schedule' : 'New Schedule'}</h2></div>
         {error && <div className="settings-error">{error}</div>}
 
-        <div className="settings-form-row">
-          {!isEdit && (
-            <div className="form-group">
-              <label>Profile</label>
-              <select value={formProfile} onChange={e => setFormProfile(e.target.value)}>
-                {profiles.map(p => <option key={p.Name} value={p.Name}>{p.Name}</option>)}
-              </select>
-            </div>
-          )}
+        {!isEdit && (
           <div className="form-group">
-            <label>Name</label>
-            <input type="text" value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. daily-review" disabled={isEdit} autoFocus={!isEdit} />
+            <label>Profile</label>
+            <select value={formProfile} onChange={e => setFormProfile(e.target.value)}>
+              {profiles.map(p => <option key={p.Name} value={p.Name}>{p.Name}</option>)}
+            </select>
           </div>
-        </div>
+        )}
 
         <div className="form-group">
-          <label>Schedule</label>
-          <CronBuilder cron={formCron} onChange={setFormCron} />
+          <label>Name</label>
+          <input type="text" value={formName} onChange={e => setFormName(e.target.value)} placeholder="e.g. daily-review" disabled={isEdit} autoFocus={!isEdit} />
         </div>
 
         <div className="form-group">
@@ -444,29 +449,46 @@ export function ScheduleSettings() {
           <input type="text" value={formDescription} onChange={e => setFormDescription(e.target.value)} placeholder="Optional description" />
         </div>
 
-        <div className="settings-form-row">
+        <div className="form-group">
+          <label>Root</label>
+          <select value={formRootName} onChange={e => setFormRootName(e.target.value)}>
+            {filteredRoots.map(r => <option key={r.Name} value={r.Name}>{r.Name}</option>)}
+          </select>
+        </div>
+
+        {actions.length > 0 && (
           <div className="form-group">
-            <label>Root</label>
-            <select value={formRootName} onChange={e => setFormRootName(e.target.value)}>
-              {filteredRoots.map(r => <option key={r.Name} value={r.Name}>{r.Name}</option>)}
+            <label>Action</label>
+            <select value={formActionName} onChange={e => setFormActionName(e.target.value)}>
+              <option value="">(default)</option>
+              {actions.map(a => <option key={a.Name} value={a.Name}>{a.Name}</option>)}
             </select>
           </div>
-          {actions.length > 0 && (
-            <div className="form-group">
-              <label>Action</label>
-              <select value={formActionName} onChange={e => setFormActionName(e.target.value)}>
-                <option value="">(default)</option>
-                {actions.map(a => <option key={a.Name} value={a.Name}>{a.Name}</option>)}
-              </select>
-            </div>
-          )}
+        )}
+
+        <div className="form-group">
+          <label>Project Name</label>
+          <input type="text" value={formProjectName} onChange={e => setFormProjectName(e.target.value)}
+            placeholder="e.g. daily-review-{date} (supports {date}, {time}, {datetime})" />
+          <div className="form-description">Name for the created project. Leave empty for auto-generated timestamp name.</div>
         </div>
 
         <div className="form-group">
-          <label className="form-checkbox-label">
-            <Toggle checked={formEnabled} onChange={setFormEnabled} />
-            <span>Enabled</span>
-          </label>
+          <label>Prompt</label>
+          <textarea value={formPrompt} onChange={e => setFormPrompt(e.target.value)}
+            placeholder="What should Claude do when this schedule fires?"
+            rows={3} />
+          <div className="form-description">The initial prompt for the Claude session. Leave empty to use the root's default.</div>
+        </div>
+
+        <div className="form-group">
+          <label>Schedule</label>
+          <CronBuilder cron={formCron} onChange={setFormCron} />
+        </div>
+
+        <div className="schedule-enabled-row">
+          <Toggle checked={formEnabled} onChange={setFormEnabled} />
+          <span className="schedule-enabled-label">Enabled</span>
         </div>
 
         <div className="settings-form-actions">

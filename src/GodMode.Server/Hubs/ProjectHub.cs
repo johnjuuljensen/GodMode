@@ -431,7 +431,15 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     public Task<ScheduleInfo> CreateSchedule(string profileName, string name, ScheduleConfig config)
     {
         _logger.LogInformation("Client {ConnectionId} creating schedule {Profile}/{Name}", Context.ConnectionId, profileName, name);
-        return Task.FromResult(_scheduleManager.CreateSchedule(profileName, name, config));
+        try
+        {
+            return Task.FromResult(_scheduleManager.CreateSchedule(profileName, name, config));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create schedule {Profile}/{Name}", profileName, name);
+            throw new HubException(ex.Message);
+        }
     }
 
     public Task<ScheduleInfo> UpdateSchedule(string profileName, string name, ScheduleConfig config)

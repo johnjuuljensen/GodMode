@@ -129,6 +129,19 @@
   max-width: 260px;
 }
 
+/* ── Schedule enabled toggle row ── */
+.schedule-enabled-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.schedule-enabled-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
 /* ── Mobile ── */
 @media (max-width: 768px) {
   .cron-freq-buttons {

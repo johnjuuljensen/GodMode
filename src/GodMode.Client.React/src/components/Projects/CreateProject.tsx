@@ -129,18 +129,37 @@ export function CreateProject() {
 
     setCreating(true);
     setError(null);
+    const profileName = selectedRoot.ProfileName ?? 'Default';
+    const inputs: Record<string, unknown> = { model: selectedModel };
+    for (const field of formFields) {
+      const val = formValues[field.key];
+      if (field.fieldType === 'boolean') inputs[field.key] = val === 'true';
+      else if (val) inputs[field.key] = val;
+    }
     try {
-      const profileName = selectedRoot.ProfileName ?? 'Default';
-      const inputs: Record<string, unknown> = { model: selectedModel };
-      for (const field of formFields) {
-        const val = formValues[field.key];
-        if (field.fieldType === 'boolean') inputs[field.key] = val === 'true';
-        else if (val) inputs[field.key] = val;
-      }
       await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs);
       closePage();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create project');
+      const msg = err instanceof Error ? err.message : 'Failed to create project';
+      if (msg.includes('FOLDER_EXISTS:')) {
+        // Project folder already exists — ask user what to do
+        const choice = confirm(
+          'A project with this name already exists.\n\nOK = Reuse existing folder\nCancel = Create new with suffix (_2, _3, ...)'
+        );
+        try {
+          if (choice) {
+            inputs.__reuseExisting = true;
+          } else {
+            inputs.__autoSuffix = true;
+          }
+          await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs);
+          closePage();
+        } catch (retryErr) {
+          setError(retryErr instanceof Error ? retryErr.message : 'Failed to create project');
+        }
+      } else {
+        setError(msg);
+      }
     } finally {
       setCreating(false);
     }

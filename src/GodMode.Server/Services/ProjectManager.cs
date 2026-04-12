@@ -442,12 +442,41 @@ public class ProjectManager : IProjectManager
 
         // Create project folder — either server-managed or script-managed
         var projectId = ProjectFiles.ProjectManager.ConvertNameToPath(name);
+        var reuseExisting = request.Inputs.TryGetValue("__reuseExisting", out var reuse) &&
+                            reuse.ValueKind == System.Text.Json.JsonValueKind.True;
+        var autoSuffix = request.Inputs.TryGetValue("__autoSuffix", out var suffix) &&
+                         suffix.ValueKind == System.Text.Json.JsonValueKind.True;
         string projectPath;
 
         if (action.ScriptsCreateFolder)
         {
             // Scripts will create the project directory (e.g. git worktree add)
             projectPath = Path.Combine(rootPath, projectId);
+        }
+        else if (reuseExisting)
+        {
+            // Reuse existing folder — reinitialize .godmode state
+            var projectFolder = ProjectFiles.ProjectFolder.Reuse(rootPath, projectId, name);
+            projectPath = projectFolder.ProjectPath;
+            projectId = Path.GetFileName(projectPath);
+        }
+        else if (autoSuffix && Directory.Exists(Path.Combine(rootPath, projectId)))
+        {
+            // Auto-suffix: find next available _N
+            var baseId = projectId;
+            var baseName = name;
+            for (var i = 2; i <= 999; i++)
+            {
+                var candidateId = $"{baseId}_{i}";
+                if (!Directory.Exists(Path.Combine(rootPath, candidateId)))
+                {
+                    projectId = candidateId;
+                    name = $"{baseName} ({i})";
+                    break;
+                }
+            }
+            var suffixedFolder = ProjectFiles.ProjectFolder.Create(rootPath, projectId, name);
+            projectPath = suffixedFolder.ProjectPath;
         }
         else
         {
@@ -1587,7 +1616,17 @@ public class ProjectManager : IProjectManager
     private static string? ResolveProjectName(CreateAction action, Dictionary<string, JsonElement> inputs)
     {
         if (action.NameTemplate != null)
-            return TemplateResolver.Resolve(action.NameTemplate, inputs);
+        {
+            var resolved = TemplateResolver.Resolve(action.NameTemplate, inputs);
+            // If unresolved placeholders remain (e.g. schedule didn't provide all inputs),
+            // fall back to a timestamp-based name
+            if (resolved != null && resolved.Contains('{') && resolved.Contains('}'))
+            {
+                var fallback = TemplateResolver.GetString(inputs, "name");
+                return fallback ?? $"project-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+            }
+            return resolved;
+        }
 
         return TemplateResolver.GetString(inputs, "name");
     }
@@ -1598,7 +1637,13 @@ public class ProjectManager : IProjectManager
     private static string? ResolvePrompt(CreateAction action, Dictionary<string, JsonElement> inputs)
     {
         if (action.PromptTemplate != null)
-            return TemplateResolver.Resolve(action.PromptTemplate, inputs);
+        {
+            var resolved = TemplateResolver.Resolve(action.PromptTemplate, inputs);
+            // If unresolved placeholders remain, return null (no prompt)
+            if (resolved != null && resolved.Contains('{') && resolved.Contains('}'))
+                return TemplateResolver.GetString(inputs, "prompt");
+            return resolved;
+        }
 
         return TemplateResolver.GetString(inputs, "prompt");
     }
