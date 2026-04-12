@@ -84,7 +84,7 @@ if [ -z "$EXISTING" ]; then
       "ANTHROPIC_API_KEY=secretref:anthropic-key" \
     --output none
 
-  # Attach persistent volume for /app/projects
+  # Attach persistent volume for /app/projects (YAML must include full container spec)
   echo "--> Attaching persistent volume"
   cat > /tmp/aca-volume-$USERNAME.yaml << YAMLEOF
 properties:
@@ -99,6 +99,19 @@ properties:
         resources:
           cpu: 1.0
           memory: 2.0Gi
+        env:
+          - name: Urls
+            value: "http://0.0.0.0:31337"
+          - name: ProjectRootsDir
+            value: "/app/projects"
+          - name: Authentication__Google__ClientId
+            value: "$GOOGLE_CLIENT_ID"
+          - name: Authentication__Google__AllowedEmail
+            value: "$EMAIL"
+          - name: Authentication__Google__ClientSecret
+            secretRef: google-client-secret
+          - name: ANTHROPIC_API_KEY
+            secretRef: anthropic-key
         volumeMounts:
           - volumeName: workspace
             mountPath: /app/projects
