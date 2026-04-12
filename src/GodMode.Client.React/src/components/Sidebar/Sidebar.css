@@ -687,3 +687,125 @@
   border-radius: 8px 8px 0 0;
   margin-bottom: 0;
 }
+
+/* ── Archived Section ── */
+.archived-section {
+  border-top: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+
+.archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.archived-toggle:hover { color: var(--text-secondary); }
+
+.archived-count {
+  font-size: 10px;
+  padding: 1px 5px;
+  background: var(--hover);
+  border-radius: 8px;
+  font-weight: 500;
+}
+
+.archived-chevron {
+  margin-left: auto;
+  transition: transform 0.15s;
+}
+
+.archived-chevron.expanded { transform: rotate(180deg); }
+
+.archived-content {
+  padding: 0 8px 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.archived-search {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  outline: none;
+  margin-bottom: 6px;
+  box-sizing: border-box;
+}
+
+.archived-search:focus { border-color: var(--accent); }
+
+.archived-empty {
+  padding: 8px 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.archived-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.archived-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+}
+
+.archived-item:hover { background: var(--hover); }
+
+.archived-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.archived-item-name {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.archived-item-root {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.archived-restore-btn {
+  flex-shrink: 0;
+  padding: 4px;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.archived-item:hover .archived-restore-btn { opacity: 1; }
+
+.archived-restore-btn:hover {
+  color: var(--accent);
+  background: var(--hover);
+}

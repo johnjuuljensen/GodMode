@@ -73,6 +73,21 @@ public interface IProjectHub
     Task DeleteProject(string projectId, bool force = false);
 
     /// <summary>
+    /// Archives a project (stops it, moves to archive, keeps data).
+    /// </summary>
+    Task ArchiveProject(string projectId);
+
+    /// <summary>
+    /// Restores an archived project.
+    /// </summary>
+    Task UnarchiveProject(string projectId);
+
+    /// <summary>
+    /// Lists all archived projects.
+    /// </summary>
+    Task<ProjectSummary[]> ListArchivedProjects();
+
+    /// <summary>
     /// Adds an MCP server at the specified level (profile, root, or action).
     /// </summary>
     /// <param name="serverName">MCP server name.</param>
@@ -191,6 +206,18 @@ public interface IProjectHub
     /// </summary>
     Task ClearChatHistory();
 
+    // ── OAuth ──
+
+    /// <summary>
+    /// Gets the OAuth connection status for all providers in a profile.
+    /// </summary>
+    Task<Dictionary<string, OAuthProviderStatus>> GetOAuthStatus(string profileName);
+
+    /// <summary>
+    /// Disconnects (deletes tokens for) an OAuth provider in a profile.
+    /// </summary>
+    Task DisconnectOAuthProvider(string profileName, string provider);
+
     // ── Webhooks ──
 
     /// <summary>
@@ -223,4 +250,39 @@ public interface IProjectHub
     /// Regenerates the webhook token. Returns the new full token (shown once).
     /// </summary>
     Task<string> RegenerateWebhookToken(string keyword);
+
+    // ── Utility ──
+
+    /// <summary>
+    /// Checks whether a CLI command is available on the server (in PATH).
+    /// Returns the resolved path if found, null if not.
+    /// </summary>
+    Task<string?> CheckCommand(string command);
+
+    // ── Schedules ──
+
+    /// <summary>
+    /// Lists all schedules for a profile.
+    /// </summary>
+    Task<ScheduleInfo[]> GetSchedules(string profileName);
+
+    /// <summary>
+    /// Creates a new schedule in a profile.
+    /// </summary>
+    Task<ScheduleInfo> CreateSchedule(string profileName, string name, ScheduleConfig config);
+
+    /// <summary>
+    /// Updates an existing schedule.
+    /// </summary>
+    Task<ScheduleInfo> UpdateSchedule(string profileName, string name, ScheduleConfig config);
+
+    /// <summary>
+    /// Deletes a schedule.
+    /// </summary>
+    Task DeleteSchedule(string profileName, string name);
+
+    /// <summary>
+    /// Toggles a schedule's enabled state.
+    /// </summary>
+    Task<ScheduleInfo> ToggleSchedule(string profileName, string name, bool enabled);
 }

@@ -26,17 +26,41 @@ export interface CatalogHeaderTemplate {
   docsUrl?: string;
 }
 
+/** Prerequisite step that must be completed before adding a connector. */
+export interface CatalogSetupStep {
+  /** Unique key for this step */
+  key: string;
+  /** Human label for the step */
+  label: string;
+  /** Explanation shown below the label */
+  description: string;
+  /** CLI command to check availability (e.g. "gws") — server runs `which <command>` */
+  checkCommand?: string;
+  /** Install instruction shown when checkCommand fails */
+  installHint?: string;
+  /** URL to installation docs */
+  installUrl?: string;
+  /** Setup command the user must run (e.g. "gws auth setup") — shown as copyable instruction */
+  setupCommand?: string;
+  /** URL to setup/auth docs */
+  setupUrl?: string;
+}
+
 export interface CatalogConnector {
   id: string;
   name: string;
   description: string;
   category: string;
+  /** App manifest (YAML/JSON) that can be copied to clipboard for quick setup */
+  manifest?: string;
   stability: 'stable' | 'beta';
   maintainer: string;
   source: string;
   docsUrl: string;
   logoUrl: string;
-  transport: 'stdio' | 'sse';
+  transport: 'stdio' | 'sse' | 'http';
+  /** Prerequisite steps shown during setup — user must complete these before the connector is added */
+  setupSteps?: CatalogSetupStep[];
   config: {
     command?: string;
     args?: string[];
@@ -78,85 +102,68 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
   },
   {
     id: 'jira',
-    name: 'Jira',
-    description: 'Search and manage Jira issues, sprints, and projects. Also includes Confluence page access.',
+    name: 'Jira & Confluence',
+    description: 'Search and manage Jira issues, sprints, projects, and Confluence pages via Atlassian Rovo MCP.',
     category: 'admin',
     stability: 'stable',
     maintainer: 'Atlassian',
     source: 'https://mcp.atlassian.com',
-    docsUrl: 'https://www.atlassian.com/platform/mcp',
+    docsUrl: 'https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/',
     logoUrl: 'https://cdn.simpleicons.org/jira',
-    transport: 'sse',
+    transport: 'http',
     config: {
-      url: 'https://mcp.atlassian.com/v1/sse',
-      auth: 'oauth',
-      headerTemplates: {
-        Authorization: {
-          label: 'Atlassian API Token',
-          description: 'Create an API token at id.atlassian.com/manage-profile/security/api-tokens',
-          secret: true,
-          required: true,
-          valueTemplate: 'Bearer {value}',
-          docsUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
-        },
-      },
-      note: 'Uses Atlassian API token for authentication.',
+      url: 'https://mcp.atlassian.com/v1/mcp',
+      note: 'Atlassian-hosted MCP server. OAuth sign-in happens when you click Connect.',
     },
   },
   {
     id: 'grafana',
     name: 'Grafana',
-    description: 'Query dashboards, alerts, Loki logs, and Prometheus metrics from your Azure-hosted Grafana instance.',
+    description: 'Query dashboards, alerts, Loki logs, and Prometheus metrics from your Grafana instance.',
     category: 'tech',
     stability: 'stable',
-    maintainer: 'Community',
-    source: 'https://github.com/0xteamhq/mcp-grafana',
-    docsUrl: 'https://www.npmjs.com/package/@leval/mcp-grafana',
+    maintainer: 'GodMode',
+    source: 'https://github.com/MortenKre/Godmode-Google-MCP',
+    docsUrl: 'https://grafana.com/docs/grafana/latest/administration/service-accounts/',
     logoUrl: 'https://cdn.simpleicons.org/grafana',
-    transport: 'stdio',
+    transport: 'sse',
     config: {
-      command: 'npx',
-      args: ['-y', '@leval/mcp-grafana'],
-      env: {
-        GRAFANA_URL: {
+      url: 'https://mcp.ingodmode.xyz/grafana',
+      headerTemplates: {
+        'X-Grafana-Url': {
           label: 'Grafana URL',
-          description: 'Full URL of your Grafana instance, e.g. https://myworkspace.grafana.azure.com',
+          description: 'Full URL of your Grafana instance, e.g. https://myworkspace.grafana.net',
           secret: false,
           required: true,
+          valueTemplate: '{value}',
         },
-        GRAFANA_SERVICE_ACCOUNT_TOKEN: {
+        'X-Grafana-Token': {
           label: 'Service Account Token',
           description: 'Grafana service account token (glsa_...). Create under Administration > Service Accounts.',
           secret: true,
           required: true,
+          valueTemplate: '{value}',
           docsUrl: 'https://grafana.com/docs/grafana/latest/administration/service-accounts/',
         },
       },
+      note: 'Hosted MCP server. No local install needed. Enter your Grafana URL and service account token.',
     },
   },
   {
     id: 'azure',
     name: 'Azure',
-    description: 'Interact with Azure resources: storage, databases, resource groups, subscriptions, and more via Azure CLI.',
+    description: 'Manage Azure resources, AKS, PostgreSQL, Storage, Key Vault, Service Bus, DNS, users, and billing.',
     category: 'tech',
     stability: 'stable',
-    maintainer: 'Microsoft',
-    source: 'https://github.com/Azure/azure-mcp',
-    docsUrl: 'https://github.com/Azure/azure-mcp#readme',
-    logoUrl: 'https://cdn.simpleicons.org/microsoftazure',
-    transport: 'stdio',
+    maintainer: 'GodMode',
+    source: 'https://github.com/MortenKre/Godmode-Google-MCP',
+    docsUrl: 'https://github.com/MortenKre/Godmode-Google-MCP#readme',
+    logoUrl: 'https://cdn.simpleicons.org/microsoftazure/0078D4',
+    transport: 'sse',
     config: {
-      command: 'npx',
-      args: ['-y', '@azure/mcp@latest'],
-      env: {
-        AZURE_SUBSCRIPTION_ID: {
-          label: 'Subscription ID',
-          description: 'Your Azure subscription ID. Scope defaults to this subscription.',
-          secret: false,
-          required: false,
-        },
-      },
-      note: 'Requires Azure CLI installed and authenticated on the host (az login).',
+      url: 'https://mcp.ingodmode.xyz/azure',
+      auth: 'oauth',
+      note: 'Hosted MCP server. Sign in with your Microsoft account to access Azure resources.',
     },
   },
   {
@@ -168,108 +175,44 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     maintainer: 'Vanta',
     source: 'https://github.com/VantaInc/vanta-mcp-server',
     docsUrl: 'https://github.com/VantaInc/vanta-mcp-server#readme',
-    logoUrl: 'https://www.vanta.com/favicon.ico',
+    logoUrl: 'https://cdn.simpleicons.org/vanta',
     transport: 'stdio',
     config: {
       command: 'npx',
       args: ['-y', '@vantasdk/vanta-mcp-server'],
       env: {
         VANTA_CLIENT_ID: {
-          label: 'OAuth Client ID',
-          description: 'Vanta OAuth client ID from your Vanta API settings',
+          label: 'Client ID',
+          description: 'Vanta API OAuth client ID',
           secret: false,
           required: true,
-          docsUrl: 'https://app.vanta.com/oauth/clients',
+          docsUrl: 'https://app.vanta.com/c/mega/settings/developer-console',
         },
         VANTA_CLIENT_SECRET: {
-          label: 'OAuth Client Secret',
-          description: 'Vanta OAuth client secret',
+          label: 'Client Secret',
+          description: 'Vanta API OAuth client secret',
           secret: true,
           required: true,
-          docsUrl: 'https://app.vanta.com/oauth/clients',
+          docsUrl: 'https://app.vanta.com/c/mega/settings/developer-console',
         },
       },
+      note: 'Credentials are from the Vanta developer console.',
     },
   },
   {
-    id: 'gmail',
-    name: 'Gmail',
-    description: 'Read, search, and draft emails in Gmail. Supports label management and thread access.',
+    id: 'google-workspace',
+    name: 'Google Workspace',
+    description: 'Gmail, Google Calendar, Google Drive, and Google Meet. Read, send, search emails, manage events, browse files, and access meeting transcripts.',
     category: 'admin',
     stability: 'stable',
-    maintainer: 'Anthropic',
-    source: 'https://claude.ai/connectors',
-    docsUrl: 'https://support.claude.ai/hc/en-us/articles/connectors',
-    logoUrl: 'https://cdn.simpleicons.org/gmail',
-    transport: 'sse',
+    maintainer: 'GodMode',
+    source: 'https://github.com/MortenKre/Godmode-Google-MCP',
+    docsUrl: 'https://github.com/MortenKre/Godmode-Google-MCP#readme',
+    logoUrl: 'https://cdn.simpleicons.org/google',
+    transport: 'http',
     config: {
-      url: 'https://gmail.mcp.claude.ai/mcp',
-      auth: 'oauth',
-      headerTemplates: {
-        Authorization: {
-          label: 'Google OAuth Token',
-          description: 'OAuth access token for Gmail. Generate via Google Cloud Console OAuth playground.',
-          secret: true,
-          required: true,
-          valueTemplate: 'Bearer {value}',
-          docsUrl: 'https://developers.google.com/oauthplayground/',
-        },
-      },
-      note: 'Anthropic-hosted connector. Requires a Google OAuth access token.',
-    },
-  },
-  {
-    id: 'google-calendar',
-    name: 'Google Calendar',
-    description: 'Read and create calendar events, check availability, and manage schedules across Google Calendar.',
-    category: 'admin',
-    stability: 'stable',
-    maintainer: 'Anthropic',
-    source: 'https://claude.ai/connectors',
-    docsUrl: 'https://support.claude.ai/hc/en-us/articles/connectors',
-    logoUrl: 'https://cdn.simpleicons.org/googlecalendar',
-    transport: 'sse',
-    config: {
-      url: 'https://gcal.mcp.claude.ai/mcp',
-      auth: 'oauth',
-      headerTemplates: {
-        Authorization: {
-          label: 'Google OAuth Token',
-          description: 'OAuth access token for Google Calendar. Generate via Google Cloud Console OAuth playground.',
-          secret: true,
-          required: true,
-          valueTemplate: 'Bearer {value}',
-          docsUrl: 'https://developers.google.com/oauthplayground/',
-        },
-      },
-      note: 'Anthropic-hosted connector. Requires a Google OAuth access token.',
-    },
-  },
-  {
-    id: 'google-drive',
-    name: 'Google Drive',
-    description: 'Browse, search, and read files in Google Drive including Docs, Sheets, and PDFs.',
-    category: 'admin',
-    stability: 'stable',
-    maintainer: 'Anthropic',
-    source: 'https://claude.ai/connectors',
-    docsUrl: 'https://support.claude.ai/hc/en-us/articles/connectors',
-    logoUrl: 'https://cdn.simpleicons.org/googledrive',
-    transport: 'sse',
-    config: {
-      url: 'https://drive.mcp.claude.ai/mcp',
-      auth: 'oauth',
-      headerTemplates: {
-        Authorization: {
-          label: 'Google OAuth Token',
-          description: 'OAuth access token for Google Drive. Generate via Google Cloud Console OAuth playground.',
-          secret: true,
-          required: true,
-          valueTemplate: 'Bearer {value}',
-          docsUrl: 'https://developers.google.com/oauthplayground/',
-        },
-      },
-      note: 'Anthropic-hosted connector. Requires a Google OAuth access token.',
+      url: 'https://mcp.ingodmode.xyz/mcp',
+      note: 'Hosted MCP server. Google OAuth sign-in happens automatically when Claude Code connects.',
     },
   },
   {
@@ -298,32 +241,6 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     },
   },
   {
-    id: 'powerpoint',
-    name: 'PowerPoint',
-    description: 'Create and edit PowerPoint presentations. Manage slides, text, and layouts using natural language.',
-    category: 'admin',
-    stability: 'beta',
-    maintainer: 'Anthropic',
-    source: 'https://claude.ai/connectors',
-    docsUrl: 'https://support.claude.ai/hc/en-us/articles/connectors',
-    logoUrl: 'https://cdn.simpleicons.org/microsoftpowerpoint',
-    transport: 'sse',
-    config: {
-      url: 'https://powerpoint.mcp.claude.ai/mcp',
-      auth: 'oauth',
-      headerTemplates: {
-        Authorization: {
-          label: 'Microsoft OAuth Token',
-          description: 'OAuth access token for Microsoft services.',
-          secret: true,
-          required: true,
-          valueTemplate: 'Bearer {value}',
-        },
-      },
-      note: 'Anthropic-hosted beta connector. Requires a Microsoft OAuth access token.',
-    },
-  },
-  {
     id: 'fireflies',
     name: 'Fireflies',
     description: 'Search and retrieve meeting transcripts, generate summaries, and query recordings from Fireflies.ai.',
@@ -340,10 +257,10 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
       env: {
         FIREFLIES_API_KEY: {
           label: 'API Key',
-          description: 'Fireflies.ai API key from your dashboard settings',
+          description: 'Fireflies.ai API key from Developer Settings.',
           secret: true,
           required: true,
-          docsUrl: 'https://fireflies.ai/dashboard/settings/api',
+          docsUrl: 'https://app.fireflies.ai/settings/developer-settings',
         },
       },
     },
@@ -352,31 +269,64 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     id: 'slack',
     name: 'Slack',
     description: 'Read messages, post to channels, list users, and search across your Slack workspace.',
+    manifest: `_metadata:
+  major_version: 1
+  minor_version: 1
+display_information:
+  name: GodMode
+  description: GodMode MCP bridge for Slack
+  background_color: "#4A154B"
+features:
+  bot_user:
+    display_name: GodMode
+    always_online: true
+oauth_config:
+  scopes:
+    bot:
+      - channels:read
+      - channels:history
+      - chat:write
+      - groups:read
+      - groups:history
+      - im:read
+      - im:history
+      - mpim:read
+      - mpim:history
+      - reactions:read
+      - reactions:write
+      - users:read
+      - users.profile:read
+      - team:read
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false`,
     category: 'admin',
     stability: 'stable',
     maintainer: 'Anthropic / Model Context Protocol',
     source: 'https://github.com/modelcontextprotocol/servers/tree/main/src/slack',
     docsUrl: 'https://github.com/modelcontextprotocol/servers/tree/main/src/slack#readme',
-    logoUrl: 'https://cdn.simpleicons.org/slack',
+    logoUrl: 'https://cdn.simpleicons.org/slack/4A154B',
     transport: 'stdio',
     config: {
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-slack'],
       env: {
         SLACK_BOT_TOKEN: {
-          label: 'Bot Token',
-          description: 'Slack bot OAuth token (xoxb-...). Create a Slack app and install it to your workspace.',
+          label: 'Bot OAuth Token (xoxb-...)',
+          description: 'Go to api.slack.com/apps → your app → OAuth & Permissions → Install to Workspace → copy "Bot User OAuth Token" (starts with xoxb-). Required scopes: channels:read, channels:history, users:read, chat:write.',
           secret: true,
           required: true,
           docsUrl: 'https://api.slack.com/apps',
         },
         SLACK_TEAM_ID: {
-          label: 'Team / Workspace ID',
-          description: 'Your Slack workspace ID (e.g. T01234ABCD). Found in your workspace URL or admin settings.',
+          label: 'Workspace ID (T...)',
+          description: 'Open Slack in browser → the URL contains your workspace ID (e.g. app.slack.com/client/T01234ABCD). Or: Slack app → Settings → About → Workspace ID.',
           secret: false,
           required: true,
         },
       },
+      note: 'Setup: 1) Create a Slack app at api.slack.com/apps. 2) Add Bot Token Scopes under OAuth & Permissions (channels:read, channels:history, users:read, chat:write). 3) Install to your workspace. 4) Copy the Bot Token and Workspace ID.',
     },
   },
 ];
@@ -394,4 +344,9 @@ export function findCatalogEntry(serverName: string): CatalogConnector | undefin
 export const CATEGORY_LABELS: Record<string, string> = {
   tech: 'Tech',
   admin: 'Admin',
+};
+
+/** Maps connector IDs to OAuth provider names (mirrors OAuthProviderMapping on server) */
+export const CONNECTOR_TO_OAUTH_PROVIDER: Record<string, string> = {
+  azure: 'microsoft',
 };

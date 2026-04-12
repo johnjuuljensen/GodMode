@@ -129,8 +129,27 @@ export function ProjectView({ serverId, projectId }: Props) {
     try { await hub.resumeProject(projectId); } catch (err) { console.error(err); }
   };
 
+  const [showProjectMenu, setShowProjectMenu] = useState(false);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showProjectMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target as Node)) setShowProjectMenu(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showProjectMenu]);
+
+  const handleArchive = async () => {
+    if (!hub) return;
+    setShowProjectMenu(false);
+    try { await hub.archiveProject(projectId); } catch (err) { console.error(err); }
+  };
+
   const handleDelete = async () => {
-    if (!hub || !confirm(`Delete project "${projectName}"?`)) return;
+    if (!hub || !confirm(`Permanently delete project "${projectName}"? This cannot be undone.`)) return;
+    setShowProjectMenu(false);
     try { await hub.deleteProject(projectId, state === 'Running'); } catch (err) { console.error(err); }
   };
 
@@ -185,11 +204,29 @@ export function ProjectView({ serverId, projectId }: Props) {
             {canStop && <span className="project-status-action">Stop</span>}
             {canResume && <span className="project-status-action">Resume</span>}
           </button>
-          <button className="delete-btn" onClick={handleDelete} title="Delete project">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            </svg>
-          </button>
+          <div className="project-menu-container" ref={projectMenuRef}>
+            <button className="delete-btn" onClick={() => setShowProjectMenu(!showProjectMenu)} title="Archive or delete">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+            </button>
+            {showProjectMenu && (
+              <div className="project-menu-dropdown">
+                <button className="project-menu-item" onClick={handleArchive}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" />
+                  </svg>
+                  Archive
+                </button>
+                <button className="project-menu-item project-menu-item-danger" onClick={handleDelete}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                  Delete permanently
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

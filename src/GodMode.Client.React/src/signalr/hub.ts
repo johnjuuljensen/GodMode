@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, ChatResponseMessage, WebhookInfo } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, ChatResponseMessage, WebhookInfo, OAuthProviderStatus, ScheduleInfo, ScheduleConfig } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -18,10 +18,13 @@ export interface HubCallbacks {
   onProjectCreated?: (status: ProjectStatus) => void;
   onCreationProgress?: (projectId: string, message: string) => void;
   onProjectDeleted?: (projectId: string) => void;
+  onProjectArchived?: (projectId: string) => void;
+  onProjectRestored?: (project: ProjectSummary) => void;
   onChatResponse?: (message: ChatResponseMessage) => void;
   onRootsChanged?: () => void;
   onProfilesChanged?: () => void;
   onWebhooksChanged?: () => void;
+  onOAuthStatusChanged?: (profileName: string) => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -81,6 +84,14 @@ export class GodModeHub {
       this.callbacks.onProjectDeleted?.(projectId);
     });
 
+    this.connection.on('ProjectArchived', (projectId: string) => {
+      this.callbacks.onProjectArchived?.(projectId);
+    });
+
+    this.connection.on('ProjectRestored', (project: ProjectSummary) => {
+      this.callbacks.onProjectRestored?.(project);
+    });
+
     this.connection.on('ChatResponse', (message: ChatResponseMessage) => {
       this.callbacks.onChatResponse?.(message);
     });
@@ -95,6 +106,10 @@ export class GodModeHub {
 
     this.connection.on('WebhooksChanged', () => {
       this.callbacks.onWebhooksChanged?.();
+    });
+
+    this.connection.on('OAuthStatusChanged', (profileName: string) => {
+      this.callbacks.onOAuthStatusChanged?.(profileName);
     });
 
     this.connection.onreconnecting(() => this.setState('reconnecting'));
@@ -167,6 +182,18 @@ export class GodModeHub {
 
   async deleteProject(projectId: string, force: boolean = false): Promise<void> {
     await this.connection!.invoke('DeleteProject', projectId, force);
+  }
+
+  async archiveProject(projectId: string): Promise<void> {
+    await this.connection!.invoke('ArchiveProject', projectId);
+  }
+
+  async unarchiveProject(projectId: string): Promise<void> {
+    await this.connection!.invoke('UnarchiveProject', projectId);
+  }
+
+  async listArchivedProjects(): Promise<ProjectSummary[]> {
+    return await this.connection!.invoke('ListArchivedProjects');
   }
 
   // --- MCP Server Management ---
@@ -278,6 +305,16 @@ export class GodModeHub {
     await this.connection!.invoke('ClearChatHistory');
   }
 
+  // --- OAuth ---
+
+  async getOAuthStatus(profileName: string): Promise<Record<string, OAuthProviderStatus>> {
+    return await this.connection!.invoke('GetOAuthStatus', profileName);
+  }
+
+  async disconnectOAuthProvider(profileName: string, provider: string): Promise<void> {
+    await this.connection!.invoke('DisconnectOAuthProvider', profileName, provider);
+  }
+
   // --- Webhooks ---
 
   async listWebhooks(): Promise<WebhookInfo[]> {
@@ -313,5 +350,33 @@ export class GodModeHub {
 
   async regenerateWebhookToken(keyword: string): Promise<string> {
     return await this.connection!.invoke('RegenerateWebhookToken', keyword);
+  }
+
+  // ── Schedules ──
+
+  async getSchedules(profileName: string): Promise<ScheduleInfo[]> {
+    return await this.connection!.invoke('GetSchedules', profileName);
+  }
+
+  async createSchedule(profileName: string, name: string, config: ScheduleConfig): Promise<ScheduleInfo> {
+    return await this.connection!.invoke('CreateSchedule', profileName, name, config);
+  }
+
+  async updateSchedule(profileName: string, name: string, config: ScheduleConfig): Promise<ScheduleInfo> {
+    return await this.connection!.invoke('UpdateSchedule', profileName, name, config);
+  }
+
+  async deleteSchedule(profileName: string, name: string): Promise<void> {
+    await this.connection!.invoke('DeleteSchedule', profileName, name);
+  }
+
+  async toggleSchedule(profileName: string, name: string, enabled: boolean): Promise<ScheduleInfo> {
+    return await this.connection!.invoke('ToggleSchedule', profileName, name, enabled);
+  }
+
+  // ── Utility ──
+
+  async checkCommand(command: string): Promise<string | null> {
+    return await this.connection!.invoke('CheckCommand', command);
   }
 }

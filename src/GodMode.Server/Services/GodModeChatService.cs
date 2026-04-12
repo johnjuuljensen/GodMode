@@ -21,6 +21,7 @@ public sealed class GodModeChatService
     private readonly IProjectManager _projectManager;
     private readonly ProfileFileManager _profileFileManager;
     private readonly WebhookFileManager _webhookFileManager;
+    private readonly ScheduleManager _scheduleManager;
     private readonly RootGenerationService _rootGenService;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ILogger<GodModeChatService> _logger;
@@ -59,6 +60,11 @@ public sealed class GodModeChatService
         Endpoint: POST /webhook/{keyword} with Authorization: Bearer {token}.
         The payload is mapped to project inputs via inputMapping or passed as-is as the prompt.
         Webhooks are stored as files in .webhooks/{keyword}.json and survive Docker rebuilds.
+
+        **Schedules** — Cron-based triggers that create projects on a schedule.
+        Stored per-profile in `.profiles/{name}/schedules/{scheduleName}.json`.
+        Each schedule has a cron expression (min hour dom month dow) and a target (rootName, actionName).
+        Schedules support `{date}`, `{time}`, `{datetime}` placeholders in input values.
 
         ## Your role
 
@@ -113,6 +119,7 @@ public sealed class GodModeChatService
         IProjectManager projectManager,
         ProfileFileManager profileFileManager,
         WebhookFileManager webhookFileManager,
+        ScheduleManager scheduleManager,
         RootGenerationService rootGenService,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
         ILogger<GodModeChatService> logger)
@@ -121,6 +128,7 @@ public sealed class GodModeChatService
         _projectManager = projectManager;
         _profileFileManager = profileFileManager;
         _webhookFileManager = webhookFileManager;
+        _scheduleManager = scheduleManager;
         _rootGenService = rootGenService;
         _hubContext = hubContext;
         _logger = logger;
@@ -241,6 +249,12 @@ public sealed class GodModeChatService
             var roots = await _projectManager.ListProjectRootsAsync();
             var projects = await _projectManager.ListProjectsAsync();
             var webhooks = await _projectManager.ListWebhooksAsync();
+            var allSchedules = new List<ScheduleInfo>();
+            foreach (var p in profiles)
+            {
+                try { allSchedules.AddRange(_scheduleManager.GetSchedules(p.Name)); }
+                catch { /* skip */ }
+            }
 
             return $"""
                 ## Current GodMode State
@@ -255,6 +269,9 @@ public sealed class GodModeChatService
 
                 **Webhooks** ({webhooks.Length}):
                 {(webhooks.Length > 0 ? string.Join("\n", webhooks.Select(w => $"- {w.Keyword} → {w.ProfileName}/{w.RootName}{(w.ActionName != null ? $"/{w.ActionName}" : "")} {(w.Enabled ? "" : "[DISABLED]")} {(w.Description != null ? $"— {w.Description}" : "")}")) : "None configured")}
+
+                **Schedules** ({allSchedules.Count}):
+                {(allSchedules.Count > 0 ? string.Join("\n", allSchedules.Select(s => $"- {s.Name} [{s.ProfileName}] {(s.Enabled ? "" : "[DISABLED]")} cron: {s.Cron}{(s.NextRunDisplay != null ? $" (next: {s.NextRunDisplay})" : "")}")) : "None configured")}
                 """;
         }
         catch (Exception ex)
@@ -435,6 +452,41 @@ public sealed class GodModeChatService
                 await _hubContext.Clients.All.WebhooksChanged();
                 return $"Regenerated token for webhook '{keyword}'. New token (save this): {newToken}";
             }, "regenerate_webhook_token", "Regenerate the bearer token for a webhook. Returns the new token (shown once)."),
+
+            // ── Schedules ──
+            AIFunctionFactory.Create((string profileName) =>
+            {
+                var schedules = _scheduleManager.GetSchedules(profileName);
+                return JsonSerializer.Serialize(schedules);
+            }, "list_schedules", "List all schedules for a profile."),
+
+            AIFunctionFactory.Create((string profileName, string name, string configJson) =>
+            {
+                var config = JsonSerializer.Deserialize<ScheduleConfig>(configJson)
+                    ?? throw new ArgumentException("Invalid configJson");
+                var info = _scheduleManager.CreateSchedule(profileName, name, config);
+                return $"Created schedule '{name}' in profile '{profileName}'. Next run: {info.NextRunDisplay ?? "unknown"}.";
+            }, "create_schedule", "Create a schedule. configJson is a JSON object with: Cron (string), Enabled (bool), Description (string?), Target: { RootName, ActionName? }."),
+
+            AIFunctionFactory.Create((string profileName, string name, string configJson) =>
+            {
+                var config = JsonSerializer.Deserialize<ScheduleConfig>(configJson)
+                    ?? throw new ArgumentException("Invalid configJson");
+                var info = _scheduleManager.UpdateSchedule(profileName, name, config);
+                return $"Updated schedule '{name}'. Next run: {info.NextRunDisplay ?? "unknown"}.";
+            }, "update_schedule", "Update a schedule's configuration."),
+
+            AIFunctionFactory.Create((string profileName, string name) =>
+            {
+                _scheduleManager.DeleteSchedule(profileName, name);
+                return $"Deleted schedule '{name}' from profile '{profileName}'.";
+            }, "delete_schedule", "Delete a schedule."),
+
+            AIFunctionFactory.Create((string profileName, string name, bool enabled) =>
+            {
+                var info = _scheduleManager.ToggleSchedule(profileName, name, enabled);
+                return $"Schedule '{name}' is now {(enabled ? "enabled" : "disabled")}. Next run: {info.NextRunDisplay ?? "N/A"}.";
+            }, "toggle_schedule", "Enable or disable a schedule."),
         ];
     }
 }

@@ -1,0 +1,21 @@
+{
+  "name": "@godmode/mcp-bridge",
+  "version": "1.0.0",
+  "description": "GodMode MCP Bridge — lets Claude interact with GodMode (submit results, update status, request reviews)",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "godmode-mcp-bridge": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}

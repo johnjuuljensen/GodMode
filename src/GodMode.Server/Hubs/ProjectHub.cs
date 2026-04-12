@@ -15,12 +15,15 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     private readonly IConvergenceEngine _convergenceEngine;
     private readonly IManifestParser _manifestParser;
     private readonly IManifestExporter _manifestExporter;
+    private readonly OAuthTokenStore _oauthTokenStore;
+    private readonly ScheduleManager _scheduleManager;
     private readonly RootGenerationService? _rootGenerationService;
     private readonly GodModeChatService? _chatService;
     private readonly ILogger<ProjectHub> _logger;
 
     public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
-        IManifestParser manifestParser, IManifestExporter manifestExporter, ILogger<ProjectHub> logger,
+        IManifestParser manifestParser, IManifestExporter manifestExporter,
+        OAuthTokenStore oauthTokenStore, ScheduleManager scheduleManager, ILogger<ProjectHub> logger,
         RootGenerationService? rootGenerationService = null,
         GodModeChatService? chatService = null)
     {
@@ -28,6 +31,8 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _convergenceEngine = convergenceEngine;
         _manifestParser = manifestParser;
         _manifestExporter = manifestExporter;
+        _oauthTokenStore = oauthTokenStore;
+        _scheduleManager = scheduleManager;
         _rootGenerationService = rootGenerationService;
         _chatService = chatService;
         _logger = logger;
@@ -141,6 +146,43 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         }
 
         await Clients.All.ProjectDeleted(projectId);
+    }
+
+    public async Task ArchiveProject(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} archiving project {ProjectId}",
+            Context.ConnectionId, projectId);
+        try
+        {
+            await _projectManager.ArchiveProjectAsync(projectId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to archive project {ProjectId}", projectId);
+            throw new HubException(ex.Message);
+        }
+        await Clients.All.ProjectArchived(projectId);
+    }
+
+    public async Task UnarchiveProject(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} unarchiving project {ProjectId}",
+            Context.ConnectionId, projectId);
+        try
+        {
+            var summary = await _projectManager.UnarchiveProjectAsync(projectId);
+            await Clients.All.ProjectRestored(summary);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to unarchive project {ProjectId}", projectId);
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task<ProjectSummary[]> ListArchivedProjects()
+    {
+        return await _projectManager.ListArchivedProjectsAsync();
     }
 
     public async Task AddMcpServer(string serverName, McpServerConfig config, string targetLevel,
@@ -316,6 +358,23 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return Task.CompletedTask;
     }
 
+    // ── OAuth ──
+
+    public Task<Dictionary<string, OAuthProviderStatus>> GetOAuthStatus(string profileName)
+    {
+        _logger.LogInformation("Client {ConnectionId} requested OAuth status for profile '{Profile}'",
+            Context.ConnectionId, profileName);
+        return Task.FromResult(_oauthTokenStore.GetProviderStatuses(profileName));
+    }
+
+    public async Task DisconnectOAuthProvider(string profileName, string provider)
+    {
+        _logger.LogInformation("Client {ConnectionId} disconnecting OAuth provider '{Provider}' from profile '{Profile}'",
+            Context.ConnectionId, provider, profileName);
+        _oauthTokenStore.DeleteTokens(profileName, provider);
+        await Clients.All.OAuthStatusChanged(profileName);
+    }
+
     // ── Webhooks ──
 
     public async Task<WebhookInfo[]> ListWebhooks()
@@ -359,6 +418,67 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         var token = await _projectManager.RegenerateWebhookTokenAsync(keyword);
         await Clients.All.WebhooksChanged();
         return token;
+    }
+
+    // ── Schedules ──
+
+    public Task<ScheduleInfo[]> GetSchedules(string profileName)
+    {
+        _logger.LogInformation("Client {ConnectionId} listing schedules for {Profile}", Context.ConnectionId, profileName);
+        return Task.FromResult(_scheduleManager.GetSchedules(profileName).ToArray());
+    }
+
+    public Task<ScheduleInfo> CreateSchedule(string profileName, string name, ScheduleConfig config)
+    {
+        _logger.LogInformation("Client {ConnectionId} creating schedule {Profile}/{Name}", Context.ConnectionId, profileName, name);
+        return Task.FromResult(_scheduleManager.CreateSchedule(profileName, name, config));
+    }
+
+    public Task<ScheduleInfo> UpdateSchedule(string profileName, string name, ScheduleConfig config)
+    {
+        _logger.LogInformation("Client {ConnectionId} updating schedule {Profile}/{Name}", Context.ConnectionId, profileName, name);
+        return Task.FromResult(_scheduleManager.UpdateSchedule(profileName, name, config));
+    }
+
+    public Task DeleteSchedule(string profileName, string name)
+    {
+        _logger.LogInformation("Client {ConnectionId} deleting schedule {Profile}/{Name}", Context.ConnectionId, profileName, name);
+        _scheduleManager.DeleteSchedule(profileName, name);
+        return Task.CompletedTask;
+    }
+
+    public Task<ScheduleInfo> ToggleSchedule(string profileName, string name, bool enabled)
+    {
+        _logger.LogInformation("Client {ConnectionId} toggling schedule {Profile}/{Name} → {Enabled}", Context.ConnectionId, profileName, name, enabled);
+        return Task.FromResult(_scheduleManager.ToggleSchedule(profileName, name, enabled));
+    }
+
+    public async Task<string?> CheckCommand(string command)
+    {
+        // Only allow checking simple command names (no paths, no args)
+        if (string.IsNullOrWhiteSpace(command) || command.Contains('/') || command.Contains('\\') || command.Contains(' '))
+            return null;
+
+        try
+        {
+            var which = OperatingSystem.IsWindows() ? "where" : "which";
+            var psi = new System.Diagnostics.ProcessStartInfo(which, command)
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return null;
+            var output = await proc.StandardOutput.ReadToEndAsync();
+            await proc.WaitForExitAsync();
+            return proc.ExitCode == 0 ? output.Trim().Split('\n')[0].Trim() : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

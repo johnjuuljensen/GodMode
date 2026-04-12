@@ -89,6 +89,7 @@ export function GodModeChat() {
               <button onClick={() => setInput('List all my profiles and roots')}>List profiles & roots</button>
               <button onClick={() => setInput('Create a new profile called "experiments"')}>Create a profile</button>
               <button onClick={() => setInput('Generate a root for a React + TypeScript project')}>Generate a root</button>
+              <button onClick={() => setInput('Create a schedule to run daily at 9am')}>Create a schedule</button>
             </div>
           </div>
         )}

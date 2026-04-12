@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy } from '../../store';
+import type { ProjectSummary } from '../../signalr/types';
 import { ProjectItem } from './ProjectItem';
 import { isMaui } from '../../services/hostApi';
 import './Sidebar.css';
@@ -38,6 +39,18 @@ export function SidebarHeader() {
             {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
           </select>
         )}
+        <button className="sidebar-add-btn" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
+          {isTileView ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+            </svg>
+          )}
+        </button>
         {hasRoots && (
           <button className="sidebar-add-btn" onClick={() => setShowCreateProject(true)} title="Create project">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -55,18 +68,6 @@ export function SidebarHeader() {
             </svg>
           </button>
         )}
-        <button className="sidebar-add-btn" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
-          {isTileView ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
-              <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
-            </svg>
-          )}
-        </button>
       </div>
     </div>
   );
@@ -116,7 +117,93 @@ export function Sidebar() {
         )}
       </div>
 
+      <ArchivedSection />
       <SidebarFooter />
+    </div>
+  );
+}
+
+function ArchivedSection() {
+  const serverConnections = useAppStore(s => s.serverConnections);
+  const conn = serverConnections.find(c => c.connectionState === 'connected');
+  const hub = conn?.hub;
+
+  const [expanded, setExpanded] = useState(false);
+  const [archived, setArchived] = useState<ProjectSummary[]>([]);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const loadArchived = useCallback(async () => {
+    if (!hub) return;
+    setLoading(true);
+    try {
+      setArchived(await hub.listArchivedProjects());
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [hub]);
+
+  useEffect(() => {
+    if (expanded) loadArchived();
+  }, [expanded, loadArchived]);
+
+  const handleUnarchive = async (projectId: string) => {
+    if (!hub) return;
+    try {
+      await hub.unarchiveProject(projectId);
+      setArchived(prev => prev.filter(p => p.Id !== projectId));
+    } catch (err) { console.error(err); }
+  };
+
+  const filtered = search.trim()
+    ? archived.filter(p => p.Name.toLowerCase().includes(search.toLowerCase()))
+    : archived;
+
+  return (
+    <div className="archived-section">
+      <button className="archived-toggle" onClick={() => setExpanded(!expanded)}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" />
+        </svg>
+        <span>Archived</span>
+        {archived.length > 0 && <span className="archived-count">{archived.length}</span>}
+        <svg className={`archived-chevron ${expanded ? 'expanded' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {expanded && (
+        <div className="archived-content">
+          <input
+            className="archived-search"
+            type="text"
+            placeholder="Search archived..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            autoFocus
+          />
+          {loading ? (
+            <div className="archived-empty">Loading...</div>
+          ) : filtered.length === 0 ? (
+            <div className="archived-empty">{search ? 'No matches' : 'No archived projects'}</div>
+          ) : (
+            <div className="archived-list">
+              {filtered.map(p => (
+                <div key={p.Id} className="archived-item">
+                  <div className="archived-item-info">
+                    <span className="archived-item-name">{p.Name}</span>
+                    {p.RootName && <span className="archived-item-root">{p.RootName}</span>}
+                  </div>
+                  <button className="archived-restore-btn" onClick={() => handleUnarchive(p.Id)} title="Restore">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="1 4 1 10 7 10" />
+                      <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -127,6 +214,7 @@ export function SidebarFooter() {
   const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
   const setShowAppSettings = useAppStore(s => s.setShowAppSettings);
   const setShowWebhookSettings = useAppStore(s => s.setShowWebhookSettings);
+  const setShowScheduleSettings = useAppStore(s => s.setShowScheduleSettings);
   const featureRoots = useAppStore(s => s.featureRoots);
   const featureMcp = useAppStore(s => s.featureMcp);
   const featureProfiles = useAppStore(s => s.featureProfiles);
@@ -189,6 +277,13 @@ export function SidebarFooter() {
               Connectors
             </button>
           )}
+          <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowScheduleSettings)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            Schedules
+          </button>
           <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowWebhookSettings)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
@@ -218,6 +313,17 @@ export function SidebarFooter() {
               </svg>
             )}
             {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+          </button>
+          <button className="sidebar-footer-menu-item sidebar-logout-btn" onClick={async () => {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.href = '/';
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+            Logout
           </button>
         </div>
       )}
