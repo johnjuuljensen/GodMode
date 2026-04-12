@@ -3,6 +3,13 @@ name: Build and Push Docker Image
 on:
   release:
     types: [published]
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - '*.slnx'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,9 +33,12 @@ jobs:
         id: meta
         run: |
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          TAG=${{ github.event.release.tag_name }}
           echo "repo=${REPO}" >> $GITHUB_OUTPUT
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tags=ghcr.io/${REPO}:latest,ghcr.io/${REPO}:${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tags=ghcr.io/${REPO}:latest" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -36,6 +46,4 @@ jobs:
           context: .
           file: src/GodMode.Server/Dockerfile
           push: true
-          tags: |
-            ghcr.io/${{ steps.meta.outputs.repo }}:latest
-            ghcr.io/${{ steps.meta.outputs.repo }}:${{ steps.meta.outputs.tag }}
+          tags: ${{ steps.meta.outputs.tags }}
