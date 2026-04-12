@@ -1,0 +1,63 @@
+name: Deploy GodMode User (Railway)
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "Username (lowercase, no spaces)"
+        required: true
+        type: string
+      email:
+        description: "User's Google email (AllowedEmail)"
+        required: true
+        type: string
+      anthropic_key:
+        description: "Anthropic API key for this user"
+        required: true
+        type: string
+      image_tag:
+        description: "Docker image tag to deploy"
+        required: false
+        default: "latest"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    name: Provision on Railway
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        env:
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_EMAIL: ${{ inputs.email }}
+        run: |
+          if ! echo "$INPUT_USERNAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,30}$'; then
+            echo "::error::Invalid username."
+            exit 1
+          fi
+          if ! echo "$INPUT_EMAIL" | grep -qE '^[^@]+@[^@]+\.[^@]+$'; then
+            echo "::error::Invalid email."
+            exit 1
+          fi
+
+      - name: Provision user
+        env:
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_EMAIL: ${{ inputs.email }}
+          INPUT_ANTHROPIC_KEY: ${{ inputs.anthropic_key }}
+          GODMODE_IMAGE: ghcr.io/johnjuuljensen/godmode:${{ inputs.image_tag }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          chmod +x scripts/provision-user-railway.sh
+          ./scripts/provision-user-railway.sh \
+            "$INPUT_USERNAME" \
+            "$INPUT_EMAIL" \
+            "$INPUT_ANTHROPIC_KEY"
