@@ -1,4 +1,5 @@
 using GodMode.Server.Models;
+using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
@@ -26,8 +27,14 @@ public class ProjectManager : IProjectManager
     private readonly RootPackager _rootPackager;
     private readonly RootInstaller _rootInstaller;
     private readonly WebhookFileManager _webhookFileManager;
+    private readonly OAuthTokenStore _oauthTokenStore;
+    private readonly OAuthProxyClient _oauthProxyClient;
+    private readonly McpOAuthStore _mcpOAuthStore;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
+
+    /// <inheritdoc />
+    public event Func<string, Task>? OnProjectCompleted;
 
     /// <summary>
     /// Legacy profiles loaded from appsettings.json at startup (before .profiles/ migration).
@@ -71,6 +78,9 @@ public class ProjectManager : IProjectManager
         RootPackager rootPackager,
         RootInstaller rootInstaller,
         WebhookFileManager webhookFileManager,
+        OAuthTokenStore oauthTokenStore,
+        OAuthProxyClient oauthProxyClient,
+        McpOAuthStore mcpOAuthStore,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -84,6 +94,9 @@ public class ProjectManager : IProjectManager
         _rootPackager = rootPackager;
         _rootInstaller = rootInstaller;
         _webhookFileManager = webhookFileManager;
+        _oauthTokenStore = oauthTokenStore;
+        _mcpOAuthStore = mcpOAuthStore;
+        _oauthProxyClient = oauthProxyClient;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -429,12 +442,41 @@ public class ProjectManager : IProjectManager
 
         // Create project folder — either server-managed or script-managed
         var projectId = ProjectFiles.ProjectManager.ConvertNameToPath(name);
+        var reuseExisting = request.Inputs.TryGetValue("__reuseExisting", out var reuse) &&
+                            reuse.ValueKind == System.Text.Json.JsonValueKind.True;
+        var autoSuffix = request.Inputs.TryGetValue("__autoSuffix", out var suffix) &&
+                         suffix.ValueKind == System.Text.Json.JsonValueKind.True;
         string projectPath;
 
         if (action.ScriptsCreateFolder)
         {
             // Scripts will create the project directory (e.g. git worktree add)
             projectPath = Path.Combine(rootPath, projectId);
+        }
+        else if (reuseExisting)
+        {
+            // Reuse existing folder — reinitialize .godmode state
+            var projectFolder = ProjectFiles.ProjectFolder.Reuse(rootPath, projectId, name);
+            projectPath = projectFolder.ProjectPath;
+            projectId = Path.GetFileName(projectPath);
+        }
+        else if (autoSuffix && Directory.Exists(Path.Combine(rootPath, projectId)))
+        {
+            // Auto-suffix: find next available _N
+            var baseId = projectId;
+            var baseName = name;
+            for (var i = 2; i <= 999; i++)
+            {
+                var candidateId = $"{baseId}_{i}";
+                if (!Directory.Exists(Path.Combine(rootPath, candidateId)))
+                {
+                    projectId = candidateId;
+                    name = $"{baseName} ({i})";
+                    break;
+                }
+            }
+            var suffixedFolder = ProjectFiles.ProjectFolder.Create(rootPath, projectId, name);
+            projectPath = suffixedFolder.ProjectPath;
         }
         else
         {
@@ -462,7 +504,8 @@ public class ProjectManager : IProjectManager
             ),
             ProjectPath = projectPath,
             ActionName = action.Name,
-            ProfileName = request.ProfileName
+            ProfileName = request.ProfileName,
+            ProjectToken = GenerateProjectToken()
         };
 
         // Result file — scripts can write key=value pairs to override project path/name
@@ -562,14 +605,28 @@ public class ProjectManager : IProjectManager
         // Resolve model: user input overrides action config default
         var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
 
-        // Build MCP config JSON (merges profile + action MCP servers)
-        var mcpConfigJson = BuildMcpConfigJson(profileConfig?.McpServers, action.McpServers);
+        // Load OAuth tokens for the profile (refresh expired ones)
+        var oauthTokens = await LoadAndRefreshOAuthTokensAsync(request.ProfileName);
+        var mcpOAuthTokens = _mcpOAuthStore.GetAllForProfile(request.ProfileName);
+
+        // Build MCP config JSON (merges profile + action MCP servers, injects OAuth tokens)
+        var mcpConfigJson = BuildMcpConfigJson(profileConfig?.McpServers, action.McpServers, oauthTokens, mcpOAuthTokens);
+
+        // Inject GodMode MCP bridge into MCP config (always available to every project)
+        mcpConfigJson = InjectMcpBridge(mcpConfigJson);
         if (mcpConfigJson != null)
             _logger.LogInformation("MCP config JSON: {McpConfig}", mcpConfigJson);
 
         // Build claude env/args from action config + project settings + profile env
         var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, model, profileEnv,
             request.ProfileName, config.StripEnvVarProfile, mcpConfigJson);
+
+        // Inject GodMode MCP bridge env vars so the bridge can call back to this server
+        claudeEnv ??= new Dictionary<string, string>();
+        claudeEnv["GODMODE_PROJECT_ID"] = projectId;
+        claudeEnv["GODMODE_PROJECT_TOKEN"] = project.ProjectToken!;
+        claudeEnv["GODMODE_SERVER_URL"] = $"http://localhost:{GetListenPort()}";
+
         if (claudeArgs != null)
             _logger.LogInformation("Claude args: {Args}", string.Join(" ", claudeArgs));
 
@@ -686,6 +743,133 @@ public class ProjectManager : IProjectManager
         _logger.LogInformation("Project {ProjectId} deleted successfully", projectId);
     }
 
+    public async Task ArchiveProjectAsync(string projectId)
+    {
+        if (!_projects.TryRemove(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        // Stop process if running
+        await _processManager.StopProcessAsync(project);
+
+        // Move project folder to .archived/ sibling directory
+        var parentDir = Path.GetDirectoryName(project.ProjectPath)!;
+        var archiveDir = Path.Combine(parentDir, ".archived");
+        Directory.CreateDirectory(archiveDir);
+        var destDir = Path.Combine(archiveDir, Path.GetFileName(project.ProjectPath));
+        if (Directory.Exists(destDir))
+            await DeleteDirectoryRobustAsync(destDir);
+        Directory.Move(project.ProjectPath, destDir);
+
+        // Write archive metadata
+        var metaPath = Path.Combine(destDir, ".godmode", "archive.json");
+        var meta = new { ArchivedAt = DateTime.UtcNow, Name = project.Status.Name,
+            RootName = project.Status.RootName, ProfileName = project.ProfileName ?? project.Status.ProfileName };
+        await File.WriteAllTextAsync(metaPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
+
+        _logger.LogInformation("Archived project {ProjectId} ({Name})", projectId, project.Status.Name);
+    }
+
+    public Task<ProjectSummary[]> ListArchivedProjectsAsync()
+    {
+        var results = new List<ProjectSummary>();
+        var snap = _snapshot;
+
+        // Scan all root directories for .archived/ folders
+        foreach (var (compositeKey, rootPath) in snap.ProjectFiles.GetAllRootPaths())
+        {
+            var archiveDir = Path.Combine(rootPath, ".archived");
+            if (!Directory.Exists(archiveDir)) continue;
+
+            foreach (var projDir in Directory.GetDirectories(archiveDir))
+            {
+                var statusPath = Path.Combine(projDir, ".godmode", "status.json");
+                var archivePath = Path.Combine(projDir, ".godmode", "archive.json");
+                if (!File.Exists(statusPath)) continue;
+
+                try
+                {
+                    var statusJson = File.ReadAllText(statusPath);
+                    var status = JsonSerializer.Deserialize<ProjectStatus>(statusJson);
+                    if (status == null) continue;
+
+                    string? profileName = null;
+                    if (File.Exists(archivePath))
+                    {
+                        var archiveJson = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(archivePath));
+                        profileName = archiveJson.TryGetProperty("ProfileName", out var pn) ? pn.GetString() : null;
+                    }
+
+                    results.Add(new ProjectSummary(
+                        status.Id, status.Name, ProjectState.Stopped, status.UpdatedAt,
+                        RootName: status.RootName, ProfileName: profileName ?? status.ProfileName));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to read archived project at {Path}", projDir);
+                }
+            }
+        }
+
+        return Task.FromResult(results.ToArray());
+    }
+
+    public async Task<ProjectSummary> UnarchiveProjectAsync(string projectId)
+    {
+        // Find the archived project folder
+        var snap = _snapshot;
+        foreach (var (compositeKey, rootPath) in snap.ProjectFiles.GetAllRootPaths())
+        {
+            var archiveDir = Path.Combine(rootPath, ".archived");
+            if (!Directory.Exists(archiveDir)) continue;
+
+            foreach (var projDir in Directory.GetDirectories(archiveDir))
+            {
+                var statusPath = Path.Combine(projDir, ".godmode", "status.json");
+                if (!File.Exists(statusPath)) continue;
+
+                try
+                {
+                    var statusJson = File.ReadAllText(statusPath);
+                    var status = JsonSerializer.Deserialize<ProjectStatus>(statusJson);
+                    if (status?.Id != projectId) continue;
+
+                    // Move back to root directory
+                    var destDir = Path.Combine(rootPath, Path.GetFileName(projDir));
+                    if (Directory.Exists(destDir))
+                        destDir = Path.Combine(rootPath, $"{Path.GetFileName(projDir)}-{DateTime.UtcNow:yyyyMMddHHmmss}");
+                    Directory.Move(projDir, destDir);
+
+                    // Remove archive metadata
+                    var archiveMeta = Path.Combine(destDir, ".godmode", "archive.json");
+                    if (File.Exists(archiveMeta)) File.Delete(archiveMeta);
+
+                    // Re-register project
+                    var profileName = status.ProfileName;
+                    var project = new ProjectInfo
+                    {
+                        Status = status with { State = ProjectState.Stopped },
+                        ProjectPath = destDir,
+                        ActionName = null,
+                        ProfileName = profileName,
+                    };
+                    _projects[projectId] = project;
+
+                    _logger.LogInformation("Unarchived project {ProjectId} ({Name})", projectId, status.Name);
+
+                    return new ProjectSummary(status.Id, status.Name, ProjectState.Stopped,
+                        DateTime.UtcNow, RootName: status.RootName, ProfileName: profileName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to unarchive project at {Path}", projDir);
+                    throw;
+                }
+            }
+        }
+
+        throw new KeyNotFoundException($"Archived project {projectId} not found");
+    }
+
     public async Task ResumeProjectAsync(string projectId)
     {
         if (!_projects.TryGetValue(projectId, out var project))
@@ -759,7 +943,9 @@ public class ProjectManager : IProjectManager
                 var action = config.ResolveAction(project.ActionName);
                 if (action != null)
                 {
-                    var mcpJson = BuildMcpConfigJson(profileCfg?.McpServers, action.McpServers);
+                    var oauthTokens = await LoadAndRefreshOAuthTokensAsync(resumeProfileName);
+                    var mcpOAuthTokensResume = _mcpOAuthStore.GetAllForProfile(resumeProfileName);
+                    var mcpJson = BuildMcpConfigJson(profileCfg?.McpServers, action.McpServers, oauthTokens, mcpOAuthTokensResume);
                     (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, action.Model, profileEnv,
                         resumeProfileName, config.StripEnvVarProfile, mcpJson);
                 }
@@ -1430,7 +1616,17 @@ public class ProjectManager : IProjectManager
     private static string? ResolveProjectName(CreateAction action, Dictionary<string, JsonElement> inputs)
     {
         if (action.NameTemplate != null)
-            return TemplateResolver.Resolve(action.NameTemplate, inputs);
+        {
+            var resolved = TemplateResolver.Resolve(action.NameTemplate, inputs);
+            // If unresolved placeholders remain (e.g. schedule didn't provide all inputs),
+            // fall back to a timestamp-based name
+            if (resolved != null && resolved.Contains('{') && resolved.Contains('}'))
+            {
+                var fallback = TemplateResolver.GetString(inputs, "name");
+                return fallback ?? $"project-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+            }
+            return resolved;
+        }
 
         return TemplateResolver.GetString(inputs, "name");
     }
@@ -1441,7 +1637,13 @@ public class ProjectManager : IProjectManager
     private static string? ResolvePrompt(CreateAction action, Dictionary<string, JsonElement> inputs)
     {
         if (action.PromptTemplate != null)
-            return TemplateResolver.Resolve(action.PromptTemplate, inputs);
+        {
+            var resolved = TemplateResolver.Resolve(action.PromptTemplate, inputs);
+            // If unresolved placeholders remain, return null (no prompt)
+            if (resolved != null && resolved.Contains('{') && resolved.Contains('}'))
+                return TemplateResolver.GetString(inputs, "prompt");
+            return resolved;
+        }
 
         return TemplateResolver.GetString(inputs, "prompt");
     }
@@ -1533,9 +1735,95 @@ public class ProjectManager : IProjectManager
             File.WriteAllText(mcpConfigPath, mcpConfigJson);
             args.Add("--mcp-config");
             args.Add(mcpConfigPath);
+
+        }
+
+        // Auto-allow all MCP tools so Claude doesn't block on permissions in --print mode.
+        // --allowedTools requires server-level prefixes (e.g. "mcp__jira"), not just "mcp__".
+        if (!settings.DangerouslySkipPermissions)
+        {
+            var mcpPrefixes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // From our --mcp-config
+            if (!string.IsNullOrWhiteSpace(mcpConfigJson))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(mcpConfigJson);
+                    if (doc.RootElement.TryGetProperty("mcpServers", out var servers))
+                        foreach (var server in servers.EnumerateObject())
+                            mcpPrefixes.Add($"mcp__{server.Name}");
+                }
+                catch { /* ignore */ }
+            }
+
+            // From user's local ~/.claude/settings.json (covers pencil, grafana, etc.)
+            var userSettingsPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "settings.json");
+            if (File.Exists(userSettingsPath))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(userSettingsPath));
+                    if (doc.RootElement.TryGetProperty("mcpServers", out var localServers))
+                        foreach (var server in localServers.EnumerateObject())
+                            mcpPrefixes.Add($"mcp__{server.Name}");
+                }
+                catch { /* ignore */ }
+            }
+
+            if (mcpPrefixes.Count > 0)
+            {
+                args.Add("--allowedTools");
+                args.Add(string.Join(",", mcpPrefixes));
+            }
         }
 
         return (env, args.Count > 0 ? args.ToArray() : null);
+    }
+
+    /// <summary>
+    /// Load all OAuth tokens for a profile, refreshing any that are expired.
+    /// Returns null if no tokens exist or the profile name is null/empty.
+    /// </summary>
+    private async Task<Dictionary<string, OAuthTokenSet>?> LoadAndRefreshOAuthTokensAsync(string? profileName)
+    {
+        if (string.IsNullOrEmpty(profileName))
+            return null;
+
+        var tokens = _oauthTokenStore.LoadAllTokens(profileName);
+        if (tokens.Count == 0)
+            return null;
+
+        // Refresh expired tokens
+        foreach (var (provider, tokenSet) in tokens.ToList())
+        {
+            if (!tokenSet.IsExpired)
+                continue;
+
+            if (string.IsNullOrEmpty(tokenSet.RefreshToken))
+            {
+                _logger.LogWarning("OAuth token for {Provider} in profile {Profile} is expired with no refresh token",
+                    provider, profileName);
+                continue;
+            }
+
+            var refreshed = await _oauthProxyClient.RefreshTokenAsync(provider, tokenSet.RefreshToken);
+            if (refreshed != null)
+            {
+                _oauthTokenStore.StoreTokens(profileName, provider, refreshed);
+                tokens[provider] = refreshed;
+                _logger.LogInformation("Refreshed expired OAuth token for {Provider} in profile {Profile}",
+                    provider, profileName);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to refresh OAuth token for {Provider} in profile {Profile}",
+                    provider, profileName);
+            }
+        }
+
+        return tokens;
     }
 
     /// <summary>
@@ -1546,7 +1834,9 @@ public class ProjectManager : IProjectManager
     /// </summary>
     private static string? BuildMcpConfigJson(
         Dictionary<string, McpServerConfig>? profileMcpServers,
-        Dictionary<string, McpServerConfig>? actionMcpServers)
+        Dictionary<string, McpServerConfig>? actionMcpServers,
+        Dictionary<string, OAuthTokenSet>? oauthTokens = null,
+        Dictionary<string, McpOAuthTokens>? mcpOAuthTokens = null)
     {
         // Merge: profile is the base, action overrides
         Dictionary<string, McpServerConfig>? merged = null;
@@ -1565,7 +1855,7 @@ public class ProjectManager : IProjectManager
             return null;
 
         // Build Claude MCP config format: { "mcpServers": { ... } }
-        // Stdio servers → { command, args, env }; SSE servers → { url, headers }
+        // Stdio servers → { command, args, env }; URL servers → { type, url, headers }
         var mcpConfig = new Dictionary<string, object>
         {
             ["mcpServers"] = merged.ToDictionary(
@@ -1574,26 +1864,144 @@ public class ProjectManager : IProjectManager
                 {
                     if (!string.IsNullOrEmpty(kvp.Value.Url))
                     {
-                        var sse = new Dictionary<string, object>
+                        // URLs ending in /sse use legacy SSE transport; all others use streamable HTTP
+                        var transport = kvp.Value.Url.EndsWith("/sse", StringComparison.OrdinalIgnoreCase) ? "sse" : "http";
+                        var server = new Dictionary<string, object>
                         {
-                            ["type"] = "sse",
+                            ["type"] = transport,
                             ["url"] = kvp.Value.Url
                         };
-                        var headers = ExpandEnvVars(kvp.Value.Headers);
-                        if (headers is { Count: > 0 })
-                            sse["headers"] = headers;
-                        return (object)sse;
+                        var headers = ExpandEnvVars(kvp.Value.Headers) ?? new Dictionary<string, string>();
+
+                        // Inject OAuth token if this connector has a mapped provider (proxy flow)
+                        if (oauthTokens != null &&
+                            OAuthProviderMapping.ConnectorToProvider.TryGetValue(kvp.Key, out var provider))
+                        {
+                            if (oauthTokens.TryGetValue(provider, out var tokens))
+                                headers["Authorization"] = $"Bearer {tokens.AccessToken}";
+                        }
+
+                        // Inject MCP OAuth token (remote MCP server flow, e.g. Google Workspace)
+                        if (mcpOAuthTokens != null &&
+                            mcpOAuthTokens.TryGetValue(kvp.Key, out var mcpTokens))
+                        {
+                            headers["Authorization"] = $"Bearer {mcpTokens.AccessToken}";
+                        }
+
+                        if (headers.Count > 0)
+                            server["headers"] = headers;
+                        return (object)server;
                     }
-                    return (object)new
                     {
-                        command = kvp.Value.Command ?? "",
-                        args = kvp.Value.Args ?? [],
-                        env = ExpandEnvVars(kvp.Value.Env)
-                    };
+                        var env = ExpandEnvVars(kvp.Value.Env) ?? new Dictionary<string, string>();
+
+                        // Inject OAuth token for stdio connectors (e.g. gws CLI)
+                        // gws reads GOOGLE_WORKSPACE_CLI_TOKEN as highest-priority auth source
+                        if (oauthTokens != null &&
+                            OAuthProviderMapping.ConnectorToProvider.TryGetValue(kvp.Key, out var stdioProvider))
+                        {
+                            if (oauthTokens.TryGetValue(stdioProvider, out var stdioTokens))
+                                env["GOOGLE_WORKSPACE_CLI_TOKEN"] = stdioTokens.AccessToken;
+                        }
+
+                        // Vanta MCP reads credentials from a JSON file, not env vars
+                        if (kvp.Key.Equals("vanta", StringComparison.OrdinalIgnoreCase)
+                            && env.TryGetValue("VANTA_CLIENT_ID", out var vantaId)
+                            && env.TryGetValue("VANTA_CLIENT_SECRET", out var vantaSecret))
+                        {
+                            var vantaCredsPath = Path.Combine(Path.GetTempPath(), $"godmode-vanta-{Guid.NewGuid():N}.json");
+                            File.WriteAllText(vantaCredsPath, JsonSerializer.Serialize(new { client_id = vantaId, client_secret = vantaSecret }));
+                            env.Remove("VANTA_CLIENT_ID");
+                            env.Remove("VANTA_CLIENT_SECRET");
+                            env["VANTA_ENV_FILE"] = vantaCredsPath;
+                        }
+
+                        if (env.Count > 0)
+                            return (object)new { command = kvp.Value.Command ?? "", args = kvp.Value.Args ?? [], env };
+                        return (object)new { command = kvp.Value.Command ?? "", args = kvp.Value.Args ?? Array.Empty<string>() };
+                    }
                 })
         };
 
         return JsonSerializer.Serialize(mcpConfig);
+    }
+
+    /// <summary>
+    /// Injects the GodMode MCP bridge server into an MCP config JSON string.
+    /// The bridge env vars (GODMODE_PROJECT_ID, etc.) are inherited from the Claude process env.
+    /// </summary>
+    private static string InjectMcpBridge(string? existingJson)
+    {
+        // Find the bridge script path (relative to the server binary)
+        var bridgePath = ResolveMcpBridgePath();
+
+        Dictionary<string, object>? mcpConfig;
+        Dictionary<string, object> servers;
+
+        if (!string.IsNullOrEmpty(existingJson))
+        {
+            mcpConfig = JsonSerializer.Deserialize<Dictionary<string, object>>(existingJson);
+            if (mcpConfig != null && mcpConfig.TryGetValue("mcpServers", out var serversObj) && serversObj is JsonElement el)
+            {
+                servers = JsonSerializer.Deserialize<Dictionary<string, object>>(el.GetRawText()) ?? new();
+            }
+            else
+            {
+                servers = new();
+                mcpConfig ??= new();
+            }
+        }
+        else
+        {
+            mcpConfig = new();
+            servers = new();
+        }
+
+        // Add the bridge as a stdio MCP server — env vars are inherited from the Claude process
+        servers["godmode-bridge"] = new
+        {
+            command = "node",
+            args = new[] { bridgePath },
+            env = new Dictionary<string, string>()
+        };
+
+        mcpConfig["mcpServers"] = servers;
+        return JsonSerializer.Serialize(mcpConfig);
+    }
+
+    /// <summary>
+    /// Resolves the path to the GodMode MCP bridge dist/index.js.
+    /// Looks in common locations relative to the running server.
+    /// </summary>
+    private static string ResolveMcpBridgePath()
+    {
+        // Check GODMODE_MCP_BRIDGE_PATH env var override first
+        var envPath = Environment.GetEnvironmentVariable("GODMODE_MCP_BRIDGE_PATH");
+        if (!string.IsNullOrEmpty(envPath) && File.Exists(envPath))
+            return Path.GetFullPath(envPath);
+
+        // Common locations relative to the project structure
+        var candidates = new[]
+        {
+            // Development: running from src/GodMode.Server/
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "GodMode.McpBridge", "dist", "index.js"),
+            // Development: running from repo root
+            Path.Combine(AppContext.BaseDirectory, "src", "GodMode.McpBridge", "dist", "index.js"),
+            // Sibling to server binary
+            Path.Combine(AppContext.BaseDirectory, "mcp-bridge", "index.js"),
+            // Published alongside
+            Path.Combine(AppContext.BaseDirectory, "GodMode.McpBridge", "dist", "index.js"),
+        };
+
+        foreach (var candidate in candidates)
+        {
+            var full = Path.GetFullPath(candidate);
+            if (File.Exists(full))
+                return full;
+        }
+
+        // Fallback: use npx to run it (requires package to be installed)
+        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "GodMode.McpBridge", "dist", "index.js"));
     }
 
     /// <summary>
@@ -1697,10 +2105,25 @@ public class ProjectManager : IProjectManager
             // Update status based on event (still need to parse for status updates)
             if (eventType != null)
             {
+                var prevState = project.Status.State;
                 var outputEvent = ParseClaudeOutput(jsonLine);
                 if (outputEvent != null)
                 {
                     await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
+                }
+
+                // Fire completion event if project just transitioned to Idle
+                if (prevState != ProjectState.Idle && project.Status.State == ProjectState.Idle)
+                {
+                    try
+                    {
+                        if (OnProjectCompleted != null)
+                            await OnProjectCompleted(id);
+                    }
+                    catch (Exception completionEx)
+                    {
+                        _logger.LogError(completionEx, "Error in OnProjectCompleted handler for project {ProjectId}", id);
+                    }
                 }
             }
         }
@@ -1912,5 +2335,109 @@ public class ProjectManager : IProjectManager
     </div>
 </body>
 </html>";
+    }
+
+    // ── Internal API helpers (project tokens, result storage) ──
+
+    /// <summary>
+    /// Generates a cryptographically random project-scoped token for MCP bridge auth.
+    /// </summary>
+    private static string GenerateProjectToken()
+    {
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        return "gpt_" + Convert.ToHexStringLower(bytes);
+    }
+
+    /// <summary>
+    /// Gets the server listen port from the Urls configuration.
+    /// </summary>
+    private int GetListenPort()
+    {
+        // Default GodMode server port
+        return 31337;
+    }
+
+    /// <summary>
+    /// Validates a project token and returns the project info if valid.
+    /// Used by internal API endpoints.
+    /// </summary>
+    public ProjectInfo? ValidateProjectToken(string projectId, string token)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            return null;
+
+        if (string.IsNullOrEmpty(project.ProjectToken))
+            return null;
+
+        var storedBytes = System.Text.Encoding.UTF8.GetBytes(project.ProjectToken);
+        var providedBytes = System.Text.Encoding.UTF8.GetBytes(token);
+
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(storedBytes, providedBytes)
+            ? project
+            : null;
+    }
+
+    /// <summary>
+    /// Stores a structured result for a project (called by MCP bridge via internal API).
+    /// </summary>
+    public async Task StoreProjectResultAsync(string projectId, SubmitResultRequest resultRequest)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        var result = new ProjectResult(resultRequest.Result, resultRequest.Summary, DateTime.UtcNow);
+        var resultPath = Path.Combine(project.ProjectPath, ".godmode", "result.json");
+        var json = JsonSerializer.Serialize(result, new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        });
+        await File.WriteAllTextAsync(resultPath, json);
+
+        _logger.LogInformation("Project {ProjectId} submitted result ({Summary})",
+            projectId, resultRequest.Summary ?? "no summary");
+
+        // Notify clients of the result
+        await _hubContext.Clients.All.StatusChanged(projectId, project.Status);
+    }
+
+    /// <summary>
+    /// Updates the custom status message for a project (called by MCP bridge).
+    /// </summary>
+    public async Task UpdateCustomStatusAsync(string projectId, string message)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        project.CustomStatus = message;
+        _logger.LogInformation("Project {ProjectId} custom status: {Status}", projectId, message);
+
+        await _hubContext.Clients.All.StatusChanged(projectId, project.Status);
+    }
+
+    /// <summary>
+    /// Requests human review for a project (called by MCP bridge).
+    /// Puts the project into WaitingInput state with the review question.
+    /// </summary>
+    public async Task RequestHumanReviewAsync(string projectId, RequestReviewRequest reviewRequest)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        var question = string.IsNullOrEmpty(reviewRequest.Context)
+            ? reviewRequest.Question
+            : $"{reviewRequest.Question}\n\nContext: {reviewRequest.Context}";
+
+        project.Status = project.Status with
+        {
+            State = ProjectState.WaitingInput,
+            CurrentQuestion = question,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        await _statusUpdater.SaveStatusAsync(project);
+        await _hubContext.Clients.All.StatusChanged(projectId, project.Status);
+
+        _logger.LogInformation("Project {ProjectId} requested human review: {Question}", projectId, reviewRequest.Question);
     }
 }

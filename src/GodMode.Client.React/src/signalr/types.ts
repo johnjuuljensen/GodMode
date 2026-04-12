@@ -126,6 +126,14 @@ export interface RootSourceInfo {
   Version?: string | null;
 }
 
+// --- OAuth (PascalCase from server) ---
+
+export interface OAuthProviderStatus {
+  Connected: boolean;
+  ExpiresAt?: string | null;
+  Email?: string | null;
+}
+
 // --- Webhooks (PascalCase from server) ---
 
 export interface WebhookInfo {
@@ -142,6 +150,31 @@ export interface WebhookResult {
   ProjectId: string;
   ProjectName: string;
   Status: string;
+}
+
+// --- Schedules (PascalCase from server) ---
+
+export interface ScheduleTarget {
+  RootName?: string | null;
+  ActionName?: string | null;
+  Inputs?: Record<string, unknown> | null;
+}
+
+export interface ScheduleConfig {
+  Description?: string | null;
+  Enabled: boolean;
+  Cron: string;
+  Target?: ScheduleTarget | null;
+}
+
+export interface ScheduleInfo {
+  Name: string;
+  ProfileName: string;
+  Description?: string | null;
+  Enabled: boolean;
+  Cron: string;
+  Target?: ScheduleTarget | null;
+  NextRunDisplay?: string | null;
 }
 
 // --- GodMode Chat (PascalCase from server) ---

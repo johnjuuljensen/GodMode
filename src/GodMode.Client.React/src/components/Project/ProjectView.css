@@ -388,3 +388,50 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ── Project Menu (Archive/Delete dropdown) ── */
+.project-menu-container {
+  position: relative;
+}
+
+.project-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 100;
+  min-width: 180px;
+  margin-top: 4px;
+  padding: 4px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-window);
+}
+
+.project-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+  text-align: left;
+}
+
+.project-menu-item:hover {
+  background: var(--hover);
+}
+
+.project-menu-item-danger {
+  color: var(--error);
+}
+
+.project-menu-item-danger:hover {
+  background: var(--error-soft);
+}

@@ -1,3 +1,4 @@
+using GodMode.Server.Models;
 using GodMode.Shared.Models;
 
 namespace GodMode.Server.Services;
@@ -66,6 +67,21 @@ public interface IProjectManager
     /// Deletes a project, running teardown scripts and removing all files.
     /// </summary>
     Task DeleteProjectAsync(string projectId, bool force = false);
+
+    /// <summary>
+    /// Archives a project (stops process, moves folder to .archived/).
+    /// </summary>
+    Task ArchiveProjectAsync(string projectId);
+
+    /// <summary>
+    /// Restores a project from archive.
+    /// </summary>
+    Task<ProjectSummary> UnarchiveProjectAsync(string projectId);
+
+    /// <summary>
+    /// Lists all archived projects.
+    /// </summary>
+    Task<ProjectSummary[]> ListArchivedProjectsAsync();
 
     /// <summary>
     /// Cleans up resources for a disconnected client.
@@ -144,6 +160,21 @@ public interface IProjectManager
         Dictionary<string, System.Text.Json.JsonElement>? staticInputs = null,
         bool? enabled = null);
     Task<string> RegenerateWebhookTokenAsync(string keyword);
+
+    // ── Events ──
+
+    /// <summary>
+    /// Fired when a project transitions to Idle state (completed).
+    /// The pipeline engine subscribes to this to advance pipeline stages.
+    /// </summary>
+    event Func<string, Task>? OnProjectCompleted;
+
+    // ── Internal API (MCP bridge) ──
+
+    ProjectInfo? ValidateProjectToken(string projectId, string token);
+    Task StoreProjectResultAsync(string projectId, SubmitResultRequest resultRequest);
+    Task UpdateCustomStatusAsync(string projectId, string message);
+    Task RequestHumanReviewAsync(string projectId, RequestReviewRequest reviewRequest);
 
     Task<byte[]> ExportRootAsync(string profileName, string rootName);
     Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes);

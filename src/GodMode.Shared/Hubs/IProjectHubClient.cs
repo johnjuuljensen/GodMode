@@ -40,6 +40,16 @@ public interface IProjectHubClient
     Task ProjectDeleted(string projectId);
 
     /// <summary>
+    /// Called when a project is archived.
+    /// </summary>
+    Task ProjectArchived(string projectId);
+
+    /// <summary>
+    /// Called when a project is restored from archive.
+    /// </summary>
+    Task ProjectRestored(ProjectSummary project);
+
+    /// <summary>
     /// Called when roots change (created, updated, or deleted).
     /// Clients should refresh their root list.
     /// </summary>
@@ -56,4 +66,15 @@ public interface IProjectHubClient
     /// Clients should refresh their webhook list.
     /// </summary>
     Task WebhooksChanged();
+
+    /// <summary>
+    /// Called when OAuth connection status changes for a profile
+    /// (token connected/disconnected/refreshed).
+    /// </summary>
+    Task OAuthStatusChanged(string profileName);
+
+    /// <summary>
+    /// Called when a schedule fires and triggers a project.
+    /// </summary>
+    Task ScheduleTriggered(string profileName, string scheduleName, string projectId);
 }

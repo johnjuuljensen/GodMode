@@ -63,6 +63,7 @@ export type ActivePage =
   | { type: 'profileSettings' }
   | { type: 'appSettings' }
   | { type: 'webhookSettings' }
+  | { type: 'scheduleSettings' }
   | { type: 'addServer' }
   | { type: 'editServer'; serverId: string }
   | { type: 'createProject'; context?: { serverId: string; rootName: string } };
@@ -149,6 +150,7 @@ interface AppState {
   setShowProfileSettings: (show: boolean) => void;
   setShowAppSettings: (show: boolean) => void;
   setShowWebhookSettings: (show: boolean) => void;
+  setShowScheduleSettings: (show: boolean) => void;
 
   // GodMode chat
   showGodModeChat: boolean;
@@ -500,7 +502,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           );
           const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
           const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
-          return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
+          return {
+            serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total,
+            // Auto-select the newly created project and close the create modal
+            selectedProject: { serverId, projectId: status.Id },
+            activePage: null,
+            showGodModeChat: false,
+            outputMessages: [],
+            question: emptyQuestion,
+          };
         });
       },
       onProjectDeleted: (projectId) => {
@@ -521,6 +531,39 @@ export const useAppStore = create<AppState>((set, get) => ({
             projectQuestions: pq, totalWaitingCount: total,
             ...(clearSel ? { selectedProject: null, outputMessages: [], question: emptyQuestion } : {}),
           };
+        });
+      },
+      onProjectArchived: (projectId) => {
+        // Same as delete — remove from active list
+        set(state => {
+          const connections = state.serverConnections.map(c =>
+            c.serverInfo.Id === serverId
+              ? { ...c, projects: c.projects.filter(p => p.Id !== projectId) }
+              : c
+          );
+          const sel = state.selectedProject;
+          const clearSel = sel?.serverId === serverId && sel?.projectId === projectId;
+          const pq = { ...state.projectQuestions };
+          delete pq[projectId];
+          const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
+          const total = computeTotalWaiting(connections, pq, state.dismissedProjects);
+          return {
+            serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
+            projectQuestions: pq, totalWaitingCount: total,
+            ...(clearSel ? { selectedProject: null, outputMessages: [], question: emptyQuestion } : {}),
+          };
+        });
+      },
+      onProjectRestored: (project) => {
+        // Add restored project back to active list
+        set(state => {
+          const connections = state.serverConnections.map(c =>
+            c.serverInfo.Id === serverId
+              ? { ...c, projects: [...c.projects, project] }
+              : c
+          );
+          const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
+          return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions };
         });
       },
       onStatusChanged: (_projectId, status) => {
@@ -615,6 +658,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
       onWebhooksChanged: () => {
         // Webhooks changed — could refresh a webhook list if UI shows one
+      },
+      onOAuthStatusChanged: () => {
+        // OAuth status changed — UI components with OAuth status will re-fetch
       },
       onChatResponse: (message) => {
         const entry: GodModeChatEntry = { role: 'server', message };
@@ -750,7 +796,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── UI pages ────────────────────────────────────────────────
 
   activePage: null,
-  setActivePage: (page) => set({ activePage: page }),
+  setActivePage: (page) => set({ activePage: page, ...(page ? { showGodModeChat: false } : {}) }),
   closePage: () => set({ activePage: null }),
 
   // Backward-compat setters (delegate to activePage)
@@ -762,10 +808,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowProfileSettings: (show) => set({ activePage: show ? { type: 'profileSettings' } : null }),
   setShowAppSettings: (show) => set({ activePage: show ? { type: 'appSettings' } : null }),
   setShowWebhookSettings: (show) => set({ activePage: show ? { type: 'webhookSettings' } : null }),
+  setShowScheduleSettings: (show) => set({ activePage: show ? { type: 'scheduleSettings' } : null }),
 
   // GodMode chat
   showGodModeChat: false,
-  setShowGodModeChat: (show) => set({ showGodModeChat: show }),
+  setShowGodModeChat: (show) => set({ showGodModeChat: show, ...(show ? { activePage: null } : {}) }),
   godModeChatMessages: [],
   godModeChatLoading: false,
   appendGodModeChatMessage: (entry) => set(state => ({ godModeChatMessages: [...state.godModeChatMessages, entry] })),

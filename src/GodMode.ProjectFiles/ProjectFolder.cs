@@ -99,11 +99,27 @@ public sealed class ProjectFolder : IDisposable
         var projectPath = Path.Combine(rootPath, projectId);
 
         if (Directory.Exists(projectPath))
-            throw new IOException($"Project folder already exists: {projectPath}");
+            throw new IOException($"FOLDER_EXISTS:{projectPath}");
 
-        // Create project directory (this IS the work directory)
+        // Create project directory
         Directory.CreateDirectory(projectPath);
+        return InitializeProjectFolder(projectPath, projectId, name);
+    }
 
+    /// <summary>
+    /// Reuses an existing project directory — reinitializes .godmode state without deleting project files.
+    /// </summary>
+    public static ProjectFolder Reuse(string rootPath, string projectId, string name)
+    {
+        var projectPath = Path.Combine(rootPath, projectId);
+        if (!Directory.Exists(projectPath))
+            throw new DirectoryNotFoundException($"Project folder not found: {projectPath}");
+
+        return InitializeProjectFolder(projectPath, projectId, name);
+    }
+
+    private static ProjectFolder InitializeProjectFolder(string projectPath, string projectId, string name)
+    {
         // Create .godmode directory for all state files
         var godModePath = Path.Combine(projectPath, GodModeDirectoryName);
         Directory.CreateDirectory(godModePath);

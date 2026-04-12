@@ -71,6 +71,12 @@ public sealed class ProjectManager
     }
 
     /// <summary>
+    /// Gets all root paths as (name, path) pairs.
+    /// </summary>
+    public IEnumerable<(string Name, string Path)> GetAllRootPaths()
+        => _projectRoots.Select(kvp => (kvp.Key, kvp.Value));
+
+    /// <summary>
     /// Lists all project folders across all project roots.
     /// </summary>
     /// <returns>Array of project folder paths.</returns>

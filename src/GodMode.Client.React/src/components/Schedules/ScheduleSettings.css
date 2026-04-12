@@ -1,0 +1,163 @@
+/* Schedule-specific styles — builds on settings-common.css */
+
+/* ── Cron Builder ── */
+.cron-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+.cron-builder-frequency label,
+.cron-builder-row label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+/* Frequency selector — segmented button bar */
+.cron-freq-buttons {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.cron-freq-btn {
+  flex: 1;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--glass-border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.cron-freq-btn:last-child {
+  border-right: none;
+}
+
+.cron-freq-btn:hover {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+}
+
+.cron-freq-btn.active {
+  background: var(--accent);
+  color: white;
+}
+
+/* Time picker row */
+.cron-time-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cron-time-picker select {
+  width: auto;
+  min-width: 60px;
+}
+
+.cron-time-sep {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Weekday toggle buttons */
+.cron-weekday-picker {
+  display: flex;
+  gap: 4px;
+}
+
+.cron-weekday-btn {
+  width: 40px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.cron-weekday-btn:hover {
+  background: var(--glass-hover);
+  border-color: var(--glass-border-strong);
+}
+
+.cron-weekday-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+/* Human-readable description */
+.cron-description {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding-top: 4px;
+  border-top: 1px solid var(--glass-border);
+}
+
+/* Builder row (label + control) */
+.cron-builder-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.cron-builder-row select,
+.cron-builder-row input[type="text"] {
+  max-width: 260px;
+}
+
+/* ── Schedule enabled toggle row ── */
+.schedule-enabled-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.schedule-enabled-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .cron-freq-buttons {
+    flex-wrap: wrap;
+  }
+
+  .cron-freq-btn {
+    flex: 0 0 calc(33.33% - 0px);
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .cron-weekday-picker {
+    flex-wrap: wrap;
+  }
+
+  .cron-weekday-btn {
+    flex: 0 0 calc(25% - 3px);
+  }
+}
