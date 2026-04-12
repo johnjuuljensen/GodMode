@@ -21,6 +21,9 @@ on:
         default: "latest"
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   provision:
     name: Provision user server
@@ -34,8 +37,26 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Validate inputs
+        env:
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_EMAIL: ${{ inputs.email }}
+        run: |
+          if ! echo "$INPUT_USERNAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,30}$'; then
+            echo "::error::Invalid username. Must be lowercase alphanumeric with hyphens, max 31 chars."
+            exit 1
+          fi
+          if ! echo "$INPUT_EMAIL" | grep -qE '^[^@]+@[^@]+\.[^@]+$'; then
+            echo "::error::Invalid email format."
+            exit 1
+          fi
+
       - name: Provision user
         env:
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_EMAIL: ${{ inputs.email }}
+          INPUT_ANTHROPIC_KEY: ${{ inputs.anthropic_key }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
           GODMODE_RG: godmode-rg
           GODMODE_ACA_ENV: godmode-env
           GODMODE_STORAGE_ACCOUNT: godmodestorage
@@ -47,17 +68,20 @@ jobs:
         run: |
           chmod +x scripts/provision-user.sh
           ./scripts/provision-user.sh \
-            "${{ inputs.username }}" \
-            "${{ inputs.email }}" \
-            "${{ inputs.anthropic_key }}"
+            "$INPUT_USERNAME" \
+            "$INPUT_EMAIL" \
+            "$INPUT_ANTHROPIC_KEY"
 
       - name: Output deployment URL
+        env:
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_EMAIL: ${{ inputs.email }}
         run: |
           FQDN=$(az containerapp show \
-            --name "godmode-${{ inputs.username }}" \
+            --name "godmode-$INPUT_USERNAME" \
             --resource-group godmode-rg \
             --query "properties.configuration.ingress.fqdn" -o tsv)
           echo "### Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**User:** ${{ inputs.email }}" >> $GITHUB_STEP_SUMMARY
+          echo "**User:** $INPUT_EMAIL" >> $GITHUB_STEP_SUMMARY
           echo "**URL:** https://$FQDN" >> $GITHUB_STEP_SUMMARY

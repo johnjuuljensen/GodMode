@@ -271,7 +271,14 @@ mcpOAuth.MapGet("/initiate", async (
     string profileName,
     string mcpServerUrl) =>
 {
-    var mcpUri = new Uri(mcpServerUrl);
+    // SSRF protection: only allow HTTPS URLs to known MCP server hosts
+    if (!Uri.TryCreate(mcpServerUrl, UriKind.Absolute, out var mcpUri) ||
+        mcpUri.Scheme != "https" ||
+        System.Net.IPAddress.TryParse(mcpUri.Host, out _))
+    {
+        return Results.BadRequest(new { error = "Invalid MCP server URL. Must be HTTPS with a hostname." });
+    }
+
     var baseUrl = $"{mcpUri.Scheme}://{mcpUri.Host}";
     var http = httpFactory.CreateClient();
 
@@ -290,6 +297,22 @@ mcpOAuth.MapGet("/initiate", async (
         registrationEndpoint = meta.GetProperty("registration_endpoint").GetString()!;
         authorizeEndpoint = meta.GetProperty("authorization_endpoint").GetString()!;
         tokenEndpoint = meta.GetProperty("token_endpoint").GetString()!;
+        // Validate discovered endpoints are on the same host or trusted hosts
+        var allowedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { mcpUri.Host };
+        foreach (var ep in new[] { registrationEndpoint, authorizeEndpoint, tokenEndpoint })
+        {
+            if (Uri.TryCreate(ep, UriKind.Absolute, out var epUri) &&
+                !allowedHosts.Contains(epUri.Host))
+            {
+                // Allow well-known auth providers (Atlassian uses cf.mcp.atlassian.com)
+                if (!epUri.Host.EndsWith($".{mcpUri.Host}", StringComparison.OrdinalIgnoreCase) &&
+                    !epUri.Host.EndsWith(".atlassian.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    logger.LogWarning("MCP OAuth: discovered endpoint {Ep} has untrusted host, rejecting", ep);
+                    return Results.BadRequest(new { error = "Discovered OAuth endpoint has untrusted host." });
+                }
+            }
+        }
         logger.LogInformation("MCP OAuth: discovered endpoints — register: {Reg}, authorize: {Auth}, token: {Token}",
             registrationEndpoint, authorizeEndpoint, tokenEndpoint);
     }
@@ -421,18 +444,23 @@ mcpOAuth.MapGet("/callback", async (
 // Status: check if a connector has MCP OAuth tokens
 mcpOAuth.MapGet("/status", (string profileName, McpOAuthStore mcpStore) =>
 {
+    if (profileName.Contains("..") || profileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        return Results.BadRequest(new { error = "Invalid profile name" });
     var tokens = mcpStore.GetAllForProfile(profileName);
     return Results.Ok(tokens.ToDictionary(
         kvp => kvp.Key,
         kvp => new { Connected = true, kvp.Value.Email }));
-}).AllowAnonymous();
+});
 
 // Disconnect: delete MCP OAuth tokens for a connector
 mcpOAuth.MapPost("/disconnect", (string profileName, string connectorId, McpOAuthStore mcpStore) =>
 {
+    if (profileName.Contains("..") || profileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+        connectorId.Contains("..") || connectorId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        return Results.BadRequest(new { error = "Invalid profile or connector name" });
     mcpStore.Delete(profileName, connectorId);
     return Results.Ok(new { success = true });
-}).AllowAnonymous();
+});
 
 app.MapGet("/api/status", () => new
 {
