@@ -32,10 +32,20 @@ COPY --from=react-build /app/dist /app/publish/wwwroot/
 # ── Runtime ──
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 
-RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
+ENV HOME=/root
+ENV PATH="/root/.local/bin:/root/.claude/local/bin:${PATH}"
+
+# Install system deps + Node.js (needed for npx MCP servers)
+RUN apt-get update && \
+    apt-get install -y git curl && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI
-RUN curl -fsSL https://claude.ai/install.sh | sh || true
+RUN curl -fsSL https://claude.ai/install.sh | sh && \
+    echo "Claude installed at: $(which claude)" && \
+    claude --version
 
 WORKDIR /app
 COPY --from=dotnet-build /app/publish .
@@ -45,6 +55,5 @@ RUN mkdir -p /app/projects /data
 EXPOSE 31337
 
 ENV ASPNETCORE_URLS=http://+:31337
-ENV HOME=/root
 
 ENTRYPOINT ["dotnet", "GodMode.Server.dll"]
