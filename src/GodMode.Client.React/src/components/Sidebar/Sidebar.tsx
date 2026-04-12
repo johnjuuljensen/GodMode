@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy } from '../../store';
+import { getBaseUrl } from '../../services/api';
 import type { ProjectSummary } from '../../signalr/types';
 import { ProjectItem } from './ProjectItem';
 import { isMaui } from '../../services/hostApi';
@@ -315,7 +316,7 @@ export function SidebarFooter() {
             {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
           </button>
           <button className="sidebar-footer-menu-item sidebar-logout-btn" onClick={async () => {
-            await fetch('/api/auth/logout', { method: 'POST' });
+            await fetch(`${getBaseUrl()}/api/auth/logout`, { method: 'POST' });
             window.location.href = '/';
           }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

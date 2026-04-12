@@ -10,8 +10,12 @@ namespace GodMode.Server.Services;
 public class OAuthCsrfStore : IDisposable
 {
     public record CsrfEntry(string Provider, string? ProfileId, string Purpose, DateTime CreatedAt);
+    public record McpOAuthPendingFlow(
+        string ConnectorId, string ProfileName, string CodeVerifier,
+        string McpServerUrl, string ClientId, string RedirectUri, string TokenEndpoint, DateTime CreatedAt);
 
     private readonly ConcurrentDictionary<string, CsrfEntry> _entries = new();
+    private readonly ConcurrentDictionary<string, McpOAuthPendingFlow> _mcpPending = new();
     private readonly Timer _cleanupTimer;
     private static readonly TimeSpan Expiry = TimeSpan.FromMinutes(10);
 
@@ -48,6 +52,16 @@ public class OAuthCsrfStore : IDisposable
         return entry;
     }
 
+    /// <summary>Store a pending MCP OAuth flow (expires with the same timer).</summary>
+    public void StoreMcpPending(string state, McpOAuthPendingFlow flow) => _mcpPending[state] = flow;
+
+    /// <summary>Consume a pending MCP OAuth flow (one-time use).</summary>
+    public McpOAuthPendingFlow? ConsumeMcpPending(string state)
+    {
+        if (!_mcpPending.TryRemove(state, out var flow)) return null;
+        return DateTime.UtcNow - flow.CreatedAt > Expiry ? null : flow;
+    }
+
     private void Cleanup()
     {
         var cutoff = DateTime.UtcNow - Expiry;
@@ -55,6 +69,11 @@ public class OAuthCsrfStore : IDisposable
         {
             if (kvp.Value.CreatedAt < cutoff)
                 _entries.TryRemove(kvp.Key, out _);
+        }
+        foreach (var kvp in _mcpPending)
+        {
+            if (kvp.Value.CreatedAt < cutoff)
+                _mcpPending.TryRemove(kvp.Key, out _);
         }
     }
 

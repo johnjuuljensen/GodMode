@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from './store';
+import { getBaseUrl } from './services/api';
 import { Shell } from './components/Shell';
 import { LoginPage } from './components/Auth/LoginPage';
 
@@ -15,7 +16,7 @@ export default function App() {
 
   const checkAuth = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/challenge');
+      const res = await fetch(`${getBaseUrl()}/api/auth/challenge`);
       if (res.ok) {
         setChallenge(await res.json());
       } else {

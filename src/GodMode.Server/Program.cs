@@ -258,12 +258,12 @@ oauth.MapGet("/relay", async (
 
 var mcpOAuth = app.MapGroup("/api/mcp-oauth");
 
-// Pending flows: state → { connectorId, profileName, codeVerifier, mcpServerUrl, clientId }
-var mcpOAuthPending = new System.Collections.Concurrent.ConcurrentDictionary<string, McpOAuthPendingFlow>();
+// MCP OAuth pending flows are stored in OAuthCsrfStore (has timer-based cleanup)
 
 // Initiate: discover endpoints, register with remote MCP server, then redirect to its /authorize
 mcpOAuth.MapGet("/initiate", async (
     HttpContext ctx,
+    OAuthCsrfStore csrfStore,
     McpOAuthStore mcpStore,
     IHttpClientFactory httpFactory,
     ILogger<Program> logger,
@@ -343,8 +343,8 @@ mcpOAuth.MapGet("/initiate", async (
 
     // Step 3: State token
     var state = Guid.NewGuid().ToString("N");
-    mcpOAuthPending[state] = new McpOAuthPendingFlow(
-        connectorId, profileName, codeVerifier, mcpServerUrl, clientId, redirectUri, tokenEndpoint);
+    csrfStore.StoreMcpPending(state, new OAuthCsrfStore.McpOAuthPendingFlow(
+        connectorId, profileName, codeVerifier, mcpServerUrl, clientId, redirectUri, tokenEndpoint, DateTime.UtcNow));
 
     // Step 4: Redirect to MCP server's authorize endpoint
     var authorizeUrl = $"{authorizeEndpoint}?" + string.Join("&",
@@ -363,13 +363,15 @@ mcpOAuth.MapGet("/initiate", async (
 // Callback: exchange code for token
 mcpOAuth.MapGet("/callback", async (
     HttpContext ctx,
+    OAuthCsrfStore csrfStore,
     McpOAuthStore mcpStore,
     IHttpClientFactory httpFactory,
     ILogger<Program> logger,
     string code,
     string state) =>
 {
-    if (!mcpOAuthPending.TryRemove(state, out var pending))
+    var pending = csrfStore.ConsumeMcpPending(state);
+    if (pending == null)
     {
         logger.LogWarning("MCP OAuth: invalid state");
         return Results.Redirect("/?error=mcp_oauth_state_invalid");
@@ -643,6 +645,3 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
 app.Run();
 
-record McpOAuthPendingFlow(
-    string ConnectorId, string ProfileName, string CodeVerifier,
-    string McpServerUrl, string ClientId, string RedirectUri, string TokenEndpoint);

@@ -1,3 +1,4 @@
+import { getBaseUrl } from '../../services/api';
 import './Auth.css';
 
 interface LoginPageProps {
@@ -6,8 +7,7 @@ interface LoginPageProps {
 
 export function LoginPage({ error }: LoginPageProps) {
   const handleLogin = () => {
-    // Redirect to server's OAuth initiate endpoint for Google login
-    window.location.href = '/api/oauth/initiate?provider=google&purpose=login';
+    window.location.href = `${getBaseUrl()}/api/oauth/initiate?provider=google&purpose=login`;
   };
 
   return (

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppStore } from '../../store';
+import { getBaseUrl } from '../../services/api';
 import type { McpServerConfig, OAuthProviderStatus } from '../../signalr/types';
 import { RowDelete } from '../settings-shared';
 import { CONNECTOR_CATALOG, findCatalogEntry, CATEGORY_LABELS, CONNECTOR_TO_OAUTH_PROVIDER, type CatalogConnector, type CatalogSetupStep } from '../../connectors-catalog';
@@ -52,7 +53,7 @@ export function McpConfigPanel() {
       setOauthStatus(status);
     } catch { /* ignore */ }
     try {
-      const resp = await fetch(`/api/mcp-oauth/status?profileName=${encodeURIComponent(selectedProfile)}`);
+      const resp = await fetch(`${getBaseUrl()}/api/mcp-oauth/status?profileName=${encodeURIComponent(selectedProfile)}`);
       if (resp.ok) setMcpOAuthStatus(await resp.json());
     } catch { /* ignore */ }
   }, [hub, selectedProfile]);
@@ -121,7 +122,7 @@ export function McpConfigPanel() {
         connectorId: connector.id,
         profileName: profile,
       }));
-      window.location.href = `/api/oauth/initiate?provider=${encodeURIComponent(provider)}&profileId=${encodeURIComponent(profile)}&purpose=connector`;
+      window.location.href = `${getBaseUrl()}/api/oauth/initiate?provider=${encodeURIComponent(provider)}&profileId=${encodeURIComponent(profile)}&purpose=connector`;
     }
   };
 
@@ -159,7 +160,7 @@ export function McpConfigPanel() {
         if (profile === selectedProfile) await loadServers();
       } else {
         // Redirect to MCP OAuth flow — server handles registration + PKCE + redirect
-        window.location.href = `/api/mcp-oauth/initiate?connectorId=${encodeURIComponent(connector.id)}&profileName=${encodeURIComponent(profile)}&mcpServerUrl=${encodeURIComponent(connector.config.url!)}`;
+        window.location.href = `${getBaseUrl()}/api/mcp-oauth/initiate?connectorId=${encodeURIComponent(connector.id)}&profileName=${encodeURIComponent(profile)}&mcpServerUrl=${encodeURIComponent(connector.config.url!)}`;
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to add connector');
@@ -170,13 +171,13 @@ export function McpConfigPanel() {
   // Initiate MCP OAuth for an already-added connector
   const connectMcpOAuth = (connectorId: string, url: string) => {
     const profile = selectedProfile;
-    window.location.href = `/api/mcp-oauth/initiate?connectorId=${encodeURIComponent(connectorId)}&profileName=${encodeURIComponent(profile)}&mcpServerUrl=${encodeURIComponent(url)}`;
+    window.location.href = `${getBaseUrl()}/api/mcp-oauth/initiate?connectorId=${encodeURIComponent(connectorId)}&profileName=${encodeURIComponent(profile)}&mcpServerUrl=${encodeURIComponent(url)}`;
   };
 
   // Disconnect MCP OAuth for a connector
   const disconnectMcpOAuth = async (connectorId: string) => {
     try {
-      await fetch(`/api/mcp-oauth/disconnect?profileName=${encodeURIComponent(selectedProfile)}&connectorId=${encodeURIComponent(connectorId)}`, { method: 'POST' });
+      await fetch(`${getBaseUrl()}/api/mcp-oauth/disconnect?profileName=${encodeURIComponent(selectedProfile)}&connectorId=${encodeURIComponent(connectorId)}`, { method: 'POST' });
       await loadOAuthStatus();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to disconnect');
@@ -346,10 +347,24 @@ export function McpConfigPanel() {
           <div className="connector-manifest">
             <div className="connector-manifest-header">
               <span className="connector-manifest-label">App Manifest</span>
-              <button className="btn btn-secondary btn-sm" onClick={() => {
-                navigator.clipboard.writeText(setupConnector.manifest!);
-                const btn = document.querySelector('.connector-manifest-header .btn') as HTMLButtonElement;
-                if (btn) { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500); }
+              <button className="btn btn-secondary btn-sm" onClick={(e) => {
+                const text = setupConnector.manifest!;
+                const btn = e.currentTarget;
+                const done = () => { btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500); };
+                if (navigator.clipboard?.writeText) {
+                  navigator.clipboard.writeText(text).then(done).catch(() => {
+                    // Fallback for environments without clipboard API (e.g. MAUI HybridWebView)
+                    const ta = document.createElement('textarea');
+                    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                    document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+                    document.body.removeChild(ta); done();
+                  });
+                } else {
+                  const ta = document.createElement('textarea');
+                  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+                  document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+                  document.body.removeChild(ta); done();
+                }
               }}>Copy</button>
             </div>
             <pre className="connector-manifest-code">{setupConnector.manifest}</pre>
@@ -406,7 +421,7 @@ export function McpConfigPanel() {
                             connectorId: setupConnector.id,
                             profileName: setupProfile,
                           }));
-                          window.location.href = `/api/oauth/initiate?provider=${encodeURIComponent(oauthProvider)}&profileId=${encodeURIComponent(setupProfile)}&purpose=connector`;
+                          window.location.href = `${getBaseUrl()}/api/oauth/initiate?provider=${encodeURIComponent(oauthProvider)}&profileId=${encodeURIComponent(setupProfile)}&purpose=connector`;
                         }}>
                           Connect with Google
                         </button>
@@ -623,7 +638,7 @@ export function McpConfigPanel() {
                           connectorId: name,
                           profileName: selectedProfile,
                         }));
-                        window.location.href = `/api/oauth/initiate?provider=${encodeURIComponent(oauthProv)}&profileId=${encodeURIComponent(selectedProfile)}&purpose=connector`;
+                        window.location.href = `${getBaseUrl()}/api/oauth/initiate?provider=${encodeURIComponent(oauthProv)}&profileId=${encodeURIComponent(selectedProfile)}&purpose=connector`;
                       }}>
                         Connect
                       </button>

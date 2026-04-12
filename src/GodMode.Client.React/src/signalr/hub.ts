@@ -25,6 +25,7 @@ export interface HubCallbacks {
   onProfilesChanged?: () => void;
   onWebhooksChanged?: () => void;
   onOAuthStatusChanged?: (profileName: string) => void;
+  onScheduleTriggered?: (profileName: string, scheduleName: string, projectId: string) => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -110,6 +111,10 @@ export class GodModeHub {
 
     this.connection.on('OAuthStatusChanged', (profileName: string) => {
       this.callbacks.onOAuthStatusChanged?.(profileName);
+    });
+
+    this.connection.on('ScheduleTriggered', (profileName: string, scheduleName: string, projectId: string) => {
+      this.callbacks.onScheduleTriggered?.(profileName, scheduleName, projectId);
     });
 
     this.connection.onreconnecting(() => this.setState('reconnecting'));
