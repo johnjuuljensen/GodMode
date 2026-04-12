@@ -63,10 +63,12 @@ jobs:
 
           for APP in $APPS; do
             echo -n "  Updating $APP... "
+            # Create a new revision to force image pull (same :latest tag won't re-pull otherwise)
             if az containerapp update \
               --name "$APP" \
               --resource-group "$RG" \
               --image "$IMAGE" \
+              --revision-suffix "build-${GITHUB_RUN_NUMBER:-$(date +%s)}" \
               --output none 2>&1; then
               echo "ok"
               SUCCESS=$((SUCCESS + 1))
