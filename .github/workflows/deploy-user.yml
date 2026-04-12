@@ -51,6 +51,10 @@ jobs:
             exit 1
           fi
 
+      - name: Mask sensitive inputs
+        run: |
+          echo "::add-mask::${{ inputs.anthropic_key }}"
+
       - name: Provision user
         env:
           INPUT_USERNAME: ${{ inputs.username }}
