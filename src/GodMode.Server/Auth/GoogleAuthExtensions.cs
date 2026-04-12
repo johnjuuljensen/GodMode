@@ -33,6 +33,7 @@ public static class GoogleAuthExtensions
                 cookieOptions.Cookie.Name = "GodMode.Auth";
                 cookieOptions.Cookie.SameSite = SameSiteMode.Lax;
                 cookieOptions.Cookie.HttpOnly = true;
+                cookieOptions.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
                 cookieOptions.Events.OnRedirectToLogin = context =>
                 {
                     context.Response.StatusCode = 401;

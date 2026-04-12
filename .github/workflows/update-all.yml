@@ -13,6 +13,9 @@ on:
         default: "latest"
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   update-all:
     name: Roll out to all instances
@@ -29,9 +32,11 @@ jobs:
 
       - name: Get image tag
         id: tag
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+            echo "tag=$INPUT_TAG" >> $GITHUB_OUTPUT
           else
             echo "tag=latest" >> $GITHUB_OUTPUT
           fi

@@ -120,7 +120,7 @@ public class OAuthProxyClient
             {
                 var json = await resp.Content.ReadFromJsonAsync<JsonElement>();
                 var email = json.TryGetProperty("email", out var e) ? e.GetString() : null;
-                _logger.LogInformation("Google tokeninfo returned email: {Email}", email);
+                _logger.LogDebug("Google tokeninfo returned email: {Email}", email);
                 return (email, null);
             }
             var body = await resp.Content.ReadAsStringAsync();
