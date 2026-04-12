@@ -42,8 +42,8 @@ RUN apt-get update && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI
-RUN curl -fsSL https://claude.ai/install.sh | sh && \
+# Install Claude Code CLI (script requires bash, not sh)
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
     echo "Claude installed at: $(which claude)" && \
     claude --version
 
