@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GodMode.AI;
 using GodMode.Shared.Models;
+using Microsoft.Extensions.AI;
 
 namespace GodMode.Server.Services;
 
@@ -75,7 +76,16 @@ public class RootGenerationService
         var userMessage = BuildUserMessage(request);
 
         _logger.LogInformation("Generating root from instruction: {Instruction}", request.Instruction);
-        var response = await _inferenceRouter.GenerateAsync(InferenceTier.Heavy, SystemPrompt, userMessage, ct);
+
+        // Root generation produces multi-file JSON — needs high token limit
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, SystemPrompt),
+            new(ChatRole.User, userMessage)
+        };
+        var options = new ChatOptions { MaxOutputTokens = 8192, Temperature = 0.3f };
+        var chatResponse = await _inferenceRouter.GenerateAsync(InferenceTier.Heavy, messages, options, ct);
+        var response = chatResponse?.Text ?? "";
 
         // Parse the JSON response
         try
