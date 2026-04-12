@@ -1,4 +1,4 @@
-name: Deploy GodMode User
+name: Deploy GodMode User (AWS)
 
 on:
   workflow_dispatch:
@@ -26,16 +26,18 @@ permissions:
 
 jobs:
   provision:
-    name: Provision user server
+    name: Provision on AWS ECS
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Azure Login
-        uses: azure/login@v2
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-1' }}
 
       - name: Validate inputs
         env:
@@ -43,49 +45,31 @@ jobs:
           INPUT_EMAIL: ${{ inputs.email }}
         run: |
           if ! echo "$INPUT_USERNAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,30}$'; then
-            echo "::error::Invalid username. Must be lowercase alphanumeric with hyphens, max 31 chars."
+            echo "::error::Invalid username."
             exit 1
           fi
           if ! echo "$INPUT_EMAIL" | grep -qE '^[^@]+@[^@]+\.[^@]+$'; then
-            echo "::error::Invalid email format."
+            echo "::error::Invalid email."
             exit 1
           fi
-
-      - name: Mask sensitive inputs
-        run: |
-          echo "::add-mask::${{ inputs.anthropic_key }}"
 
       - name: Provision user
         env:
           INPUT_USERNAME: ${{ inputs.username }}
           INPUT_EMAIL: ${{ inputs.email }}
           INPUT_ANTHROPIC_KEY: ${{ inputs.anthropic_key }}
-          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
-          GODMODE_RG: godmode-rg
-          GODMODE_ACA_ENV: godmode-env
-          GODMODE_STORAGE_ACCOUNT: godmodestorage
           GODMODE_IMAGE: ghcr.io/johnjuuljensen/godmode:${{ inputs.image_tag }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-          GHCR_USERNAME: ${{ github.repository_owner }}
+          GODMODE_ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'godmode-cluster' }}
+          GODMODE_EXECUTION_ROLE: ${{ secrets.AWS_EXECUTION_ROLE_ARN }}
+          GODMODE_SUBNET_IDS: ${{ vars.SUBNET_IDS }}
+          GODMODE_SECURITY_GROUP: ${{ vars.SECURITY_GROUP }}
+          GODMODE_SECRET_ARN_GOOGLE_SECRET: ${{ secrets.AWS_SECRET_ARN_GOOGLE }}
+          GODMODE_SECRET_ARN_ANTHROPIC: ${{ secrets.AWS_SECRET_ARN_ANTHROPIC }}
         run: |
-          chmod +x scripts/provision-user.sh
-          ./scripts/provision-user.sh \
+          chmod +x scripts/provision-user-aws.sh
+          ./scripts/provision-user-aws.sh \
             "$INPUT_USERNAME" \
             "$INPUT_EMAIL" \
             "$INPUT_ANTHROPIC_KEY"
-
-      - name: Output deployment URL
-        env:
-          INPUT_USERNAME: ${{ inputs.username }}
-          INPUT_EMAIL: ${{ inputs.email }}
-        run: |
-          FQDN=$(az containerapp show \
-            --name "godmode-$INPUT_USERNAME" \
-            --resource-group godmode-rg \
-            --query "properties.configuration.ingress.fqdn" -o tsv)
-          echo "### Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**User:** $INPUT_EMAIL" >> $GITHUB_STEP_SUMMARY
-          echo "**URL:** https://$FQDN" >> $GITHUB_STEP_SUMMARY
