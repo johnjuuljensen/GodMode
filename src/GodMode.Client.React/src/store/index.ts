@@ -64,6 +64,7 @@ export type ActivePage =
   | { type: 'appSettings' }
   | { type: 'webhookSettings' }
   | { type: 'scheduleSettings' }
+  | { type: 'storageBrowser' }
   | { type: 'addServer' }
   | { type: 'editServer'; serverId: string }
   | { type: 'createProject'; context?: { serverId: string; rootName: string } };

@@ -17,13 +17,15 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     private readonly IManifestExporter _manifestExporter;
     private readonly OAuthTokenStore _oauthTokenStore;
     private readonly ScheduleManager _scheduleManager;
+    private readonly string _projectRootsDir;
     private readonly RootGenerationService? _rootGenerationService;
     private readonly GodModeChatService? _chatService;
     private readonly ILogger<ProjectHub> _logger;
 
     public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
         IManifestParser manifestParser, IManifestExporter manifestExporter,
-        OAuthTokenStore oauthTokenStore, ScheduleManager scheduleManager, ILogger<ProjectHub> logger,
+        OAuthTokenStore oauthTokenStore, ScheduleManager scheduleManager,
+        IConfiguration configuration, ILogger<ProjectHub> logger,
         RootGenerationService? rootGenerationService = null,
         GodModeChatService? chatService = null)
     {
@@ -33,6 +35,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _manifestExporter = manifestExporter;
         _oauthTokenStore = oauthTokenStore;
         _scheduleManager = scheduleManager;
+        _projectRootsDir = Path.GetFullPath(configuration["_projectRootsDir"] ?? "roots");
         _rootGenerationService = rootGenerationService;
         _chatService = chatService;
         _logger = logger;
@@ -487,6 +490,73 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         {
             return null;
         }
+    }
+
+    // ── Storage Browser ──
+
+    private string ResolveSafePath(string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath)) relativePath = ".";
+        if (relativePath.Contains("..") || Path.IsPathRooted(relativePath))
+            throw new HubException("Invalid path");
+        var full = Path.GetFullPath(Path.Combine(_projectRootsDir, relativePath));
+        if (!full.StartsWith(_projectRootsDir, StringComparison.OrdinalIgnoreCase))
+            throw new HubException("Path outside storage root");
+        return full;
+    }
+
+    public Task<StorageEntry[]> BrowseStorage(string path)
+    {
+        var full = ResolveSafePath(path);
+        if (!Directory.Exists(full))
+            return Task.FromResult(Array.Empty<StorageEntry>());
+
+        var entries = new List<StorageEntry>();
+        foreach (var dir in Directory.GetDirectories(full).OrderBy(d => d))
+        {
+            var info = new DirectoryInfo(dir);
+            var rel = Path.GetRelativePath(_projectRootsDir, dir).Replace('\\', '/');
+            entries.Add(new StorageEntry(info.Name, rel, true, 0, info.LastWriteTimeUtc));
+        }
+        foreach (var file in Directory.GetFiles(full).OrderBy(f => f))
+        {
+            var info = new FileInfo(file);
+            var rel = Path.GetRelativePath(_projectRootsDir, file).Replace('\\', '/');
+            entries.Add(new StorageEntry(info.Name, rel, false, info.Length, info.LastWriteTimeUtc));
+        }
+        return Task.FromResult(entries.ToArray());
+    }
+
+    public Task<string> ReadStorageFile(string path)
+    {
+        var full = ResolveSafePath(path);
+        if (!File.Exists(full)) throw new HubException("File not found");
+        if (new FileInfo(full).Length > 1_048_576) throw new HubException("File too large (max 1MB)");
+        return File.ReadAllTextAsync(full);
+    }
+
+    public Task WriteStorageFile(string path, string content)
+    {
+        var full = ResolveSafePath(path);
+        var dir = Path.GetDirectoryName(full);
+        if (dir != null) Directory.CreateDirectory(dir);
+        return File.WriteAllTextAsync(full, content);
+    }
+
+    public Task DeleteStorageEntry(string path)
+    {
+        var full = ResolveSafePath(path);
+        if (File.Exists(full)) File.Delete(full);
+        else if (Directory.Exists(full)) Directory.Delete(full, false);
+        else throw new HubException("Not found");
+        return Task.CompletedTask;
+    }
+
+    public Task CreateStorageDirectory(string path)
+    {
+        var full = ResolveSafePath(path);
+        Directory.CreateDirectory(full);
+        return Task.CompletedTask;
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)

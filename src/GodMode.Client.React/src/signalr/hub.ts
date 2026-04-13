@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, ChatResponseMessage, WebhookInfo, OAuthProviderStatus, ScheduleInfo, ScheduleConfig } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, ChatResponseMessage, WebhookInfo, OAuthProviderStatus, ScheduleInfo, ScheduleConfig, StorageEntry } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -377,6 +377,28 @@ export class GodModeHub {
 
   async toggleSchedule(profileName: string, name: string, enabled: boolean): Promise<ScheduleInfo> {
     return await this.connection!.invoke('ToggleSchedule', profileName, name, enabled);
+  }
+
+  // ── Storage Browser ──
+
+  async browseStorage(path: string): Promise<StorageEntry[]> {
+    return await this.connection!.invoke('BrowseStorage', path);
+  }
+
+  async readStorageFile(path: string): Promise<string> {
+    return await this.connection!.invoke('ReadStorageFile', path);
+  }
+
+  async writeStorageFile(path: string, content: string): Promise<void> {
+    await this.connection!.invoke('WriteStorageFile', path, content);
+  }
+
+  async deleteStorageEntry(path: string): Promise<void> {
+    await this.connection!.invoke('DeleteStorageEntry', path);
+  }
+
+  async createStorageDirectory(path: string): Promise<void> {
+    await this.connection!.invoke('CreateStorageDirectory', path);
   }
 
   // ── Utility ──

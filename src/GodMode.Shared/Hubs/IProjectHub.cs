@@ -285,4 +285,31 @@ public interface IProjectHub
     /// Toggles a schedule's enabled state.
     /// </summary>
     Task<ScheduleInfo> ToggleSchedule(string profileName, string name, bool enabled);
+
+    // ── Storage Browser ──
+
+    /// <summary>
+    /// Lists files and directories at a path relative to ProjectRootsDir.
+    /// </summary>
+    Task<StorageEntry[]> BrowseStorage(string path);
+
+    /// <summary>
+    /// Reads a file's content (text only, max 1MB).
+    /// </summary>
+    Task<string> ReadStorageFile(string path);
+
+    /// <summary>
+    /// Writes content to a file (creates parent dirs if needed).
+    /// </summary>
+    Task WriteStorageFile(string path, string content);
+
+    /// <summary>
+    /// Deletes a file or empty directory.
+    /// </summary>
+    Task DeleteStorageEntry(string path);
+
+    /// <summary>
+    /// Creates a directory.
+    /// </summary>
+    Task CreateStorageDirectory(string path);
 }
