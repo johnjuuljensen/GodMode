@@ -1,112 +1,240 @@
-.root-manager-modal {
-  max-width: 600px;
-  max-height: 85vh;
-  overflow-y: auto;
-}
+/* ── Root Manager ── */
 
-.root-list {
+/* ── Schema field builder ── */
+.root-schema-fields {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
 }
 
-.root-item {
+.root-schema-field {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 6px 8px;
   background: var(--glass);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius);
 }
 
-.root-item-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.root-item-name {
-  font-weight: 600;
-  font-size: 13px;
-  color: var(--text-primary);
-}
-
-.root-item-desc {
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-
-.root-item-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.root-profile-select {
-  height: 28px;
-  padding: 0 8px;
-  background: var(--glass);
+.root-schema-field input[type="text"],
+.root-schema-field select {
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--bg-base);
   border: 1px solid var(--glass-border);
   border-radius: 6px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 11px;
+  outline: none;
+}
+
+.root-schema-field input[type="text"]:focus,
+.root-schema-field select:focus {
+  border-color: var(--accent);
+}
+
+.root-schema-check {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.root-tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 16px;
+.root-schema-check input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.root-schema-remove {
+  padding: 2px 6px;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+.root-schema-remove:hover {
+  color: var(--error);
+  background: var(--error-soft);
+}
+
+/* ── Scripts / Advanced collapsible ── */
+.root-scripts-section {
+  margin: 12px 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.root-scripts-section summary {
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  background: var(--glass);
+  user-select: none;
+}
+
+.root-scripts-section summary:hover {
+  background: var(--hover);
+}
+
+.root-scripts-section[open] summary {
   border-bottom: 1px solid var(--glass-border);
 }
 
-.root-tab {
-  padding: 8px 16px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-tertiary);
+.root-scripts-section .form-group {
+  padding: 0 14px;
+}
+
+.root-scripts-section .form-group:first-of-type {
+  padding-top: 12px;
+}
+
+.root-scripts-section .form-group:last-of-type {
+  padding-bottom: 12px;
+}
+
+/* ── Actions section ── */
+.root-actions-section {
+  margin: 16px 0;
+}
+
+.root-actions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.root-actions-header label {
+  margin-bottom: 0;
+}
+
+.root-action-card {
+  margin-bottom: 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.root-action-card summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
   cursor: pointer;
-  font-size: 13px;
+  background: var(--glass);
+  user-select: none;
 }
 
-.root-tab.active {
+.root-action-card summary:hover {
+  background: var(--hover);
+}
+
+.root-action-card[open] summary {
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.root-action-body {
+  padding: 12px 14px;
+}
+
+.root-action-body .form-group {
+  margin-bottom: 12px;
+}
+
+/* ── Status message ── */
+.root-status {
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--radius);
 }
 
-.root-import-section {
-  border-top: 1px solid var(--glass-border);
-  padding-top: 16px;
-}
-
-.root-import-section h3 {
-  margin: 0 0 12px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.root-create-section {
-  border-top: 1px solid var(--glass-border);
-  padding-top: 16px;
-}
-
-.root-create-section h3 {
-  margin: 0 0 12px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
-.root-empty {
+/* ── ZIP upload dropzone ── */
+.root-zip-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 40px 20px;
+  border: 2px dashed var(--glass-border);
+  border-radius: 12px;
+  cursor: pointer;
   text-align: center;
+  color: var(--text-secondary);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.root-zip-dropzone:hover {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.root-zip-dropzone svg {
   color: var(--text-tertiary);
-  font-size: 13px;
-  padding: 20px 0;
+}
+
+.root-zip-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ── Import preview ── */
+.root-import-preview {
+  margin: 12px 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.root-import-preview-title {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  background: var(--glass);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.root-import-preview-files {
+  padding: 8px 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.root-import-file {
+  padding: 3px 0;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+/* ── Mobile ── */
+@media (max-width: 768px) {
+  .root-schema-field {
+    flex-wrap: wrap;
+  }
+
+  .root-schema-field input[type="text"] {
+    width: 100% !important;
+    flex: none !important;
+  }
 }
