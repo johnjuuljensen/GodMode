@@ -177,6 +177,16 @@ export interface ScheduleInfo {
   NextRunDisplay?: string | null;
 }
 
+// --- Storage Browser ---
+
+export interface StorageEntry {
+  Name: string;
+  Path: string;
+  IsDirectory: boolean;
+  Size: number;
+  ModifiedAt: string;
+}
+
 // --- GodMode Chat (PascalCase from server) ---
 
 export interface ChatResponseMessage {

@@ -12,6 +12,7 @@ import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
 import { WebhookSettings } from './Webhooks/WebhookSettings';
 import { ScheduleSettings } from './Schedules/ScheduleSettings';
+import { StorageBrowser } from './Storage/StorageBrowser';
 import { GodModeChat } from './GodModeChat/GodModeChat';
 import { CONNECTOR_CATALOG } from '../connectors-catalog';
 import type { McpServerConfig } from '../signalr/types';
@@ -37,6 +38,7 @@ function PageContent({ page }: { page: ActivePage }) {
         {page.type === 'appSettings' && <AppSettings />}
         {page.type === 'webhookSettings' && <WebhookSettings />}
         {page.type === 'scheduleSettings' && <ScheduleSettings />}
+        {page.type === 'storageBrowser' && <StorageBrowser />}
         {page.type === 'addServer' && <AddServer />}
         {page.type === 'editServer' && <EditServer serverId={page.serverId} />}
         {page.type === 'createProject' && <CreateProject />}
