@@ -46,9 +46,9 @@ except Exception as e:
 
 # 0. Get workspace ID
 echo "--> Getting workspace..."
-WORKSPACE_RESULT=$(gql "{ me { workspaces { edges { node { id name } } } } }")
+WORKSPACE_RESULT=$(gql "{ me { workspaces { id name } } }")
 echo "    Workspaces: $WORKSPACE_RESULT"
-WORKSPACE_ID=$(echo "$WORKSPACE_RESULT" | extract "data.me.workspaces.edges.0.node.id") || {
+WORKSPACE_ID=$(echo "$WORKSPACE_RESULT" | extract "data.me.workspaces.0.id") || {
   echo "Error getting workspace."
   exit 1
 }
