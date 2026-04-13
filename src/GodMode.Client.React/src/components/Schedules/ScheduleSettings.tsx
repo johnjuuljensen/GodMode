@@ -283,6 +283,7 @@ export function ScheduleSettings() {
   const [formActionName, setFormActionName] = useState('');
   const [formProjectName, setFormProjectName] = useState('');
   const [formPrompt, setFormPrompt] = useState('');
+  const [formReuseProject, setFormReuseProject] = useState(false);
 
   const filteredRoots = roots.filter(r => r.ProfileName === formProfile);
 
@@ -324,6 +325,7 @@ export function ScheduleSettings() {
     setFormActionName('');
     setFormProjectName('');
     setFormPrompt('');
+    setFormReuseProject(false);
     setEditingSchedule(null);
   };
 
@@ -347,6 +349,7 @@ export function ScheduleSettings() {
     const inputs = s.Target?.Inputs as Record<string, unknown> | undefined;
     setFormProjectName((inputs?.name as string) ?? '');
     setFormPrompt((inputs?.prompt as string) ?? '');
+    setFormReuseProject(s.Target?.ReuseProject ?? false);
     setView('edit');
   };
 
@@ -358,6 +361,7 @@ export function ScheduleSettings() {
       RootName: formRootName || null,
       ActionName: formActionName || null,
       Inputs: Object.keys(inputs).length > 0 ? inputs : null,
+      ReuseProject: formReuseProject || undefined,
     };
     return {
       Description: formDescription.trim() || null,
@@ -479,6 +483,18 @@ export function ScheduleSettings() {
             placeholder="What should Claude do when this schedule fires?"
             rows={3} />
           <div className="form-description">The initial prompt for the Claude session. Leave empty to use the root's default.</div>
+        </div>
+
+        <div className="schedule-enabled-row">
+          <Toggle checked={formReuseProject} onChange={setFormReuseProject} />
+          <div>
+            <span className="schedule-enabled-label">Reuse same project</span>
+            <div className="form-description" style={{ marginTop: 2 }}>
+              {formReuseProject
+                ? 'Each trigger reuses the same project folder — no new projects created. Good for recurring checks.'
+                : 'Each trigger creates a new project. Good for daily reports or unique tasks.'}
+            </div>
+          </div>
         </div>
 
         <div className="form-group">

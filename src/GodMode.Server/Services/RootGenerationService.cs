@@ -53,9 +53,33 @@ public class RootGenerationService
         Scripts receive: GODMODE_ROOT_PATH, GODMODE_PROJECT_PATH, GODMODE_PROJECT_ID,
         GODMODE_PROJECT_NAME, GODMODE_RESULT_FILE, and GODMODE_INPUT_* for each form field.
 
+        ## Server deployment constraints
+        Scripts run inside a Docker container on cloud platforms (Azure Container Apps, AWS ECS, Railway).
+        The workspace is mounted from network storage (Azure Files, EFS, etc.). Follow these rules:
+
+        1. **No chmod** — Network-mounted filesystems (Azure Files, NFS) don't support permission changes.
+           Never use `chmod` in scripts. If you must, guard it: `chmod +x file 2>/dev/null || true`
+        2. **No sudo** — The container runs as a non-root user. Never use sudo.
+        3. **No systemd/service commands** — No systemctl, service, etc.
+        4. **No package installation** — Don't use apt-get, yum, brew, etc. The container image is immutable.
+           Only npm/npx are available (Node.js is pre-installed).
+        5. **Portable paths** — Use $GODMODE_PROJECT_PATH, never hardcode paths.
+        6. **No interactive commands** — Scripts run headlessly. No prompts, no editors.
+        7. **Idempotent scripts** — Scripts may run multiple times (project reuse). Use mkdir -p, don't fail if files exist.
+        8. **Keep scripts simple** — Create directories, write template files, initialize git. Don't do complex setups.
+        9. **set -e** — Always start bash scripts with `set -e` to fail fast on errors.
+        10. **mkdir syntax** — Use `mkdir -p dir1 dir2 dir3`, NOT `mkdir -p {dir1,dir2}` (brace expansion is fragile).
+
+        ## claudeArgs rules
+        The `claudeArgs` field in config.json passes extra flags to the Claude Code CLI.
+        - Only use valid Claude Code CLI flags: `--model`, `--verbose`, `--allowedTools`
+        - NEVER use `--mcp` or `--mcp-config` — MCP servers are injected automatically by GodMode
+        - Leave `claudeArgs` as an empty array `[]` unless you have a specific reason
+        - When in doubt, omit the field entirely
+
         ## Cross-platform scripts
-        Provide both .sh (Linux/macOS) and .ps1 (Windows) variants when the root
-        should work cross-platform. The script runner auto-selects by platform.
+        For server deployments, only .sh scripts are needed (servers run Linux).
+        Provide .ps1 variants only if the root is specifically for Windows/local use.
 
         ## Response format
         Return ONLY a JSON object mapping file paths to contents.

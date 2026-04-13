@@ -238,8 +238,11 @@ public class ScheduleManager : IDisposable
 
             // Resolve date placeholders in inputs
             var inputs = ResolveInputPlaceholders(target.Inputs);
-            // Schedules always auto-suffix to avoid folder conflicts
-            inputs["__autoSuffix"] = JsonSerializer.SerializeToElement(true);
+
+            if (target.ReuseProject)
+                inputs["__reuseExisting"] = JsonSerializer.SerializeToElement(true);
+            else
+                inputs["__autoSuffix"] = JsonSerializer.SerializeToElement(true);
 
             if (string.IsNullOrEmpty(target.RootName)) return;
 

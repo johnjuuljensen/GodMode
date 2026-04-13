@@ -158,6 +158,7 @@ export interface ScheduleTarget {
   RootName?: string | null;
   ActionName?: string | null;
   Inputs?: Record<string, unknown> | null;
+  ReuseProject?: boolean;
 }
 
 export interface ScheduleConfig {
