@@ -44,9 +44,19 @@ except Exception as e:
 "
 }
 
+# 0. Get workspace ID
+echo "--> Getting workspace..."
+WORKSPACE_RESULT=$(gql "{ me { workspaces { edges { node { id name } } } } }")
+echo "    Workspaces: $WORKSPACE_RESULT"
+WORKSPACE_ID=$(echo "$WORKSPACE_RESULT" | extract "data.me.workspaces.edges.0.node.id") || {
+  echo "Error getting workspace."
+  exit 1
+}
+echo "  Workspace ID: $WORKSPACE_ID"
+
 # 1. Create project
 echo "--> Creating project: $PROJECT_NAME"
-PROJECT_RESULT=$(gql "mutation { projectCreate(input: { name: \"$PROJECT_NAME\" }) { id } }")
+PROJECT_RESULT=$(gql "mutation { projectCreate(input: { name: \"$PROJECT_NAME\", workspaceId: \"$WORKSPACE_ID\" }) { id } }")
 echo "    API response: $PROJECT_RESULT"
 PROJECT_ID=$(echo "$PROJECT_RESULT" | extract "data.projectCreate.id") || {
   echo "Error creating project."
