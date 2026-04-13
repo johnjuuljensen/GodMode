@@ -19,7 +19,8 @@ public record ScheduleConfig(
 public record ScheduleTarget(
     string? RootName = null,
     string? ActionName = null,
-    Dictionary<string, JsonElement>? Inputs = null);
+    Dictionary<string, JsonElement>? Inputs = null,
+    bool ReuseProject = false);
 
 // ── Schedule info for UI ──
 

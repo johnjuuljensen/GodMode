@@ -111,6 +111,15 @@ public sealed class GodModeChatService
         Scripts receive: GODMODE_ROOT_PATH, GODMODE_PROJECT_PATH, GODMODE_PROJECT_ID,
         GODMODE_PROJECT_NAME, GODMODE_RESULT_FILE, plus GODMODE_INPUT_{FIELD} for each form field.
 
+        ## Server deployment constraints
+        GodMode runs in Docker containers on cloud platforms. Scripts must follow these rules:
+        - No chmod (Azure Files doesn't support it — guard with `2>/dev/null || true`)
+        - No sudo, no apt-get/yum/brew (container is immutable, only Node.js/npm/npx available)
+        - No interactive commands (headless environment)
+        - Use mkdir -p for idempotent directory creation (not brace expansion)
+        - Always start scripts with `set -e`
+        - Only .sh scripts needed (servers run Linux)
+
         Be concise and helpful. Use tools to take action — don't just describe what you would do.
         """;
 
