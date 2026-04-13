@@ -70,6 +70,13 @@ public class RootGenerationService
         9. **set -e** — Always start bash scripts with `set -e` to fail fast on errors.
         10. **mkdir syntax** — Use `mkdir -p dir1 dir2 dir3`, NOT `mkdir -p {dir1,dir2}` (brace expansion is fragile).
 
+        ## claudeArgs rules
+        The `claudeArgs` field in config.json passes extra flags to the Claude Code CLI.
+        - Only use valid Claude Code CLI flags: `--model`, `--verbose`, `--allowedTools`
+        - NEVER use `--mcp` or `--mcp-config` — MCP servers are injected automatically by GodMode
+        - Leave `claudeArgs` as an empty array `[]` unless you have a specific reason
+        - When in doubt, omit the field entirely
+
         ## Cross-platform scripts
         For server deployments, only .sh scripts are needed (servers run Linux).
         Provide .ps1 variants only if the root is specifically for Windows/local use.
