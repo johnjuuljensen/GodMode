@@ -193,24 +193,23 @@ export function CreateProject() {
               {Array.from(rootsByProfile.entries()).map(([profile, profileRoots]) => (
                 <div key={profile}>
                   {rootsByProfile.size > 1 && <div className="root-picker-profile">{profile}</div>}
-                  {profileRoots.map(root => (
-                    <button
-                      key={root.Name}
-                      className="root-picker-card"
-                      onClick={() => selectRoot(root.Name)}
-                    >
-                      <div className="root-picker-card-name">{root.Name}</div>
-                      {root.Description && <div className="root-picker-card-desc">{root.Description}</div>}
-                      {root.Actions && root.Actions.length > 0 && (
-                        <div className="root-picker-card-actions">
-                          {root.Actions.map(a => <span key={a.Name} className="root-picker-action-tag">{a.Name}</span>)}
-                        </div>
-                      )}
-                      {root.ProfileName && rootsByProfile.size > 1 && (
-                        <span className="root-picker-card-profile">{root.ProfileName}</span>
-                      )}
-                    </button>
-                  ))}
+                  <div className="root-picker-cards">
+                    {profileRoots.map(root => (
+                      <button
+                        key={root.Name}
+                        className="root-picker-card"
+                        onClick={() => selectRoot(root.Name)}
+                      >
+                        <div className="root-picker-card-name">{root.Name}</div>
+                        {root.Description && <div className="root-picker-card-desc">{root.Description}</div>}
+                        {root.Actions && root.Actions.length > 1 && (
+                          <div className="root-picker-card-actions">
+                            {root.Actions.map(a => <span key={a.Name} className="root-picker-action-tag">{a.Name}</span>)}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
@@ -233,11 +232,18 @@ export function CreateProject() {
             {actions.length > 1 && (
               <div className="form-group">
                 <label>Action</label>
-                <select value={selectedActionName} onChange={e => setSelectedActionName(e.target.value)}>
+                <div className="action-picker">
                   {actions.map(a => (
-                    <option key={a.Name} value={a.Name}>{a.Name}{a.Description ? ` — ${a.Description}` : ''}</option>
+                    <button
+                      key={a.Name}
+                      className={`action-picker-btn ${selectedActionName === a.Name ? 'active' : ''}`}
+                      onClick={() => setSelectedActionName(a.Name)}
+                    >
+                      <span className="action-picker-name">{a.Name}</span>
+                      {a.Description && <span className="action-picker-desc">{a.Description}</span>}
+                    </button>
                   ))}
-                </select>
+                </div>
               </div>
             )}
 
