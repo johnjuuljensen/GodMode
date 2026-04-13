@@ -508,6 +508,8 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     public Task<StorageEntry[]> BrowseStorage(string path)
     {
         var full = ResolveSafePath(path);
+        _logger.LogInformation("BrowseStorage: path={Path}, resolved={Full}, rootsDir={RootsDir}, exists={Exists}",
+            path, full, _projectRootsDir, Directory.Exists(full));
         if (!Directory.Exists(full))
             return Task.FromResult(Array.Empty<StorageEntry>());
 
