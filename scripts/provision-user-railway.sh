@@ -71,8 +71,10 @@ echo "  Project ID: $PROJECT_ID"
 
 # 2. Get default environment
 ENV_RESULT=$(gql "{ project(id: \"$PROJECT_ID\") { environments { edges { node { id } } } } }")
-ENV_ID=$(echo "$ENV_RESULT" | extract "data.project.environments.edges.0.node.id") || {
-  echo "Error getting environment. Response: $ENV_RESULT"
+echo "    Environments: $ENV_RESULT"
+ENV_ID=$(echo "$ENV_RESULT" | extract "data.project.environments.edges.0.node.id" 2>/dev/null) || \
+ENV_ID=$(echo "$ENV_RESULT" | extract "data.project.environments.0.id" 2>/dev/null) || {
+  echo "Error getting environment."
   exit 1
 }
 echo "  Environment ID: $ENV_ID"
@@ -88,11 +90,13 @@ echo "  Service ID: $SERVICE_ID"
 
 # 4. Set environment variables
 echo "--> Setting environment variables"
-gql "mutation { variableCollectionUpsert(input: { projectId: \"$PROJECT_ID\", environmentId: \"$ENV_ID\", serviceId: \"$SERVICE_ID\", variables: { PORT: \"31337\", Urls: \"http://0.0.0.0:31337\", ProjectRootsDir: \"/app/projects\", Authentication__Google__ClientId: \"$GOOGLE_CLIENT_ID\", Authentication__Google__ClientSecret: \"$GOOGLE_CLIENT_SECRET\", Authentication__Google__AllowedEmail: \"$EMAIL\", ANTHROPIC_API_KEY: \"$ANTHROPIC_KEY\" } }) }" > /dev/null
+ENV_SET_RESULT=$(gql "mutation { variableCollectionUpsert(input: { projectId: \"$PROJECT_ID\", environmentId: \"$ENV_ID\", serviceId: \"$SERVICE_ID\", variables: { PORT: \"31337\", Urls: \"http://0.0.0.0:31337\", ProjectRootsDir: \"/app/projects\", Authentication__Google__ClientId: \"$GOOGLE_CLIENT_ID\", Authentication__Google__ClientSecret: \"$GOOGLE_CLIENT_SECRET\", Authentication__Google__AllowedEmail: \"$EMAIL\", ANTHROPIC_API_KEY: \"$ANTHROPIC_KEY\" } }) }")
+echo "    Env result: $(echo "$ENV_SET_RESULT" | head -c 200)"
 
-# 5. Create volume for persistent workspace
-echo "--> Creating volume for /app/projects"
-gql "mutation { volumeCreate(input: { projectId: \"$PROJECT_ID\", environmentId: \"$ENV_ID\", serviceId: \"$SERVICE_ID\", mountPath: \"/app/projects\" }) { id } }" > /dev/null
+# 5. Create volume for persistent workspace (/app/projects survives deploys)
+echo "--> Creating persistent volume for /app/projects"
+VOLUME_RESULT=$(gql "mutation { volumeCreate(input: { projectId: \"$PROJECT_ID\", environmentId: \"$ENV_ID\", serviceId: \"$SERVICE_ID\", mountPath: \"/app/projects\" }) { id } }")
+echo "    Volume result: $VOLUME_RESULT"
 
 # 6. Generate public domain
 echo "--> Generating public domain"
