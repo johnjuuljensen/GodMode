@@ -18,16 +18,40 @@ echo "==> Provisioning GodMode on Railway for $EMAIL as $PROJECT_NAME"
 
 gql() {
   local query="$1"
-  curl -s -X POST "$API" \
+  local escaped
+  escaped=$(python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" <<< "$query")
+  local response
+  response=$(curl -s -X POST "$API" \
     -H "Authorization: Bearer $RAILWAY_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "{\"query\": $(echo "$query" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')}"
+    -d "{\"query\": $escaped}")
+  echo "$response"
+}
+
+extract() {
+  python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.stdin.read())
+    keys = '$1'.split('.')
+    for k in keys:
+        if isinstance(d, list): d = d[int(k)]
+        else: d = d[k]
+    print(d)
+except Exception as e:
+    print(f'EXTRACT_ERROR: {e}', file=sys.stderr)
+    sys.exit(1)
+"
 }
 
 # 1. Create project
 echo "--> Creating project: $PROJECT_NAME"
 PROJECT_RESULT=$(gql "mutation { projectCreate(input: { name: \"$PROJECT_NAME\" }) { id } }")
-PROJECT_ID=$(echo "$PROJECT_RESULT" | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['data']['projectCreate']['id'])" 2>/dev/null)
+echo "    API response: $PROJECT_RESULT"
+PROJECT_ID=$(echo "$PROJECT_RESULT" | extract "data.projectCreate.id") || {
+  echo "Error creating project."
+  exit 1
+}
 
 if [ -z "$PROJECT_ID" ] || [ "$PROJECT_ID" = "null" ]; then
   echo "Error creating project. Response: $PROJECT_RESULT"
@@ -36,14 +60,20 @@ fi
 echo "  Project ID: $PROJECT_ID"
 
 # 2. Get default environment
-ENV_ID=$(gql "{ project(id: \"$PROJECT_ID\") { environments { edges { node { id } } } } }" \
-  | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['data']['project']['environments']['edges'][0]['node']['id'])")
+ENV_RESULT=$(gql "{ project(id: \"$PROJECT_ID\") { environments { edges { node { id } } } } }")
+ENV_ID=$(echo "$ENV_RESULT" | extract "data.project.environments.edges.0.node.id") || {
+  echo "Error getting environment. Response: $ENV_RESULT"
+  exit 1
+}
 echo "  Environment ID: $ENV_ID"
 
 # 3. Create service from image
 echo "--> Creating service from image: $IMAGE"
-SERVICE_ID=$(gql "mutation { serviceCreate(input: { projectId: \"$PROJECT_ID\", name: \"$SERVICE_NAME\", source: { image: \"$IMAGE\" } }) { id } }" \
-  | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['data']['serviceCreate']['id'])")
+SERVICE_RESULT=$(gql "mutation { serviceCreate(input: { projectId: \"$PROJECT_ID\", name: \"$SERVICE_NAME\", source: { image: \"$IMAGE\" } }) { id } }")
+SERVICE_ID=$(echo "$SERVICE_RESULT" | extract "data.serviceCreate.id") || {
+  echo "Error creating service. Response: $SERVICE_RESULT"
+  exit 1
+}
 echo "  Service ID: $SERVICE_ID"
 
 # 4. Set environment variables
@@ -56,8 +86,8 @@ gql "mutation { volumeCreate(input: { projectId: \"$PROJECT_ID\", environmentId:
 
 # 6. Generate public domain
 echo "--> Generating public domain"
-DOMAIN=$(gql "mutation { serviceDomainCreate(input: { serviceId: \"$SERVICE_ID\", environmentId: \"$ENV_ID\" }) { domain } }" \
-  | python3 -c "import sys,json; print(json.loads(sys.stdin.read())['data']['serviceDomainCreate']['domain'])" 2>/dev/null || echo "unknown")
+DOMAIN_RESULT=$(gql "mutation { serviceDomainCreate(input: { serviceId: \"$SERVICE_ID\", environmentId: \"$ENV_ID\" }) { domain } }")
+DOMAIN=$(echo "$DOMAIN_RESULT" | extract "data.serviceDomainCreate.domain" 2>/dev/null || echo "unknown")
 
 echo ""
 echo "Done!"
