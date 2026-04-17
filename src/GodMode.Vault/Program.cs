@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddSingleton<EncryptionService>();
 builder.Services.AddSingleton<FileSecretStore>();
+builder.Services.AddSingleton<VaultProfileStore>();
 
 // --- Authentication: Cookie + Google + GitHub ---
 

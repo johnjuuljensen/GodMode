@@ -1,6 +1,8 @@
 # GodMode.Vault
 
-A headless, encrypted credentials vault for provisioning GodMode servers. No UI — pure API, Docker-deployable.
+A headless, zero-knowledge credentials vault for provisioning GodMode servers. No UI — pure API, Docker-deployable.
+
+> **Architectural note.** Vault is in the middle of a migration from a server-side-encryption model to a zero-knowledge model where encryption and decryption happen in the user's browser. The `/api/vault/profile` endpoints and the setup/unlock flow described in [provisioning-site.md](./provisioning-site.md) reflect the current code. The `/api/secrets/*` endpoints still accept and return raw bytes, but in the zero-knowledge flow those bytes are client-ciphertext (opaque to Vault). Vault additionally wraps them in HKDF(VMS, user_sub)+AES-GCM as defense in depth — see [Encryption](#encryption).
 
 ## Problem
 
@@ -159,7 +161,40 @@ When registering OAuth apps, configure these callback URLs:
 
 ## API Reference
 
-All endpoints under `/api/secrets` require authentication (Google or GitHub OAuth session).
+All endpoints under `/api/secrets` and `/api/vault` require authentication (Google or GitHub OAuth session).
+
+### Get vault profile
+
+```
+GET /api/vault/profile
+```
+
+Returns the authenticated user's vault setup material, or `{ "initialized": false }` if unset.
+
+```json
+{
+  "initialized": true,
+  "salt": "<base64 16+ bytes>",
+  "passkeyCredentialIds": ["<base64 cred id>", "..."],
+  "wrappedKek": {
+    "passkey": "<base64 blob, optional>",
+    "recoveryCode": "<base64 blob, optional>"
+  },
+  "algVersion": 1
+}
+```
+
+### Put vault profile
+
+```
+PUT /api/vault/profile
+```
+
+Stores (or replaces) the authenticated user's vault profile. Body mirrors the response shape above (minus `initialized`). At least one of `wrappedKek.passkey` or `wrappedKek.recoveryCode` must be present; if `passkey` is present, `passkeyCredentialIds` must be non-empty. `algVersion` must equal the server's current version (currently `1`).
+
+Returns `204 No Content` on success, `400` on validation failure.
+
+
 
 ### Check profile completeness
 
@@ -267,14 +302,22 @@ Profile names and secret names must match `[a-zA-Z0-9_-]+`. Names like `ANTHROPI
 
 ## Encryption
 
-Secrets are encrypted at rest using envelope encryption:
+Vault applies a **server-side wrapper** to every stored blob. This is defense in depth — the primary encryption in the zero-knowledge model happens in the browser (see [provisioning-site.md](./provisioning-site.md)).
 
-1. A **Vault Master Secret** (VMS) is set once at deployment via environment variable
-2. Per-user keys are derived: `KEK = HKDF-SHA256(VMS, user_sub, "godmode-vault")`
-3. Each secret is encrypted with AES-256-GCM using the user's KEK and a random 12-byte nonce
-4. Stored wire format: `[nonce 12B][auth tag 16B][ciphertext]`
+Server-side wrapper:
 
-The user sub is prefixed with the auth provider (`google:123...`, `github:456...`) to prevent cross-provider collisions. This means the same person authenticating via Google and GitHub would have separate encryption keys and separate secret storage.
+1. A **Vault Master Secret** (VMS) is set once at deployment via environment variable.
+2. Per-user keys are derived: `KEK_server = HKDF-SHA256(VMS, user_sub, "godmode-vault")`.
+3. Every blob passed to `PUT /api/secrets/...` is encrypted with AES-256-GCM under `KEK_server` and a random 12-byte nonce before being written to disk. `GET` reverses the operation.
+4. Stored wire format: `[nonce 12B][auth tag 16B][ciphertext]`.
+
+In the zero-knowledge flow the blob coming in is already client-ciphertext, so what sits on disk is double-encrypted. An attacker with only disk access gets neither layer without VMS; an attacker with VMS still only sees the client's ciphertext. Only the browser (holding the client KEK) can recover plaintext.
+
+The user sub is prefixed with the auth provider (`google:123...`, `github:456...`) to prevent cross-provider collisions. This means the same person authenticating via Google and GitHub would have separate server-side keys and separate secret storage.
+
+### Vault Profile
+
+The per-user vault profile lives at `{basePath}/{sanitized_user_sub}/.vault-profile.json` and contains the setup material the browser needs to derive the client-side KEK: a salt, WebAuthn credential IDs, and the wrapped-KEK blobs (AES-GCM ciphertext under keys Vault never sees). The profile file is stored as plain JSON — the wrapped-KEK blobs inside are already encrypted, and the other fields (salt, credential IDs) are not secret. Retrieve and update via `GET`/`PUT /api/vault/profile`.
 
 ## Storage Layout
 

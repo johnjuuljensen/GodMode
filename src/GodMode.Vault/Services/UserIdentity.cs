@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 
 namespace GodMode.Vault.Services;
 
@@ -7,7 +8,7 @@ namespace GodMode.Vault.Services;
 /// Google: "sub" claim from OIDC id_token.
 /// GitHub: "id" claim (numeric user ID, stable across renames).
 /// </summary>
-public static class UserIdentity
+public static partial class UserIdentity
 {
     public static string GetUserSub(ClaimsPrincipal user)
     {
@@ -28,4 +29,11 @@ public static class UserIdentity
         user.FindFirstValue(ClaimTypes.Name)
         ?? user.FindFirstValue(ClaimTypes.Email)
         ?? user.FindFirstValue("login"); // GitHub login name
+
+    /// <summary>Replaces path-unsafe characters in a user sub (e.g. "google:123" → "google_123").</summary>
+    public static string SanitizeSubForPath(string userSub) =>
+        UnsafeSubRegex().Replace(userSub, "_");
+
+    [GeneratedRegex(@"[^a-zA-Z0-9_-]")]
+    private static partial Regex UnsafeSubRegex();
 }

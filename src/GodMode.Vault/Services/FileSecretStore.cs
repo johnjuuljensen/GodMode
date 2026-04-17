@@ -164,12 +164,8 @@ public sealed partial class FileSecretStore
     }
 
     /// <summary>Sanitizes user sub (provider:id) into a safe directory name.</summary>
-    private static string SanitizeSub(string userSub) =>
-        SafeSubRegex().Replace(userSub, "_");
+    private static string SanitizeSub(string userSub) => UserIdentity.SanitizeSubForPath(userSub);
 
     [GeneratedRegex(@"^[a-zA-Z0-9_-]+$")]
     private static partial Regex SafeNameRegex();
-
-    [GeneratedRegex(@"[^a-zA-Z0-9_-]")]
-    private static partial Regex SafeSubRegex();
 }
