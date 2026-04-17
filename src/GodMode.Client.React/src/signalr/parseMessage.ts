@@ -63,6 +63,10 @@ function extractSummary(root: any, type: string, subtype: string | null): string
     const text = root.result ?? '';
     return text.length > MAX_SUMMARY ? text.slice(0, MAX_SUMMARY) + '...' : text;
   }
+  if (type === 'error') {
+    const text = root.error ?? root.message ?? '';
+    return text.length > MAX_SUMMARY ? text.slice(0, MAX_SUMMARY) + '...' : text;
+  }
   return '';
 }
 

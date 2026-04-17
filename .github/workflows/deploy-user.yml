@@ -1,0 +1,91 @@
+name: Deploy GodMode User
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "Username (lowercase, no spaces)"
+        required: true
+        type: string
+      email:
+        description: "User's Google email (AllowedEmail)"
+        required: true
+        type: string
+      anthropic_key:
+        description: "Anthropic API key for this user"
+        required: true
+        type: string
+      image_tag:
+        description: "Docker image tag to deploy"
+        required: false
+        default: "latest"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    name: Provision user server
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Validate inputs
+        env:
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_EMAIL: ${{ inputs.email }}
+        run: |
+          if ! echo "$INPUT_USERNAME" | grep -qE '^[a-z0-9][a-z0-9-]{0,30}$'; then
+            echo "::error::Invalid username. Must be lowercase alphanumeric with hyphens, max 31 chars."
+            exit 1
+          fi
+          if ! echo "$INPUT_EMAIL" | grep -qE '^[^@]+@[^@]+\.[^@]+$'; then
+            echo "::error::Invalid email format."
+            exit 1
+          fi
+
+      - name: Mask sensitive inputs
+        run: |
+          echo "::add-mask::${{ inputs.anthropic_key }}"
+
+      - name: Provision user
+        env:
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_EMAIL: ${{ inputs.email }}
+          INPUT_ANTHROPIC_KEY: ${{ inputs.anthropic_key }}
+          INPUT_IMAGE_TAG: ${{ inputs.image_tag }}
+          GODMODE_RG: godmode-rg
+          GODMODE_ACA_ENV: godmode-env
+          GODMODE_STORAGE_ACCOUNT: godmodestorage
+          GODMODE_IMAGE: ghcr.io/johnjuuljensen/godmode:${{ inputs.image_tag }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+          GHCR_USERNAME: ${{ github.repository_owner }}
+        run: |
+          chmod +x scripts/provision-user.sh
+          ./scripts/provision-user.sh \
+            "$INPUT_USERNAME" \
+            "$INPUT_EMAIL" \
+            "$INPUT_ANTHROPIC_KEY"
+
+      - name: Output deployment URL
+        env:
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_EMAIL: ${{ inputs.email }}
+        run: |
+          FQDN=$(az containerapp show \
+            --name "godmode-$INPUT_USERNAME" \
+            --resource-group godmode-rg \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          echo "### Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**User:** $INPUT_EMAIL" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** https://$FQDN" >> $GITHUB_STEP_SUMMARY

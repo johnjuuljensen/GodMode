@@ -1,66 +1,14 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { getBaseUrl } from '../../services/api';
 import './Auth.css';
 
 interface LoginPageProps {
-  clientId: string;
   error?: string;
-  onLogin: () => void;
 }
 
-export function LoginPage({ clientId, error, onLogin }: LoginPageProps) {
-  const btnRef = useRef<HTMLDivElement>(null);
-  const initialized = useRef(false);
-
-  const handleCredentialResponse = useCallback(async (response: { credential: string }) => {
-    try {
-      const res = await fetch('/api/auth/google/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: response.credential }),
-      });
-
-      if (res.ok) {
-        onLogin();
-      } else {
-        window.location.href = '/?error=access_denied';
-      }
-    } catch {
-      window.location.href = '/?error=network';
-    }
-  }, [onLogin]);
-
-  useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.onload = () => {
-      const google = (window as any).google;
-      if (!google?.accounts?.id) return;
-
-      google.accounts.id.initialize({
-        client_id: clientId,
-        callback: handleCredentialResponse,
-      });
-
-      if (btnRef.current) {
-        google.accounts.id.renderButton(btnRef.current, {
-          type: 'standard',
-          theme: 'outline',
-          size: 'large',
-          text: 'signin_with',
-          width: 300,
-        });
-      }
-    };
-    document.head.appendChild(script);
-
-    return () => {
-      script.remove();
-    };
-  }, [clientId, handleCredentialResponse]);
+export function LoginPage({ error }: LoginPageProps) {
+  const handleLogin = () => {
+    window.location.href = `${getBaseUrl()}/api/oauth/initiate?provider=google&purpose=login`;
+  };
 
   return (
     <div className="auth-page">
@@ -79,13 +27,25 @@ export function LoginPage({ clientId, error, onLogin }: LoginPageProps) {
           <div className="auth-error">
             {error === 'access_denied'
               ? 'Access denied. You are not authorized to sign in.'
+              : error === 'csrf_mismatch'
+              ? 'Session expired. Please try again.'
+              : error === 'relay_failed'
+              ? 'Authentication failed. Please try again.'
               : error === 'network'
               ? 'Network error. Please try again.'
               : 'An error occurred during sign in.'}
           </div>
         )}
 
-        <div ref={btnRef} className="auth-google-container" />
+        <button className="auth-google-btn" onClick={handleLogin}>
+          <svg width="18" height="18" viewBox="0 0 48 48">
+            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+          </svg>
+          Sign in with Google
+        </button>
       </div>
     </div>
   );

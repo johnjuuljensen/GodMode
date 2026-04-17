@@ -1,0 +1,489 @@
+/* ── Connector Catalog Grid ── */
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.catalog-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  text-align: left;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.catalog-card:hover {
+  background: var(--glass-hover);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.catalog-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.catalog-card-logo {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.catalog-card-logo img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  /* Invert for dark mode so dark logos become visible */
+  filter: brightness(0) invert(0.85);
+}
+
+[data-theme="light"] .catalog-card-logo img {
+  filter: brightness(0) invert(0.2);
+}
+
+.catalog-card-title {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.catalog-card-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.catalog-card-badges {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.catalog-card-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Connector Logo in List Items ── */
+.connector-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.connector-logo img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  filter: brightness(0) invert(0.85);
+}
+
+[data-theme="light"] .connector-logo img {
+  filter: brightness(0) invert(0.2);
+}
+
+.connector-logo-placeholder {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  border: 1px solid rgba(94,158,255,0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ── Credential Form ── */
+.connector-setup-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.connector-setup-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.connector-setup-logo img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  filter: brightness(0) invert(0.85);
+}
+
+[data-theme="light"] .connector-setup-logo img {
+  filter: brightness(0) invert(0.2);
+}
+
+.connector-setup-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.connector-setup-info h3 {
+  margin: 0 0 2px;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.connector-setup-info p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.connector-note {
+  padding: 10px 12px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(94,158,255,0.15);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-bottom: 14px;
+}
+
+.field-docs-link {
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: 4px;
+}
+
+.field-docs-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Category headers in catalog ── */
+.catalog-category {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 24px 0 8px;
+}
+
+.catalog-category:first-child {
+  padding-top: 0;
+}
+
+@media (max-width: 768px) {
+  .catalog-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .connector-setup-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .connector-setup-logo {
+    width: 36px;
+    height: 36px;
+  }
+
+  .connector-setup-logo img {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* ── OAuth Section ── */
+.oauth-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.oauth-connected {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+}
+
+.oauth-status-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.oauth-status-badge.connected {
+  color: var(--success, #22c55e);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.oauth-email {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.oauth-connect-btn {
+  width: 100%;
+}
+
+.oauth-badge-connected {
+  color: var(--success, #22c55e) !important;
+  border-color: rgba(34, 197, 94, 0.3) !important;
+}
+
+.oauth-badge-disconnected {
+  color: var(--warning, #f59e0b) !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+}
+
+.settings-item-email {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+/* ── Setup Steps (Prerequisites) ── */
+.setup-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.setup-steps-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.setup-step {
+  padding: 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+}
+
+.setup-step-ok {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.setup-step-missing {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.setup-step-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.setup-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--glass-border-strong);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.setup-step-ok .setup-step-num {
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+}
+
+.setup-step-missing .setup-step-num {
+  background: rgba(245, 158, 11, 0.2);
+  color: #f59e0b;
+}
+
+.setup-step-icon {
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.setup-step-ok .setup-step-icon {
+  color: #22c55e;
+}
+
+.setup-step-missing .setup-step-icon {
+  color: #f59e0b;
+}
+
+.setup-step-checking .setup-step-icon {
+  color: var(--text-tertiary);
+}
+
+.setup-step-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.setup-step-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: 44px;
+  line-height: 1.4;
+}
+
+.setup-step-action {
+  margin-top: 8px;
+  margin-left: 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.setup-step-action-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.setup-step-command {
+  display: block;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  user-select: all;
+  word-break: break-all;
+}
+
+.setup-step-link {
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.setup-step-link:hover {
+  text-decoration: underline;
+}
+
+.setup-step-oauth-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #22c55e;
+  font-weight: 500;
+}
+
+.setup-step-details {
+  margin-top: 8px;
+}
+
+.setup-step-details summary {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.setup-step-details summary:hover {
+  color: var(--text-secondary);
+}
+
+.setup-step-details .setup-step-command {
+  margin-top: 4px;
+}
+
+/* ── Connector Manifest ── */
+.connector-manifest {
+  margin: 12px 0;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.connector-manifest-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--hover);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.connector-manifest-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.connector-manifest-code {
+  margin: 0;
+  padding: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--bg-base);
+  overflow-x: auto;
+  max-height: 200px;
+  overflow-y: auto;
+}

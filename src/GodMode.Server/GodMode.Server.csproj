@@ -18,6 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\GodMode.AI\GodMode.AI.csproj" />
     <ProjectReference Include="..\GodMode.ProjectFiles\GodMode.ProjectFiles.csproj" />
     <ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
   </ItemGroup>
@@ -46,6 +47,7 @@
   <!-- Build React and copy to wwwroot (incremental: skipped when sources unchanged) -->
   <Target Name="BuildReact"
           BeforeTargets="PrepareForBuild"
+          Condition="'$(PublishReactClient)' != 'false'"
           Inputs="@(_ReactSource)"
           Outputs="$(_ReactDir)\dist\index.html">
     <Message Importance="high" Text="Building React client..." />
@@ -55,6 +57,7 @@
   <Target Name="CopyReactToWwwroot"
           DependsOnTargets="BuildReact"
           BeforeTargets="PrepareForBuild"
+          Condition="'$(PublishReactClient)' != 'false'"
           Inputs="$(_ReactDir)\dist\index.html"
           Outputs="wwwroot\index.html">
     <ItemGroup>

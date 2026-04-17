@@ -31,8 +31,31 @@ public class ProjectInfo
     /// </summary>
     public string? ProfileName { get; set; }
 
+    /// <summary>
+    /// Per-project token for the GodMode MCP bridge to authenticate to internal API.
+    /// Generated at creation time, passed as GODMODE_PROJECT_TOKEN env var.
+    /// </summary>
+    public string? ProjectToken { get; set; }
+
+    /// <summary>
+    /// Custom status message set via the MCP bridge (godmode_update_status).
+    /// </summary>
+    public string? CustomStatus { get; set; }
+
     public int ProcessId { get; set; }
     public CancellationTokenSource? ProcessCancellation { get; set; }
 
     public HashSet<string> SubscribedConnections { get; } = new();
 }
+
+/// <summary>MCP bridge request to submit a project result.</summary>
+public record SubmitResultRequest(object? Result, string? Summary);
+
+/// <summary>MCP bridge request to update custom status.</summary>
+public record UpdateStatusRequest(string Message);
+
+/// <summary>MCP bridge request to ask for human review.</summary>
+public record RequestReviewRequest(string Question, string? Context);
+
+/// <summary>Structured result stored per project.</summary>
+public record ProjectResult(object? Result, string? Summary, DateTime StoredAt);

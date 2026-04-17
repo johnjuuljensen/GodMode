@@ -9,12 +9,6 @@
     <PackageVersion Include="Anthropic" Version="12.8.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.6" />
     <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.6" />
-    <PackageVersion Include="Avalonia" Version="11.3.12" />
-    <PackageVersion Include="Avalonia.Android" Version="11.3.12" />
-    <PackageVersion Include="Avalonia.Desktop" Version="11.3.12" />
-    <PackageVersion Include="Avalonia.Fonts.Inter" Version="11.3.12" />
-    <PackageVersion Include="Avalonia.Skia" Version="11.3.12" />
-    <PackageVersion Include="Avalonia.Themes.Fluent" Version="11.3.12" />
     <PackageVersion Include="AWSSDK.DynamoDBv2" Version="3.7.400" />
     <PackageVersion Include="AWSSDK.SecretsManager" Version="3.7.400" />
     <PackageVersion Include="CliWrap" Version="3.10.0" />
@@ -33,20 +27,13 @@
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Debug" Version="10.0.3" />
-    <PackageVersion Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.2" />
-    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.12.1" />
-    <PackageVersion Include="Microsoft.ML.OnnxRuntimeGenAI.DirectML" Version="0.12.1" />
-    <PackageVersion Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="1.0.0" />
     <PackageVersion Include="Octokit" Version="14.0.0" />
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="Serilog.Sinks.File" Version="7.0.0" />
-    <PackageVersion Include="SkiaSharp" Version="3.119.2" />
     <PackageVersion Include="System.Reactive" Version="6.1.0" />
     <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="9.0.4" />
     <PackageVersion Include="TypedSignalR.Client" Version="3.6.0" />
-    <PackageVersion Include="Whisper.net" Version="1.9.0" />
-    <PackageVersion Include="Whisper.net.Runtime" Version="1.9.0" />
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

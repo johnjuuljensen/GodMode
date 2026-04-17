@@ -1,12 +1,21 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useAppStore } from '../store';
-import { Sidebar } from './Sidebar/Sidebar';
+import { useEffect, useRef, useState } from 'react';
+import { useAppStore, type ActivePage } from '../store';
+import { Sidebar, SidebarHeader, SidebarFooter } from './Sidebar/Sidebar';
 import { ProjectView } from './Project/ProjectView';
 import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
-import { isMaui, openDevTools } from '../services/hostApi';
+import { McpConfigPanel } from './Mcp/McpConfigPanel';
+import { RootManager } from './Roots/RootManager';
+import { ProfileSettings } from './Profiles/ProfileSettings';
+import { AppSettings } from './AppSettings';
+import { WebhookSettings } from './Webhooks/WebhookSettings';
+import { ScheduleSettings } from './Schedules/ScheduleSettings';
+import { StorageBrowser } from './Storage/StorageBrowser';
+import { GodModeChat } from './GodModeChat/GodModeChat';
+import { CONNECTOR_CATALOG } from '../connectors-catalog';
+import type { McpServerConfig } from '../signalr/types';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -15,84 +24,166 @@ function getInitialTheme(): 'dark' | 'light' {
   return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
+function PageContent({ page }: { page: ActivePage }) {
+  const closePage = useAppStore(s => s.closePage);
+  return (
+    <div className="page-view">
+      <div className="page-back-bar">
+        <button className="btn btn-secondary btn-sm" onClick={closePage}>← Back</button>
+      </div>
+      <div className="page-body">
+        {page.type === 'mcpConfig' && <McpConfigPanel />}
+        {page.type === 'rootManager' && <RootManager />}
+        {page.type === 'profileSettings' && <ProfileSettings />}
+        {page.type === 'appSettings' && <AppSettings />}
+        {page.type === 'webhookSettings' && <WebhookSettings />}
+        {page.type === 'scheduleSettings' && <ScheduleSettings />}
+        {page.type === 'storageBrowser' && <StorageBrowser />}
+        {page.type === 'addServer' && <AddServer />}
+        {page.type === 'editServer' && <EditServer serverId={page.serverId} />}
+        {page.type === 'createProject' && <CreateProject />}
+      </div>
+    </div>
+  );
+}
+
 export function Shell() {
   const selectedProject = useAppStore(s => s.selectedProject);
-  const showAddServer = useAppStore(s => s.showAddServer);
-  const editServerId = useAppStore(s => s.editServerId);
-  const showCreateProject = useAppStore(s => s.showCreateProject);
   const isTileView = useAppStore(s => s.isTileView);
-  const setTileView = useAppStore(s => s.setTileView);
   const clearSelection = useAppStore(s => s.clearSelection);
-  const totalWaitingCount = useAppStore(s => s.totalWaitingCount);
-  const profileFilter = useAppStore(s => s.profileFilter);
-  const setProfileFilter = useAppStore(s => s.setProfileFilter);
-  const profileFilterOptions = useAppStore(s => s.profileFilterOptions);
+  const showGodModeChat = useAppStore(s => s.showGodModeChat);
+  const activePage = useAppStore(s => s.activePage);
+  const isMobile = useAppStore(s => s.isMobile);
+  const setIsMobile = useAppStore(s => s.setIsMobile);
 
-  const showProfileFilter = profileFilterOptions.length > 2;
-
-  const [theme, setTheme] = useState<'dark' | 'light'>(getInitialTheme);
+  const [theme] = useState<'dark' | 'light'>(getInitialTheme);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('godmode-theme', theme);
   }, [theme]);
 
-  const toggleTheme = useCallback(() => setTheme(t => t === 'dark' ? 'light' : 'dark'), []);
+  // Mobile detection
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [setIsMobile]);
+
+  // Handle OAuth connector redirect: auto-add the pending MCP connector
+  const oauthHandled = useRef(false);
+  const serverConnections = useAppStore(s => s.serverConnections);
+  const setActivePage = useAppStore(s => s.setActivePage);
+  useEffect(() => {
+    if (oauthHandled.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const oauthSuccess = params.get('oauthSuccess');
+    if (!oauthSuccess) return;
+
+    const conn = serverConnections.find(c => c.connectionState === 'connected');
+    if (!conn?.hub) return;
+
+    oauthHandled.current = true;
+    window.history.replaceState({}, '', window.location.pathname);
+
+    const raw = sessionStorage.getItem('oauth-pending-connector');
+    sessionStorage.removeItem('oauth-pending-connector');
+
+    // Navigate to connectors page so user sees the result
+    setActivePage({ type: 'mcpConfig' });
+
+    if (!raw) return;
+
+    try {
+      const { connectorId, profileName } = JSON.parse(raw) as { connectorId: string; profileName: string };
+      const catalog = CONNECTOR_CATALOG.find(c => c.id === connectorId);
+      if (!catalog?.config.url) return;
+
+      const config: McpServerConfig = { Url: catalog.config.url };
+      conn.hub.addMcpServer(catalog.id, config, 'profile', profileName)
+        .then(() => console.info(`[oauth] Auto-added ${catalog.id} to profile ${profileName}`))
+        .catch(e => console.error('[oauth] Failed to auto-add connector:', e));
+    } catch { /* ignore */ }
+  }, [serverConnections, setActivePage]);
 
   const isTileFullscreen = isTileView && selectedProject !== null;
 
-  return (
-    <div className="shell">
-      {!isTileView && (
-        <div className="shell-sidebar">
-          <Sidebar />
-        </div>
-      )}
-      <div className="shell-content">
-        <div className="shell-header">
-          <div className="shell-header-left">
-            {isTileFullscreen && (
-              <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Tiles</button>
-            )}
-            {totalWaitingCount > 0 && (
-              <div className="shell-badge">
-                <span className="shell-badge-dot" />
-                <span className="shell-badge-text">{totalWaitingCount} waiting</span>
-              </div>
-            )}
-          </div>
-          <div className="shell-header-right">
-            {showProfileFilter && (
-              <select className="shell-profile-filter" value={profileFilter} onChange={e => setProfileFilter(e.target.value)}>
-                {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
-              </select>
-            )}
-            <button className="shell-theme-toggle" onClick={toggleTheme} title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
-              {theme === 'dark' ? '☀' : '☾'}
-            </button>
-            <button className="shell-view-toggle" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
-              {isTileView ? '☰' : '⊞'}
-            </button>
-            {isMaui && (
-              <button className="shell-view-toggle" onClick={() => openDevTools()} title="Open DevTools">
-                {'{ }'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {isTileView && !isTileFullscreen ? (
-          <TileGrid />
+  // ── Mobile layout ──
+  if (isMobile) {
+    return (
+      <div className="shell shell-mobile">
+        {activePage ? (
+          <PageContent page={activePage} />
         ) : selectedProject ? (
-          <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
+          <div className="shell-mobile-project">
+            <div className="page-back-bar">
+              <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Back</button>
+            </div>
+            <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
+          </div>
+        ) : showGodModeChat ? (
+          <GodModeChat />
+        ) : isTileView ? (
+          <div className="shell-mobile-tiles">
+            <SidebarHeader />
+            <TileGrid />
+            <SidebarFooter />
+          </div>
         ) : (
-          <div className="shell-empty"><p>Select a project from the sidebar</p></div>
+          <Sidebar />
         )}
       </div>
+    );
+  }
 
-      {showAddServer && <AddServer />}
-      {editServerId !== null && <EditServer serverId={editServerId} />}
-      {showCreateProject && <CreateProject />}
+  // ── Desktop layout ──
+  return (
+    <div className={`shell ${isTileView ? 'shell-tile-mode' : ''}`}>
+      {!isTileView ? (
+        <>
+          <div className="shell-sidebar">
+            <Sidebar />
+          </div>
+          <div className="shell-content">
+            {activePage ? (
+              <PageContent page={activePage} />
+            ) : showGodModeChat ? (
+              <GodModeChat />
+            ) : selectedProject ? (
+              <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
+            ) : (
+              <div className="shell-empty"><p>Select a project from the sidebar</p></div>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <SidebarHeader />
+          <div className="shell-content">
+            {activePage ? (
+              <PageContent page={activePage} />
+            ) : (
+              <>
+                {isTileFullscreen && (
+                  <div className="shell-back-bar">
+                    <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Tiles</button>
+                  </div>
+                )}
+                {showGodModeChat ? (
+                  <GodModeChat />
+                ) : isTileFullscreen ? (
+                  <ProjectView serverId={selectedProject!.serverId} projectId={selectedProject!.projectId} />
+                ) : (
+                  <TileGrid />
+                )}
+              </>
+            )}
+          </div>
+          <SidebarFooter />
+        </>
+      )}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '../../store';
 import type { ProjectRootInfo } from '../../signalr/types';
+import '../settings-common.css';
 import './CreateProject.css';
 
 interface FormField {
@@ -47,8 +48,10 @@ const MODEL_OPTIONS = ['opus', 'sonnet', 'haiku'];
 
 export function CreateProject() {
   const serverConnections = useAppStore(s => s.serverConnections);
-  const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
-  const createProjectContext = useAppStore(s => s.createProjectContext);
+  const closePage = useAppStore(s => s.closePage);
+  const activePage = useAppStore(s => s.activePage);
+  const createProjectContext = activePage?.type === 'createProject' ? activePage.context ?? null : null;
+  const profileFilter = useAppStore(s => s.profileFilter);
 
   const connectedServers = useMemo(
     () => serverConnections.filter(c => c.connectionState === 'connected' && c.roots.length > 0),
@@ -57,6 +60,8 @@ export function CreateProject() {
 
   const defaultServerId = createProjectContext?.serverId ?? connectedServers[0]?.serverInfo.Id ?? '';
   const [selectedServerId, setSelectedServerId] = useState<string>(defaultServerId);
+  // Step 1: root picker, Step 2: project form
+  const [step, setStep] = useState<1 | 2>(createProjectContext?.rootName ? 2 : 1);
   const [selectedRootName, setSelectedRootName] = useState(createProjectContext?.rootName ?? '');
   const [selectedActionName, setSelectedActionName] = useState('');
   const [selectedModel, setSelectedModel] = useState('opus');
@@ -65,7 +70,13 @@ export function CreateProject() {
   const [error, setError] = useState<string | null>(null);
 
   const server = connectedServers.find(c => c.serverInfo.Id === selectedServerId);
-  const roots = server?.roots ?? [];
+  const allRoots = server?.roots ?? [];
+
+  // Filter roots by active profile filter
+  const roots = useMemo(() => {
+    if (profileFilter === 'All') return allRoots;
+    return allRoots.filter(r => (r.ProfileName ?? 'Default').toLowerCase() === profileFilter.toLowerCase());
+  }, [allRoots, profileFilter]);
 
   const rootsByProfile = useMemo(() => {
     const groups = new Map<string, ProjectRootInfo[]>();
@@ -81,11 +92,6 @@ export function CreateProject() {
   const actions = selectedRoot?.Actions ?? [];
   const selectedAction = actions.find(a => a.Name === selectedActionName) ?? null;
   const formFields = useMemo(() => selectedAction?.InputSchema ? parseFormFields(selectedAction.InputSchema) : [], [selectedAction]);
-
-  useEffect(() => {
-    if (roots.length > 0 && !roots.find(r => r.Name === selectedRootName))
-      setSelectedRootName(roots[0].Name);
-  }, [roots, selectedRootName]);
 
   useEffect(() => {
     if (actions.length > 0 && !actions.find(a => a.Name === selectedActionName))
@@ -107,6 +113,11 @@ export function CreateProject() {
     setFormValues(prev => ({ ...prev, [key]: value }));
   }, []);
 
+  const selectRoot = useCallback((rootName: string) => {
+    setSelectedRootName(rootName);
+    setStep(2);
+  }, []);
+
   const handleCreate = async () => {
     if (!server || !selectedRoot) return;
     for (const field of formFields) {
@@ -118,108 +129,161 @@ export function CreateProject() {
 
     setCreating(true);
     setError(null);
+    const profileName = selectedRoot.ProfileName ?? 'Default';
+    const inputs: Record<string, unknown> = { model: selectedModel };
+    for (const field of formFields) {
+      const val = formValues[field.key];
+      if (field.fieldType === 'boolean') inputs[field.key] = val === 'true';
+      else if (val) inputs[field.key] = val;
+    }
     try {
-      const profileName = selectedRoot.ProfileName ?? 'Default';
-      const inputs: Record<string, unknown> = { model: selectedModel };
-      for (const field of formFields) {
-        const val = formValues[field.key];
-        if (field.fieldType === 'boolean') inputs[field.key] = val === 'true';
-        else if (val) inputs[field.key] = val;
-      }
       await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs);
-      setShowCreateProject(false);
+      closePage();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create project');
+      const msg = err instanceof Error ? err.message : 'Failed to create project';
+      if (msg.includes('FOLDER_EXISTS:')) {
+        // Project folder already exists — ask user what to do
+        const choice = confirm(
+          'A project with this name already exists.\n\nOK = Reuse existing folder\nCancel = Create new with suffix (_2, _3, ...)'
+        );
+        try {
+          if (choice) {
+            inputs.__reuseExisting = true;
+          } else {
+            inputs.__autoSuffix = true;
+          }
+          await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs);
+          closePage();
+        } catch (retryErr) {
+          setError(retryErr instanceof Error ? retryErr.message : 'Failed to create project');
+        }
+      } else {
+        setError(msg);
+      }
     } finally {
       setCreating(false);
     }
   };
 
+  // Auto-advance to step 2 if only one root
+  useEffect(() => {
+    if (step === 1 && roots.length === 1) selectRoot(roots[0].Name);
+  }, [step, roots, selectRoot]);
+
   return (
-    <div className="modal-overlay" onClick={() => !creating && setShowCreateProject(false)}>
-      <div className="modal create-project-modal" onClick={e => e.stopPropagation()}>
-        <h2>New Project</h2>
+    <>
+      {step === 1 ? (
+          <>
+            <div className="settings-header"><h2>Choose Root</h2></div>
 
-        {connectedServers.length > 1 && (
-          <div className="form-group">
-            <label>Server</label>
-            <select value={selectedServerId} onChange={e => setSelectedServerId(e.target.value)}>
-              {connectedServers.map(c => (
-                <option key={c.serverInfo.Id} value={c.serverInfo.Id}>
-                  {c.serverInfo.Name || c.serverInfo.Url}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div className="form-group">
-          <label>Project Root</label>
-          <select value={selectedRootName} onChange={e => setSelectedRootName(e.target.value)}>
-            {rootsByProfile.size <= 1 ? (
-              roots.map(r => (
-                <option key={r.Name} value={r.Name}>{r.Name}{r.Description ? ` — ${r.Description}` : ''}</option>
-              ))
-            ) : (
-              Array.from(rootsByProfile.entries()).map(([profile, profileRoots]) => (
-                <optgroup key={profile} label={profile}>
-                  {profileRoots.map(r => (
-                    <option key={r.Name} value={r.Name}>{r.Name}{r.Description ? ` — ${r.Description}` : ''}</option>
+            {connectedServers.length > 1 && (
+              <div className="form-group">
+                <label>Server</label>
+                <select value={selectedServerId} onChange={e => setSelectedServerId(e.target.value)}>
+                  {connectedServers.map(c => (
+                    <option key={c.serverInfo.Id} value={c.serverInfo.Id}>
+                      {c.serverInfo.Name || c.serverInfo.Url}
+                    </option>
                   ))}
-                </optgroup>
-              ))
+                </select>
+              </div>
             )}
-          </select>
-        </div>
 
-        {actions.length > 1 && (
-          <div className="form-group">
-            <label>Action</label>
-            <select value={selectedActionName} onChange={e => setSelectedActionName(e.target.value)}>
-              {actions.map(a => (
-                <option key={a.Name} value={a.Name}>{a.Name}{a.Description ? ` — ${a.Description}` : ''}</option>
+            <div className="root-picker-grid">
+              {Array.from(rootsByProfile.entries()).map(([profile, profileRoots]) => (
+                <div key={profile}>
+                  {rootsByProfile.size > 1 && <div className="root-picker-profile">{profile}</div>}
+                  <div className="root-picker-cards">
+                    {profileRoots.map(root => (
+                      <button
+                        key={root.Name}
+                        className="root-picker-card"
+                        onClick={() => selectRoot(root.Name)}
+                      >
+                        <div className="root-picker-card-name">{root.Name}</div>
+                        {root.Description && <div className="root-picker-card-desc">{root.Description}</div>}
+                        {root.Actions && root.Actions.length > 1 && (
+                          <div className="root-picker-card-actions">
+                            {root.Actions.map(a => <span key={a.Name} className="root-picker-action-tag">{a.Name}</span>)}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ))}
-            </select>
-          </div>
-        )}
+            </div>
 
-        <div className="form-group">
-          <label>Model</label>
-          <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}>
-            {MODEL_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
+          </>
+        ) : (
+          <>
+            <div className="settings-header"><h2>New Project</h2></div>
 
-        {formFields.map(field => (
-          <div className="form-group" key={field.key}>
-            <label>{field.title}{field.isRequired && <span className="form-required">*</span>}</label>
-            {field.description && <div className="form-description">{field.description}</div>}
-            {field.fieldType === 'boolean' ? (
-              <label className="form-toggle">
-                <input type="checkbox" checked={formValues[field.key] === 'true'} onChange={e => setFieldValue(field.key, e.target.checked ? 'true' : 'false')} />
-                <span>{formValues[field.key] === 'true' ? 'Yes' : 'No'}</span>
-              </label>
-            ) : field.fieldType === 'enum' ? (
-              <select value={formValues[field.key] ?? ''} onChange={e => setFieldValue(field.key, e.target.value)}>
-                {field.enumOptions?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-              </select>
-            ) : field.fieldType === 'multiline' ? (
-              <textarea className="form-textarea" value={formValues[field.key] ?? ''} onChange={e => setFieldValue(field.key, e.target.value)} rows={5} />
-            ) : (
-              <input type="text" value={formValues[field.key] ?? ''} onChange={e => setFieldValue(field.key, e.target.value)} />
+            <div className="form-group">
+              <label>Root</label>
+              <div className="selected-root-header">
+                <span className="selected-root-name">{selectedRoot?.Name}</span>
+                {roots.length > 1 && (
+                  <button className="btn btn-secondary btn-sm" onClick={() => setStep(1)}>Change</button>
+                )}
+              </div>
+            </div>
+
+            {actions.length > 1 && (
+              <div className="form-group">
+                <label>Action</label>
+                <div className="action-picker">
+                  {actions.map(a => (
+                    <button
+                      key={a.Name}
+                      className={`action-picker-btn ${selectedActionName === a.Name ? 'active' : ''}`}
+                      onClick={() => setSelectedActionName(a.Name)}
+                    >
+                      <span className="action-picker-name">{a.Name}</span>
+                      {a.Description && <span className="action-picker-desc">{a.Description}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-          </div>
-        ))}
 
-        {error && <div className="form-error">{error}</div>}
+            <div className="form-group">
+              <label>Model</label>
+              <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}>
+                {MODEL_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
 
-        <div className="btn-group">
-          <button className="btn btn-primary" onClick={handleCreate} disabled={creating || !selectedRoot}>
-            {creating ? 'Creating...' : 'Create'}
-          </button>
-          <button className="btn btn-secondary" onClick={() => setShowCreateProject(false)} disabled={creating}>Cancel</button>
-        </div>
-      </div>
-    </div>
+            {formFields.map(field => (
+              <div className="form-group" key={field.key}>
+                <label>{field.title}{field.isRequired && <span className="form-required">*</span>}</label>
+                {field.description && <div className="form-description">{field.description}</div>}
+                {field.fieldType === 'boolean' ? (
+                  <label className="form-toggle">
+                    <input type="checkbox" checked={formValues[field.key] === 'true'} onChange={e => setFieldValue(field.key, e.target.checked ? 'true' : 'false')} />
+                    <span>{formValues[field.key] === 'true' ? 'Yes' : 'No'}</span>
+                  </label>
+                ) : field.fieldType === 'enum' ? (
+                  <select value={formValues[field.key] ?? ''} onChange={e => setFieldValue(field.key, e.target.value)}>
+                    {field.enumOptions?.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                  </select>
+                ) : field.fieldType === 'multiline' ? (
+                  <textarea className="form-textarea" value={formValues[field.key] ?? ''} onChange={e => setFieldValue(field.key, e.target.value)} rows={5} />
+                ) : (
+                  <input type="text" value={formValues[field.key] ?? ''} onChange={e => setFieldValue(field.key, e.target.value)} />
+                )}
+              </div>
+            ))}
+
+            {error && <div className="form-error">{error}</div>}
+
+            <div className="btn-group">
+              <button className="btn btn-primary" onClick={handleCreate} disabled={creating || !selectedRoot}>
+                {creating ? 'Creating...' : 'Create'}
+              </button>
+            </div>
+          </>
+        )}
+    </>
   );
 }

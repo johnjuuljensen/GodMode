@@ -1,0 +1,306 @@
+/* ── Storage Browser ── */
+
+.storage-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.storage-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.storage-action-btn:hover {
+  background: var(--hover);
+  border-color: var(--text-tertiary);
+  color: var(--text-primary);
+}
+
+.storage-upload-btn {
+  cursor: pointer;
+}
+
+/* ── Filter pills ── */
+.storage-filter-bar {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  margin-bottom: 12px;
+}
+
+.storage-filter-btn {
+  padding: 5px 14px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  background: transparent;
+  border: none;
+  border-radius: 16px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.storage-filter-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.storage-filter-btn.active {
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3);
+}
+
+.storage-breadcrumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 8px 0 12px;
+  font-size: 12px;
+}
+
+.storage-breadcrumb {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.storage-breadcrumb:hover {
+  background: var(--hover);
+}
+
+.storage-breadcrumb-sep {
+  color: var(--text-tertiary);
+  margin: 0 2px;
+}
+
+.storage-level-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: 8px;
+  font-style: italic;
+}
+
+.storage-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.storage-badge-root {
+  background: rgba(99, 102, 241, 0.15);
+  color: var(--accent);
+}
+
+.storage-badge-project {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--success);
+}
+
+.storage-new-dir {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: var(--glass);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.storage-new-dir input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: var(--bg-base);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  outline: none;
+}
+
+.storage-new-dir input:focus {
+  border-color: var(--accent);
+}
+
+.storage-new-cancel {
+  padding: 4px;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.storage-new-cancel:hover {
+  color: var(--text-primary);
+  background: var(--hover);
+}
+
+/* ── File/folder list ── */
+
+.storage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.storage-entry {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius);
+}
+
+.storage-entry:hover {
+  background: var(--hover);
+}
+
+.storage-entry-up {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.storage-entry-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+
+.storage-entry-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.storage-entry-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.storage-entry-action {
+  padding: 6px;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.storage-entry-action:hover {
+  color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.storage-entry-action-danger:hover {
+  color: var(--error);
+  background: var(--error-soft);
+}
+
+/* ── File editor ── */
+
+.storage-file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 12px;
+}
+
+.storage-file-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.storage-file-path {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+.storage-file-actions {
+  margin-left: auto;
+}
+
+.storage-editor {
+  width: 100%;
+  min-height: 400px;
+  padding: 12px;
+  background: var(--bg-base);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.storage-editor:focus {
+  border-color: var(--accent);
+}
+
+.storage-up-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  margin-bottom: 8px;
+}

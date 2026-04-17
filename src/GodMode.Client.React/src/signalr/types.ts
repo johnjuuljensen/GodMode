@@ -7,6 +7,7 @@
 
 export type ProjectState = 'Idle' | 'Running' | 'WaitingInput' | 'Error' | 'Stopped';
 export type ServerState = 'Running' | 'Stopped' | 'Starting' | 'Stopping' | 'Unknown';
+export type ChatResponseType = 'Text' | 'ToolCall' | 'ToolResult' | 'Error';
 
 // --- Models (PascalCase properties matching server serialization) ---
 
@@ -83,6 +84,116 @@ export interface ServerInfo {
   State: ServerState;
   Url?: string | null;
   Description?: string | null;
+}
+
+// --- MCP Server Configuration ---
+
+export interface McpServerConfig {
+  Command?: string | null;
+  Args?: string[] | null;
+  Env?: Record<string, string> | null;
+  Url?: string | null;
+  Headers?: Record<string, string> | null;
+}
+
+// --- Root Management ---
+
+export interface RootPreview {
+  Files: Record<string, string>;
+  ValidationError?: string | null;
+}
+
+export interface RootManifest {
+  Name: string;
+  Description?: string | null;
+  Author?: string | null;
+  Version?: string | null;
+  ExportedAt?: string | null;
+  ScriptHashes?: Record<string, string> | null;
+}
+
+export interface SharedRootPreview {
+  Manifest: RootManifest;
+  Preview: RootPreview;
+  Source?: string | null;
+}
+
+export interface RootSourceInfo {
+  Git?: string | null;
+  Ref?: string | null;
+  Path?: string | null;
+  InstalledAt: string;
+  Version?: string | null;
+}
+
+// --- OAuth (PascalCase from server) ---
+
+export interface OAuthProviderStatus {
+  Connected: boolean;
+  ExpiresAt?: string | null;
+  Email?: string | null;
+}
+
+// --- Webhooks (PascalCase from server) ---
+
+export interface WebhookInfo {
+  Keyword: string;
+  ProfileName: string;
+  RootName: string;
+  ActionName?: string | null;
+  Description?: string | null;
+  Enabled: boolean;
+  TokenPrefix?: string | null;
+}
+
+export interface WebhookResult {
+  ProjectId: string;
+  ProjectName: string;
+  Status: string;
+}
+
+// --- Schedules (PascalCase from server) ---
+
+export interface ScheduleTarget {
+  RootName?: string | null;
+  ActionName?: string | null;
+  Inputs?: Record<string, unknown> | null;
+  ReuseProject?: boolean;
+}
+
+export interface ScheduleConfig {
+  Description?: string | null;
+  Enabled: boolean;
+  Cron: string;
+  Target?: ScheduleTarget | null;
+}
+
+export interface ScheduleInfo {
+  Name: string;
+  ProfileName: string;
+  Description?: string | null;
+  Enabled: boolean;
+  Cron: string;
+  Target?: ScheduleTarget | null;
+  NextRunDisplay?: string | null;
+}
+
+// --- Storage Browser ---
+
+export interface StorageEntry {
+  Name: string;
+  Path: string;
+  IsDirectory: boolean;
+  Size: number;
+  ModifiedAt: string;
+}
+
+// --- GodMode Chat (PascalCase from server) ---
+
+export interface ChatResponseMessage {
+  Type: ChatResponseType;
+  Content: string;
+  ToolName?: string | null;
 }
 
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---

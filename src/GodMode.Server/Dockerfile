@@ -32,19 +32,36 @@ COPY --from=react-build /app/dist /app/publish/wwwroot/
 # ── Runtime ──
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 
-RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
+# Create non-root user (Claude CLI refuses --dangerously-skip-permissions as root)
+RUN groupadd -r godmode && useradd -r -g godmode -m -d /home/godmode godmode
 
-# Install Claude Code CLI
-RUN curl -fsSL https://claude.ai/install.sh | sh || true
+ENV HOME=/home/godmode
+ENV PATH="/home/godmode/.local/bin:/home/godmode/.claude/local/bin:${PATH}"
 
+# Install system deps + Node.js (needed for npx MCP servers)
+RUN apt-get update && \
+    apt-get install -y git curl bash && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI as the non-root user
+USER godmode
+RUN curl -fsSL https://claude.ai/install.sh | bash && \
+    echo "Claude installed at: $(which claude)" && \
+    claude --version
+
+# Switch back to root for file operations, then drop to godmode
+USER root
 WORKDIR /app
 COPY --from=dotnet-build /app/publish .
 
-RUN mkdir -p /app/projects /data
+RUN mkdir -p /app/projects /data && \
+    chown -R godmode:godmode /app/projects /data /app
 
 EXPOSE 31337
 
 ENV ASPNETCORE_URLS=http://+:31337
-ENV HOME=/root
 
+USER godmode
 ENTRYPOINT ["dotnet", "GodMode.Server.dll"]

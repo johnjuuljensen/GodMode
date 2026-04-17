@@ -8,6 +8,11 @@ namespace GodMode.Server.Services;
 public delegate Task OutputReceivedHandler(ProjectInfo project, string jsonLine);
 
 /// <summary>
+/// Callback invoked when a Claude process exits.
+/// </summary>
+public delegate Task ProcessExitedHandler(ProjectInfo project, int exitCode);
+
+/// <summary>
 /// Interface for managing Claude Code processes.
 /// </summary>
 public interface IClaudeProcessManager
@@ -16,6 +21,11 @@ public interface IClaudeProcessManager
     /// Event raised when a Claude process produces output.
     /// </summary>
     event OutputReceivedHandler? OnOutputReceived;
+
+    /// <summary>
+    /// Event raised when a Claude process exits (normally or abnormally).
+    /// </summary>
+    event ProcessExitedHandler? OnProcessExited;
 
     /// <summary>
     /// Starts a new Claude process with an initial prompt and new session ID.

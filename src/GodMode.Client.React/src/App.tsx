@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from './store';
+import { getBaseUrl } from './services/api';
 import { Shell } from './components/Shell';
 import { LoginPage } from './components/Auth/LoginPage';
 
 interface AuthChallenge {
   method: string;
-  clientId?: string;
   authenticated: boolean;
 }
 
@@ -16,15 +16,13 @@ export default function App() {
 
   const checkAuth = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/challenge');
+      const res = await fetch(`${getBaseUrl()}/api/auth/challenge`);
       if (res.ok) {
         setChallenge(await res.json());
       } else {
-        // No auth endpoints available — no auth required
         setChallenge({ method: 'none', authenticated: true });
       }
     } catch {
-      // Server unreachable or no auth — proceed without auth
       setChallenge({ method: 'none', authenticated: true });
     } finally {
       setLoading(false);
@@ -46,13 +44,7 @@ export default function App() {
   if (challenge?.method === 'google' && !challenge.authenticated) {
     const params = new URLSearchParams(window.location.search);
     const error = params.get('error') ?? undefined;
-    return (
-      <LoginPage
-        clientId={challenge.clientId!}
-        error={error}
-        onLogin={checkAuth}
-      />
-    );
+    return <LoginPage error={error} />;
   }
 
   return <Shell />;
