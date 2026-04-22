@@ -44,9 +44,9 @@ jobs:
           fi
 
       # Build + push the runtime variant (stage `runtime`) as the default/:latest
-      # tag, and the sdk variant (stage `sdk`) as `:sdk`. The two runs share the
-      # same base layers via BuildKit's layer cache, so the sdk build is mostly
-      # the incremental apt install.
+      # tag, and the sdk variant (stage `sdk`) as `:sdk`. The second build reuses
+      # layers from the first via the local docker daemon cache within this run,
+      # so the sdk build is mostly just the incremental apt install on top.
       - name: Build and push runtime
         uses: docker/build-push-action@v5
         with:
@@ -55,8 +55,6 @@ jobs:
           target: runtime
           push: true
           tags: ${{ steps.meta.outputs.runtime_tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Build and push sdk
         uses: docker/build-push-action@v5
@@ -66,5 +64,3 @@ jobs:
           target: sdk
           push: true
           tags: ${{ steps.meta.outputs.sdk_tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
