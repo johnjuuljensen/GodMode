@@ -2,6 +2,20 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Autonomous mode (AutoClaude or GodMode)
+
+When claude is being asked to work on features/bugs/etc. and the work is being done in a worktree, follow this recipe:
+- create .autoclaude/progress.txt with a plan for the implementation and todo lists. (Files in .autoclaude are ignored by git, it's your workspace)
+- Do not assume the user is available for questions. Unless the case is completely unclear, prefer bringing up any alternatives in the PR description.
+- Maintain progress.txt throughout the work.
+- Commit when major milestones are done.
+- Make sure to build as you go.
+- Iterate until all case points have been implemented and all tests pass (excluding preexisting baseline failures).
+- When done create a Pull Request
+    - Make the PR against base branch, which is normally "master".
+    - Always include any case id as the first item in the PR summary. Example: Issue-45: Something something
+- When addressing PR review comments, resolve each review thread as you fix it. Use the GitHub GraphQL API `resolveReviewThread` mutation with the thread's node ID.
+
 ## MUST READ: Architecture Document
 
 **Before starting any non-trivial work, read `docs/UNIFIED-ARCHITECTURE.md`.** It describes the full system architecture, design principles, deployment strategy, and where to place new code. Violating its principles (especially the declarative configuration rules in Section 5) will result in work that needs to be redone.

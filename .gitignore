@@ -45,3 +45,7 @@ appsettings.*.json
 /nul
 /src/MauiDemo
 .godmode-logs/
+
+
+.autoclaude/*
+bash.exe.stackdump
