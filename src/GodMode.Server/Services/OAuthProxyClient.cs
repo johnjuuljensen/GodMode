@@ -79,12 +79,11 @@ public class OAuthProxyClient
     }
 
     /// <summary>
-    /// Fetch Google user info (email, name) using an access token.
-    /// The proxy doesn't return user info, so we call Google's userinfo endpoint directly.
-    /// </summary>
-    /// <summary>
-    /// Fetch Google user info (email, name) using an access token.
-    /// Tries userinfo endpoint first, falls back to tokeninfo if scopes are insufficient.
+    /// Fetch Google user info (email, name) using an access token, enforcing that Google has
+    /// verified the email. Returns (null, null) when the email claim is missing or unverified
+    /// (<c>verified_email</c> / <c>email_verified</c> is not <c>true</c>) — treating an
+    /// unverified claim as trusted would allow an attacker controlling a federated Workspace
+    /// tenant to assert the victim's email. Tries userinfo first, falls back to tokeninfo.
     /// </summary>
     public async Task<(string? Email, string? Name)> FetchGoogleUserInfoAsync(string accessToken)
     {
@@ -101,8 +100,14 @@ public class OAuthProxyClient
                 var json = await resp.Content.ReadFromJsonAsync<JsonElement>();
                 var email = json.TryGetProperty("email", out var e) ? e.GetString() : null;
                 var name = json.TryGetProperty("name", out var n) ? n.GetString() : null;
+                var verified = TryGetBool(json, "verified_email") ?? TryGetBool(json, "email_verified");
                 if (!string.IsNullOrEmpty(email))
-                    return (email, name);
+                {
+                    if (verified == true)
+                        return (email, name);
+                    _logger.LogWarning("Google userinfo email {Email} is not verified (verified_email={Verified}); rejecting", email, verified);
+                    return (null, null);
+                }
             }
             _logger.LogDebug("Google userinfo returned no email, trying tokeninfo");
         }
@@ -120,11 +125,21 @@ public class OAuthProxyClient
             {
                 var json = await resp.Content.ReadFromJsonAsync<JsonElement>();
                 var email = json.TryGetProperty("email", out var e) ? e.GetString() : null;
-                _logger.LogDebug("Google tokeninfo returned email: {Email}", email);
-                return (email, null);
+                var verified = TryGetBool(json, "email_verified") ?? TryGetBool(json, "verified_email");
+                _logger.LogDebug("Google tokeninfo returned email: {Email} verified={Verified}", email, verified);
+                if (!string.IsNullOrEmpty(email))
+                {
+                    if (verified == true)
+                        return (email, null);
+                    _logger.LogWarning("Google tokeninfo email {Email} is not verified (email_verified={Verified}); rejecting", email, verified);
+                    return (null, null);
+                }
             }
-            var body = await resp.Content.ReadAsStringAsync();
-            _logger.LogWarning("Google tokeninfo failed ({Status}): {Body}", resp.StatusCode, body);
+            else
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                _logger.LogWarning("Google tokeninfo failed ({Status}): {Body}", resp.StatusCode, body);
+            }
         }
         catch (Exception ex)
         {
@@ -132,6 +147,20 @@ public class OAuthProxyClient
         }
 
         return (null, null);
+    }
+
+    // Google returns email_verified/verified_email as either a JSON boolean or the string "true"/"false".
+    internal static bool? TryGetBool(JsonElement json, string propertyName)
+    {
+        if (!json.TryGetProperty(propertyName, out var prop))
+            return null;
+        return prop.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String when bool.TryParse(prop.GetString(), out var b) => b,
+            _ => null,
+        };
     }
 
     /// <summary>

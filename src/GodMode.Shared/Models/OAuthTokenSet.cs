@@ -9,7 +9,8 @@ public record OAuthTokenSet(
     long ExpiresAt,
     string Provider,
     string? Email = null,
-    string? Name = null)
+    string? Name = null,
+    bool? EmailVerified = null)
 {
     public bool IsExpired => DateTimeOffset.FromUnixTimeSeconds(ExpiresAt) < DateTimeOffset.UtcNow;
 }

@@ -216,10 +216,14 @@ oauth.MapGet("/relay", async (
     if (csrfEntry.Purpose == "login")
     {
         var googleOptions = ctx.RequestServices.GetService<GoogleAuthOptions>();
-        var email = tokens.Email?.Trim().ToLowerInvariant();
-        var name = tokens.Name;
+        // Only trust the proxy's Email claim if the proxy has explicitly asserted EmailVerified=true.
+        // Otherwise fetch from Google directly, which enforces the verified_email/email_verified flag.
+        // Using an unverified email for login would allow a federated Workspace tenant (or other
+        // source of unverified claims) to impersonate the AllowedEmail.
+        var proxyEmailVerified = tokens.EmailVerified == true;
+        var email = proxyEmailVerified ? tokens.Email?.Trim().ToLowerInvariant() : null;
+        var name = proxyEmailVerified ? tokens.Name : null;
 
-        // Proxy doesn't return user info — fetch from Google's userinfo endpoint
         if (string.IsNullOrEmpty(email) && provider == "google")
         {
             var (fetchedEmail, fetchedName) = await proxyClient.FetchGoogleUserInfoAsync(tokens.AccessToken);
