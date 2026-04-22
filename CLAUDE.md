@@ -116,12 +116,11 @@ cd src/GodMode.Client.React && npm run dev
 GodMode servers run in Docker containers on cloud platforms (Azure, AWS, Railway) with network-mounted storage:
 - **No chmod** — Azure Files doesn't support permission changes. Guard with `2>/dev/null || true`
 - **No sudo** — Container runs as non-root user
-- **No package installation** — No apt-get/yum/brew. Only Node.js/npm/npx are available
+- **No package installation via system package manager** — No apt-get/yum/brew. User-scope installs into `$HOME/.local/…` are fine (how pwsh, mcp binaries, etc. land on the server).
 - **No interactive commands** — Headless environment, no prompts or editors
-- **Idempotent** — Scripts may run multiple times. Use `mkdir -p`, don't fail if files exist
-- **set -e** — Always start bash scripts with `set -e`
-- **mkdir syntax** — Use `mkdir -p dir1 dir2 dir3`, NOT `mkdir -p {dir1,dir2}` (brace expansion is fragile across shells)
-- **Only .sh** — Servers run Linux. Only provide .ps1 for explicitly Windows/local roots
+- **Idempotent** — Scripts may run multiple times. Use `mkdir -p`/`New-Item -Force`, don't fail if files exist
+- **pwsh everywhere** — Write root scripts as `.ps1`. The container bootstrap installs PowerShell 7 on each start, so the same script runs on Windows (local dev) and Linux (deployed). Use `$ErrorActionPreference = 'Stop'` at the top.
+- **mkdir syntax** — In any bash helper, use `mkdir -p dir1 dir2 dir3`, NOT `mkdir -p {dir1,dir2}` (brace expansion is fragile across shells)
 
 ## Code Style Preferences
 
