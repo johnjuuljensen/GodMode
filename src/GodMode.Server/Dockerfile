@@ -45,11 +45,14 @@ RUN apt-get update && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# Install PowerShell 7 — root scripts run as .ps1 on both Windows and Linux
+# Install PowerShell 7 — root scripts run as .ps1 on both Windows and Linux.
+# The tarball ships binaries mode 0644, so mark pwsh executable explicitly
+# (otherwise exec() returns ENOENT, which Linux reports as "No such file or directory").
 ARG PWSH_VERSION=7.6.1
 RUN mkdir -p /opt/microsoft/powershell/7 && \
     curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/powershell-${PWSH_VERSION}-linux-x64.tar.gz" \
       | tar xz -C /opt/microsoft/powershell/7 && \
+    chmod +x /opt/microsoft/powershell/7/pwsh && \
     ln -s /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh
 
 # Install Claude Code CLI as the non-root user
