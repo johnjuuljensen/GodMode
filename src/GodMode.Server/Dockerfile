@@ -45,6 +45,13 @@ RUN apt-get update && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# Install PowerShell 7 — root scripts run as .ps1 on both Windows and Linux
+ARG PWSH_VERSION=7.6.1
+RUN mkdir -p /opt/microsoft/powershell/7 && \
+    curl -fsSL "https://github.com/PowerShell/PowerShell/releases/download/v${PWSH_VERSION}/powershell-${PWSH_VERSION}-linux-x64.tar.gz" \
+      | tar xz -C /opt/microsoft/powershell/7 && \
+    ln -s /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh
+
 # Install Claude Code CLI as the non-root user
 USER godmode
 RUN curl -fsSL https://claude.ai/install.sh | bash && \
