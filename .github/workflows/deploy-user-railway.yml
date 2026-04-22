@@ -55,8 +55,6 @@ jobs:
           INPUT_EMAIL: ${{ inputs.email }}
           INPUT_ANTHROPIC_KEY: ${{ inputs.anthropic_key }}
           GODMODE_IMAGE: ghcr.io/johnjuuljensen/godmode:${{ inputs.image_tag }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           chmod +x scripts/provision-user-railway.sh

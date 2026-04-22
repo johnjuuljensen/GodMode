@@ -9,8 +9,6 @@ RG="${GODMODE_RG:-godmode-rg}"
 ACA_ENV="${GODMODE_ACA_ENV:-godmode-env}"
 STORAGE_ACCOUNT="${GODMODE_STORAGE_ACCOUNT:-godmodestorage}"
 IMAGE="${GODMODE_IMAGE:-ghcr.io/johnjuuljensen/godmode:latest}"
-GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID}"
-GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:?Set GOOGLE_CLIENT_SECRET}"
 
 APP_NAME="godmode-$USERNAME"
 SHARE_NAME="godmode-$USERNAME-data"
@@ -68,10 +66,8 @@ if [ -z "$EXISTING" ]; then
     --env-vars \
       "Urls=http://0.0.0.0:31337" \
       "ProjectRootsDir=/app/projects" \
-      "Authentication__Google__ClientId=$GOOGLE_CLIENT_ID" \
       "Authentication__Google__AllowedEmail=$EMAIL" \
     --secrets \
-      "google-client-secret=$GOOGLE_CLIENT_SECRET" \
       "anthropic-key=$ANTHROPIC_KEY" \
     --output none
 
@@ -80,7 +76,6 @@ if [ -z "$EXISTING" ]; then
     --name "$APP_NAME" \
     --resource-group "$RG" \
     --set-env-vars \
-      "Authentication__Google__ClientSecret=secretref:google-client-secret" \
       "ANTHROPIC_API_KEY=secretref:anthropic-key" \
     --output none
 
@@ -104,12 +99,8 @@ properties:
             value: "http://0.0.0.0:31337"
           - name: ProjectRootsDir
             value: "/app/projects"
-          - name: Authentication__Google__ClientId
-            value: "$GOOGLE_CLIENT_ID"
           - name: Authentication__Google__AllowedEmail
             value: "$EMAIL"
-          - name: Authentication__Google__ClientSecret
-            secretRef: google-client-secret
           - name: ANTHROPIC_API_KEY
             secretRef: anthropic-key
         volumeMounts:
@@ -136,7 +127,6 @@ else
     --name "$APP_NAME" \
     --resource-group "$RG" \
     --secrets \
-      "google-client-secret=$GOOGLE_CLIENT_SECRET" \
       "anthropic-key=$ANTHROPIC_KEY" \
     --output none
 fi

@@ -65,8 +65,6 @@ jobs:
           GODMODE_ACA_ENV: godmode-env
           GODMODE_STORAGE_ACCOUNT: godmodestorage
           GODMODE_IMAGE: ghcr.io/johnjuuljensen/godmode:${{ inputs.image_tag }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           GHCR_USERNAME: ${{ github.repository_owner }}
         run: |
