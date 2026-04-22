@@ -7,8 +7,6 @@ ANTHROPIC_KEY="${3:?}"
 
 RAILWAY_TOKEN="${RAILWAY_TOKEN:?Set RAILWAY_TOKEN}"
 IMAGE="${GODMODE_IMAGE:-ghcr.io/johnjuuljensen/godmode:latest}"
-GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID}"
-GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:?Set GOOGLE_CLIENT_SECRET}"
 API="https://backboard.railway.com/graphql/v2"
 
 PROJECT_NAME="godmode-$USERNAME"
@@ -90,7 +88,7 @@ echo "  Service ID: $SERVICE_ID"
 
 # 4. Set environment variables
 echo "--> Setting environment variables"
-ENV_SET_RESULT=$(gql "mutation { variableCollectionUpsert(input: { projectId: \"$PROJECT_ID\", environmentId: \"$ENV_ID\", serviceId: \"$SERVICE_ID\", variables: { PORT: \"31337\", Urls: \"http://0.0.0.0:31337\", ProjectRootsDir: \"/app/projects\", Authentication__Google__ClientId: \"$GOOGLE_CLIENT_ID\", Authentication__Google__ClientSecret: \"$GOOGLE_CLIENT_SECRET\", Authentication__Google__AllowedEmail: \"$EMAIL\", ANTHROPIC_API_KEY: \"$ANTHROPIC_KEY\" } }) }")
+ENV_SET_RESULT=$(gql "mutation { variableCollectionUpsert(input: { projectId: \"$PROJECT_ID\", environmentId: \"$ENV_ID\", serviceId: \"$SERVICE_ID\", variables: { PORT: \"31337\", Urls: \"http://0.0.0.0:31337\", ProjectRootsDir: \"/app/projects\", Authentication__Google__AllowedEmail: \"$EMAIL\", ANTHROPIC_API_KEY: \"$ANTHROPIC_KEY\" } }) }")
 echo "    Env result: $(echo "$ENV_SET_RESULT" | head -c 200)"
 
 # 5. Create volume for persistent workspace (/app/projects survives deploys)

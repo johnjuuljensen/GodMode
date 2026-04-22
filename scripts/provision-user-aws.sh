@@ -8,8 +8,6 @@ ANTHROPIC_KEY="${3:?}"
 CLUSTER="${GODMODE_ECS_CLUSTER:-godmode-cluster}"
 REGION="${AWS_REGION:-eu-west-1}"
 IMAGE="${GODMODE_IMAGE:-ghcr.io/johnjuuljensen/godmode:latest}"
-GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:?Set GOOGLE_CLIENT_ID}"
-GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:?Set GOOGLE_CLIENT_SECRET}"
 SUBNET_IDS="${GODMODE_SUBNET_IDS:?Set GODMODE_SUBNET_IDS (comma-separated)}"
 SECURITY_GROUP="${GODMODE_SECURITY_GROUP:?Set GODMODE_SECURITY_GROUP}"
 
@@ -37,11 +35,9 @@ cat > /tmp/godmode-task-def.json << TASKEOF
       "environment": [
         { "name": "Urls", "value": "http://0.0.0.0:31337" },
         { "name": "ProjectRootsDir", "value": "/app/projects" },
-        { "name": "Authentication__Google__ClientId", "value": "$GOOGLE_CLIENT_ID" },
         { "name": "Authentication__Google__AllowedEmail", "value": "$EMAIL" }
       ],
       "secrets": [
-        { "name": "Authentication__Google__ClientSecret", "valueFrom": "${GODMODE_SECRET_ARN_GOOGLE_SECRET:?}" },
         { "name": "ANTHROPIC_API_KEY", "valueFrom": "${GODMODE_SECRET_ARN_ANTHROPIC:?}" }
       ],
       "logConfiguration": {
