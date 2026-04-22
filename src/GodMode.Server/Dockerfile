@@ -30,7 +30,7 @@ RUN dotnet publish src/GodMode.Server/GodMode.Server.csproj -c Release -o /app/p
 COPY --from=react-build /app/dist /app/publish/wwwroot/
 
 # ── Runtime ──
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 
 # Create non-root user (Claude CLI refuses --dangerously-skip-permissions as root)
 RUN groupadd -r godmode && useradd -r -g godmode -m -d /home/godmode godmode
@@ -74,5 +74,18 @@ EXPOSE 31337
 
 ENV ASPNETCORE_URLS=http://+:31337
 
+USER godmode
+ENTRYPOINT ["dotnet", "GodMode.Server.dll"]
+
+# ── SDK variant ──
+# Published as the `:sdk` tag. Layers .NET SDK on top of the runtime image so
+# Claude Code (or anyone running inside the container) can `dotnet build` / test.
+# Consumers who only need to run the server should use `:latest`; consumers who
+# run dev workflows inside the container should use `:sdk`.
+FROM runtime AS sdk
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends dotnet-sdk-10.0 && \
+    rm -rf /var/lib/apt/lists/*
 USER godmode
 ENTRYPOINT ["dotnet", "GodMode.Server.dll"]

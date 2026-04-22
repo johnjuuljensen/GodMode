@@ -35,15 +35,36 @@ jobs:
           REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
           echo "repo=${REPO}" >> $GITHUB_OUTPUT
           if [ "${{ github.event_name }}" = "release" ]; then
-            echo "tags=ghcr.io/${REPO}:latest,ghcr.io/${REPO}:${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            TAG="${{ github.event.release.tag_name }}"
+            echo "runtime_tags=ghcr.io/${REPO}:latest,ghcr.io/${REPO}:${TAG}" >> $GITHUB_OUTPUT
+            echo "sdk_tags=ghcr.io/${REPO}:sdk,ghcr.io/${REPO}:${TAG}-sdk" >> $GITHUB_OUTPUT
           else
-            echo "tags=ghcr.io/${REPO}:latest" >> $GITHUB_OUTPUT
+            echo "runtime_tags=ghcr.io/${REPO}:latest" >> $GITHUB_OUTPUT
+            echo "sdk_tags=ghcr.io/${REPO}:sdk" >> $GITHUB_OUTPUT
           fi
 
-      - name: Build and push
+      # Build + push the runtime variant (stage `runtime`) as the default/:latest
+      # tag, and the sdk variant (stage `sdk`) as `:sdk`. The two runs share the
+      # same base layers via BuildKit's layer cache, so the sdk build is mostly
+      # the incremental apt install.
+      - name: Build and push runtime
         uses: docker/build-push-action@v5
         with:
           context: .
           file: src/GodMode.Server/Dockerfile
+          target: runtime
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.meta.outputs.runtime_tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push sdk
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: src/GodMode.Server/Dockerfile
+          target: sdk
+          push: true
+          tags: ${{ steps.meta.outputs.sdk_tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
