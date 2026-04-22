@@ -49,3 +49,4 @@ appsettings.*.json
 
 .autoclaude/*
 bash.exe.stackdump
+.wrangler/*
