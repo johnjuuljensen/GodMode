@@ -7,6 +7,8 @@
   <ItemGroup>
     <PackageVersion Include="Amazon.Lambda.AspNetCoreServer.Hosting" Version="1.7.2" />
     <PackageVersion Include="Anthropic" Version="12.8.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.Google" Version="10.0.6" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.6" />
     <PackageVersion Include="AWSSDK.DynamoDBv2" Version="3.7.400" />
     <PackageVersion Include="AWSSDK.SecretsManager" Version="3.7.400" />
     <PackageVersion Include="CliWrap" Version="3.10.0" />

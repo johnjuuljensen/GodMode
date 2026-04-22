@@ -11,10 +11,12 @@
     <Project Path="src/GodMode.Mcp/GodMode.Mcp.csproj" />
     <Project Path="src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj" />
     <Project Path="src/GodMode.Server/GodMode.Server.csproj" />
+    <Project Path="src/GodMode.Vault/GodMode.Vault.csproj" />
     <Project Path="src/GodMode.Shared/GodMode.Shared.csproj" />
     <Project Path="src/SignalR.Proxy/SignalR.Proxy.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/GodMode.Server.Tests/GodMode.Server.Tests.csproj" />
+    <Project Path="tests/GodMode.Vault.Tests/GodMode.Vault.Tests.csproj" />
   </Folder>
 </Solution>
