@@ -8,12 +8,14 @@ When claude is being asked to work on features/bugs/etc. and the work is being d
 - create .autoclaude/progress.txt with a plan for the implementation and todo lists. (Files in .autoclaude are ignored by git, it's your workspace)
 - Do not assume the user is available for questions. Unless the case is completely unclear, prefer bringing up any alternatives in the PR description.
 - Maintain progress.txt throughout the work.
-- Commit when major milestones are done.
-- Make sure to build as you go.
-- Iterate until all case points have been implemented and all tests pass (excluding preexisting baseline failures).
-- When done create a Pull Request
+- Create a Pull Request as early as possible
     - Make the PR against base branch, which is normally "master".
     - Always include any case id as the first item in the PR summary. Example: Issue-45: Something something
+    - Make sure to update the PR description when work is done, and to update it after making changes from user requests or review comments.
+- Commit when major milestones are done.
+- Push before going idle, your workspace may be transient.
+- Make sure to build as you go.
+- Iterate until all case points have been implemented and all tests pass (excluding preexisting baseline failures).
 - When addressing PR review comments, resolve each review thread as you fix it. Use the GitHub GraphQL API `resolveReviewThread` mutation with the thread's node ID.
 
 ## MUST READ: Architecture Document
