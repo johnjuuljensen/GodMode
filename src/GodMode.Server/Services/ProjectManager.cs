@@ -2109,7 +2109,7 @@ public class ProjectManager : IProjectManager
                 var outputEvent = ParseClaudeOutput(jsonLine);
                 if (outputEvent != null)
                 {
-                    await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent);
+                    await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
                 }
 
                 // Fire completion event if project just transitioned to Idle

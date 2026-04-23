@@ -29,7 +29,7 @@ public class StatusUpdater : IStatusUpdater
         await File.WriteAllTextAsync(statusPath, json);
     }
 
-    public async Task UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent)
+    public async Task UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent, string rawJson)
     {
         var stateChanged = false;
         var status = project.Status;
@@ -37,14 +37,19 @@ public class StatusUpdater : IStatusUpdater
         // Parse Claude output events to update state
         switch (outputEvent.Type)
         {
+            case OutputEventType.User:
+                // A new turn is starting — clear any memo of the previous turn's
+                // trailing assistant text so stale questions don't leak forward.
+                project.LastAssistantText = null;
+                break;
+
             case OutputEventType.Assistant:
-                // Check if it's asking a question (simple heuristic)
-                if (!string.IsNullOrEmpty(outputEvent.Content) &&
-                    outputEvent.Content.Contains("?") && outputEvent.Content.Length < 500)
-                {
-                    status = status with { State = ProjectState.WaitingInput, CurrentQuestion = outputEvent.Content };
-                    stateChanged = true;
-                }
+                // Remember the last text content block from this assistant event.
+                // The deterministic question check happens on Result (end of turn).
+                // Tool-only assistant events return null here; don't overwrite
+                // a previously-seen text block in that case.
+                var lastText = QuestionDetection.ExtractLastAssistantText(rawJson);
+                if (lastText != null) project.LastAssistantText = lastText;
                 break;
 
             case OutputEventType.Error:
@@ -53,8 +58,21 @@ public class StatusUpdater : IStatusUpdater
                 break;
 
             case OutputEventType.Result:
-                // Result indicates the turn is complete
-                status = status with { State = ProjectState.Idle, CurrentQuestion = null };
+                // End of turn: decide Idle vs WaitingInput based on whether the
+                // last assistant text block (trimmed) ends with '?'. See issue #131.
+                if (QuestionDetection.IsQuestion(project.LastAssistantText))
+                {
+                    status = status with
+                    {
+                        State = ProjectState.WaitingInput,
+                        CurrentQuestion = project.LastAssistantText,
+                    };
+                }
+                else
+                {
+                    status = status with { State = ProjectState.Idle, CurrentQuestion = null };
+                }
+                project.LastAssistantText = null;
                 stateChanged = true;
 
                 // Update metrics from result metadata

@@ -46,6 +46,14 @@ public class ProjectInfo
     public CancellationTokenSource? ProcessCancellation { get; set; }
 
     public HashSet<string> SubscribedConnections { get; } = new();
+
+    /// <summary>
+    /// The most recent assistant text content block seen on the stream, used by
+    /// the deterministic question detector to decide (on <c>result</c>) whether
+    /// the turn ended with a question. Reset when a new turn starts.
+    /// In-memory only; not persisted.
+    /// </summary>
+    public string? LastAssistantText { get; set; }
 }
 
 /// <summary>MCP bridge request to submit a project result.</summary>
