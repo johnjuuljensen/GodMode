@@ -1,9 +1,16 @@
 /**
- * Question detection logic — mirrors the 3-layer approach from ProjectViewModel.cs.
+ * Question detection — deterministic rule (see issue #131).
  *
- * Layer 1: Structured AskUserQuestion tool_use (parsed in parseMessage.ts)
- * Layer 2: Text-based heuristic on assistant messages
- * Layer 3: Server-side CurrentQuestion from ProjectStatus
+ * The only reliable signal in Claude's stream-json output is that the last
+ * `type="text"` content block of the assistant message preceding a `result`
+ * event ends with '?' (after TrimEnd) iff that turn is a question. Fuzzy
+ * heuristics ("would you like", numbered lists, etc.) produce false positives
+ * on final summaries, so we don't use them.
+ *
+ * Layers, in priority order:
+ *   1. Structured AskUserQuestion tool_use (see parseMessage.ts:extractQuestionData)
+ *   2. Last text block of an assistant message, trimmed, ends with '?'
+ *   3. Server-side CurrentQuestion from ProjectStatus (authoritative, also based on rule 2)
  */
 import type { ClaudeMessage, QuestionOptionData } from '../signalr/types';
 
@@ -33,6 +40,7 @@ export function detectQuestionFromMessage(
 ): QuestionState | null {
   // Don't re-detect if user dismissed this project's question
   if (isDismissed) return null;
+
   // Layer 1: Structured AskUserQuestion
   if (message.isQuestion && message.questionOptions.length > 0) {
     return {
@@ -43,14 +51,17 @@ export function detectQuestionFromMessage(
     };
   }
 
-  // Layer 2: Text-based question from assistant message
-  if (message.type === 'assistant' && message.contentSummary && looksLikeQuestion(message.contentSummary)) {
-    return {
-      isActive: true,
-      text: message.contentSummary,
-      options: parseTextOptions(message.contentSummary),
-      header: null,
-    };
+  // Layer 2: Last text block of this assistant message ends with '?'
+  if (message.type === 'assistant') {
+    const lastText = getLastTextBlock(message);
+    if (lastText !== null && endsWithQuestionMark(lastText)) {
+      return {
+        isActive: true,
+        text: lastText,
+        options: parseTextOptions(lastText),
+        header: null,
+      };
+    }
   }
 
   // Result means turn is over — don't clear the question here.
@@ -81,10 +92,9 @@ export function detectQuestionFromStatus(
   const isWaiting = state === 'WaitingInput' || state === 'Idle';
   if (!isWaiting) return null;
 
-  // Try server-side CurrentQuestion first
+  // Prefer server-side CurrentQuestion (server runs the same deterministic rule).
+  // Fallback: scan recent output for an assistant message whose last text block ends with '?'.
   let questionText = currentQuestion ?? null;
-
-  // Client-side fallback: check last assistant message
   if (!questionText) {
     questionText = getLastAssistantQuestion(outputMessages);
   }
@@ -106,34 +116,40 @@ function getLastAssistantQuestion(messages: ClaudeMessage[]): string | null {
     const msg = messages[i];
     if (msg.type === 'user') break;
     if (msg.type !== 'assistant') continue;
-    if (msg.contentSummary && looksLikeQuestion(msg.contentSummary)) {
-      return msg.contentSummary;
-    }
+    const lastText = getLastTextBlock(msg);
+    if (lastText !== null && endsWithQuestionMark(lastText)) return lastText;
   }
   return null;
 }
 
-/** Client-side heuristic: does this text look like a question? */
-export function looksLikeQuestion(text: string): boolean {
-  const trimmed = text.trim();
-
-  // Contains a question mark (not just at end — options may follow the question)
-  if (trimmed.includes('?')) return true;
-
-  // (y/n) or (yes/no) style
-  if (/\(y(?:es)?\/n(?:o)?\)\s*$/i.test(trimmed)) return true;
-
-  // (a/b/c) style options
-  if (/\([^)]+\/[^)]+\)\s*$/.test(trimmed)) return true;
-
-  // Common question phrases
-  const phrases = ['would you like', 'do you want', 'should i', 'shall i', 'which one', 'please choose', 'please select', 'multiple choice'];
-  const lower = trimmed.toLowerCase();
-  for (const phrase of phrases) {
-    if (lower.includes(phrase)) return true;
+/**
+ * Returns the text of the last `type === 'text'` content item in the message,
+ * or null if there isn't one.
+ */
+export function getLastTextBlock(message: ClaudeMessage): string | null {
+  for (let i = message.contentItems.length - 1; i >= 0; i--) {
+    const item = message.contentItems[i];
+    if (item.type === 'text') return item.summary;
   }
+  return null;
+}
 
-  return false;
+/** Deterministic question check: trimmed text ends with '?'. */
+export function endsWithQuestionMark(text: string): boolean {
+  if (!text) return false;
+  const trimmed = text.replace(/\s+$/, '');
+  return trimmed.length > 0 && trimmed.charCodeAt(trimmed.length - 1) === 0x3f; // '?'
+}
+
+/**
+ * True iff this message should surface as a question (structured tool_use or
+ * assistant text ending with '?'). Used where a single bool decision is enough.
+ */
+export function isQuestionMessage(message: ClaudeMessage): boolean {
+  if (message.isQuestion && message.questionOptions.length > 0) return true;
+  if (message.type !== 'assistant') return false;
+  const lastText = getLastTextBlock(message);
+  return lastText !== null && endsWithQuestionMark(lastText);
 }
 
 /** Parses inline options from question text (y/n, numbered lists, etc.) */

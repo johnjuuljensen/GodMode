@@ -13,7 +13,7 @@ import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../services/hostApi';
 import {
   type QuestionState, emptyQuestion, detectQuestionFromMessage,
-  detectQuestionFromStatus, looksLikeQuestion,
+  detectQuestionFromStatus, isQuestionMessage,
 } from '../services/questionDetection';
 
 // ── Persisted dismiss tracking ─────────────────────────────────
@@ -620,10 +620,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const s = get();
         const sel = s.selectedProject;
         const isDismissed = s.dismissedProjects[projectId];
-        const isQuestion = !isDismissed && (
-          message.isQuestion ||
-          (message.type === 'assistant' && message.contentSummary && looksLikeQuestion(message.contentSummary))
-        );
+        const isQuestion = !isDismissed && isQuestionMessage(message);
 
         if (isQuestion) {
           set(state => {
