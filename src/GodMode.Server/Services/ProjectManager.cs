@@ -584,7 +584,11 @@ public class ProjectManager : IProjectManager
             prompt = overridePrompt;
             _logger.LogInformation("Script overrode project prompt ({Length} chars)", prompt.Length);
         }
-        project.Status = project.Status with { Id = projectId, Name = name };
+        // Resolve model: user input overrides action config default.
+        // Persisted in status.json so resumes keep using the same model even if the
+        // root config changes or the machine-wide Claude default differs.
+        var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
+        project.Status = project.Status with { Id = projectId, Name = name, Model = model };
 
         // Ensure .godmode directory exists (scripts may have created the project dir without it)
         EnsureGodModeDirectory(projectPath);
@@ -601,9 +605,6 @@ public class ProjectManager : IProjectManager
 
         // Add to tracking
         _projects[projectId] = project;
-
-        // Resolve model: user input overrides action config default
-        var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
 
         // Load OAuth tokens for the profile (refresh expired ones)
         var oauthTokens = await LoadAndRefreshOAuthTokensAsync(request.ProfileName);
@@ -936,6 +937,10 @@ public class ProjectManager : IProjectManager
             resumeSnap.Profiles.TryGetValue(resumeProfileName ?? "", out var profileCfg);
             var profileEnv = profileCfg?.Environment;
 
+            // Prefer the model the session was originally started with (persisted in status.json).
+            // Falls back to the current action config for projects created before the field existed.
+            var resumeModel = project.Status.Model;
+
             if (project.Status.RootName != null && resumeProfileName != null)
             {
                 var rootPath = resumeSnap.ProjectFiles.GetProjectRootPath(CompositeKey(resumeProfileName, project.Status.RootName));
@@ -946,18 +951,18 @@ public class ProjectManager : IProjectManager
                     var oauthTokens = await LoadAndRefreshOAuthTokensAsync(resumeProfileName);
                     var mcpOAuthTokensResume = _mcpOAuthStore.GetAllForProfile(resumeProfileName);
                     var mcpJson = BuildMcpConfigJson(profileCfg?.McpServers, action.McpServers, oauthTokens, mcpOAuthTokensResume);
-                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, action.Model, profileEnv,
+                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, resumeModel ?? action.Model, profileEnv,
                         resumeProfileName, config.StripEnvVarProfile, mcpJson);
                 }
                 else
-                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings,
+                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel,
                         profileEnv: profileEnv, profileName: resumeProfileName,
                         stripEnvVarProfile: config.StripEnvVarProfile);
             }
             else
             {
                 // No root config, just apply project settings
-                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, profileEnv: profileEnv);
+                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel, profileEnv: profileEnv);
             }
         }
         catch (Exception ex)
