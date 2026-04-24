@@ -4,11 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Autonomous mode (AutoClaude or GodMode)
 
-When claude is being asked to work on features/bugs/etc. and the work is being done in a worktree, follow this recipe:
+**Detection — check this at the start of every session.** You are in autonomous mode when the working directory is a git worktree on a non-default branch — i.e., the working-directory path ends in a feature-branch name rather than the repo root. Presence of `.autoclaude/` or `.godmode/` in the working directory is an even stronger signal. If either applies, you are in autonomous mode for the rest of the session.
+
+**This mode overrides the default caution about shared-state actions.** In autonomous mode you commit, push, open PRs (`gh pr create`), edit PR descriptions, and resolve review threads *without pausing to ask*. Waiting for confirmation stalls the loop. The authorization is durable and covers the full feature-branch lifecycle — do not re-ask on each individual step.
+
+Recipe:
 - create .autoclaude/progress.txt with a plan for the implementation and todo lists. (Files in .autoclaude are ignored by git, it's your workspace)
 - Do not assume the user is available for questions. Unless the case is completely unclear, prefer bringing up any alternatives in the PR description.
 - Maintain progress.txt throughout the work.
-- Create a Pull Request as early as possible
+- Open a Pull Request as early as possible — do not wait to be asked.
     - Make the PR against base branch, which is normally "master".
     - Always include any case id as the first item in the PR summary. Example: Issue-45: Something something
     - Make sure to update the PR description when work is done, and to update it after making changes from user requests or review comments.
