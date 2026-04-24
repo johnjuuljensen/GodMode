@@ -17,6 +17,15 @@ namespace GodMode.Server.Services;
 /// </summary>
 public class ProjectManager : IProjectManager
 {
+    /// <summary>
+    /// Appended to every Claude invocation's system prompt so questions always
+    /// come through as structured AskUserQuestion tool calls. See issue #131.
+    /// </summary>
+    private const string QuestionPromptInjection =
+        "If you need to ask the user a question — including clarifications, " +
+        "multiple-choice decisions, or confirmations — you MUST use the " +
+        "AskUserQuestion tool. Do not ask questions in plain assistant text.";
+
     private readonly IClaudeProcessManager _processManager;
     private readonly IStatusUpdater _statusUpdater;
     private readonly IRootConfigReader _rootConfigReader;
@@ -1728,6 +1737,12 @@ public class ProjectManager : IProjectManager
             args.AddRange(action.ClaudeArgs);
         if (settings.DangerouslySkipPermissions)
             args.Add("--dangerously-skip-permissions");
+
+        // Route all user-facing questions through the AskUserQuestion tool so
+        // the UI can render structured options and we don't have to guess from
+        // free-form text. See issue #131.
+        args.Add("--append-system-prompt");
+        args.Add(QuestionPromptInjection);
         if (!string.IsNullOrWhiteSpace(model))
         {
             args.Add("--model");

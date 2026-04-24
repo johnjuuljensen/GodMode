@@ -51,14 +51,17 @@ export function detectQuestionFromMessage(
     };
   }
 
-  // Layer 2: Last text block of this assistant message ends with '?'
+  // Layer 2: Last text block of this assistant message ends with '?'.
+  // Free-form question — no options. Structured choices come only from
+  // AskUserQuestion (layer 1); we can't reliably tell a multiple-choice
+  // question from a narrative summary that happens to contain bullets.
   if (message.type === 'assistant') {
     const lastText = getLastTextBlock(message);
     if (lastText !== null && endsWithQuestionMark(lastText)) {
       return {
         isActive: true,
         text: lastText,
-        options: parseTextOptions(lastText),
+        options: [],
         header: null,
       };
     }
@@ -103,7 +106,7 @@ export function detectQuestionFromStatus(
     return {
       isActive: true,
       text: questionText,
-      options: parseTextOptions(questionText),
+      options: [],
       header: projectName,
     };
   }
@@ -152,38 +155,3 @@ export function isQuestionMessage(message: ClaudeMessage): boolean {
   return lastText !== null && endsWithQuestionMark(lastText);
 }
 
-/** Parses inline options from question text (y/n, numbered lists, etc.) */
-export function parseTextOptions(text: string): QuestionOptionData[] {
-  const trimmed = text.trim();
-
-  // (y/n) or (yes/no)
-  if (/\(y(?:es)?\/n(?:o)?\)\s*$/i.test(trimmed)) {
-    return [{ label: 'Yes', description: null }, { label: 'No', description: null }];
-  }
-
-  // (a/b/c) style
-  const parenMatch = trimmed.match(/\(([^)]+\/[^)]+)\)\s*$/);
-  if (parenMatch) {
-    return parenMatch[1].split('/').map(p => ({ label: p.trim(), description: null }));
-  }
-
-  // Numbered list: 1. Option one\n2. Option two
-  const numbered = [...trimmed.matchAll(/^\s*\d+[.)]\s+(.+)$/gm)];
-  if (numbered.length >= 2) {
-    return numbered.map(m => ({ label: m[1].trim(), description: null }));
-  }
-
-  // Lettered list: A) Option one\nB) Option two or A. Option one
-  const lettered = [...trimmed.matchAll(/^\s*([A-Za-z])[.)]\s+(.+)$/gm)];
-  if (lettered.length >= 2) {
-    return lettered.map(m => ({ label: `${m[1].toUpperCase()}) ${m[2].trim()}`, description: null }));
-  }
-
-  // Bullet list: - Option one\n- Option two
-  const bullets = [...trimmed.matchAll(/^\s*[-*]\s+(.+)$/gm)];
-  if (bullets.length >= 2) {
-    return bullets.map(m => ({ label: m[1].trim(), description: null }));
-  }
-
-  return [];
-}
