@@ -115,6 +115,8 @@ builder.Services.AddSingleton<WebhookFileManager>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 builder.Services.AddSingleton<ScheduleManager>();
 builder.Services.AddSingleton<McpOAuthStore>();
+builder.Services.Configure<BackupConfig>(builder.Configuration.GetSection("Backup"));
+builder.Services.AddSingleton<BackupService>();
 
 var app = builder.Build();
 
@@ -472,6 +474,71 @@ app.MapGet("/api/status", () => new
     version = "1.0.0",
     status = "running"
 }).AllowAnonymous();
+
+// ── Backup / restore endpoints (/api/backup/*) ───────────────────
+// Snapshots ProjectRootsDir (profiles, webhooks, data-protection keys, every
+// project's chat history) into a tar.gz on Backup:Location, and restores
+// from one. The location is intended to be a mounted shared/remote path.
+
+var backup = app.MapGroup("/api/backup");
+
+backup.MapPost("/", async (BackupService svc, ILogger<Program> log, CancellationToken ct) =>
+{
+    try
+    {
+        var result = await svc.CreateBackupAsync(ct);
+        return Results.Ok(result);
+    }
+    catch (InvalidOperationException ex)
+    {
+        log.LogWarning(ex, "Backup precondition failed");
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Backup failed");
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
+
+backup.MapGet("/", (BackupService svc) =>
+{
+    try
+    {
+        return Results.Ok(new { location = svc.Location, items = svc.ListBackups() });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+backup.MapPost("/restore", async (BackupRestoreRequest? req, BackupService svc, ILogger<Program> log, CancellationToken ct) =>
+{
+    try
+    {
+        var result = await svc.RestoreBackupAsync(req?.FileName, ct);
+        return Results.Ok(result);
+    }
+    catch (FileNotFoundException ex)
+    {
+        return Results.NotFound(new { error = ex.Message });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        log.LogWarning(ex, "Restore precondition failed");
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+        log.LogError(ex, "Restore failed");
+        return Results.Json(new { error = ex.Message }, statusCode: 500);
+    }
+});
 
 app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
 
