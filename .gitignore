@@ -32,21 +32,13 @@ Desktop.ini
 # Mac
 .DS_Store
 
-# AWS
-.aws-sam/
-samconfig.toml
-
 # Secrets
 appsettings.*.json
 !appsettings.json
 *.env
 .env.*
 /log.jsonl
-/nul
-/src/MauiDemo
 .godmode-logs/
 
-
 .autoclaude/*
-bash.exe.stackdump
 .wrangler/*
