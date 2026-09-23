@@ -97,7 +97,7 @@ public class ProjectLifecycleTests
     /// WaitingInput, in memory and in status.json. Each project is one trial, stopped before the next
     /// starts so live processes do not pile up.
     /// </summary>
-    [Fact(Skip = "fixed by #159")]
+    [Fact]
     public async Task AssistantQuestionThenResult_IsWaitingInput_EveryTime()
     {
         const int trials = 20;
@@ -119,6 +119,65 @@ public class ProjectLifecycleTests
 
         Assert.True(stale.Count == 0,
             $"{stale.Count} of {trials} projects are WaitingInput in memory but not in status.json. First: {stale.FirstOrDefault()}");
+    }
+
+    /// <summary>
+    /// A delete that its script refuses (godmode-dev's refuses with uncommitted changes) leaves the
+    /// project as it was: resumed, its output is still persisted and still moves its state on.
+    /// </summary>
+    [Fact]
+    public async Task DeleteRefusedByItsScript_ThenResume_StillHandlesOutput()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().Turn("First."),
+            rootConfig: new Dictionary<string, object> { ["delete"] = "refuse.ps1" });
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "refuse.ps1"), "exit 1");
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Projects.DeleteProjectAsync(created.Id));
+        harness.UseScript(new FakeScript().EmitInit().EmitAssistant("Committed.").EmitResult());
+        await harness.Projects.ResumeProjectAsync(created.Id);
+
+        await harness.WaitForLaunchAsync(created.Id, _ => true, index: 1);
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        await LifecycleHarness.WaitUntilAsync(
+            () => Task.FromResult(harness.ReadOutputFile(created.Id).Contains("Committed.")), null,
+            () => $"the resumed launch's output is not in output.jsonl.\n{harness.Describe(created.Id)}");
+    }
+
+    /// <summary>Two user sends at once reach claude as two whole stream-json lines.</summary>
+    [Fact]
+    public Task ConcurrentSendInput_WritesTwoWholeLines() =>
+        TwoSendsAtOnce_WriteTwoWholeLines((harness, projectId, input) => harness.Projects.SendInputAsync(projectId, input));
+
+    /// <summary>
+    /// The same below the project's state lock, which user sends also take: sends that meet at the
+    /// process (the initial prompt and a send, say) are kept apart by the stdin lock alone.
+    /// </summary>
+    [Fact]
+    public Task ConcurrentProcessSends_WriteTwoWholeLines() =>
+        TwoSendsAtOnce_WriteTwoWholeLines((harness, projectId, input) =>
+            harness.ProcessManager.SendInputAsync(harness.ProjectInfo(projectId), input));
+
+    /// <summary>
+    /// Two sends at once, not one interleaved or lost line. The messages are large so that each
+    /// write takes several pipe writes, which is where they would mix.
+    /// </summary>
+    private static async Task TwoSendsAtOnce_WriteTwoWholeLines(Func<LifecycleHarness, string, string, Task> send)
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().Turn("Ready."));
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        var first = new string('a', 256 * 1024);
+        var second = new string('b', 256 * 1024);
+
+        await Task.WhenAll(
+            Task.Run(() => send(harness, created.Id, first)),
+            Task.Run(() => send(harness, created.Id, second)));
+
+        var launch = await harness.WaitForStdinAsync(created.Id, count: 3);
+        Assert.Equal(3, launch.Stdin.Count);
+        Assert.Equal([first, second], launch.Stdin.Skip(1).Select(PromptText).Order());
     }
 
     /// <summary>The text of a stream-json user message as GodMode writes it to claude's stdin.</summary>

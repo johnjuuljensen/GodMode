@@ -250,7 +250,7 @@ public sealed class ProjectFolder : IDisposable
         try
         {
             var json = JsonSerializer.Serialize(status, ProjectJsonContext.Default.ProjectStatus);
-            await File.WriteAllTextAsync(StatusFilePath, json, Encoding.UTF8, cancellationToken);
+            await AtomicFile.WriteAllTextAsync(StatusFilePath, json, Encoding.UTF8, cancellationToken);
         }
         finally
         {
@@ -272,7 +272,7 @@ public sealed class ProjectFolder : IDisposable
         try
         {
             var json = JsonSerializer.Serialize(status, ProjectJsonContext.Default.ProjectStatus);
-            File.WriteAllText(StatusFilePath, json, Encoding.UTF8);
+            AtomicFile.WriteAllText(StatusFilePath, json, Encoding.UTF8);
         }
         finally
         {
