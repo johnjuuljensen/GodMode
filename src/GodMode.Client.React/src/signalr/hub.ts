@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, WebhookInfo, OAuthProviderStatus, ScheduleInfo, ScheduleConfig, StorageEntry } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, OAuthProviderStatus, StorageEntry } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -22,9 +22,7 @@ export interface HubCallbacks {
   onProjectRestored?: (project: ProjectSummary) => void;
   onRootsChanged?: () => void;
   onProfilesChanged?: () => void;
-  onWebhooksChanged?: () => void;
   onOAuthStatusChanged?: (profileName: string) => void;
-  onScheduleTriggered?: (profileName: string, scheduleName: string, projectId: string) => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -100,16 +98,8 @@ export class GodModeHub {
       this.callbacks.onProfilesChanged?.();
     });
 
-    this.connection.on('WebhooksChanged', () => {
-      this.callbacks.onWebhooksChanged?.();
-    });
-
     this.connection.on('OAuthStatusChanged', (profileName: string) => {
       this.callbacks.onOAuthStatusChanged?.(profileName);
-    });
-
-    this.connection.on('ScheduleTriggered', (profileName: string, scheduleName: string, projectId: string) => {
-      this.callbacks.onScheduleTriggered?.(profileName, scheduleName, projectId);
     });
 
     this.connection.onreconnecting(() => this.setState('reconnecting'));
@@ -297,65 +287,6 @@ export class GodModeHub {
 
   async disconnectOAuthProvider(profileName: string, provider: string): Promise<void> {
     await this.connection!.invoke('DisconnectOAuthProvider', profileName, provider);
-  }
-
-  // --- Webhooks ---
-
-  async listWebhooks(): Promise<WebhookInfo[]> {
-    return await this.connection!.invoke('ListWebhooks');
-  }
-
-  async createWebhook(
-    keyword: string,
-    profileName: string,
-    rootName: string,
-    actionName?: string | null,
-    description?: string | null,
-    inputMapping?: Record<string, string> | null,
-    staticInputs?: Record<string, unknown> | null,
-  ): Promise<WebhookInfo> {
-    return await this.connection!.invoke('CreateWebhook', keyword, profileName, rootName,
-      actionName, description, inputMapping, staticInputs);
-  }
-
-  async deleteWebhook(keyword: string): Promise<void> {
-    await this.connection!.invoke('DeleteWebhook', keyword);
-  }
-
-  async updateWebhook(
-    keyword: string,
-    description?: string | null,
-    inputMapping?: Record<string, string> | null,
-    staticInputs?: Record<string, unknown> | null,
-    enabled?: boolean | null,
-  ): Promise<WebhookInfo> {
-    return await this.connection!.invoke('UpdateWebhook', keyword, description, inputMapping, staticInputs, enabled);
-  }
-
-  async regenerateWebhookToken(keyword: string): Promise<string> {
-    return await this.connection!.invoke('RegenerateWebhookToken', keyword);
-  }
-
-  // ── Schedules ──
-
-  async getSchedules(profileName: string): Promise<ScheduleInfo[]> {
-    return await this.connection!.invoke('GetSchedules', profileName);
-  }
-
-  async createSchedule(profileName: string, name: string, config: ScheduleConfig): Promise<ScheduleInfo> {
-    return await this.connection!.invoke('CreateSchedule', profileName, name, config);
-  }
-
-  async updateSchedule(profileName: string, name: string, config: ScheduleConfig): Promise<ScheduleInfo> {
-    return await this.connection!.invoke('UpdateSchedule', profileName, name, config);
-  }
-
-  async deleteSchedule(profileName: string, name: string): Promise<void> {
-    await this.connection!.invoke('DeleteSchedule', profileName, name);
-  }
-
-  async toggleSchedule(profileName: string, name: string, enabled: boolean): Promise<ScheduleInfo> {
-    return await this.connection!.invoke('ToggleSchedule', profileName, name, enabled);
   }
 
   // ── Storage Browser ──

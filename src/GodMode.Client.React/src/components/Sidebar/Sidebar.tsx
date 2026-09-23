@@ -214,8 +214,6 @@ export function SidebarFooter() {
   const setShowRootManager = useAppStore(s => s.setShowRootManager);
   const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
   const setShowAppSettings = useAppStore(s => s.setShowAppSettings);
-  const setShowWebhookSettings = useAppStore(s => s.setShowWebhookSettings);
-  const setShowScheduleSettings = useAppStore(s => s.setShowScheduleSettings);
   const featureRoots = useAppStore(s => s.featureRoots);
   const featureMcp = useAppStore(s => s.featureMcp);
   const featureProfiles = useAppStore(s => s.featureProfiles);
@@ -276,25 +274,11 @@ export function SidebarFooter() {
               Connectors
             </button>
           )}
-          <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowScheduleSettings)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-            Schedules
-          </button>
           <button className="sidebar-footer-menu-item" onClick={() => openAndClose(() => useAppStore.getState().setActivePage({ type: 'storageBrowser' }))}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
             </svg>
             File Browser
-          </button>
-          <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowWebhookSettings)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-            Webhooks
           </button>
           <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowAppSettings)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -317,15 +317,6 @@
   color: var(--text-secondary);
 }
 
-.settings-form-row {
-  display: flex;
-  gap: 8px;
-}
-
-.settings-form-row .form-group {
-  flex: 1;
-}
-
 .settings-form-actions {
   margin-top: 20px;
 }
@@ -334,110 +325,6 @@
   width: 100%;
   padding: 11px;
   font-size: 14px;
-}
-
-/* ── Endpoint / Code Block ── */
-.settings-code-block {
-  margin-top: 8px;
-  padding: 8px 10px;
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 4px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.settings-code-block code {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-
-.settings-copy-btn {
-  background: none;
-  border: none;
-  color: var(--accent);
-  cursor: pointer;
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  font-family: var(--font-sans);
-}
-
-.settings-copy-btn:hover {
-  background: var(--glass);
-}
-
-/* ── Key-Value Rows (env vars, mappings) ── */
-.settings-kv-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 6px;
-  align-items: center;
-}
-
-.settings-kv-row input {
-  flex: 1;
-}
-
-.settings-kv-row .kv-arrow {
-  color: var(--text-tertiary);
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.settings-kv-add {
-  font-size: 12px;
-  color: var(--accent);
-  cursor: pointer;
-  background: none;
-  border: none;
-  padding: 4px 0;
-  font-family: var(--font-sans);
-}
-
-.settings-kv-add:hover {
-  text-decoration: underline;
-}
-
-/* ── Token Reveal Banner ── */
-.settings-token-reveal {
-  margin-bottom: 12px;
-  padding: 12px;
-  background: rgba(34, 197, 94, 0.08);
-  border: 1px solid rgba(34, 197, 94, 0.2);
-  border-radius: var(--radius);
-}
-
-.settings-token-reveal p {
-  margin: 0 0 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-
-.settings-token-value {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.settings-token-value code {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-primary);
-  word-break: break-all;
-  flex: 1;
-}
-
-.settings-token-dismiss {
-  margin-top: 8px;
 }
 
 /* ── Tabs ── */
@@ -467,27 +354,6 @@
 .settings-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
-}
-
-/* ── Collapsible Details ── */
-.settings-details {
-  margin-top: 4px;
-}
-
-.settings-details summary {
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--text-secondary);
-  user-select: none;
-  font-family: var(--font-sans);
-}
-
-.settings-details summary:hover {
-  color: var(--text-primary);
-}
-
-.settings-details-body {
-  margin-top: 8px;
 }
 
 /* ── Error ── */
@@ -549,61 +415,13 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-/* ── Stacked Item (webhook-style: header row + code block) ── */
-.settings-item.settings-item-stacked {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0;
-}
-
-.settings-item-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 /* ── Mobile Responsive ── */
 @media (max-width: 768px) {
-  .settings-form-row {
-    flex-direction: column;
-  }
-
-  .settings-kv-row {
-    flex-wrap: wrap;
-  }
-
   .settings-item {
     flex-wrap: wrap;
   }
 
   .settings-item-actions {
-    width: 100%;
-    justify-content: flex-end;
-    padding-top: 4px;
-    border-top: 1px solid var(--glass-border);
-    margin-top: 4px;
-  }
-
-  .settings-code-block {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .settings-code-block code {
-    white-space: normal;
-    word-break: break-all;
-  }
-
-  .settings-token-value {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .settings-item-row {
-    flex-wrap: wrap;
-  }
-
-  .settings-item-row .settings-item-actions {
     width: 100%;
     justify-content: flex-end;
     padding-top: 4px;
