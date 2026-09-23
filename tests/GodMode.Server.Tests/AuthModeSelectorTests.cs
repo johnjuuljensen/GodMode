@@ -46,13 +46,25 @@ public class AuthModeSelectorTests
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Urls"] = "http://127.0.0.1:1; http://localhost:2",
-            ["HTTP_PORTS"] = "8080",
+            ["HTTP_PORTS"] = "8080", // ignored by Kestrel while Urls is set, as in the Docker image
             ["Kestrel:Endpoints:Public:Url"] = "http://0.0.0.0:3",
         }).Build();
 
         Assert.Equal(
-            ["http://127.0.0.1:1", "http://localhost:2", "http://*:8080", "http://0.0.0.0:3"],
+            ["http://127.0.0.1:1", "http://localhost:2", "http://0.0.0.0:3"],
             AuthModeSelector.GetConfiguredUrls(config));
+    }
+
+    [Fact]
+    public void GetConfiguredUrls_WithoutUrls_UsesHttpPortsOnAllInterfaces()
+    {
+        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["HTTP_PORTS"] = "8080",
+            ["HTTPS_PORTS"] = "8443",
+        }).Build();
+
+        Assert.Equal(["http://*:8080", "https://*:8443"], AuthModeSelector.GetConfiguredUrls(config));
     }
 
     [Fact]

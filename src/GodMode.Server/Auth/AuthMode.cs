@@ -56,21 +56,23 @@ public static class AuthModeSelector
 
     /// <summary>
     /// Every URL Kestrel will bind, from the same sources Kestrel reads: <c>Urls</c>
-    /// (appsettings, <c>--urls</c>, <c>ASPNETCORE_URLS</c>), <c>HTTP_PORTS</c>/<c>HTTPS_PORTS</c>
-    /// (all interfaces) and <c>Kestrel:Endpoints:*:Url</c>. Falls back to Kestrel's own default.
+    /// (appsettings, <c>--urls</c>, <c>URLS</c>/<c>ASPNETCORE_URLS</c>), else <c>HTTP_PORTS</c>/<c>HTTPS_PORTS</c>
+    /// (all interfaces), plus <c>Kestrel:Endpoints:*:Url</c>. Falls back to Kestrel's own default.
     /// </summary>
     public static IReadOnlyList<string> GetConfiguredUrls(IConfiguration config)
     {
         static IEnumerable<string> Split(string? value) =>
             (value ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var urls = Split(config["urls"])
-            .Concat(Split(config["http_ports"]).Select(port => $"http://*:{port}"))
-            .Concat(Split(config["https_ports"]).Select(port => $"https://*:{port}"))
-            .Concat(config.GetSection("Kestrel:Endpoints").GetChildren()
-                .Select(endpoint => endpoint["Url"])
-                .OfType<string>())
-            .ToList();
+        // Kestrel uses HTTP(S)_PORTS only when no Urls are set (the aspnet base image sets HTTP_PORTS=8080)
+        var urls = Split(config["urls"]).ToList();
+        if (urls.Count == 0)
+            urls.AddRange(Split(config["http_ports"]).Select(port => $"http://*:{port}")
+                .Concat(Split(config["https_ports"]).Select(port => $"https://*:{port}")));
+
+        urls.AddRange(config.GetSection("Kestrel:Endpoints").GetChildren()
+            .Select(endpoint => endpoint["Url"])
+            .OfType<string>());
 
         return urls.Count > 0 ? urls : [KestrelDefaultUrl];
     }

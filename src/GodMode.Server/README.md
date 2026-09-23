@@ -37,9 +37,13 @@ Every endpoint and the SignalR hub require authentication. Only `/health` and th
 |---|---|---|
 | `codespace` | `CODESPACES=true` (set by GitHub Codespaces) | a GitHub token owned by `GITHUB_USER`. This mode wins whatever the binding and whether or not an API key is set. |
 | `apikey` | `Authentication:ApiKey` is set | `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on WebSocket upgrade) |
-| loopback | no key, and every binding is `127.0.0.1`, `[::1]` or `localhost` | nothing, but only from a loopback address |
+| loopback | no key, and every binding is `127.0.0.1`, `[::1]` or `localhost` | nothing, but only from a loopback address, with a loopback `Host`, and with a loopback `Origin` when there is one (so other web pages open in your browser can't reach it) |
 
-With no key and any other binding (`0.0.0.0`, `+`, `*`, a LAN or Tailscale address, a hostname), the server **refuses to start**. It prints why and exits with code 1. This applies to Docker too: the image binds `http://+:31337`, so set `Authentication__ApiKey`.
+With no key and any other binding (`0.0.0.0`, `+`, `*`, a LAN or Tailscale address, a hostname), the server **refuses to start**. It prints why and exits with code 1.
+
+A same-host reverse proxy or tunnel (`tailscale serve`, cloudflared, `ssh -L`, ngrok) makes remote callers look like loopback: **set a key before putting one in front of the server.**
+
+**Docker:** the image sets `URLS=http://+:31337` (all interfaces), so a container without a key exits at startup; run it with `-e Authentication__ApiKey=<key>`. To change the binding, use the unprefixed `URLS` variable or `--urls`. `ASPNETCORE_URLS` loses to the `Urls` in `appsettings.json`.
 
 The shipped config binds `http://127.0.0.1:31337`, so a fresh `dotnet run` is reachable only from the same machine. The browser client asks for the key once and keeps it in that browser. The MAUI app stores the key per server (the access token you enter when adding it) and adds it when relaying.
 
