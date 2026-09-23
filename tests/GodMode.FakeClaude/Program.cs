@@ -26,7 +26,8 @@ FakeRecording.Append(recordPath, new RecordLine(RecordLine.Start, pid, Argv: arg
 var sessionId = ArgValue("--session-id") ?? ArgValue("--resume") ?? "";
 var script = FakeScript.Load(Path.GetFullPath(scriptPath));
 
-var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true };
+// Consecutive emit steps go out in one write, as a burst of output from the real CLI does.
+var stdout = new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false));
 var stderr = new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(false)) { AutoFlush = true };
 
 // Every stdin line is recorded as it arrives, whether or not the script is waiting for one.
@@ -42,12 +43,14 @@ _ = Task.Run(async () =>
     stdinLines.Writer.Complete();
 });
 
-foreach (var step in script.Steps)
+for (var i = 0; i < script.Steps.Count; i++)
 {
-    switch (step)
+    switch (script.Steps[i])
     {
         case ScriptStep.Emit emit:
             await stdout.WriteLineAsync(emit.Line.Replace(FakeScript.SessionIdPlaceholder, sessionId));
+            if (i + 1 == script.Steps.Count || script.Steps[i + 1] is not ScriptStep.Emit)
+                await stdout.FlushAsync();
             break;
         case ScriptStep.AwaitStdin:
             if (!await stdinLines.Reader.WaitToReadAsync()) return Exit(0);

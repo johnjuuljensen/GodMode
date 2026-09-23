@@ -7,6 +7,7 @@ using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace GodMode.Server.Tests.Lifecycle;
 
@@ -30,6 +31,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private readonly string _workDir;
     private readonly ServiceProvider _services;
     private readonly List<string> _projectIds = [];
+    private readonly CapturingLoggerProvider _logs = new();
 
     public string RootPath { get; }
     public string ScriptPath { get; }
@@ -62,7 +64,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
             configuration[key] = value;
 
-        _services = BuildServices(new ConfigurationBuilder().AddInMemoryCollection(configuration).Build());
+        _services = BuildServices(new ConfigurationBuilder().AddInMemoryCollection(configuration).Build(), _logs);
         Projects = _services.GetRequiredService<IProjectManager>();
     }
 
@@ -88,10 +90,10 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         File.WriteAllText(Path.Combine(godModeRoot, "config.json"), JsonSerializer.Serialize(config));
     }
 
-    private static ServiceProvider BuildServices(IConfiguration configuration)
+    private static ServiceProvider BuildServices(IConfiguration configuration, ILoggerProvider logs)
     {
         var services = new ServiceCollection();
-        services.AddLogging();
+        services.AddLogging(logging => logging.AddProvider(logs));
         services.AddSignalR();
         services.AddSingleton(configuration);
         services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
@@ -129,10 +131,26 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         return status;
     }
 
-    /// <summary>status.json as it is on disk, which is what recovery and a restarted server read.</summary>
-    public ProjectStatus ReadStatusFile(string projectId) =>
-        JsonSerializer.Deserialize<ProjectStatus>(
-            File.ReadAllText(Path.Combine(ProjectPath(projectId), ".godmode", "status.json")), JsonDefaults.Options)!;
+    /// <summary>
+    /// status.json as it is on disk, which is what recovery and a restarted server read. The server
+    /// rewrites it in place, so a read can meet a locked or half-written file; those are retried.
+    /// </summary>
+    public ProjectStatus ReadStatusFile(string projectId)
+    {
+        var path = Path.Combine(ProjectPath(projectId), ".godmode", "status.json");
+        for (var attempt = 1; ; attempt++)
+        {
+            try { return JsonSerializer.Deserialize<ProjectStatus>(ReadShared(path), JsonDefaults.Options)!; }
+            catch (Exception ex) when (ex is IOException or JsonException && attempt < 50) { Thread.Sleep(20); }
+        }
+    }
+
+    /// <summary>Reads a file the server may still hold open for writing (output.jsonl, errs.txt, status.json).</summary>
+    private static string ReadShared(string path)
+    {
+        using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+        return reader.ReadToEnd();
+    }
 
     // ── What the fake saw ──
 
@@ -169,29 +187,30 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         catch (InvalidOperationException) { return false; }
     }
 
-    public static async Task WaitUntilAsync(Func<Task<bool>> condition, TimeSpan? timeout, Func<string> failure)
+    /// <summary>Polls <paramref name="condition"/> until it holds (true) or the timeout passes (false).</summary>
+    public static async Task<bool> WaitForAsync(Func<Task<bool>> condition, TimeSpan? timeout = null)
     {
         var deadline = DateTime.UtcNow + (timeout ?? DefaultTimeout);
         while (!await condition())
         {
-            if (DateTime.UtcNow > deadline)
-                Assert.Fail(failure());
+            if (DateTime.UtcNow > deadline) return false;
             await Task.Delay(20);
         }
+        return true;
+    }
+
+    /// <summary>As <see cref="WaitForAsync"/>, failing the test with <paramref name="failure"/> on timeout.</summary>
+    public static async Task WaitUntilAsync(Func<Task<bool>> condition, TimeSpan? timeout, Func<string> failure)
+    {
+        if (!await WaitForAsync(condition, timeout))
+            Assert.Fail(failure());
     }
 
     /// <summary>Everything a failed wait needs to be diagnosed from the test output alone.</summary>
     public string Describe(string projectId)
     {
         var godMode = Path.Combine(ProjectPath(projectId), ".godmode");
-        string Read(string file)
-        {
-            var path = Path.Combine(godMode, file);
-            if (!File.Exists(path)) return "(none)";
-            // The server keeps output.jsonl and errs.txt open for writing while the process runs.
-            using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
-            return reader.ReadToEnd();
-        }
+        string Read(string file) => File.Exists(Path.Combine(godMode, file)) ? ReadShared(Path.Combine(godMode, file)) : "(none)";
         var launches = Launches(projectId);
         return $"""
             status.json: {Read("status.json")}
@@ -201,6 +220,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             {Read("errs.txt")}
             fake launches: {launches.Count}
             {string.Join("\n", launches.Select(l => $"  pid {l.Pid}, stdin lines {l.Stdin.Count}, exit {l.ExitCode?.ToString() ?? "(none)"}"))}
+            server warnings and errors (all projects):
+            {string.Join("\n", _logs.Lines)}
             """;
     }
 

@@ -24,7 +24,10 @@ public static class FakeClaudeEnvironment
 /// <summary>One step of a fake claude script.</summary>
 public abstract record ScriptStep
 {
-    /// <summary>Writes one line to stdout. <c>{{session_id}}</c> is replaced by the session id from argv.</summary>
+    /// <summary>
+    /// Writes one line to stdout. <c>{{session_id}}</c> is replaced by the session id from argv.
+    /// Consecutive emits are flushed together, so the server reads them as one burst.
+    /// </summary>
     public sealed record Emit(string Line) : ScriptStep;
 
     /// <summary>Waits for the next stdin line. Exits 0 if stdin closes first, as the real CLI does.</summary>
@@ -94,9 +97,13 @@ public sealed class FakeScript
             session_id = SessionIdPlaceholder,
         }));
 
-    /// <summary>One whole turn: wait for the prompt, answer with <paramref name="answer"/>, end the turn.</summary>
+    /// <summary>
+    /// One whole turn: wait for the prompt, answer with <paramref name="answer"/>, end the turn. The
+    /// result follows after a short pause, so the turn does not race the server's per-line handlers;
+    /// a test about that race emits the two lines back to back itself.
+    /// </summary>
     public FakeScript Turn(string answer) =>
-        AwaitStdin().EmitAssistant(answer).EmitResult();
+        AwaitStdin().EmitAssistant(answer).Sleep(50).EmitResult();
 
     private static string Json<T>(T value) => JsonSerializer.Serialize(value);
 

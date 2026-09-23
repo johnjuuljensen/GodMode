@@ -93,27 +93,32 @@ public class ProjectLifecycleTests
     }
 
     /// <summary>
-    /// An assistant question followed at once by its result must end in WaitingInput, in memory and in
-    /// status.json. Several projects at once make an interleaving of the two lines' handlers likely.
+    /// An assistant question followed at once by its result (one burst on stdout) must end in
+    /// WaitingInput, in memory and in status.json. Each project is one trial, stopped before the next
+    /// starts so live processes do not pile up.
     /// </summary>
     [Fact(Skip = "fixed by #159")]
     public async Task AssistantQuestionThenResult_IsWaitingInput_EveryTime()
     {
-        const int projects = 20;
-        await using var harness = new LifecycleHarness(
-            new FakeScript().AwaitStdin().EmitAssistant("Which branch should I use?").EmitResult());
+        const int trials = 20;
+        const string question = "Which branch should I use?";
+        await using var harness = new LifecycleHarness(new FakeScript().AwaitStdin().EmitAssistant(question).EmitResult());
+        var stale = new List<string>();
 
-        var created = await Task.WhenAll(Enumerable.Range(1, projects).Select(i => harness.CreateProjectAsync($"q{i}")));
-
-        foreach (var project in created)
+        for (var i = 1; i <= trials; i++)
         {
+            var project = await harness.CreateProjectAsync($"q{i}");
             var status = await harness.WaitForStateAsync(project.Id, ProjectState.WaitingInput);
-            Assert.Equal("Which branch should I use?", status.CurrentQuestion);
-            await LifecycleHarness.WaitUntilAsync(
-                () => Task.FromResult(harness.ReadStatusFile(project.Id).State == ProjectState.WaitingInput),
-                TimeSpan.FromSeconds(2),
-                () => $"status.json of {project.Id} is not WaitingInput.\n{harness.Describe(project.Id)}");
+            Assert.Equal(question, status.CurrentQuestion);
+            if (!await LifecycleHarness.WaitForAsync(
+                    () => Task.FromResult(harness.ReadStatusFile(project.Id).State == ProjectState.WaitingInput),
+                    TimeSpan.FromMilliseconds(500)))
+                stale.Add($"{project.Id}\n{harness.Describe(project.Id)}");
+            await harness.Projects.StopProjectAsync(project.Id);
         }
+
+        Assert.True(stale.Count == 0,
+            $"{stale.Count} of {trials} projects are WaitingInput in memory but not in status.json. First: {stale.FirstOrDefault()}");
     }
 
     /// <summary>The text of a stream-json user message as GodMode writes it to claude's stdin.</summary>
