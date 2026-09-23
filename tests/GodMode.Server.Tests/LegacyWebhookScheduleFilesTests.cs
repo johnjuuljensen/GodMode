@@ -1,6 +1,4 @@
-using System.Diagnostics;
 using System.Net;
-using System.Net.Sockets;
 using System.Text;
 
 namespace GodMode.Server.Tests;
@@ -56,7 +54,7 @@ public class LegacyWebhookScheduleFilesTests
     [Fact]
     public async Task Server_StartsCleanly_AndIgnoresLegacyWebhookAndScheduleFiles()
     {
-        var workDir = Path.Combine(Path.GetTempPath(), "godmode-is153-" + Guid.NewGuid().ToString("N"));
+        var workDir = ServerProcess.CreateWorkDir("is153");
         var rootsDir = Path.Combine(workDir, "roots");
         var webhookPath = Path.Combine(rootsDir, ".webhooks", $"{WebhookKeyword}.json");
         var schedulePath = Path.Combine(rootsDir, ".profiles", "Default", "schedules", "nightly.json");
@@ -66,16 +64,14 @@ public class LegacyWebhookScheduleFilesTests
         WriteFile(schedulePath, ScheduleJson);
         WriteFile(profilePath, ProfileJson);
 
-        var port = GetFreePort();
-        var baseUrl = $"http://127.0.0.1:{port}";
-        var output = new StringBuilder();
+        var baseUrl = $"http://127.0.0.1:{ServerProcess.GetFreePort()}";
 
-        using var server = StartServer(workDir, rootsDir, baseUrl, output);
-        try
+        // No API key on a loopback binding: the server runs without authentication.
+        using (var server = ServerProcess.Start(workDir, baseUrl))
         {
             using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(5) };
 
-            await WaitForHealthyAsync(http, server, output);
+            await server.WaitForHealthyAsync(http);
 
             // The webhook route is gone: posting to the legacy keyword with its valid token is
             // answered exactly like a POST to a path that never existed.
@@ -86,11 +82,7 @@ public class LegacyWebhookScheduleFilesTests
             // Still serving after all of the above.
             using var health = await http.GetAsync("/health");
             Assert.Equal(HttpStatusCode.OK, health.StatusCode);
-            Assert.False(server.HasExited, $"Server exited unexpectedly.\n{output}");
-        }
-        finally
-        {
-            StopServer(server);
+            Assert.False(server.HasExited, $"Server exited unexpectedly.\n{server.Output}");
         }
 
         // The user's files are neither deleted nor rewritten.
@@ -98,7 +90,7 @@ public class LegacyWebhookScheduleFilesTests
         Assert.Equal(ScheduleJson, File.ReadAllText(schedulePath));
         Assert.Equal(ProfileJson, File.ReadAllText(profilePath));
 
-        try { Directory.Delete(workDir, recursive: true); } catch (IOException) { }
+        ServerProcess.DeleteWorkDir(workDir);
     }
 
     private static Task<HttpResponseMessage> PostAsync(HttpClient http, string path)
@@ -115,68 +107,5 @@ public class LegacyWebhookScheduleFilesTests
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
-    }
-
-    private static int GetFreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
-
-    private static Process StartServer(string workDir, string rootsDir, string url, StringBuilder output)
-    {
-        var serverDll = Path.Combine(AppContext.BaseDirectory, "GodMode.Server.dll");
-        var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } hostPath ? hostPath : "dotnet";
-
-        var psi = new ProcessStartInfo(dotnet)
-        {
-            WorkingDirectory = workDir,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-        };
-        psi.ArgumentList.Add(serverDll);
-        psi.ArgumentList.Add($"--ProjectRootsDir={rootsDir}");
-        psi.ArgumentList.Add($"--Urls={url}");
-        psi.ArgumentList.Add("--Authentication:Google:AllowedEmail=");
-        psi.ArgumentList.Add("--Authentication:ApiKey=");
-        psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
-        psi.Environment["CODESPACES"] = "";
-
-        var process = new Process { StartInfo = psi };
-        process.OutputDataReceived += (_, e) => { if (e.Data != null) lock (output) output.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (output) output.AppendLine(e.Data); };
-        process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-        return process;
-    }
-
-    private static async Task WaitForHealthyAsync(HttpClient http, Process server, StringBuilder output)
-    {
-        var deadline = DateTime.UtcNow.AddSeconds(60);
-        while (DateTime.UtcNow < deadline)
-        {
-            Assert.False(server.HasExited, $"Server exited during startup (code {(server.HasExited ? server.ExitCode : 0)}).\n{output}");
-            try
-            {
-                using var response = await http.GetAsync("/health");
-                if (response.IsSuccessStatusCode) return;
-            }
-            catch (HttpRequestException) { }
-            catch (TaskCanceledException) { }
-            await Task.Delay(250);
-        }
-        Assert.Fail($"Server did not become healthy within 60s.\n{output}");
-    }
-
-    private static void StopServer(Process server)
-    {
-        if (server.HasExited) return;
-        server.Kill(entireProcessTree: true);
-        server.WaitForExit(10_000);
     }
 }
