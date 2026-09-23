@@ -121,6 +121,30 @@ public class ProjectLifecycleTests
             $"{stale.Count} of {trials} projects are WaitingInput in memory but not in status.json. First: {stale.FirstOrDefault()}");
     }
 
+    /// <summary>
+    /// A delete that its script refuses (godmode-dev's refuses with uncommitted changes) leaves the
+    /// project as it was: resumed, its output is still persisted and still moves its state on.
+    /// </summary>
+    [Fact]
+    public async Task DeleteRefusedByItsScript_ThenResume_StillHandlesOutput()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().Turn("First."),
+            rootConfig: new Dictionary<string, object> { ["delete"] = "refuse.ps1" });
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "refuse.ps1"), "exit 1");
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Projects.DeleteProjectAsync(created.Id));
+        harness.UseScript(new FakeScript().EmitInit().EmitAssistant("Committed.").EmitResult());
+        await harness.Projects.ResumeProjectAsync(created.Id);
+
+        await harness.WaitForLaunchAsync(created.Id, _ => true, index: 1);
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        await LifecycleHarness.WaitUntilAsync(
+            () => Task.FromResult(harness.ReadOutputFile(created.Id).Contains("Committed.")), null,
+            () => $"the resumed launch's output is not in output.jsonl.\n{harness.Describe(created.Id)}");
+    }
+
     /// <summary>Two user sends at once reach claude as two whole stream-json lines.</summary>
     [Fact]
     public Task ConcurrentSendInput_WritesTwoWholeLines() =>

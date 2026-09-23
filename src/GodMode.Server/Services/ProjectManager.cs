@@ -661,8 +661,9 @@ public class ProjectManager : IProjectManager
 
         _logger.LogInformation("Deleting project {ProjectId} ({Name}), force={Force}", projectId, project.Status.Name, force);
 
-        // Stop Claude process if running, and finish its output
-        await _lifecycle.CloseAsync(project);
+        // Stop Claude process if running. Its output pipeline stays open until the delete is
+        // committed: a delete script may refuse, and the project is then resumed as before
+        await _lifecycle.StopAsync(project);
 
         // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
@@ -692,8 +693,9 @@ public class ProjectManager : IProjectManager
             }
         }
 
-        // Remove from tracking
+        // Remove from tracking, and finish its output
         _projects.TryRemove(projectId, out _);
+        await project.Process.CloseAsync();
 
         // Delete project folder — use robust deletion to handle locked/read-only files
         // (common with .git directories on Windows after git init or process shutdown)

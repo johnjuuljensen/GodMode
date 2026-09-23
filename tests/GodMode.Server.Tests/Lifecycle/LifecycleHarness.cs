@@ -154,6 +154,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         }
     }
 
+    public string ReadOutputFile(string projectId) =>
+        ReadShared(Path.Combine(ProjectPath(projectId), ".godmode", "output.jsonl"));
+
     /// <summary>Reads a file the server may still hold open for writing (output.jsonl, errs.txt, status.json).</summary>
     private static string ReadShared(string path)
     {
