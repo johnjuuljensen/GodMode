@@ -21,15 +21,20 @@ public class ClaudeProcessManager : IClaudeProcessManager
         "--input-format=stream-json"
     ];
 
+    /// <summary>Configuration key for the Claude Code executable (a name on PATH or a full path).</summary>
+    public const string ExecutableSetting = "Claude:Executable";
+
     private readonly ILogger<ClaudeProcessManager> _logger;
+    private readonly string _executable;
     private readonly ConcurrentDictionary<string, Process> _processes = new();
 
     public event OutputReceivedHandler? OnOutputReceived;
     public event ProcessExitedHandler? OnProcessExited;
 
-    public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger)
+    public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _executable = configuration[ExecutableSetting] is { Length: > 0 } executable ? executable : "claude";
     }
 
     public async Task<int> StartClaudeProcessAsync(
@@ -132,7 +137,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = "claude",
+            FileName = _executable,
             WorkingDirectory = project.ProjectPath,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
