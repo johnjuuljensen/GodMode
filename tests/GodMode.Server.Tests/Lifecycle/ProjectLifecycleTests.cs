@@ -97,7 +97,7 @@ public class ProjectLifecycleTests
     /// WaitingInput, in memory and in status.json. Each project is one trial, stopped before the next
     /// starts so live processes do not pile up.
     /// </summary>
-    [Fact(Skip = "fixed by #159")]
+    [Fact]
     public async Task AssistantQuestionThenResult_IsWaitingInput_EveryTime()
     {
         const int trials = 20;
