@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy } from '../../store';
-import { getBaseUrl } from '../../services/api';
 import type { ProjectSummary } from '../../signalr/types';
 import { ProjectItem } from './ProjectItem';
-import { isMaui } from '../../services/hostApi';
+import { isMaui, clearApiKey } from '../../services/hostApi';
 import './Sidebar.css';
 
 const GROUP_LABELS: Record<SidebarGroupBy, string> = {
@@ -210,17 +209,9 @@ function ArchivedSection() {
 }
 
 export function SidebarFooter() {
-  const setShowMcpConfig = useAppStore(s => s.setShowMcpConfig);
-  const setShowRootManager = useAppStore(s => s.setShowRootManager);
   const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
   const setShowAppSettings = useAppStore(s => s.setShowAppSettings);
-  const setShowWebhookSettings = useAppStore(s => s.setShowWebhookSettings);
-  const setShowScheduleSettings = useAppStore(s => s.setShowScheduleSettings);
-  const featureRoots = useAppStore(s => s.featureRoots);
-  const featureMcp = useAppStore(s => s.featureMcp);
   const featureProfiles = useAppStore(s => s.featureProfiles);
-  const showGodModeChat = useAppStore(s => s.showGodModeChat);
-  const setShowGodModeChat = useAppStore(s => s.setShowGodModeChat);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -261,43 +252,6 @@ export function SidebarFooter() {
               Profiles
             </button>
           )}
-          {featureRoots && (
-            <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowRootManager)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-              </svg>
-              Roots
-            </button>
-          )}
-          {featureMcp && (
-            <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowMcpConfig)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-                <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
-              </svg>
-              Connectors
-            </button>
-          )}
-          <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowScheduleSettings)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-            Schedules
-          </button>
-          <button className="sidebar-footer-menu-item" onClick={() => openAndClose(() => useAppStore.getState().setActivePage({ type: 'storageBrowser' }))}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
-            File Browser
-          </button>
-          <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowWebhookSettings)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-            </svg>
-            Webhooks
-          </button>
           <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowAppSettings)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
@@ -321,8 +275,9 @@ export function SidebarFooter() {
             )}
             {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
           </button>
-          <button className="sidebar-footer-menu-item sidebar-logout-btn" onClick={async () => {
-            await fetch(`${getBaseUrl()}/api/auth/logout`, { method: 'POST' });
+          <button className="sidebar-footer-menu-item sidebar-logout-btn" onClick={() => {
+            // Forget the API key held by this browser; the key page shows again on reload
+            clearApiKey();
             window.location.href = '/';
           }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -341,10 +296,6 @@ export function SidebarFooter() {
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
           </svg>
           Settings
-        </button>
-        <button className={`sidebar-godmode-btn ${showGodModeChat ? 'active' : ''}`} onClick={() => setShowGodModeChat(!showGodModeChat)} title="GodMode">
-          <span className="sidebar-godmode-shine" />
-          GodMode
         </button>
       </div>
     </div>

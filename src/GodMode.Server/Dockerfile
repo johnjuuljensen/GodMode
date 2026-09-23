@@ -16,14 +16,12 @@ COPY src/Directory.Build.props src/
 COPY src/GodMode.Server/GodMode.Server.csproj src/GodMode.Server/
 COPY src/GodMode.Shared/GodMode.Shared.csproj src/GodMode.Shared/
 COPY src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj src/GodMode.ProjectFiles/
-COPY src/GodMode.AI/GodMode.AI.csproj src/GodMode.AI/
 RUN dotnet restore src/GodMode.Server/GodMode.Server.csproj
 
 # Copy source and publish
 COPY src/GodMode.Server/ src/GodMode.Server/
 COPY src/GodMode.Shared/ src/GodMode.Shared/
 COPY src/GodMode.ProjectFiles/ src/GodMode.ProjectFiles/
-COPY src/GodMode.AI/ src/GodMode.AI/
 RUN dotnet publish src/GodMode.Server/GodMode.Server.csproj -c Release -o /app/publish -p:PublishReactClient=false
 
 # Copy React build output into wwwroot
@@ -82,7 +80,10 @@ RUN mkdir -p /app/projects /data && \
 
 EXPOSE 31337
 
-ENV ASPNETCORE_URLS=http://+:31337
+# Unprefixed URLS, not ASPNETCORE_URLS: ASPNETCORE_* is read before appsettings.json, whose
+# loopback "Urls" would win. The server refuses to start on this binding without an API key:
+# run with -e Authentication__ApiKey=<key>.
+ENV URLS=http://+:31337
 
 USER godmode
 ENTRYPOINT ["dotnet", "GodMode.Server.dll"]

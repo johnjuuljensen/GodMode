@@ -26,11 +26,11 @@ Recipe:
 
 ## MUST READ: Architecture Document
 
-**Before starting any non-trivial work, read `docs/UNIFIED-ARCHITECTURE.md`.** It describes the full system architecture, design principles, deployment strategy, and where to place new code. Violating its principles (especially the declarative configuration rules in Section 5) will result in work that needs to be redone.
+**Before starting any non-trivial work, read `docs/UNIFIED-ARCHITECTURE.md`.** It describes the full system architecture, design principles, deployment strategy, and where to place new code. Violating its principles (especially Section 5: files on disk are the source of truth) will result in work that needs to be redone.
 
 ## Project Overview
 
-GodMode is a Claude Autonomous Development System — a multi-project .NET 10 solution for managing Claude Code instances across local machines and GitHub Codespaces. It provides two UI surfaces:
+GodMode runs Claude Code sessions that ship issues, on machines you own (a PC, a VM or a GitHub Codespace), and lets you follow and steer them from a browser or a phone. It is a .NET 10 solution with two UI surfaces:
 
 1. **React SPA** — served directly by GodMode.Server, accessed via browser
 2. **MAUI app** — hosts the same React SPA in a HybridWebView, with a local proxy for multi-server connectivity
@@ -43,7 +43,7 @@ GodMode is a Claude Autonomous Development System — a multi-project .NET 10 so
 # Build server (includes React SPA build)
 dotnet build src/GodMode.Server/GodMode.Server.csproj
 
-# Run server (port 31337)
+# Run server (http://127.0.0.1:31337, keyless because it is loopback-only)
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
 # Build MAUI app (requires MAUI workload)
@@ -52,11 +52,11 @@ dotnet build src/GodMode.Maui/GodMode.Maui.csproj
 # Run all tests
 dotnet test
 
-# React dev server (hot reload, proxies to running GodMode.Server)
+# React dev server (hot reload only; it has no proxy, so it cannot reach a GodMode.Server)
 cd src/GodMode.Client.React && npm run dev
 ```
 
-**Running/Debugging**: The server and MAUI app are separate processes. The server serves the React SPA and manages Claude Code processes. The MAUI app connects to one or more servers via its local proxy. To develop React, run the server and use `npm run dev` for hot reload.
+**Running/Debugging**: The server and MAUI app are separate processes. The server serves the React SPA and manages Claude Code processes. The MAUI app connects to one or more servers via its local proxy. To see a React change against a running server, rebuild the server (`dotnet build`, or restart `dotnet run`) and reload the page: the server build rebuilds the client when its sources changed and copies `dist/` into `wwwroot/`. `npm run dev` starts Vite with hot reload, but `vite.config.ts` has no proxy, so that page shows "No servers configured".
 
 ## Architecture
 
@@ -64,13 +64,13 @@ cd src/GodMode.Client.React && npm run dev
 
 - **GodMode.Shared** — Shared types, models, enums, and SignalR hub interfaces (`IProjectHub`, `IProjectHubClient`)
 - **GodMode.Server** — ASP.NET SignalR server that spawns/manages Claude Code processes, serves React SPA
-- **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation
+- **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation (npm project, not in the slnx)
 - **GodMode.ClientBase** — Shared .NET client abstractions (host providers, server registry, token protection)
 - **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React
-- **GodMode.AI** — Cross-platform AI abstractions (IChatClientFactory, IChatClient, Anthropic provider)
 - **GodMode.ProjectFiles** — File system utilities for project folders (status.json, JSONL streams)
-- **GodMode.Mcp** — AWS Lambda MCP server (separate deployment)
+- **GodMode.McpBridge** — stdio MCP server given to every Claude session, for reporting results and status back to the server (npm project, not in the slnx)
 - **SignalR.Proxy** — SignalR WebSocket relay used by MAUI for multi-server connectivity
+- **GodMode.Server.Tests** — xUnit tests for GodMode.Server (`tests/`)
 
 ### Key Patterns
 
@@ -78,15 +78,16 @@ cd src/GodMode.Client.React && npm run dev
 - `IProjectHub` (Shared) — Client→Server methods
 - `IProjectHubClient` (Shared) — Server→Client callbacks (including `CreationProgress`)
 - `ProjectHub` (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
-- `SignalRProjectConnection` (ClientBase) — Uses `TypedSignalR.Client` source generator
+- `HubConnectionFactory` (ClientBase) — .NET clients get a raw `HubConnection` and use `TypedSignalR.Client`'s `CreateHubProxy<IProjectHub>()` for typed calls
+- `signalr/hub.ts` + `signalr/types.ts` (React) — hand-kept mirror of both interfaces
 
 **Config-Driven Project Roots (Multi-File)**
-- Each project root directory can contain a `.godmode-root/` folder with config files
-- `config.json` defines base/shared config (prepare, delete, environment, claudeArgs)
+- A root is a subdirectory of `ProjectRootsDir` (appsettings, default `roots`) that contains a `.godmode-root/` folder with config files
+- `config.json` defines base/shared config (profileName, prepare, delete, environment, claudeArgs, mcpServers)
 - `config.{action}.json` files define per-action overlays (merged with base)
 - `{actionName}/schema.json` provides input schema by convention (falls back to default name+prompt)
 - `RootConfigReader` discovers, merges, and resolves configs fresh on each operation (no restart needed)
-- `ScriptRunner` executes scripts with cross-platform extension resolution (.ps1 on Windows, .sh on Linux)
+- `ScriptRunner` executes scripts with cross-platform extension resolution (`.ps1` runs under `pwsh` on every OS; extensionless names try `.ps1`/`.cmd`/`.bat` on Windows, `.sh` then `.ps1` on Linux)
 - `TemplateResolver` resolves `{fieldName}` placeholders in name/prompt templates
 - UIs render dynamic forms from the JSON Schema (string, multiline, boolean, enum fields)
 
@@ -95,12 +96,17 @@ cd src/GodMode.Client.React && npm run dev
 - In browser mode: React connects directly to GodMode.Server via SignalR
 - In MAUI mode: React connects via a local proxy (`LocalServer`) that relays WebSocket to remote servers
 - React detects hosting mode via `window.location.hostname === '0.0.0.1'` (HybridWebView address)
-- Use `getBaseUrl()`, `getHubUrl()`, `getHubOptions()` from `hostApi.ts` — never hardcode URLs
+- Use the helpers in `hostApi.ts` (`getHubUrl()`, `getHubOptions()`, and its fetch helpers) — never hardcode URLs
 
 **Process Management**
 - `ClaudeProcessManager` uses `System.Diagnostics.Process` directly (not CliWrap) for proper stdin handling
 - `--dangerously-skip-permissions` is per-project (stored in `.godmode/settings.json`), not global
-- Processes write to `.godmode/output.jsonl`, read via `ProjectFolderWatcher`
+- `ClaudeProcessManager` appends each process's stdout to `.godmode/output.jsonl`, which backfills clients that subscribe later
+
+**Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
+- One mode per run: codespace (`CODESPACES=true`), API key (`Authentication:ApiKey`), or keyless loopback
+- Keyless is allowed only when every binding is loopback, and only for loopback callers with a loopback `Host`/`Origin`. Otherwise the server refuses to start without a key
+- Default binding `http://127.0.0.1:31337`. Binding a Tailscale or LAN address needs a key; so does the Docker image (`URLS=http://+:31337`)
 
 ### Project Folder Structure
 ```
@@ -117,31 +123,31 @@ cd src/GodMode.Client.React && npm run dev
 
 ### Project Root Config
 ```
-/root/
+{ProjectRootsDir}/root-name/
 ├── .godmode-root/               # Root config and scripts (optional)
 │   ├── config.json              # Base/shared config (prepare, delete, env, claudeArgs)
 │   ├── config.freeform.json     # Per-action overlay (merged with base)
 │   ├── config.issue.json        # Per-action overlay (merged with base)
 │   ├── freeform/                # Action resources
 │   │   ├── schema.json          # Input schema (convention-based)
-│   │   └── create.ps1 / .sh    # Action-specific create script
+│   │   └── create.ps1           # Action-specific create script
 │   ├── issue/                   # Action resources
 │   │   ├── schema.json          # Input schema
-│   │   └── create.ps1 / .sh    # Action-specific create script
+│   │   └── create.ps1           # Action-specific create script
 │   └── scripts/                 # Shared scripts (cross-platform)
-│       ├── prepare.ps1 / .sh
-│       └── delete.ps1 / .sh
+│       ├── prepare.ps1
+│       └── delete.ps1
 └── {project-id}/                # Project folders
 ```
 
 ### Script Constraints (Server Deployment)
-GodMode servers run in Docker containers on cloud platforms (Azure, AWS, Railway) with network-mounted storage:
-- **No chmod** — Azure Files doesn't support permission changes. Guard with `2>/dev/null || true`
-- **No sudo** — Container runs as non-root user
+Root scripts run on whatever machine hosts the server: a Windows or Linux PC or VM, a codespace, or the Docker image. Write them to work on all of them:
+- **No chmod reliance** — some file systems (Windows, network mounts) don't support permission changes. Guard with `2>/dev/null || true`
+- **No sudo** — Scripts run as the server's user; the Docker image runs as a non-root user
 - **No package installation via system package manager** — No apt-get/yum/brew. User-scope installs into `$HOME/.local/…` are fine (how pwsh, mcp binaries, etc. land on the server).
 - **No interactive commands** — Headless environment, no prompts or editors
 - **Idempotent** — Scripts may run multiple times. Use `mkdir -p`/`New-Item -Force`, don't fail if files exist
-- **pwsh everywhere** — Write root scripts as `.ps1`. The container bootstrap installs PowerShell 7 on each start, so the same script runs on Windows (local dev) and Linux (deployed). Use `$ErrorActionPreference = 'Stop'` at the top.
+- **pwsh everywhere** — Write root scripts as `.ps1`. The Docker image ships PowerShell 7, so the same script runs on Windows and Linux. Use `$ErrorActionPreference = 'Stop'` at the top.
 - **mkdir syntax** — In any bash helper, use `mkdir -p dir1 dir2 dir3`, NOT `mkdir -p {dir1,dir2}` (brace expansion is fragile across shells)
 
 ## Code Style Preferences
@@ -171,33 +177,18 @@ GodMode servers run in Docker containers on cloud platforms (Azure, AWS, Railway
   - Bundle all assets — no CDN dependencies
   - Test in browser; be aware of MAUI differences
 
-## Inference Configuration
-
-All inference config lives in `~/.godmode/inference.json`.
-
-```json
-{
-  "api_key": "sk-ant-...",
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-20250514",
-  "max_tokens": 256,
-  "temperature": 0.3
-}
-```
-
-The `InferenceRouter` in `GodMode.AI` maps inference requests to the Anthropic provider. The `api_key` field (or `ANTHROPIC_API_KEY` env var) is required for AI features (GodMode Chat, root generation).
-
 ## GitHub Codespaces (GodMode Server)
 
-The `.devcontainer/godmode-server/devcontainer.json` provisions a codespace with GodMode.Server. On creation it clones the repo, publishes the server to `/opt/godmode-server`, and installs Claude Code. On every start it launches the server on port 31337 and sets the port to public.
+The `.devcontainer/godmode-server/devcontainer.json` provisions a codespace with GodMode.Server. On creation it clones the repo's `master`, publishes the server to `/opt/godmode-server`, copies the repo's root configs to `~/roots`, and installs Claude Code. On every start it launches the server on port 31337 and sets the port to public. The server runs in codespace auth mode: callers present a GitHub token owned by the codespace's user.
 
 ### Codespace layout
 
 - **Binary**: `/opt/godmode-server/` (root-owned, read-only)
 - **Config**: `/opt/godmode-server/appsettings.json` (via `--contentRoot`)
-- **Projects**: `~/projects/` (server CWD is `$HOME`)
+- **Roots**: `~/roots/` (`--ProjectRootsDir roots`, server CWD is `$HOME`), copied from `.devcontainer/godmode-server/roots/` in the repo
+- **Projects**: inside their root, `~/roots/<root>/<project-id>/`
+- **Logs**: `~/.godmode-logs/`
 - **Claude Code**: `~/.local/bin/claude` (added to PATH in postStartCommand)
-- **Root configs**: `.devcontainer/godmode-server/roots/` in the repo
 
 ### Create / delete a codespace
 
@@ -205,7 +196,6 @@ The `.devcontainer/godmode-server/devcontainer.json` provisions a codespace with
 # Create
 gh codespace create \
   --repo johnjuuljensen/GodMode \
-  --branch feature/server-auth-and-devcontainer \
   --devcontainer-path .devcontainer/godmode-server/devcontainer.json \
   --display-name GodMode
 
@@ -213,7 +203,7 @@ gh codespace create \
 gh codespace delete -c <codespace-name>
 ```
 
-The devcontainer must exist on the target branch — GitHub reads it from the repo at that ref.
+GitHub reads the devcontainer from the branch the codespace is created on (the default branch when `--branch` is omitted). Whatever that branch is, `postCreateCommand` clones and builds `master`.
 
 ### Checking codespace health
 

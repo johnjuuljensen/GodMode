@@ -39,7 +39,7 @@ state lives; the user tracks by issue.
 
    Ready means done, and it is the only signal that says so. **Green means no new failures against
    your base.** `master` is not clean today: on 2026-09-23 it had one build error (`MCPEXP002` in
-   `src/GodMode.Mcp/Program.cs`) and ten lint errors in the React client, with every test passing.
+   `GodMode.Mcp`, a project epic #148 removes) and ten lint errors in the React client, with every test passing.
    Your brief gives your base's numbers; if it does not, measure them once in a detached checkout
    (`git worktree add --detach <scratch dir> $env:AC_GWT_BASE_BRANCH`, then `git worktree remove` it)
    rather than by stashing — the stash is shared by every worktree. Do not add to them.

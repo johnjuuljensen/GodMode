@@ -1,50 +1,45 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from './store';
-import { getBaseUrl } from './services/api';
+import { isAuthorized, getApiKey, setApiKey } from './services/hostApi';
 import { Shell } from './components/Shell';
 import { LoginPage } from './components/Auth/LoginPage';
 
-interface AuthChallenge {
-  method: string;
-  authenticated: boolean;
+type AuthState = 'checking' | 'authorized' | 'needs-key' | 'rejected' | 'unreachable';
+
+/** Asks the backend whether this client may proceed with the key it holds (if any). */
+async function probeAuth(): Promise<AuthState> {
+  try {
+    if (await isAuthorized()) return 'authorized';
+    // A key was held but the server refused it, as opposed to none entered yet
+    return getApiKey() !== null ? 'rejected' : 'needs-key';
+  } catch {
+    return 'unreachable';
+  }
 }
 
 export default function App() {
   const loadServers = useAppStore(s => s.loadServers);
-  const [challenge, setChallenge] = useState<AuthChallenge | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [auth, setAuth] = useState<AuthState>('checking');
 
-  const checkAuth = useCallback(async () => {
-    try {
-      const res = await fetch(`${getBaseUrl()}/api/auth/challenge`);
-      if (res.ok) {
-        setChallenge(await res.json());
-      } else {
-        setChallenge({ method: 'none', authenticated: true });
-      }
-    } catch {
-      setChallenge({ method: 'none', authenticated: true });
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    probeAuth().then(setAuth);
   }, []);
 
   useEffect(() => {
-    checkAuth();
-  }, [checkAuth]);
-
-  useEffect(() => {
-    if (challenge && (challenge.method === 'none' || challenge.authenticated)) {
+    if (auth === 'authorized') {
       loadServers().catch(console.error);
     }
-  }, [challenge, loadServers]);
+  }, [auth, loadServers]);
 
-  if (loading) return null;
+  const submitKey = useCallback(async (key: string) => {
+    setApiKey(key);
+    setAuth(await probeAuth());
+  }, []);
 
-  if (challenge?.method === 'google' && !challenge.authenticated) {
-    const params = new URLSearchParams(window.location.search);
-    const error = params.get('error') ?? undefined;
-    return <LoginPage error={error} />;
+  if (auth === 'checking') return null;
+
+  if (auth !== 'authorized') {
+    return <LoginPage error={auth === 'unreachable' ? 'network' : auth === 'rejected' ? 'rejected' : undefined} onSubmit={submitKey} />;
   }
 
   return <Shell />;

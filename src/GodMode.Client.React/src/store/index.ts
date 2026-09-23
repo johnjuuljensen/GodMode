@@ -6,9 +6,8 @@ import { create } from 'zustand';
 import { GodModeHub, type ConnectionState } from '../signalr/hub';
 import type {
   ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
-  ServerInfo, CreateActionInfo, McpServerConfig,
+  ServerInfo, CreateActionInfo,
 } from '../signalr/types';
-import type { GodModeChatEntry } from '../components/GodModeChat/GodModeChat';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../services/hostApi';
 import {
@@ -58,13 +57,8 @@ export interface ProfileGroup {
 
 // ── Active page (replaces modal booleans) ─────────────────────
 export type ActivePage =
-  | { type: 'mcpConfig' }
-  | { type: 'rootManager' }
   | { type: 'profileSettings' }
   | { type: 'appSettings' }
-  | { type: 'webhookSettings' }
-  | { type: 'scheduleSettings' }
-  | { type: 'storageBrowser' }
   | { type: 'addServer' }
   | { type: 'editServer'; serverId: string }
   | { type: 'createProject'; context?: { serverId: string; rootName: string } };
@@ -90,10 +84,6 @@ interface AppState {
   // Sidebar grouping
   sidebarGroupBy: SidebarGroupBy;
   cycleSidebarGroupBy: () => void;
-
-  // MCP cache: "serverId:profileName" -> MCP server names
-  profileMcpCache: Record<string, Record<string, McpServerConfig>>;
-  getProjectMcpServers: (serverId: string, profileName: string) => Record<string, McpServerConfig> | undefined;
 
   // Server lifecycle
   loadServers: () => Promise<void>;
@@ -146,27 +136,12 @@ interface AppState {
   setShowAddServer: (show: boolean) => void;
   setShowCreateProject: (show: boolean, context?: { serverId: string; rootName: string }) => void;
   setEditServerId: (id: string | null) => void;
-  setShowMcpConfig: (show: boolean) => void;
-  setShowRootManager: (show: boolean) => void;
   setShowProfileSettings: (show: boolean) => void;
   setShowAppSettings: (show: boolean) => void;
-  setShowWebhookSettings: (show: boolean) => void;
-  setShowScheduleSettings: (show: boolean) => void;
-
-  // GodMode chat
-  showGodModeChat: boolean;
-  setShowGodModeChat: (show: boolean) => void;
-  godModeChatMessages: GodModeChatEntry[];
-  godModeChatLoading: boolean;
-  appendGodModeChatMessage: (entry: GodModeChatEntry) => void;
-  clearGodModeChat: () => void;
-  setGodModeChatLoading: (loading: boolean) => void;
 
   // Feature visibility
-  featureRoots: boolean;
-  featureMcp: boolean;
   featureProfiles: boolean;
-  setFeatureFlag: (flag: 'featureRoots' | 'featureMcp' | 'featureProfiles', value: boolean) => void;
+  setFeatureFlag: (flag: 'featureProfiles', value: boolean) => void;
 }
 
 // ── Helper: rebuild profile hierarchy ──────────────────────────
@@ -380,10 +355,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ sidebarGroupBy: next, profileGroups, inactiveServers, profileFilterOptions });
   },
 
-  // MCP cache
-  profileMcpCache: {},
-  getProjectMcpServers: (serverId, profileName) => get().profileMcpCache[`${serverId}:${profileName}`],
-
   // ── Server lifecycle ──────────────────────────────────────
 
   loadServers: async () => {
@@ -508,7 +479,6 @@ export const useAppStore = create<AppState>((set, get) => ({
             // Auto-select the newly created project and close the create modal
             selectedProject: { serverId, projectId: status.Id },
             activePage: null,
-            showGodModeChat: false,
             outputMessages: [],
             question: emptyQuestion,
           };
@@ -648,24 +618,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       },
       onCreationProgress: () => {},
-      onRootsChanged: () => {
-        get().refreshProjects(serverId);
-      },
       onProfilesChanged: () => {
         get().refreshProjects(serverId);
-      },
-      onWebhooksChanged: () => {
-        // Webhooks changed — could refresh a webhook list if UI shows one
-      },
-      onOAuthStatusChanged: () => {
-        // OAuth status changed — UI components with OAuth status will re-fetch
-      },
-      onChatResponse: (message) => {
-        const entry: GodModeChatEntry = { role: 'server', message };
-        set(state => ({
-          godModeChatMessages: [...state.godModeChatMessages, entry],
-          godModeChatLoading: message.Type === 'ToolCall', // still processing if tool call
-        }));
       },
     });
 
@@ -720,20 +674,6 @@ export const useAppStore = create<AppState>((set, get) => ({
         const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
         return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
       });
-
-      // Load MCP servers per unique profile (fire-and-forget, non-blocking)
-      const profileRootMap = new Map<string, string>();
-      for (const root of roots) {
-        const pn = root.ProfileName ?? 'Default';
-        if (!profileRootMap.has(pn)) profileRootMap.set(pn, root.Name);
-      }
-      for (const [profileName, rootName] of profileRootMap) {
-        conn.hub.getEffectiveMcpServers(profileName, rootName).then(mcpServers => {
-          set(state => ({
-            profileMcpCache: { ...state.profileMcpCache, [`${serverId}:${profileName}`]: mcpServers },
-          }));
-        }).catch(() => { /* ignore MCP cache failures */ });
-      }
     } catch (err) {
       console.error('Failed to refresh projects:', err);
     }
@@ -747,7 +687,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Selection ─────────────────────────────────────────────
 
   selectedProject: null,
-  selectProject: (serverId, projectId) => set({ selectedProject: { serverId, projectId }, activePage: null, showGodModeChat: false, outputMessages: [], question: emptyQuestion }),
+  selectProject: (serverId, projectId) => set({ selectedProject: { serverId, projectId }, activePage: null, outputMessages: [], question: emptyQuestion }),
   clearSelection: () => set({ selectedProject: null, outputMessages: [], question: emptyQuestion }),
 
   // ── Output ────────────────────────────────────────────────
@@ -794,32 +734,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── UI pages ────────────────────────────────────────────────
 
   activePage: null,
-  setActivePage: (page) => set({ activePage: page, ...(page ? { showGodModeChat: false } : {}) }),
+  setActivePage: (page) => set({ activePage: page }),
   closePage: () => set({ activePage: null }),
 
   // Backward-compat setters (delegate to activePage)
   setShowAddServer: (show) => set({ activePage: show ? { type: 'addServer' } : null }),
   setShowCreateProject: (show, context) => set({ activePage: show ? { type: 'createProject', context } : null }),
   setEditServerId: (id) => set({ activePage: id ? { type: 'editServer', serverId: id } : null }),
-  setShowMcpConfig: (show) => set({ activePage: show ? { type: 'mcpConfig' } : null }),
-  setShowRootManager: (show) => set({ activePage: show ? { type: 'rootManager' } : null }),
   setShowProfileSettings: (show) => set({ activePage: show ? { type: 'profileSettings' } : null }),
   setShowAppSettings: (show) => set({ activePage: show ? { type: 'appSettings' } : null }),
-  setShowWebhookSettings: (show) => set({ activePage: show ? { type: 'webhookSettings' } : null }),
-  setShowScheduleSettings: (show) => set({ activePage: show ? { type: 'scheduleSettings' } : null }),
-
-  // GodMode chat
-  showGodModeChat: false,
-  setShowGodModeChat: (show) => set({ showGodModeChat: show, ...(show ? { activePage: null } : {}) }),
-  godModeChatMessages: [],
-  godModeChatLoading: false,
-  appendGodModeChatMessage: (entry) => set(state => ({ godModeChatMessages: [...state.godModeChatMessages, entry] })),
-  clearGodModeChat: () => set({ godModeChatMessages: [], godModeChatLoading: false }),
-  setGodModeChatLoading: (loading) => set({ godModeChatLoading: loading }),
 
   // Feature visibility (persisted to localStorage)
-  featureRoots: localStorage.getItem('godmode-feature-roots') !== 'false',
-  featureMcp: localStorage.getItem('godmode-feature-mcp') !== 'false',
   featureProfiles: localStorage.getItem('godmode-feature-profiles') !== 'false',
   setFeatureFlag: (flag, value) => {
     localStorage.setItem(`godmode-${flag.replace('feature', 'feature-').toLowerCase()}`, String(value));

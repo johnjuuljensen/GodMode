@@ -5,70 +5,80 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using GodMode.Server.Services;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 
 namespace GodMode.Server.Auth;
 
+/// <summary>
+/// Authenticates users of the server (React client, MAUI relay) according to the startup <see cref="AuthMode"/>.
+/// </summary>
 public class GodModeAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
     private static readonly ConcurrentDictionary<string, (string user, DateTime expiry)> TokenCache = new();
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(30);
 
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IConfiguration _configuration;
+    private readonly AuthSettings _settings;
 
     public GodModeAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
         IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
+        AuthSettings settings)
         : base(options, logger, encoder)
     {
         _httpClientFactory = httpClientFactory;
-        _configuration = configuration;
+        _settings = settings;
     }
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        // Extract token from Authorization header or query string (SignalR WebSocket upgrade)
-        var token = ExtractToken();
-        if (token == null)
+        // A project's MCP bridge is not a user; its token must never be checked as an API key
+        // or sent to GitHub. The project-token scheme handles it.
+        if (Request.Headers.ContainsKey(ProjectTokenAuthenticationHandler.ProjectIdHeader))
             return AuthenticateResult.NoResult();
 
-        var isCodespace = string.Equals(
-            Environment.GetEnvironmentVariable("CODESPACES"), "true", StringComparison.OrdinalIgnoreCase);
+        if (_settings.Mode == AuthMode.Loopback)
+            return IsLocalRequest()
+                ? SuccessResult(Scheme.Name, "local-user")
+                : AuthenticateResult.Fail("Unauthenticated access is only allowed locally: loopback caller, Host and Origin");
 
-        if (isCodespace)
-            return await ValidateGitHubTokenAsync(token);
+        // Authorization header; for the hub only, also the query string, because browsers cannot set
+        // headers on a WebSocket upgrade. Nowhere else: a key in a URL ends up in logs and history.
+        var queryToken = Request.Path.StartsWithSegments(GodModeAuthExtensions.HubPath)
+            ? Request.Query["access_token"].FirstOrDefault()
+            : null;
+        if ((BearerToken.FromHeader(Request) ?? queryToken) is not { Length: > 0 } token)
+            return AuthenticateResult.NoResult();
 
-        var apiKey = _configuration["Authentication:ApiKey"];
-        if (!string.IsNullOrEmpty(apiKey))
-            return ValidateApiKey(token, apiKey);
-
-        // No auth mode configured — should not reach here if middleware is wired correctly
-        return AuthenticateResult.NoResult();
+        return _settings.Mode switch
+        {
+            AuthMode.Codespace => await ValidateGitHubTokenAsync(token),
+            AuthMode.ApiKey => ValidateApiKey(token, _settings.ApiKey!),
+            _ => AuthenticateResult.NoResult(),
+        };
     }
 
-    private string? ExtractToken()
-    {
-        // Check Authorization header first
-        var authHeader = Request.Headers.Authorization.ToString();
-        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            return authHeader["Bearer ".Length..].Trim();
-
-        // Fall back to query string (SignalR sends token here for WebSocket upgrade)
-        var queryToken = Request.Query["access_token"].FirstOrDefault();
-        if (!string.IsNullOrEmpty(queryToken))
-            return queryToken;
-
-        return null;
-    }
+    /// <summary>
+    /// Keyless loopback mode trusts this machine, and a browser on this machine is a loopback
+    /// caller too. So besides the caller's address (which keeps it closed if the server is
+    /// reachable some other way), the Host it asked for must be loopback, against DNS rebinding,
+    /// and so must the Origin of the page that sent it, when there is one, against cross-site
+    /// requests including WebSocket upgrades.
+    /// </summary>
+    private bool IsLocalRequest() =>
+        AuthModeSelector.IsLoopback(Context.Connection.RemoteIpAddress)
+        && AuthModeSelector.IsLoopbackHost(Request.Host.Host)
+        && Request.Headers.Origin.ToString() is var origin
+        && (origin.Length == 0 || AuthModeSelector.IsLoopbackOrigin(origin));
 
     private async Task<AuthenticateResult> ValidateGitHubTokenAsync(string token)
     {
-        var expectedUser = Environment.GetEnvironmentVariable("GITHUB_USER");
+        var expectedUser = _settings.GitHubUser;
         if (string.IsNullOrEmpty(expectedUser))
             return AuthenticateResult.Fail("GITHUB_USER environment variable not set");
 
@@ -78,7 +88,7 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
         if (TokenCache.TryGetValue(cacheKey, out var cached) && cached.expiry > DateTime.UtcNow)
         {
             if (string.Equals(cached.user, expectedUser, StringComparison.OrdinalIgnoreCase))
-                return SuccessResult(cached.user);
+                return SuccessResult(Scheme.Name, cached.user);
 
             return AuthenticateResult.Fail("Token owner does not match GITHUB_USER");
         }
@@ -105,7 +115,7 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
             TokenCache[cacheKey] = (login, DateTime.UtcNow + CacheTtl);
 
             if (string.Equals(login, expectedUser, StringComparison.OrdinalIgnoreCase))
-                return SuccessResult(login);
+                return SuccessResult(Scheme.Name, login);
 
             return AuthenticateResult.Fail("Token owner does not match GITHUB_USER");
         }
@@ -125,22 +135,21 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
         if (!CryptographicOperations.FixedTimeEquals(tokenBytes, keyBytes))
             return AuthenticateResult.Fail("Invalid API key");
 
-        return SuccessResult("api-key-user");
+        return SuccessResult(Scheme.Name, "api-key-user");
     }
 
-    private AuthenticateResult SuccessResult(string username)
+    internal static AuthenticateResult SuccessResult(string scheme, string username, params Claim[] extraClaims)
     {
-        var claims = new[]
-        {
+        Claim[] claims =
+        [
             new Claim(ClaimTypes.NameIdentifier, username),
-            new Claim(ClaimTypes.Name, username)
-        };
+            new Claim(ClaimTypes.Name, username),
+            .. extraClaims,
+        ];
 
-        var identity = new ClaimsIdentity(claims, Scheme.Name);
+        var identity = new ClaimsIdentity(claims, scheme);
         var principal = new ClaimsPrincipal(identity);
-        var ticket = new AuthenticationTicket(principal, Scheme.Name);
-
-        return AuthenticateResult.Success(ticket);
+        return AuthenticateResult.Success(new AuthenticationTicket(principal, scheme));
     }
 
     protected override Task HandleChallengeAsync(AuthenticationProperties properties)
@@ -157,16 +166,67 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
     }
 }
 
+/// <summary>
+/// Authenticates the GodMode MCP bridge running inside a project: <c>X-GodMode-Project-Id</c>
+/// plus that project's bearer token. A user's API key is not a project token.
+/// </summary>
+public class ProjectTokenAuthenticationHandler(
+    IOptionsMonitor<AuthenticationSchemeOptions> options,
+    ILoggerFactory logger,
+    UrlEncoder encoder,
+    IProjectManager projectManager)
+    : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
+{
+    public const string ProjectIdHeader = "X-GodMode-Project-Id";
+
+    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    {
+        var projectId = Request.Headers[ProjectIdHeader].ToString();
+        if (string.IsNullOrEmpty(projectId) || BearerToken.FromHeader(Request) is not { Length: > 0 } token)
+            return Task.FromResult(AuthenticateResult.NoResult());
+
+        return Task.FromResult(projectManager.ValidateProjectToken(projectId, token) == null
+            ? AuthenticateResult.Fail("Invalid project token")
+            : GodModeAuthenticationHandler.SuccessResult(Scheme.Name, $"project:{projectId}",
+                new Claim(GodModeAuthExtensions.ProjectIdClaim, projectId)));
+    }
+}
+
+internal static class BearerToken
+{
+    public static string? FromHeader(HttpRequest request)
+    {
+        var header = request.Headers.Authorization.ToString();
+        return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            ? header["Bearer ".Length..].Trim()
+            : null;
+    }
+}
+
 public static class GodModeAuthExtensions
 {
+    public const string HubPath = "/hubs/projects";
     public const string SchemeName = "GodModeBearer";
+    public const string ProjectTokenSchemeName = "GodModeProjectToken";
+    public const string ProjectPolicy = "GodModeProject";
+    public const string ProjectIdClaim = "godmode:project-id";
 
-    public static AuthenticationBuilder AddGodModeAuth(
-        this AuthenticationBuilder builder,
-        Action<AuthenticationSchemeOptions>? configure = null)
+    /// <summary>
+    /// Registers user and project authentication, and makes authentication the default:
+    /// every endpoint requires an authenticated user unless it explicitly opts out (only /health and the SPA do).
+    /// </summary>
+    public static IServiceCollection AddGodModeAuth(this IServiceCollection services, AuthSettings settings)
     {
-        return builder.AddScheme<AuthenticationSchemeOptions, GodModeAuthenticationHandler>(
-            SchemeName,
-            configure ?? (_ => { }));
+        services.AddSingleton(settings);
+        services.AddAuthentication(SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, GodModeAuthenticationHandler>(SchemeName, _ => { })
+            .AddScheme<AuthenticationSchemeOptions, ProjectTokenAuthenticationHandler>(ProjectTokenSchemeName, _ => { });
+        services.AddAuthorizationBuilder()
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder(SchemeName).RequireAuthenticatedUser().Build())
+            .AddPolicy(ProjectPolicy, policy => policy
+                .AddAuthenticationSchemes(ProjectTokenSchemeName)
+                .RequireAuthenticatedUser()
+                .RequireClaim(ProjectIdClaim));
+        return services;
     }
 }

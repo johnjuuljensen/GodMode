@@ -10,7 +10,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="CliWrap" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Serilog.Sinks.File" />
@@ -18,7 +17,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\GodMode.AI\GodMode.AI.csproj" />
     <ProjectReference Include="..\GodMode.ProjectFiles\GodMode.ProjectFiles.csproj" />
     <ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
   </ItemGroup>

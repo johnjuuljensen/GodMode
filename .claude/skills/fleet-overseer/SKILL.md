@@ -136,10 +136,10 @@ within a lane rather than widening it. **Lanes are about who edits what at the s
 licence to split one result across several issues.**
 
 The natural lanes here are the server (`src/GodMode.Server`, with `GodMode.ProjectFiles` and
-`GodMode.AI`), the React client (`src/GodMode.Client.React`), and the MAUI shell
+`src/GodMode.McpBridge`), the React client (`src/GodMode.Client.React`), and the MAUI shell
 (`src/GodMode.Maui`, `GodMode.ClientBase`, `SignalR.Proxy`). **The hub contract is the one seam they
 all share**: `IProjectHub` / `IProjectHubClient` and the models in `src/GodMode.Shared` are mirrored
-by hand in the client's `src/signalr/types.ts`. A change to the contract edits both sides, so give it
+by hand in the client's `signalr/types.ts` and `signalr/hub.ts`. A change to the contract edits both sides, so give it
 to one worker who owns both files for that issue, rather than to two lanes that must agree.
 
 **A session's slot frees when its work is reviewed and clear for merge, not when it merges.** Never
@@ -309,10 +309,9 @@ is hard to reverse. `master` is the opposite on both counts — every push to it
 
 ## Reviewing
 
-**No CI runs on a pull request here.** The only workflow that runs by itself,
-`build-and-push.yml`, fires after a push to `master` and publishes an image; the `deploy-user*`
-workflows are manual. So `gh pr checks` reports nothing, and the gate is what a worker runs in its
-own worktree as part of writing the code:
+**No CI runs on a pull request here.** The only workflow, `build-and-push.yml`, fires after a push
+to `master` and publishes an image. So `gh pr checks` reports nothing, and the gate is what a worker
+runs in its own worktree as part of writing the code:
 
 ```powershell
 cd src/GodMode.Client.React; npm ci; cd ../..   # the server build runs `npm run build` but never installs
@@ -322,7 +321,7 @@ cd src/GodMode.Client.React; npm run lint
 ```
 
 **`master` is not green on this gate**, so "green" means **no new failures against the base**. On
-2026-09-23 `origin/master` had one build error (`MCPEXP002` in `src/GodMode.Mcp/Program.cs`) and ten
+2026-09-23 `origin/master` had one build error (`MCPEXP002` in `GodMode.Mcp`, a project epic #148 removes) and ten
 lint errors in `src/GodMode.Client.React`, with every test passing. A body states the base's numbers
 next to its own. A pull request that removes a baseline failure says so. One that adds a failure is
 red, whatever else the gate shows.

@@ -2,19 +2,15 @@ import { useAppStore } from '../store';
 import { Toggle } from './settings-shared';
 import './settings-common.css';
 
-const FLAGS: { key: 'featureRoots' | 'featureMcp' | 'featureProfiles'; label: string; desc: string }[] = [
-  { key: 'featureRoots',    label: 'Root Manager',  desc: 'Show Root Manager in settings menu' },
-  { key: 'featureMcp',      label: 'MCP Servers',   desc: 'Show MCP config and badges' },
+const FLAGS: { key: 'featureProfiles'; label: string; desc: string }[] = [
   { key: 'featureProfiles', label: 'Profiles',      desc: 'Show profile filter and settings' },
 ];
 
 export function AppSettings() {
-  const featureRoots = useAppStore(s => s.featureRoots);
-  const featureMcp = useAppStore(s => s.featureMcp);
   const featureProfiles = useAppStore(s => s.featureProfiles);
   const setFeatureFlag = useAppStore(s => s.setFeatureFlag);
 
-  const values: Record<string, boolean> = { featureRoots, featureMcp, featureProfiles };
+  const values: Record<string, boolean> = { featureProfiles };
 
   return (
     <>
