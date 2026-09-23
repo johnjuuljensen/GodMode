@@ -16,13 +16,12 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     private readonly IManifestParser _manifestParser;
     private readonly IManifestExporter _manifestExporter;
     private readonly OAuthTokenStore _oauthTokenStore;
-    private readonly ScheduleManager _scheduleManager;
     private readonly string _projectRootsDir;
     private readonly ILogger<ProjectHub> _logger;
 
     public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
         IManifestParser manifestParser, IManifestExporter manifestExporter,
-        OAuthTokenStore oauthTokenStore, ScheduleManager scheduleManager,
+        OAuthTokenStore oauthTokenStore,
         IConfiguration configuration, ILogger<ProjectHub> logger)
     {
         _projectManager = projectManager;
@@ -30,7 +29,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _manifestParser = manifestParser;
         _manifestExporter = manifestExporter;
         _oauthTokenStore = oauthTokenStore;
-        _scheduleManager = scheduleManager;
         _projectRootsDir = Path.GetFullPath(configuration["_projectRootsDir"] ?? "roots");
         _logger = logger;
     }
@@ -342,92 +340,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
             Context.ConnectionId, provider, profileName);
         _oauthTokenStore.DeleteTokens(profileName, provider);
         await Clients.All.OAuthStatusChanged(profileName);
-    }
-
-    // ── Webhooks ──
-
-    public async Task<WebhookInfo[]> ListWebhooks()
-    {
-        _logger.LogInformation("Client {ConnectionId} requested webhooks", Context.ConnectionId);
-        return await _projectManager.ListWebhooksAsync();
-    }
-
-    public async Task<WebhookInfo> CreateWebhook(string keyword, string profileName, string rootName,
-        string? actionName = null, string? description = null,
-        Dictionary<string, string>? inputMapping = null,
-        Dictionary<string, JsonElement>? staticInputs = null)
-    {
-        _logger.LogInformation("Client {ConnectionId} creating webhook '{Keyword}'", Context.ConnectionId, keyword);
-        var info = await _projectManager.CreateWebhookAsync(keyword, profileName, rootName, actionName, description, inputMapping, staticInputs);
-        await Clients.All.WebhooksChanged();
-        return info;
-    }
-
-    public async Task DeleteWebhook(string keyword)
-    {
-        _logger.LogInformation("Client {ConnectionId} deleting webhook '{Keyword}'", Context.ConnectionId, keyword);
-        await _projectManager.DeleteWebhookAsync(keyword);
-        await Clients.All.WebhooksChanged();
-    }
-
-    public async Task<WebhookInfo> UpdateWebhook(string keyword, string? description = null,
-        Dictionary<string, string>? inputMapping = null,
-        Dictionary<string, JsonElement>? staticInputs = null,
-        bool? enabled = null)
-    {
-        _logger.LogInformation("Client {ConnectionId} updating webhook '{Keyword}'", Context.ConnectionId, keyword);
-        var info = await _projectManager.UpdateWebhookAsync(keyword, description, inputMapping, staticInputs, enabled);
-        await Clients.All.WebhooksChanged();
-        return info;
-    }
-
-    public async Task<string> RegenerateWebhookToken(string keyword)
-    {
-        _logger.LogInformation("Client {ConnectionId} regenerating token for webhook '{Keyword}'", Context.ConnectionId, keyword);
-        var token = await _projectManager.RegenerateWebhookTokenAsync(keyword);
-        await Clients.All.WebhooksChanged();
-        return token;
-    }
-
-    // ── Schedules ──
-
-    public Task<ScheduleInfo[]> GetSchedules(string profileName)
-    {
-        _logger.LogInformation("Client {ConnectionId} listing schedules for {Profile}", Context.ConnectionId, profileName);
-        return Task.FromResult(_scheduleManager.GetSchedules(profileName).ToArray());
-    }
-
-    public Task<ScheduleInfo> CreateSchedule(string profileName, string name, ScheduleConfig config)
-    {
-        _logger.LogInformation("Client {ConnectionId} creating schedule {Profile}/{Name}", Context.ConnectionId, profileName, name);
-        try
-        {
-            return Task.FromResult(_scheduleManager.CreateSchedule(profileName, name, config));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create schedule {Profile}/{Name}", profileName, name);
-            throw new HubException(ex.Message);
-        }
-    }
-
-    public Task<ScheduleInfo> UpdateSchedule(string profileName, string name, ScheduleConfig config)
-    {
-        _logger.LogInformation("Client {ConnectionId} updating schedule {Profile}/{Name}", Context.ConnectionId, profileName, name);
-        return Task.FromResult(_scheduleManager.UpdateSchedule(profileName, name, config));
-    }
-
-    public Task DeleteSchedule(string profileName, string name)
-    {
-        _logger.LogInformation("Client {ConnectionId} deleting schedule {Profile}/{Name}", Context.ConnectionId, profileName, name);
-        _scheduleManager.DeleteSchedule(profileName, name);
-        return Task.CompletedTask;
-    }
-
-    public Task<ScheduleInfo> ToggleSchedule(string profileName, string name, bool enabled)
-    {
-        _logger.LogInformation("Client {ConnectionId} toggling schedule {Profile}/{Name} → {Enabled}", Context.ConnectionId, profileName, name, enabled);
-        return Task.FromResult(_scheduleManager.ToggleSchedule(profileName, name, enabled));
     }
 
     public async Task<string?> CheckCommand(string command)

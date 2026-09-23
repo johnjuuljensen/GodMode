@@ -147,20 +147,6 @@ public interface IProjectManager
     /// </summary>
     Task UpdateProfileDescriptionAsync(string name, string? description);
 
-    // ── Webhooks ──
-
-    Task<WebhookInfo[]> ListWebhooksAsync();
-    Task<WebhookInfo> CreateWebhookAsync(string keyword, string profileName, string rootName,
-        string? actionName = null, string? description = null,
-        Dictionary<string, string>? inputMapping = null,
-        Dictionary<string, System.Text.Json.JsonElement>? staticInputs = null);
-    Task DeleteWebhookAsync(string keyword);
-    Task<WebhookInfo> UpdateWebhookAsync(string keyword, string? description = null,
-        Dictionary<string, string>? inputMapping = null,
-        Dictionary<string, System.Text.Json.JsonElement>? staticInputs = null,
-        bool? enabled = null);
-    Task<string> RegenerateWebhookTokenAsync(string keyword);
-
     // ── Events ──
 
     /// <summary>

@@ -203,39 +203,6 @@ public interface IProjectHub
     /// </summary>
     Task DisconnectOAuthProvider(string profileName, string provider);
 
-    // ── Webhooks ──
-
-    /// <summary>
-    /// Lists all configured webhooks (tokens redacted).
-    /// </summary>
-    Task<WebhookInfo[]> ListWebhooks();
-
-    /// <summary>
-    /// Creates a new webhook. Returns the info including the full token (shown once).
-    /// </summary>
-    Task<WebhookInfo> CreateWebhook(string keyword, string profileName, string rootName,
-        string? actionName = null, string? description = null,
-        Dictionary<string, string>? inputMapping = null,
-        Dictionary<string, JsonElement>? staticInputs = null);
-
-    /// <summary>
-    /// Deletes a webhook.
-    /// </summary>
-    Task DeleteWebhook(string keyword);
-
-    /// <summary>
-    /// Updates webhook settings (preserves token).
-    /// </summary>
-    Task<WebhookInfo> UpdateWebhook(string keyword, string? description = null,
-        Dictionary<string, string>? inputMapping = null,
-        Dictionary<string, JsonElement>? staticInputs = null,
-        bool? enabled = null);
-
-    /// <summary>
-    /// Regenerates the webhook token. Returns the new full token (shown once).
-    /// </summary>
-    Task<string> RegenerateWebhookToken(string keyword);
-
     // ── Utility ──
 
     /// <summary>
@@ -243,33 +210,6 @@ public interface IProjectHub
     /// Returns the resolved path if found, null if not.
     /// </summary>
     Task<string?> CheckCommand(string command);
-
-    // ── Schedules ──
-
-    /// <summary>
-    /// Lists all schedules for a profile.
-    /// </summary>
-    Task<ScheduleInfo[]> GetSchedules(string profileName);
-
-    /// <summary>
-    /// Creates a new schedule in a profile.
-    /// </summary>
-    Task<ScheduleInfo> CreateSchedule(string profileName, string name, ScheduleConfig config);
-
-    /// <summary>
-    /// Updates an existing schedule.
-    /// </summary>
-    Task<ScheduleInfo> UpdateSchedule(string profileName, string name, ScheduleConfig config);
-
-    /// <summary>
-    /// Deletes a schedule.
-    /// </summary>
-    Task DeleteSchedule(string profileName, string name);
-
-    /// <summary>
-    /// Toggles a schedule's enabled state.
-    /// </summary>
-    Task<ScheduleInfo> ToggleSchedule(string profileName, string name, bool enabled);
 
     // ── Storage Browser ──
 

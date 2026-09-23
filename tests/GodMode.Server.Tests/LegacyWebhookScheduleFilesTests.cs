@@ -77,14 +77,11 @@ public class LegacyWebhookScheduleFilesTests
 
             await WaitForHealthyAsync(http, server, output);
 
-            // The webhook route is gone: posting to the legacy keyword with its valid token does nothing.
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"/webhook/{WebhookKeyword}")
-            {
-                Content = new StringContent("""{"issue":{"title":"t","body":"b"}}""", Encoding.UTF8, "application/json")
-            };
-            request.Headers.Authorization = new("Bearer", WebhookToken);
-            using var response = await http.SendAsync(request);
-            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+            // The webhook route is gone: posting to the legacy keyword with its valid token is
+            // answered exactly like a POST to a path that never existed.
+            using var unknown = await PostAsync(http, "/no-such-route");
+            using var webhook = await PostAsync(http, $"/webhook/{WebhookKeyword}");
+            Assert.Equal(unknown.StatusCode, webhook.StatusCode);
 
             // Still serving after all of the above.
             using var health = await http.GetAsync("/health");
@@ -102,6 +99,16 @@ public class LegacyWebhookScheduleFilesTests
         Assert.Equal(ProfileJson, File.ReadAllText(profilePath));
 
         try { Directory.Delete(workDir, recursive: true); } catch (IOException) { }
+    }
+
+    private static Task<HttpResponseMessage> PostAsync(HttpClient http, string path)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = new StringContent("""{"issue":{"title":"t","body":"b"}}""", Encoding.UTF8, "application/json")
+        };
+        request.Headers.Authorization = new("Bearer", WebhookToken);
+        return http.SendAsync(request);
     }
 
     private static void WriteFile(string path, string content)
