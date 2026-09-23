@@ -39,6 +39,12 @@ public abstract record ScriptStep
     public sealed record Stderr(string Text) : ScriptStep;
 
     public sealed record Exit(int Code) : ScriptStep;
+
+    /// <summary>
+    /// When launched with <c>--resume</c>, fails as the real CLI does for a session it has no
+    /// conversation for: the error on stderr, exit 1. Otherwise does nothing.
+    /// </summary>
+    public sealed record RejectResume : ScriptStep;
 }
 
 /// <summary>
@@ -50,6 +56,7 @@ public abstract record ScriptStep
 /// sleep 100
 /// stderr some text
 /// exit 1
+/// reject-resume
 /// </code>
 /// Blank lines and lines starting with <c>#</c> are ignored. A script that runs off its end keeps
 /// the process alive until stdin closes (then exits 0), like the real CLI between turns.
@@ -70,6 +77,10 @@ public sealed class FakeScript
     public FakeScript Sleep(int milliseconds) => Add(new ScriptStep.Sleep(milliseconds));
     public FakeScript Stderr(string text) => Add(new ScriptStep.Stderr(text));
     public FakeScript Exit(int code) => Add(new ScriptStep.Exit(code));
+    public FakeScript RejectResume() => Add(new ScriptStep.RejectResume());
+
+    /// <summary>What the real CLI writes to stderr when <c>--resume</c> names a session it has no conversation for.</summary>
+    public const string NoConversationError = "No conversation found with session ID: ";
 
     // ── Stream-json lines in the shape the real CLI emits (only the fields GodMode reads) ──
 
@@ -120,6 +131,7 @@ public sealed class FakeScript
                 ScriptStep.Sleep s => $"sleep {s.Milliseconds}",
                 ScriptStep.Stderr s => $"stderr {s.Text}",
                 ScriptStep.Exit e => $"exit {e.Code}",
+                ScriptStep.RejectResume => "reject-resume",
                 _ => throw new InvalidOperationException($"Unknown step {step}"),
             });
         return text.ToString();
@@ -146,6 +158,7 @@ public sealed class FakeScript
                 "sleep" => new ScriptStep.Sleep(int.Parse(argument)),
                 "stderr" => new ScriptStep.Stderr(argument),
                 "exit" => new ScriptStep.Exit(int.Parse(argument)),
+                "reject-resume" => new ScriptStep.RejectResume(),
                 _ => throw new FormatException($"Unknown fake claude script step: {raw}"),
             });
         }

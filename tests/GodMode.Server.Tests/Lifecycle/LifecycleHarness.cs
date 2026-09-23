@@ -5,7 +5,10 @@ using GodMode.Server.Models;
 using GodMode.Server.Services;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
+using GodMode.Server.Hubs;
+using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -38,6 +41,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public string ScriptPath { get; }
     public IProjectManager Projects { get; }
 
+    /// <summary>Every push the server makes to its hub clients.</summary>
+    public RecordingHubContext Hub { get; } = new();
+
     /// <summary>The fake's apphost next to the test assembly (copied there by the project reference).</summary>
     public static string FakeClaudePath =>
         Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "GodMode.FakeClaude.exe" : "GodMode.FakeClaude");
@@ -65,7 +71,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
             configuration[key] = value;
 
-        _services = BuildServices(new ConfigurationBuilder().AddInMemoryCollection(configuration).Build(), _logs);
+        _services = BuildServices(new ConfigurationBuilder().AddInMemoryCollection(configuration).Build(), _logs, Hub);
         Projects = _services.GetRequiredService<IProjectManager>();
     }
 
@@ -91,11 +97,12 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         File.WriteAllText(Path.Combine(godModeRoot, "config.json"), JsonSerializer.Serialize(config));
     }
 
-    private static ServiceProvider BuildServices(IConfiguration configuration, ILoggerProvider logs)
+    private static ServiceProvider BuildServices(IConfiguration configuration, ILoggerProvider logs, RecordingHubContext hub)
     {
         var services = new ServiceCollection();
         services.AddLogging(logging => logging.AddProvider(logs));
         services.AddSignalR();
+        services.AddSingleton<IHubContext<ProjectHub, IProjectHubClient>>(hub);
         services.AddSingleton(configuration);
         services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
         services.AddSingleton<IStatusUpdater, StatusUpdater>();
@@ -138,6 +145,21 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         await WaitUntilAsync(async () => (status = await Projects.GetStatusAsync(projectId)).State == state, timeout,
             () => $"project {projectId} did not reach {state}; it is {status.State}.\n{Describe(projectId)}");
         return status;
+    }
+
+    /// <summary>
+    /// Waits for a <c>StatusChanged</c> push for the project that satisfies <paramref name="condition"/>,
+    /// among those after the first <paramref name="skip"/>.
+    /// </summary>
+    public async Task<ProjectStatus> WaitForStatusPushAsync(string projectId, Func<ProjectStatus, bool> condition,
+        int skip = 0, TimeSpan? timeout = null)
+    {
+        ProjectStatus? pushed = null;
+        await WaitUntilAsync(() => Task.FromResult((pushed = Hub.StatusPushes(projectId).Skip(skip).LastOrDefault(condition)) != null),
+            timeout,
+            () => $"no matching StatusChanged was pushed for project {projectId}; pushed: " +
+                  $"{string.Join(", ", Hub.StatusPushes(projectId).Select(s => s.State))}.\n{Describe(projectId)}");
+        return pushed!;
     }
 
     /// <summary>

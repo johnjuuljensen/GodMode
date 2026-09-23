@@ -64,6 +64,9 @@ for (var i = 0; i < script.Steps.Count; i++)
             break;
         case ScriptStep.Exit exit:
             return Exit(exit.Code);
+        case ScriptStep.RejectResume when ArgValue("--resume") is { } resumed:
+            await stderr.WriteLineAsync(FakeScript.NoConversationError + resumed);
+            return Exit(1);
     }
 }
 

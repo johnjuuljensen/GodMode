@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GodMode.FakeClaude;
+using GodMode.Server.Services;
 using GodMode.Shared.Enums;
 
 namespace GodMode.Server.Tests.Lifecycle;
@@ -69,8 +70,8 @@ public class ProjectLifecycleTests
         Assert.False(LifecycleHarness.IsProcessAlive(launch.Pid), $"fake claude (pid {launch.Pid}) is still running after Stop");
     }
 
-    [Fact(Skip = "fixed by #160")]
-    public async Task ProcessExitsWithAnError_IsError()
+    [Fact]
+    public async Task ProcessExitsWithAnError_IsError_AndPushesItsStderr()
     {
         await using var harness = new LifecycleHarness(
             new FakeScript().EmitInit().AwaitStdin().Stderr("fatal: something broke").Exit(1));
@@ -78,10 +79,16 @@ public class ProjectLifecycleTests
         var created = await harness.CreateProjectAsync();
 
         await harness.WaitForLaunchAsync(created.Id, l => l.ExitCode == 1);
-        await harness.WaitForStateAsync(created.Id, ProjectState.Error);
+        var status = await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Error);
+        Assert.Contains("fatal: something broke", status.LastError);
+        Assert.Equal(ProjectState.Error, (await harness.Projects.GetStatusAsync(created.Id)).State);
+        var onDisk = harness.ReadStatusFile(created.Id);
+        Assert.Equal(ProjectState.Error, onDisk.State);
+        Assert.Contains("fatal: something broke", onDisk.LastError);
+        Assert.Equal(0, harness.ProjectInfo(created.Id).Process.ProcessId);
     }
 
-    [Fact(Skip = "fixed by #160")]
+    [Fact]
     public async Task ProcessExitsCleanlyAfterAResult_IsStopped()
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().Turn("All done.").Exit(0));
@@ -89,7 +96,107 @@ public class ProjectLifecycleTests
         var created = await harness.CreateProjectAsync();
 
         await harness.WaitForLaunchAsync(created.Id, l => l.ExitCode == 0);
-        await harness.WaitForStateAsync(created.Id, ProjectState.Stopped);
+        var status = await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Stopped);
+        Assert.Null(status.LastError);
+        Assert.Equal(ProjectState.Stopped, harness.ReadStatusFile(created.Id).State);
+        Assert.Equal(0, harness.ProjectInfo(created.Id).Process.ProcessId);
+    }
+
+    /// <summary>A clean exit in the middle of a turn, before its result, is not a finished session.</summary>
+    [Fact]
+    public async Task ProcessExitsCleanlyBeforeAResult_IsError()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().EmitAssistant("Working").Exit(0));
+
+        var created = await harness.CreateProjectAsync();
+
+        await harness.WaitForLaunchAsync(created.Id, l => l.ExitCode == 0);
+        var status = await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Error);
+        Assert.NotNull(status.LastError);
+    }
+
+    /// <summary>Nobody subscribes to the project's output; every client still hears its state change.</summary>
+    [Fact]
+    public async Task AssistantThenResult_PushesStatusChanged_WithoutASubscriber()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().Turn("All done."));
+
+        var created = await harness.CreateProjectAsync();
+
+        var status = await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Idle);
+        Assert.Equal(1, status.Metrics.InputTokens);
+    }
+
+    [Fact]
+    public async Task ErrorResult_IsError_WithItsText()
+    {
+        await using var harness = new LifecycleHarness(
+            new FakeScript().EmitInit().AwaitStdin().EmitAssistant("Trying").EmitResult("API overloaded", isError: true));
+
+        var created = await harness.CreateProjectAsync();
+
+        var status = await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Error);
+        Assert.Equal("API overloaded", status.LastError);
+    }
+
+    /// <summary>A stderr line starting "Error:" is shown, not taken for the session failing.</summary>
+    [Fact]
+    public async Task StderrErrorLine_DoesNotMakeTheProjectError()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin()
+            .Stderr("Error: a hook failed").Sleep(100).EmitAssistant("Done anyway.").EmitResult());
+
+        var created = await harness.CreateProjectAsync();
+
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        Assert.Contains("a hook failed", harness.ReadOutputFile(created.Id));
+        Assert.DoesNotContain(harness.Hub.StatusPushes(created.Id), s => s.State == ProjectState.Error);
+    }
+
+    /// <summary>Only system/init means a session (re)started; other system events leave the state alone.</summary>
+    [Fact]
+    public async Task SystemEventOtherThanInit_LeavesTheStateAlone()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().Turn("Done.")
+            .Emit("""{"type":"system","subtype":"compact_boundary"}"""));
+
+        var created = await harness.CreateProjectAsync();
+
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        await LifecycleHarness.WaitUntilAsync(
+            () => Task.FromResult(harness.Hub.Pushes.Any(p => p.RawJson?.Contains("compact_boundary") == true)), null,
+            () => $"the compact_boundary line was never broadcast.\n{harness.Describe(created.Id)}");
+        Assert.Equal(ProjectState.Idle, (await harness.Projects.GetStatusAsync(created.Id)).State);
+    }
+
+    /// <summary>
+    /// A result still queued when Stop kills the process is handled before Stopped is applied, so it
+    /// cannot turn Stopped back into Idle. The consumer is held on the assistant line's broadcast
+    /// while the result waits behind it.
+    /// </summary>
+    [Fact]
+    public async Task ResultQueuedWhenStopped_StaysStopped()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().Sleep(100)
+            .EmitAssistant("Almost").EmitResult("late"));
+        var created = await harness.CreateProjectAsync();
+        var launch = await harness.WaitForStdinAsync(created.Id);
+        harness.Hub.HoldOutput();
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadOutputFile(created.Id).Contains("Almost")), null,
+            () => $"the assistant line never reached output.jsonl.\n{harness.Describe(created.Id)}");
+
+        var stop = harness.Projects.StopProjectAsync(created.Id);
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(!LifecycleHarness.IsProcessAlive(launch.Pid)), null,
+            () => $"fake claude (pid {launch.Pid}) is still running after Stop");
+        harness.Hub.ReleaseOutput();
+        await stop;
+        await LifecycleHarness.WaitUntilAsync(
+            () => Task.FromResult(harness.Hub.Pushes.Any(p => p.RawJson?.Contains("\"late\"") == true)), null,
+            () => $"the queued result was never handled.\n{harness.Describe(created.Id)}");
+
+        Assert.Equal(ProjectState.Stopped, (await harness.Projects.GetStatusAsync(created.Id)).State);
+        Assert.Equal(ProjectState.Stopped, harness.ReadStatusFile(created.Id).State);
+        Assert.Equal(ProjectState.Stopped, harness.Hub.StatusPushes(created.Id)[^1].State);
     }
 
     /// <summary>
@@ -143,6 +250,38 @@ public class ProjectLifecycleTests
         await LifecycleHarness.WaitUntilAsync(
             () => Task.FromResult(harness.ReadOutputFile(created.Id).Contains("Committed.")), null,
             () => $"the resumed launch's output is not in output.jsonl.\n{harness.Describe(created.Id)}");
+    }
+
+    /// <summary>
+    /// A resume claude has no conversation for exits at once; the server starts a fresh session on
+    /// the same id instead, with the MCP config the resume was given, and never shows Error.
+    /// </summary>
+    [Fact]
+    public async Task ResumeOfAnUnknownSession_StartsFresh_WithItsMcpConfig()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().RejectResume().EmitInit().Turn("First."));
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        var sessionId = (await harness.WaitForStdinAsync(created.Id)).ArgValue("--session-id");
+        await harness.Projects.StopProjectAsync(created.Id);
+        var configPath = McpConfigFile.PathFor(harness.ProjectPath(created.Id));
+        var pushedBefore = harness.Hub.StatusPushes(created.Id).Count;
+
+        await harness.Projects.ResumeProjectAsync(created.Id);
+
+        await harness.WaitForLaunchAsync(created.Id, l => l.ExitCode == 1 && l.ArgValue("--resume") == sessionId, index: 1);
+        var fresh = await harness.WaitForStdinAsync(created.Id, index: 2);
+        Assert.Equal(sessionId, fresh.ArgValue("--session-id"));
+        Assert.StartsWith("Continue from where we left off", PromptText(Assert.Single(fresh.Stdin)));
+        await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Idle, skip: pushedBefore);
+        Assert.True(File.Exists(configPath), $"{configPath} should exist while the fresh session runs.\n{harness.Describe(created.Id)}");
+        Assert.Equal(fresh.Pid, harness.ProjectInfo(created.Id).Process.ProcessId);
+        Assert.DoesNotContain(harness.Hub.StatusPushes(created.Id), s => s.State == ProjectState.Error);
+        Assert.Equal(ProjectState.Idle, (await harness.Projects.GetStatusAsync(created.Id)).State);
+
+        await harness.Projects.StopProjectAsync(created.Id);
+        Assert.True(await LifecycleHarness.WaitForAsync(() => Task.FromResult(!File.Exists(configPath))),
+            $"{configPath} is still there after the fresh session exited.\n{harness.Describe(created.Id)}");
     }
 
     /// <summary>Two user sends at once reach claude as two whole stream-json lines.</summary>
