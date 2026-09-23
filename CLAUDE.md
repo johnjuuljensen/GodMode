@@ -52,11 +52,11 @@ dotnet build src/GodMode.Maui/GodMode.Maui.csproj
 # Run all tests
 dotnet test
 
-# React dev server (hot reload, proxies to running GodMode.Server)
+# React dev server (hot reload only; it has no proxy, so it cannot reach a GodMode.Server)
 cd src/GodMode.Client.React && npm run dev
 ```
 
-**Running/Debugging**: The server and MAUI app are separate processes. The server serves the React SPA and manages Claude Code processes. The MAUI app connects to one or more servers via its local proxy. To develop React, run the server and use `npm run dev` for hot reload.
+**Running/Debugging**: The server and MAUI app are separate processes. The server serves the React SPA and manages Claude Code processes. The MAUI app connects to one or more servers via its local proxy. To see a React change against a running server, rebuild the server (`dotnet build`, or restart `dotnet run`) and reload the page: the server build rebuilds the client when its sources changed and copies `dist/` into `wwwroot/`. `npm run dev` starts Vite with hot reload, but `vite.config.ts` has no proxy, so that page shows "No servers configured".
 
 ## Architecture
 

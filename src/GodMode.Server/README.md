@@ -233,7 +233,7 @@ Archived projects move to `{root}/.archived/{project-id}/`.
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 ```
 
-The build runs `npm run build` in `src/GodMode.Client.React` and serves the result from `wwwroot/`. Run `npm ci` there once first. For hot reload, run `npm run dev` in that folder against the running server.
+The build runs `npm run build` in `src/GodMode.Client.React` when the client's sources changed, and the server serves the result from `wwwroot/`. Run `npm ci` there once first. `npm run dev` cannot reach the server: `vite.config.ts` has no proxy.
 
 ### Production
 
