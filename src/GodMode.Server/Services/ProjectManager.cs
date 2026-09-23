@@ -597,12 +597,11 @@ public class ProjectManager : IProjectManager
         var mcpConfigJson = BuildMcpConfigJson(profileConfig?.McpServers, action.McpServers);
 
         // Inject GodMode MCP bridge into MCP config (always available to every project)
+        // Never logged: it carries the MCP servers' credentials
         mcpConfigJson = InjectMcpBridge(mcpConfigJson);
-        if (mcpConfigJson != null)
-            _logger.LogInformation("MCP config JSON: {McpConfig}", mcpConfigJson);
 
         // Build claude env/args from action config + project settings + profile env
-        var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, model, profileEnv,
+        var (claudeEnv, claudeArgs) = BuildClaudeConfig(project.ProjectPath, action, settings, model, profileEnv,
             request.ProfileName, config.StripEnvVarProfile, mcpConfigJson);
 
         claudeEnv = AddMcpBridgeEnvironment(project, claudeEnv);
@@ -928,18 +927,19 @@ public class ProjectManager : IProjectManager
                 if (action != null)
                 {
                     var mcpJson = InjectMcpBridge(BuildMcpConfigJson(profileCfg?.McpServers, action.McpServers));
-                    (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, resumeModel ?? action.Model, profileEnv,
+                    (claudeEnv, claudeArgs) = BuildClaudeConfig(project.ProjectPath, action, settings, resumeModel ?? action.Model, profileEnv,
                         resumeProfileName, config.StripEnvVarProfile, mcpJson);
                 }
                 else
-                    (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel,
+                    // The process no longer inherits the server's environment: keep the profile's
+                    (claudeEnv, claudeArgs) = BuildClaudeConfig(project.ProjectPath, new CreateAction("Create"), settings, resumeModel,
                         profileEnv: profileEnv, profileName: resumeProfileName,
                         stripEnvVarProfile: config.StripEnvVarProfile, mcpConfigJson: InjectMcpBridge(null));
             }
             else
             {
                 // No root config, just apply project settings
-                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel, profileEnv: profileEnv,
+                (claudeEnv, claudeArgs) = BuildClaudeConfig(project.ProjectPath, new CreateAction("Create"), settings, resumeModel, profileEnv: profileEnv,
                     mcpConfigJson: InjectMcpBridge(null));
             }
         }
@@ -1393,7 +1393,7 @@ public class ProjectManager : IProjectManager
     /// Builds claude environment and args from action config + project settings + profile env.
     /// </summary>
     private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
-        CreateAction action, ProjectFiles.ProjectSettings settings,
+        string projectPath, CreateAction action, ProjectFiles.ProjectSettings settings,
         string? model = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
@@ -1420,12 +1420,9 @@ public class ProjectManager : IProjectManager
         }
         if (!string.IsNullOrWhiteSpace(mcpConfigJson))
         {
-            // Write to a temp file — --mcp-config expects a file path, not inline JSON
-            var mcpConfigPath = Path.Combine(Path.GetTempPath(), $"godmode-mcp-{Guid.NewGuid():N}.json");
-            File.WriteAllText(mcpConfigPath, mcpConfigJson);
+            // --mcp-config expects a file path, not inline JSON; the process manager deletes it on exit
             args.Add("--mcp-config");
-            args.Add(mcpConfigPath);
-
+            args.Add(McpConfigFile.Write(projectPath, mcpConfigJson));
         }
 
         // Auto-allow all MCP tools so Claude doesn't block on permissions in --print mode.
@@ -1706,22 +1703,17 @@ public class ProjectManager : IProjectManager
 
         var id = project.Status.Id;
 
-        _logger.LogInformation("HandleOutputReceivedAsync for project {ProjectId}: {Line}",
-            id, jsonLine.Length > 100 ? jsonLine[..100] + "..." : jsonLine);
-
         try
         {
             // Extract type for logging and status updates
             var eventType = ExtractEventType(jsonLine);
 
-            _logger.LogInformation("Sending raw JSON to group 'project-{ProjectId}', Type: {Type}",
+            _logger.LogDebug("Sending raw JSON to group 'project-{ProjectId}', Type: {Type}",
                 id, eventType);
 
             // Send raw JSON to subscribed clients - UI will parse and render
             await _hubContext.Clients.Group($"project-{id}")
                 .OutputReceived(id, jsonLine);
-
-            _logger.LogInformation("OutputReceived sent successfully for project {ProjectId}", id);
 
             // Update status based on event (still need to parse for status updates)
             if (eventType != null)

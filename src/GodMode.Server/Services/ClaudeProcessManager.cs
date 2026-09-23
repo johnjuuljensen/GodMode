@@ -14,7 +14,6 @@ public class ClaudeProcessManager : IClaudeProcessManager
     private static readonly string[] DefaultArgs =
     [
         "--print",
-        "--debug",
         "--replay-user-messages",
         "--verbose",
         "--output-format=stream-json",
@@ -83,7 +82,9 @@ public class ClaudeProcessManager : IClaudeProcessManager
             {
                 sessionNotFound = true;
             }
-        });
+        },
+        // The fresh start below launches with the same MCP config
+        retainMcpConfig: () => sessionNotFound);
 
         // If session wasn't found, the process will have exited - start fresh
         if (sessionNotFound)
@@ -116,15 +117,16 @@ public class ClaudeProcessManager : IClaudeProcessManager
     }
 
     private Task<int> RunClaudeProcessAsync(ProjectInfo project, string[] args, string? initialPrompt, CancellationToken cancellationToken, Dictionary<string, string>? extraEnvironment = null)
-        => RunClaudeProcessAsync(project, args, initialPrompt, cancellationToken, extraEnvironment, onStderrLine: null);
+        => RunClaudeProcessAsync(project, args, initialPrompt, cancellationToken, extraEnvironment, onStderrLine: null, retainMcpConfig: null);
 
     private async Task<int> RunClaudeProcessAsync(
         ProjectInfo project,
         string[] args,
         string? initialPrompt,
         CancellationToken cancellationToken,
-        Dictionary<string, string>? extraEnvironment = null,
-        Action<string>? onStderrLine = null)
+        Dictionary<string, string>? extraEnvironment,
+        Action<string>? onStderrLine,
+        Func<bool>? retainMcpConfig)
     {
         var godModePath = Path.Combine(project.ProjectPath, ".godmode");
         var outputPath = Path.Combine(godModePath, "output.jsonl");
@@ -144,14 +146,10 @@ public class ClaudeProcessManager : IClaudeProcessManager
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        // Set extra environment variables from root config
-        if (extraEnvironment != null)
-        {
-            foreach (var (key, value) in extraEnvironment)
-            {
-                startInfo.Environment[key] = value;
-            }
-        }
+        // Start from the allowlist, not the server's environment, then the configured variables
+        startInfo.Environment.Clear();
+        foreach (var (key, value) in ChildEnvironment.Build(ChildEnvironment.Current(), extraEnvironment))
+            startInfo.Environment[key] = value;
 
         foreach (var arg in args)
         {
@@ -207,7 +205,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             {
                 outputWriter.WriteLine(e.Data);
 
-                _logger.LogInformation("Claude output [{ProjectId}]: {Output}",
+                _logger.LogDebug("Claude output [{ProjectId}]: {Output}",
                     project.Status.Id,
                     e.Data.Length > 200 ? e.Data[..200] + "..." : e.Data);
 
@@ -264,12 +262,30 @@ public class ClaudeProcessManager : IClaudeProcessManager
             }
         };
 
+        // The MCP config goes once the process has exited and its stderr is drained, so the
+        // resume check above has seen every line before retainMcpConfig is asked
+        var stderrClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        process.ErrorDataReceived += (_, e) => { if (e.Data == null) stderrClosed.TrySetResult(); };
+        var launchedAt = DateTime.UtcNow;
+        _ = DeleteMcpConfigAfterExitAsync(project, launchedAt, Task.WhenAll(exitedTcs.Task, stderrClosed.Task), retainMcpConfig);
+
         _processes[project.Status.Id] = process;
 
         _logger.LogInformation("Starting Claude process for project {ProjectId} with args: {Args}",
             project.Status.Id, string.Join(" ", args));
 
-        process.Start();
+        try
+        {
+            process.Start();
+        }
+        catch
+        {
+            // Never started: no Exited event will come, so release the MCP config cleanup here
+            _processes.TryRemove(project.Status.Id, out _);
+            exitedTcs.TrySetResult(-1);
+            stderrClosed.TrySetResult();
+            throw;
+        }
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
@@ -314,6 +330,14 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
 
         return process.Id;
+    }
+
+    private async Task DeleteMcpConfigAfterExitAsync(ProjectInfo project, DateTime launchedAt, Task exited, Func<bool>? retain)
+    {
+        await exited;
+        if (retain?.Invoke() == true) return;
+        try { McpConfigFile.DeleteIfWrittenBefore(project.ProjectPath, launchedAt); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Could not delete the MCP config for project {ProjectId}", project.Status.Id); }
     }
 
     public async Task SendInputAsync(ProjectInfo project, string input)
