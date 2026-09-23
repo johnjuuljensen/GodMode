@@ -121,12 +121,25 @@ public class ProjectLifecycleTests
             $"{stale.Count} of {trials} projects are WaitingInput in memory but not in status.json. First: {stale.FirstOrDefault()}");
     }
 
+    /// <summary>Two user sends at once reach claude as two whole stream-json lines.</summary>
+    [Fact]
+    public Task ConcurrentSendInput_WritesTwoWholeLines() =>
+        TwoSendsAtOnce_WriteTwoWholeLines((harness, projectId, input) => harness.Projects.SendInputAsync(projectId, input));
+
     /// <summary>
-    /// Two sends at once reach claude as two whole stream-json lines, not one interleaved one. The
-    /// messages are large so that each write takes several pipe writes, which is where they would mix.
+    /// The same below the project's state lock, which user sends also take: sends that meet at the
+    /// process (the initial prompt and a send, say) are kept apart by the stdin lock alone.
     /// </summary>
     [Fact]
-    public async Task ConcurrentSendInput_WritesTwoWholeLines()
+    public Task ConcurrentProcessSends_WriteTwoWholeLines() =>
+        TwoSendsAtOnce_WriteTwoWholeLines((harness, projectId, input) =>
+            harness.ProcessManager.SendInputAsync(harness.ProjectInfo(projectId), input));
+
+    /// <summary>
+    /// Two sends at once, not one interleaved or lost line. The messages are large so that each
+    /// write takes several pipe writes, which is where they would mix.
+    /// </summary>
+    private static async Task TwoSendsAtOnce_WriteTwoWholeLines(Func<LifecycleHarness, string, string, Task> send)
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().Turn("Ready."));
         var created = await harness.CreateProjectAsync();
@@ -135,8 +148,8 @@ public class ProjectLifecycleTests
         var second = new string('b', 256 * 1024);
 
         await Task.WhenAll(
-            Task.Run(() => harness.Projects.SendInputAsync(created.Id, first)),
-            Task.Run(() => harness.Projects.SendInputAsync(created.Id, second)));
+            Task.Run(() => send(harness, created.Id, first)),
+            Task.Run(() => send(harness, created.Id, second)));
 
         var launch = await harness.WaitForStdinAsync(created.Id, count: 3);
         Assert.Equal(3, launch.Stdin.Count);

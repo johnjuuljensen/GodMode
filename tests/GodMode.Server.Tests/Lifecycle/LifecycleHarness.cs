@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using GodMode.FakeClaude;
+using GodMode.Server.Models;
 using GodMode.Server.Services;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
@@ -122,6 +123,13 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     }
 
     public string ProjectPath(string projectId) => Path.Combine(RootPath, projectId);
+
+    public IClaudeProcessManager ProcessManager => _services.GetRequiredService<IClaudeProcessManager>();
+
+    /// <summary>The server's own record of a project, found as the MCP bridge finds it: by its launch's token.</summary>
+    public ProjectInfo ProjectInfo(string projectId) =>
+        Projects.ValidateProjectToken(projectId, Launches(projectId)[0].Environment["GODMODE_PROJECT_TOKEN"])
+        ?? throw new InvalidOperationException($"project {projectId} does not accept its launch's token");
 
     /// <summary>Polls the in-memory status until it reaches <paramref name="state"/>.</summary>
     public async Task<ProjectStatus> WaitForStateAsync(string projectId, ProjectState state, TimeSpan? timeout = null)
