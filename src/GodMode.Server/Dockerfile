@@ -80,7 +80,10 @@ RUN mkdir -p /app/projects /data && \
 
 EXPOSE 31337
 
-ENV ASPNETCORE_URLS=http://+:31337
+# Unprefixed URLS, not ASPNETCORE_URLS: ASPNETCORE_* is read before appsettings.json, whose
+# loopback "Urls" would win. The server refuses to start on this binding without an API key:
+# run with -e Authentication__ApiKey=<key>.
+ENV URLS=http://+:31337
 
 USER godmode
 ENTRYPOINT ["dotnet", "GodMode.Server.dll"]

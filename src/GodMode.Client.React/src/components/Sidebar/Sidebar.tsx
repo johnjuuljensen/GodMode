@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy } from '../../store';
-import { getBaseUrl } from '../../services/api';
 import type { ProjectSummary } from '../../signalr/types';
 import { ProjectItem } from './ProjectItem';
-import { isMaui } from '../../services/hostApi';
+import { isMaui, clearApiKey } from '../../services/hostApi';
 import './Sidebar.css';
 
 const GROUP_LABELS: Record<SidebarGroupBy, string> = {
@@ -303,8 +302,9 @@ export function SidebarFooter() {
             )}
             {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
           </button>
-          <button className="sidebar-footer-menu-item sidebar-logout-btn" onClick={async () => {
-            await fetch(`${getBaseUrl()}/api/auth/logout`, { method: 'POST' });
+          <button className="sidebar-footer-menu-item sidebar-logout-btn" onClick={() => {
+            // Forget the API key held by this browser; the key page shows again on reload
+            clearApiKey();
             window.location.href = '/';
           }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

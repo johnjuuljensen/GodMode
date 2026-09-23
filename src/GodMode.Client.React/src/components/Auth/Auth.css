@@ -50,28 +50,6 @@
   text-align: center;
 }
 
-.auth-google-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  width: 100%;
-  padding: 12px 20px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-primary);
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.auth-google-btn:hover {
-  background: var(--hover);
-  border-color: var(--text-tertiary);
-}
-
 .auth-form {
   display: flex;
   flex-direction: column;

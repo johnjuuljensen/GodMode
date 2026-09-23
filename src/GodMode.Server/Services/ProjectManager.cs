@@ -35,9 +35,6 @@ public class ProjectManager : IProjectManager
     private readonly RootCreator _rootCreator;
     private readonly RootPackager _rootPackager;
     private readonly RootInstaller _rootInstaller;
-    private readonly OAuthTokenStore _oauthTokenStore;
-    private readonly OAuthProxyClient _oauthProxyClient;
-    private readonly McpOAuthStore _mcpOAuthStore;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
@@ -85,9 +82,6 @@ public class ProjectManager : IProjectManager
         RootCreator rootCreator,
         RootPackager rootPackager,
         RootInstaller rootInstaller,
-        OAuthTokenStore oauthTokenStore,
-        OAuthProxyClient oauthProxyClient,
-        McpOAuthStore mcpOAuthStore,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -100,9 +94,6 @@ public class ProjectManager : IProjectManager
         _rootCreator = rootCreator;
         _rootPackager = rootPackager;
         _rootInstaller = rootInstaller;
-        _oauthTokenStore = oauthTokenStore;
-        _mcpOAuthStore = mcpOAuthStore;
-        _oauthProxyClient = oauthProxyClient;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -511,7 +502,6 @@ public class ProjectManager : IProjectManager
             ProjectPath = projectPath,
             ActionName = action.Name,
             ProfileName = request.ProfileName,
-            ProjectToken = GenerateProjectToken()
         };
 
         // Result file — scripts can write key=value pairs to override project path/name
@@ -612,12 +602,8 @@ public class ProjectManager : IProjectManager
         // Add to tracking
         _projects[projectId] = project;
 
-        // Load OAuth tokens for the profile (refresh expired ones)
-        var oauthTokens = await LoadAndRefreshOAuthTokensAsync(request.ProfileName);
-        var mcpOAuthTokens = _mcpOAuthStore.GetAllForProfile(request.ProfileName);
-
-        // Build MCP config JSON (merges profile + action MCP servers, injects OAuth tokens)
-        var mcpConfigJson = BuildMcpConfigJson(profileConfig?.McpServers, action.McpServers, oauthTokens, mcpOAuthTokens);
+        // Build MCP config JSON (merges profile + action MCP servers)
+        var mcpConfigJson = BuildMcpConfigJson(profileConfig?.McpServers, action.McpServers);
 
         // Inject GodMode MCP bridge into MCP config (always available to every project)
         mcpConfigJson = InjectMcpBridge(mcpConfigJson);
@@ -628,11 +614,7 @@ public class ProjectManager : IProjectManager
         var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, model, profileEnv,
             request.ProfileName, config.StripEnvVarProfile, mcpConfigJson);
 
-        // Inject GodMode MCP bridge env vars so the bridge can call back to this server
-        claudeEnv ??= new Dictionary<string, string>();
-        claudeEnv["GODMODE_PROJECT_ID"] = projectId;
-        claudeEnv["GODMODE_PROJECT_TOKEN"] = project.ProjectToken!;
-        claudeEnv["GODMODE_SERVER_URL"] = $"http://localhost:{GetListenPort()}";
+        claudeEnv = AddMcpBridgeEnvironment(project, claudeEnv);
 
         if (claudeArgs != null)
             _logger.LogInformation("Claude args: {Args}", string.Join(" ", claudeArgs));
@@ -954,27 +936,28 @@ public class ProjectManager : IProjectManager
                 var action = config.ResolveAction(project.ActionName);
                 if (action != null)
                 {
-                    var oauthTokens = await LoadAndRefreshOAuthTokensAsync(resumeProfileName);
-                    var mcpOAuthTokensResume = _mcpOAuthStore.GetAllForProfile(resumeProfileName);
-                    var mcpJson = BuildMcpConfigJson(profileCfg?.McpServers, action.McpServers, oauthTokens, mcpOAuthTokensResume);
+                    var mcpJson = InjectMcpBridge(BuildMcpConfigJson(profileCfg?.McpServers, action.McpServers));
                     (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, resumeModel ?? action.Model, profileEnv,
                         resumeProfileName, config.StripEnvVarProfile, mcpJson);
                 }
                 else
                     (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel,
                         profileEnv: profileEnv, profileName: resumeProfileName,
-                        stripEnvVarProfile: config.StripEnvVarProfile);
+                        stripEnvVarProfile: config.StripEnvVarProfile, mcpConfigJson: InjectMcpBridge(null));
             }
             else
             {
                 // No root config, just apply project settings
-                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel, profileEnv: profileEnv);
+                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel, profileEnv: profileEnv,
+                    mcpConfigJson: InjectMcpBridge(null));
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not read config for project {ProjectId}, continuing without extra config", projectId);
         }
+
+        claudeEnv = AddMcpBridgeEnvironment(project, claudeEnv);
 
         try
         {
@@ -1759,50 +1742,6 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
-    /// Load all OAuth tokens for a profile, refreshing any that are expired.
-    /// Returns null if no tokens exist or the profile name is null/empty.
-    /// </summary>
-    private async Task<Dictionary<string, OAuthTokenSet>?> LoadAndRefreshOAuthTokensAsync(string? profileName)
-    {
-        if (string.IsNullOrEmpty(profileName))
-            return null;
-
-        var tokens = _oauthTokenStore.LoadAllTokens(profileName);
-        if (tokens.Count == 0)
-            return null;
-
-        // Refresh expired tokens
-        foreach (var (provider, tokenSet) in tokens.ToList())
-        {
-            if (!tokenSet.IsExpired)
-                continue;
-
-            if (string.IsNullOrEmpty(tokenSet.RefreshToken))
-            {
-                _logger.LogWarning("OAuth token for {Provider} in profile {Profile} is expired with no refresh token",
-                    provider, profileName);
-                continue;
-            }
-
-            var refreshed = await _oauthProxyClient.RefreshTokenAsync(provider, tokenSet.RefreshToken);
-            if (refreshed != null)
-            {
-                _oauthTokenStore.StoreTokens(profileName, provider, refreshed);
-                tokens[provider] = refreshed;
-                _logger.LogInformation("Refreshed expired OAuth token for {Provider} in profile {Profile}",
-                    provider, profileName);
-            }
-            else
-            {
-                _logger.LogWarning("Failed to refresh OAuth token for {Provider} in profile {Profile}",
-                    provider, profileName);
-            }
-        }
-
-        return tokens;
-    }
-
-    /// <summary>
     /// Merges MCP servers from profile and action levels and returns inline JSON for --mcp-config.
     /// Returns the JSON string if MCP servers exist, null otherwise.
     /// Merge order: profile → action (action wins on conflict).
@@ -1810,9 +1749,7 @@ public class ProjectManager : IProjectManager
     /// </summary>
     private static string? BuildMcpConfigJson(
         Dictionary<string, McpServerConfig>? profileMcpServers,
-        Dictionary<string, McpServerConfig>? actionMcpServers,
-        Dictionary<string, OAuthTokenSet>? oauthTokens = null,
-        Dictionary<string, McpOAuthTokens>? mcpOAuthTokens = null)
+        Dictionary<string, McpServerConfig>? actionMcpServers)
     {
         // Merge: profile is the base, action overrides
         Dictionary<string, McpServerConfig>? merged = null;
@@ -1847,52 +1784,14 @@ public class ProjectManager : IProjectManager
                             ["type"] = transport,
                             ["url"] = kvp.Value.Url
                         };
-                        var headers = ExpandEnvVars(kvp.Value.Headers) ?? new Dictionary<string, string>();
-
-                        // Inject OAuth token if this connector has a mapped provider (proxy flow)
-                        if (oauthTokens != null &&
-                            OAuthProviderMapping.ConnectorToProvider.TryGetValue(kvp.Key, out var provider))
-                        {
-                            if (oauthTokens.TryGetValue(provider, out var tokens))
-                                headers["Authorization"] = $"Bearer {tokens.AccessToken}";
-                        }
-
-                        // Inject MCP OAuth token (remote MCP server flow, e.g. Google Workspace)
-                        if (mcpOAuthTokens != null &&
-                            mcpOAuthTokens.TryGetValue(kvp.Key, out var mcpTokens))
-                        {
-                            headers["Authorization"] = $"Bearer {mcpTokens.AccessToken}";
-                        }
-
-                        if (headers.Count > 0)
+                        var headers = ExpandEnvVars(kvp.Value.Headers);
+                        if (headers is { Count: > 0 })
                             server["headers"] = headers;
                         return (object)server;
                     }
                     {
-                        var env = ExpandEnvVars(kvp.Value.Env) ?? new Dictionary<string, string>();
-
-                        // Inject OAuth token for stdio connectors (e.g. gws CLI)
-                        // gws reads GOOGLE_WORKSPACE_CLI_TOKEN as highest-priority auth source
-                        if (oauthTokens != null &&
-                            OAuthProviderMapping.ConnectorToProvider.TryGetValue(kvp.Key, out var stdioProvider))
-                        {
-                            if (oauthTokens.TryGetValue(stdioProvider, out var stdioTokens))
-                                env["GOOGLE_WORKSPACE_CLI_TOKEN"] = stdioTokens.AccessToken;
-                        }
-
-                        // Vanta MCP reads credentials from a JSON file, not env vars
-                        if (kvp.Key.Equals("vanta", StringComparison.OrdinalIgnoreCase)
-                            && env.TryGetValue("VANTA_CLIENT_ID", out var vantaId)
-                            && env.TryGetValue("VANTA_CLIENT_SECRET", out var vantaSecret))
-                        {
-                            var vantaCredsPath = Path.Combine(Path.GetTempPath(), $"godmode-vanta-{Guid.NewGuid():N}.json");
-                            File.WriteAllText(vantaCredsPath, JsonSerializer.Serialize(new { client_id = vantaId, client_secret = vantaSecret }));
-                            env.Remove("VANTA_CLIENT_ID");
-                            env.Remove("VANTA_CLIENT_SECRET");
-                            env["VANTA_ENV_FILE"] = vantaCredsPath;
-                        }
-
-                        if (env.Count > 0)
+                        var env = ExpandEnvVars(kvp.Value.Env);
+                        if (env is { Count: > 0 })
                             return (object)new { command = kvp.Value.Command ?? "", args = kvp.Value.Args ?? [], env };
                         return (object)new { command = kvp.Value.Command ?? "", args = kvp.Value.Args ?? Array.Empty<string>() };
                     }
@@ -1900,6 +1799,21 @@ public class ProjectManager : IProjectManager
         };
 
         return JsonSerializer.Serialize(mcpConfig);
+    }
+
+    /// <summary>
+    /// Sets the env vars the GodMode MCP bridge calls back to this server with, issuing a fresh
+    /// project token for this launch. Tokens live only in memory, so a project recovered after a
+    /// restart has none until it is launched again; a new launch also retires the previous token.
+    /// </summary>
+    private Dictionary<string, string> AddMcpBridgeEnvironment(ProjectInfo project, Dictionary<string, string>? env)
+    {
+        project.ProjectToken = GenerateProjectToken();
+        env ??= new Dictionary<string, string>();
+        env["GODMODE_PROJECT_ID"] = project.Status.Id;
+        env["GODMODE_PROJECT_TOKEN"] = project.ProjectToken;
+        env["GODMODE_SERVER_URL"] = $"http://localhost:{GetListenPort()}";
+        return env;
     }
 
     /// <summary>

@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, OAuthProviderStatus, StorageEntry } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, StorageEntry } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -22,7 +22,6 @@ export interface HubCallbacks {
   onProjectRestored?: (project: ProjectSummary) => void;
   onRootsChanged?: () => void;
   onProfilesChanged?: () => void;
-  onOAuthStatusChanged?: (profileName: string) => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -96,10 +95,6 @@ export class GodModeHub {
 
     this.connection.on('ProfilesChanged', () => {
       this.callbacks.onProfilesChanged?.();
-    });
-
-    this.connection.on('OAuthStatusChanged', (profileName: string) => {
-      this.callbacks.onOAuthStatusChanged?.(profileName);
     });
 
     this.connection.onreconnecting(() => this.setState('reconnecting'));
@@ -277,16 +272,6 @@ export class GodModeHub {
 
   async exportManifest(): Promise<string> {
     return await this.connection!.invoke('ExportManifest');
-  }
-
-  // --- OAuth ---
-
-  async getOAuthStatus(profileName: string): Promise<Record<string, OAuthProviderStatus>> {
-    return await this.connection!.invoke('GetOAuthStatus', profileName);
-  }
-
-  async disconnectOAuthProvider(profileName: string, provider: string): Promise<void> {
-    await this.connection!.invoke('DisconnectOAuthProvider', profileName, provider);
   }
 
   // ── Storage Browser ──

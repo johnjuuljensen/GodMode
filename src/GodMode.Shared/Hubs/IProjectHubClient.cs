@@ -55,10 +55,4 @@ public interface IProjectHubClient
     /// Clients should refresh their profile list.
     /// </summary>
     Task ProfilesChanged();
-
-    /// <summary>
-    /// Called when OAuth connection status changes for a profile
-    /// (token connected/disconnected/refreshed).
-    /// </summary>
-    Task OAuthStatusChanged(string profileName);
 }
