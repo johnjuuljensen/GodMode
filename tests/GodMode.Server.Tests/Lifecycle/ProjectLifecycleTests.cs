@@ -70,6 +70,25 @@ public class ProjectLifecycleTests
         Assert.False(LifecycleHarness.IsProcessAlive(launch.Pid), $"fake claude (pid {launch.Pid}) is still running after Stop");
     }
 
+    /// <summary>
+    /// Server shutdown kills claude and leaves the project Stopped on disk, so recovery on the next
+    /// start does not run a second process on the session while an orphan still has it.
+    /// </summary>
+    [Fact]
+    public async Task StoppingTheHost_KillsTheProcess_AndPersistsStopped()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+        var created = await harness.CreateProjectAsync();
+        var launch = await harness.WaitForStdinAsync(created.Id);
+        Assert.Equal(launch.Pid, harness.ProjectInfo(created.Id).Process.ProcessId);
+
+        harness.StopHost();
+
+        Assert.False(LifecycleHarness.IsProcessAlive(launch.Pid), $"fake claude (pid {launch.Pid}) is still running after the host stopped");
+        Assert.Equal(ProjectState.Stopped, harness.ReadStatusFile(created.Id).State);
+        Assert.Equal(ProjectState.Stopped, harness.Hub.StatusPushes(created.Id)[^1].State);
+    }
+
     [Fact]
     public async Task ProcessExitsWithAnError_IsError_AndPushesItsStderr()
     {

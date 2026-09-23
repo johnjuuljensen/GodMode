@@ -14,7 +14,9 @@ namespace GodMode.Server.Services;
 /// Runs each project's Claude process: start, resume, input and stop, and the one consumer that
 /// handles its output. The consumer takes the project's lines in the order claude wrote them and,
 /// for each, appends it to <c>output.jsonl</c>, updates state, then broadcasts it, so state derived
-/// from output is deterministic. Per-project state lives in <see cref="ProjectInfo.Process"/>.
+/// from output is deterministic. The process's exit comes last, after all its lines, and a Stop
+/// marks the project Stopped behind whatever is still queued. Every change the consumer makes to
+/// the status is pushed to all clients. Per-project state lives in <see cref="ProjectInfo.Process"/>.
 /// </summary>
 public sealed class ProjectLifecycle
 {
@@ -23,7 +25,7 @@ public sealed class ProjectLifecycle
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ILogger<ProjectLifecycle> _logger;
 
-    /// <summary>Raised when output takes a project to Idle.</summary>
+    /// <summary>Raised, on the project's consumer, when output takes a project to Idle. A handler must not wait for a Stop.</summary>
     public event Func<string, Task>? OnProjectCompleted;
 
     public ProjectLifecycle(
@@ -40,19 +42,17 @@ public sealed class ProjectLifecycle
 
     // ── Process ──
 
-    public async Task StartAsync(ProjectInfo project, string initialPrompt,
+    public Task StartAsync(ProjectInfo project, string initialPrompt,
         Dictionary<string, string>? environment, string[]? args)
     {
         var process = BeginLaunch(project);
-        process.ProcessId = await _processManager.StartClaudeProcessAsync(
-            project, initialPrompt, process.Cancellation!.Token, environment, args);
+        return _processManager.StartClaudeProcessAsync(project, initialPrompt, process.Cancellation!.Token, environment, args);
     }
 
-    public async Task ResumeAsync(ProjectInfo project, Dictionary<string, string>? environment, string[]? args)
+    public Task ResumeAsync(ProjectInfo project, Dictionary<string, string>? environment, string[]? args)
     {
         var process = BeginLaunch(project);
-        process.ProcessId = await _processManager.ResumeClaudeProcessAsync(
-            project, process.Cancellation!.Token, environment, args);
+        return _processManager.ResumeClaudeProcessAsync(project, process.Cancellation!.Token, environment, args);
     }
 
     /// <summary>Replaces the previous launch's cancellation and makes sure output has its consumer.</summary>
@@ -65,18 +65,36 @@ public sealed class ProjectLifecycle
             previous.Dispose();
         }
         process.Cancellation = new CancellationTokenSource();
-        process.EnsureConsumer(lines => ConsumeOutputAsync(project, lines));
+        EnsureConsumer(project);
         return process;
     }
 
+    private void EnsureConsumer(ProjectInfo project) =>
+        project.Process.EnsureConsumer(items => ConsumeAsync(project, items));
+
     public bool IsRunning(ProjectInfo project) => _processManager.IsProcessRunning(project.Process.ProcessId);
 
-    public Task StopAsync(ProjectInfo project) => _processManager.StopProcessAsync(project);
+    /// <summary>Kills the process tree; its output and exit are still handled, but change nothing after it.</summary>
+    public Task KillAsync(ProjectInfo project) => _processManager.StopProcessAsync(project);
 
-    /// <summary>Stops the process and lets the consumer finish, before the project is removed.</summary>
+    /// <summary>
+    /// Kills the process tree, then marks the project Stopped once every line it wrote has been
+    /// handled, so a result still queued cannot turn Stopped back into Idle.
+    /// </summary>
+    public async Task StopAsync(ProjectInfo project)
+    {
+        await KillAsync(project);
+        await InOrderAsync(project, () => SetStatusAsync(project, status => status with
+        {
+            State = ProjectState.Stopped,
+            UpdatedAt = DateTime.UtcNow
+        }));
+    }
+
+    /// <summary>Kills the process and lets the consumer finish, before the project is removed.</summary>
     public async Task CloseAsync(ProjectInfo project)
     {
-        await StopAsync(project);
+        await KillAsync(project);
         await project.Process.CloseAsync();
     }
 
@@ -116,17 +134,98 @@ public sealed class ProjectLifecycle
         finally { stateLock.Release(); }
     }
 
+    /// <summary>
+    /// Runs <paramref name="change"/> on the consumer, under the state lock, after everything already
+    /// on the pipeline. Once the pipeline is closed nothing is queued, and it runs at once.
+    /// </summary>
+    private async Task InOrderAsync(ProjectInfo project, Func<Task> change)
+    {
+        EnsureConsumer(project);
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (project.Process.Output.TryWrite(new PipelineItem.InOrder(change, done)))
+            await done.Task;
+        else
+            await WithStateLockAsync(project, change);
+    }
+
+    /// <summary>Pushes the project's current status to every client.</summary>
+    public async Task NotifyStatusChangedAsync(ProjectInfo project)
+    {
+        try
+        {
+            await _hubContext.Clients.All.StatusChanged(project.Status.Id, project.Status);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error broadcasting the status of project {ProjectId}", project.Status.Id);
+        }
+    }
+
     // ── Output ──
 
-    private async Task ConsumeOutputAsync(ProjectInfo project, ChannelReader<string> lines)
+    private async Task ConsumeAsync(ProjectInfo project, ChannelReader<PipelineItem> items)
     {
-        while (await lines.WaitToReadAsync())
+        while (await items.WaitToReadAsync())
         {
             // Open for each burst, so nothing holds output.jsonl while the project is quiet
             await using var output = OpenOutput(project);
-            while (lines.TryRead(out var line))
-                await HandleOutputLineAsync(project, output, line);
+            while (items.TryRead(out var item))
+                await (item switch
+                {
+                    PipelineItem.Line line => HandleOutputLineAsync(project, output, line.Json),
+                    PipelineItem.Exited exited => HandleExitAsync(project, exited.Exit),
+                    PipelineItem.InOrder inOrder => RunInOrderAsync(project, inOrder),
+                    _ => throw new InvalidOperationException($"Unknown pipeline item {item}"),
+                });
         }
+    }
+
+    private static async Task RunInOrderAsync(ProjectInfo project, PipelineItem.InOrder item)
+    {
+        try
+        {
+            await WithStateLockAsync(project, item.Change);
+            item.Done.TrySetResult();
+        }
+        catch (Exception ex)
+        {
+            item.Done.TrySetException(ex);
+        }
+    }
+
+    /// <summary>
+    /// The process ended on its own: Stopped if it exited cleanly with its turn over, Error with its
+    /// last stderr otherwise. A process the server killed changes nothing: whoever killed it decides.
+    /// </summary>
+    private async Task HandleExitAsync(ProjectInfo project, ProcessExit exit)
+    {
+        if (exit.Killed) return;
+
+        var changed = false;
+        try
+        {
+            await WithStateLockAsync(project, async () =>
+            {
+                // A later launch is already running; its own exit settles the state
+                if (project.Process.ProcessId != 0) return;
+
+                var finished = exit.ExitCode == 0 && project.Status.State is ProjectState.Idle or ProjectState.WaitingInput;
+                await SetStatusAsync(project, status => status with
+                {
+                    State = finished ? ProjectState.Stopped : ProjectState.Error,
+                    CurrentQuestion = null,
+                    LastError = finished ? null : exit.Stderr ?? $"claude exited with code {exit.ExitCode}",
+                    UpdatedAt = DateTime.UtcNow
+                });
+                changed = true;
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error handling the exit of project {ProjectId}", project.Status.Id);
+        }
+
+        if (changed) await NotifyStatusChangedAsync(project);
     }
 
     private StreamWriter? OpenOutput(ProjectInfo project)
@@ -153,6 +252,7 @@ public sealed class ProjectLifecycle
             id, jsonLine.Length > 200 ? jsonLine[..200] + "..." : jsonLine);
 
         var completed = false;
+        var statusChanged = false;
         try
         {
             // 1. Persist, so a client subscribing from here on backfills this line
@@ -163,7 +263,7 @@ public sealed class ProjectLifecycle
                 await WithStateLockAsync(project, async () =>
                 {
                     var previous = project.Status.State;
-                    await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
+                    statusChanged = await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
                     completed = previous != ProjectState.Idle && project.Status.State == ProjectState.Idle;
                 });
         }
@@ -181,6 +281,9 @@ public sealed class ProjectLifecycle
         {
             _logger.LogError(ex, "Error broadcasting output for project {ProjectId}", id);
         }
+
+        // 4. Every client hears the change, subscribed to this project's output or not
+        if (statusChanged) await NotifyStatusChangedAsync(project);
 
         if (completed && OnProjectCompleted != null)
         {
@@ -307,6 +410,12 @@ public sealed class ProjectLifecycle
 
         if (root.TryGetProperty("duration_ms", out var duration))
             metadata["duration_ms"] = duration.GetInt64();
+
+        if (root.TryGetProperty("subtype", out var subtype) && subtype.ValueKind == JsonValueKind.String)
+            metadata["subtype"] = subtype.GetString()!;
+
+        if (root.TryGetProperty("is_error", out var isError) && isError.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            metadata["is_error"] = isError.GetBoolean();
 
         return metadata.Count > 0 ? metadata : null;
     }

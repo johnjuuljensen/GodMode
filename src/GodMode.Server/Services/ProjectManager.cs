@@ -21,6 +21,9 @@ public class ProjectManager : IProjectManager
     /// Appended to every Claude invocation's system prompt so questions always
     /// come through as structured AskUserQuestion tool calls. See issue #131.
     /// </summary>
+    /// <summary>How long server shutdown waits for the projects' processes to be killed and marked Stopped.</summary>
+    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
+
     private const string QuestionPromptInjection =
         "If you need to ask the user a question — including clarifications, " +
         "multiple-choice decisions, or confirmations — you MUST use the " +
@@ -81,6 +84,7 @@ public class ProjectManager : IProjectManager
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
         ProfileFileManager profileFileManager,
         IConfiguration configuration,
+        IHostApplicationLifetime lifetime,
         ILogger<ProjectManager> logger)
     {
         _lifecycle = lifecycle;
@@ -106,6 +110,35 @@ public class ProjectManager : IProjectManager
 
         // Build initial profile/root snapshot
         _snapshot = BuildSnapshot();
+
+        lifetime.ApplicationStopping.Register(StopProjectsOnShutdown);
+    }
+
+    /// <summary>
+    /// Server shutdown: kills every running claude process tree and persists Stopped, so recovery
+    /// on the next start does not launch a second process on a session an orphan still runs.
+    /// Blocks shutdown until done or <see cref="ShutdownTimeout"/> passes.
+    /// </summary>
+    private void StopProjectsOnShutdown()
+    {
+        var running = _projects.Values.Where(_lifecycle.IsRunning).ToArray();
+        if (running.Length == 0) return;
+
+        _logger.LogInformation("Server stopping: stopping {Count} running project(s)", running.Length);
+        var stops = Task.WhenAll(running.Select(async project =>
+        {
+            try
+            {
+                await _lifecycle.StopAsync(project);
+                await NotifyStatusChanged(project);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not stop project {ProjectId} on shutdown", project.Status.Id);
+            }
+        }));
+        if (!stops.Wait(ShutdownTimeout))
+            _logger.LogWarning("Server stopping: projects were not all stopped within {Timeout}", ShutdownTimeout);
     }
 
     private static Dictionary<string, ProfileConfig> LoadProfiles(IConfiguration configuration, bool hasAutoDiscovery)
@@ -644,11 +677,6 @@ public class ProjectManager : IProjectManager
         }
 
         await _lifecycle.StopAsync(project);
-        await _lifecycle.UpdateStatusAsync(project, status => status with
-        {
-            State = ProjectState.Stopped,
-            UpdatedAt = DateTime.UtcNow
-        });
         await NotifyStatusChanged(project);
     }
 
@@ -663,7 +691,7 @@ public class ProjectManager : IProjectManager
 
         // Stop Claude process if running. Its output pipeline stays open until the delete is
         // committed: a delete script may refuse, and the project is then resumed as before
-        await _lifecycle.StopAsync(project);
+        await _lifecycle.KillAsync(project);
 
         // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
@@ -871,7 +899,7 @@ public class ProjectManager : IProjectManager
         _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}",
             projectId, project.SessionId);
 
-        await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Running, UpdatedAt = DateTime.UtcNow });
+        await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Running, LastError = null, UpdatedAt = DateTime.UtcNow });
 
         // Build claude env/args from action config + persisted project settings + profile env
         Dictionary<string, string>? claudeEnv = null;
@@ -1706,10 +1734,7 @@ public class ProjectManager : IProjectManager
         }
     }
 
-    private async Task NotifyStatusChanged(ProjectInfo project)
-    {
-        await _hubContext.Clients.All.StatusChanged(project.Status.Id, project.Status);
-    }
+    private Task NotifyStatusChanged(ProjectInfo project) => _lifecycle.NotifyStatusChangedAsync(project);
 
     // ── Internal API helpers (project tokens, result storage) ──
 

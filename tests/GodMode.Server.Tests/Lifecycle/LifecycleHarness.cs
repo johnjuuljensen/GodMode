@@ -11,6 +11,8 @@ using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.Internal;
 using Microsoft.Extensions.Logging;
 
 namespace GodMode.Server.Tests.Lifecycle;
@@ -110,6 +112,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
         services.AddSingleton<ProfileFileManager>();
+        services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();
     }
@@ -133,9 +136,12 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     public IClaudeProcessManager ProcessManager => _services.GetRequiredService<IClaudeProcessManager>();
 
-    /// <summary>The server's own record of a project, found as the MCP bridge finds it: by its launch's token.</summary>
+    /// <summary>Stops the host as the server's does on shutdown: raises ApplicationStopping and waits for its handlers.</summary>
+    public void StopHost() => ((ApplicationLifetime)_services.GetRequiredService<IHostApplicationLifetime>()).StopApplication();
+
+    /// <summary>The server's own record of a project, found as the MCP bridge finds it: by its latest launch's token.</summary>
     public ProjectInfo ProjectInfo(string projectId) =>
-        Projects.ValidateProjectToken(projectId, Launches(projectId)[0].Environment["GODMODE_PROJECT_TOKEN"])
+        Projects.ValidateProjectToken(projectId, Launches(projectId)[^1].Environment["GODMODE_PROJECT_TOKEN"])
         ?? throw new InvalidOperationException($"project {projectId} does not accept its launch's token");
 
     /// <summary>Polls the in-memory status until it reaches <paramref name="state"/>.</summary>

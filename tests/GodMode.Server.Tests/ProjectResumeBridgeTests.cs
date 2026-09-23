@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.Internal;
 using System.Text.Json;
 using GodMode.Server.Models;
 using GodMode.Server.Services;
@@ -119,6 +121,7 @@ public class ProjectResumeBridgeTests
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
         services.AddSingleton<ProfileFileManager>();
+        services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();
     }
@@ -127,8 +130,6 @@ public class ProjectResumeBridgeTests
     {
         public List<(Dictionary<string, string>? Env, string[]? Args)> Launches { get; } = [];
         public bool Running { get; set; }
-
-        public event ProcessExitedHandler? OnProcessExited { add { } remove { } }
 
         public Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
             Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null) => Record(extraEnvironment, extraArgs);

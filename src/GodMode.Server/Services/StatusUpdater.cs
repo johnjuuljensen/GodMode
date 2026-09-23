@@ -31,7 +31,7 @@ public class StatusUpdater : IStatusUpdater
         await AtomicFile.WriteAllTextAsync(statusPath, json);
     }
 
-    public async Task UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent, string rawJson)
+    public async Task<bool> UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent, string rawJson)
     {
         var stateChanged = false;
         var status = project.Status;
@@ -55,9 +55,19 @@ public class StatusUpdater : IStatusUpdater
                 if (lastText != null) process.LastAssistantText = lastText;
                 break;
 
-            case OutputEventType.Error:
-                stateChanged = status.State != ProjectState.Error;
-                status = status with { State = ProjectState.Error };
+            // Error events are stderr lines shown in the UI; the process's exit and error results
+            // decide whether the session failed
+
+            case OutputEventType.Result when IsErrorResult(outputEvent):
+                status = status with
+                {
+                    State = ProjectState.Error,
+                    CurrentQuestion = null,
+                    LastError = outputEvent.Content is { Length: > 0 } text ? text : Subtype(outputEvent) ?? "error result",
+                };
+                process.LastAssistantText = null;
+                stateChanged = true;
+                status = WithTokenMetrics(status, outputEvent);
                 break;
 
             case OutputEventType.Result:
@@ -69,45 +79,27 @@ public class StatusUpdater : IStatusUpdater
                     {
                         State = ProjectState.WaitingInput,
                         CurrentQuestion = process.LastAssistantText,
+                        LastError = null,
                     };
                 }
                 else
                 {
-                    status = status with { State = ProjectState.Idle, CurrentQuestion = null };
+                    status = status with { State = ProjectState.Idle, CurrentQuestion = null, LastError = null };
                 }
                 process.LastAssistantText = null;
                 stateChanged = true;
-
-                // Update metrics from result metadata
-                if (outputEvent.Metadata != null)
-                {
-                    if (outputEvent.Metadata.TryGetValue("input_tokens", out var inputTokens))
-                    {
-                        if (long.TryParse(inputTokens?.ToString(), out var tokens))
-                        {
-                            status = status with { Metrics = status.Metrics with { InputTokens = tokens } };
-                        }
-                    }
-
-                    if (outputEvent.Metadata.TryGetValue("output_tokens", out var outputTokens))
-                    {
-                        if (long.TryParse(outputTokens?.ToString(), out var tokens))
-                        {
-                            status = status with { Metrics = status.Metrics with { OutputTokens = tokens } };
-                        }
-                    }
-                }
+                status = WithTokenMetrics(status, outputEvent);
                 break;
 
-            case OutputEventType.System:
-                // System init event - project is running
-                stateChanged = status.State != ProjectState.Running;
-                status = status with { State = ProjectState.Running };
+            case OutputEventType.System when Subtype(outputEvent) == "init":
+                // The session (re)started - project is running
+                stateChanged = status.State != ProjectState.Running || status.LastError != null;
+                status = status with { State = ProjectState.Running, LastError = null };
                 break;
         }
 
         // Most lines (assistant text, tool use, echoed user messages) change nothing on disk
-        if (!stateChanged) return;
+        if (!stateChanged) return false;
 
         // Update duration
         var duration = DateTime.UtcNow - status.CreatedAt;
@@ -120,6 +112,30 @@ public class StatusUpdater : IStatusUpdater
 
         project.Status = status with { UpdatedAt = DateTime.UtcNow };
         await SaveStatusAsync(project);
+        return true;
+    }
+
+    private static string? Subtype(OutputEvent outputEvent) =>
+        outputEvent.Metadata?.GetValueOrDefault("subtype") as string;
+
+    /// <summary><c>is_error</c>, or for a CLI that omits it, a subtype other than <c>success</c>.</summary>
+    private static bool IsErrorResult(OutputEvent outputEvent) =>
+        outputEvent.Metadata?.GetValueOrDefault("is_error") is bool isError
+            ? isError
+            : Subtype(outputEvent) is { } subtype && subtype != "success";
+
+    /// <summary>Takes the token counts from a result's metadata.</summary>
+    private static ProjectStatus WithTokenMetrics(ProjectStatus status, OutputEvent outputEvent)
+    {
+        if (outputEvent.Metadata == null) return status;
+
+        if (outputEvent.Metadata.TryGetValue("input_tokens", out var inputTokens) && long.TryParse(inputTokens?.ToString(), out var input))
+            status = status with { Metrics = status.Metrics with { InputTokens = input } };
+
+        if (outputEvent.Metadata.TryGetValue("output_tokens", out var outputTokens) && long.TryParse(outputTokens?.ToString(), out var output))
+            status = status with { Metrics = status.Metrics with { OutputTokens = output } };
+
+        return status;
     }
 
     public async Task UpdateGitStatusAsync(ProjectInfo project)
