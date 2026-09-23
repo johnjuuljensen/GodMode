@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -31,6 +32,63 @@ public class AuthTests
         await hub.StartAsync();
         var profiles = await hub.InvokeAsync<JsonElement>("ListProfiles");
         Assert.Equal(JsonValueKind.Array, profiles.ValueKind);
+    }
+
+    // Keyless loopback mode trusts the caller's address, so a browser on this machine is a
+    // loopback caller too. A foreign page must not reach the server through it: not by a
+    // cross-site WebSocket (foreign Origin) and not by DNS rebinding (foreign Host).
+
+    [Theory]
+    [InlineData("https://evil.example")]
+    [InlineData("http://rebind.evil.example:31337")]
+    [InlineData("null")]
+    public async Task NoKey_Loopback_ForeignOriginIsRejected(string origin)
+    {
+        await using var run = await StartHealthyAsync("127.0.0.1");
+
+        using var negotiate = await NegotiateAsync(run.Http, token: null, origin: origin);
+        Assert.Equal(HttpStatusCode.Unauthorized, negotiate.StatusCode);
+
+        // A raw WebSocket upgrade straight to the hub, as a cross-site page would open it.
+        using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Origin", origin);
+        var ex = await Assert.ThrowsAsync<WebSocketException>(() =>
+            socket.ConnectAsync(new Uri($"{run.BaseUrl.Replace("http", "ws")}{HubPath}"), CancellationToken.None));
+        Assert.Contains("401", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("http://localhost:5173")] // the Vite dev server
+    [InlineData("http://127.0.0.1:31337")]
+    [InlineData("http://[::1]:31337")]
+    public async Task NoKey_Loopback_LoopbackOriginIsAllowed(string origin)
+    {
+        await using var run = await StartHealthyAsync("127.0.0.1");
+
+        using var negotiate = await NegotiateAsync(run.Http, token: null, origin: origin);
+        Assert.Equal(HttpStatusCode.OK, negotiate.StatusCode);
+
+        using var socket = new ClientWebSocket();
+        socket.Options.SetRequestHeader("Origin", origin);
+        await socket.ConnectAsync(new Uri($"{run.BaseUrl.Replace("http", "ws")}{HubPath}"), CancellationToken.None);
+        Assert.Equal(WebSocketState.Open, socket.State);
+    }
+
+    [Theory]
+    [InlineData("rebind.evil.example", HttpStatusCode.Unauthorized)]
+    [InlineData("192.168.1.10", HttpStatusCode.Unauthorized)]
+    [InlineData("localhost", HttpStatusCode.OK)]
+    [InlineData("127.0.0.1", HttpStatusCode.OK)]
+    [InlineData("[::1]", HttpStatusCode.OK)]
+    public async Task NoKey_Loopback_ChecksTheHostHeader(string host, HttpStatusCode expected)
+    {
+        await using var run = await StartHealthyAsync("127.0.0.1");
+        var port = new Uri(run.BaseUrl).Port;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/servers");
+        request.Headers.Host = $"{host}:{port}";
+        using var response = await run.Http.SendAsync(request);
+        Assert.Equal(expected, response.StatusCode);
     }
 
     [Fact]
@@ -89,6 +147,41 @@ public class AuthTests
         await authed.StartAsync();
         var profiles = await authed.InvokeAsync<JsonElement>("ListProfiles");
         Assert.Equal(JsonValueKind.Array, profiles.ValueKind);
+    }
+
+    [Fact]
+    public async Task QueryToken_IsOnlyAcceptedByTheHub_AndNeverLogged()
+    {
+        await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
+
+        // Outside the hub, a key in the URL is refused.
+        using var servers = await run.Http.GetAsync($"/servers?access_token={ApiKey}");
+        Assert.Equal(HttpStatusCode.Unauthorized, servers.StatusCode);
+
+        // The hub's WebSocket upgrade carries it in the query string, all a browser can do, and works.
+        await using (var hub = new HubConnectionBuilder()
+            .WithUrl($"{run.BaseUrl}{HubPath}", options =>
+            {
+                options.AccessTokenProvider = () => Task.FromResult<string?>(ApiKey);
+                options.Transports = Microsoft.AspNetCore.Http.Connections.HttpTransportType.WebSockets;
+                options.SkipNegotiation = true;
+            })
+            .Build())
+        {
+            await hub.StartAsync();
+            await hub.InvokeAsync<JsonElement>("ListProfiles");
+        }
+
+        // Neither URL reached the console or the log file.
+        Assert.DoesNotContain(ApiKey, run.Server.Output);
+        var logDir = Path.Combine(run.Server.WorkDir, ".godmode-logs");
+        foreach (var logFile in Directory.GetFiles(logDir))
+        {
+            using var reader = new StreamReader(new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+            var log = await reader.ReadToEndAsync();
+            Assert.Contains("Authentication mode", log); // the right file, and it is being written
+            Assert.DoesNotContain(ApiKey, log);
+        }
     }
 
     // ── Fail closed: only /health and the SPA's static files are anonymous ──
@@ -209,8 +302,8 @@ public class AuthTests
         Assert.Equal(HttpStatusCode.OK, right.StatusCode);
     }
 
-    private static Task<HttpResponseMessage> NegotiateAsync(HttpClient http, string? token) =>
-        SendAsync(http, HttpMethod.Post, $"{HubPath}/negotiate?negotiateVersion=1", token);
+    private static Task<HttpResponseMessage> NegotiateAsync(HttpClient http, string? token, string? origin = null) =>
+        SendAsync(http, HttpMethod.Post, $"{HubPath}/negotiate?negotiateVersion=1", token, origin);
 
     private static Task<HttpResponseMessage> PostInternalStatusAsync(HttpClient http, string? projectId, string? token)
     {
@@ -223,10 +316,11 @@ public class AuthTests
         return http.SendAsync(request);
     }
 
-    private static Task<HttpResponseMessage> SendAsync(HttpClient http, HttpMethod method, string path, string? token)
+    private static Task<HttpResponseMessage> SendAsync(HttpClient http, HttpMethod method, string path, string? token, string? origin = null)
     {
         var request = new HttpRequestMessage(method, path);
         if (token != null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (origin != null) request.Headers.Add("Origin", origin);
         return http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
     }
 

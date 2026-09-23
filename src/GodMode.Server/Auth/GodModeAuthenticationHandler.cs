@@ -42,15 +42,17 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
         if (Request.Headers.ContainsKey(ProjectTokenAuthenticationHandler.ProjectIdHeader))
             return AuthenticateResult.NoResult();
 
-        // Loopback mode is only selected when every binding is loopback; checking the caller
-        // as well keeps it closed if the server is reachable some other way.
         if (_settings.Mode == AuthMode.Loopback)
-            return AuthModeSelector.IsLoopback(Context.Connection.RemoteIpAddress)
+            return IsLocalRequest()
                 ? SuccessResult(Scheme.Name, "local-user")
-                : AuthenticateResult.Fail("Unauthenticated access is only allowed from loopback");
+                : AuthenticateResult.Fail("Unauthenticated access is only allowed locally: loopback caller, Host and Origin");
 
-        // Authorization header, or query string (SignalR sends the token there for WebSocket upgrade)
-        if ((BearerToken.FromHeader(Request) ?? Request.Query["access_token"].FirstOrDefault()) is not { Length: > 0 } token)
+        // Authorization header; for the hub only, also the query string, because browsers cannot set
+        // headers on a WebSocket upgrade. Nowhere else: a key in a URL ends up in logs and history.
+        var queryToken = Request.Path.StartsWithSegments(GodModeAuthExtensions.HubPath)
+            ? Request.Query["access_token"].FirstOrDefault()
+            : null;
+        if ((BearerToken.FromHeader(Request) ?? queryToken) is not { Length: > 0 } token)
             return AuthenticateResult.NoResult();
 
         return _settings.Mode switch
@@ -60,6 +62,19 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
             _ => AuthenticateResult.NoResult(),
         };
     }
+
+    /// <summary>
+    /// Keyless loopback mode trusts this machine, and a browser on this machine is a loopback
+    /// caller too. So besides the caller's address (which keeps it closed if the server is
+    /// reachable some other way), the Host it asked for must be loopback, against DNS rebinding,
+    /// and so must the Origin of the page that sent it, when there is one, against cross-site
+    /// requests including WebSocket upgrades.
+    /// </summary>
+    private bool IsLocalRequest() =>
+        AuthModeSelector.IsLoopback(Context.Connection.RemoteIpAddress)
+        && AuthModeSelector.IsLoopbackHost(Request.Host.Host)
+        && Request.Headers.Origin.ToString() is var origin
+        && (origin.Length == 0 || AuthModeSelector.IsLoopbackOrigin(origin));
 
     private async Task<AuthenticateResult> ValidateGitHubTokenAsync(string token)
     {
@@ -190,6 +205,7 @@ internal static class BearerToken
 
 public static class GodModeAuthExtensions
 {
+    public const string HubPath = "/hubs/projects";
     public const string SchemeName = "GodModeBearer";
     public const string ProjectTokenSchemeName = "GodModeProjectToken";
     public const string ProjectPolicy = "GodModeProject";

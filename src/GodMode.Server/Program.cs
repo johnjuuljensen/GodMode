@@ -7,12 +7,17 @@ using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Serilog;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Host.UseSerilog((context, configuration) =>
     configuration
         .ReadFrom.Configuration(context.Configuration)
+        // Serilog ignores Logging:LogLevel. ASP.NET Core's Information events log full request
+        // URLs, which for the hub's WebSocket upgrade carry the key as ?access_token=, so they
+        // stay off after any configured levels.
+        .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
         .WriteTo.Console()
         .WriteTo.File(
             Path.Combine(".godmode-logs", "server-.log"),
@@ -128,7 +133,7 @@ app.MapGet("/events", async (HttpContext ctx) =>
     catch (OperationCanceledException) { }
 });
 
-app.MapHub<ProjectHub>("/hubs/projects").RequireAuthorization();
+app.MapHub<ProjectHub>(GodModeAuthExtensions.HubPath).RequireAuthorization();
 
 // ── Internal API (MCP bridge → server, project-scoped token auth) ──
 

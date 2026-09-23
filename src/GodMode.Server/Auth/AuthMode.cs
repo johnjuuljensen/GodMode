@@ -81,17 +81,25 @@ public static class AuthModeSelector
         try
         {
             var address = BindingAddress.Parse(url);
-            if (address.IsUnixPipe || address.IsNamedPipe)
-                return false;
-            var host = address.Host.Trim('[', ']');
-            return string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-                || (IPAddress.TryParse(host, out var ip) && IsLoopback(ip));
+            return !address.IsUnixPipe && !address.IsNamedPipe && IsLoopbackHost(address.Host);
         }
         catch (FormatException)
         {
             return false;
         }
     }
+
+    /// <summary>True for <c>localhost</c> and loopback IP literals (IPv6 with or without brackets).</summary>
+    public static bool IsLoopbackHost(string host)
+    {
+        host = host.Trim('[', ']');
+        return string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+            || (IPAddress.TryParse(host, out var ip) && IsLoopback(ip));
+    }
+
+    /// <summary>True for an absolute origin whose host is loopback. <c>null</c> and anything unparsable are not.</summary>
+    public static bool IsLoopbackOrigin(string origin) =>
+        Uri.TryCreate(origin, UriKind.Absolute, out var uri) && IsLoopbackHost(uri.Host);
 
     public static bool IsLoopback(IPAddress? address) =>
         address != null && IPAddress.IsLoopback(address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address);
