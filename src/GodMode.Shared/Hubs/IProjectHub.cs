@@ -191,18 +191,6 @@ public interface IProjectHub
     /// </summary>
     Task<string> ExportManifest();
 
-    // ── OAuth ──
-
-    /// <summary>
-    /// Gets the OAuth connection status for all providers in a profile.
-    /// </summary>
-    Task<Dictionary<string, OAuthProviderStatus>> GetOAuthStatus(string profileName);
-
-    /// <summary>
-    /// Disconnects (deletes tokens for) an OAuth provider in a profile.
-    /// </summary>
-    Task DisconnectOAuthProvider(string profileName, string provider);
-
     // ── Utility ──
 
     /// <summary>

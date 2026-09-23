@@ -15,20 +15,17 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     private readonly IConvergenceEngine _convergenceEngine;
     private readonly IManifestParser _manifestParser;
     private readonly IManifestExporter _manifestExporter;
-    private readonly OAuthTokenStore _oauthTokenStore;
     private readonly string _projectRootsDir;
     private readonly ILogger<ProjectHub> _logger;
 
     public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
         IManifestParser manifestParser, IManifestExporter manifestExporter,
-        OAuthTokenStore oauthTokenStore,
         IConfiguration configuration, ILogger<ProjectHub> logger)
     {
         _projectManager = projectManager;
         _convergenceEngine = convergenceEngine;
         _manifestParser = manifestParser;
         _manifestExporter = manifestExporter;
-        _oauthTokenStore = oauthTokenStore;
         _projectRootsDir = Path.GetFullPath(configuration["_projectRootsDir"] ?? "roots");
         _logger = logger;
     }
@@ -323,23 +320,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} exporting manifest", Context.ConnectionId);
         var manifest = _manifestExporter.Export();
         return Task.FromResult(_manifestExporter.Serialize(manifest));
-    }
-
-    // ── OAuth ──
-
-    public Task<Dictionary<string, OAuthProviderStatus>> GetOAuthStatus(string profileName)
-    {
-        _logger.LogInformation("Client {ConnectionId} requested OAuth status for profile '{Profile}'",
-            Context.ConnectionId, profileName);
-        return Task.FromResult(_oauthTokenStore.GetProviderStatuses(profileName));
-    }
-
-    public async Task DisconnectOAuthProvider(string profileName, string provider)
-    {
-        _logger.LogInformation("Client {ConnectionId} disconnecting OAuth provider '{Provider}' from profile '{Profile}'",
-            Context.ConnectionId, provider, profileName);
-        _oauthTokenStore.DeleteTokens(profileName, provider);
-        await Clients.All.OAuthStatusChanged(profileName);
     }
 
     public async Task<string?> CheckCommand(string command)
