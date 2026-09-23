@@ -197,7 +197,7 @@ public static class GodModeAuthExtensions
 
     /// <summary>
     /// Registers user and project authentication, and makes authentication the default:
-    /// every endpoint requires an authenticated user unless it opts out with <c>AllowAnonymous</c>.
+    /// every endpoint requires an authenticated user unless it explicitly opts out (only /health and the SPA do).
     /// </summary>
     public static IServiceCollection AddGodModeAuth(this IServiceCollection services, AuthSettings settings)
     {

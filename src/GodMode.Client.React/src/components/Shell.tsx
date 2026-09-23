@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore, type ActivePage } from '../store';
 import { Sidebar, SidebarHeader, SidebarFooter } from './Sidebar/Sidebar';
 import { ProjectView } from './Project/ProjectView';
@@ -11,8 +11,6 @@ import { RootManager } from './Roots/RootManager';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
 import { StorageBrowser } from './Storage/StorageBrowser';
-import { CONNECTOR_CATALOG } from '../connectors-catalog';
-import type { McpServerConfig } from '../signalr/types';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -65,42 +63,6 @@ export function Shell() {
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, [setIsMobile]);
-
-  // Handle OAuth connector redirect: auto-add the pending MCP connector
-  const oauthHandled = useRef(false);
-  const serverConnections = useAppStore(s => s.serverConnections);
-  const setActivePage = useAppStore(s => s.setActivePage);
-  useEffect(() => {
-    if (oauthHandled.current) return;
-    const params = new URLSearchParams(window.location.search);
-    const oauthSuccess = params.get('oauthSuccess');
-    if (!oauthSuccess) return;
-
-    const conn = serverConnections.find(c => c.connectionState === 'connected');
-    if (!conn?.hub) return;
-
-    oauthHandled.current = true;
-    window.history.replaceState({}, '', window.location.pathname);
-
-    const raw = sessionStorage.getItem('oauth-pending-connector');
-    sessionStorage.removeItem('oauth-pending-connector');
-
-    // Navigate to connectors page so user sees the result
-    setActivePage({ type: 'mcpConfig' });
-
-    if (!raw) return;
-
-    try {
-      const { connectorId, profileName } = JSON.parse(raw) as { connectorId: string; profileName: string };
-      const catalog = CONNECTOR_CATALOG.find(c => c.id === connectorId);
-      if (!catalog?.config.url) return;
-
-      const config: McpServerConfig = { Url: catalog.config.url };
-      conn.hub.addMcpServer(catalog.id, config, 'profile', profileName)
-        .then(() => console.info(`[oauth] Auto-added ${catalog.id} to profile ${profileName}`))
-        .catch(e => console.error('[oauth] Failed to auto-add connector:', e));
-    } catch { /* ignore */ }
-  }, [serverConnections, setActivePage]);
 
   const isTileFullscreen = isTileView && selectedProject !== null;
 

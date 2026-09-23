@@ -639,9 +639,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       onProfilesChanged: () => {
         get().refreshProjects(serverId);
       },
-      onOAuthStatusChanged: () => {
-        // OAuth status changed — UI components with OAuth status will re-fetch
-      },
     });
 
     try {

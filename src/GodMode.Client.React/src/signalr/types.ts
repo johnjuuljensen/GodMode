@@ -125,14 +125,6 @@ export interface RootSourceInfo {
   Version?: string | null;
 }
 
-// --- OAuth (PascalCase from server) ---
-
-export interface OAuthProviderStatus {
-  Connected: boolean;
-  ExpiresAt?: string | null;
-  Email?: string | null;
-}
-
 // --- Storage Browser ---
 
 export interface StorageEntry {

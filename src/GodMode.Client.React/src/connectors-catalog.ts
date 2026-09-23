@@ -69,7 +69,6 @@ export interface CatalogConnector {
     /** For SSE connectors: header templates keyed by header name (e.g. "Authorization") */
     headerTemplates?: Record<string, CatalogHeaderTemplate>;
     url?: string;
-    auth?: string;
     note?: string;
   };
 }
@@ -113,7 +112,7 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
     transport: 'http',
     config: {
       url: 'https://mcp.atlassian.com/v1/mcp',
-      note: 'Atlassian-hosted MCP server. OAuth sign-in happens when you click Connect.',
+      note: 'Atlassian-hosted MCP server.',
     },
   },
   {
@@ -147,23 +146,6 @@ export const CONNECTOR_CATALOG: CatalogConnector[] = [
         },
       },
       note: 'Hosted MCP server. No local install needed. Enter your Grafana URL and service account token.',
-    },
-  },
-  {
-    id: 'azure',
-    name: 'Azure',
-    description: 'Manage Azure resources, AKS, PostgreSQL, Storage, Key Vault, Service Bus, DNS, users, and billing.',
-    category: 'tech',
-    stability: 'stable',
-    maintainer: 'GodMode',
-    source: 'https://github.com/MortenKre/Godmode-Google-MCP',
-    docsUrl: 'https://github.com/MortenKre/Godmode-Google-MCP#readme',
-    logoUrl: 'https://cdn.simpleicons.org/microsoftazure/0078D4',
-    transport: 'sse',
-    config: {
-      url: 'https://mcp.ingodmode.xyz/azure',
-      auth: 'oauth',
-      note: 'Hosted MCP server. Sign in with your Microsoft account to access Azure resources.',
     },
   },
   {
@@ -344,9 +326,4 @@ export function findCatalogEntry(serverName: string): CatalogConnector | undefin
 export const CATEGORY_LABELS: Record<string, string> = {
   tech: 'Tech',
   admin: 'Admin',
-};
-
-/** Maps connector IDs to OAuth provider names (mirrors OAuthProviderMapping on server) */
-export const CONNECTOR_TO_OAUTH_PROVIDER: Record<string, string> = {
-  azure: 'microsoft',
 };
