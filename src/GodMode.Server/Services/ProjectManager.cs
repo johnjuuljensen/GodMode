@@ -502,7 +502,6 @@ public class ProjectManager : IProjectManager
             ProjectPath = projectPath,
             ActionName = action.Name,
             ProfileName = request.ProfileName,
-            ProjectToken = GenerateProjectToken()
         };
 
         // Result file — scripts can write key=value pairs to override project path/name
@@ -615,11 +614,7 @@ public class ProjectManager : IProjectManager
         var (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, model, profileEnv,
             request.ProfileName, config.StripEnvVarProfile, mcpConfigJson);
 
-        // Inject GodMode MCP bridge env vars so the bridge can call back to this server
-        claudeEnv ??= new Dictionary<string, string>();
-        claudeEnv["GODMODE_PROJECT_ID"] = projectId;
-        claudeEnv["GODMODE_PROJECT_TOKEN"] = project.ProjectToken!;
-        claudeEnv["GODMODE_SERVER_URL"] = $"http://localhost:{GetListenPort()}";
+        claudeEnv = AddMcpBridgeEnvironment(project, claudeEnv);
 
         if (claudeArgs != null)
             _logger.LogInformation("Claude args: {Args}", string.Join(" ", claudeArgs));
@@ -941,25 +936,28 @@ public class ProjectManager : IProjectManager
                 var action = config.ResolveAction(project.ActionName);
                 if (action != null)
                 {
-                    var mcpJson = BuildMcpConfigJson(profileCfg?.McpServers, action.McpServers);
+                    var mcpJson = InjectMcpBridge(BuildMcpConfigJson(profileCfg?.McpServers, action.McpServers));
                     (claudeEnv, claudeArgs) = BuildClaudeConfig(action, settings, resumeModel ?? action.Model, profileEnv,
                         resumeProfileName, config.StripEnvVarProfile, mcpJson);
                 }
                 else
                     (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel,
                         profileEnv: profileEnv, profileName: resumeProfileName,
-                        stripEnvVarProfile: config.StripEnvVarProfile);
+                        stripEnvVarProfile: config.StripEnvVarProfile, mcpConfigJson: InjectMcpBridge(null));
             }
             else
             {
                 // No root config, just apply project settings
-                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel, profileEnv: profileEnv);
+                (_, claudeArgs) = BuildClaudeConfig(new CreateAction("Create"), settings, resumeModel, profileEnv: profileEnv,
+                    mcpConfigJson: InjectMcpBridge(null));
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not read config for project {ProjectId}, continuing without extra config", projectId);
         }
+
+        claudeEnv = AddMcpBridgeEnvironment(project, claudeEnv);
 
         try
         {
@@ -1801,6 +1799,21 @@ public class ProjectManager : IProjectManager
         };
 
         return JsonSerializer.Serialize(mcpConfig);
+    }
+
+    /// <summary>
+    /// Sets the env vars the GodMode MCP bridge calls back to this server with, issuing a fresh
+    /// project token for this launch. Tokens live only in memory, so a project recovered after a
+    /// restart has none until it is launched again; a new launch also retires the previous token.
+    /// </summary>
+    private Dictionary<string, string> AddMcpBridgeEnvironment(ProjectInfo project, Dictionary<string, string>? env)
+    {
+        project.ProjectToken = GenerateProjectToken();
+        env ??= new Dictionary<string, string>();
+        env["GODMODE_PROJECT_ID"] = project.Status.Id;
+        env["GODMODE_PROJECT_TOKEN"] = project.ProjectToken;
+        env["GODMODE_SERVER_URL"] = $"http://localhost:{GetListenPort()}";
+        return env;
     }
 
     /// <summary>
