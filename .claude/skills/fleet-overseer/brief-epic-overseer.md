@@ -5,8 +5,6 @@ Use the `fleet-overseer` skill. You own epic #<N> and nothing else.
 **Your branch:** `epic/<N>-<slug>`, cut from `origin/master`. Every sub-issue's pull request targets
 it. You merge those; the single pull request from it to `master` is the user's.
 
-**Launch with** `-ClaudeArgs '--model','sonnet'` — an overseer mostly reads pull request state.
-
 **Report to:** `<address, or "the user">` — for relaying, never for waiting. You do not halt on a
 question and you do not halt on a merge you are unsure of.
 

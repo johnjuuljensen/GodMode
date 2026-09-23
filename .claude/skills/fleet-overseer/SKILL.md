@@ -248,9 +248,8 @@ Branch prefix and default base come from the issue's labels via `branchTypes` in
 `epic` → `epic/<n>-<slug>`, `bug` → `bug/<n>-<slug>`, anything else → `feature/<n>-<slug>`, all
 cut from `origin/master` unless `-BaseBranch` says otherwise.
 
-`-BaseBranch` is the epic branch, or a sibling's branch when stacking. Workers reason about code
-and get the default model; add `-ClaudeArgs '--model','sonnet'` when you launch an overseer, which
-mostly reads pull request state. Take the worktree path from
+`-BaseBranch` is the epic branch, or a sibling's branch when stacking. Do not pass `--model` —
+workers and overseers alike run on the configured default model. Take the worktree path from
 the JSON line — the one starting `{` — rather than deriving the branch slug yourself.
 
 `wt` returns before the session exists. Do not guess its name: the brief tells the worker to
