@@ -6,6 +6,7 @@ namespace GodMode.Server.Tests;
 /// A Claude process starts from an allowlist, not from the server's environment: a secret the
 /// server holds reaches the session only when config names it.
 /// </summary>
+[Collection(Lifecycle.ServerEnvironmentCollection.Name)]
 public class ChildEnvironmentTests
 {
     private static readonly KeyValuePair<string, string?>[] ServerEnvironment =
