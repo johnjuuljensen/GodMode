@@ -6,12 +6,12 @@ This document is the single source of truth for Claude Code sessions working on 
 
 ## 1. What GodMode Is
 
-GodMode is a **Claude Autonomous Development System** — a multi-project .NET 10 solution for managing Claude Code instances across local machines and GitHub Codespaces. It provides two UI surfaces:
+GodMode runs Claude Code sessions that ship issues, and lets you follow and steer them from a browser or a phone. It is a .NET 10 solution with two UI surfaces:
 
 1. **React SPA** — served directly by GodMode.Server, accessed via browser
 2. **MAUI app** — hosts the same React SPA in a HybridWebView, with a local proxy for multi-server connectivity
 
-Users define **project roots** (templates with scripts, schemas, MCP configs) and **profiles** (groupings with shared environment and MCP servers). They create **projects** from roots, which spawn Claude Code processes that execute autonomously.
+A server runs on a machine you own: a PC, a VM or a GitHub Codespace. Its **project roots** are directories on that machine, each with scripts, input schemas and MCP config in `.godmode-root/`. **Profiles** group roots and carry shared environment variables and MCP servers. You create **projects** from a root's actions. Each project is a folder with a Claude Code process working in it.
 
 ---
 
@@ -21,18 +21,18 @@ Users define **project roots** (templates with scripts, schemas, MCP configs) an
 GodMode.slnx
 ├── src/
 │   ├── GodMode.Shared/            # Shared types, models, enums, hub interfaces
-│   ├── GodMode.Server/            # ASP.NET SignalR server, spawns Claude processes
-│   ├── GodMode.Client.React/      # React SPA (Vite + Zustand + SignalR)
+│   ├── GodMode.Server/            # ASP.NET SignalR server, spawns Claude processes, serves the SPA
+│   ├── GodMode.ProjectFiles/      # File system utilities for project folders
 │   ├── GodMode.ClientBase/        # Shared .NET client abstractions (host providers, registry)
 │   ├── GodMode.Maui/              # MAUI app (Android, iOS, macOS, Windows) — hosts React
-│   ├── GodMode.AI/                # Cross-platform AI abstractions
-│   ├── GodMode.AI.LocalInference.Windows/  # DirectML ONNX (Windows only)
-│   ├── GodMode.AI.LocalInference.Mac/      # CPU ONNX (macOS only)
-│   ├── GodMode.ProjectFiles/      # File system utilities for project folders
-│   ├── GodMode.Mcp/               # AWS Lambda MCP server (separate deployment)
 │   └── SignalR.Proxy/             # SignalR WebSocket relay for MAUI
 └── tests/
-    └── GodMode.Server.Tests/
+    └── GodMode.Server.Tests/      # xUnit tests for GodMode.Server
+
+Not in the slnx (npm projects):
+src/
+├── GodMode.Client.React/          # React SPA (Vite + Zustand + SignalR); built into the server's wwwroot
+└── GodMode.McpBridge/             # stdio MCP server the server gives every Claude session (Section 8.2)
 ```
 
 ### Project Dependency Graph
@@ -42,7 +42,7 @@ GodMode.Shared  ← (no deps, shared by everything)
     ↑
 GodMode.ProjectFiles
     ↑
-GodMode.Server  ← GodMode.AI
+GodMode.Server  ← GodMode.Server.Tests
 
 GodMode.Shared
     ↑
@@ -50,6 +50,8 @@ GodMode.ClientBase  ← (host providers, server registry, token protection)
     ↑
 GodMode.Maui  ← SignalR.Proxy
 ```
+
+The server's and the MAUI app's builds run `npm run build` in `GodMode.Client.React` and copy its `dist/` into their `wwwroot`.
 
 ### Where to Put New Code
 
@@ -61,8 +63,7 @@ GodMode.Maui  ← SignalR.Proxy
 | New React UI component | `src/GodMode.Client.React/src/components/{Feature}/` |
 | New React store action | `src/GodMode.Client.React/src/store/index.ts` |
 | New TypeScript hub type | `src/GodMode.Client.React/src/signalr/types.ts` |
-| Cross-platform AI abstraction | `GodMode.AI/` |
-| Platform-specific AI impl | `GodMode.AI.LocalInference.{Platform}/` |
+| New tool for Claude sessions to call back into GodMode | `src/GodMode.McpBridge/src/index.ts` + an `/api/internal/*` endpoint in `Program.cs` |
 | Client-side .NET abstractions | `GodMode.ClientBase/` |
 | File system project utilities | `GodMode.ProjectFiles/` |
 | **All UI changes** | **React only** — never in .NET projects |
@@ -126,16 +127,17 @@ export const isMaui = window.location.hostname === '0.0.0.1';
 | React source | Served by GodMode.Server `/wwwroot` | Embedded in MAUI resources |
 | SignalR connection | Direct to server `/hubs/projects` | Via LocalServer WebSocket relay |
 | Server discovery | Single server (the one serving the page) | Multiple servers via `/servers` REST API |
-| Authentication | Handled by server (Google OAuth, etc.) | Token stored in `~/.godmode/servers.json`, relayed by proxy |
+| Authentication | API key entered once, kept in that browser (Section 4.4) | Access token stored per server in `~/.godmode/servers.json`, added by the proxy when relaying |
 | SignalR negotiate | Standard | Skipped (`skipNegotiation: true`, relay handles it) |
 | Server management | Not available | Add/remove/start/stop servers via `/servers/registrations` |
 
 ### 3.4 What MAUI Developers Need to Know
 
 The MAUI project (`GodMode.Maui/`) contains:
-- `MainPage.xaml/.cs` — HybridWebView setup, injects base URL, Windows DevTools integration
+- `MainPage.xaml` + `MainPage.xaml.cs` — HybridWebView setup, injects base URL, Windows DevTools integration
 - `LocalServer.cs` — HTTP listener providing REST API, SSE events, and WebSocket relay
-- `MauiProgram.cs` + `ServiceCollectionExtensions.cs` — DI registration
+- `MauiProgram.cs` — DI registration, using `ServiceCollectionExtensions.cs` from GodMode.ClientBase
+- `Bridge/` — `HostBridge` messages between the WebView and the host
 - `Platforms/` — Platform-specific entry points (minimal)
 
 **Key services in GodMode.ClientBase/**:
@@ -151,7 +153,7 @@ The MAUI project (`GodMode.Maui/`) contains:
 
 When making React changes, keep these MAUI constraints in mind:
 
-1. **No server-relative URLs** — React may be served from `0.0.0.1` (MAUI) or from the server. Always use `getBaseUrl()` from `hostApi.ts` for API calls.
+1. **No server-relative URLs** — React may be served from `0.0.0.1` (MAUI) or from the server. Make HTTP calls through the helpers in `hostApi.ts`, which resolve the base URL for both modes.
 
 2. **SignalR connection differences** — Use `getHubUrl(serverId)` and `getHubOptions(serverId)` from `hostApi.ts`. Never hardcode hub paths.
 
@@ -169,12 +171,26 @@ When making React changes, keep these MAUI constraints in mind:
 
 ### 4.1 SignalR Communication (Strongly Typed)
 
-All real-time communication uses strongly-typed SignalR:
+All real-time communication uses strongly-typed SignalR on one hub, `/hubs/projects`:
 
-- **`IProjectHub`** (Shared) — Client→Server methods (create project, send input, manage roots/profiles/MCP)
-- **`IProjectHubClient`** (Shared) — Server→Client callbacks (output received, status changed, creation progress)
+- **`IProjectHub`** (Shared) — Client→Server methods
+- **`IProjectHubClient`** (Shared) — Server→Client callbacks
 - **`ProjectHub`** (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
-- **`SignalRProjectConnection`** (ClientBase) — .NET client-side, uses `TypedSignalR.Client` source generator
+- **`HubConnectionFactory`** (ClientBase) — .NET client side: `IServerProvider.ConnectAsync` returns a raw `HubConnection`, and consumers call `CreateHubProxy<IProjectHub>()` (`TypedSignalR.Client`) for typed calls
+- **`signalr/hub.ts`** (React) — the TypeScript mirror, kept in step with the interfaces by hand
+
+The hub is the session loop plus profiles and roots:
+
+| `IProjectHub` (18 methods) | |
+|---|---|
+| Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `ArchiveProject`, `UnarchiveProject`, `ListArchivedProjects` |
+| Roots | `ListProjectRoots` |
+| Profiles | `ListProfiles`, `CreateProfile`, `DeleteProfile`, `UpdateProfileDescription` |
+| Utility | `CheckCommand` |
+
+| `IProjectHubClient` (8 callbacks) |
+|---|
+| `OutputReceived`, `StatusChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted`, `ProjectArchived`, `ProjectRestored`, `ProfilesChanged` |
 
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
@@ -185,29 +201,34 @@ When adding a new hub method:
 
 ### 4.2 Config-Driven Project Roots
 
-Each project root directory can contain `.godmode-root/` with:
+A root is a subdirectory of `ProjectRootsDir` that contains `.godmode-root/`. The server discovers roots by scanning that directory on each call, so a root added on the host shows up on the next refresh.
 
 ```
 root-name/
-└── .godmode-root/
-    ├── config.json                # Base config (prepare, delete, environment, claudeArgs)
-    ├── config.{action}.json       # Per-action overlays (merged with base)
-    ├── {action}/
-    │   ├── schema.json            # Input form schema (JSON Schema)
-    │   └── create.ps1 / .sh      # Action-specific creation script
-    └── scripts/
-        ├── prepare.ps1 / .sh      # Shared prepare script
-        └── delete.ps1 / .sh       # Shared delete script
+├── .godmode-root/
+│   ├── config.json                # Base config (profileName, prepare, delete, environment, claudeArgs, mcpServers)
+│   ├── config.{action}.json       # Per-action overlays (merged with base)
+│   ├── {action}/
+│   │   ├── schema.json            # Input form schema (JSON Schema)
+│   │   └── create.ps1             # Action-specific creation script
+│   └── scripts/
+│       ├── prepare.ps1            # Shared prepare script
+│       └── delete.ps1             # Shared delete script
+└── {project-id}/                  # Projects created from this root
 ```
 
 **Merge order**: `config.json` (base) → `config.{action}.json` (overlay). Action overlay wins on conflict.
+
+**Profile assignment**: `profileName` in `config.json` puts the root in that profile. Roots without it go to `Default`.
 
 **MCP server merge order**: Profile → Root → Action (three layers, later wins on conflict).
 
 Key services:
 - `RootConfigReader` — discovers and merges configs fresh on each operation (no caching, no restart needed)
-- `ScriptRunner` — executes scripts with cross-platform extension resolution
+- `ScriptRunner` — executes scripts with cross-platform extension resolution (`.ps1` runs under `pwsh` on every OS)
 - `TemplateResolver` — resolves `{fieldName}` placeholders in name/prompt templates
+
+`src/GodMode.Server/README.md` documents every config field, the script environment and the input schema.
 
 ### 4.3 Project Folder Structure
 
@@ -223,13 +244,19 @@ Key services:
 └── (project files)      # Working directory for Claude
 ```
 
+Archiving moves the folder to `{root}/.archived/{project-id}/`.
+
 ### 4.4 Authentication
 
-The server supports exactly one auth mode (first match in `Program.cs`):
-1. **Google OAuth** — if `Authentication:Google:ClientId` is configured
-2. **Codespace** — if `CODESPACES=true` environment variable
-3. **API Key** — if `Authentication:ApiKey` is configured
-4. **None** — no auth required (default)
+The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
+
+1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`.
+2. **API key** — `Authentication:ApiKey` is set. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade).
+3. **Loopback** — no key, and every binding is loopback. Callers need no key, but only from a loopback address, with a loopback `Host` and, when present, a loopback `Origin`.
+
+With no key and any non-loopback binding, the server **refuses to start**. The shipped binding is `http://127.0.0.1:31337`. Binding to another address, such as the machine's Tailscale IP, needs a key. The Docker image sets `URLS=http://+:31337`, so it needs a key too.
+
+Only `/health` and the SPA's static files are anonymous. `/api/internal/*` uses a per-project token instead (Section 8.2). `src/GodMode.Server/README.md` has the full binding guide.
 
 ### 4.5 React Client Architecture
 
@@ -239,52 +266,42 @@ The server supports exactly one auth mode (first match in `Program.cs`):
 - **Styling**: CSS files per component + shared `settings-common.css`
 - **No router** — navigation via `activePage` state and `selectedProject`
 
-Active page is a union: `mcpConfig | rootManager | profileSettings | appSettings | webhookSettings | addServer | editServer | createProject`. Setting `activePage` shows the page; selecting a project clears it.
+Active page is a union: `profileSettings | appSettings | addServer | editServer | createProject`. Setting `activePage` shows the page; selecting a project clears it.
 
 ---
 
-## 5. Design Principles — Declarative Configuration
+## 5. Design Principles — Files Are the Source of Truth
 
-These principles govern how configuration, state, and provisioning work in GodMode. All new features must respect them.
+These principles govern how configuration and state work in GodMode. All new features must respect them.
 
-### 5.1 No Shadow Config Stores
+### 5.1 Files on Disk Are the Only Source of Truth
 
-Runtime changes write to the **same config files** that provisioning populates. There is one source of truth: files on disk. Never introduce a parallel config system (override stores, runtime-only state files, in-memory caches that outlive a request).
+Roots, profiles and projects are files and directories on the server's machine. You change configuration by editing those files, with an editor, a script or git, on the host. The server reads them fresh on each operation, so a change takes effect without a restart.
+
+Never introduce a parallel config system: no override stores, no runtime-only state files, no in-memory caches that outlive a request.
 
 **Wrong**: A `~/.godmode/profile-overrides.json` layered on top of `appsettings.json`.
 **Right**: Editing the profile's config file directly.
 
-### 5.2 The Server Config File Layout Is the Contract
+### 5.2 The Config File Layout Is the Contract
 
-The config files on disk serve as both the provisioning input format and the runtime state format. Same shape, same files, no translation layer. If you can read the files, you understand the system state.
+The files on disk are the whole interface to configuration. There is no translation layer and no second format: if you can read the files, you understand the system state. Adding config means adding a file; removing config means removing it.
 
-### 5.3 The Manifest Is the Complete Desired State
+### 5.3 The Server Consumes Config; It Does Not Author It
 
-A manifest declares the full configuration of a GodMode instance — roots, profiles, MCP servers. Convergence is additive and subtractive: what's declared exists, what's not declared gets removed (with safety checks for active projects).
+The server reads roots, actions, schemas and MCP config. It does not edit, package, import or export them. There is no in-app editor, file browser, connector catalog or manifest. The only config writes the hub makes are the profile methods (`CreateProfile`, `DeleteProfile`, `UpdateProfileDescription`), which write the same `.profiles/` files you would write by hand.
 
-```
-manifest → apply/converge → run → modify → export → commit manifest
-```
+### 5.4 Roots Are External
 
-### 5.4 Export Is First-Class
-
-The server can serialize its current config state back into manifest format. Since runtime changes wrote to the same config files, export reads disk and emits a manifest that reproduces the current state.
-
-### 5.5 Templates Are External
-
-Root templates are roots like any other, living in git repos. The server doesn't bundle or manage templates in its binary.
-
-### 5.6 Discovery Is a UI Concern
-
-MCP server discovery (catalogs, registries) is a client/UI concern. The server consumes config; it doesn't help author it. The React client has a `connectors-catalog.ts` for curated MCP connectors — this is the right layer.
+Root definitions live wherever you keep them, typically a git repo you clone into `ProjectRootsDir`. The server doesn't bundle root templates in its binary. `.devcontainer/godmode-server/roots/` is one such set, which the codespace copies into place.
 
 ---
 
 ## 6. File-Based Profile Configuration
 
-Profiles are moving from `appsettings.json` to a file-based structure under `.profiles/` in `ProjectRootsDir`. This follows the principle that adding a profile = adding a directory, not editing a shared config file.
+Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means adding a directory, not editing a shared config file.
 
-### Target Layout
+### Layout
 
 ```
 {ProjectRootsDir}/
@@ -302,8 +319,7 @@ Profiles are moving from `appsettings.json` to a file-based structure under `.pr
 │           └── monitoring.json
 ├── feature-root/
 │   └── .godmode-root/
-│       ├── config.json
-│       └── source.json            # Provenance (git source, install date)
+│       └── config.json            # "profileName": "production" puts this root in that profile
 └── bugfix-root/
     └── .godmode-root/
         └── ...
@@ -311,29 +327,14 @@ Profiles are moving from `appsettings.json` to a file-based structure under `.pr
 
 ### Key Properties
 
-- **Adding a profile** = `mkdir .profiles/{name}` + write `profile.json`
+- **Adding a profile** = `mkdir .profiles/{name}` + write `profile.json` (or `CreateProfile` from the UI)
 - **Deleting a profile** = `rm -rf .profiles/{name}`
 - **Adding an MCP server** = write a JSON file to `.profiles/{name}/mcp/`
 - **Removing an MCP server** = delete the file
-- **No file editing** — only create/delete whole files
-- **Docker COPY works** — copy `.profiles/` into image, system is fully configured
 - **Git works** — the entire `{ProjectRootsDir}` can be a git repo
+- **Profile env from the server's environment** — with `stripEnvVarProfile` in a root's config (or `{PROFILE}_STRIP_ENV_VAR_PROFILE=true` in the server's environment), server variables prefixed with the profile name (`MEGA_GITHUB_TOKEN`) reach that profile's sessions without the prefix (`GITHUB_TOKEN`)
 
-### Root Provenance
-
-Each imported root carries `.godmode-root/source.json`:
-
-```json
-{
-  "git": "https://github.com/acme/roots.git",
-  "ref": "v1.2",
-  "path": "feature",
-  "installedAt": "2026-03-31T10:00:00Z",
-  "version": "1.0"
-}
-```
-
-Absence = local root. This replaces any centralized `installed.json` tracking file.
+**Legacy config:** `Profiles` and `ProjectRoots` sections in `appsettings.json` are migrated into `.profiles/` once, the first time the server starts without a `.profiles/` directory. After that `.profiles/` is authoritative.
 
 ---
 
@@ -341,32 +342,31 @@ Absence = local root. This replaces any centralized `installed.json` tracking fi
 
 | Service | Responsibility |
 |---|---|
-| `ProjectManager` | Central orchestrator — project lifecycle, profile/root listing, MCP config building |
-| `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process` |
+| `ProjectManager` | Central orchestrator — project lifecycle, profile/root snapshot, environment and MCP config building |
+| `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process`, writes their output to `output.jsonl` |
 | `RootConfigReader` | Discovers and merges `.godmode-root/` configs |
-| `ScriptRunner` | Executes cross-platform scripts (.ps1/.sh) |
-| `ProfileFileManager` | CRUD on `.profiles/` directory structure |
-| `RootCreator` | Creates new root directories on disk |
-| `RootPackager` | Exports roots as `.gmroot` ZIP packages |
-| `RootInstaller` | Installs shared roots from git/URL/bytes |
-| `ConvergenceEngine` | Applies manifests — diff-and-reconcile against disk |
-| `ManifestParser` | Parses manifest JSON |
-| `ManifestExporter` | Exports current state as manifest |
+| `ScriptRunner` | Executes cross-platform scripts (`.ps1` via `pwsh`, `.sh` via `bash`, `.cmd`/`.bat` on Windows) |
+| `ProfileFileManager` | CRUD on the `.profiles/` directory structure (in `ConfigFileWriter.cs`) |
 | `StatusUpdater` | Updates `status.json` during execution |
 | `TemplateResolver` | Resolves `{field}` placeholders |
-| `EnvironmentExpander` | Expands `${VAR}` in config values |
-| `WebhookFileManager` | Manages webhook config and token validation |
-| `GodModeChatService` | Meta-management AI chat |
-| `RootGenerationService` | LLM-based root config generation |
-| `GitFetcher` | Git operations for root imports |
+| `EnvironmentExpander` | Expands `${VAR}` in config values and strips profile prefixes from server env vars |
+| `QuestionDetection` | Detects when Claude's turn ends in a question for the user |
 
-All services are registered as **singletons** in `Program.cs`.
+All services are registered as **singletons** in `Program.cs`. Authentication lives in `Auth/` (`AuthModeSelector`, `GodModeAuthenticationHandler`).
 
 ---
 
-## 8. MCP Server Configuration
+## 8. MCP Servers
+
+### 8.1 Configuration
 
 MCP servers are configured at three levels (merge order: profile → root → action):
+
+| Level | Where |
+|---|---|
+| Profile | `.profiles/{name}/mcp/{server}.json` |
+| Root | `mcpServers` in `.godmode-root/config.json` |
+| Action | `mcpServers` in `.godmode-root/config.{action}.json` |
 
 ```csharp
 // GodMode.Shared/Models/McpServerConfig.cs
@@ -381,111 +381,49 @@ public record McpServerConfig(
 **Stdio transport**: `Command` + `Args` + `Env`
 **SSE transport**: `Url` + `Headers` (requires `"type": "sse"` when passed to Claude CLI)
 
-The server writes merged MCP config to a temp file and passes it via `--mcp-config {path}` to Claude Code. Environment variables in MCP config support `${VAR}` expansion from the server process environment.
+The server writes the merged MCP config to a temp file and passes it via `--mcp-config {path}` to Claude Code. Environment variables in MCP config support `${VAR}` expansion from the server process environment.
 
-The React client has a curated connector catalog (`connectors-catalog.ts`) with pre-configured MCP servers including auth templates for OAuth connectors.
+### 8.2 The GodMode MCP Bridge
+
+Every session also gets `godmode-bridge`, the stdio MCP server in `src/GodMode.McpBridge` (Node, built with `npm run build` to `dist/index.js`). It gives Claude three tools:
+
+| Tool | Calls | Effect |
+|---|---|---|
+| `godmode_submit_result` | `POST /api/internal/result` | Stores the project's structured result |
+| `godmode_update_status` | `POST /api/internal/status` | Sets a custom status message shown in the UI |
+| `godmode_request_human_review` | `POST /api/internal/review` | Flags the project for human attention |
+
+The server injects `GODMODE_PROJECT_ID`, `GODMODE_PROJECT_TOKEN` (per-project token that authorizes only `/api/internal/*` for that project) and `GODMODE_SERVER_URL` (`http://localhost:{port}`, which is why a server bound to another address keeps a loopback binding too). It finds the bridge through `GODMODE_MCP_BRIDGE_PATH` or next to the build output.
 
 ---
 
 ## 9. Deployment Architecture
 
-### 9.1 Deployment Targets
+### 9.1 Where GodMode Runs
 
-GodMode.Server is a standard ASP.NET app that runs anywhere .NET 10 runs. The three primary deployment targets:
+GodMode.Server runs on a machine you own, where Claude Code sessions can use the Claude subscriptions logged in there. Give a root its own `CLAUDE_CONFIG_DIR` in its `environment` to pin it to one subscription. There is no per-user cloud provisioning.
 
 | Target | How | Auth Mode | Use Case |
 |---|---|---|---|
-| **GitHub Codespaces** | DevContainer | Codespace token | Development, per-developer instances |
-| **Docker (any cloud)** | Container image | Google OAuth / API Key | Production, shared team instances |
-| **Local** | `dotnet run` | None / API Key | Development, testing |
+| **A PC or VM** | `dotnet run`, or a published build | Loopback (same machine) or API key (reached over Tailscale or a LAN) | The main setup: sessions run on your hardware |
+| **GitHub Codespaces** | `.devcontainer/godmode-server/` | Codespace token | A disposable server per developer |
+| **Docker** | Image from `src/GodMode.Server/Dockerfile` | API key (required) | A containerized server on your own host |
 
-### 9.2 Docker Image
+### 9.2 On a PC or VM
 
-The existing Dockerfile (`src/GodMode.Server/Dockerfile`) builds a multi-stage image:
-
-```
-Stage 1: Node 22 — builds React client (npm run build)
-Stage 2: .NET SDK 10.0 — restores and publishes GodMode.Server
-Stage 3: .NET ASP.NET 10.0 runtime — final image
-```
-
-The final image includes:
-- Published server binary
-- React SPA in wwwroot
-- Git and curl (for root operations)
-- Claude Code CLI (installed from https://claude.ai/install.sh)
-- Directories: `/app/projects` (workspace), `/data` (persistent storage)
-- Exposes port 31337
-
-### 9.3 CI/CD Pipeline
-
-GitHub Actions workflow (`.github/workflows/build-and-push.yml`):
-- **Trigger**: On GitHub release publication
-- **Registry**: GHCR (`ghcr.io/johnjuuljensen/godmode`)
-- **Tags**: `latest` + release tag (e.g., `v1.0.0`)
-
-### 9.4 Deploying to Azure
-
-**Azure Container Apps** (recommended for simplicity):
 ```bash
-# Create resource group and environment
-az group create --name godmode-rg --location westeurope
-az containerapp env create --name godmode-env --resource-group godmode-rg
+# Same machine only (keyless)
+dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
-# Deploy from GHCR
-az containerapp create \
-  --name godmode \
-  --resource-group godmode-rg \
-  --environment godmode-env \
-  --image ghcr.io/johnjuuljensen/godmode:latest \
-  --target-port 31337 \
-  --ingress external \
-  --min-replicas 1 --max-replicas 1 \
-  --env-vars ANTHROPIC_API_KEY=secretref:anthropic-key \
-  --secrets anthropic-key=$ANTHROPIC_API_KEY
+# Reachable from your phone over Tailscale: set a key and keep the loopback binding
+export Authentication__ApiKey=<key>
+dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
+  --urls "http://127.0.0.1:31337;http://$(tailscale ip -4):31337"
 ```
 
-Key considerations:
-- **Persistent storage**: Mount an Azure Files share to `/app/projects` for workspace persistence across container restarts/updates
-- **Authentication**: Configure `Authentication:Google:ClientId` and `AllowedEmail` via env vars, or use `Authentication:ApiKey`
-- **Claude Code**: The Docker image includes Claude Code CLI. Ensure `ANTHROPIC_API_KEY` is set as a secret
-- **Single replica**: GodMode manages local processes — it cannot scale horizontally. Always `max-replicas=1`
+For a long-running server, `dotnet publish -c Release` and run the output. Put roots in `ProjectRootsDir` (default `roots` under the working directory). The machine needs `claude`, `git`, `pwsh`, Node (for the MCP bridge and `npx` MCP servers) and whatever the roots' scripts call, such as `gh`.
 
-**Azure App Service** (alternative):
-- Use a custom container deployment from GHCR
-- Enable persistent storage via App Service storage mounts
-- Configure `WEBSITES_PORT=31337`
-- WebSocket support must be enabled (Settings → General → Web sockets: On)
-
-### 9.5 Deploying to AWS
-
-**AWS ECS/Fargate**:
-```bash
-# Create task definition with the GHCR image
-# Key settings:
-#   - Container port: 31337
-#   - EFS volume mounted to /app/projects (for persistence)
-#   - Environment: ANTHROPIC_API_KEY from Secrets Manager
-#   - Task size: 1 vCPU, 2GB RAM minimum (Claude processes need memory)
-#   - Desired count: 1 (no horizontal scaling)
-```
-
-**AWS App Runner** (simpler alternative):
-- Create service from container image
-- Port: 31337
-- Instance size: 1 vCPU / 2GB minimum
-- No persistent storage natively — use EFS sidecar or accept ephemeral workspace
-
-**AWS Lambda** (GodMode.Mcp only):
-The `GodMode.Mcp` project deploys separately as an AWS Lambda function:
-- Runtime: .NET 8 (net8.0)
-- Memory: 512 MB, timeout: 30s
-- Uses DynamoDB for OAuth state storage in production
-- Uses AWS Secrets Manager for API keys
-- MCP endpoint at `/mcp` with GitHub OAuth authentication
-- Provides tools for managing Codespaces and GitHub operations
-
-### 9.6 GitHub Codespaces Deployment
+### 9.3 GitHub Codespaces
 
 ```
 .devcontainer/godmode-server/
@@ -494,16 +432,31 @@ The `GodMode.Mcp` project deploys separately as an AWS Lambda function:
 ```
 
 **Lifecycle**:
-- `postCreateCommand`: Clones repo, publishes server to `/opt/godmode-server`, installs Claude Code
-- `postStartCommand`: Starts server on port 31337, sets port to public
+- `postCreateCommand`: clones `master`, publishes the server to `/opt/godmode-server`, copies `roots/` to `~/roots`, installs Claude Code
+- `postStartCommand`: starts the server with `--ProjectRootsDir roots` from `$HOME`, sets port 31337 to public
 
 **Server URL**: `https://<codespace-name>-31337.app.github.dev/`
 
 **Secrets**: `gh secret set ANTHROPIC_API_KEY --repos owner/repo --app codespaces`
 
-### 9.7 Persistent Workspace Architecture
+### 9.4 Docker Image
 
-All deployment targets must separate the **server binary** from the **workspace data**:
+`src/GodMode.Server/Dockerfile` builds a multi-stage image:
+
+```
+Stage 1: Node 22 — builds React client (npm run build)
+Stage 2: .NET SDK 10.0 — restores and publishes GodMode.Server
+Stage 3: .NET ASP.NET 10.0 runtime — final image (`runtime` target)
+Stage 4: runtime + .NET SDK — the `:sdk` tag, for sessions that build .NET code
+```
+
+The runtime image includes the published server and SPA, git, curl, Node 22, PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`, so run it with `-e Authentication__ApiKey=<key>`. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
+
+GitHub Actions (`.github/workflows/build-and-push.yml`) builds and pushes both targets to GHCR (`ghcr.io/johnjuuljensen/godmode`) on pushes to `master` that touch `src/`, `tests/` or the slnx (`latest`, `sdk`), and on a published release (plus the release tag).
+
+### 9.5 Persistent Workspace
+
+Every target separates the **server binary** from the **workspace data**:
 
 ```
 /opt/godmode-server/          # Server binary (replaced on updates)
@@ -511,61 +464,20 @@ All deployment targets must separate the **server binary** from the **workspace 
 ├── appsettings.json          # Static config (URLs, auth, logging)
 └── wwwroot/                  # React SPA
 
-/home/vscode/workspace/       # Workspace data (persists across updates)
+~/roots/                      # Workspace data = ProjectRootsDir (persists across updates)
 ├── .profiles/                # Profile definitions
 │   └── default/
 │       ├── profile.json
 │       ├── env.json
 │       └── mcp/
-├── my-root/                  # Project roots
-│   └── .godmode-root/
-└── .godmode-logs/            # Server logs
+└── my-root/                  # Project roots
+    ├── .godmode-root/
+    └── {project-id}/         # Projects
+
+~/.godmode-logs/              # Server logs (relative to the working directory)
 ```
 
-**Key principle**: Server updates replace the binary without touching workspace data. The server reads `ProjectRootsDir` from config to find workspace data.
-
-For Docker: mount a volume at the workspace path.
-For Azure: use Azure Files or managed disk.
-For AWS: use EFS or EBS.
-For Codespaces: workspace persists with the codespace lifecycle.
-
-### 9.8 Manifest-Based Provisioning
-
-For production deployments, a manifest declares the complete desired state:
-
-```yaml
-roots:
-  feature:
-    git: https://github.com/acme/roots.git
-    path: feature
-    ref: v1.2
-  custom:
-    path: ./roots/custom
-profiles:
-  default:
-    roots: [feature, custom]
-    mcpServers:
-      github:
-        command: npx
-        args: ["-y", "@modelcontextprotocol/server-github"]
-```
-
-On startup, `ConvergenceEngine` reads the manifest, diffs against disk, and converges:
-- Creates missing roots (fetches from git if needed)
-- Removes undeclared roots (with safety checks for active projects)
-- Creates/updates profiles in `.profiles/`
-
-After convergence, runtime changes go to the same files. Export reads them back into manifest format.
-
-### 9.9 Update Flow
-
-```
-1. Build new server binary (CI/CD pushes to GHCR on release)
-2. Pull new image / replace binary on target
-3. Server starts, reads workspace from ProjectRootsDir
-4. If manifest configured: converge (add new roots, remove deprecated ones)
-5. Workspace data is untouched — projects, logs, profiles persist
-```
+**Key principle**: Server updates replace the binary without touching workspace data. The server reads `ProjectRootsDir` from config to find it. On startup it recovers the projects it finds there.
 
 ---
 
@@ -579,27 +491,13 @@ Contains only infrastructure config — not domain data:
 {
   "Logging": { "LogLevel": { "Default": "Information" } },
   "AllowedHosts": "*",
-  "Authentication": {
-    "Google": { "ClientId": "...", "AllowedEmail": "..." }
-  },
+  "Authentication": { "ApiKey": "" },
   "ProjectRootsDir": "roots",
-  "Urls": "http://0.0.0.0:31337"
+  "Urls": "http://127.0.0.1:31337"
 }
 ```
 
-Domain data (profiles, MCP servers, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
-
-### Inference Config (~/.godmode/inference.json)
-
-```json
-{
-  "api_key": "sk-ant-...",
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-20250514",
-  "max_tokens": 256,
-  "temperature": 0.3
-}
-```
+Every key can also be set as an environment variable (`Authentication__ApiKey`) or a command-line argument (`--ProjectRootsDir=...`). Domain data (profiles, MCP servers, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
 
 ---
 
@@ -607,7 +505,7 @@ Domain data (profiles, MCP servers, roots) lives in the file tree under `Project
 
 When building a new feature on GodMode:
 
-1. **Check the design principles** (Section 5). Does your feature write to the same config files it reads? Can it be exported to a manifest? Does it avoid shadow state?
+1. **Check the design principles** (Section 5). Does your feature keep its state in files under `ProjectRootsDir`, read fresh from disk? Does it avoid shadow state and in-app config authoring?
 
 2. **Choose the right layer**:
    - Server-side logic → `GodMode.Server/Services/`
@@ -623,34 +521,4 @@ When building a new feature on GodMode:
 
 6. **For new UI pages**: Create a component directory under `components/`, add an `activePage` variant in the store, add CSS alongside the component.
 
-7. **Test the round-trip**: Can your feature's state be exported to a manifest and re-applied to reproduce the same configuration?
-
-8. **Test both hosting modes**: Verify the feature works in browser (direct to server) and consider MAUI constraints (multi-server, proxy, embedded assets).
-
----
-
-## 12. Future Directions
-
-### Pipeline / Multi-Agent Orchestration
-
-Documented in `docs/pipeline_ideas.md`. Three approaches under consideration:
-1. **Pipeline as first-class concept** — ordered sequence of actions with result passing
-2. **Webhook chaining** — lightweight, existing infrastructure
-3. **GodMode MCP server** — Claude instances can call back into GodMode to create projects, submit results, request human review
-
-Recommended: Pipeline + GodMode MCP server combination.
-
-### GodMode MCP Server
-
-An MCP server that lets Claude Code instances interact with GodMode:
-- `submit_result` — pass results to next pipeline step
-- `create_project` — spawn sibling/child projects
-- `request_human_review` — escalate decisions
-- `get_project_status` — check other project states
-- `update_metrics` — report custom metrics
-
-This would live in `GodMode.Mcp/` or as a new project.
-
-### Manifest Composition
-
-For complex deployments, manifests may need composition (cherry-picking roots from multiple repos, environment-specific overlays). CUE or a similar configuration language could handle validation and merging if the manifest format becomes complex enough.
+7. **Test both hosting modes**: Verify the feature works in browser (direct to server) and consider MAUI constraints (multi-server, proxy, embedded assets).
