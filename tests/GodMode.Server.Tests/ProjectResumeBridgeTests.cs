@@ -118,9 +118,6 @@ public class ProjectResumeBridgeTests
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
         services.AddSingleton<ProfileFileManager>();
-        services.AddSingleton<RootCreator>();
-        services.AddSingleton<RootPackager>();
-        services.AddSingleton<RootInstaller>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();
     }

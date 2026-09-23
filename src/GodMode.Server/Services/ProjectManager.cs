@@ -32,9 +32,6 @@ public class ProjectManager : IProjectManager
     private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ProfileFileManager _profileFileManager;
-    private readonly RootCreator _rootCreator;
-    private readonly RootPackager _rootPackager;
-    private readonly RootInstaller _rootInstaller;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
@@ -79,9 +76,6 @@ public class ProjectManager : IProjectManager
         IScriptRunner scriptRunner,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
         ProfileFileManager profileFileManager,
-        RootCreator rootCreator,
-        RootPackager rootPackager,
-        RootInstaller rootInstaller,
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
@@ -91,9 +85,6 @@ public class ProjectManager : IProjectManager
         _scriptRunner = scriptRunner;
         _hubContext = hubContext;
         _profileFileManager = profileFileManager;
-        _rootCreator = rootCreator;
-        _rootPackager = rootPackager;
-        _rootInstaller = rootInstaller;
         _logger = logger;
 
         // Subscribe to output events from Claude processes
@@ -1004,24 +995,6 @@ public class ProjectManager : IProjectManager
         project.SubscribedConnections.Remove(connectionId);
     }
 
-    public async Task<string> GetMetricsHtmlAsync(string projectId)
-    {
-        if (!_projects.TryGetValue(projectId, out var project))
-        {
-            throw new KeyNotFoundException($"Project {projectId} not found");
-        }
-
-        var metricsPath = Path.Combine(project.ProjectPath, ".godmode", "metrics.html");
-
-        if (File.Exists(metricsPath))
-        {
-            return await File.ReadAllTextAsync(metricsPath);
-        }
-
-        // Generate basic metrics HTML
-        return GenerateMetricsHtml(project);
-    }
-
     public async Task CleanupConnectionAsync(string connectionId)
     {
         foreach (var project in _projects.Values)
@@ -1029,211 +1002,6 @@ public class ProjectManager : IProjectManager
             project.SubscribedConnections.Remove(connectionId);
         }
         await Task.CompletedTask;
-    }
-
-    public Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
-        string? profileName, string? rootName, string? actionName)
-    {
-        switch (targetLevel.ToLowerInvariant())
-        {
-            case "profile":
-                ArgumentNullException.ThrowIfNull(profileName);
-                _profileFileManager.AddMcpServerToProfile(profileName, serverName, config);
-                break;
-            case "root":
-                ArgumentNullException.ThrowIfNull(profileName);
-                ArgumentNullException.ThrowIfNull(rootName);
-                var rootPath = ResolveRootPath(profileName, rootName);
-                MutateRootConfigMcpServers(rootPath, null, (servers) => servers[serverName] = config);
-                break;
-            case "action":
-                ArgumentNullException.ThrowIfNull(profileName);
-                ArgumentNullException.ThrowIfNull(rootName);
-                ArgumentNullException.ThrowIfNull(actionName);
-                var actionRootPath = ResolveRootPath(profileName, rootName);
-                MutateRootConfigMcpServers(actionRootPath, actionName, (servers) => servers[serverName] = config);
-                break;
-            default:
-                throw new ArgumentException($"Unknown target level '{targetLevel}'. Must be 'profile', 'root', or 'action'.");
-        }
-        RebuildSnapshot();
-        return Task.CompletedTask;
-    }
-
-    public Task CreateRootAsync(string rootName, RootPreview preview, string? profileName)
-    {
-        var error = _rootCreator.Validate(preview);
-        if (error != null)
-            throw new ArgumentException(error);
-
-        if (_projectRootsDir == null)
-            throw new InvalidOperationException("ProjectRootsDir is not configured. Cannot create roots without autodiscovery.");
-
-        var rootPath = Path.Combine(Path.GetFullPath(_projectRootsDir), rootName);
-        if (Directory.Exists(Path.Combine(rootPath, ".godmode-root")))
-            throw new InvalidOperationException($"Root '{rootName}' already exists.");
-
-        Directory.CreateDirectory(rootPath);
-        _rootCreator.WriteRoot(rootPath, preview);
-        RebuildSnapshot();
-        return Task.CompletedTask;
-    }
-
-    public Task RemoveMcpServerAsync(string serverName, string targetLevel,
-        string? profileName, string? rootName, string? actionName)
-    {
-        switch (targetLevel.ToLowerInvariant())
-        {
-            case "profile":
-                ArgumentNullException.ThrowIfNull(profileName);
-                _profileFileManager.RemoveMcpServerFromProfile(profileName, serverName);
-                break;
-            case "root":
-                ArgumentNullException.ThrowIfNull(profileName);
-                ArgumentNullException.ThrowIfNull(rootName);
-                var rootPath = ResolveRootPath(profileName, rootName);
-                MutateRootConfigMcpServers(rootPath, null, (servers) => servers.Remove(serverName));
-                break;
-            case "action":
-                ArgumentNullException.ThrowIfNull(profileName);
-                ArgumentNullException.ThrowIfNull(rootName);
-                ArgumentNullException.ThrowIfNull(actionName);
-                var actionRootPath = ResolveRootPath(profileName, rootName);
-                MutateRootConfigMcpServers(actionRootPath, actionName, (servers) => servers.Remove(serverName));
-                break;
-            default:
-                throw new ArgumentException($"Unknown target level '{targetLevel}'.");
-        }
-        RebuildSnapshot();
-        return Task.CompletedTask;
-    }
-
-    public Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
-        string profileName, string rootName, string? actionName)
-    {
-        var snap = _snapshot;
-        snap.Profiles.TryGetValue(profileName, out var profileConfig);
-
-        var key = CompositeKey(profileName, rootName);
-        if (!snap.ProjectFiles.ProjectRoots.ContainsKey(key))
-            return Task.FromResult(new Dictionary<string, McpServerConfig>());
-
-        var rootPath = snap.ProjectFiles.GetProjectRootPath(key);
-        var config = _rootConfigReader.ReadConfig(rootPath);
-        var action = config.ResolveAction(actionName);
-
-        // Three-level merge: profile -> root base -> action
-        var result = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase);
-        if (profileConfig?.McpServers != null)
-            foreach (var (k, v) in profileConfig.McpServers)
-                result[k] = v;
-        // Root-level MCP servers come through action (since RootConfigReader already merges base+overlay)
-        if (action?.McpServers != null)
-            foreach (var (k, v) in action.McpServers)
-                result[k] = v;
-
-        return Task.FromResult(result);
-    }
-
-    private string ResolveRootPath(string profileName, string rootName) =>
-        _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
-
-    /// <summary>
-    /// Reads a root or action config.json, mutates the mcpServers section, and writes back.
-    /// </summary>
-    private static void MutateRootConfigMcpServers(string rootPath, string? actionName,
-        Action<Dictionary<string, McpServerConfig>> mutate)
-    {
-        var godModeRootPath = Path.Combine(rootPath, ".godmode-root");
-        var configFileName = actionName != null ? $"config.{actionName}.json" : "config.json";
-        var configPath = Path.Combine(godModeRootPath, configFileName);
-
-        var options = new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true,
-            WriteIndented = true,
-            AllowTrailingCommas = true,
-            ReadCommentHandling = JsonCommentHandling.Skip
-        };
-
-        Dictionary<string, object?>? raw = null;
-        if (File.Exists(configPath))
-        {
-            var json = File.ReadAllText(configPath);
-            raw = JsonSerializer.Deserialize<Dictionary<string, object?>>(json, options);
-        }
-        raw ??= new Dictionary<string, object?>();
-
-        // Parse existing mcpServers or create empty
-        var mcpServers = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase);
-        if (raw.TryGetValue("mcpServers", out var existing) && existing is JsonElement elem)
-        {
-            var parsed = JsonSerializer.Deserialize<Dictionary<string, McpServerConfig>>(elem.GetRawText(), options);
-            if (parsed != null)
-                foreach (var (k, v) in parsed)
-                    mcpServers[k] = v;
-        }
-
-        mutate(mcpServers);
-
-        // Update raw and write back
-        raw["mcpServers"] = mcpServers;
-        var output = JsonSerializer.Serialize(raw, options);
-        Directory.CreateDirectory(godModeRootPath);
-        File.WriteAllText(configPath, output);
-    }
-
-    public Task DeleteRootAsync(string profileName, string rootName, bool force)
-    {
-        var snap = _snapshot;
-        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
-
-        // Safety check: refuse to delete if projects exist under this root
-        if (!force)
-        {
-            var hasActiveProjects = _projects.Values.Any(p =>
-                p.ProjectPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase));
-            if (hasActiveProjects)
-                throw new InvalidOperationException($"Root '{rootName}' has active projects. Use force=true to delete anyway.");
-        }
-
-        var godModeRootPath = Path.Combine(rootPath, ".godmode-root");
-        if (Directory.Exists(godModeRootPath))
-            Directory.Delete(godModeRootPath, recursive: true);
-
-        // Clean up empty root directory
-        if (Directory.Exists(rootPath) && !Directory.EnumerateFileSystemEntries(rootPath).Any())
-            Directory.Delete(rootPath);
-
-        RebuildSnapshot();
-        return Task.CompletedTask;
-    }
-
-    public Task<RootPreview?> GetRootPreviewAsync(string profileName, string rootName)
-    {
-        var snap = _snapshot;
-        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
-        var preview = _rootCreator.ReadExistingRoot(rootPath);
-        return Task.FromResult(preview);
-    }
-
-    public Task UpdateRootAsync(string profileName, string rootName, RootPreview preview)
-    {
-        var error = _rootCreator.Validate(preview);
-        if (error != null)
-            throw new ArgumentException(error);
-
-        var snap = _snapshot;
-        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
-
-        // Clear existing .godmode-root/ and rewrite
-        var godModeRootPath = Path.Combine(rootPath, ".godmode-root");
-        if (Directory.Exists(godModeRootPath))
-            Directory.Delete(godModeRootPath, recursive: true);
-
-        _rootCreator.WriteRoot(rootPath, preview);
-        RebuildSnapshot();
-        return Task.CompletedTask;
     }
 
     public Task CreateProfileAsync(string name, string? description)
@@ -1302,43 +1070,6 @@ public class ProjectManager : IProjectManager
     public Task UpdateProfileDescriptionAsync(string name, string? description)
     {
         _profileFileManager.UpdateProfileDescription(name, description);
-        RebuildSnapshot();
-        return Task.CompletedTask;
-    }
-
-    public Task<byte[]> ExportRootAsync(string profileName, string rootName)
-    {
-        var snap = _snapshot;
-        var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
-        var bytes = _rootPackager.Export(rootPath, rootName);
-        return Task.FromResult(bytes);
-    }
-
-    public Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes) =>
-        Task.FromResult(RootPackager.PreviewFromBytes(packageBytes));
-
-    public Task<SharedRootPreview> PreviewImportFromUrlAsync(string url) =>
-        _rootInstaller.PreviewFromUrlAsync(url);
-
-    public Task<SharedRootPreview> PreviewImportFromGitAsync(string gitUrl, string? path, string? gitRef) =>
-        _rootInstaller.PreviewFromGitAsync(gitUrl, path, gitRef);
-
-    public Task InstallSharedRootAsync(string rootName, SharedRootPreview preview)
-    {
-        if (_projectRootsDir == null)
-            throw new InvalidOperationException("ProjectRootsDir is not configured.");
-
-        _rootInstaller.Install(_projectRootsDir, rootName, preview);
-        RebuildSnapshot();
-        return Task.CompletedTask;
-    }
-
-    public Task UninstallSharedRootAsync(string rootName)
-    {
-        if (_projectRootsDir == null)
-            throw new InvalidOperationException("ProjectRootsDir is not configured.");
-
-        _rootInstaller.Uninstall(_projectRootsDir, rootName);
         RebuildSnapshot();
         return Task.CompletedTask;
     }
@@ -2190,41 +1921,6 @@ public class ProjectManager : IProjectManager
     private async Task NotifyStatusChanged(ProjectInfo project)
     {
         await _hubContext.Clients.All.StatusChanged(project.Status.Id, project.Status);
-    }
-
-    private string GenerateMetricsHtml(ProjectInfo project)
-    {
-        var s = project.Status;
-        return $@"
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Metrics - {s.Name}</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; }}
-        .metric {{ margin: 10px 0; }}
-        .label {{ font-weight: bold; }}
-    </style>
-</head>
-<body>
-    <h1>Project Metrics: {s.Name}</h1>
-    <div class=""metric"">
-        <span class=""label"">Input Tokens:</span> {s.Metrics.InputTokens:N0}
-    </div>
-    <div class=""metric"">
-        <span class=""label"">Output Tokens:</span> {s.Metrics.OutputTokens:N0}
-    </div>
-    <div class=""metric"">
-        <span class=""label"">Tool Calls:</span> {s.Metrics.ToolCalls}
-    </div>
-    <div class=""metric"">
-        <span class=""label"">Duration:</span> {s.Metrics.Duration}
-    </div>
-    <div class=""metric"">
-        <span class=""label"">Cost Estimate:</span> ${s.Metrics.CostEstimate:F4}
-    </div>
-</body>
-</html>";
     }
 
     // ── Internal API helpers (project tokens, result storage) ──

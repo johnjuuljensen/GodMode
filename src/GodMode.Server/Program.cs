@@ -82,12 +82,6 @@ builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
 builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
 builder.Services.AddSingleton<ProfileFileManager>();
-builder.Services.AddSingleton<RootCreator>();
-builder.Services.AddSingleton<RootPackager>();
-builder.Services.AddSingleton<RootInstaller>();
-builder.Services.AddSingleton<IManifestParser, ManifestParser>();
-builder.Services.AddSingleton<IConvergenceEngine, ConvergenceEngine>();
-builder.Services.AddSingleton<IManifestExporter, ManifestExporter>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 var app = builder.Build();
@@ -179,25 +173,6 @@ app.Logger.LogInformation("Authentication mode: {AuthMode}", authSettings.Mode);
 if (authSettings.Mode == AuthMode.Loopback)
     app.Logger.LogWarning("No API key configured: unauthenticated access is allowed from loopback only. " +
         "Set {Setting} before binding to any other address.", AuthModeSelector.ApiKeySetting);
-
-// Apply manifest on startup if configured
-var manifestPath = builder.Configuration["Manifest"];
-if (!string.IsNullOrEmpty(manifestPath))
-{
-    var parser = app.Services.GetRequiredService<IManifestParser>();
-    var engine = app.Services.GetRequiredService<IConvergenceEngine>();
-    try
-    {
-        var manifest = parser.ParseFile(manifestPath);
-        var result = engine.ConvergeAsync(manifest).GetAwaiter().GetResult();
-        app.Logger.LogInformation("Startup convergence: {Actions} actions, {Errors} errors",
-            result.Actions.Count, result.Errors.Count);
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(ex, "Failed to apply manifest from {ManifestPath}", manifestPath);
-    }
-}
 
 // Recover existing projects AFTER server starts (non-blocking)
 var projectManager = app.Services.GetRequiredService<IProjectManager>();

@@ -12,21 +12,11 @@ namespace GodMode.Server.Hubs;
 public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
 {
     private readonly IProjectManager _projectManager;
-    private readonly IConvergenceEngine _convergenceEngine;
-    private readonly IManifestParser _manifestParser;
-    private readonly IManifestExporter _manifestExporter;
-    private readonly string _projectRootsDir;
     private readonly ILogger<ProjectHub> _logger;
 
-    public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
-        IManifestParser manifestParser, IManifestExporter manifestExporter,
-        IConfiguration configuration, ILogger<ProjectHub> logger)
+    public ProjectHub(IProjectManager projectManager, ILogger<ProjectHub> logger)
     {
         _projectManager = projectManager;
-        _convergenceEngine = convergenceEngine;
-        _manifestParser = manifestParser;
-        _manifestExporter = manifestExporter;
-        _projectRootsDir = Path.GetFullPath(configuration["_projectRootsDir"] ?? "roots");
         _logger = logger;
     }
 
@@ -113,13 +103,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.UnsubscribeProjectAsync(projectId, Context.ConnectionId);
     }
 
-    public async Task<string> GetMetricsHtml(string projectId)
-    {
-        _logger.LogInformation("Client {ConnectionId} requested metrics for project {ProjectId}",
-            Context.ConnectionId, projectId);
-        return await _projectManager.GetMetricsHtmlAsync(projectId);
-    }
-
     public async Task DeleteProject(string projectId, bool force = false)
     {
         _logger.LogInformation("Client {ConnectionId} deleting project {ProjectId} (force={Force})",
@@ -177,69 +160,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.ListArchivedProjectsAsync();
     }
 
-    public async Task AddMcpServer(string serverName, McpServerConfig config, string targetLevel,
-        string? profileName = null, string? rootName = null, string? actionName = null)
-    {
-        _logger.LogInformation("Client {ConnectionId} adding MCP server '{ServerName}' at {Level}",
-            Context.ConnectionId, serverName, targetLevel);
-        await _projectManager.AddMcpServerAsync(serverName, config, targetLevel, profileName, rootName, actionName);
-    }
-
-    public async Task RemoveMcpServer(string serverName, string targetLevel,
-        string? profileName = null, string? rootName = null, string? actionName = null)
-    {
-        _logger.LogInformation("Client {ConnectionId} removing MCP server '{ServerName}' at {Level}",
-            Context.ConnectionId, serverName, targetLevel);
-        await _projectManager.RemoveMcpServerAsync(serverName, targetLevel, profileName, rootName, actionName);
-    }
-
-    public async Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServers(
-        string profileName, string rootName, string? actionName = null)
-    {
-        _logger.LogInformation("Client {ConnectionId} requesting effective MCP servers for {Profile}/{Root}/{Action}",
-            Context.ConnectionId, profileName, rootName, actionName ?? "(all)");
-        return await _projectManager.GetEffectiveMcpServersAsync(profileName, rootName, actionName);
-    }
-
-    public async Task CreateRoot(string rootName, RootPreview preview, string? profileName = null)
-    {
-        _logger.LogInformation("Client {ConnectionId} creating root '{RootName}'",
-            Context.ConnectionId, rootName);
-        await _projectManager.CreateRootAsync(rootName, preview, profileName);
-        await Clients.All.RootsChanged();
-    }
-
-    public async Task DeleteRoot(string profileName, string rootName, bool force = false)
-    {
-        _logger.LogInformation("Client {ConnectionId} deleting root '{RootName}' (force={Force})",
-            Context.ConnectionId, rootName, force);
-        try
-        {
-            await _projectManager.DeleteRootAsync(profileName, rootName, force);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete root '{RootName}'", rootName);
-            throw new HubException(ex.Message);
-        }
-        await Clients.All.RootsChanged();
-    }
-
-    public async Task<RootPreview?> GetRootPreview(string profileName, string rootName)
-    {
-        _logger.LogInformation("Client {ConnectionId} getting root preview for '{RootName}'",
-            Context.ConnectionId, rootName);
-        return await _projectManager.GetRootPreviewAsync(profileName, rootName);
-    }
-
-    public async Task UpdateRoot(string profileName, string rootName, RootPreview preview)
-    {
-        _logger.LogInformation("Client {ConnectionId} updating root '{RootName}'",
-            Context.ConnectionId, rootName);
-        await _projectManager.UpdateRootAsync(profileName, rootName, preview);
-        await Clients.All.RootsChanged();
-    }
-
     public async Task CreateProfile(string name, string? description)
     {
         _logger.LogInformation("Client {ConnectionId} creating profile '{ProfileName}'",
@@ -272,56 +192,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await Clients.All.ProfilesChanged();
     }
 
-    public async Task<byte[]> ExportRoot(string profileName, string rootName)
-    {
-        _logger.LogInformation("Client {ConnectionId} exporting root '{RootName}'", Context.ConnectionId, rootName);
-        return await _projectManager.ExportRootAsync(profileName, rootName);
-    }
-
-    public async Task<SharedRootPreview> PreviewImportFromBytes(byte[] packageBytes)
-    {
-        _logger.LogInformation("Client {ConnectionId} previewing import from bytes", Context.ConnectionId);
-        return await _projectManager.PreviewImportFromBytesAsync(packageBytes);
-    }
-
-    public async Task<SharedRootPreview> PreviewImportFromUrl(string url)
-    {
-        _logger.LogInformation("Client {ConnectionId} previewing import from URL", Context.ConnectionId);
-        return await _projectManager.PreviewImportFromUrlAsync(url);
-    }
-
-    public async Task<SharedRootPreview> PreviewImportFromGit(string gitUrl, string? path = null, string? gitRef = null)
-    {
-        _logger.LogInformation("Client {ConnectionId} previewing import from git {Url}", Context.ConnectionId, gitUrl);
-        return await _projectManager.PreviewImportFromGitAsync(gitUrl, path, gitRef);
-    }
-
-    public async Task InstallSharedRoot(string rootName, SharedRootPreview preview)
-    {
-        _logger.LogInformation("Client {ConnectionId} installing shared root '{RootName}'", Context.ConnectionId, rootName);
-        await _projectManager.InstallSharedRootAsync(rootName, preview);
-    }
-
-    public async Task UninstallSharedRoot(string rootName)
-    {
-        _logger.LogInformation("Client {ConnectionId} uninstalling shared root '{RootName}'", Context.ConnectionId, rootName);
-        await _projectManager.UninstallSharedRootAsync(rootName);
-    }
-
-    public async Task<ConvergenceResult> ApplyManifest(string manifestContent, bool force = false)
-    {
-        _logger.LogInformation("Client {ConnectionId} applying manifest", Context.ConnectionId);
-        var manifest = _manifestParser.Parse(manifestContent);
-        return await _convergenceEngine.ConvergeAsync(manifest, force);
-    }
-
-    public Task<string> ExportManifest()
-    {
-        _logger.LogInformation("Client {ConnectionId} exporting manifest", Context.ConnectionId);
-        var manifest = _manifestExporter.Export();
-        return Task.FromResult(_manifestExporter.Serialize(manifest));
-    }
-
     public async Task<string?> CheckCommand(string command)
     {
         // Only allow checking simple command names (no paths, no args)
@@ -348,75 +218,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         {
             return null;
         }
-    }
-
-    // ── Storage Browser ──
-
-    private string ResolveSafePath(string relativePath)
-    {
-        if (string.IsNullOrWhiteSpace(relativePath)) relativePath = ".";
-        if (relativePath.Contains("..") || Path.IsPathRooted(relativePath))
-            throw new HubException("Invalid path");
-        var full = Path.GetFullPath(Path.Combine(_projectRootsDir, relativePath));
-        if (!full.StartsWith(_projectRootsDir, StringComparison.OrdinalIgnoreCase))
-            throw new HubException("Path outside storage root");
-        return full;
-    }
-
-    public Task<StorageEntry[]> BrowseStorage(string path)
-    {
-        var full = ResolveSafePath(path);
-        _logger.LogInformation("BrowseStorage: path={Path}, resolved={Full}, rootsDir={RootsDir}, exists={Exists}",
-            path, full, _projectRootsDir, Directory.Exists(full));
-        if (!Directory.Exists(full))
-            return Task.FromResult(Array.Empty<StorageEntry>());
-
-        var entries = new List<StorageEntry>();
-        foreach (var dir in Directory.GetDirectories(full).OrderBy(d => d))
-        {
-            var info = new DirectoryInfo(dir);
-            var rel = Path.GetRelativePath(_projectRootsDir, dir).Replace('\\', '/');
-            entries.Add(new StorageEntry(info.Name, rel, true, 0, info.LastWriteTimeUtc));
-        }
-        foreach (var file in Directory.GetFiles(full).OrderBy(f => f))
-        {
-            var info = new FileInfo(file);
-            var rel = Path.GetRelativePath(_projectRootsDir, file).Replace('\\', '/');
-            entries.Add(new StorageEntry(info.Name, rel, false, info.Length, info.LastWriteTimeUtc));
-        }
-        return Task.FromResult(entries.ToArray());
-    }
-
-    public Task<string> ReadStorageFile(string path)
-    {
-        var full = ResolveSafePath(path);
-        if (!File.Exists(full)) throw new HubException("File not found");
-        if (new FileInfo(full).Length > 1_048_576) throw new HubException("File too large (max 1MB)");
-        return File.ReadAllTextAsync(full);
-    }
-
-    public Task WriteStorageFile(string path, string content)
-    {
-        var full = ResolveSafePath(path);
-        var dir = Path.GetDirectoryName(full);
-        if (dir != null) Directory.CreateDirectory(dir);
-        return File.WriteAllTextAsync(full, content);
-    }
-
-    public Task DeleteStorageEntry(string path)
-    {
-        var full = ResolveSafePath(path);
-        if (File.Exists(full)) File.Delete(full);
-        else if (Directory.Exists(full)) Directory.Delete(full, false);
-        else throw new HubException("Not found");
-        return Task.CompletedTask;
-    }
-
-    public Task CreateStorageDirectory(string path)
-    {
-        var full = ResolveSafePath(path);
-        Directory.CreateDirectory(full);
-        return Task.CompletedTask;
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
