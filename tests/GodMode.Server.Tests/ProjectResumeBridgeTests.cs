@@ -115,6 +115,7 @@ public class ProjectResumeBridgeTests
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton<IClaudeProcessManager, RecordingProcessManager>();
         services.AddSingleton<IStatusUpdater, StatusUpdater>();
+        services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
         services.AddSingleton<ProfileFileManager>();
@@ -127,7 +128,6 @@ public class ProjectResumeBridgeTests
         public List<(Dictionary<string, string>? Env, string[]? Args)> Launches { get; } = [];
         public bool Running { get; set; }
 
-        public event OutputReceivedHandler? OnOutputReceived { add { } remove { } }
         public event ProcessExitedHandler? OnProcessExited { add { } remove { } }
 
         public Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,

@@ -27,7 +27,6 @@ public class ClaudeProcessManager : IClaudeProcessManager
     private readonly string _executable;
     private readonly ConcurrentDictionary<string, Process> _processes = new();
 
-    public event OutputReceivedHandler? OnOutputReceived;
     public event ProcessExitedHandler? OnProcessExited;
 
     public ClaudeProcessManager(ILogger<ClaudeProcessManager> logger, IConfiguration configuration)
@@ -134,7 +133,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         Func<bool>? retainMcpConfig)
     {
         var godModePath = Path.Combine(project.ProjectPath, ".godmode");
-        var outputPath = Path.Combine(godModePath, "output.jsonl");
+        var output = project.Process.Output;
         var stderrPath = Path.Combine(godModePath, "errs.txt");
 
         var startInfo = new ProcessStartInfo
@@ -161,9 +160,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             startInfo.ArgumentList.Add(arg);
         }
 
-        // Open output files for writing
-        var outputStream = new FileStream(outputPath, FileMode.Append, FileAccess.Write, FileShare.Read);
-        var outputWriter = new StreamWriter(outputStream, Encoding.UTF8) { AutoFlush = true };
+        // stdout goes to the project's output pipeline, whose consumer writes output.jsonl
         var stderrStream = new FileStream(stderrPath, FileMode.Append, FileAccess.Write, FileShare.Read);
         var stderrWriter = new StreamWriter(stderrStream, Encoding.UTF8) { AutoFlush = true };
 
@@ -185,12 +182,6 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
             _processes.TryRemove(project.Status.Id, out _);
 
-            // Clean up streams
-            outputWriter.Dispose();
-            outputStream.Dispose();
-            stderrWriter.Dispose();
-            stderrStream.Dispose();
-
             exitedTcs.TrySetResult(exitCode);
 
             // Notify listeners so ProjectManager can update status
@@ -201,42 +192,25 @@ public class ClaudeProcessManager : IClaudeProcessManager
             }
         };
 
-        // Handle stdout data received
-        process.OutputDataReceived += async (sender, e) =>
+        // stdout: only hand the line on. The project's one consumer writes it to output.jsonl, updates
+        // state and broadcasts it, in order; doing that here raced the lines of one burst.
+        process.OutputDataReceived += (_, e) =>
         {
-            if (e.Data == null) return;
-
-            try
-            {
-                outputWriter.WriteLine(e.Data);
-
-                _logger.LogDebug("Claude output [{ProjectId}]: {Output}",
-                    project.Status.Id,
-                    e.Data.Length > 200 ? e.Data[..200] + "..." : e.Data);
-
-                // Raise event to notify listeners
-                if (OnOutputReceived != null)
-                {
-                    try
-                    {
-                        await OnOutputReceived(project, e.Data);
-                    }
-                    catch (Exception eventEx)
-                    {
-                        _logger.LogError(eventEx, "Error in OnOutputReceived handler for project {ProjectId}", project.Status.Id);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error writing stdout for project {ProjectId}", project.Status.Id);
-            }
+            if (e.Data != null && !output.TryWrite(e.Data))
+                _logger.LogDebug("Dropped output for project {ProjectId}: its pipeline is closed", project.Status.Id);
         };
 
-        // Handle stderr data received
-        process.ErrorDataReceived += async (sender, e) =>
+        // The MCP config goes once the process has exited and its stderr is drained, so the
+        // resume check below has seen every line before retainMcpConfig is asked
+        var stderrClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        process.ErrorDataReceived += (_, e) =>
         {
-            if (e.Data == null) return;
+            if (e.Data == null)
+            {
+                stderrWriter.Dispose();
+                stderrClosed.TrySetResult();
+                return;
+            }
 
             try
             {
@@ -245,21 +219,10 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
                 onStderrLine?.Invoke(e.Data);
 
-                // Surface error lines to the UI as synthetic error output events
+                // Surface error lines to the UI as synthetic error output events, through the same
+                // pipeline so they persist to output.jsonl for backfill on refresh
                 if (e.Data.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
-                {
-                    var errorJson = JsonSerializer.Serialize(new { type = "error", error = e.Data });
-
-                    // Write to output.jsonl so it persists for backfill on refresh
-                    try { outputWriter.WriteLine(errorJson); }
-                    catch { /* stream may be disposed if process exited */ }
-
-                    if (OnOutputReceived != null)
-                    {
-                        try { await OnOutputReceived(project, errorJson); }
-                        catch (Exception eventEx) { _logger.LogError(eventEx, "Error in OnOutputReceived for stderr"); }
-                    }
-                }
+                    output.TryWrite(JsonSerializer.Serialize(new { type = "error", error = e.Data }));
             }
             catch (Exception ex)
             {
@@ -267,10 +230,6 @@ public class ClaudeProcessManager : IClaudeProcessManager
             }
         };
 
-        // The MCP config goes once the process has exited and its stderr is drained, so the
-        // resume check above has seen every line before retainMcpConfig is asked
-        var stderrClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        process.ErrorDataReceived += (_, e) => { if (e.Data == null) stderrClosed.TrySetResult(); };
         var launchedAt = DateTime.UtcNow;
         _ = DeleteMcpConfigAfterExitAsync(project, launchedAt, Task.WhenAll(exitedTcs.Task, stderrClosed.Task), retainMcpConfig);
 
@@ -287,6 +246,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         {
             // Never started: no Exited event will come, so release the MCP config cleanup here
             _processes.TryRemove(project.Status.Id, out _);
+            stderrWriter.Dispose();
             exitedTcs.TrySetResult(-1);
             stderrClosed.TrySetResult();
             throw;
@@ -372,23 +332,33 @@ public class ClaudeProcessManager : IClaudeProcessManager
         var json = JsonSerializer.Serialize(inputMessage);
         _logger.LogDebug("Sending JSON to stdin: {Json}", json);
 
-        await process.StandardInput.WriteLineAsync(json);
-        await process.StandardInput.FlushAsync();
+        // One send at a time: StreamWriter rejects a second async write while one is in flight,
+        // and input.jsonl is appended by whole-file open
+        var stdinLock = project.Process.StdinLock;
+        await stdinLock.WaitAsync();
+        try
+        {
+            await process.StandardInput.WriteLineAsync(json);
+            await process.StandardInput.FlushAsync();
 
-        // Log input
-        var inputPath = Path.Combine(project.ProjectPath, ".godmode", "input.jsonl");
-        await LogInputAsync(inputPath, input, CancellationToken.None);
+            var inputPath = Path.Combine(project.ProjectPath, ".godmode", "input.jsonl");
+            await LogInputAsync(inputPath, input, CancellationToken.None);
+        }
+        finally
+        {
+            stdinLock.Release();
+        }
     }
 
     public async Task StopProcessAsync(ProjectInfo project)
     {
         _logger.LogInformation("Stopping process for project {ProjectId}", project.Status.Id);
 
-        if (project.ProcessCancellation != null)
+        if (project.Process.Cancellation is { } cancellation)
         {
-            await project.ProcessCancellation.CancelAsync();
-            project.ProcessCancellation.Dispose();
-            project.ProcessCancellation = null;
+            await cancellation.CancelAsync();
+            cancellation.Dispose();
+            project.Process.Cancellation = null;
         }
 
         if (_processes.TryRemove(project.Status.Id, out var process))
@@ -408,7 +378,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             }
         }
 
-        project.ProcessId = 0;
+        project.Process.ProcessId = 0;
     }
 
     public bool IsProcessRunning(int processId)

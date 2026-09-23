@@ -1,3 +1,4 @@
+using GodMode.ProjectFiles;
 using GodMode.Server.Models;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
@@ -26,13 +27,15 @@ public class StatusUpdater : IStatusUpdater
 
         var json = JsonSerializer.Serialize(project.Status, JsonDefaults.Options);
 
-        await File.WriteAllTextAsync(statusPath, json);
+        // Atomic, so a reader (recovery, a restarted server) never meets a half-written file
+        await AtomicFile.WriteAllTextAsync(statusPath, json);
     }
 
     public async Task UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent, string rawJson)
     {
         var stateChanged = false;
         var status = project.Status;
+        var process = project.Process;
 
         // Parse Claude output events to update state
         switch (outputEvent.Type)
@@ -40,7 +43,7 @@ public class StatusUpdater : IStatusUpdater
             case OutputEventType.User:
                 // A new turn is starting — clear any memo of the previous turn's
                 // trailing assistant text so stale questions don't leak forward.
-                project.LastAssistantText = null;
+                process.LastAssistantText = null;
                 break;
 
             case OutputEventType.Assistant:
@@ -49,30 +52,30 @@ public class StatusUpdater : IStatusUpdater
                 // Tool-only assistant events return null here; don't overwrite
                 // a previously-seen text block in that case.
                 var lastText = QuestionDetection.ExtractLastAssistantText(rawJson);
-                if (lastText != null) project.LastAssistantText = lastText;
+                if (lastText != null) process.LastAssistantText = lastText;
                 break;
 
             case OutputEventType.Error:
+                stateChanged = status.State != ProjectState.Error;
                 status = status with { State = ProjectState.Error };
-                stateChanged = true;
                 break;
 
             case OutputEventType.Result:
                 // End of turn: decide Idle vs WaitingInput based on whether the
                 // last assistant text block (trimmed) ends with '?'. See issue #131.
-                if (QuestionDetection.IsQuestion(project.LastAssistantText))
+                if (QuestionDetection.IsQuestion(process.LastAssistantText))
                 {
                     status = status with
                     {
                         State = ProjectState.WaitingInput,
-                        CurrentQuestion = project.LastAssistantText,
+                        CurrentQuestion = process.LastAssistantText,
                     };
                 }
                 else
                 {
                     status = status with { State = ProjectState.Idle, CurrentQuestion = null };
                 }
-                project.LastAssistantText = null;
+                process.LastAssistantText = null;
                 stateChanged = true;
 
                 // Update metrics from result metadata
@@ -98,10 +101,13 @@ public class StatusUpdater : IStatusUpdater
 
             case OutputEventType.System:
                 // System init event - project is running
+                stateChanged = status.State != ProjectState.Running;
                 status = status with { State = ProjectState.Running };
-                stateChanged = true;
                 break;
         }
+
+        // Most lines (assistant text, tool use, echoed user messages) change nothing on disk
+        if (!stateChanged) return;
 
         // Update duration
         var duration = DateTime.UtcNow - status.CreatedAt;
@@ -112,12 +118,7 @@ public class StatusUpdater : IStatusUpdater
         var outputCost = (status.Metrics.OutputTokens / 1_000_000m) * 15m;
         status = status with { Metrics = status.Metrics with { CostEstimate = inputCost + outputCost } };
 
-        if (stateChanged)
-        {
-            status = status with { UpdatedAt = DateTime.UtcNow };
-        }
-
-        project.Status = status;
+        project.Status = status with { UpdatedAt = DateTime.UtcNow };
         await SaveStatusAsync(project);
     }
 

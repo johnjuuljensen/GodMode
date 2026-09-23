@@ -26,7 +26,7 @@ public class ProjectManager : IProjectManager
         "multiple-choice decisions, or confirmations — you MUST use the " +
         "AskUserQuestion tool. Do not ask questions in plain assistant text.";
 
-    private readonly IClaudeProcessManager _processManager;
+    private readonly ProjectLifecycle _lifecycle;
     private readonly IStatusUpdater _statusUpdater;
     private readonly IRootConfigReader _rootConfigReader;
     private readonly IScriptRunner _scriptRunner;
@@ -36,7 +36,11 @@ public class ProjectManager : IProjectManager
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
 
     /// <inheritdoc />
-    public event Func<string, Task>? OnProjectCompleted;
+    public event Func<string, Task>? OnProjectCompleted
+    {
+        add => _lifecycle.OnProjectCompleted += value;
+        remove => _lifecycle.OnProjectCompleted -= value;
+    }
 
     /// <summary>
     /// Legacy profiles loaded from appsettings.json at startup (before .profiles/ migration).
@@ -70,7 +74,7 @@ public class ProjectManager : IProjectManager
         ProjectFiles.ProjectManager ProjectFiles);
 
     public ProjectManager(
-        IClaudeProcessManager processManager,
+        ProjectLifecycle lifecycle,
         IStatusUpdater statusUpdater,
         IRootConfigReader rootConfigReader,
         IScriptRunner scriptRunner,
@@ -79,16 +83,13 @@ public class ProjectManager : IProjectManager
         IConfiguration configuration,
         ILogger<ProjectManager> logger)
     {
-        _processManager = processManager;
+        _lifecycle = lifecycle;
         _statusUpdater = statusUpdater;
         _rootConfigReader = rootConfigReader;
         _scriptRunner = scriptRunner;
         _hubContext = hubContext;
         _profileFileManager = profileFileManager;
         _logger = logger;
-
-        // Subscribe to output events from Claude processes
-        _processManager.OnOutputReceived += HandleOutputReceivedAsync;
 
         // Read optional autodiscovery directory (normalize empty/whitespace to null)
         var rawDir = configuration["ProjectRootsDir"];
@@ -610,23 +611,14 @@ public class ProjectManager : IProjectManager
             _logger.LogInformation("Claude args: {Args}", string.Join(" ", claudeArgs));
 
         // Start Claude process
-        project.ProcessCancellation = new CancellationTokenSource();
         try
         {
-            var processId = await _processManager.StartClaudeProcessAsync(
-                project,
-                prompt ?? "Hello",
-                project.ProcessCancellation.Token,
-                claudeEnv,
-                claudeArgs
-            );
-            project.ProcessId = processId;
+            await _lifecycle.StartAsync(project, prompt ?? "Hello", claudeEnv, claudeArgs);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to start Claude process for project {ProjectId}", projectId);
-            project.Status = project.Status with { State = ProjectState.Error };
-            await _statusUpdater.SaveStatusAsync(project);
+            await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Error });
             throw;
         }
 
@@ -640,16 +632,7 @@ public class ProjectManager : IProjectManager
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        await _processManager.SendInputAsync(project, input);
-
-        project.Status = project.Status with
-        {
-            State = ProjectState.Running,
-            CurrentQuestion = null,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        await _statusUpdater.SaveStatusAsync(project);
+        await _lifecycle.SendInputAsync(project, input);
         await NotifyStatusChanged(project);
     }
 
@@ -660,15 +643,12 @@ public class ProjectManager : IProjectManager
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        await _processManager.StopProcessAsync(project);
-
-        project.Status = project.Status with
+        await _lifecycle.StopAsync(project);
+        await _lifecycle.UpdateStatusAsync(project, status => status with
         {
             State = ProjectState.Stopped,
             UpdatedAt = DateTime.UtcNow
-        };
-
-        await _statusUpdater.SaveStatusAsync(project);
+        });
         await NotifyStatusChanged(project);
     }
 
@@ -681,8 +661,8 @@ public class ProjectManager : IProjectManager
 
         _logger.LogInformation("Deleting project {ProjectId} ({Name}), force={Force}", projectId, project.Status.Name, force);
 
-        // Stop Claude process if running
-        await _processManager.StopProcessAsync(project);
+        // Stop Claude process if running, and finish its output
+        await _lifecycle.CloseAsync(project);
 
         // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
@@ -727,8 +707,8 @@ public class ProjectManager : IProjectManager
         if (!_projects.TryRemove(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
 
-        // Stop process if running
-        await _processManager.StopProcessAsync(project);
+        // Stop process if running, and finish its output
+        await _lifecycle.CloseAsync(project);
 
         // Move project folder to .archived/ sibling directory
         var parentDir = Path.GetDirectoryName(project.ProjectPath)!;
@@ -857,17 +837,15 @@ public class ProjectManager : IProjectManager
         }
 
         // Check if process is actually still running (regardless of reported state)
-        if (project.ProcessId != 0 && _processManager.IsProcessRunning(project.ProcessId))
+        if (_lifecycle.IsRunning(project))
         {
             _logger.LogInformation("Project {ProjectId} already has a running process with PID {ProcessId} (state: {State})",
-                projectId, project.ProcessId, project.Status.State);
+                projectId, project.Process.ProcessId, project.Status.State);
 
             if (project.Status.State == ProjectState.Idle)
             {
                 _logger.LogInformation("Project {ProjectId} is idle with running process, sending continue prompt", projectId);
-                await _processManager.SendInputAsync(project, "Continue");
-                project.Status = project.Status with { State = ProjectState.Running, UpdatedAt = DateTime.UtcNow };
-                await _statusUpdater.SaveStatusAsync(project);
+                await _lifecycle.SendInputAsync(project, "Continue");
                 await NotifyStatusChanged(project);
                 return;
             }
@@ -888,18 +866,10 @@ public class ProjectManager : IProjectManager
             throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {project.Status.State})");
         }
 
-        // Stop any existing process/cancellation token
-        if (project.ProcessCancellation != null)
-        {
-            await project.ProcessCancellation.CancelAsync();
-            project.ProcessCancellation.Dispose();
-        }
-
         _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}",
             projectId, project.SessionId);
 
-        project.Status = project.Status with { State = ProjectState.Running, UpdatedAt = DateTime.UtcNow };
-        project.ProcessCancellation = new CancellationTokenSource();
+        await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Running, UpdatedAt = DateTime.UtcNow });
 
         // Build claude env/args from action config + persisted project settings + profile env
         Dictionary<string, string>? claudeEnv = null;
@@ -952,23 +922,16 @@ public class ProjectManager : IProjectManager
 
         try
         {
-            var processId = await _processManager.ResumeClaudeProcessAsync(
-                project,
-                project.ProcessCancellation.Token,
-                claudeEnv,
-                claudeArgs
-            );
-            project.ProcessId = processId;
+            // Cancels the previous launch's token and gives this one its own
+            await _lifecycle.ResumeAsync(project, claudeEnv, claudeArgs);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to resume Claude process for project {ProjectId}", projectId);
-            project.Status = project.Status with { State = ProjectState.Error };
-            await _statusUpdater.SaveStatusAsync(project);
+            await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Error });
             throw;
         }
 
-        await _statusUpdater.SaveStatusAsync(project);
         await NotifyStatusChanged(project);
     }
 
@@ -1031,7 +994,8 @@ public class ProjectManager : IProjectManager
                     .ToList();
                 foreach (var project in projectsInRoot)
                 {
-                    project.ProcessCancellation?.Cancel();
+                    project.Process.Cancellation?.Cancel();
+                    project.Process.Output.TryComplete();
                     _projects.TryRemove(project.Status.Id, out _);
                 }
 
@@ -1693,176 +1657,6 @@ public class ProjectManager : IProjectManager
         return result.ToString();
     }
 
-    /// <summary>
-    /// Handles output received directly from the Claude process manager.
-    /// Sends raw JSON to clients for UI parsing/rendering.
-    /// </summary>
-    private async Task HandleOutputReceivedAsync(ProjectInfo project, string jsonLine)
-    {
-        if (string.IsNullOrWhiteSpace(jsonLine)) return;
-
-        var id = project.Status.Id;
-
-        try
-        {
-            // Extract type for logging and status updates
-            var eventType = ExtractEventType(jsonLine);
-
-            _logger.LogDebug("Sending raw JSON to group 'project-{ProjectId}', Type: {Type}",
-                id, eventType);
-
-            // Send raw JSON to subscribed clients - UI will parse and render
-            await _hubContext.Clients.Group($"project-{id}")
-                .OutputReceived(id, jsonLine);
-
-            // Update status based on event (still need to parse for status updates)
-            if (eventType != null)
-            {
-                var prevState = project.Status.State;
-                var outputEvent = ParseClaudeOutput(jsonLine);
-                if (outputEvent != null)
-                {
-                    await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
-                }
-
-                // Fire completion event if project just transitioned to Idle
-                if (prevState != ProjectState.Idle && project.Status.State == ProjectState.Idle)
-                {
-                    try
-                    {
-                        if (OnProjectCompleted != null)
-                            await OnProjectCompleted(id);
-                    }
-                    catch (Exception completionEx)
-                    {
-                        _logger.LogError(completionEx, "Error in OnProjectCompleted handler for project {ProjectId}", id);
-                    }
-                }
-            }
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(ex, "Failed to parse output line in HandleOutputReceivedAsync: {Line}", jsonLine);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error in HandleOutputReceivedAsync for project {ProjectId}", id);
-        }
-    }
-
-    /// <summary>
-    /// Extracts the event type from raw JSON for logging purposes.
-    /// </summary>
-    private static string? ExtractEventType(string jsonLine)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(jsonLine);
-            if (doc.RootElement.TryGetProperty("type", out var typeElement))
-            {
-                return typeElement.GetString();
-            }
-        }
-        catch { }
-        return null;
-    }
-
-    /// <summary>
-    /// Parses Claude's raw JSON output into an OutputEvent with properly extracted content.
-    /// </summary>
-    private OutputEvent? ParseClaudeOutput(string jsonLine)
-    {
-        using var doc = JsonDocument.Parse(jsonLine);
-        var root = doc.RootElement;
-
-        if (!root.TryGetProperty("type", out var typeElement))
-            return null;
-
-        var typeStr = typeElement.GetString();
-        if (!Enum.TryParse<OutputEventType>(typeStr, ignoreCase: true, out var eventType))
-            return null;
-
-        var content = ExtractContent(root, eventType);
-        var metadata = ExtractMetadata(root);
-
-        return new OutputEvent(DateTime.UtcNow, eventType, content, metadata);
-    }
-
-    /// <summary>
-    /// Extracts the content from Claude's JSON based on event type.
-    /// </summary>
-    private static string ExtractContent(JsonElement root, OutputEventType eventType)
-    {
-        return eventType switch
-        {
-            OutputEventType.User => ExtractMessageContent(root),
-            OutputEventType.Assistant => ExtractMessageContent(root),
-            OutputEventType.Result => ExtractResultContent(root),
-            OutputEventType.System => ExtractSystemContent(root),
-            OutputEventType.Error => root.TryGetProperty("error", out var err) ? err.GetString() ?? "" : "",
-            _ => ""
-        };
-    }
-
-    private static string ExtractMessageContent(JsonElement root)
-    {
-        if (!root.TryGetProperty("message", out var message))
-            return "";
-
-        if (!message.TryGetProperty("content", out var content))
-            return "";
-
-        if (content.ValueKind != JsonValueKind.Array || content.GetArrayLength() == 0)
-            return "";
-
-        var firstContent = content[0];
-        if (firstContent.TryGetProperty("text", out var text))
-            return text.GetString() ?? "";
-
-        return "";
-    }
-
-    private static string ExtractResultContent(JsonElement root)
-    {
-        if (root.TryGetProperty("result", out var result))
-            return result.GetString() ?? "";
-
-        return "";
-    }
-
-    private static string ExtractSystemContent(JsonElement root)
-    {
-        if (root.TryGetProperty("subtype", out var subtype))
-        {
-            var subtypeStr = subtype.GetString() ?? "";
-            if (root.TryGetProperty("session_id", out var sessionId))
-                return $"{subtypeStr} (session: {sessionId.GetString()?[..8]}...)";
-            return subtypeStr;
-        }
-        return "system";
-    }
-
-    private static Dictionary<string, object>? ExtractMetadata(JsonElement root)
-    {
-        var metadata = new Dictionary<string, object>();
-
-        if (root.TryGetProperty("usage", out var usage))
-        {
-            if (usage.TryGetProperty("input_tokens", out var inputTokens))
-                metadata["input_tokens"] = inputTokens.GetInt64();
-            if (usage.TryGetProperty("output_tokens", out var outputTokens))
-                metadata["output_tokens"] = outputTokens.GetInt64();
-        }
-
-        if (root.TryGetProperty("total_cost_usd", out var cost))
-            metadata["cost_usd"] = cost.GetDouble();
-
-        if (root.TryGetProperty("duration_ms", out var duration))
-            metadata["duration_ms"] = duration.GetInt64();
-
-        return metadata.Count > 0 ? metadata : null;
-    }
-
     private async Task SendOutputFromOffsetAsync(ProjectInfo project, long offset, string connectionId)
     {
         var id = project.Status.Id;
@@ -1892,7 +1686,7 @@ public class ProjectManager : IProjectManager
 
                 lineCount++;
 
-                var eventType = ExtractEventType(line);
+                var eventType = ProjectLifecycle.ExtractEventType(line);
                 _logger.LogInformation("Sending existing output line {LineNum} to client {ConnectionId} for project {ProjectId}, Type: {Type}",
                     lineCount, connectionId, id, eventType);
 
@@ -2006,14 +1800,12 @@ public class ProjectManager : IProjectManager
             ? reviewRequest.Question
             : $"{reviewRequest.Question}\n\nContext: {reviewRequest.Context}";
 
-        project.Status = project.Status with
+        await _lifecycle.UpdateStatusAsync(project, status => status with
         {
             State = ProjectState.WaitingInput,
             CurrentQuestion = question,
             UpdatedAt = DateTime.UtcNow
-        };
-
-        await _statusUpdater.SaveStatusAsync(project);
+        });
         await _hubContext.Clients.All.StatusChanged(projectId, project.Status);
 
         _logger.LogInformation("Project {ProjectId} requested human review: {Question}", projectId, reviewRequest.Question);

@@ -98,6 +98,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         services.AddSingleton(configuration);
         services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
         services.AddSingleton<IStatusUpdater, StatusUpdater>();
+        services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
         services.AddSingleton<ProfileFileManager>();

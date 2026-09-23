@@ -79,6 +79,7 @@ builder.Services.AddGodModeAuth(authSettings);
 // Register application services
 builder.Services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
 builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
+builder.Services.AddSingleton<ProjectLifecycle>();
 builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
 builder.Services.AddSingleton<ProfileFileManager>();
