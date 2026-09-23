@@ -85,56 +85,6 @@ export interface ServerInfo {
   Description?: string | null;
 }
 
-// --- MCP Server Configuration ---
-
-export interface McpServerConfig {
-  Command?: string | null;
-  Args?: string[] | null;
-  Env?: Record<string, string> | null;
-  Url?: string | null;
-  Headers?: Record<string, string> | null;
-}
-
-// --- Root Management ---
-
-export interface RootPreview {
-  Files: Record<string, string>;
-  ValidationError?: string | null;
-}
-
-export interface RootManifest {
-  Name: string;
-  Description?: string | null;
-  Author?: string | null;
-  Version?: string | null;
-  ExportedAt?: string | null;
-  ScriptHashes?: Record<string, string> | null;
-}
-
-export interface SharedRootPreview {
-  Manifest: RootManifest;
-  Preview: RootPreview;
-  Source?: string | null;
-}
-
-export interface RootSourceInfo {
-  Git?: string | null;
-  Ref?: string | null;
-  Path?: string | null;
-  InstalledAt: string;
-  Version?: string | null;
-}
-
-// --- Storage Browser ---
-
-export interface StorageEntry {
-  Name: string;
-  Path: string;
-  IsDirectory: boolean;
-  Size: number;
-  ModifiedAt: string;
-}
-
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---
 
 export interface QuestionOptionData {

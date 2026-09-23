@@ -6,11 +6,8 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
-import { McpConfigPanel } from './Mcp/McpConfigPanel';
-import { RootManager } from './Roots/RootManager';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
-import { StorageBrowser } from './Storage/StorageBrowser';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -27,11 +24,8 @@ function PageContent({ page }: { page: ActivePage }) {
         <button className="btn btn-secondary btn-sm" onClick={closePage}>← Back</button>
       </div>
       <div className="page-body">
-        {page.type === 'mcpConfig' && <McpConfigPanel />}
-        {page.type === 'rootManager' && <RootManager />}
         {page.type === 'profileSettings' && <ProfileSettings />}
         {page.type === 'appSettings' && <AppSettings />}
-        {page.type === 'storageBrowser' && <StorageBrowser />}
         {page.type === 'addServer' && <AddServer />}
         {page.type === 'editServer' && <EditServer serverId={page.serverId} />}
         {page.type === 'createProject' && <CreateProject />}
