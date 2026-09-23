@@ -1,9 +1,11 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using GodMode.Server.Models;
 using GodMode.Server.Services;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace GodMode.Server.Tests;
 
@@ -79,6 +81,41 @@ public class ProjectCreationFromFilesTests
         }
     }
 
+    [Fact]
+    public async Task CreateProject_NeverLogsAnMcpHeaderValue_AndKeepsTheConfigInTheProject()
+    {
+        const string headerVariable = "GODMODE_TEST_MCP_HEADER";
+        var canary = "canary-" + Guid.NewGuid().ToString("N");
+        var workDir = ServerProcess.CreateWorkDir("create");
+        Environment.SetEnvironmentVariable(headerVariable, canary);
+        try
+        {
+            var rootsDir = Path.Combine(workDir, "roots");
+            WriteRootAndProfile(rootsDir);
+            var logs = new CapturingLoggerProvider();
+            await using var services = BuildServices(workDir, logs);
+            var projects = services.GetRequiredService<IProjectManager>();
+            var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
+
+            var inputs = new Dictionary<string, JsonElement> { ["issueNumber"] = JsonSerializer.SerializeToElement("7") };
+            var status = await projects.CreateProjectAsync(new CreateProjectRequest("team", "shipit", inputs, "issue"));
+
+            var args = Assert.Single(launcher.Launches).Args!;
+            var configPath = args[Array.IndexOf(args, "--mcp-config") + 1];
+            Assert.Equal(Path.Combine(rootsDir, "shipit", status.Id, ".godmode", "mcp-config.json"), configPath);
+            // The header did reach the config, so its absence from the log below means something
+            Assert.Contains($"Bearer {canary}", File.ReadAllText(configPath));
+
+            Assert.NotEmpty(logs.Lines);
+            Assert.DoesNotContain(logs.Lines, l => l.Level >= LogLevel.Information && l.Text.Contains(canary));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(headerVariable, null);
+            ServerProcess.DeleteWorkDir(workDir);
+        }
+    }
+
     /// <summary>
     /// One root, "shipit", in profile "team", with an "issue" action that has its own schema.json and
     /// create script. MCP servers are declared at every level, with one name overridden at each step.
@@ -108,7 +145,7 @@ public class ProjectCreationFromFilesTests
               "nameTemplate": "issue_{issueNumber}",
               "promptTemplate": "Work on issue {issueNumber}",
               "mcpServers": {
-                "from-action": { "url": "https://mcp.example.test/mcp" },
+                "from-action": { "url": "https://mcp.example.test/mcp", "headers": { "Authorization": "Bearer ${GODMODE_TEST_MCP_HEADER}" } },
                 "action-over-root": { "command": "action-wins" }
               }
             }
@@ -136,7 +173,7 @@ public class ProjectCreationFromFilesTests
         return File.ReadAllText(args[index + 1]);
     }
 
-    private static ServiceProvider BuildServices(string workDir)
+    private static ServiceProvider BuildServices(string workDir, ILoggerProvider? logs = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -144,7 +181,12 @@ public class ProjectCreationFromFilesTests
         }).Build();
 
         var services = new ServiceCollection();
-        services.AddLogging();
+        services.AddLogging(b =>
+        {
+            if (logs == null) return;
+            b.SetMinimumLevel(LogLevel.Trace);
+            b.AddProvider(logs);
+        });
         services.AddSignalR();
         services.AddHttpClient();
         services.AddSingleton<IConfiguration>(configuration);
@@ -155,6 +197,22 @@ public class ProjectCreationFromFilesTests
         services.AddSingleton<ProfileFileManager>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();
+    }
+
+    private sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        public ConcurrentQueue<(LogLevel Level, string Text)> Lines { get; } = new();
+
+        public ILogger CreateLogger(string categoryName) => new Logger(Lines);
+        public void Dispose() { }
+
+        private sealed class Logger(ConcurrentQueue<(LogLevel, string)> lines) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter) => lines.Enqueue((logLevel, formatter(state, exception)));
+        }
     }
 
     private sealed class RecordingProcessManager : IClaudeProcessManager
