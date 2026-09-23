@@ -10,8 +10,6 @@ import { McpConfigPanel } from './Mcp/McpConfigPanel';
 import { RootManager } from './Roots/RootManager';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
-import { WebhookSettings } from './Webhooks/WebhookSettings';
-import { ScheduleSettings } from './Schedules/ScheduleSettings';
 import { StorageBrowser } from './Storage/StorageBrowser';
 import { CONNECTOR_CATALOG } from '../connectors-catalog';
 import type { McpServerConfig } from '../signalr/types';
@@ -35,8 +33,6 @@ function PageContent({ page }: { page: ActivePage }) {
         {page.type === 'rootManager' && <RootManager />}
         {page.type === 'profileSettings' && <ProfileSettings />}
         {page.type === 'appSettings' && <AppSettings />}
-        {page.type === 'webhookSettings' && <WebhookSettings />}
-        {page.type === 'scheduleSettings' && <ScheduleSettings />}
         {page.type === 'storageBrowser' && <StorageBrowser />}
         {page.type === 'addServer' && <AddServer />}
         {page.type === 'editServer' && <EditServer serverId={page.serverId} />}

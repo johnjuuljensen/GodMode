@@ -57,19 +57,8 @@ public interface IProjectHubClient
     Task ProfilesChanged();
 
     /// <summary>
-    /// Called when webhooks change (created, updated, or deleted).
-    /// Clients should refresh their webhook list.
-    /// </summary>
-    Task WebhooksChanged();
-
-    /// <summary>
     /// Called when OAuth connection status changes for a profile
     /// (token connected/disconnected/refreshed).
     /// </summary>
     Task OAuthStatusChanged(string profileName);
-
-    /// <summary>
-    /// Called when a schedule fires and triggers a project.
-    /// </summary>
-    Task ScheduleTriggered(string profileName, string scheduleName, string projectId);
 }

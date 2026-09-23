@@ -61,8 +61,6 @@ export type ActivePage =
   | { type: 'rootManager' }
   | { type: 'profileSettings' }
   | { type: 'appSettings' }
-  | { type: 'webhookSettings' }
-  | { type: 'scheduleSettings' }
   | { type: 'storageBrowser' }
   | { type: 'addServer' }
   | { type: 'editServer'; serverId: string }
@@ -149,8 +147,6 @@ interface AppState {
   setShowRootManager: (show: boolean) => void;
   setShowProfileSettings: (show: boolean) => void;
   setShowAppSettings: (show: boolean) => void;
-  setShowWebhookSettings: (show: boolean) => void;
-  setShowScheduleSettings: (show: boolean) => void;
 
   // Feature visibility
   featureRoots: boolean;
@@ -643,9 +639,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       onProfilesChanged: () => {
         get().refreshProjects(serverId);
       },
-      onWebhooksChanged: () => {
-        // Webhooks changed — could refresh a webhook list if UI shows one
-      },
       onOAuthStatusChanged: () => {
         // OAuth status changed — UI components with OAuth status will re-fetch
       },
@@ -787,8 +780,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowRootManager: (show) => set({ activePage: show ? { type: 'rootManager' } : null }),
   setShowProfileSettings: (show) => set({ activePage: show ? { type: 'profileSettings' } : null }),
   setShowAppSettings: (show) => set({ activePage: show ? { type: 'appSettings' } : null }),
-  setShowWebhookSettings: (show) => set({ activePage: show ? { type: 'webhookSettings' } : null }),
-  setShowScheduleSettings: (show) => set({ activePage: show ? { type: 'scheduleSettings' } : null }),
 
   // Feature visibility (persisted to localStorage)
   featureRoots: localStorage.getItem('godmode-feature-roots') !== 'false',

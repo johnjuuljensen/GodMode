@@ -107,9 +107,7 @@ builder.Services.AddSingleton<RootInstaller>();
 builder.Services.AddSingleton<IManifestParser, ManifestParser>();
 builder.Services.AddSingleton<IConvergenceEngine, ConvergenceEngine>();
 builder.Services.AddSingleton<IManifestExporter, ManifestExporter>();
-builder.Services.AddSingleton<WebhookFileManager>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
-builder.Services.AddSingleton<ScheduleManager>();
 builder.Services.AddSingleton<McpOAuthStore>();
 
 var app = builder.Build();
@@ -495,66 +493,6 @@ var hub = app.MapHub<ProjectHub>("/hubs/projects");
 if (authMode != "none")
     hub.RequireAuthorization();
 
-// ── Webhook endpoint (uses per-webhook token auth, not server auth) ──
-
-app.MapPost("/webhook/{keyword}", async (string keyword, HttpContext ctx,
-    WebhookFileManager webhookManager, IProjectManager pm,
-    IHubContext<ProjectHub, IProjectHubClient> hubContext, ILogger<Program> logger) =>
-{
-    // Read webhook config
-    var config = webhookManager.Read(keyword);
-    if (config == null)
-        return Results.NotFound(new { error = $"Webhook '{keyword}' not found." });
-
-    // Validate bearer token
-    var authHeader = ctx.Request.Headers.Authorization.ToString();
-    if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        return Results.Json(new { error = "Missing webhook token. Use: Authorization: Bearer <token>" }, statusCode: 401);
-
-    var token = authHeader["Bearer ".Length..].Trim();
-    if (!webhookManager.ValidateToken(keyword, token))
-        return Results.Json(new { error = "Invalid webhook token." }, statusCode: 401);
-
-    if (!config.Enabled)
-        return Results.Json(new { error = $"Webhook '{keyword}' is disabled." }, statusCode: 403);
-
-    // Parse payload
-    JsonElement? payload = null;
-    if (ctx.Request.ContentLength > 0 || ctx.Request.ContentType?.Contains("json") == true)
-    {
-        try
-        {
-            payload = await JsonSerializer.DeserializeAsync<JsonElement>(ctx.Request.Body);
-        }
-        catch (JsonException)
-        {
-            return Results.BadRequest(new { error = "Invalid JSON payload." });
-        }
-    }
-
-    // Map payload to inputs
-    var inputs = WebhookPayloadMapper.MapPayload(config, payload);
-
-    // Create project
-    try
-    {
-        var request = new CreateProjectRequest(config.ProfileName, config.RootName, inputs, config.ActionName);
-        var status = await pm.CreateProjectAsync(request);
-        await hubContext.Clients.All.ProjectCreated(status);
-
-        logger.LogInformation("Webhook '{Keyword}' triggered project '{ProjectName}' ({ProjectId})",
-            keyword, status.Name, status.Id);
-
-        return Results.Json(new WebhookResult(status.Id, status.Name, status.State.ToString()),
-            statusCode: 202);
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Webhook '{Keyword}' failed to create project", keyword);
-        return Results.Json(new { error = $"Project creation failed: {ex.Message}" }, statusCode: 500);
-    }
-}).AllowAnonymous();
-
 // ── Internal API (MCP bridge → server, project-scoped token auth) ──
 
 var internalApi = app.MapGroup("/api/internal");
@@ -637,10 +575,6 @@ if (!string.IsNullOrEmpty(manifestPath))
         app.Logger.LogError(ex, "Failed to apply manifest from {ManifestPath}", manifestPath);
     }
 }
-
-// Initialize schedule timers
-var scheduleManager = app.Services.GetRequiredService<ScheduleManager>();
-scheduleManager.Initialize();
 
 // Recover existing projects AFTER server starts (non-blocking)
 var projectManager = app.Services.GetRequiredService<IProjectManager>();
