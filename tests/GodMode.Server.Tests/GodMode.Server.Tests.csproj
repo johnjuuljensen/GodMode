@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\GodMode.Server\GodMode.Server.csproj" />
+    <!-- Lifecycle tests launch its apphost from this output directory and share its script/record types. -->
+    <ProjectReference Include="..\GodMode.FakeClaude\GodMode.FakeClaude.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -14,6 +14,7 @@
     <Project Path="src/SignalR.Proxy/SignalR.Proxy.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/GodMode.FakeClaude/GodMode.FakeClaude.csproj" />
     <Project Path="tests/GodMode.Server.Tests/GodMode.Server.Tests.csproj" />
   </Folder>
 </Solution>
