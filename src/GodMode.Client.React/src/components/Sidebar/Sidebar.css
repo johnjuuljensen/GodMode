@@ -454,53 +454,6 @@
   border-color: var(--glass-border-strong);
 }
 
-/* ── GodMode Button ── */
-.sidebar-godmode-btn {
-  position: relative;
-  flex: 1;
-  height: 32px;
-  border: 1px solid rgba(167,139,250,0.25);
-  border-radius: 7px;
-  background: linear-gradient(135deg, rgba(167,139,250,0.12), rgba(94,158,255,0.08));
-  color: var(--purple);
-  font-family: var(--font-sans);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  overflow: hidden;
-  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
-}
-
-.sidebar-godmode-btn:hover,
-.sidebar-godmode-btn.active {
-  background: linear-gradient(135deg, rgba(167,139,250,0.20), rgba(94,158,255,0.14));
-  border-color: rgba(167,139,250,0.40);
-  box-shadow: 0 0 12px rgba(167,139,250,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
-}
-
-.sidebar-godmode-btn.active {
-  background: linear-gradient(135deg, rgba(167,139,250,0.28), rgba(94,158,255,0.18));
-  border-color: rgba(167,139,250,0.50);
-}
-
-.sidebar-godmode-shine {
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
-  animation: godmode-shine 3s ease-in-out infinite;
-  pointer-events: none;
-}
-
-@keyframes godmode-shine {
-  0% { left: -100%; }
-  50% { left: 100%; }
-  100% { left: 100%; }
-}
-
 /* ── Footer Menu (opens upward) ── */
 .sidebar-footer-menu {
   position: absolute;

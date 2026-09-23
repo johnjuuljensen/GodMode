@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.SignalR;
-using GodMode.AI;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Models;
@@ -108,9 +107,6 @@ builder.Services.AddSingleton<RootInstaller>();
 builder.Services.AddSingleton<IManifestParser, ManifestParser>();
 builder.Services.AddSingleton<IConvergenceEngine, ConvergenceEngine>();
 builder.Services.AddSingleton<IManifestExporter, ManifestExporter>();
-builder.Services.AddGodModeAIServices();
-builder.Services.AddSingleton<RootGenerationService>();
-builder.Services.AddSingleton<GodModeChatService>();
 builder.Services.AddSingleton<WebhookFileManager>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 builder.Services.AddSingleton<ScheduleManager>();
@@ -640,18 +636,6 @@ if (!string.IsNullOrEmpty(manifestPath))
     {
         app.Logger.LogError(ex, "Failed to apply manifest from {ManifestPath}", manifestPath);
     }
-}
-
-// Initialize inference router (loads AI providers)
-var inferenceRouter = app.Services.GetRequiredService<InferenceRouter>();
-try
-{
-    await inferenceRouter.InitializeAsync();
-    app.Logger.LogInformation("Inference router initialized: {Status}", inferenceRouter.IsLoaded ? "ready" : "no providers");
-}
-catch (Exception ex)
-{
-    app.Logger.LogWarning(ex, "Failed to initialize inference router");
 }
 
 // Initialize schedule timers
