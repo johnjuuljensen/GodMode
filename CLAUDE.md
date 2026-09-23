@@ -22,6 +22,8 @@ Recipe:
 - Iterate until all case points have been implemented and all tests pass (excluding preexisting baseline failures).
 - When addressing PR review comments, resolve each review thread as you fix it. Use the GitHub GraphQL API `resolveReviewThread` mutation with the thread's node ID.
 
+**Working under an overseer.** If your brief says to use the `fleet-worker` skill, that skill takes precedence over this recipe where they differ: your PR targets `AC_GWT_BASE_BRANCH` (an epic or sibling branch, not `master`), a draft PR means *still working*, and you never merge. The overseer side is the `fleet-overseer` skill. Both live in `.claude/skills/`.
+
 ## MUST READ: Architecture Document
 
 **Before starting any non-trivial work, read `docs/UNIFIED-ARCHITECTURE.md`.** It describes the full system architecture, design principles, deployment strategy, and where to place new code. Violating its principles (especially the declarative configuration rules in Section 5) will result in work that needs to be redone.
@@ -264,9 +266,9 @@ When doing work initiated by GodMode, indicated by the presence of a `.godmode` 
 - You are running in a headless environement, the user is not able to respond to interactive dialogs.
 - Do not enter plan mode, just plan and execute.
 - Commit and push at regular/relevant intervals.
-- Create a PR when work is completed.
+- Open the PR early as a draft, and mark it ready for review when the work is done.
 - Any uncertainties or questions can be posed in the PR.
-- If the solution needs user attention create the PR as draft and start the description with !!Attention needed!!
+- If the solution needs user attention, start the PR description with !!Attention needed!! and assign the PR to the user. Do not use draft status for this — draft means the work is still in progress.
 - Make sure to maintain slnx file
 - When asked to merge master into a branch always use origin/master as local master is likely stale
-- When creating branches and PR connected to issues, use issue-XX-name
+- Branches for issues are named by `ac-gwt-issue` from the issue's labels: `feature/<n>-<slug>`, `bug/<n>-<slug>`, `epic/<n>-<slug>`. Use the same scheme when creating one by hand.
