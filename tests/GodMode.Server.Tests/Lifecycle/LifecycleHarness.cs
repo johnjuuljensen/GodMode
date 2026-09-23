@@ -184,7 +184,14 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public string Describe(string projectId)
     {
         var godMode = Path.Combine(ProjectPath(projectId), ".godmode");
-        string Read(string file) => File.Exists(Path.Combine(godMode, file)) ? File.ReadAllText(Path.Combine(godMode, file)) : "(none)";
+        string Read(string file)
+        {
+            var path = Path.Combine(godMode, file);
+            if (!File.Exists(path)) return "(none)";
+            // The server keeps output.jsonl and errs.txt open for writing while the process runs.
+            using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+            return reader.ReadToEnd();
+        }
         var launches = Launches(projectId);
         return $"""
             status.json: {Read("status.json")}
