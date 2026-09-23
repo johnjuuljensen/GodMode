@@ -309,10 +309,9 @@ is hard to reverse. `master` is the opposite on both counts — every push to it
 
 ## Reviewing
 
-**No CI runs on a pull request here.** The only workflow that runs by itself,
-`build-and-push.yml`, fires after a push to `master` and publishes an image; the `deploy-user*`
-workflows are manual. So `gh pr checks` reports nothing, and the gate is what a worker runs in its
-own worktree as part of writing the code:
+**No CI runs on a pull request here.** The only workflow, `build-and-push.yml`, fires after a push
+to `master` and publishes an image. So `gh pr checks` reports nothing, and the gate is what a worker
+runs in its own worktree as part of writing the code:
 
 ```powershell
 cd src/GodMode.Client.React; npm ci; cd ../..   # the server build runs `npm run build` but never installs
