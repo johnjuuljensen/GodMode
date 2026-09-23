@@ -18,16 +18,12 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     private readonly OAuthTokenStore _oauthTokenStore;
     private readonly ScheduleManager _scheduleManager;
     private readonly string _projectRootsDir;
-    private readonly RootGenerationService? _rootGenerationService;
-    private readonly GodModeChatService? _chatService;
     private readonly ILogger<ProjectHub> _logger;
 
     public ProjectHub(IProjectManager projectManager, IConvergenceEngine convergenceEngine,
         IManifestParser manifestParser, IManifestExporter manifestExporter,
         OAuthTokenStore oauthTokenStore, ScheduleManager scheduleManager,
-        IConfiguration configuration, ILogger<ProjectHub> logger,
-        RootGenerationService? rootGenerationService = null,
-        GodModeChatService? chatService = null)
+        IConfiguration configuration, ILogger<ProjectHub> logger)
     {
         _projectManager = projectManager;
         _convergenceEngine = convergenceEngine;
@@ -36,8 +32,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _oauthTokenStore = oauthTokenStore;
         _scheduleManager = scheduleManager;
         _projectRootsDir = Path.GetFullPath(configuration["_projectRootsDir"] ?? "roots");
-        _rootGenerationService = rootGenerationService;
-        _chatService = chatService;
         _logger = logger;
     }
 
@@ -333,34 +327,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return Task.FromResult(_manifestExporter.Serialize(manifest));
     }
 
-    public async Task<RootPreview> GenerateRootWithLlm(RootGenerationRequest request)
-    {
-        if (_rootGenerationService == null)
-            throw new HubException("LLM root generation is not available. Configure inference in ~/.godmode/inference.json.");
-
-        _logger.LogInformation("Client {ConnectionId} generating root with LLM: {Instruction}",
-            Context.ConnectionId, request.Instruction);
-        return await _rootGenerationService.GenerateAsync(request);
-    }
-
-    public async Task SendChatMessage(string message)
-    {
-        if (_chatService == null)
-            throw new HubException("GodMode chat is not available. Configure inference in ~/.godmode/inference.json.");
-
-        _logger.LogInformation("Client {ConnectionId} sending chat message", Context.ConnectionId);
-        await _chatService.ProcessMessageAsync(
-            Context.ConnectionId,
-            message,
-            async msg => await Clients.Caller.ChatResponse(msg));
-    }
-
-    public Task ClearChatHistory()
-    {
-        _chatService?.RemoveSession(Context.ConnectionId);
-        return Task.CompletedTask;
-    }
-
     // ── OAuth ──
 
     public Task<Dictionary<string, OAuthProviderStatus>> GetOAuthStatus(string profileName)
@@ -564,7 +530,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);
-        _chatService?.RemoveSession(Context.ConnectionId);
         await _projectManager.CleanupConnectionAsync(Context.ConnectionId);
         await base.OnDisconnectedAsync(exception);
     }

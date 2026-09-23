@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, ChatResponseMessage, WebhookInfo, OAuthProviderStatus, ScheduleInfo, ScheduleConfig, StorageEntry } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, McpServerConfig, RootPreview, SharedRootPreview, WebhookInfo, OAuthProviderStatus, ScheduleInfo, ScheduleConfig, StorageEntry } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -20,7 +20,6 @@ export interface HubCallbacks {
   onProjectDeleted?: (projectId: string) => void;
   onProjectArchived?: (projectId: string) => void;
   onProjectRestored?: (project: ProjectSummary) => void;
-  onChatResponse?: (message: ChatResponseMessage) => void;
   onRootsChanged?: () => void;
   onProfilesChanged?: () => void;
   onWebhooksChanged?: () => void;
@@ -91,10 +90,6 @@ export class GodModeHub {
 
     this.connection.on('ProjectRestored', (project: ProjectSummary) => {
       this.callbacks.onProjectRestored?.(project);
-    });
-
-    this.connection.on('ChatResponse', (message: ChatResponseMessage) => {
-      this.callbacks.onChatResponse?.(message);
     });
 
     this.connection.on('RootsChanged', () => {
@@ -292,22 +287,6 @@ export class GodModeHub {
 
   async exportManifest(): Promise<string> {
     return await this.connection!.invoke('ExportManifest');
-  }
-
-  // --- LLM Root Generation ---
-
-  async generateRootWithLlm(request: { Instruction: string; CurrentFiles?: Record<string, string>; SchemaFields?: string[] }): Promise<RootPreview> {
-    return await this.connection!.invoke('GenerateRootWithLlm', request);
-  }
-
-  // --- GodMode Chat ---
-
-  async sendChatMessage(message: string): Promise<void> {
-    await this.connection!.invoke('SendChatMessage', message);
-  }
-
-  async clearChatHistory(): Promise<void> {
-    await this.connection!.invoke('ClearChatHistory');
   }
 
   // --- OAuth ---

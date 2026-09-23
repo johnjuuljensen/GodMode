@@ -13,7 +13,6 @@ import { AppSettings } from './AppSettings';
 import { WebhookSettings } from './Webhooks/WebhookSettings';
 import { ScheduleSettings } from './Schedules/ScheduleSettings';
 import { StorageBrowser } from './Storage/StorageBrowser';
-import { GodModeChat } from './GodModeChat/GodModeChat';
 import { CONNECTOR_CATALOG } from '../connectors-catalog';
 import type { McpServerConfig } from '../signalr/types';
 import './Shell.css';
@@ -51,7 +50,6 @@ export function Shell() {
   const selectedProject = useAppStore(s => s.selectedProject);
   const isTileView = useAppStore(s => s.isTileView);
   const clearSelection = useAppStore(s => s.clearSelection);
-  const showGodModeChat = useAppStore(s => s.showGodModeChat);
   const activePage = useAppStore(s => s.activePage);
   const isMobile = useAppStore(s => s.isMobile);
   const setIsMobile = useAppStore(s => s.setIsMobile);
@@ -123,8 +121,6 @@ export function Shell() {
             </div>
             <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
           </div>
-        ) : showGodModeChat ? (
-          <GodModeChat />
         ) : isTileView ? (
           <div className="shell-mobile-tiles">
             <SidebarHeader />
@@ -149,8 +145,6 @@ export function Shell() {
           <div className="shell-content">
             {activePage ? (
               <PageContent page={activePage} />
-            ) : showGodModeChat ? (
-              <GodModeChat />
             ) : selectedProject ? (
               <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
             ) : (
@@ -171,9 +165,7 @@ export function Shell() {
                     <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Tiles</button>
                   </div>
                 )}
-                {showGodModeChat ? (
-                  <GodModeChat />
-                ) : isTileFullscreen ? (
+                {isTileFullscreen ? (
                   <ProjectView serverId={selectedProject!.serverId} projectId={selectedProject!.projectId} />
                 ) : (
                   <TileGrid />

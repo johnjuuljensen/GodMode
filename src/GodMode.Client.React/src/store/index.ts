@@ -8,7 +8,6 @@ import type {
   ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
   ServerInfo, CreateActionInfo, McpServerConfig,
 } from '../signalr/types';
-import type { GodModeChatEntry } from '../components/GodModeChat/GodModeChat';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../services/hostApi';
 import {
@@ -152,15 +151,6 @@ interface AppState {
   setShowAppSettings: (show: boolean) => void;
   setShowWebhookSettings: (show: boolean) => void;
   setShowScheduleSettings: (show: boolean) => void;
-
-  // GodMode chat
-  showGodModeChat: boolean;
-  setShowGodModeChat: (show: boolean) => void;
-  godModeChatMessages: GodModeChatEntry[];
-  godModeChatLoading: boolean;
-  appendGodModeChatMessage: (entry: GodModeChatEntry) => void;
-  clearGodModeChat: () => void;
-  setGodModeChatLoading: (loading: boolean) => void;
 
   // Feature visibility
   featureRoots: boolean;
@@ -508,7 +498,6 @@ export const useAppStore = create<AppState>((set, get) => ({
             // Auto-select the newly created project and close the create modal
             selectedProject: { serverId, projectId: status.Id },
             activePage: null,
-            showGodModeChat: false,
             outputMessages: [],
             question: emptyQuestion,
           };
@@ -660,13 +649,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       onOAuthStatusChanged: () => {
         // OAuth status changed — UI components with OAuth status will re-fetch
       },
-      onChatResponse: (message) => {
-        const entry: GodModeChatEntry = { role: 'server', message };
-        set(state => ({
-          godModeChatMessages: [...state.godModeChatMessages, entry],
-          godModeChatLoading: message.Type === 'ToolCall', // still processing if tool call
-        }));
-      },
     });
 
     try {
@@ -747,7 +729,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Selection ─────────────────────────────────────────────
 
   selectedProject: null,
-  selectProject: (serverId, projectId) => set({ selectedProject: { serverId, projectId }, activePage: null, showGodModeChat: false, outputMessages: [], question: emptyQuestion }),
+  selectProject: (serverId, projectId) => set({ selectedProject: { serverId, projectId }, activePage: null, outputMessages: [], question: emptyQuestion }),
   clearSelection: () => set({ selectedProject: null, outputMessages: [], question: emptyQuestion }),
 
   // ── Output ────────────────────────────────────────────────
@@ -794,7 +776,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── UI pages ────────────────────────────────────────────────
 
   activePage: null,
-  setActivePage: (page) => set({ activePage: page, ...(page ? { showGodModeChat: false } : {}) }),
+  setActivePage: (page) => set({ activePage: page }),
   closePage: () => set({ activePage: null }),
 
   // Backward-compat setters (delegate to activePage)
@@ -807,15 +789,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setShowAppSettings: (show) => set({ activePage: show ? { type: 'appSettings' } : null }),
   setShowWebhookSettings: (show) => set({ activePage: show ? { type: 'webhookSettings' } : null }),
   setShowScheduleSettings: (show) => set({ activePage: show ? { type: 'scheduleSettings' } : null }),
-
-  // GodMode chat
-  showGodModeChat: false,
-  setShowGodModeChat: (show) => set({ showGodModeChat: show, ...(show ? { activePage: null } : {}) }),
-  godModeChatMessages: [],
-  godModeChatLoading: false,
-  appendGodModeChatMessage: (entry) => set(state => ({ godModeChatMessages: [...state.godModeChatMessages, entry] })),
-  clearGodModeChat: () => set({ godModeChatMessages: [], godModeChatLoading: false }),
-  setGodModeChatLoading: (loading) => set({ godModeChatLoading: loading }),
 
   // Feature visibility (persisted to localStorage)
   featureRoots: localStorage.getItem('godmode-feature-roots') !== 'false',

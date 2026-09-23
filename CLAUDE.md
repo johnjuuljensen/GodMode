@@ -67,7 +67,6 @@ cd src/GodMode.Client.React && npm run dev
 - **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation
 - **GodMode.ClientBase** — Shared .NET client abstractions (host providers, server registry, token protection)
 - **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React
-- **GodMode.AI** — Cross-platform AI abstractions (IChatClientFactory, IChatClient, Anthropic provider)
 - **GodMode.ProjectFiles** — File system utilities for project folders (status.json, JSONL streams)
 - **GodMode.Mcp** — AWS Lambda MCP server (separate deployment)
 - **SignalR.Proxy** — SignalR WebSocket relay used by MAUI for multi-server connectivity
@@ -170,22 +169,6 @@ GodMode servers run in Docker containers on cloud platforms (Azure, AWS, Railway
   - Support multi-server (don't assume single server)
   - Bundle all assets — no CDN dependencies
   - Test in browser; be aware of MAUI differences
-
-## Inference Configuration
-
-All inference config lives in `~/.godmode/inference.json`.
-
-```json
-{
-  "api_key": "sk-ant-...",
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-20250514",
-  "max_tokens": 256,
-  "temperature": 0.3
-}
-```
-
-The `InferenceRouter` in `GodMode.AI` maps inference requests to the Anthropic provider. The `api_key` field (or `ANTHROPIC_API_KEY` env var) is required for AI features (GodMode Chat, root generation).
 
 ## GitHub Codespaces (GodMode Server)
 
