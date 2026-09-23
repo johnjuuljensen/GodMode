@@ -45,12 +45,6 @@ public interface IProjectHubClient
     Task ProjectRestored(ProjectSummary project);
 
     /// <summary>
-    /// Called when roots change (created, updated, or deleted).
-    /// Clients should refresh their root list.
-    /// </summary>
-    Task RootsChanged();
-
-    /// <summary>
     /// Called when profiles change (created, updated, or deleted).
     /// Clients should refresh their profile list.
     /// </summary>

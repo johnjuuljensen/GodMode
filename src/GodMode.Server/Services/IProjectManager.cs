@@ -59,11 +59,6 @@ public interface IProjectManager
     Task UnsubscribeProjectAsync(string projectId, string connectionId);
 
     /// <summary>
-    /// Gets the metrics HTML for a project.
-    /// </summary>
-    Task<string> GetMetricsHtmlAsync(string projectId);
-
-    /// <summary>
     /// Deletes a project, running teardown scripts and removing all files.
     /// </summary>
     Task DeleteProjectAsync(string projectId, bool force = false);
@@ -92,44 +87,6 @@ public interface IProjectManager
     /// Recovers projects from disk on startup.
     /// </summary>
     Task RecoverProjectsAsync();
-
-    /// <summary>
-    /// Adds an MCP server at the specified level.
-    /// </summary>
-    Task AddMcpServerAsync(string serverName, McpServerConfig config, string targetLevel,
-        string? profileName, string? rootName, string? actionName);
-
-    /// <summary>
-    /// Removes an MCP server at the specified level.
-    /// </summary>
-    Task RemoveMcpServerAsync(string serverName, string targetLevel,
-        string? profileName, string? rootName, string? actionName);
-
-    /// <summary>
-    /// Gets effective MCP servers after three-level merge.
-    /// </summary>
-    Task<Dictionary<string, McpServerConfig>> GetEffectiveMcpServersAsync(
-        string profileName, string rootName, string? actionName);
-
-    /// <summary>
-    /// Creates a new project root on disk.
-    /// </summary>
-    Task CreateRootAsync(string rootName, RootPreview preview, string? profileName);
-
-    /// <summary>
-    /// Deletes a project root from disk.
-    /// </summary>
-    Task DeleteRootAsync(string profileName, string rootName, bool force);
-
-    /// <summary>
-    /// Gets a preview of an existing root.
-    /// </summary>
-    Task<RootPreview?> GetRootPreviewAsync(string profileName, string rootName);
-
-    /// <summary>
-    /// Updates a root's .godmode-root/ contents.
-    /// </summary>
-    Task UpdateRootAsync(string profileName, string rootName, RootPreview preview);
 
     /// <summary>
     /// Creates a new profile and persists it to appsettings.json.
@@ -161,11 +118,4 @@ public interface IProjectManager
     Task StoreProjectResultAsync(string projectId, SubmitResultRequest resultRequest);
     Task UpdateCustomStatusAsync(string projectId, string message);
     Task RequestHumanReviewAsync(string projectId, RequestReviewRequest reviewRequest);
-
-    Task<byte[]> ExportRootAsync(string profileName, string rootName);
-    Task<SharedRootPreview> PreviewImportFromBytesAsync(byte[] packageBytes);
-    Task<SharedRootPreview> PreviewImportFromUrlAsync(string url);
-    Task<SharedRootPreview> PreviewImportFromGitAsync(string gitUrl, string? path, string? gitRef);
-    Task InstallSharedRootAsync(string rootName, SharedRootPreview preview);
-    Task UninstallSharedRootAsync(string rootName);
 }

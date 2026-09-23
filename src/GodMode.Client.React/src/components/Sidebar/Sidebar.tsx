@@ -209,12 +209,8 @@ function ArchivedSection() {
 }
 
 export function SidebarFooter() {
-  const setShowMcpConfig = useAppStore(s => s.setShowMcpConfig);
-  const setShowRootManager = useAppStore(s => s.setShowRootManager);
   const setShowProfileSettings = useAppStore(s => s.setShowProfileSettings);
   const setShowAppSettings = useAppStore(s => s.setShowAppSettings);
-  const featureRoots = useAppStore(s => s.featureRoots);
-  const featureMcp = useAppStore(s => s.featureMcp);
   const featureProfiles = useAppStore(s => s.featureProfiles);
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -256,29 +252,6 @@ export function SidebarFooter() {
               Profiles
             </button>
           )}
-          {featureRoots && (
-            <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowRootManager)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-              </svg>
-              Roots
-            </button>
-          )}
-          {featureMcp && (
-            <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowMcpConfig)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-                <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
-              </svg>
-              Connectors
-            </button>
-          )}
-          <button className="sidebar-footer-menu-item" onClick={() => openAndClose(() => useAppStore.getState().setActivePage({ type: 'storageBrowser' }))}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
-            File Browser
-          </button>
           <button className="sidebar-footer-menu-item" onClick={() => openAndClose(setShowAppSettings)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />

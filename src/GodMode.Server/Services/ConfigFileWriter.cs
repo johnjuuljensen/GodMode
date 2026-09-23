@@ -78,26 +78,6 @@ public class ProfileFileManager
         _logger.LogInformation("Added MCP server '{ServerName}' to profile '{ProfileName}'", serverName, profileName);
     }
 
-    public void RemoveMcpServerFromProfile(string profileName, string serverName)
-    {
-        var profileDir = GetProfileDir(profileName);
-        var serverPath = Path.Combine(profileDir, "mcp", $"{serverName}.json");
-        if (!File.Exists(serverPath))
-        {
-            _logger.LogWarning("MCP server '{ServerName}' not found in profile '{ProfileName}' .profiles/ directory (may be legacy or auto-discovered)", serverName, profileName);
-            return;
-        }
-
-        File.Delete(serverPath);
-
-        // Clean up empty mcp directory
-        var mcpDir = Path.Combine(profileDir, "mcp");
-        if (Directory.Exists(mcpDir) && !Directory.EnumerateFileSystemEntries(mcpDir).Any())
-            Directory.Delete(mcpDir);
-
-        _logger.LogInformation("Removed MCP server '{ServerName}' from profile '{ProfileName}'", serverName, profileName);
-    }
-
     public void SetProfileEnvironment(string profileName, Dictionary<string, string>? env)
     {
         var profileDir = GetProfileDir(profileName);

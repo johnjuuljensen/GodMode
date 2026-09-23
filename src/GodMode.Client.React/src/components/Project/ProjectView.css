@@ -42,31 +42,6 @@
   gap: 6px;
 }
 
-/* ── MCP Badges ── */
-.mcp-badges {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-
-.mcp-badge {
-  font-size: 9px;
-  font-family: var(--font-mono);
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--glass);
-  border: 1px solid var(--glass-border);
-  color: var(--text-tertiary);
-  letter-spacing: 0.02em;
-}
-
-.mcp-badge-count {
-  cursor: help;
-  background: var(--accent-soft);
-  border-color: rgba(94,158,255,0.2);
-  color: var(--accent);
-}
-
 /* ── Status Button ── */
 .project-status-btn {
   display: flex;
