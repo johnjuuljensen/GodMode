@@ -121,6 +121,28 @@ public class ProjectLifecycleTests
             $"{stale.Count} of {trials} projects are WaitingInput in memory but not in status.json. First: {stale.FirstOrDefault()}");
     }
 
+    /// <summary>
+    /// Two sends at once reach claude as two whole stream-json lines, not one interleaved one. The
+    /// messages are large so that each write takes several pipe writes, which is where they would mix.
+    /// </summary>
+    [Fact]
+    public async Task ConcurrentSendInput_WritesTwoWholeLines()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().Turn("Ready."));
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        var first = new string('a', 256 * 1024);
+        var second = new string('b', 256 * 1024);
+
+        await Task.WhenAll(
+            Task.Run(() => harness.Projects.SendInputAsync(created.Id, first)),
+            Task.Run(() => harness.Projects.SendInputAsync(created.Id, second)));
+
+        var launch = await harness.WaitForStdinAsync(created.Id, count: 3);
+        Assert.Equal(3, launch.Stdin.Count);
+        Assert.Equal([first, second], launch.Stdin.Skip(1).Select(PromptText).Order());
+    }
+
     /// <summary>The text of a stream-json user message as GodMode writes it to claude's stdin.</summary>
     private static string PromptText(string stdinLine)
     {
