@@ -18,11 +18,16 @@ public class PermissionPromptTests
     private static PermissionPromptRequest Bash(string command) =>
         new("Bash", JsonSerializer.SerializeToElement(new { command }), "toolu_1");
 
-    private static async Task<(LifecycleHarness Harness, ProjectStatus Created)> RunningAsync()
+    /// <summary>A project whose fake has its prompt and is waiting, as claude is when it asks.</summary>
+    private static async Task<(LifecycleHarness Harness, ProjectStatus Created)> RunningAsync(FakeScript? script = null)
     {
-        var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+        var harness = new LifecycleHarness(script ?? new FakeScript().EmitInit().AwaitStdin());
         var created = await harness.CreateProjectAsync();
         await harness.WaitForStdinAsync(created.Id);
+        // Its init line is handled (the offset moves under the same lock as the state), so it cannot
+        // land after a request and set Running over it; the real claude has long sent it by then
+        await LifecycleHarness.WaitUntilAsync(async () => (await harness.Projects.GetStatusAsync(created.Id)).OutputOffset > 0, null,
+            () => $"the init line of {created.Id} was not handled.\n{harness.Describe(created.Id)}");
         return (harness, created);
     }
 
@@ -186,9 +191,8 @@ public class PermissionPromptTests
     [Fact]
     public async Task ProcessExitingWhileWaiting_IsError_WithoutTheRequest()
     {
-        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().AwaitStdin().Stderr("boom").Exit(1));
-        var created = await harness.CreateProjectAsync();
-        await harness.WaitForStdinAsync(created.Id);
+        var (harness, created) = await RunningAsync(new FakeScript().EmitInit().AwaitStdin().AwaitStdin().Stderr("boom").Exit(1));
+        await using var _ = harness;
         var asking = harness.Projects.RequestPermissionAsync(created.Id, Bash("ls"), CancellationToken.None);
         await harness.WaitForStatusPushAsync(created.Id, s => s.PendingPermission != null);
 
