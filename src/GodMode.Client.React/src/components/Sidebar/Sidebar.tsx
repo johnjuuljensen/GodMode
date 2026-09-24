@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import {
   useAppStore, projectKey,
   type ProfileGroup, type ProjectKey, type RootGroup, type ServerConnection, type SidebarGroupBy,
@@ -32,6 +33,7 @@ export function SidebarHeader() {
   return (
     <div className="sidebar-header">
       <span className="sidebar-title">GodMode</span>
+      <ConnectionIndicator />
       <div className="sidebar-header-actions">
         {showProfileFilter && (
           <select
@@ -72,6 +74,29 @@ export function SidebarHeader() {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Each server whose connection was lost and is being retried: small, beside the title in every layout,
+ * never over the page. A tap retries now.
+ */
+function ConnectionIndicator() {
+  // Changes when a server starts or stops reconnecting, not on each status change
+  const lost = useAppStore(useShallow(s => s.serverConnections
+    .filter(c => c.connectionState === 'reconnecting').map(c => c.serverInfo)));
+  const retryServers = useAppStore(s => s.retryServers);
+  if (lost.length === 0) return null;
+  return (
+    <div className="connection-indicator">
+      {lost.map(info => (
+        <button key={info.Id} className="connection-indicator-item" onClick={retryServers}
+          title={`Connection to ${info.Name} lost, retrying. Tap to retry now.`}>
+          <span className="server-dot reconnecting" />
+          <span className="connection-indicator-name">{info.Name}</span>
+        </button>
+      ))}
     </div>
   );
 }

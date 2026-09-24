@@ -4,6 +4,7 @@
  * attention) and resumes every open subscription from its own offset, once. Waking the page retries
  * at once. Drives the real store, and the components that open subscriptions, through fake hubs.
  */
+import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseClaudeMessage } from '../signalr/parseMessage';
 import type { OutputMessage } from '../signalr/hub';
@@ -11,6 +12,7 @@ import { FakeHub, project, root, connectServers, flush } from '../test/fakeHub';
 import { render, type Rendered } from '../test/render';
 import { ProjectView } from '../components/Project/ProjectView';
 import { TileGrid } from '../components/Tiles/TileGrid';
+import { SidebarHeader } from '../components/Sidebar/Sidebar';
 import { useAppStore } from './index';
 import { projectKey } from './projectKey';
 
@@ -21,6 +23,8 @@ vi.mock('../services/hostApi', () => ({
   subscribeEvents: () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,
   getHubOptions: () => ({}),
+  isMaui: false,
+  clearApiKey: () => {},
 }));
 
 const line = (offset: number): OutputMessage => ({
@@ -186,5 +190,19 @@ describe('waking the page', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     await flush();
     expect(hub.calls).toMatchObject({ retryNow: 0, connect: 0 });
+  });
+});
+
+describe('the connection indicator', () => {
+  it('shows a lost server beside the title while it is retried, retries on a tap, and goes when it is back', async () => {
+    view = await render(<SidebarHeader />);
+    const indicator = () => view!.container.querySelector<HTMLButtonElement>('.connection-indicator-item');
+    expect(indicator()).toBeNull();
+    await act(() => hub.drop());
+    expect(indicator()?.textContent).toBe('Server A');
+    await act(async () => indicator()!.click());
+    expect(hub.calls.retryNow).toBe(1);
+    await act(() => hub.reconnect());
+    expect(indicator()).toBeNull();
   });
 });
