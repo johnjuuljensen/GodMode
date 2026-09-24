@@ -50,6 +50,9 @@ public sealed class AttentionNotifier(Context context) : IAttentionNotifier
         builder.SetGroup(Group);
         builder.SetAutoCancel(true);
         builder.SetContentIntent(OpenIntent(notice.Link));
+        // A changed item alerts again. One this process has not shown yet alerts only if nothing shows under its
+        // key: after a restart, the items still showing from before stay quiet
+        builder.SetOnlyAlertOnce(!_shown.ContainsKey(notice.Link.Key));
         Notify(notice.Link.Key, ItemId, builder.Build()!);
         _shown[notice.Link.Key] = 0;
         UpdateSummary();

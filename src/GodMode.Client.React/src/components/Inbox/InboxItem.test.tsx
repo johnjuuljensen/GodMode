@@ -104,7 +104,7 @@ describe('the inbox', () => {
     expect(useAppStore.getState().selectedProject).toEqual({ serverId: 'B', projectId: 'p1' });
   });
 
-  it('opens on the item a tapped notification names, from another screen, and again on a second tap', async () => {
+  it('opens on the item a tapped notification names, from another screen, and scrolls to it again on a second tap', async () => {
     const scrolled: Element[] = [];
     HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) { scrolled.push(this); };
     try {
@@ -120,6 +120,13 @@ describe('the inbox', () => {
 
       await act(async () => useAppStore.getState().openInboxItem('A', 'p1'));
       expect(scrolled).toEqual([...focused, ...focused]);
+
+      // Another server's older item lands above it, as servers connect after a cold start: back to the item
+      await act(async () => hubB.callbacks.onAttentionChanged?.([
+        item('p1', 'Finished', '2026-09-24T09:00:00Z', { PullRequestUrl: 'https://example.test/pr/1' }),
+        item('p0', 'Question', '2026-09-24T08:00:00Z'),
+      ]));
+      expect(scrolled).toEqual([...focused, ...focused, itemEl('p1', 'Server A')]);
     } finally {
       delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
     }
