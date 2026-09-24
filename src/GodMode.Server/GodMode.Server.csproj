@@ -62,9 +62,15 @@
           BeforeTargets="BuildReact"
           DependsOnTargets="ResolveProjectReferences"
           Condition="'$(PublishReactClient)' != 'false'">
-    <ItemGroup>
-      <_TypeGenAssembly Include="@(_ResolvedProjectReferencePaths)" Condition="'%(Filename)' == 'GodMode.TypeGen'" />
-    </ItemGroup>
+    <!-- ResolveProjectReferences built it but keeps no output of a ReferenceOutputAssembly="false"
+         reference, so ask it for its path, with the properties that build used -->
+    <MSBuild Projects="@(_MSBuildProjectReferenceExistent)"
+             Condition="'%(Filename)' == 'GodMode.TypeGen'"
+             Targets="GetTargetPath"
+             Properties="%(_MSBuildProjectReferenceExistent.SetConfiguration); %(_MSBuildProjectReferenceExistent.SetPlatform); %(_MSBuildProjectReferenceExistent.SetTargetFramework)"
+             RemoveProperties="%(_MSBuildProjectReferenceExistent.GlobalPropertiesToRemove)$(_GlobalPropertiesToRemoveFromProjectReferences)">
+      <Output TaskParameter="TargetOutputs" ItemName="_TypeGenAssembly" />
+    </MSBuild>
     <Error Condition="'@(_TypeGenAssembly)' == ''" Text="GodMode.TypeGen was not built; cannot generate the client's hub types." />
     <Exec Command="dotnet &quot;@(_TypeGenAssembly)&quot; &quot;$(_HubTypesFile)&quot;" />
   </Target>

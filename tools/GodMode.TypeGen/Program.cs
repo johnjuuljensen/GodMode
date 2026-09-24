@@ -24,7 +24,8 @@ var text = TypeScriptWriter.Write(
     extraTypes: [typeof(ServerInfo)]);
 
 outputPath = Path.GetFullPath(outputPath);
-if (File.Exists(outputPath) && File.ReadAllText(outputPath) == text)
+// A checkout may have given the file CRLF line endings (.gitattributes: text=auto); that is no change
+if (File.Exists(outputPath) && File.ReadAllText(outputPath).ReplaceLineEndings("\n") == text)
     return 0;
 
 Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
