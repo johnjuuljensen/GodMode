@@ -1,4 +1,5 @@
 using GodMode.FakeClaude;
+using GodMode.Server.Models;
 using GodMode.Shared.Enums;
 
 namespace GodMode.Server.Tests.Lifecycle;
@@ -63,6 +64,34 @@ public class ResumeLaunchTests
 
         var resume = await harness.WaitForLaunchAsync(created.Id, _ => true, index: 1);
         Assert.Equal(reported, resume.ArgValue("--resume"));
+    }
+
+    /// <summary>
+    /// A resume that cannot launch with the project's own action refuses: the project is Error,
+    /// saying why, and nothing is launched. The default action would drop the action's environment
+    /// (an account's CLAUDE_CONFIG_DIR, say), and --resume would then miss in the wrong account.
+    /// </summary>
+    [Theory]
+    [InlineData("config.json", "{ not json", "root config unreadable")]
+    // An overlay makes the root's actions its own: the project's "Create" is gone
+    [InlineData("config.other.json", "{}", "root config has no action 'Create'")]
+    public async Task Resume_WithoutTheProjectsActionInItsRootConfig_IsErrorAndLaunchesNothing(string file, string content, string reason)
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStdinAsync(created.Id);
+        await harness.Projects.StopProjectAsync(created.Id);
+        await harness.WaitForStateAsync(created.Id, ProjectState.Stopped);
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", file), content);
+
+        var refused = await Assert.ThrowsAsync<LaunchConfigException>(() => harness.Projects.ResumeProjectAsync(created.Id));
+
+        Assert.StartsWith(reason, refused.Message);
+        var status = await harness.Projects.GetStatusAsync(created.Id);
+        Assert.Equal(ProjectState.Error, status.State);
+        Assert.StartsWith(reason, status.LastError);
+        Assert.Equal(ProjectState.Error, harness.ReadStatusFile(created.Id).State);
+        Assert.Single(harness.Launches(created.Id));
     }
 
     private static IReadOnlyList<string> WithoutSessionFlag(IReadOnlyList<string> argv) =>

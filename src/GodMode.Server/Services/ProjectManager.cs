@@ -1028,7 +1028,11 @@ public class ProjectManager : IProjectManager
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to resume Claude process for project {ProjectId}", projectId);
-            await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Error });
+            await _lifecycle.UpdateStatusAsync(project, status => status with
+            {
+                State = ProjectState.Error,
+                LastError = ex is LaunchConfigException ? ex.Message : status.LastError,
+            });
             throw;
         }
 
@@ -1464,8 +1468,9 @@ public class ProjectManager : IProjectManager
     /// from the project (its profile, root, action and model) and what is saved in its folder
     /// (settings.json), read fresh, so a resume, or a resume after a restart, launches as the
     /// create did. The profile's environment and MCP servers, the action's, and the MCP bridge with
-    /// its <c>GODMODE_*</c> variables and a fresh project token are always there: a root config that
-    /// cannot be read, or an action that is gone, falls back to the default action, not to no config.
+    /// its <c>GODMODE_*</c> variables and a fresh project token are always there. A root config that
+    /// cannot be read, or an action that is gone, throws <see cref="LaunchConfigException"/>: a
+    /// launch with anything but the project's own action would not be the one it was created with.
     /// </summary>
     private ClaudeLaunchSpec BuildLaunchSpec(ProjectInfo project)
     {
@@ -1484,24 +1489,26 @@ public class ProjectManager : IProjectManager
         return new ClaudeLaunchSpec(AddMcpBridgeEnvironment(project, env), args ?? []);
     }
 
-    /// <summary>The project's action in its root's config, or the default action when there is none to read.</summary>
+    /// <summary>
+    /// The project's action in its root's config (the default action for a project with no root).
+    /// Throws <see cref="LaunchConfigException"/> when the config cannot be read or lacks the action.
+    /// </summary>
     private (CreateAction Action, bool StripEnvVarProfile) ResolveLaunchAction(ProfileSnapshot snap, ProjectInfo project, string? profileName)
     {
-        var fallback = (new CreateAction("Create"), false);
-        if (project.Status.RootName == null || profileName == null) return fallback;
+        if (project.Status.RootName == null || profileName == null) return (new CreateAction("Create"), false);
+
+        RootConfig config;
         try
         {
-            var config = _rootConfigReader.ReadConfig(snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName)));
-            if (config.ResolveAction(project.ActionName) is { } action) return (action, config.StripEnvVarProfile);
-            _logger.LogWarning("Project {ProjectId}'s action {Action} is not in its root's config; launching with the default action",
-                project.Status.Id, project.ActionName);
-            return (new CreateAction("Create"), config.StripEnvVarProfile);
+            config = _rootConfigReader.ReadConfigStrict(snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName)));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not read the root config of project {ProjectId}; launching with the default action", project.Status.Id);
-            return fallback;
+            throw new LaunchConfigException($"root config unreadable: {ex.Message}", ex);
         }
+        return config.ResolveAction(project.ActionName) is { } action
+            ? (action, config.StripEnvVarProfile)
+            : throw new LaunchConfigException($"root config has no action '{project.ActionName}'");
     }
 
     /// <summary>

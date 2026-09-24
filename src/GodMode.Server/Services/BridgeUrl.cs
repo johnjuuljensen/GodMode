@@ -4,7 +4,7 @@ namespace GodMode.Server.Services;
 /// The URL a project's MCP bridge calls this server on (<c>GODMODE_SERVER_URL</c>), picked from the
 /// addresses the server listens on. The bridge runs on this machine, so it takes, in order: a
 /// loopback binding; a wildcard binding (<c>+</c>, <c>*</c>, <c>0.0.0.0</c>, <c>[::]</c>) reached on
-/// the loopback address of its family; else the one address bound (a Tailscale or LAN IP only),
+/// 127.0.0.1; else the one address bound (a Tailscale or LAN IP only),
 /// which this machine reaches too. Kestrel binds any host name but localhost to every address, so
 /// such a name counts as a wildcard. http before https: the bridge's fetch need not trust the
 /// server's certificate then. A port 0 binding is skipped: only the address it got is reachable.
@@ -36,8 +36,9 @@ public static class BridgeUrl
         var (host, rank) = uri.HostNameType switch
         {
             _ when uri.IsLoopback => (uri.Host, 0),
+            // Kestrel's [::] socket is dual-mode, and ::1 is unreachable where IPv6 is disabled (a container)
             UriHostNameType.IPv4 when uri.Host == "0.0.0.0" => ("127.0.0.1", 1),
-            UriHostNameType.IPv6 when uri.Host == "[::]" => ("[::1]", 1),
+            UriHostNameType.IPv6 when uri.Host == "[::]" => ("127.0.0.1", 1),
             // Kestrel binds any other host name (than localhost) to every address
             UriHostNameType.Dns => ("127.0.0.1", 1),
             _ => (uri.Host, 2),

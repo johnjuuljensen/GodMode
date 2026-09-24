@@ -8,3 +8,10 @@ namespace GodMode.Server.Models;
 /// the process manager adds.
 /// </summary>
 public sealed record ClaudeLaunchSpec(Dictionary<string, string> Environment, string[] Args);
+
+/// <summary>
+/// A project's launch configuration cannot be built as it was created: its root config cannot be
+/// read, or no longer has its action. Launching with the default action instead would drop the
+/// action's environment and arguments (its account's <c>CLAUDE_CONFIG_DIR</c>, say).
+/// </summary>
+public sealed class LaunchConfigException(string message, Exception? inner = null) : Exception(message, inner);

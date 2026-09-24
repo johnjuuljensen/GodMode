@@ -18,4 +18,11 @@ public interface IRootConfigReader
     /// Always reads fresh — no caching.
     /// </summary>
     RootConfig ReadConfig(string rootPath);
+
+    /// <summary>
+    /// As <see cref="ReadConfig"/>, but a config file that exists and cannot be read or parsed
+    /// throws instead of reading as the default config. A launch uses it: the default config
+    /// lacks the action's environment and arguments.
+    /// </summary>
+    RootConfig ReadConfigStrict(string rootPath);
 }

@@ -16,7 +16,7 @@ public class BridgeUrlTests
     [InlineData(new[] { "http://+:31337" }, "http://127.0.0.1:31337")]
     [InlineData(new[] { "http://*:31337" }, "http://127.0.0.1:31337")]
     [InlineData(new[] { "http://0.0.0.0:5000" }, "http://127.0.0.1:5000")]
-    [InlineData(new[] { "http://[::]:5000" }, "http://[::1]:5000")]
+    [InlineData(new[] { "http://[::]:5000" }, "http://127.0.0.1:5000")]
     [InlineData(new[] { "http://myhost:5002" }, "http://127.0.0.1:5002")]
     // Only a non-loopback IP (Tailscale only): that IP, since nothing listens on localhost
     [InlineData(new[] { "http://100.64.0.1:31337" }, "http://100.64.0.1:31337")]
