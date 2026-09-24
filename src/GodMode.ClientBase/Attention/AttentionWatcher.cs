@@ -40,25 +40,37 @@ public sealed class AttentionWatcher : IAsyncDisposable
     }
 
     /// <summary>
-    /// Watches every server the directory lists now, and stops watching (and cancels what was shown for) any it no
-    /// longer lists. Call it on start and whenever the server list changes.
+    /// Watches every server the directory lists now, and stops watching (and cancels what was shown for) any that is
+    /// gone: its registration was removed, or listed without it. A registration whose listing failed keeps its
+    /// watches as they are. Call it on start and whenever the server list changes.
     /// </summary>
     public async Task RefreshAsync(CancellationToken ct = default)
     {
         await _refreshing.WaitAsync(ct);
         try
         {
-            var servers = await _directory.ListAllServersAsync(ct);
-            foreach (var server in servers)
+            var listings = await _directory.ListByRegistrationAsync(ct);
+            var failed = listings.Where(l => l.Servers is null).Select(l => l.RegistrationId).ToHashSet();
+            foreach (var listing in listings.Where(l => l.Servers is not null))
             {
-                if (_watches.TryGetValue(server.Id, out var watch))
-                    watch.Name = server.Name;
-                else
-                    _watches[server.Id] = Start(server);
+                foreach (var server in listing.Servers!)
+                {
+                    if (_watches.TryGetValue(server.Id, out var watch))
+                        watch.Name = server.Name;
+                    else
+                        _watches[server.Id] = Start(server, listing.RegistrationId);
+                }
             }
-            foreach (var gone in _watches.Keys.Except(servers.Select(s => s.Id)).ToList())
+            if (failed.Count > 0)
+                _logger.LogWarning("Could not list the servers of {Count} registration(s); keeping their watches", failed.Count);
+
+            var listed = listings.SelectMany(l => l.Servers ?? []).Select(s => s.Id).ToHashSet();
+            var kept = _watches.Values.Where(w => listed.Contains(w.Id) || failed.Contains(w.RegistrationId)).Select(w => w.Id).ToHashSet();
+            foreach (var gone in _watches.Keys.Except(kept).ToList())
                 await StopAsync(gone);
-            _tracker.RemoveAllExcept(servers.Select(s => s.Id));
+            // What an earlier run showed is known by server alone: with a listing missing, it may be that registration's
+            if (failed.Count == 0)
+                _tracker.RemoveAllExcept(kept);
         }
         finally
         {
@@ -79,10 +91,10 @@ public sealed class AttentionWatcher : IAsyncDisposable
             await StopAsync(id, cancelShown: false);
     }
 
-    private Watch Start(ServerInfo server)
+    private Watch Start(ServerInfo server, string registrationId)
     {
         _logger.LogInformation("Watching attention on server {ServerId} ({Name})", server.Id, server.Name);
-        var watch = new Watch(server.Id, server.Name);
+        var watch = new Watch(server.Id, server.Name, registrationId);
         watch.Loop = RunAsync(watch);
         return watch;
     }
@@ -171,12 +183,14 @@ public sealed class AttentionWatcher : IAsyncDisposable
         _logger.LogInformation("Attention connection to server {ServerId} closed: {Error}", watch.Id, error?.Message ?? "by the server");
     }
 
-    private sealed class Watch(string id, string name)
+    private sealed class Watch(string id, string name, string registrationId)
     {
         private readonly CancellationTokenSource _stop = new();
         private CancellationTokenSource? _session;
 
         public string Id { get; } = id;
+        /// <summary>The registration that listed it (for a codespace, its GitHub account).</summary>
+        public string RegistrationId { get; } = registrationId;
         public string Name { get; set; } = name;
         public Task Loop { get; set; } = Task.CompletedTask;
         public CancellationToken Stopping => _stop.Token;

@@ -16,6 +16,7 @@ public sealed class AttentionWatcherTests : IAsyncLifetime
     private readonly InMemorySecretStore _secrets = new();
     private readonly RecordingNotifier _notifier = new();
     private ServerRegistryService _registry = null!;
+    private FlakyDirectory _directory = null!;
     private AttentionWatcher _watcher = null!;
     private FakeAttentionServer _alpha = null!;
     private FakeAttentionServer _beta = null!;
@@ -25,8 +26,8 @@ public sealed class AttentionWatcherTests : IAsyncLifetime
         _alpha = await FakeAttentionServer.StartAsync();
         _beta = await FakeAttentionServer.StartAsync();
         _registry = new ServerRegistryService(_dataDir, _secrets);
-        var directory = new ServerDirectory(_registry, new ServerUrlSelector(ServerUrlSelector.CreateHttpClient()), NullLoggerFactory.Instance);
-        _watcher = new AttentionWatcher(directory, _notifier, NullLoggerFactory.Instance,
+        _directory = new FlakyDirectory(new ServerDirectory(_registry, new ServerUrlSelector(ServerUrlSelector.CreateHttpClient()), NullLoggerFactory.Instance));
+        _watcher = new AttentionWatcher(_directory, _notifier, NullLoggerFactory.Instance,
             retryDelay: TimeSpan.FromMilliseconds(50), maxRetryDelay: TimeSpan.FromMilliseconds(200));
     }
 
@@ -148,6 +149,30 @@ public sealed class AttentionWatcherTests : IAsyncLifetime
         Assert.Equal([(alpha, "Default/root/kept")], notifier.Items);
         Assert.Contains($"cancel {new AttentionLink(alpha, "Default/root/answered").Key}", notifier.Log);
         Assert.Contains($"cancel {new AttentionLink("unregistered", "Default/root/x").Key}", notifier.Log);
+    }
+
+    [Fact]
+    public async Task A_listing_that_fails_once_keeps_its_servers_watched_and_their_notifications_shown()
+    {
+        var alpha = await AddAsync(_alpha, "key-alpha");
+        var beta = await AddAsync(_beta, "key-beta");
+        _alpha.SetQuietly(Item("Default/root/a"));
+        _beta.SetQuietly(Item("Default/root/b"));
+        await _watcher.RefreshAsync();
+        await UntilAsync(() => _notifier.Items.Count == 2, "an item from each server");
+
+        // A GitHub API error, say: alpha's registration cannot be listed this time
+        _directory.FailOnce(alpha);
+        await _watcher.RefreshAsync();
+
+        Assert.Equal(2, _notifier.Items.Count);
+        Assert.DoesNotContain(_notifier.Log, l => l.StartsWith("cancel"));
+        await _alpha.SetAsync(Item("Default/root/a"), Item("Default/root/a2"));
+        await UntilAsync(() => _notifier.Items.Count == 3, "alpha's new item, so alpha is still watched");
+
+        await _watcher.RefreshAsync();
+        Assert.Equal(3, _notifier.Items.Count);
+        Assert.Contains(_notifier.Items, i => i.ServerId == beta);
     }
 
     [Fact]

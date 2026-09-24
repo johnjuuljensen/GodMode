@@ -17,8 +17,8 @@ public class MainActivity : MauiAppCompatActivity
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
-        // A recreated activity gets its old intent again; that tap was already handled
-        if (savedInstanceState == null) OpenAttentionLink(Intent);
+        // A recreated activity, or one relaunched from Recents, gets its old intent again; that tap was already handled
+        if (savedInstanceState == null && Intent?.Flags.HasFlag(ActivityFlags.LaunchedFromHistory) != true) OpenAttentionLink(Intent);
         _ = AttentionService.StartAsync();
     }
 

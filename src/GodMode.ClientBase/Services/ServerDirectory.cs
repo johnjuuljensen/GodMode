@@ -19,23 +19,27 @@ public class ServerDirectory(
 
     public async Task<IReadOnlyList<ServerInfo>> ListAllServersAsync(CancellationToken ct = default)
     {
+        var servers = (await ListByRegistrationAsync(ct)).SelectMany(l => l.Servers ?? []).ToList();
+        _logger.LogInformation("Discovered {Count} servers: [{Servers}]", servers.Count,
+            string.Join(", ", servers.Select(s => $"{s.Name}({s.State})")));
+        return servers;
+    }
+
+    public async Task<IReadOnlyList<RegistrationListing>> ListByRegistrationAsync(CancellationToken ct = default)
+    {
         var providers = await GetProvidersAsync();
-        var lists = await Task.WhenAll(providers.Select(async p =>
+        return await Task.WhenAll(providers.Select(async p =>
         {
             try
             {
-                return await p.Provider.ListServersAsync(ct);
+                return new RegistrationListing(p.Registration.Id, await p.Provider.ListServersAsync(ct));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error listing servers of registration {Id} ({Type})", p.Registration.Id, p.Provider.Type);
-                return [];
+                return new RegistrationListing(p.Registration.Id, null);
             }
         }));
-        var servers = lists.SelectMany(l => l).ToList();
-        _logger.LogInformation("Discovered {Count} servers: [{Servers}]", servers.Count,
-            string.Join(", ", servers.Select(s => $"{s.Name}({s.State})")));
-        return servers;
     }
 
     public async Task<RelayTarget?> ResolveAsync(string serverId, CancellationToken ct = default) =>
