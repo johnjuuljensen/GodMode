@@ -1,4 +1,13 @@
 /* ── Transcript ── */
+/* The list and the button over it: the button stays inside the list, never over the input below */
+.transcript {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 /* The list's side space is on its rows: the virtualized list sizes its content to the scroller's full width */
 .project-messages.transcript-list {
   padding: 0;
@@ -391,7 +400,52 @@
   font-size: 12.5px;
 }
 
+/* ── Back to the latest: shown once the reader has scrolled up ── */
+.transcript-jump {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 9px;
+  background: var(--accent);
+  border: none;
+  border-radius: 16px;
+  box-shadow: var(--shadow-card-hover);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.transcript-jump.has-new {
+  padding: 0 14px 0 11px;
+}
+
+.transcript-jump:hover {
+  filter: brightness(1.08);
+}
+
+.transcript-jump:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
 @media (max-width: 768px) {
+  .transcript-jump {
+    min-width: 44px;
+    height: 44px;
+    border-radius: 22px;
+    font-size: 13px;
+  }
+
   .ti-fold {
     min-height: 44px;
   }
