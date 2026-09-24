@@ -195,8 +195,6 @@ interface AppState {
   /** Subscribes a tile to the last `turns` turns of a project's output (tileMessages, not a transcript). */
   subscribeTail: (serverId: string, projectId: string, turns: number) => Promise<void>;
   outputMessages: ClaudeMessage[];
-  appendOutput: (projectId: string, message: ClaudeMessage) => void;
-  clearOutput: () => void;
 
   // Question state
   question: QuestionState;
@@ -688,8 +686,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     await hub.subscribeProject(projectId, -turns);
   },
   outputMessages: [],
-  appendOutput: (_projectId, message) => set(state => ({ outputMessages: [...state.outputMessages, message] })),
-  clearOutput: () => set({ outputMessages: [] }),
 
   // ── Questions ─────────────────────────────────────────────
 
