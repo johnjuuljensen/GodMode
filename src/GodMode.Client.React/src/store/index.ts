@@ -23,6 +23,7 @@ export { projectKey, type ProjectKey };
 /** The key of a transcript: a project's ProjectKey. */
 export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
+export { isListed } from './hierarchy';
 
 // ── Persisted dismiss tracking ─────────────────────────────────
 // Keyed by ProjectKey; the unversioned key held project IDs alone, which collide across servers
@@ -175,6 +176,8 @@ interface AppState {
   disconnectServer: (serverId: string) => Promise<void>;
   startServer: (serverId: string) => Promise<void>;
   refreshProjects: (serverId: string) => Promise<void>;
+  /** Retries every server that is not connected, now: the page woke, or the network is back. */
+  retryServers: () => void;
 
   // Selected project (by serverId + projectId)
   selectedProject: { serverId: string; projectId: string } | null;
@@ -186,14 +189,21 @@ interface AppState {
    */
   openCreatedProject: (serverId: string, status: ProjectStatus) => void;
 
-  // Project output: transcripts by ProjectKey; outputMessages is the selected one's
+  // Project output: transcripts by ProjectKey; outputMessages is the selected one's.
+  // The store owns subscriptions: a component opens and closes one, and the store (re)subscribes each
+  // open one whenever its server connects, from its own offset (#171)
   transcripts: Record<ProjectKey, Transcript>;
-  /** Subscribes to a project's output, resuming from the offset of the transcript held (0 if none). Resolves after the replay. */
+  /**
+   * Opens a project's output, resuming from the offset of the transcript held (0 if none). Resolves
+   * after the replay; while not connected, at once, and the store subscribes when the server connects.
+   */
   subscribeOutput: (serverId: string, projectId: string) => Promise<void>;
   /** Stops a project's live output. The transcript is kept, to resume from. */
   unsubscribeOutput: (serverId: string, projectId: string) => Promise<void>;
-  /** Subscribes a tile to the last `turns` turns of a project's output (tileMessages, not a transcript). */
+  /** Opens a tile on the last `turns` turns of a project's output (tileMessages, not a transcript). */
   subscribeTail: (serverId: string, projectId: string, turns: number) => Promise<void>;
+  /** Closes a tile. */
+  unsubscribeTail: (serverId: string, projectId: string) => Promise<void>;
   outputMessages: ClaudeMessage[];
   appendOutput: (projectId: string, message: ClaudeMessage) => void;
   clearOutput: () => void;
@@ -228,6 +238,8 @@ interface AppState {
   // By ProjectKey
   tileMessages: Record<ProjectKey, ClaudeMessage[]>;
   tileLoading: Record<ProjectKey, boolean>;
+  /** The open tiles, each with the offset after its last line: -turns until it has one. A tile resumes from it. */
+  tileOffsets: Record<ProjectKey, number>;
   setTileLoading: (key: ProjectKey, loading: boolean) => void;
   clearTileMessages: () => void;
 
@@ -276,7 +288,40 @@ function loadGroupBy(): SidebarGroupBy {
   return SIDEBAR_GROUP_ORDER.includes(v as SidebarGroupBy) ? v as SidebarGroupBy : 'profile';
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+// Retry each server that is not connected when the page is shown again, or the network is back
+let watchingWake = false;
+function watchWake(retry: () => void) {
+  if (watchingWake || typeof document === 'undefined') return;
+  watchingWake = true;
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') retry(); });
+  window.addEventListener('online', retry);
+}
+
+export const useAppStore = create<AppState>((set, get) => {
+  /**
+   * Opens a tile on a project's output from fromOffset: -turns for a new tail, which starts empty, or
+   * the tile's offset to resume, adding what follows. Subscribed when its server connects.
+   */
+  const openTail = async (serverId: string, projectId: string, fromOffset: number) => {
+    const conn = get().getConnection(serverId);
+    if (!conn) return;
+    const key = projectKey(serverId, projectId);
+    set(state => ({
+      tileMessages: fromOffset < 0 ? { ...state.tileMessages, [key]: [] } : state.tileMessages,
+      tileLoading: { ...state.tileLoading, [key]: true },
+      tileOffsets: { ...state.tileOffsets, [key]: fromOffset },
+    }));
+    if (conn.connectionState !== 'connected') return;
+    await conn.hub.subscribeProject(projectId, fromOffset);
+  };
+
+  /** Ends a subscription on the server. A lost connection has none to end: its server dropped them. */
+  const unsubscribe = async (serverId: string, projectId: string) => {
+    const conn = get().getConnection(serverId);
+    if (conn?.connectionState === 'connected') await conn.hub.unsubscribeProject(projectId);
+  };
+
+  return {
   // Mobile detection
   isMobile: false,
   setIsMobile: (mobile) => set({ isMobile: mobile }),
@@ -310,6 +355,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadServers: async () => {
     console.info('[store] loadServers: waiting for host API');
+    watchWake(() => get().retryServers());
     await api.waitUntilReady();
     try {
       const servers = await api.fetchServers();
@@ -438,9 +484,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           }
         }
 
-        // A tile takes its replay while loading, then live lines
-        if (state.isTileView && replayed === !!state.tileLoading[key]) {
-          updates.tileMessages = { ...state.tileMessages, [key]: [...(state.tileMessages[key] ?? []), ...messages] };
+        // An open tile takes its replay while loading, then live lines: those past its offset
+        const tileOffset = state.tileOffsets[key];
+        if (state.isTileView && tileOffset !== undefined && replayed === !!state.tileLoading[key]) {
+          const fresh = lines.filter(l => l.offset > tileOffset);
+          if (fresh.length > 0) {
+            updates.tileMessages = { ...state.tileMessages, [key]: [...(state.tileMessages[key] ?? []), ...fresh.map(l => l.message)] };
+            updates.tileOffsets = { ...state.tileOffsets, [key]: fresh[fresh.length - 1].offset };
+          }
         }
         return updates;
       });
@@ -475,9 +526,39 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const addProject = (project: ProjectSummary) => set(state => listed(state, serverId, project));
 
+    /**
+     * On each connect, the first or after a lost connection: the lists again, and every open
+     * transcript and tile subscribed from its offset, as a new connection holds no subscriptions.
+     * The one place that resubscribes; components only open and close (#171).
+     */
+    const catchUp = async () => {
+      await get().refreshProjects(serverId);
+      // Of the projects listed now: one deleted meanwhile is not subscribed
+      const state = get();
+      const projects = state.getConnection(serverId)?.projects ?? [];
+      const keyed = projects.map(p => ({ projectId: p.Id, key: projectKey(serverId, p.Id) }));
+      const transcripts = keyed.filter(({ key }) => state.transcripts[key] && state.transcripts[key].phase !== 'idle');
+      // One subscription per project: a transcript open on it wins over a tile
+      const tiles = keyed.filter(({ key }) => state.tileOffsets[key] !== undefined && !transcripts.some(t => t.key === key));
+      await Promise.all([
+        ...transcripts.map(({ projectId }) => get().subscribeOutput(serverId, projectId)),
+        ...tiles.map(({ projectId, key }) => openTail(serverId, projectId, state.tileOffsets[key])),
+      ].map(p => p.catch(err => console.error('[store] resubscribe failed:', serverId, err))));
+      // What the selected project waits on, from its state now and the lines replayed
+      set(state => {
+        const sel = state.selectedProject;
+        if (sel?.serverId !== serverId) return {};
+        const key = projectKey(serverId, sel.projectId);
+        const project = state.getConnection(serverId)?.projects.find(p => p.Id === sel.projectId);
+        return { question: heldQuestion(state.outputMessages, project, state.dismissedProjects[key], state.lastInputSentAt) };
+      });
+    };
+    let caughtUp: Promise<void> = Promise.resolve();
+
     conn.hub.setCallbacks({
       onStateChanged: (connectionState) => {
         updateConn({ connectionState });
+        if (connectionState === 'connected') caughtUp = catchUp();
         if (connectionState === 'connected') {
           // A reconnect may have missed pushes: take the whole list again
           conn.hub.getAttention()
@@ -566,7 +647,12 @@ export const useAppStore = create<AppState>((set, get) => ({
             const sel = state.selectedProject;
             if (sel?.serverId === serverId && sel.projectId === projectId) updates.outputMessages = transcript.messages;
           }
-          if (state.isTileView) updates.tileLoading = { ...state.tileLoading, [key]: false };
+          if (state.isTileView) {
+            updates.tileLoading = { ...state.tileLoading, [key]: false };
+            // A tail that replayed nothing resumes from the end of the file
+            const tileOffset = state.tileOffsets[key];
+            if (tileOffset !== undefined && tileOffset < offset) updates.tileOffsets = { ...state.tileOffsets, [key]: offset };
+          }
           return updates;
         });
       },
@@ -581,8 +667,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       const hubOptions = api.getHubOptions(serverId);
       console.info(`[store] connectServer: hub.connect(${hubUrl})...`);
       await conn.hub.connect(hubUrl, hubOptions);
-      console.info(`[store] connectServer: connected, refreshing projects...`);
-      await get().refreshProjects(serverId);
+      console.info(`[store] connectServer: connected, catching up...`);
+      await caughtUp;
       console.info(`[store] connectServer: ${serverId} ready`);
     } catch (err) {
       console.error(`[store] connectServer ${serverId} failed:`, err);
@@ -604,6 +690,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
         return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
       });
+    }
+  },
+
+  retryServers: () => {
+    for (const conn of get().serverConnections) {
+      if (conn.connectionState === 'reconnecting') conn.hub.retryNow();
+      // As loadServers' auto-connect: a stopped codespace needs starting first
+      else if (conn.connectionState === 'disconnected' && !(conn.serverInfo.Type === 'github' && conn.serverInfo.State === 'Stopped')) {
+        get().connectServer(conn.serverInfo.Id).catch(err => console.warn('[store] retry failed:', conn.serverInfo.Id, err));
+      }
     }
   },
 
@@ -663,29 +759,32 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   transcripts: {},
   subscribeOutput: async (serverId, projectId) => {
-    const hub = get().getHub(serverId);
-    if (!hub) return;
+    const conn = get().getConnection(serverId);
+    if (!conn) return;
     const key = projectKey(serverId, projectId);
     const held = get().transcripts[key] ?? { messages: [], offset: 0, phase: 'idle' };
     set(state => ({ transcripts: { ...state.transcripts, [key]: { ...held, phase: 'replaying' } } }));
-    await hub.subscribeProject(projectId, held.offset);
+    // Open now; subscribed when the server connects
+    if (conn.connectionState !== 'connected') return;
+    await conn.hub.subscribeProject(projectId, held.offset);
   },
   unsubscribeOutput: async (serverId, projectId) => {
     const key = projectKey(serverId, projectId);
     set(state => state.transcripts[key]
       ? { transcripts: { ...state.transcripts, [key]: { ...state.transcripts[key], phase: 'idle' } } }
       : {});
-    await get().getHub(serverId)?.unsubscribeProject(projectId);
+    await unsubscribe(serverId, projectId);
   },
-  subscribeTail: async (serverId, projectId, turns) => {
-    const hub = get().getHub(serverId);
-    if (!hub) return;
+  subscribeTail: (serverId, projectId, turns) => openTail(serverId, projectId, -turns),
+  unsubscribeTail: async (serverId, projectId) => {
     const key = projectKey(serverId, projectId);
-    set(state => ({
-      tileMessages: { ...state.tileMessages, [key]: [] },
-      tileLoading: { ...state.tileLoading, [key]: true },
-    }));
-    await hub.subscribeProject(projectId, -turns);
+    set(state => {
+      if (state.tileOffsets[key] === undefined) return {};
+      const tileOffsets = { ...state.tileOffsets };
+      delete tileOffsets[key];
+      return { tileOffsets };
+    });
+    await unsubscribe(serverId, projectId);
   },
   outputMessages: [],
   appendOutput: (_projectId, message) => set(state => ({ outputMessages: [...state.outputMessages, message] })),
@@ -721,11 +820,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Tile view ─────────────────────────────────────────────
 
   isTileView: false,
-  setTileView: (tile) => set({ isTileView: tile, tileMessages: {}, tileLoading: {}, selectedProject: null, outputMessages: [], question: emptyQuestion }),
+  setTileView: (tile) => set({ isTileView: tile, tileMessages: {}, tileLoading: {}, tileOffsets: {}, selectedProject: null, outputMessages: [], question: emptyQuestion }),
   tileMessages: {},
   tileLoading: {},
+  tileOffsets: {},
   setTileLoading: (key, loading) => set(state => ({ tileLoading: { ...state.tileLoading, [key]: loading } })),
-  clearTileMessages: () => set({ tileMessages: {}, tileLoading: {} }),
+  clearTileMessages: () => set({ tileMessages: {}, tileLoading: {}, tileOffsets: {} }),
 
   // ── UI pages ────────────────────────────────────────────────
 
@@ -746,4 +846,5 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem(`godmode-${flag.replace('feature', 'feature-').toLowerCase()}`, String(value));
     set({ [flag]: value });
   },
-}));
+  };
+});

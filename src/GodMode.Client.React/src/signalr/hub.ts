@@ -37,10 +37,20 @@ export interface HubCallbacks {
   onStateChanged?: (state: ConnectionState) => void;
 }
 
+/**
+ * How long to wait before each retry of a lost connection, by attempt; the last repeats for as long as
+ * it takes. A phone that sleeps loses its connection every time, so a retry never gives up.
+ */
+export const RETRY_DELAYS_MS = [0, 1000, 2000, 5000, 10000, 20000, 30000];
+
 export class GodModeHub {
   private connection: signalR.HubConnection | null = null;
   private callbacks: HubCallbacks = {};
   private _state: ConnectionState = 'disconnected';
+  /** Retries made since the connection was lost, the next one's timer, and whether one is running. */
+  private retries = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retrying = false;
 
   get state(): ConnectionState {
     return this._state;
@@ -65,11 +75,13 @@ export class GodModeHub {
       await this.disconnect();
     }
 
-    this.connection = new signalR.HubConnectionBuilder()
+    // No withAutomaticReconnect: its loop gives up, and cannot be told to retry now. A lost
+    // connection closes, and retry() starts the same connection again until it connects
+    const connection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, options)
-      .withAutomaticReconnect()
       .configureLogging(signalR.LogLevel.Warning)
       .build();
+    this.connection = connection;
 
     // Register server→client callbacks (IProjectHubClient)
     this.connection.on('OutputReceived', (projectId: string, offset: number, rawJson: string) => {
@@ -117,20 +129,59 @@ export class GodModeHub {
       this.callbacks.onProfilesChanged?.();
     });
 
-    this.connection.onreconnecting(() => this.setState('reconnecting'));
-    this.connection.onreconnected(() => this.setState('connected'));
-    this.connection.onclose(() => this.setState('disconnected'));
+    // Closed by disconnect(), the connection is no longer this.connection; else it was lost
+    connection.onclose(() => {
+      if (this.connection !== connection) return;
+      this.retries = 0;
+      this.setState('reconnecting');
+      this.scheduleRetry();
+    });
 
     this.setState('connecting');
-    await this.connection.start();
+    await connection.start();
     this.setState('connected');
   }
 
   async disconnect(): Promise<void> {
-    if (this.connection) {
-      await this.connection.stop();
+    const connection = this.connection;
+    if (connection) {
       this.connection = null;
+      this.cancelRetry();
+      await connection.stop();
       this.setState('disconnected');
+    }
+  }
+
+  /** Retries a lost connection now rather than when its wait is over: the page woke, or the network is back. */
+  retryNow() {
+    if (this._state !== 'reconnecting' || this.retrying) return;
+    this.cancelRetry();
+    void this.retry();
+  }
+
+  private scheduleRetry() {
+    const delay = RETRY_DELAYS_MS[Math.min(this.retries, RETRY_DELAYS_MS.length - 1)];
+    this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.retry(); }, delay);
+  }
+
+  private cancelRetry() {
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+  }
+
+  private async retry() {
+    const connection = this.connection;
+    if (!connection) return;
+    this.retrying = true;
+    this.retries++;
+    try {
+      await connection.start();
+      if (this.connection === connection) this.setState('connected');
+    } catch (err) {
+      console.warn(`[hub] retry ${this.retries} failed:`, err);
+      if (this.connection === connection) this.scheduleRetry();
+    } finally {
+      this.retrying = false;
     }
   }
 
