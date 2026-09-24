@@ -22,6 +22,12 @@ namespace GodMode.Shared.Models;
 /// <param name="PendingQuestion">The AskUserQuestion waiting for the user's answer, while the project is <see cref="ProjectState.WaitingInput"/> on it. Null otherwise.</param>
 /// <param name="LastError">Why the project is in <see cref="ProjectState.Error"/>: the last lines claude wrote to stderr before it exited, or an error result's text. Null otherwise.</param>
 /// <param name="PullRequest">The pull request the project's work became, as its root's <c>status</c> script last reported it. Null when there is none, or the root has no status script.</param>
+/// <param name="StateAtShutdown">
+/// What the project was doing when a server shutdown stopped it (<see cref="ProjectState.Running"/>,
+/// <see cref="ProjectState.WaitingInput"/> or <see cref="ProjectState.WaitingPermission"/>), so the next
+/// start carries on with it. Null when the project was not active then, was stopped by the user, or
+/// has been launched or resumed since.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -44,5 +50,6 @@ public record ProjectStatus(
     DateTime? LastResultAt = null,
     DateTime? QuestionAt = null,
     DateTime? SeenAt = null,
-    PullRequestStatus? PullRequest = null
+    PullRequestStatus? PullRequest = null,
+    ProjectState? StateAtShutdown = null
 );

@@ -98,6 +98,8 @@ Defines shared settings (prepare + delete scripts, environment, claude args, MCP
   "prepare": "scripts/prepare",
   "delete": "scripts/delete",
   "status": "scripts/status",
+  "resumeOnRestart": true,
+  "resumePrompt": "The GodMode server restarted and interrupted you. Continue where you left off.",
   "mcpServers": {
     "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
   }
@@ -124,7 +126,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 
 | Field | Merge Rule |
 |-------|-----------|
-| Scalars (description, nameTemplate, model, etc.) | Overlay replaces if present |
+| Scalars (description, nameTemplate, model, resumeOnRestart, resumePrompt, etc.) | Overlay replaces if present |
 | `environment` | Dictionary merge, overlay keys override |
 | `mcpServers` | Dictionary merge, overlay servers override by name |
 | `claudeArgs` | Concatenated (base + overlay) |
@@ -155,6 +157,8 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `nameTemplate` | Derive project name from inputs, e.g. `"issue_{issueNumber}"` |
 | `promptTemplate` | Derive initial prompt from inputs |
 | `scriptsCreateFolder` | If true, create scripts are responsible for creating the project directory |
+| `resumeOnRestart` | Whether a project that was active when the server stopped carries on when it starts again. Default `true`: see [Resuming after a restart](#resuming-after-a-restart) |
+| `resumePrompt` | What a project that was working when the server stopped is told when it is resumed. Default `"The GodMode server restarted and interrupted you. Continue where you left off."` |
 | `stripEnvVarProfile` | If true (`config.json` only), server env vars prefixed with the profile name reach sessions without the prefix: `MEGA_GITHUB_TOKEN` → `GITHUB_TOKEN` for profile `mega` |
 
 Script fields accept either a single string or a string array in JSON. Paths are relative to `.godmode-root/`.
@@ -226,6 +230,18 @@ or `{}` when there is no pull request. The result is `ProjectStatus.PullRequest`
 - A root without `status` runs nothing, and its projects have no `PullRequest`.
 
 `godmode-dev`'s `scripts/status.ps1` is an example using `gh pr view`. It prints `{}` only when there is no pull request (none for the branch, not a repository, a detached HEAD, `git` or `gh` not installed); any other `gh` failure, such as a network error, a rate limit or an expired login, exits non-zero, so the server keeps what it knew and keeps polling.
+
+### Resuming After a Restart
+
+When the server stops, it stops every project, and one that was `Running`, `WaitingInput` or `WaitingPermission` keeps that in `ProjectStatus.StateAtShutdown` (in `status.json`) beside `Stopped`. When it starts again, once it is listening and has recovered the projects, it carries on with them as the project's action says:
+
+- **Working** (`Running`, or `WaitingPermission`, whose prompt the shutdown denied): resumed with `--resume <session-id>`, launched as any resume is, and sent `resumePrompt` as its first input. Three are resumed at a time, each until claude reports `system/init`.
+- **Waiting on a question** (`WaitingInput`): no process is launched. The project is `WaitingInput` again with its `CurrentQuestion`, and still a `Question` in `GetAttention`, until a reply (`ReplyAndResume`) resumes it with the answer. An AskUserQuestion's options do not survive: the shutdown denied it, and what is left is its first question's text, answered in the chat.
+- **`resumeOnRestart: false`**: the project stays `Stopped`.
+
+A project the user stopped, or that was `Idle`, `Stopped` or `Error` when the server stopped, is not resumed. A resume that fails is `Error` with `LastError`, as any resume is (a root config the launch cannot use, a claude that exits at once), and is not tried again. Any launch clears `StateAtShutdown`, and so do a stop, an archive and an unarchive by the user. A project waiting its turn is decided when it comes: one the user has stopped, resumed or answered meanwhile is left as it is. A shutdown while the start is still resuming launches nothing more, and the projects not resumed yet keep their marker for the next start. The marker is only a field in `status.json`: a `status.json` restored from a backup or copied from another machine carries it, and that project is resumed on the next start.
+
+A Ctrl+C on a server run in a terminal reaches claude too, and claude may exit before the server's shutdown begins. An exit on its own no more than `ExitBeforeShutdownWindowSeconds` (default 5) before the shutdown, with nothing changed since, counts as stopped by it: the project keeps its question and is resumed like the rest. A server that is killed (no shutdown runs) leaves no `StateAtShutdown`, and its projects are recovered `Stopped`.
 
 ## Project Folder Structure
 

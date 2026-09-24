@@ -28,6 +28,12 @@ public sealed class ProjectLifecycle
 
     private volatile bool _shuttingDown;
 
+    /// <summary>Held from a launch's check for shutdown until its process is started: see <see cref="BeginShutdown"/>.</summary>
+    private readonly SemaphoreSlim _launchGate = new(1, 1);
+
+    /// <summary>How long <see cref="BeginShutdown"/> waits for a launch under way to have started its process.</summary>
+    private static readonly TimeSpan LaunchGateTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>Raised, on the project's consumer, when output takes a project to Idle. A handler must not wait for a Stop.</summary>
     public event Func<string, Task>? OnProjectCompleted;
 
@@ -48,16 +54,29 @@ public sealed class ProjectLifecycle
 
     // ── Process ──
 
-    public Task StartAsync(ProjectInfo project, string initialPrompt, ClaudeLaunchSpec launch)
-    {
-        var process = BeginLaunch(project);
-        return _processManager.StartClaudeProcessAsync(project, initialPrompt, process.Cancellation!.Token, launch.Environment, launch.Args);
-    }
+    public Task StartAsync(ProjectInfo project, string initialPrompt, ClaudeLaunchSpec launch) =>
+        LaunchAsync(project, cancel => _processManager.StartClaudeProcessAsync(project, initialPrompt, cancel, launch.Environment, launch.Args));
 
-    public Task ResumeAsync(ProjectInfo project, ClaudeLaunchSpec launch)
+    public Task ResumeAsync(ProjectInfo project, ClaudeLaunchSpec launch) =>
+        LaunchAsync(project, cancel => _processManager.ResumeClaudeProcessAsync(project, cancel, launch.Environment, launch.Args));
+
+    /// <summary>
+    /// Starts a process, unless the server is stopping (<see cref="ServerStoppingException"/>): one
+    /// started after the shutdown stopped the projects would outlive the server.
+    /// </summary>
+    private async Task LaunchAsync(ProjectInfo project, Func<CancellationToken, Task<int>> launch)
     {
-        var process = BeginLaunch(project);
-        return _processManager.ResumeClaudeProcessAsync(project, process.Cancellation!.Token, launch.Environment, launch.Args);
+        await _launchGate.WaitAsync();
+        try
+        {
+            if (_shuttingDown) throw new ServerStoppingException();
+            var process = BeginLaunch(project);
+            await launch(process.Cancellation!.Token);
+        }
+        finally
+        {
+            _launchGate.Release();
+        }
     }
 
     /// <summary>Replaces the previous launch's cancellation and makes sure output has its consumer.</summary>
@@ -79,9 +98,17 @@ public sealed class ProjectLifecycle
 
     /// <summary>
     /// The server is stopping: from now on a process that exits on its own went with it (a Ctrl+C
-    /// reaches claude too) and is Stopped, keeping its question, rather than failed.
+    /// reaches claude too) and is Stopped, keeping its question, rather than failed, and nothing is
+    /// launched. A launch under way is waited for, so its process is there for the shutdown to stop.
     /// </summary>
-    public void BeginShutdown() => _shuttingDown = true;
+    public void BeginShutdown()
+    {
+        var entered = _launchGate.Wait(LaunchGateTimeout);
+        _shuttingDown = true;
+        if (entered) _launchGate.Release();
+    }
+
+    public bool ShuttingDown => _shuttingDown;
 
     public bool IsRunning(ProjectInfo project) => _processManager.IsProcessRunning(project.Process.ProcessId);
 
@@ -90,17 +117,53 @@ public sealed class ProjectLifecycle
 
     /// <summary>
     /// Kills the process tree, then marks the project Stopped once every line it wrote has been
-    /// handled, so a result still queued cannot turn Stopped back into Idle.
+    /// handled, so a result still queued cannot turn Stopped back into Idle. A shutdown passes what
+    /// the project was doing (<see cref="ActiveState"/>), for the next start to carry on with; a
+    /// stop by the user passes nothing, and its project is not resumed.
     /// </summary>
-    public async Task StopAsync(ProjectInfo project)
+    public async Task StopAsync(ProjectInfo project, ProjectState? stateAtShutdown = null)
     {
         await KillAsync(project);
         project.Process.DenyAllPending(StoppedMessage);
         await InOrderAsync(project, () => SetStatusAsync(project, status => WithoutPending(status) with
         {
             State = ProjectState.Stopped,
+            StateAtShutdown = stateAtShutdown,
             UpdatedAt = DateTime.UtcNow
         }));
+    }
+
+    /// <summary>The state itself when it is one a restart carries on with (claude was working, or waiting on the user); null otherwise.</summary>
+    public static ProjectState? ActiveState(ProjectState state) =>
+        state is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission ? state : null;
+
+    /// <summary>
+    /// A Ctrl+C on a server run in a terminal reaches claude too, and claude can exit, and its exit
+    /// be handled (Error, or Stopped without its question), before the server's shutdown begins.
+    /// An exit on its own no more than <paramref name="window"/> before the shutdown, with nothing
+    /// changed since, is taken for that: the project is Stopped as the shutdown would have left it,
+    /// its question and what it was doing restored. True when it was.
+    /// </summary>
+    public async Task<bool> UndoExitBeforeShutdownAsync(ProjectInfo project, TimeSpan window)
+    {
+        var undone = false;
+        await WithStateLockAsync(project, async () =>
+        {
+            if (project.Process.LastExit is not { } exit || !ReferenceEquals(exit.After, project.Status)
+                || DateTime.UtcNow - exit.At > window || ActiveState(exit.Before.State) is not { } active)
+                return;
+            project.Process.LastExit = null;
+            await SetStatusAsync(project, status => status with
+            {
+                State = ProjectState.Stopped,
+                StateAtShutdown = active,
+                CurrentQuestion = exit.Before.CurrentQuestion,
+                LastError = null,
+                UpdatedAt = DateTime.UtcNow
+            });
+            undone = true;
+        });
+        return undone;
     }
 
     /// <summary>What a permission prompt still waiting when its session ends is answered with.</summary>
@@ -336,7 +399,8 @@ public sealed class ProjectLifecycle
                 project.Process.DenyAllPending(StoppedMessage);
 
                 var shuttingDown = _shuttingDown;
-                var finished = shuttingDown || exit.ExitCode == 0 && project.Status.State is ProjectState.Idle or ProjectState.WaitingInput;
+                var before = project.Status;
+                var finished = shuttingDown || exit.ExitCode == 0 && before.State is ProjectState.Idle or ProjectState.WaitingInput;
                 await SetStatusAsync(project, status => WithoutPending(status) with
                 {
                     State = finished ? ProjectState.Stopped : ProjectState.Error,
@@ -344,6 +408,8 @@ public sealed class ProjectLifecycle
                     LastError = finished ? null : exit.Stderr ?? $"claude exited with code {exit.ExitCode}",
                     UpdatedAt = DateTime.UtcNow
                 });
+                // A shutdown that follows at once may take it back: see UndoExitBeforeShutdownAsync
+                project.Process.LastExit = shuttingDown ? null : new ExitOnItsOwn(DateTime.UtcNow, before, project.Status);
                 changed = true;
             });
         }

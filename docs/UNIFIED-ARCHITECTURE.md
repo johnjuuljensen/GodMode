@@ -208,7 +208,7 @@ A root is a subdirectory of `ProjectRootsDir` that contains `.godmode-root/`. Th
 ```
 root-name/
 ├── .godmode-root/
-│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, mcpServers)
+│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, mcpServers, resumeOnRestart, resumePrompt)
 │   ├── config.{action}.json       # Per-action overlays (merged with base)
 │   ├── {action}/
 │   │   ├── schema.json            # Input form schema (JSON Schema)
@@ -227,6 +227,8 @@ root-name/
 **MCP server merge order**: Profile → Root → Action (three layers, later wins on conflict).
 
 **Pull request status**: a root's optional `status` script prints the project's pull request as JSON (`{"pullRequest": {url, number, state, review}}`, or `{}`), and the server keeps it in `ProjectStatus.PullRequest` in `status.json`. It runs on each transition to Idle or Stopped and, while the pull request is open, every 10 minutes. Only that schedule is in memory. The server parses the output strictly and knows nothing of the VCS.
+
+**Resuming after a restart**: the shutdown records what an active project was doing in `ProjectStatus.StateAtShutdown` (`status.json`). After recovery, once the server listens, a project that was working (`Running`, or `WaitingPermission`, whose prompt the shutdown denied) is resumed and sent the action's `resumePrompt`, three at a time; one waiting on a question is `WaitingInput` again without a process, until a reply resumes it, so nothing answers it for the user. `resumeOnRestart: false` keeps it `Stopped`. A user stop, and any launch, clear the marker. The server README has the details.
 
 Key services:
 - `RootConfigReader` — discovers and merges configs fresh on each operation (no caching, no restart needed)
