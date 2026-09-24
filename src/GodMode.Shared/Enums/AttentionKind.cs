@@ -20,6 +20,13 @@ public enum AttentionKind
     Error,
 
     /// <summary>
+    /// A reviewer asked for changes on the project's open pull request (<see cref="Models.ProjectStatus.PullRequest"/>),
+    /// and the project is Idle or Stopped. Cleared by <see cref="Hubs.IProjectHub.MarkSeen"/> and by any reply,
+    /// until the pull request changes again.
+    /// </summary>
+    Review,
+
+    /// <summary>
     /// The turn ended with a result the user has not seen (<see cref="Models.ProjectStatus.LastResult"/>),
     /// and the project is Idle or Stopped. Cleared by <see cref="Hubs.IProjectHub.MarkSeen"/> and by any reply.
     /// </summary>
