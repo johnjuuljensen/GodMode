@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '../../store';
 import type { ProjectRootInfo } from '../../signalr/types';
+import { askConfirm } from '../../confirmDialog';
 import '../settings-common.css';
 import './CreateProject.css';
 
@@ -143,11 +144,17 @@ export function CreateProject() {
       const msg = err instanceof Error ? err.message : 'Failed to create project';
       if (msg.includes('FOLDER_EXISTS:')) {
         // Project folder already exists — ask user what to do
-        const choice = confirm(
-          'A project with this name already exists.\n\nOK = Reuse existing folder\nCancel = Create new with suffix (_2, _3, ...)'
-        );
+        const choice = await askConfirm({
+          title: 'A project with this name already exists',
+          message: 'Reuse its folder, or create a new folder with a suffix (_2, _3, ...)?',
+          choices: [
+            { label: 'New folder', value: 'suffix', tone: 'secondary' },
+            { label: 'Reuse folder', value: 'reuse' },
+          ],
+        });
+        if (choice === null) return;
         try {
-          if (choice) {
+          if (choice === 'reuse') {
             inputs.__reuseExisting = true;
           } else {
             inputs.__autoSuffix = true;

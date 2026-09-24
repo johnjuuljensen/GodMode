@@ -3,6 +3,7 @@ import { useAppStore, transcriptKey } from '../../store';
 import { ChatMessage } from './ChatMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
+import { confirmAction } from '../../confirmDialog';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
@@ -152,7 +153,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   }, [dismissQuestion]);
 
   const handleStop = async () => {
-    if (!hub) return;
+    // A stray tap on the status pill must never end a session
+    if (!hub || !await confirmAction(`Stop "${projectName}"?`, 'Stop', { message: 'Claude stops mid-turn. Sending a message resumes it.', tone: 'danger' })) return;
     try { await hub.stopProject(projectId); } catch (err) { console.error(err); }
   };
 
@@ -180,8 +182,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   };
 
   const handleDelete = async () => {
-    if (!hub || !confirm(`Permanently delete project "${projectName}"? This cannot be undone.`)) return;
     setShowProjectMenu(false);
+    if (!hub || !await confirmAction(`Delete "${projectName}" permanently?`, 'Delete', { message: 'This cannot be undone.', tone: 'danger' })) return;
     try { await hub.deleteProject(projectId, state === 'Running'); } catch (err) { console.error(err); }
   };
 

@@ -50,7 +50,7 @@
   --radius:           8px;
   --radius-lg:        12px;
   --radius-xl:        14px;
-  --font-sans:        'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans:        'DM Sans Variable', 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono:        'DM Mono', 'Cascadia Code', 'Fira Code', monospace;
 }
 
@@ -109,6 +109,7 @@ body {
   color: var(--text-primary);
   overflow: hidden;
   height: 100vh;
+  height: 100dvh;
   position: relative;
 }
 
@@ -137,6 +138,7 @@ body::after {
 
 #root {
   height: 100vh;
+  height: 100dvh;
   position: relative;
   z-index: 1;
 }
@@ -145,6 +147,7 @@ body::after {
 .shell {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   background: transparent;
 }
 
@@ -245,6 +248,15 @@ body::after {
   overflow: hidden;
 }
 
+/* Notches and the gesture bar: the list's header and the chat's input bar clear them too */
+.shell.shell-mobile > .sidebar > .sidebar-header {
+  padding-top: calc(14px + env(safe-area-inset-top));
+}
+
+.shell-mobile-project .project-input-bar {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
 .shell-mobile-tiles {
   display: flex;
   flex-direction: column;
@@ -278,6 +290,68 @@ body::after {
 @media (max-width: 768px) {
   .page-body {
     padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .page-view > .page-back-bar {
+    padding-top: calc(8px + env(safe-area-inset-top));
+  }
+}
+
+/* ── Touch targets: 44px minimum on narrow screens ──
+   Laptop sizes are untouched; only the phone layout grows its controls. */
+@media (max-width: 768px) {
+  .btn,
+  .btn-sm,
+  .question-dismiss,
+  .server-action-btn,
+  .root-action-btn,
+  .sidebar-add-btn,
+  .sidebar-settings-btn,
+  .sidebar-footer-menu-item,
+  .sidebar-sort-bar,
+  .sidebar-profile-filter,
+  .project-detail-btn,
+  .archived-restore-btn,
+  .archived-toggle,
+  .project-status-btn,
+  .project-menu-item,
+  .delete-btn,
+  .settings-add-btn,
+  .form-group select,
+  .form-group input:not([type="checkbox"]):not([type="radio"]) {
+    min-height: 44px;
+  }
+
+  /* Square icon buttons grow both ways */
+  .question-dismiss,
+  .server-action-btn,
+  .root-action-btn,
+  .sidebar-add-btn,
+  .project-detail-btn,
+  .archived-restore-btn,
+  .delete-btn {
+    min-width: 44px;
+  }
+
+  .btn-sm {
+    font-size: 13px;
+    padding: 6px 14px;
+  }
+
+  /* The input bar pins Send to its own height; the phone rule wins */
+  .project-input-bar > .btn {
+    min-height: 44px;
+  }
+}
+
+/* No hover on touch: show the actions that otherwise appear on hover */
+@media (hover: none) {
+  .server-actions,
+  .root-action-btn,
+  .project-detail-btn,
+  .archived-restore-btn {
+    opacity: 1;
   }
 }
 

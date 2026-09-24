@@ -79,6 +79,20 @@ public partial class MainPage : ContentPage
 #endif
     }
 
+    // Android back walks the client's history, where each screen is an entry. With none left
+    // the default runs, which leaves the app.
+    protected override bool OnBackButtonPressed()
+    {
+#if ANDROID
+        if (WebView.Handler?.PlatformView is Android.Webkit.WebView webView && webView.CanGoBack())
+        {
+            webView.EvaluateJavascript("history.back()", null);
+            return true;
+        }
+#endif
+        return base.OnBackButtonPressed();
+    }
+
     public static void OpenDevTools()
     {
 #if WINDOWS

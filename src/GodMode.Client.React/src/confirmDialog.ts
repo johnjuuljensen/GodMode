@@ -1,4 +1,4 @@
-// In-app replacement for window.confirm(), which MAUI's WebView does not show.
+// In-app replacement for the browser's confirm dialog, which MAUI's WebView does not show.
 // `askConfirm` opens the dialog that <ConfirmDialog /> (mounted once, in the Shell) renders,
 // and resolves with the value of the choice tapped, or null when it is dismissed.
 
