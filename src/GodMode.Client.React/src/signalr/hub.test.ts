@@ -26,9 +26,14 @@ class FakeConnection {
   onclose(cb: Callback) { this.closed.push(cb); }
   onreconnecting(cb: Callback) { this.reconnecting.push(cb); }
   onreconnected(cb: Callback) { this.reconnected.push(cb); }
+  /** When set, start() waits until hung() is called, then fails: a request the network holds. */
+  hang = false;
+  hung: () => void = () => {};
   async start() {
     this.starts.push(Date.now());
-    if (this.offline) throw new Error('offline');
+    const hanging = this.hang;
+    if (hanging) await new Promise<void>(resolve => { this.hung = resolve; });
+    if (this.offline || hanging) throw new Error('offline');
   }
   async stop() { this.closed.forEach(cb => cb()); }
 
@@ -118,6 +123,23 @@ describe('a lost connection', () => {
     const attempts = conn.starts.length;
     conn.offline = false;
     hub.retryNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(conn.starts.length).toBe(attempts + 1);
+    expect(hub.state).toBe('connected');
+  });
+
+  it('asked to retry during an attempt that hangs, retries at once when that attempt fails', async () => {
+    conn.drop();
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    conn.hang = true;
+    await vi.advanceTimersByTimeAsync(30_000);
+    const attempts = conn.starts.length;
+    hub.retryNow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(conn.starts.length).toBe(attempts);
+    conn.hang = false;
+    conn.offline = false;
+    conn.hung();
     await vi.advanceTimersByTimeAsync(0);
     expect(conn.starts.length).toBe(attempts + 1);
     expect(hub.state).toBe('connected');

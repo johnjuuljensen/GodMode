@@ -51,6 +51,7 @@ export class GodModeHub {
   private retries = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private retrying = false;
+  private retryWanted = false;
 
   get state(): ConnectionState {
     return this._state;
@@ -133,6 +134,7 @@ export class GodModeHub {
     connection.onclose(() => {
       if (this.connection !== connection) return;
       this.retries = 0;
+      this.retryWanted = false;
       this.setState('reconnecting');
       this.scheduleRetry();
     });
@@ -154,13 +156,16 @@ export class GodModeHub {
 
   /** Retries a lost connection now rather than when its wait is over: the page woke, or the network is back. */
   retryNow() {
-    if (this._state !== 'reconnecting' || this.retrying) return;
+    if (this._state !== 'reconnecting') return;
+    // An attempt made before the page slept can hang until the network gives up on it: the next one is at once
+    if (this.retrying) { this.retryWanted = true; return; }
     this.cancelRetry();
     void this.retry();
   }
 
   private scheduleRetry() {
-    const delay = RETRY_DELAYS_MS[Math.min(this.retries, RETRY_DELAYS_MS.length - 1)];
+    const delay = this.retryWanted ? 0 : RETRY_DELAYS_MS[Math.min(this.retries, RETRY_DELAYS_MS.length - 1)];
+    this.retryWanted = false;
     this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.retry(); }, delay);
   }
 
