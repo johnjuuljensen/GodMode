@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.Internal;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using GodMode.Server.Models;
@@ -196,6 +198,7 @@ public class ProjectCreationFromFilesTests
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
         services.AddSingleton<ProfileFileManager>();
+        services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();
     }
@@ -219,8 +222,6 @@ public class ProjectCreationFromFilesTests
     private sealed class RecordingProcessManager : IClaudeProcessManager
     {
         public List<(Dictionary<string, string>? Env, string[]? Args)> Launches { get; } = [];
-
-        public event ProcessExitedHandler? OnProcessExited { add { } remove { } }
 
         public Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
             Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null) => Record(extraEnvironment, extraArgs);

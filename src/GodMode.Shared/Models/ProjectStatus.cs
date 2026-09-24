@@ -18,6 +18,7 @@ namespace GodMode.Shared.Models;
 /// <param name="RootName">The name of the project root this project belongs to.</param>
 /// <param name="Model">The Claude model the session was started with. Used on resume so the session keeps running on the same model regardless of the current root config or machine default.</param>
 /// <param name="RepoUrl">Deprecated. Kept for backward compatibility with existing status.json files on disk.</param>
+/// <param name="LastError">Why the project is in <see cref="ProjectState.Error"/>: the last lines claude wrote to stderr before it exited, or an error result's text. Null otherwise.</param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -32,5 +33,6 @@ public record ProjectStatus(
     string? RootName = null,
     string? ProfileName = null,
     string? RepoUrl = null,
-    string? Model = null
+    string? Model = null,
+    string? LastError = null
 );

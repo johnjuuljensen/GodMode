@@ -55,6 +55,8 @@ export interface ProjectStatus {
   OutputOffset: number;
   RootName?: string | null;
   ProfileName?: string | null;
+  /** Why the project is in Error: claude's last stderr lines before it exited, or an error result's text. */
+  LastError?: string | null;
 }
 
 export interface ProfileInfo {

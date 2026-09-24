@@ -9,14 +9,16 @@ namespace GodMode.Server.Models;
 /// </summary>
 public sealed class ProjectProcess
 {
-    private readonly Channel<string> _output = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<PipelineItem> _output = Channel.CreateUnbounded<PipelineItem>(new UnboundedChannelOptions { SingleReader = true });
     private readonly object _gate = new();
+    private int _processId;
 
     /// <summary>
     /// Every line claude writes to stdout, plus the stderr errors surfaced to the UI, in the order
-    /// they arrived. The process's pipe handlers only write here; the one consumer does the rest.
+    /// they arrived, then the process's exit. The process's pipe handlers only write here; the one
+    /// consumer does the rest.
     /// </summary>
-    public ChannelWriter<string> Output => _output.Writer;
+    public ChannelWriter<PipelineItem> Output => _output.Writer;
 
     /// <summary>Serialises writes to claude's stdin, so two sends cannot mix their JSON lines.</summary>
     public SemaphoreSlim StdinLock { get; } = new(1, 1);
@@ -27,7 +29,16 @@ public sealed class ProjectProcess
     /// </summary>
     public SemaphoreSlim StateLock { get; } = new(1, 1);
 
-    public int ProcessId { get; set; }
+    /// <summary>The live claude process, 0 when there is none. Kept by the process manager.</summary>
+    public int ProcessId
+    {
+        get => Volatile.Read(ref _processId);
+        set => Volatile.Write(ref _processId, value);
+    }
+
+    /// <summary>Clears <see cref="ProcessId"/> if it is still <paramref name="processId"/>, not a later launch.</summary>
+    public void ClearProcessId(int processId) => Interlocked.CompareExchange(ref _processId, 0, processId);
+
     public CancellationTokenSource? Cancellation { get; set; }
 
     /// <summary>
@@ -41,13 +52,13 @@ public sealed class ProjectProcess
     private Task? _consumer;
 
     /// <summary>Starts the one consumer of <see cref="Output"/>, unless it is already running.</summary>
-    public void EnsureConsumer(Func<ChannelReader<string>, Task> consume)
+    public void EnsureConsumer(Func<ChannelReader<PipelineItem>, Task> consume)
     {
         lock (_gate)
             _consumer ??= Task.Run(() => consume(_output.Reader));
     }
 
-    /// <summary>Closes the pipeline and waits for the consumer to finish the lines already in it.</summary>
+    /// <summary>Closes the pipeline and waits for the consumer to finish the items already in it.</summary>
     public async Task CloseAsync()
     {
         _output.Writer.TryComplete();
@@ -56,3 +67,22 @@ public sealed class ProjectProcess
         if (consumer != null) await consumer;
     }
 }
+
+/// <summary>One item on a project's output pipeline, handled by its consumer in the order written.</summary>
+public abstract record PipelineItem
+{
+    /// <summary>A line claude wrote to stdout, or a stderr error line surfaced to the UI.</summary>
+    public sealed record Line(string Json) : PipelineItem;
+
+    /// <summary>The process ended. Written after both of its pipes closed, so after every line it wrote.</summary>
+    public sealed record Exited(ProcessExit Exit) : PipelineItem;
+
+    /// <summary>A status change that must come after everything queued before it; <paramref name="Done"/> completes once it has run.</summary>
+    public sealed record InOrder(Func<Task> Change, TaskCompletionSource Done) : PipelineItem;
+}
+
+/// <param name="ProcessId">The process that exited.</param>
+/// <param name="ExitCode">Its exit code.</param>
+/// <param name="Killed">The server killed it (Stop, shutdown, a relaunch), which then decides the project's state.</param>
+/// <param name="Stderr">The last lines it wrote to stderr, oldest first; null if it wrote none.</param>
+public sealed record ProcessExit(int ProcessId, int ExitCode, bool Killed, string? Stderr);
