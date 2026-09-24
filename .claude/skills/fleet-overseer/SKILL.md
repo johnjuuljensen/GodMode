@@ -317,12 +317,14 @@ runs in its own worktree as part of writing the code:
 cd src/GodMode.Client.React; npm ci; cd ../..   # the server build runs `npm run build` but never installs
 dotnet build GodMode.slnx                         # also builds the React client into the server's wwwroot
 dotnet test GodMode.slnx --no-build
-cd src/GodMode.Client.React; npm run lint
+cd src/GodMode.Client.React; npm run lint; npm test
 ```
 
-**`master` is not green on this gate**, so "green" means **no new failures against the base**. On
-2026-09-23 `origin/master` had one build error (`MCPEXP002` in `GodMode.Mcp`, a project epic #148 removes) and ten
-lint errors in `src/GodMode.Client.React`, with every test passing. A body states the base's numbers
+**The base is not green on this gate**, so "green" means **no new failures against the base**. On
+2026-09-24 the epic #168 branch (`41d60c4`) built with 0 errors, passed all 278 `GodMode.Server.Tests`,
+and had 7 errors and 2 warnings from `npm run lint` in `src/GodMode.Client.React`. `npm test` (Vitest,
+added by #169) had 14 tests, all passing. A build under load can print MSBuild `PLUGIN_TIMINGS`
+warnings; they are about the machine, not the code. A body states the base's numbers
 next to its own. A pull request that removes a baseline failure says so. One that adds a failure is
 red, whatever else the gate shows.
 

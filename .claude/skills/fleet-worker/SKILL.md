@@ -34,12 +34,14 @@ state lives; the user tracks by issue.
    cd src/GodMode.Client.React; npm ci; cd ../..   # the server build runs `npm run build` but never installs
    dotnet build GodMode.slnx                         # also builds the React client into the server's wwwroot
    dotnet test GodMode.slnx --no-build
-   cd src/GodMode.Client.React; npm run lint
+   cd src/GodMode.Client.React; npm run lint; npm test
    ```
 
    Ready means done, and it is the only signal that says so. **Green means no new failures against
-   your base.** `master` is not clean today: on 2026-09-23 it had one build error (`MCPEXP002` in
-   `GodMode.Mcp`, a project epic #148 removes) and ten lint errors in the React client, with every test passing.
+   your base.** The base is not clean: on 2026-09-24 the epic #168 branch (`41d60c4`) built with 0
+   errors, passed all 278 `GodMode.Server.Tests`, and had 7 errors and 2 warnings from `npm run lint`
+   in the React client. `npm test` (Vitest, added by #169) had 14 tests, all passing. A build under
+   load can print MSBuild `PLUGIN_TIMINGS` warnings; they are about the machine, not the code.
    Your brief gives your base's numbers; if it does not, measure them once in a detached checkout
    (`git worktree add --detach <scratch dir> $env:AC_GWT_BASE_BRANCH`, then `git worktree remove` it)
    rather than by stashing — the stash is shared by every worktree. Do not add to them.
@@ -138,7 +140,7 @@ it.
 | the fix changed | run |
 |---|---|
 | only `*.md` | nothing |
-| code inside `src/GodMode.Client.React` only | `npm run build` and `npm run lint` there |
+| code inside `src/GodMode.Client.React` only | `npm run build`, `npm run lint` and `npm test` there |
 | code inside one .NET project, no change to its public types | `dotnet build` that project, then `dotnet test tests/GodMode.Server.Tests` (or the test project that covers it) |
 | `GodMode.Shared`, a hub contract, a `.csproj`, `Directory.*.props`, `GodMode.slnx`, or more than one project | the full gate again |
 
