@@ -21,10 +21,8 @@ vi.mock('../../services/hostApi', () => ({
 }));
 
 class InboxHub extends FakeHub {
-  attention: AttentionItem[] = [];
   decisions: { projectId: string; requestId: string; decision: PermissionDecision }[] = [];
   seen: string[] = [];
-  async getAttention() { return this.attention; }
   async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision) {
     this.decisions.push({ projectId, requestId, decision });
   }
@@ -50,15 +48,16 @@ beforeEach(async () => {
   useAppStore.setState(initialState, true);
   hubA = new InboxHub([], []);
   hubB = new InboxHub([], []);
-  hubA.attention = [
-    item('p1', 'Question', '2026-09-24T10:00:00Z'),
-    item('p2', 'Permission', '2026-09-24T11:00:00Z', {
-      Permission: { RequestId: 'r1', ToolName: 'Bash', Input: {}, Summary: 'Bash: git push', RequestedAt: '2026-09-24T11:00:00Z' },
-    }),
-  ];
-  hubB.attention = [item('p1', 'Finished', '2026-09-24T09:00:00Z', { PullRequestUrl: 'https://example.test/pr/1' })];
   await connectServers({ A: hubA, B: hubB });
-  await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+  await act(async () => {
+    hubA.callbacks.onAttentionChanged?.([
+      item('p1', 'Question', '2026-09-24T10:00:00Z'),
+      item('p2', 'Permission', '2026-09-24T11:00:00Z', {
+        Permission: { RequestId: 'r1', ToolName: 'Bash', Input: {}, Summary: 'Bash: git push', RequestedAt: '2026-09-24T11:00:00Z' },
+      }),
+    ]);
+    hubB.callbacks.onAttentionChanged?.([item('p1', 'Finished', '2026-09-24T09:00:00Z', { PullRequestUrl: 'https://example.test/pr/1' })]);
+  });
   view = await render(<Inbox variant="screen" />);
 });
 
