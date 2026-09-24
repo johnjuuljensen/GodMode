@@ -63,51 +63,17 @@ public sealed class ServerRegistryTests : IDisposable
     }
 
     [Fact]
-    public async Task Older_file_is_upgraded_ids_urls_and_tokens_moved_to_secure_storage()
+    public async Task Server_whose_token_secure_storage_refuses_is_not_added_and_its_token_never_reaches_the_file()
     {
-        await File.WriteAllTextAsync(ServersFile, """
-            {
-              "Servers": [
-                { "Type": "local", "Url": "http://localhost:31337/", "Token": "plain:local-key", "DisplayName": "One" },
-                { "Type": "local", "Url": "http://localhost:31338", "DisplayName": "Two" },
-                { "Type": "github", "Username": "octo", "Token": "plain:plain:ghp_double" }
-              ]
-            }
-            """);
-
-        var servers = await new ServerRegistryService(_dataDir, _secrets).GetServersAsync();
-
-        Assert.Equal(3, servers.Select(s => s.Id).Distinct().Count());
-        Assert.Equal(["http://localhost:31337"], servers[0].Urls);
-        Assert.Equal(["http://localhost:31338"], servers[1].Urls);
-        Assert.All(servers, s => Assert.Null(s.Token));
-        var registry = new ServerRegistryService(_dataDir, _secrets);
-        Assert.Equal("local-key", await registry.GetAccessTokenAsync(servers[0].Id));
-        Assert.Null(await registry.GetAccessTokenAsync(servers[1].Id));
-        Assert.Equal("ghp_double", await registry.GetAccessTokenAsync(servers[2].Id));
-
-        var file = await File.ReadAllTextAsync(ServersFile);
-        Assert.DoesNotContain("local-key", file);
-        Assert.DoesNotContain("ghp_double", file);
-        Assert.DoesNotContain("\"Url\"", file);
-
-        var reloaded = await new ServerRegistryService(_dataDir, _secrets).GetServersAsync();
-        Assert.Equal(servers.Select(s => s.Id), reloaded.Select(s => s.Id));
-    }
-
-    [Fact]
-    public async Task Token_that_cannot_be_moved_to_secure_storage_stays_in_the_file()
-    {
-        await File.WriteAllTextAsync(ServersFile, """
-            { "Servers": [ { "Type": "github", "Username": "octo", "Token": "plain:ghp_keep" } ] }
-            """);
         var registry = new ServerRegistryService(_dataDir, new FailingSecretStore());
+        var keyless = await registry.AddServerAsync(new ServerRegistration { Urls = ["http://keyless"] }, null);
 
-        var server = Assert.Single(await registry.GetServersAsync());
+        var error = await Record.ExceptionAsync(() =>
+            registry.AddServerAsync(new ServerRegistration { Type = ServerTypes.GitHub, Username = "octo" }, "ghp_refused"));
 
-        Assert.NotEmpty(server.Id);
-        Assert.Equal("ghp_keep", await registry.GetAccessTokenAsync(server.Id));
-        Assert.Contains("ghp_keep", await File.ReadAllTextAsync(ServersFile));
+        Assert.DoesNotContain("ghp_refused", await File.ReadAllTextAsync(ServersFile));
+        Assert.Contains("secure storage", Assert.IsType<InvalidOperationException>(error).Message);
+        Assert.Equal([keyless.Id], (await new ServerRegistryService(_dataDir, _secrets).GetServersAsync()).Select(s => s.Id));
     }
 
     private sealed class FailingSecretStore : ISecretStore
