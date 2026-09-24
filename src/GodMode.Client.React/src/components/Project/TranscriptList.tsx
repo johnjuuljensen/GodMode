@@ -6,11 +6,15 @@ import './Transcript.css';
 
 interface Props {
   items: TranscriptItem[];
+  /** The server is still replaying the transcript's history: it opens at the end of that history */
+  replaying: boolean;
 }
 
 const Spacer = () => <div className="transcript-spacer" />;
 const components = { Header: Spacer, Footer: Spacer };
 const itemKey = (_: number, item: TranscriptItem) => item.key;
+const followAlways = () => 'auto' as const;
+const followAtBottom = (atBottom: boolean) => (atBottom ? 'auto' as const : false);
 
 /**
  * A project's transcript, virtualized: only the rows near the viewport are in the DOM. It opens at
@@ -21,7 +25,7 @@ const itemKey = (_: number, item: TranscriptItem) => item.key;
  * `scrollToIndex({ index: 'LAST' })` for that button, and `followOutput` decides whether new items
  * scroll the list. Remount it (a `key`) for each project.
  */
-export function TranscriptList({ items }: Props) {
+export function TranscriptList({ items, replaying }: Props) {
   // Open rows by item key: kept here, not in the row, so a row scrolled away and back stays open
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((key: string) => setExpanded(prev => {
@@ -49,8 +53,9 @@ export function TranscriptList({ items }: Props) {
       itemContent={renderItem}
       components={components}
       initialTopMostItemIndex={{ index: 'LAST', align: 'end' }}
-      // Only while the reader is at the bottom: new output never pulls them away from what they read
-      followOutput="auto"
+      // New output follows only while the reader is at the bottom, so it never pulls them away from
+      // what they read. A replay's batches are the history the list opened on, and always follow
+      followOutput={replaying ? followAlways : followAtBottom}
       increaseViewportBy={{ top: 600, bottom: 600 }}
     />
   );
