@@ -3,8 +3,6 @@ import { useAppStore } from '../../store';
 import { DeleteConfirm } from '../settings-shared';
 import '../settings-common.css';
 
-const refresh = () => useAppStore.getState().refreshFirstConnected();
-
 const BackArrow = () => (
   <svg width={16} height={16} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"><path d="M10 4L6 8l4 4"/></svg>
 );
@@ -14,9 +12,13 @@ type View = 'list' | 'create';
 export function ProfileSettings() {
   const serverConnections = useAppStore(s => s.serverConnections);
 
-  const conn = serverConnections.find(c => c.connectionState === 'connected');
+  // Profiles are per server: pick one when more than one is connected
+  const connectedServers = serverConnections.filter(c => c.connectionState === 'connected');
+  const [selectedServerId, setSelectedServerId] = useState('');
+  const conn = connectedServers.find(c => c.serverInfo.Id === selectedServerId) ?? connectedServers[0];
   const hub = conn?.hub;
   const profiles = conn?.profiles ?? [];
+  const refresh = () => conn ? useAppStore.getState().refreshProjects(conn.serverInfo.Id) : Promise.resolve();
 
   const [view, setView] = useState<View>('list');
   const [newName, setNewName] = useState('');
@@ -59,7 +61,7 @@ export function ProfileSettings() {
         <div className="settings-header">
           <button className="settings-back-link" onClick={goList}><BackArrow /> Profiles</button>
         </div>
-        <div className="settings-header"><h2>New Profile</h2></div>
+        <div className="settings-header"><h2>New Profile{connectedServers.length > 1 && conn ? ` on ${conn.serverInfo.Name}` : ''}</h2></div>
         {error && <div className="settings-error">{error}</div>}
         <div className="form-group">
           <label>Name</label>
@@ -85,6 +87,19 @@ export function ProfileSettings() {
           <span className="plus">+</span> Add
         </button>
       </div>
+
+      {connectedServers.length > 1 && (
+        <div className="form-group">
+          <label>Server</label>
+          <select value={conn?.serverInfo.Id} onChange={e => setSelectedServerId(e.target.value)}>
+            {connectedServers.map(c => (
+              <option key={c.serverInfo.Id} value={c.serverInfo.Id}>
+                {c.serverInfo.Name || c.serverInfo.Url}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {error && <div className="settings-error">{error}</div>}
 

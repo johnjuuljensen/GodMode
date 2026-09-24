@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useAppStore, TILE_TAIL_TURNS } from '../../store';
+import { useAppStore, TILE_TAIL_TURNS, projectKey } from '../../store';
 import { ProjectTile } from './ProjectTile';
 import './TileGrid.css';
 
@@ -21,7 +21,7 @@ export function TileGrid() {
     for (const conn of serverConnections) {
       if (conn.connectionState !== 'connected') continue;
       for (const project of conn.projects) {
-        if (!subscribedRef.current.has(project.Id)) {
+        if (!subscribedRef.current.has(projectKey(conn.serverInfo.Id, project.Id))) {
           toSubscribe.push({ serverId: conn.serverInfo.Id, projectId: project.Id });
         }
       }
@@ -29,14 +29,14 @@ export function TileGrid() {
 
     const newSubscribed = new Set<string>();
     for (const { serverId, projectId } of toSubscribe) {
-      newSubscribed.add(projectId);
+      newSubscribed.add(projectKey(serverId, projectId));
       // Tail mode: only the last turns; loading ends with the server's replay-complete
       subscribeTail(serverId, projectId, TILE_TAIL_TURNS).catch(console.error);
     }
 
     for (const conn of serverConnections) {
       if (conn.connectionState !== 'connected') continue;
-      for (const p of conn.projects) newSubscribed.add(p.Id);
+      for (const p of conn.projects) newSubscribed.add(projectKey(conn.serverInfo.Id, p.Id));
     }
     subscribedRef.current = newSubscribed;
 
@@ -72,10 +72,11 @@ export function TileGrid() {
       <div className="tile-grid">
         {allProjects.map(({ serverId, project }) => (
           <ProjectTile
-            key={project.Id}
+            key={projectKey(serverId, project.Id)}
             project={project}
-            messages={tileMessages[project.Id] ?? []}
-            isLoading={tileLoading[project.Id] ?? false}
+            serverId={serverId}
+            messages={tileMessages[projectKey(serverId, project.Id)] ?? []}
+            isLoading={tileLoading[projectKey(serverId, project.Id)] ?? false}
             isSelected={
               selectedProject?.serverId === serverId &&
               selectedProject?.projectId === project.Id
