@@ -221,11 +221,11 @@ A root's `status` script tells the server what became of a project's work, witho
 or `{}` when there is no pull request. The result is `ProjectStatus.PullRequest` (in `status.json`), with `ChangedAt`, when the server first saw that state and review.
 
 - **When:** on every transition to Idle or Stopped, and every `PullRequestPollSeconds` (default 600) while the pull request is draft or open; for an open one also when the server starts. One check at a time per project, at most four across the server. Deleting or archiving a project stops its checks.
-- **Failures change nothing:** a non-zero exit, more than `StatusScriptTimeoutSeconds` (default 30, then the script is killed), more than 16 KB of stdout, or output that is not exactly the object above (unknown properties, other values, extra text) leaves the pull request as it was, and is logged as a warning.
+- **Failures change nothing:** a non-zero exit, more than `StatusScriptTimeoutSeconds` (default 30, then the script is killed), more than 16 KB of stdout, or output that is not exactly the object above (unknown properties, other values, extra text) leaves the pull request as it was, and is logged as a warning, on every check that fails.
 - **Attention:** an open pull request with `changes_requested`, on a project that is Idle or Stopped, is a `Review` item until `MarkSeen` or a reply, and again when the review changes. `Review` and `Finished` items carry `PullRequestUrl`.
 - A root without `status` runs nothing, and its projects have no `PullRequest`.
 
-`godmode-dev`'s `scripts/status.ps1` is an example using `gh pr view`; it prints `{}` when `gh` is missing or not logged in.
+`godmode-dev`'s `scripts/status.ps1` is an example using `gh pr view`. It prints `{}` only when there is no pull request (none for the branch, not a repository, a detached HEAD, `git` or `gh` not installed); any other `gh` failure, such as a network error, a rate limit or an expired login, exits non-zero, so the server keeps what it knew and keeps polling.
 
 ## Project Folder Structure
 
