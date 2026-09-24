@@ -30,46 +30,40 @@ public class GitHubCodespaceProvider : IServerProvider
         };
     }
 
+    /// <summary>The account's GodMode codespaces. Throws when GitHub cannot be asked: an empty list means there are none.</summary>
     public async Task<IReadOnlyList<ServerInfo>> ListServersAsync(CancellationToken ct = default)
     {
         var servers = new List<ServerInfo>();
 
-        try
+        var codespaces = await GetCodespacesViaRestApi();
+        _logger.LogDebug("GitHub API returned {Count} codespaces", codespaces.Count);
+
+        var running = codespaces.Where(c => c.State == "Available").ToList();
+        var notRunning = codespaces.Where(c => c.State != "Available").ToList();
+
+        foreach (var c in codespaces)
+            _logger.LogDebug("  Codespace: {Name} ({DisplayName}) state={State}", c.Name, c.DisplayName, c.State);
+
+        var probeResults = await Task.WhenAll(
+            running.Select(async c => (Codespace: c, HasGodMode: await ProbeGodModeServerAsync(c.Name, _token))));
+
+        foreach (var (codespace, hasGodMode) in probeResults)
+            _logger.LogDebug("  Probe {Name}: hasGodMode={HasGodMode}", codespace.Name, hasGodMode);
+
+        foreach (var (codespace, _) in probeResults.Where(r => r.HasGodMode))
+            servers.Add(ToServerInfo(codespace, ServerState.Running));
+
+        foreach (var (codespace, _) in probeResults.Where(r =>
+            !r.HasGodMode && (r.Codespace.DisplayName ?? r.Codespace.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
+            servers.Add(ToServerInfo(codespace, ServerState.Running));
+
+        foreach (var codespace in notRunning.Where(c =>
+            (c.DisplayName ?? c.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
         {
-            var codespaces = await GetCodespacesViaRestApi();
-            _logger.LogDebug("GitHub API returned {Count} codespaces", codespaces.Count);
-
-            var running = codespaces.Where(c => c.State == "Available").ToList();
-            var notRunning = codespaces.Where(c => c.State != "Available").ToList();
-
-            foreach (var c in codespaces)
-                _logger.LogDebug("  Codespace: {Name} ({DisplayName}) state={State}", c.Name, c.DisplayName, c.State);
-
-            var probeResults = await Task.WhenAll(
-                running.Select(async c => (Codespace: c, HasGodMode: await ProbeGodModeServerAsync(c.Name, _token))));
-
-            foreach (var (codespace, hasGodMode) in probeResults)
-                _logger.LogDebug("  Probe {Name}: hasGodMode={HasGodMode}", codespace.Name, hasGodMode);
-
-            foreach (var (codespace, _) in probeResults.Where(r => r.HasGodMode))
-                servers.Add(ToServerInfo(codespace, ServerState.Running));
-
-            foreach (var (codespace, _) in probeResults.Where(r =>
-                !r.HasGodMode && (r.Codespace.DisplayName ?? r.Codespace.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
-                servers.Add(ToServerInfo(codespace, ServerState.Running));
-
-            foreach (var codespace in notRunning.Where(c =>
-                (c.DisplayName ?? c.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
-            {
-                var mapped = MapCodespaceState(codespace.State);
-                _logger.LogDebug("  Non-running godmode codespace: {Name} ghState={GhState} mapped={Mapped}",
-                    codespace.Name, codespace.State, mapped);
-                servers.Add(ToServerInfo(codespace, mapped));
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error listing codespaces");
+            var mapped = MapCodespaceState(codespace.State);
+            _logger.LogDebug("  Non-running godmode codespace: {Name} ghState={GhState} mapped={Mapped}",
+                codespace.Name, codespace.State, mapped);
+            servers.Add(ToServerInfo(codespace, mapped));
         }
 
         _logger.LogInformation("GitHub provider found {Count} godmode servers", servers.Count);

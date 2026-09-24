@@ -73,6 +73,13 @@
 		<Copy SourceFiles="@(_ReactDist)"
 		      DestinationFiles="@(_ReactDist->'Resources\Raw\wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
 		      SkipUnchangedFiles="true" />
+		<!-- The static glob above ran before this copy: without this, a new bundle (a new hashed file name)
+		     would reach the app only on the next build, and this one would ship an index.html naming a missing script -->
+		<ItemGroup>
+			<_ReactAsset Include="Resources\Raw\wwwroot\**" />
+			<MauiAsset Remove="Resources\Raw\wwwroot\**" />
+			<MauiAsset Include="@(_ReactAsset)" LogicalName="wwwroot\%(_ReactAsset.RecursiveDir)%(_ReactAsset.Filename)%(_ReactAsset.Extension)" />
+		</ItemGroup>
 	</Target>
 
 </Project>

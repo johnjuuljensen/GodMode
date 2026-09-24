@@ -30,6 +30,12 @@ interface ServerIdPayload {
   ServerId: string;
 }
 
+/** The attention item a notification tap opened: a project on a server, both IDs as the server gave them. */
+export interface AttentionLinkPayload {
+  ServerId: string;
+  ProjectId: string;
+}
+
 /** Request types → [payload, response]. */
 interface BridgeRequests {
   'relay.info': [void, RelayInfo];
@@ -39,10 +45,12 @@ interface BridgeRequests {
   'servers.start': [ServerIdPayload, boolean];
   'servers.stop': [ServerIdPayload, boolean];
   'host.openDevTools': [void, boolean];
+  /** The item the last notification tap opened, once; null when there is none (or it was taken). */
+  'attention.take': [void, AttentionLinkPayload | null];
 }
 
-/** Event types the shell sends. */
-export type BridgeEvent = 'servers.changed';
+/** Event types the shell sends. attention.open: a notification was tapped, and attention.take has its item. */
+export type BridgeEvent = 'servers.changed' | 'attention.open';
 
 interface BridgeMessage {
   Type: string;
