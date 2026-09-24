@@ -37,6 +37,11 @@ export function subscribeConfirm(listener: () => void) {
 
 export const getOpenConfirm = () => open;
 
+/** Answers the open question, if any, with null: what Cancel does */
+export function dismissConfirm() {
+  open?.resolve(null);
+}
+
 /** Asks, and resolves with the chosen value, or null when dismissed. A second ask dismisses the first. */
 export function askConfirm<T extends string>(request: ConfirmRequest<T>): Promise<T | null> {
   open?.resolve(null);
