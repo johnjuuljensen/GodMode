@@ -75,9 +75,13 @@ export interface ServerAttentionItem extends AttentionItem {
   serverId: string;
 }
 
-/** Replaces one server's items in the merged list, keeping it oldest first. */
+/**
+ * Replaces one server's items in the merged list, keeping it oldest first and one item per
+ * ProjectKey (the last a server lists, should it list a project twice).
+ */
 function mergeAttention(all: ServerAttentionItem[], serverId: string, items: AttentionItem[]): ServerAttentionItem[] {
-  return [...all.filter(i => i.serverId !== serverId), ...items.map(i => ({ ...i, serverId }))]
+  const fresh = new Map(items.map(i => [i.ProjectId, { ...i, serverId }]));
+  return [...all.filter(i => i.serverId !== serverId), ...fresh.values()]
     .sort((a, b) => a.Since.localeCompare(b.Since)
       || projectKey(a.serverId, a.ProjectId).localeCompare(projectKey(b.serverId, b.ProjectId)));
 }

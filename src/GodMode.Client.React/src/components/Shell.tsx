@@ -8,6 +8,8 @@ import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
+import { Inbox, HomeTabBar, type HomeTab } from './Inbox/Inbox';
+import { useAttentionTitle } from './Inbox/useAttentionTitle';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -43,6 +45,9 @@ export function Shell() {
   const setIsMobile = useAppStore(s => s.setIsMobile);
 
   const [theme] = useState<'dark' | 'light'>(getInitialTheme);
+  // The phone's home: the inbox, or the project list
+  const [homeTab, setHomeTab] = useState<HomeTab>('inbox');
+  useAttentionTitle();
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -80,7 +85,10 @@ export function Shell() {
             <SidebarFooter />
           </div>
         ) : (
-          <Sidebar />
+          <div className="shell-mobile-home">
+            {homeTab === 'inbox' ? <><SidebarHeader /><Inbox variant="screen" /></> : <Sidebar />}
+            <HomeTabBar tab={homeTab} onChange={setHomeTab} />
+          </div>
         )}
       </div>
     );
@@ -92,7 +100,7 @@ export function Shell() {
       {!isTileView ? (
         <>
           <div className="shell-sidebar">
-            <Sidebar />
+            <Sidebar withInbox />
           </div>
           <div className="shell-content">
             {activePage ? (
@@ -120,7 +128,10 @@ export function Shell() {
                 {isTileFullscreen ? (
                   <ProjectView serverId={selectedProject!.serverId} projectId={selectedProject!.projectId} />
                 ) : (
-                  <TileGrid />
+                  <>
+                    <Inbox variant="pane" />
+                    <TileGrid />
+                  </>
                 )}
               </>
             )}
