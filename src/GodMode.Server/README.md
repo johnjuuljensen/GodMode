@@ -196,7 +196,7 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 |----------|-------------|
 | `GODMODE_ROOT_PATH` | Root directory path |
 | `GODMODE_PROJECT_PATH` | Project directory path |
-| `GODMODE_PROJECT_ID` | Folder name / project ID |
+| `GODMODE_PROJECT_ID` | The project's folder name (not the project ID below; claude's own `GODMODE_PROJECT_ID`, for the MCP bridge, is the project ID) |
 | `GODMODE_PROJECT_NAME` | Display name |
 | `GODMODE_INPUT_*` | All form inputs (key in upper snake case, e.g. `GODMODE_INPUT_ISSUE_NUMBER`) |
 | `GODMODE_RESULT_FILE` | Create scripts only: a file the script can write `key=value` lines to (see below) |
@@ -212,7 +212,7 @@ Script stdout is streamed to the client as creation progress. Non-zero exit code
 Each project is stored in a folder under its root:
 
 ```
-{root}/{project-id}/
+{root}/{folder}/
 ├── .godmode/
 │   ├── status.json      # Current project state
 │   ├── settings.json    # Per-project settings (e.g. skip-permissions)
@@ -223,7 +223,11 @@ Each project is stored in a folder under its root:
 └── (project files)      # Working directory for Claude
 ```
 
-Archived projects move to `{root}/.archived/{project-id}/`.
+Archived projects move to `{root}/.archived/{folder}/`.
+
+**Project ID.** A project is identified by `{profile}/{root}/{folder}`: where its folder is. Two projects with the same name in different roots or profiles are separate projects, with their own process, output and SignalR group. Clients treat the ID as opaque and pass it back as they received it. The server derives it from the folder's location on every start and writes it to `status.json`, so a folder from before this format (its `Id` the bare folder name), or one whose root has moved to another profile, is recovered under its current ID. Nothing else in `.godmode` holds the ID.
+
+The folder name comes from the project's name: spaces become underscores and characters that are invalid in a file name are dropped. A name that leaves no folder of its own (empty, `.`, `..`, or dots only) is refused before anything is created or run. So is a create script's `project_path` at or above the root.
 
 ## Running the Server
 
