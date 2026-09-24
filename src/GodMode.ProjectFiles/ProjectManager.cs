@@ -204,16 +204,20 @@ public sealed class ProjectManager
     }
 
     /// <summary>
-    /// Converts a display name to a path-safe project ID.
+    /// Converts a display name to a path-safe project folder name.
     /// Spaces become underscores; invalid filename characters are removed.
     /// </summary>
+    /// <exception cref="ArgumentException">
+    /// The name leaves no folder of its own: empty once cleaned, or dots only (<c>.</c>, <c>..</c>).
+    /// </exception>
     public static string ConvertNameToPath(string name)
     {
         var invalidChars = Path.GetInvalidFileNameChars();
         var cleaned = new string(name.Select(c => c == ' ' ? '_' : c)
-            .Where(c => !invalidChars.Contains(c))
+            .Where(c => !invalidChars.Contains(c) && c is not ('/' or '\\'))
             .ToArray());
-        return string.IsNullOrWhiteSpace(cleaned) ? "project" : cleaned;
+        ProjectFolder.ValidateFolderName(cleaned, nameof(name));
+        return cleaned;
     }
 
     /// <summary>

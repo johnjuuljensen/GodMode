@@ -21,8 +21,9 @@ namespace GodMode.Server.Tests.Lifecycle;
 /// The real <see cref="ProjectManager"/> and <see cref="ClaudeProcessManager"/>, wired as Program.cs
 /// wires them, launching <c>GodMode.FakeClaude</c> instead of <c>claude</c>. Each harness owns a temp
 /// roots dir with one root, <see cref="RootName"/>, whose minimal <c>.godmode-root/config.json</c>
-/// names its profile and tells the fake where its script and sidecar are. Every project launched from it plays the
-/// script last passed to <see cref="UseScript"/> and records to <c>fake-claude.jsonl</c> in its own folder.
+/// names its profile and tells the fake where its script and sidecar are, and any extra roots asked for,
+/// configured the same way. Every project launched from them plays the script last passed to
+/// <see cref="UseScript"/> and records to <c>fake-claude.jsonl</c> in its own folder.
 /// </summary>
 internal sealed class LifecycleHarness : IAsyncDisposable
 {
@@ -39,6 +40,12 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private readonly List<string> _projectIds = [];
     private readonly CapturingLoggerProvider _logs = new();
 
+    /// <summary>The temp dir everything the harness and the server write lives under.</summary>
+    public string WorkDir => _workDir;
+
+    /// <summary>The server's <c>ProjectRootsDir</c>: one subdirectory per root.</summary>
+    public string RootsDir { get; }
+
     public string RootPath { get; }
     public string ScriptPath { get; }
     public IProjectManager Projects { get; }
@@ -53,21 +60,25 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <param name="script">The script every launch plays until <see cref="UseScript"/> replaces it.</param>
     /// <param name="rootConfig">Extra top-level properties for the root's config.json (for example <c>claudeArgs</c>).</param>
     /// <param name="settings">Extra server configuration, applied over the harness defaults.</param>
+    /// <param name="extraRoots">More roots beside <see cref="RootName"/>, each in the profile given, configured as it is.</param>
     public LifecycleHarness(
         FakeScript script,
         IReadOnlyDictionary<string, object>? rootConfig = null,
-        IReadOnlyDictionary<string, string?>? settings = null)
+        IReadOnlyDictionary<string, string?>? settings = null,
+        IReadOnlyList<(string Root, string Profile)>? extraRoots = null)
     {
         _workDir = ServerProcess.CreateWorkDir("lifecycle");
-        var rootsDir = Path.Combine(_workDir, "roots");
-        RootPath = Path.Combine(rootsDir, RootName);
+        RootsDir = Path.Combine(_workDir, "roots");
+        RootPath = Path.Combine(RootsDir, RootName);
         ScriptPath = Path.Combine(_workDir, "fake-claude.script");
         UseScript(script);
-        WriteRootConfig(rootConfig);
+        WriteRootConfig(RootPath, ProfileName, rootConfig);
+        foreach (var (root, profile) in extraRoots ?? [])
+            WriteRootConfig(Path.Combine(RootsDir, root), profile, rootConfig);
 
         var configuration = new Dictionary<string, string?>
         {
-            ["ProjectRootsDir"] = rootsDir,
+            ["ProjectRootsDir"] = RootsDir,
             [ClaudeProcessManager.ExecutableSetting] = FakeClaudePath,
         };
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
@@ -80,11 +91,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <summary>Replaces the script that the next launch plays. Running fakes keep the one they loaded.</summary>
     public void UseScript(FakeScript script) => script.Save(ScriptPath);
 
-    private void WriteRootConfig(IReadOnlyDictionary<string, object>? extra)
+    private void WriteRootConfig(string rootPath, string profileName, IReadOnlyDictionary<string, object>? extra)
     {
         var config = new Dictionary<string, object>
         {
-            ["profileName"] = ProfileName,
+            ["profileName"] = profileName,
             ["environment"] = new Dictionary<string, string>
             {
                 [FakeClaudeEnvironment.Script] = ScriptPath,
@@ -94,7 +105,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         foreach (var (key, value) in extra ?? new Dictionary<string, object>())
             config[key] = value;
 
-        var godModeRoot = Path.Combine(RootPath, ".godmode-root");
+        var godModeRoot = Path.Combine(rootPath, ".godmode-root");
         Directory.CreateDirectory(godModeRoot);
         File.WriteAllText(Path.Combine(godModeRoot, "config.json"), JsonSerializer.Serialize(config));
     }
@@ -119,20 +130,31 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     // ── Projects ──
 
-    /// <summary>Creates a project in the harness root (the default "Create" action) and returns its status.</summary>
-    public async Task<ProjectStatus> CreateProjectAsync(string name = "p1", string prompt = "Say hello")
+    /// <summary>
+    /// Creates a project (the default "Create" action) in the harness root, or in
+    /// <paramref name="root"/> of <paramref name="profile"/>, and returns its status.
+    /// </summary>
+    public async Task<ProjectStatus> CreateProjectAsync(string name = "p1", string prompt = "Say hello",
+        string root = RootName, string profile = ProfileName, IReadOnlyDictionary<string, object>? inputs = null)
     {
-        var inputs = new Dictionary<string, JsonElement>
+        var request = new Dictionary<string, JsonElement>
         {
             ["name"] = JsonSerializer.SerializeToElement(name),
             ["prompt"] = JsonSerializer.SerializeToElement(prompt),
         };
-        var status = await Projects.CreateProjectAsync(new CreateProjectRequest(ProfileName, RootName, inputs));
+        foreach (var (key, value) in inputs ?? new Dictionary<string, object>())
+            request[key] = JsonSerializer.SerializeToElement(value);
+        var status = await Projects.CreateProjectAsync(new CreateProjectRequest(profile, root, request));
         _projectIds.Add(status.Id);
         return status;
     }
 
-    public string ProjectPath(string projectId) => Path.Combine(RootPath, projectId);
+    /// <summary>
+    /// The folder of a project: <c>{profile}/{root}/{folder}</c> is found in its root's directory
+    /// (a discovered root's name is its directory's); a bare folder name in <see cref="RootPath"/>.
+    /// </summary>
+    public string ProjectPath(string projectId) =>
+        projectId.Split('/') is [.., var root, var folder] ? Path.Combine(RootsDir, root, folder) : Path.Combine(RootPath, projectId);
 
     public IClaudeProcessManager ProcessManager => _services.GetRequiredService<IClaudeProcessManager>();
 
