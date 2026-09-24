@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } fr
 import { useAppStore, transcriptKey } from '../../store';
 import { ChatMessage } from './ChatMessage';
 import { QuestionPrompt } from './QuestionPrompt';
+import { PermissionCard } from './PermissionCard';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
@@ -17,6 +18,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   const question = useAppStore(s => s.question);
   const dismissQuestion = useAppStore(s => s.dismissQuestion);
   const markInputSent = useAppStore(s => s.markInputSent);
+  const respondToPermission = useAppStore(s => s.respondToPermission);
+  const answerQuestion = useAppStore(s => s.answerQuestion);
   const [inputText, setInputText] = useState('');
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
@@ -67,9 +70,40 @@ export function ProjectView({ serverId, projectId }: Props) {
   );
 
   const state = project?.State ?? 'Idle';
-  const canSendInput = state === 'WaitingInput' || state === 'Running' || state === 'Stopped' || state === 'Idle';
+  const canSendInput = state === 'WaitingInput' || state === 'WaitingPermission' || state === 'Running' || state === 'Stopped' || state === 'Idle';
   const canResume = state === 'Stopped' || state === 'Idle';
-  const canStop = state === 'Running' || state === 'WaitingInput';
+  const canStop = state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission';
+
+  // What claude is blocked on: a tool call to allow or deny, or AskUserQuestion's questions, asked one at a time
+  const pendingPermission = project?.PendingPermission ?? null;
+  const pendingQuestion = project?.PendingQuestion ?? null;
+  const [answers, setAnswers] = useState<{ requestId: string; byQuestion: Record<string, string> } | null>(null);
+  const answered = useMemo(
+    () => (answers && answers.requestId === pendingQuestion?.RequestId ? answers.byQuestion : {}),
+    [answers, pendingQuestion?.RequestId],
+  );
+  const openQuestion = pendingQuestion?.Questions.find(q => answered[q.Question] === undefined) ?? null;
+
+  const handlePermission = useCallback(async (allow: boolean) => {
+    if (!pendingPermission) return;
+    try {
+      await respondToPermission(serverId, projectId, pendingPermission.RequestId, { Allow: allow });
+    } catch (err) {
+      console.error('Failed to answer the permission request:', err);
+    }
+  }, [pendingPermission, respondToPermission, serverId, projectId]);
+
+  const handleQuestionAnswer = useCallback(async (label: string) => {
+    if (!pendingQuestion || !openQuestion) return;
+    const byQuestion = { ...answered, [openQuestion.Question]: label };
+    setAnswers({ requestId: pendingQuestion.RequestId, byQuestion });
+    if (pendingQuestion.Questions.some(q => byQuestion[q.Question] === undefined)) return;
+    try {
+      await answerQuestion(serverId, projectId, pendingQuestion.RequestId, byQuestion);
+    } catch (err) {
+      console.error('Failed to answer the question:', err);
+    }
+  }, [pendingQuestion, openQuestion, answered, answerQuestion, serverId, projectId]);
 
   const sendText = useCallback(async (text: string) => {
     if (!text.trim() || !hub) return;
@@ -213,11 +247,21 @@ export function ProjectView({ serverId, projectId }: Props) {
         )}
       </div>
 
-      {question.isActive && (
+      {pendingPermission ? (
+        <PermissionCard permission={pendingPermission} onAnswer={handlePermission} />
+      ) : openQuestion ? (
+        <QuestionPrompt
+          text={openQuestion.Question}
+          header={openQuestion.Header ?? null}
+          options={openQuestion.Options}
+          onSelectOption={handleQuestionAnswer}
+          onDismiss={handleDismiss}
+        />
+      ) : question.isActive && (
         <QuestionPrompt
           text={question.text}
           header={question.header}
-          options={question.options}
+          options={[]}
           onSelectOption={handleOptionSelect}
           onDismiss={handleDismiss}
         />

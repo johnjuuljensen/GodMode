@@ -5,7 +5,7 @@
 
 // --- Enums (serialized as strings by JsonStringEnumConverter) ---
 
-export type ProjectState = 'Idle' | 'Running' | 'WaitingInput' | 'Error' | 'Stopped';
+export type ProjectState = 'Idle' | 'Running' | 'WaitingInput' | 'WaitingPermission' | 'Error' | 'Stopped';
 export type ServerState = 'Running' | 'Stopped' | 'Starting' | 'Stopping' | 'Unknown';
 
 // --- Models (PascalCase properties matching server serialization) ---
@@ -18,6 +18,10 @@ export interface ProjectSummary {
   CurrentQuestion?: string | null;
   RootName?: string | null;
   ProfileName?: string | null;
+  /** As ProjectStatus.PendingPermission. */
+  PendingPermission?: PendingPermission | null;
+  /** As ProjectStatus.PendingQuestion. */
+  PendingQuestion?: PendingQuestion | null;
 }
 
 export interface ProjectMetrics {
@@ -58,6 +62,51 @@ export interface ProjectStatus {
   ProfileName?: string | null;
   /** Why the project is in Error: claude's last stderr lines before it exited, or an error result's text. */
   LastError?: string | null;
+  /** The tool call waiting for the user to allow or deny it, while the project is WaitingPermission. */
+  PendingPermission?: PendingPermission | null;
+  /** The AskUserQuestion waiting for the user's answer, while the project is WaitingInput on it. */
+  PendingQuestion?: PendingQuestion | null;
+}
+
+/** A tool call claude holds until the user answers it with RespondToPermission (PendingPermission in GodMode.Shared). */
+export interface PendingPermission {
+  RequestId: string;
+  ToolName: string;
+  /** The tool's input as claude sent it. Show Summary rather than parsing this. */
+  Input: unknown;
+  /** One line saying what the call does, e.g. "Bash: git push origin feature/12-x". */
+  Summary: string;
+  RequestedAt: string;
+}
+
+/** The answer to a PendingPermission (PermissionDecision in GodMode.Shared). */
+export interface PermissionDecision {
+  Allow: boolean;
+  /** Why it was denied; claude reads it. */
+  Message?: string | null;
+  /** The input to run the tool with instead. Only read when allowed. */
+  UpdatedInput?: unknown;
+}
+
+/** Questions claude asked with AskUserQuestion, answered with AnswerQuestion (PendingQuestion in GodMode.Shared). */
+export interface PendingQuestion {
+  RequestId: string;
+  Questions: QuestionItem[];
+  RequestedAt: string;
+}
+
+export interface QuestionItem {
+  /** The question; its answer is keyed by this text. */
+  Question: string;
+  Header?: string | null;
+  Options: QuestionOption[];
+  /** More than one option may be chosen; their labels are joined with ", ". */
+  MultiSelect: boolean;
+}
+
+export interface QuestionOption {
+  Label: string;
+  Description?: string | null;
 }
 
 /** One replayed line of a project's output (OutputLine in GodMode.Shared). */
@@ -97,11 +146,6 @@ export interface ServerInfo {
 
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---
 
-export interface QuestionOptionData {
-  label: string;
-  description?: string | null;
-}
-
 export interface ClaudeContentItem {
   type: string;
   summary: string;
@@ -131,8 +175,4 @@ export interface ClaudeMessage {
   formattedJson: string;
   isToolOnly: boolean;
   textOnlyContentSummary: string;
-  isQuestion: boolean;
-  questionText?: string | null;
-  questionOptions: QuestionOptionData[];
-  questionHeader?: string | null;
 }

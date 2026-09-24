@@ -457,7 +457,9 @@ public class ProjectManager : IProjectManager
                 s.UpdatedAt,
                 s.CurrentQuestion,
                 s.RootName,
-                ProfileName: project.ProfileName ?? s.ProfileName
+                ProfileName: project.ProfileName ?? s.ProfileName,
+                PendingPermission: s.PendingPermission,
+                PendingQuestion: s.PendingQuestion
             ));
         }
 

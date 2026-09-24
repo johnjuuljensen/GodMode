@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import { GodModeHub, type ConnectionState, type OutputMessage } from '../signalr/hub';
 import type {
   ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
-  ServerInfo, CreateActionInfo,
+  ServerInfo, CreateActionInfo, PermissionDecision,
 } from '../signalr/types';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../services/hostApi';
@@ -170,6 +170,10 @@ interface AppState {
   setQuestion: (q: QuestionState) => void;
   dismissQuestion: () => void;
   markInputSent: () => void;
+
+  // Permission prompts and AskUserQuestion (ProjectSummary.PendingPermission / PendingQuestion)
+  respondToPermission: (serverId: string, projectId: string, requestId: string, decision: PermissionDecision) => Promise<void>;
+  answerQuestion: (serverId: string, projectId: string, requestId: string, answers: Record<string, string>) => Promise<void>;
 
   // Per-project question tracking
   projectQuestions: Record<string, boolean>;
@@ -336,7 +340,7 @@ function buildByRecent(
   return { profileGroups, inactiveServers, profileFilterOptions };
 }
 
-const STATUS_ORDER: Record<string, number> = { Running: 0, WaitingInput: 1, Idle: 2, Error: 3, Stopped: 4 };
+const STATUS_ORDER: Record<string, number> = { Running: 0, WaitingPermission: 1, WaitingInput: 1, Idle: 2, Error: 3, Stopped: 4 };
 
 function buildByStatus(
   allRoots: RootEntry[], _multiServer: boolean,
@@ -369,7 +373,8 @@ function computeTotalWaiting(connections: ServerConnection[], pq: Record<string,
   let total = 0;
   for (const conn of connections) {
     for (const p of conn.projects) {
-      if (!dp[p.Id] && (p.State === 'WaitingInput' || pq[p.Id])) total++;
+      // A permission prompt cannot be dismissed: claude waits until it is answered
+      if (p.State === 'WaitingPermission' || (!dp[p.Id] && (p.State === 'WaitingInput' || pq[p.Id]))) total++;
     }
   }
   return total;
@@ -562,6 +567,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             Id: status.Id, Name: status.Name, State: status.State,
             UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
             RootName: status.RootName, ProfileName: status.ProfileName,
+            PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
           };
           const connections = state.serverConnections.map(c =>
             c.serverInfo.Id === serverId
@@ -642,7 +648,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           const connections = state.serverConnections.map(c =>
             c.serverInfo.Id === serverId
               ? { ...c, projects: c.projects.map(p => p.Id === status.Id
-                  ? { ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion }
+                  ? {
+                      ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
+                      PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
+                    }
                   : p) }
               : c
           );
@@ -841,6 +850,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     const total = computeTotalWaiting(state.serverConnections, pq, dp);
     return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total };
   }),
+
+  respondToPermission: async (serverId, projectId, requestId, decision) => {
+    await get().getHub(serverId)?.respondToPermission(projectId, requestId, decision);
+  },
+  answerQuestion: async (serverId, projectId, requestId, answers) => {
+    await get().getHub(serverId)?.answerQuestion(projectId, requestId, answers);
+  },
 
   projectQuestions: {},
   dismissedProjects: loadDismissed(),

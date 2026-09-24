@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, OutputLine } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, OutputLine, PermissionDecision } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -157,6 +157,16 @@ export class GodModeHub {
 
   async sendInput(projectId: string, input: string): Promise<void> {
     await this.connection!.invoke('SendInput', projectId, input);
+  }
+
+  /** Answers the project's PendingPermission: the tool call runs, or claude is told it was denied. */
+  async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision): Promise<void> {
+    await this.connection!.invoke('RespondToPermission', projectId, requestId, decision);
+  }
+
+  /** Answers the project's PendingQuestion: each question's text to the chosen label or the user's own text. */
+  async answerQuestion(projectId: string, requestId: string, answers: Record<string, string>): Promise<void> {
+    await this.connection!.invoke('AnswerQuestion', projectId, requestId, answers);
   }
 
   async stopProject(projectId: string): Promise<void> {
