@@ -260,7 +260,7 @@ Projects:
 - `Task SendInput(projectId, input)` — Send input to Claude
 - `Task StopProject(projectId)` — Stop running project
 - `Task ResumeProject(projectId)` — Resume stopped project
-- `Task SubscribeProject(projectId, outputOffset)` — Subscribe to output events
+- `Task SubscribeProject(projectId, fromOffset)` — Replay `output.jsonl` from `fromOffset` (the byte offset after the last line the client has; 0 for all, `-N` for the last N turns) in `OutputBatch` messages, then `OutputReplayComplete`, then live `OutputReceived` lines, each line once and in order
 - `Task UnsubscribeProject(projectId)` — Unsubscribe from output
 - `Task DeleteProject(projectId, force)` — Run delete scripts and remove the project
 - `Task ArchiveProject(projectId)` / `Task UnarchiveProject(projectId)` — Move to and from `.archived/`
@@ -276,7 +276,9 @@ Utility:
 
 ### Server → Client Events
 
-- `OutputReceived(projectId, rawJson)` — Raw Claude JSON output line
+- `OutputReceived(projectId, offset, rawJson)` — A live raw Claude JSON output line; `offset` is the byte offset in `output.jsonl` just after it
+- `OutputBatch(projectId, fromOffset, lines)` — Replayed `OutputLine`s (`Offset`, `RawJson`) covering `output.jsonl` from `fromOffset`; a replay from 0 when more was asked for means the client's transcript is not from this file
+- `OutputReplayComplete(projectId, offset)` — The subscription's replay is done at `offset`; live lines follow
 - `StatusChanged(projectId, status)` — Project status changed
 - `ProjectCreated(status)` — New project created
 - `CreationProgress(projectId, message)` — Script progress during project creation

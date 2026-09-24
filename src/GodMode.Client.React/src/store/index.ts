@@ -89,6 +89,24 @@ function appendLines(t: Transcript, lines: OutputMessage[], fromOffset?: number)
   return { transcript: { ...base, messages: [...base.messages, ...added], offset: fresh[fresh.length - 1].offset }, added };
 }
 
+/**
+ * The question a held transcript is waiting on, as detection over a full replay would find it:
+ * the current turn's messages (those after the last user message), then the server's status.
+ * None when the project is not waiting or its question was dismissed.
+ */
+function heldQuestion(
+  messages: ClaudeMessage[], project: ProjectSummary | undefined, dismissed: boolean | undefined, lastInputSentAt: number,
+): QuestionState {
+  if (!project || dismissed || (project.State !== 'WaitingInput' && project.State !== 'Idle')) return emptyQuestion;
+  let turnStart = messages.length;
+  while (turnStart > 0 && messages[turnStart - 1].type !== 'user') turnStart--;
+  let question = emptyQuestion;
+  for (const message of messages.slice(turnStart)) {
+    question = detectQuestionFromMessage(message, question, lastInputSentAt, dismissed) ?? question;
+  }
+  return detectQuestionFromStatus(project.State, project.CurrentQuestion, project.Name, question, lastInputSentAt, messages) ?? question;
+}
+
 // ── Active page (replaces modal booleans) ─────────────────────
 export type ActivePage =
   | { type: 'profileSettings' }
@@ -760,10 +778,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Selection ─────────────────────────────────────────────
 
   selectedProject: null,
-  selectProject: (serverId, projectId) => set(state => ({
-    selectedProject: { serverId, projectId }, activePage: null, question: emptyQuestion,
-    outputMessages: state.transcripts[transcriptKey(serverId, projectId)]?.messages ?? [],
-  })),
+  selectProject: (serverId, projectId) => set(state => {
+    const messages = state.transcripts[transcriptKey(serverId, projectId)]?.messages ?? [];
+    const project = state.serverConnections.find(c => c.serverInfo.Id === serverId)?.projects.find(p => p.Id === projectId);
+    return {
+      selectedProject: { serverId, projectId }, activePage: null, outputMessages: messages,
+      // A resume replays only what is new, so the question comes from what is held
+      question: heldQuestion(messages, project, state.dismissedProjects[projectId], state.lastInputSentAt),
+    };
+  }),
   clearSelection: () => set({ selectedProject: null, outputMessages: [], question: emptyQuestion }),
 
   // ── Output ────────────────────────────────────────────────
