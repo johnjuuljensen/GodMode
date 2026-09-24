@@ -78,7 +78,8 @@ The key can also go in `appsettings.json` (`"Authentication": { "ApiKey": "..." 
     │   │   └── create.ps1            # Action-specific create script
     │   └── scripts/                  # Shared scripts
     │       ├── prepare.ps1           # Shared prepare script
-    │       └── delete.ps1            # Shared delete script
+    │       ├── delete.ps1            # Shared delete script
+    │       └── status.ps1            # Reports the project's pull request (optional)
     └── {project-id}/                 # Projects created from this root
 ```
 
@@ -96,6 +97,7 @@ Defines shared settings (prepare + delete scripts, environment, claude args, MCP
   "claudeArgs": ["--append-system-prompt", "Extra instructions"],
   "prepare": "scripts/prepare",
   "delete": "scripts/delete",
+  "status": "scripts/status",
   "mcpServers": {
     "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
   }
@@ -126,7 +128,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `environment` | Dictionary merge, overlay keys override |
 | `mcpServers` | Dictionary merge, overlay servers override by name |
 | `claudeArgs` | Concatenated (base + overlay) |
-| Script fields (prepare, create, delete) | Overlay replaces entirely |
+| Script fields (prepare, create, delete, status) | Overlay replaces entirely |
 
 `profileName` and `stripEnvVarProfile` are read from `config.json` only.
 
@@ -146,6 +148,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `prepare` | Scripts run before project folder is created (working dir = root) |
 | `create` | Scripts run to create the project (working dir = project, or root if `scriptsCreateFolder`) |
 | `delete` | Scripts run when a project is deleted (working dir = root) |
+| `status` | One script that reports the project's pull request (working dir = project): see [Pull request status](#pull-request-status) |
 | `claudeArgs` | Extra CLI arguments appended when starting Claude |
 | `model` | Default `--model` for the action. A `model` form input overrides it |
 | `mcpServers` | MCP servers for the root or action, merged over the profile's (profile → root → action) |
@@ -206,6 +209,23 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 A create script can override the project's `project_path`, `project_name` or `project_prompt` by writing them to `GODMODE_RESULT_FILE`, one `key=value` per line. The last key may span several lines, which suits a multiline prompt.
 
 Script stdout is streamed to the client as creation progress. Non-zero exit code aborts creation.
+
+### Pull Request Status
+
+A root's `status` script tells the server what became of a project's work, without the server knowing the VCS. It runs in the project folder, with the environment above, and prints one JSON object:
+
+```json
+{"pullRequest": {"url": "https://github.com/o/r/pull/12", "number": 12, "state": "draft|open|merged|closed", "review": "none|changes_requested|approved"}}
+```
+
+or `{}` when there is no pull request. The result is `ProjectStatus.PullRequest` (in `status.json`), with `ChangedAt`, when the server first saw that state and review.
+
+- **When:** on every transition to Idle or Stopped, and every `PullRequestPollSeconds` (default 600) while the pull request is draft or open; for an open one also when the server starts. One check at a time per project, at most four across the server. Deleting or archiving a project stops its checks.
+- **Failures change nothing:** a non-zero exit, more than `StatusScriptTimeoutSeconds` (default 30, then the script is killed), more than 16 KB of stdout, or output that is not exactly the object above (unknown properties, other values, extra text) leaves the pull request as it was, and is logged as a warning.
+- **Attention:** an open pull request with `changes_requested`, on a project that is Idle or Stopped, is a `Review` item until `MarkSeen` or a reply, and again when the review changes. `Review` and `Finished` items carry `PullRequestUrl`.
+- A root without `status` runs nothing, and its projects have no `PullRequest`.
+
+`godmode-dev`'s `scripts/status.ps1` is an example using `gh pr view`; it prints `{}` when `gh` is missing or not logged in.
 
 ## Project Folder Structure
 
@@ -269,8 +289,8 @@ Projects:
 - `Task<ProjectSummary[]> ListArchivedProjects()` — Get archived projects
 
 Attention:
-- `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Finished`), oldest first, with a short plain `Text`; the same after a restart
-- `Task MarkSeen(projectId)` — The last result is seen: no longer `Finished` (a reply does the same)
+- `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Review`, `Finished`), oldest first, with a short plain `Text`; the same after a restart
+- `Task MarkSeen(projectId)` — The last result is seen: no longer `Finished`, nor `Review` until the pull request changes (a reply does the same)
 - `Task ReplyAndResume(projectId, text)` — `SendInput` to a running claude; otherwise resume, send, and return once claude reports `system/init` (fails on exit or after `SessionStartTimeoutSeconds`, default 60)
 
 Roots and profiles:
