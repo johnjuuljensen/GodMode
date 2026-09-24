@@ -12,12 +12,14 @@ export function AddServer() {
   const [username, setUsername] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSave = async () => {
     if (type === 'local' && !url.trim()) return;
     if (type === 'github' && (!username.trim() || !accessToken.trim())) return;
 
     setSaving(true);
+    setError(null);
     try {
       await addServer({
         Type: type,
@@ -28,6 +30,8 @@ export function AddServer() {
       });
     } catch (err) {
       console.error('Failed to add server:', err);
+      // The shell's own words, e.g. that secure storage would not keep the token
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -80,6 +84,8 @@ export function AddServer() {
           </div>
         </>
       )}
+
+      {error && <div className="settings-error" role="alert">{error}</div>}
 
       <div className="settings-form-actions">
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
