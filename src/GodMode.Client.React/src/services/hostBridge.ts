@@ -59,6 +59,27 @@ declare global {
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
+/** MAUI's HybridWebView script, served by the WebView itself (defines window.HybridWebView). */
+const HYBRID_WEBVIEW_SCRIPT = '_framework/hybridwebview.js';
+
+let hostReady: Promise<NonNullable<Window['HybridWebView']>> | null = null;
+
+/** Loads the HybridWebView script once, on first use, so the browser build never requests it. */
+function loadHost(): Promise<NonNullable<Window['HybridWebView']>> {
+  hostReady ??= new Promise((resolve, reject) => {
+    if (window.HybridWebView) return resolve(window.HybridWebView);
+    const script = document.createElement('script');
+    script.src = HYBRID_WEBVIEW_SCRIPT;
+    script.onload = () => window.HybridWebView
+      ? resolve(window.HybridWebView)
+      : reject(new Error('HybridWebView bridge is not available'));
+    script.onerror = () => reject(new Error(`Could not load ${HYBRID_WEBVIEW_SCRIPT}`));
+    document.head.appendChild(script);
+  });
+  hostReady.catch(() => { hostReady = null; });
+  return hostReady;
+}
+
 let nextId = 0;
 const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
 const listeners = new Map<string, Set<() => void>>();
@@ -89,13 +110,12 @@ function ensureListening(): void {
 }
 
 /** Sends a request to the shell and resolves with its response payload. */
-export function request<K extends keyof BridgeRequests>(
+export async function request<K extends keyof BridgeRequests>(
   type: K,
   ...payload: BridgeRequests[K][0] extends void ? [] : [BridgeRequests[K][0]]
 ): Promise<BridgeRequests[K][1]> {
   ensureListening();
-  const host = window.HybridWebView;
-  if (!host) return Promise.reject(new Error('HybridWebView bridge is not available'));
+  const host = await loadHost();
 
   const id = `js-${++nextId}`;
   return new Promise((resolve, reject) => {
