@@ -77,8 +77,11 @@ public abstract record PipelineItem
     /// <summary>The process ended. Written after both of its pipes closed, so after every line it wrote.</summary>
     public sealed record Exited(ProcessExit Exit) : PipelineItem;
 
-    /// <summary>A status change that must come after everything queued before it; <paramref name="Done"/> completes once it has run.</summary>
-    public sealed record InOrder(Func<Task> Change, TaskCompletionSource Done) : PipelineItem;
+    /// <summary>
+    /// A change that must come after everything queued before it, under the state lock when
+    /// <paramref name="UnderStateLock"/>; <paramref name="Done"/> completes once it has run.
+    /// </summary>
+    public sealed record InOrder(Func<Task> Change, TaskCompletionSource Done, bool UnderStateLock = true) : PipelineItem;
 }
 
 /// <param name="ProcessId">The process that exited.</param>

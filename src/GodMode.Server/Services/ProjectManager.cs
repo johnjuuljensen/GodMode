@@ -874,7 +874,7 @@ public class ProjectManager : IProjectManager
                     var id = ProjectId(profileName, rootName, Path.GetFileName(destDir));
                     var project = new ProjectInfo
                     {
-                        Status = status with { Id = id, State = ProjectState.Stopped, RootName = rootName, ProfileName = profileName },
+                        Status = status with { Id = id, State = ProjectState.Stopped, RootName = rootName, ProfileName = profileName, OutputOffset = OutputLog.End(destDir) },
                         ProjectPath = destDir,
                         ActionName = null,
                         ProfileName = profileName,
@@ -1004,7 +1004,7 @@ public class ProjectManager : IProjectManager
         await NotifyStatusChanged(project);
     }
 
-    public async Task SubscribeProjectAsync(string projectId, long outputOffset, string connectionId)
+    public async Task SubscribeProjectAsync(string projectId, long fromOffset, string connectionId)
     {
         if (!_projects.TryGetValue(projectId, out var project))
         {
@@ -1012,9 +1012,7 @@ public class ProjectManager : IProjectManager
         }
 
         project.SubscribedConnections.Add(connectionId);
-
-        // Send any output from the requested offset
-        await SendOutputFromOffsetAsync(project, outputOffset, connectionId);
+        await _lifecycle.SubscribeAsync(project, fromOffset, connectionId);
     }
 
     public async Task UnsubscribeProjectAsync(string projectId, string connectionId)
@@ -1156,9 +1154,11 @@ public class ProjectManager : IProjectManager
                 if (idChanged)
                     _logger.LogInformation("Project at {Path} had ID {OldId}; it is now {ProjectId}", projectPath, status.Id, id);
 
+                // The offset is output.jsonl's, not status.json's, which is saved less often than output is written
+                var outputOffset = OutputLog.End(projectPath);
                 var correctedStatus = stateChanged
-                    ? status with { Id = id, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName }
-                    : status with { Id = id, RootName = rootName, ProfileName = profileName };
+                    ? status with { Id = id, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
+                    : status with { Id = id, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };
 
                 var project = new ProjectInfo
                 {
@@ -1735,53 +1735,6 @@ public class ProjectManager : IProjectManager
             result.Append(char.ToUpperInvariant(c));
         }
         return result.ToString();
-    }
-
-    private async Task SendOutputFromOffsetAsync(ProjectInfo project, long offset, string connectionId)
-    {
-        var id = project.Status.Id;
-        var outputPath = Path.Combine(project.ProjectPath, ".godmode", "output.jsonl");
-
-        _logger.LogInformation("SendOutputFromOffsetAsync called for project {ProjectId}, offset: {Offset}, connectionId: {ConnectionId}",
-            id, offset, connectionId);
-
-        if (!File.Exists(outputPath))
-        {
-            _logger.LogInformation("No output file exists yet for project {ProjectId}", id);
-            return;
-        }
-
-        try
-        {
-            using var stream = new FileStream(outputPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            stream.Seek(offset, SeekOrigin.Begin);
-
-            using var reader = new StreamReader(stream);
-
-            string? line;
-            var lineCount = 0;
-            while ((line = await reader.ReadLineAsync()) != null)
-            {
-                if (string.IsNullOrWhiteSpace(line)) continue;
-
-                lineCount++;
-
-                var eventType = ProjectLifecycle.ExtractEventType(line);
-                _logger.LogInformation("Sending existing output line {LineNum} to client {ConnectionId} for project {ProjectId}, Type: {Type}",
-                    lineCount, connectionId, id, eventType);
-
-                // Send raw JSON to client - UI will parse and render
-                await _hubContext.Clients.Client(connectionId)
-                    .OutputReceived(id, line);
-            }
-
-            _logger.LogInformation("Sent {LineCount} existing output lines to client {ConnectionId} for project {ProjectId}",
-                lineCount, connectionId, id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error sending output from offset for project {ProjectId}", id);
-        }
     }
 
     private Task NotifyStatusChanged(ProjectInfo project) => _lifecycle.NotifyStatusChangedAsync(project);

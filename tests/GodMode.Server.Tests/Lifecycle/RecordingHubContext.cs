@@ -7,7 +7,9 @@ using Microsoft.AspNetCore.SignalR;
 namespace GodMode.Server.Tests.Lifecycle;
 
 /// <summary>One call the server made to its hub clients, whoever it was addressed to.</summary>
-internal sealed record HubPush(string Method, string? ProjectId, ProjectStatus? Status = null, string? RawJson = null);
+/// <param name="Offset">An output line's offset (OutputReceived), a batch's fromOffset (OutputBatch), or where a replay completed.</param>
+internal sealed record HubPush(string Method, string? ProjectId, ProjectStatus? Status = null, string? RawJson = null,
+    long? Offset = null, IReadOnlyList<OutputLine>? Lines = null);
 
 /// <summary>
 /// Stands in for the server's hub context: every push to any client is recorded, in order, as a
@@ -83,11 +85,17 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
     /// <summary>The client proxy for one address; it records each push to whoever the address reaches at the time.</summary>
     private sealed class RecordingClient(RecordingHubContext hub, Func<IEnumerable<string>> recipients) : IProjectHubClient
     {
-        public async Task OutputReceived(string projectId, string rawJson)
+        public async Task OutputReceived(string projectId, long offset, string rawJson)
         {
             if (hub._outputGate is { } gate) await gate.Task;
-            await Done(new HubPush(nameof(OutputReceived), projectId, RawJson: rawJson));
+            await Done(new HubPush(nameof(OutputReceived), projectId, RawJson: rawJson, Offset: offset));
         }
+
+        public Task OutputBatch(string projectId, long fromOffset, IReadOnlyList<OutputLine> lines) =>
+            Done(new HubPush(nameof(OutputBatch), projectId, Offset: fromOffset, Lines: lines));
+
+        public Task OutputReplayComplete(string projectId, long offset) =>
+            Done(new HubPush(nameof(OutputReplayComplete), projectId, Offset: offset));
 
         public Task StatusChanged(string projectId, ProjectStatus status) =>
             Done(new HubPush(nameof(StatusChanged), projectId, status));
