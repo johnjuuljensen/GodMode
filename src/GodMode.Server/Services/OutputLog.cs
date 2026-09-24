@@ -103,9 +103,12 @@ public static class OutputLog
 
         internal Writer(string path)
         {
-            _stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+            _stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+            if (_stream.Length == 0) return;
+
             // A write cut short left a line without its \n: end it, so the next line starts on a boundary
-            if (_stream.Length > 0 && LastByte(path) != NewLine)
+            _stream.Position = _stream.Length - 1;
+            if (_stream.ReadByte() != NewLine)
             {
                 _stream.WriteByte(NewLine);
                 _stream.Flush();
@@ -133,14 +136,6 @@ public static class OutputLog
 
     private static FileStream OpenRead(string path) =>
         new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, bufferSize: 1, useAsync: true);
-
-    private static int LastByte(string path)
-    {
-        using var stream = OpenRead(path);
-        if (stream.Length == 0) return -1;
-        stream.Position = stream.Length - 1;
-        return stream.ReadByte();
-    }
 
     /// <summary>The offset after the last <c>\n</c> in the stream, or 0.</summary>
     private static long LastLineEnd(FileStream stream)
