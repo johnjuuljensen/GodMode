@@ -49,6 +49,14 @@ public class ProjectManager : IProjectManager
     private readonly IServer? _server;
     private readonly string[] _configuredUrls;
 
+    /// <summary>How long a reply that resumes a project waits for claude to report its session started.</summary>
+    public const string SessionStartTimeoutSetting = "SessionStartTimeoutSeconds";
+    private readonly TimeSpan _sessionStartTimeout;
+
+    /// <summary>The attention list last pushed, and the lock that orders computing and pushing it.</summary>
+    private AttentionItem[] _attention = [];
+    private readonly SemaphoreSlim _attentionLock = new(1, 1);
+
     /// <inheritdoc />
     public event Func<string, Task>? OnProjectCompleted
     {
@@ -109,6 +117,8 @@ public class ProjectManager : IProjectManager
         _mcpBridgePath = ResolveMcpBridgePath(configuration);
         _server = server;
         _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        _sessionStartTimeout = TimeSpan.FromSeconds(configuration.GetValue(SessionStartTimeoutSetting, 60.0));
+        _lifecycle.StatusNotified += PushAttentionIfChangedAsync;
 
         // Read optional autodiscovery directory (normalize empty/whitespace to null)
         var rawDir = configuration["ProjectRootsDir"];
@@ -483,6 +493,13 @@ public class ProjectManager : IProjectManager
 
     public async Task<ProjectStatus> CreateProjectAsync(CreateProjectRequest request)
     {
+        // A create that fails leaves an Error project behind, which needs the user
+        try { return await CreateProjectCoreAsync(request); }
+        finally { await PushAttentionIfChangedAsync(); }
+    }
+
+    private async Task<ProjectStatus> CreateProjectCoreAsync(CreateProjectRequest request)
+    {
         _logger.LogInformation("Creating project in profile '{Profile}' root '{Root}' action '{Action}' with inputs: {InputKeys}",
             request.ProfileName, request.ProjectRootName, request.ActionName ?? "(default)", string.Join(", ", request.Inputs.Keys));
 
@@ -726,6 +743,99 @@ public class ProjectManager : IProjectManager
         await NotifyStatusChanged(project);
     }
 
+    public async Task ReplyAndResumeAsync(string projectId, string text)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        // One reply at a time decides whether to resume: two would launch two processes
+        var resumeLock = project.Process.ResumeLock;
+        await resumeLock.WaitAsync();
+        try
+        {
+            if (_lifecycle.IsRunning(project))
+            {
+                await SendInputAsync(projectId, text);
+                return;
+            }
+
+            // claude writes system/init once it has read its first input, so the reply is sent at
+            // once and the session start awaited after it
+            var sessionStart = project.Process.NextSessionStart();
+            await ResumeProjectAsync(projectId);
+            var sentTo = await TrySendInputAsync(project, text);
+            await NotifyStatusChanged(project);
+
+            int startedIn;
+            try
+            {
+                startedIn = await sessionStart.WaitAsync(_sessionStartTimeout);
+            }
+            catch (TimeoutException)
+            {
+                throw new TimeoutException(
+                    $"Project {projectId} was resumed, but claude did not start its session within {_sessionStartTimeout.TotalSeconds:0} seconds");
+            }
+
+            // The resume found no conversation and a fresh session took its place: the reply went
+            // to the process that gave up, or reached none
+            if (startedIn != sentTo)
+            {
+                _logger.LogInformation("Project {ProjectId}: its session started in another process than the reply went to; sending it again", projectId);
+                await _lifecycle.SendInputAsync(project, text);
+                await NotifyStatusChanged(project);
+            }
+        }
+        finally
+        {
+            resumeLock.Release();
+        }
+    }
+
+    /// <summary>Sends to the process just launched; 0 when it has exited already (a fresh session may take its place).</summary>
+    private async Task<int> TrySendInputAsync(ProjectInfo project, string text)
+    {
+        try { return await _lifecycle.SendInputAsync(project, text); }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogInformation("Project {ProjectId}: the resumed process took no input ({Message})", project.Status.Id, ex.Message);
+            return 0;
+        }
+    }
+
+    public AttentionItem[] GetAttention() => Attention.Of(_projects.Values.Select(project => project.Status));
+
+    public async Task MarkSeenAsync(string projectId)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        // Not UpdatedAt: it dates an Error, and seeing a result changes no state
+        await _lifecycle.UpdateStatusAsync(project, status => status with { SeenAt = DateTime.UtcNow });
+        await NotifyStatusChanged(project);
+    }
+
+    /// <summary>Pushes the attention list to every client when it differs from the one last pushed.</summary>
+    private async Task PushAttentionIfChangedAsync()
+    {
+        await _attentionLock.WaitAsync();
+        try
+        {
+            var attention = GetAttention();
+            if (Attention.Same(attention, _attention)) return;
+            _attention = attention;
+            await _hubContext.Clients.All.AttentionChanged(attention);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error pushing the attention list");
+        }
+        finally
+        {
+            _attentionLock.Release();
+        }
+    }
+
     public async Task RespondToPermissionAsync(string projectId, string requestId, PermissionDecision decision)
     {
         var (project, pending) = FindPending(projectId, requestId);
@@ -854,6 +964,7 @@ public class ProjectManager : IProjectManager
         await DeleteDirectoryRobustAsync(project.ProjectPath);
 
         _logger.LogInformation("Project {ProjectId} deleted successfully", projectId);
+        await PushAttentionIfChangedAsync();
     }
 
     public async Task ArchiveProjectAsync(string projectId)
@@ -880,6 +991,7 @@ public class ProjectManager : IProjectManager
         await File.WriteAllTextAsync(metaPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
 
         _logger.LogInformation("Archived project {ProjectId} ({Name})", projectId, project.Status.Name);
+        await PushAttentionIfChangedAsync();
     }
 
     public Task<ProjectSummary[]> ListArchivedProjectsAsync()
@@ -963,6 +1075,7 @@ public class ProjectManager : IProjectManager
                     await _statusUpdater.SaveStatusAsync(project);
 
                     _logger.LogInformation("Unarchived project {ArchivedId} ({Name}) as {ProjectId}", projectId, status.Name, id);
+                    await PushAttentionIfChangedAsync();
 
                     return new ProjectSummary(id, status.Name, ProjectState.Stopped,
                         DateTime.UtcNow, RootName: rootName, ProfileName: profileName);
@@ -1033,6 +1146,7 @@ public class ProjectManager : IProjectManager
                 State = ProjectState.Error,
                 LastError = ex is LaunchConfigException ? ex.Message : status.LastError,
             });
+            await NotifyStatusChanged(project);
             throw;
         }
 
@@ -1076,7 +1190,7 @@ public class ProjectManager : IProjectManager
         return Task.CompletedTask;
     }
 
-    public Task DeleteProfileAsync(string name, bool deleteContents = false)
+    public async Task DeleteProfileAsync(string name, bool deleteContents = false)
     {
         _profileFileManager.DeleteProfile(name);
 
@@ -1130,7 +1244,8 @@ public class ProjectManager : IProjectManager
         }
 
         RebuildSnapshot();
-        return Task.CompletedTask;
+        // A cascade removed projects, which may have needed the user
+        await PushAttentionIfChangedAsync();
     }
 
     public Task UpdateProfileDescriptionAsync(string name, string? description)
@@ -1225,6 +1340,8 @@ public class ProjectManager : IProjectManager
                 _logger.LogError(ex, "Failed to recover project from {Path}", projectPath);
             }
         });
+
+        await PushAttentionIfChangedAsync();
     }
 
     /// <summary>
@@ -1866,7 +1983,7 @@ public class ProjectManager : IProjectManager
             projectId, resultRequest.Summary ?? "no summary");
 
         // Notify clients of the result
-        await _hubContext.Clients.All.StatusChanged(projectId, project.Status);
+        await NotifyStatusChanged(project);
     }
 
     /// <summary>
@@ -1880,7 +1997,7 @@ public class ProjectManager : IProjectManager
         project.CustomStatus = message;
         _logger.LogInformation("Project {ProjectId} custom status: {Status}", projectId, message);
 
-        await _hubContext.Clients.All.StatusChanged(projectId, project.Status);
+        await NotifyStatusChanged(project);
     }
 
     /// <summary>
@@ -1900,9 +2017,10 @@ public class ProjectManager : IProjectManager
         {
             State = ProjectState.WaitingInput,
             CurrentQuestion = question,
+            QuestionAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         });
-        await _hubContext.Clients.All.StatusChanged(projectId, project.Status);
+        await NotifyStatusChanged(project);
 
         _logger.LogInformation("Project {ProjectId} requested human review: {Question}", projectId, reviewRequest.Question);
     }

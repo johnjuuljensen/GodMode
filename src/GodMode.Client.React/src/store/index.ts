@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import { GodModeHub, type ConnectionState, type OutputMessage } from '../signalr/hub';
 import type {
   ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
-  ServerInfo, CreateActionInfo, PermissionDecision,
+  ServerInfo, CreateActionInfo, PermissionDecision, AttentionItem,
 } from '../signalr/types';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../services/hostApi';
@@ -67,6 +67,18 @@ export interface Transcript {
   messages: ClaudeMessage[];
   offset: number;
   phase: 'idle' | 'replaying' | 'live';
+}
+
+/** An attention item and the server it is from: attention is per server, merged here. */
+export interface ServerAttentionItem extends AttentionItem {
+  serverId: string;
+}
+
+/** Replaces one server's items in the merged list, keeping it oldest first. */
+function mergeAttention(all: ServerAttentionItem[], serverId: string, items: AttentionItem[]): ServerAttentionItem[] {
+  return [...all.filter(i => i.serverId !== serverId), ...items.map(i => ({ ...i, serverId }))]
+    .sort((a, b) => a.Since.localeCompare(b.Since)
+      || transcriptKey(a.serverId, a.ProjectId).localeCompare(transcriptKey(b.serverId, b.ProjectId)));
 }
 
 /** The key of a transcript. Project IDs contain '/', so a key is only ever built, never split. */
@@ -174,6 +186,12 @@ interface AppState {
   // Permission prompts and AskUserQuestion (ProjectSummary.PendingPermission / PendingQuestion)
   respondToPermission: (serverId: string, projectId: string, requestId: string, decision: PermissionDecision) => Promise<void>;
   answerQuestion: (serverId: string, projectId: string, requestId: string, answers: Record<string, string>) => Promise<void>;
+
+  // What needs the user, across every connected server, oldest first. Key an item by transcriptKey(serverId, ProjectId)
+  attention: ServerAttentionItem[];
+  markSeen: (serverId: string, projectId: string) => Promise<void>;
+  /** Answers a project whether its claude runs or not (resuming it if needed). */
+  replyAndResume: (serverId: string, projectId: string, text: string) => Promise<void>;
 
   // Per-project question tracking
   projectQuestions: Record<string, boolean>;
@@ -560,7 +578,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
 
     conn.hub.setCallbacks({
-      onStateChanged: (connectionState) => updateConn({ connectionState }),
+      onStateChanged: (connectionState) => {
+        updateConn({ connectionState });
+        if (connectionState === 'connected') {
+          // A reconnect may have missed pushes: take the whole list again
+          conn.hub.getAttention()
+            .then(items => set(state => ({ attention: mergeAttention(state.attention, serverId, items) })))
+            .catch(err => console.error('[store] getAttention failed:', serverId, err));
+        } else if (connectionState === 'disconnected') {
+          set(state => ({ attention: mergeAttention(state.attention, serverId, []) }));
+        }
+      },
+      onAttentionChanged: (items) => set(state => ({ attention: mergeAttention(state.attention, serverId, items) })),
       onProjectCreated: (status) => {
         set(state => {
           const summary: ProjectSummary = {
@@ -856,6 +885,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   answerQuestion: async (serverId, projectId, requestId, answers) => {
     await get().getHub(serverId)?.answerQuestion(projectId, requestId, answers);
+  },
+
+  attention: [],
+  markSeen: async (serverId, projectId) => {
+    await get().getHub(serverId)?.markSeen(projectId);
+  },
+  replyAndResume: async (serverId, projectId, text) => {
+    await get().getHub(serverId)?.replyAndResume(projectId, text);
   },
 
   projectQuestions: {},

@@ -36,7 +36,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private const string RecordFileName = "fake-claude.jsonl";
 
     private readonly string _workDir;
-    private readonly ServiceProvider _services;
+    private ServiceProvider _services;
+    private readonly IConfiguration _configuration;
+    private readonly List<ServiceProvider> _stopped = [];
     private readonly List<string> _projectIds = [];
     private readonly CapturingLoggerProvider _logs = new();
 
@@ -48,10 +50,10 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     public string RootPath { get; }
     public string ScriptPath { get; }
-    public IProjectManager Projects { get; }
+    public IProjectManager Projects { get; private set; }
 
-    /// <summary>Every push the server makes to its hub clients.</summary>
-    public RecordingHubContext Hub { get; } = new();
+    /// <summary>Every push the server makes to its hub clients (since the last <see cref="RestartAsync"/>).</summary>
+    public RecordingHubContext Hub { get; private set; } = new();
 
     /// <summary>The fake's apphost next to the test assembly (copied there by the project reference).</summary>
     public static string FakeClaudePath =>
@@ -92,8 +94,23 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
             configuration[key] = value;
 
-        _services = BuildServices(new ConfigurationBuilder().AddInMemoryCollection(configuration).Build(), _logs, Hub);
+        _configuration = new ConfigurationBuilder().AddInMemoryCollection(configuration).Build();
+        _services = BuildServices(_configuration, _logs, Hub);
         Projects = _services.GetRequiredService<IProjectManager>();
+    }
+
+    /// <summary>
+    /// Restarts the server over the same roots: the host stops (every project is stopped and
+    /// persisted), then a new server, with a new hub, recovers the projects from their files.
+    /// </summary>
+    public async Task RestartAsync()
+    {
+        StopHost();
+        _stopped.Add(_services);
+        Hub = new RecordingHubContext();
+        _services = BuildServices(_configuration, _logs, Hub);
+        Projects = _services.GetRequiredService<IProjectManager>();
+        await Projects.RecoverProjectsAsync();
     }
 
     /// <summary>Replaces the script that the next launch plays. Running fakes keep the one they loaded.</summary>
@@ -314,6 +331,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             catch (Exception) { /* best effort: the test may have stopped or broken it already */ }
         }
         await _services.DisposeAsync();
+        foreach (var stopped in _stopped) await stopped.DisposeAsync();
         ServerProcess.DeleteWorkDir(_workDir);
     }
 }

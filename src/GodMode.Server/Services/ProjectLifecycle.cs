@@ -31,6 +31,9 @@ public sealed class ProjectLifecycle
     /// <summary>Raised, on the project's consumer, when output takes a project to Idle. A handler must not wait for a Stop.</summary>
     public event Func<string, Task>? OnProjectCompleted;
 
+    /// <summary>Raised after every <see cref="NotifyStatusChangedAsync"/>, once clients have the status.</summary>
+    public event Func<Task>? StatusNotified;
+
     public ProjectLifecycle(
         IClaudeProcessManager processManager,
         IStatusUpdater statusUpdater,
@@ -136,6 +139,7 @@ public sealed class ProjectLifecycle
                     PendingPermission = null,
                     PendingQuestion = question,
                     CurrentQuestion = question.Questions[0].Question,
+                    QuestionAt = question.RequestedAt,
                 },
                 _ when before.PendingPermission != null || before.PendingQuestion != null => WithoutPending(before) with
                 {
@@ -160,19 +164,27 @@ public sealed class ProjectLifecycle
 
     /// <summary>
     /// Sends user input and marks the project Running, under the state lock: a reply that lands
-    /// before Running is set waits for it, so Running can never overwrite the reply's state.
+    /// before Running is set waits for it, so Running can never overwrite the reply's state. A
+    /// reply means the user has seen the last result. Returns the process the input went to.
     /// </summary>
-    public Task SendInputAsync(ProjectInfo project, string input) =>
-        WithStateLockAsync(project, async () =>
+    public async Task<int> SendInputAsync(ProjectInfo project, string input)
+    {
+        var sentTo = 0;
+        await WithStateLockAsync(project, async () =>
         {
+            sentTo = project.Process.ProcessId;
             await _processManager.SendInputAsync(project, input);
+            var now = DateTime.UtcNow;
             await SetStatusAsync(project, status => status with
             {
                 State = ProjectState.Running,
                 CurrentQuestion = null,
-                UpdatedAt = DateTime.UtcNow
+                SeenAt = now,
+                UpdatedAt = now
             });
         });
+        return sentTo;
+    }
 
     // ── State ──
 
@@ -220,6 +232,10 @@ public sealed class ProjectLifecycle
         {
             _logger.LogError(ex, "Error broadcasting the status of project {ProjectId}", project.Status.Id);
         }
+
+        if (StatusNotified == null) return;
+        try { await StatusNotified(); }
+        catch (Exception ex) { _logger.LogError(ex, "Error in StatusNotified handler for project {ProjectId}", project.Status.Id); }
     }
 
     // ── Output ──
@@ -300,6 +316,12 @@ public sealed class ProjectLifecycle
     /// </summary>
     private async Task HandleExitAsync(ProjectInfo project, ProcessExit exit)
     {
+        // A reply waiting for this launch's session to start waits no longer
+        if (project.Process.ProcessId == 0)
+            project.Process.SessionEnded(exit.Killed
+                ? "claude was stopped before it started its session"
+                : $"claude exited before it started its session: {exit.Stderr ?? $"exit code {exit.ExitCode}"}");
+
         if (exit.Killed) return;
 
         var changed = false;
@@ -371,6 +393,7 @@ public sealed class ProjectLifecycle
                 var previous = project.Status.State;
                 statusChanged = await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
                 completed = previous != ProjectState.Idle && project.Status.State == ProjectState.Idle;
+                if (StatusUpdater.IsSessionStart(outputEvent)) project.Process.SessionStarted();
             });
         }
         catch (Exception ex)

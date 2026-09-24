@@ -8,8 +8,9 @@ namespace GodMode.Server.Tests.Lifecycle;
 
 /// <summary>One call the server made to its hub clients, whoever it was addressed to.</summary>
 /// <param name="Offset">An output line's offset (OutputReceived), a batch's fromOffset (OutputBatch), or where a replay completed.</param>
+/// <param name="Attention">The list an AttentionChanged pushed.</param>
 internal sealed record HubPush(string Method, string? ProjectId, ProjectStatus? Status = null, string? RawJson = null,
-    long? Offset = null, IReadOnlyList<OutputLine>? Lines = null);
+    long? Offset = null, IReadOnlyList<OutputLine>? Lines = null, IReadOnlyList<AttentionItem>? Attention = null);
 
 /// <summary>
 /// Stands in for the server's hub context: every push to any client is recorded, in order, as a
@@ -42,6 +43,10 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
     public IReadOnlyList<ProjectStatus> StatusPushes(string projectId) =>
         Pushes.Where(p => p.Method == nameof(IProjectHubClient.StatusChanged) && p.ProjectId == projectId)
             .Select(p => p.Status!).ToArray();
+
+    /// <summary>The lists <c>AttentionChanged</c> pushed, oldest first.</summary>
+    public IReadOnlyList<IReadOnlyList<AttentionItem>> AttentionPushes =>
+        Pushes.Where(p => p.Method == nameof(IProjectHubClient.AttentionChanged)).Select(p => p.Attention!).ToArray();
 
     /// <summary>Output broadcasts wait from now until the returned gate is released.</summary>
     public TaskCompletionSource HoldOutput() =>
@@ -99,6 +104,9 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
 
         public Task StatusChanged(string projectId, ProjectStatus status) =>
             Done(new HubPush(nameof(StatusChanged), projectId, status));
+
+        public Task AttentionChanged(AttentionItem[] items) =>
+            Done(new HubPush(nameof(AttentionChanged), null, Attention: items));
 
         public Task ProjectCreated(ProjectStatus status) => Done(new HubPush(nameof(ProjectCreated), status.Id, status));
         public Task CreationProgress(string projectId, string message) => Done(new HubPush(nameof(CreationProgress), projectId));

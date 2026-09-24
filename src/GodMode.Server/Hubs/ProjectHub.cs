@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
+using GodMode.Server.Models;
 using GodMode.Server.Services;
 using Microsoft.AspNetCore.SignalR;
 
@@ -69,6 +70,38 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} sending input to project {ProjectId}",
             Context.ConnectionId, projectId);
         await _projectManager.SendInputAsync(projectId, input);
+    }
+
+    public Task<AttentionItem[]> GetAttention()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested the attention list", Context.ConnectionId);
+        return Task.FromResult(_projectManager.GetAttention());
+    }
+
+    public async Task MarkSeen(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} saw project {ProjectId}", Context.ConnectionId, projectId);
+        try
+        {
+            await _projectManager.MarkSeenAsync(projectId);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task ReplyAndResume(string projectId, string text)
+    {
+        _logger.LogInformation("Client {ConnectionId} replying to project {ProjectId}", Context.ConnectionId, projectId);
+        try
+        {
+            await _projectManager.ReplyAndResumeAsync(projectId, text);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or TimeoutException or LaunchConfigException)
+        {
+            throw new HubException(ex.Message);
+        }
     }
 
     public async Task RespondToPermission(string projectId, string requestId, PermissionDecision decision)

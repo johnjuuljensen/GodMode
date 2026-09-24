@@ -78,6 +78,37 @@ public sealed class ProjectProcess
             CompletePending(request, PermissionPromptResult.Deny(message));
     }
 
+    private TaskCompletionSource<int>? _sessionStart;
+
+    /// <summary>
+    /// Completes at the next <c>system/init</c> the consumer handles, with the process running then:
+    /// claude has started its session. Fails, with why, when the process exits first.
+    /// </summary>
+    public Task<int> NextSessionStart()
+    {
+        lock (_gate)
+            return (_sessionStart ??= new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+    }
+
+    /// <summary>claude reported its session started: see <see cref="NextSessionStart"/>.</summary>
+    public void SessionStarted() => TakeSessionStart()?.TrySetResult(ProcessId);
+
+    /// <summary>The process exited, with no later launch running: see <see cref="NextSessionStart"/>.</summary>
+    public void SessionEnded(string reason) => TakeSessionStart()?.TrySetException(new InvalidOperationException(reason));
+
+    private TaskCompletionSource<int>? TakeSessionStart()
+    {
+        lock (_gate)
+        {
+            var sessionStart = _sessionStart;
+            _sessionStart = null;
+            return sessionStart;
+        }
+    }
+
+    /// <summary>Held while a reply resumes the project, so two replies cannot launch two processes.</summary>
+    public SemaphoreSlim ResumeLock { get; } = new(1, 1);
+
     private Task? _consumer;
 
     /// <summary>Starts the one consumer of <see cref="Output"/>, unless it is already running.</summary>
