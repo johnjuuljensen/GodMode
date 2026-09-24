@@ -215,6 +215,9 @@ interface AppState {
 
   // What needs the user, across every connected server, oldest first. Key an item by projectKey(serverId, ProjectId)
   attention: ServerAttentionItem[];
+  /** What the phone's home screen shows: the inbox (the default), or the project list. A wide screen shows both. */
+  homeView: 'inbox' | 'projects';
+  setHomeView: (view: 'inbox' | 'projects') => void;
   markSeen: (serverId: string, projectId: string) => Promise<void>;
   /** Answers a project whether its claude runs or not (resuming it if needed). */
   replyAndResume: (serverId: string, projectId: string, text: string) => Promise<void>;
@@ -711,6 +714,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   attention: [],
+  homeView: 'inbox',
+  setHomeView: (view) => set({ homeView: view }),
   markSeen: async (serverId, projectId) => {
     await get().getHub(serverId)?.markSeen(projectId);
   },

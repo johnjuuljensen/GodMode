@@ -225,13 +225,7 @@
 .inbox-running-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
 .inbox-running-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ── Phone home: inbox or project list, with a tab bar ── */
-.shell-mobile-home {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-}
+/* ── Phone home (the Shell's sidebar slot): inbox or project list, with a tab bar ── */
 .shell-mobile-home > .sidebar { flex: 1; min-height: 0; height: auto; }
 .shell-mobile-home > .sidebar-header { flex-shrink: 0; padding-top: calc(14px + env(safe-area-inset-top)); }
 
