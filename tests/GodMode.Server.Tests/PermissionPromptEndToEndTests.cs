@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using GodMode.FakeClaude;
 using GodMode.Server.Services;
@@ -66,7 +65,7 @@ public class PermissionPromptEndToEndTests
             await server.WaitForHealthyAsync(http);
 
             // ── Allowed with an edited input; the request outlives the client that saw it ──
-            await using var first = new Client(baseUrl);
+            await using var first = new ServerHubClient(baseUrl);
             await first.StartAsync();
             var created = await first.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.CreateProject), Profile, Root, null,
                 new Dictionary<string, JsonElement>
@@ -81,7 +80,7 @@ public class PermissionPromptEndToEndTests
             Assert.Equal("git push origin feature/12-x", push.PendingPermission.Input.GetProperty("command").GetString());
             await first.DisposeAsync();
 
-            await using var second = new Client(baseUrl);
+            await using var second = new ServerHubClient(baseUrl);
             await second.StartAsync();
             var listed = Assert.Single(await second.Hub.InvokeAsync<ProjectSummary[]>(nameof(IProjectHub.ListProjects)));
             Assert.Equal(ProjectState.WaitingPermission, listed.State);
@@ -140,45 +139,5 @@ public class PermissionPromptEndToEndTests
             server.Dispose();
             ServerProcess.DeleteWorkDir(workDir);
         }
-    }
-
-    /// <summary>A hub connection that keeps every StatusChanged it is pushed.</summary>
-    private sealed class Client(string baseUrl) : IAsyncDisposable
-    {
-        private readonly ConcurrentQueue<ProjectStatus> _pushes = new();
-
-        public HubConnection Hub { get; } = new HubConnectionBuilder()
-            .WithUrl($"{baseUrl}/hubs/projects")
-            .AddJsonProtocol(options =>
-            {
-                options.PayloadSerializerOptions.PropertyNamingPolicy = JsonDefaults.Options.PropertyNamingPolicy;
-                foreach (var converter in JsonDefaults.Options.Converters)
-                    options.PayloadSerializerOptions.Converters.Add(converter);
-            })
-            .Build();
-
-        public async Task StartAsync()
-        {
-            Hub.On<string, ProjectStatus>(nameof(IProjectHubClient.StatusChanged), (_, status) => _pushes.Enqueue(status));
-            await Hub.StartAsync();
-        }
-
-        /// <summary>The first status pushed for the project, or read with GetStatus, that satisfies <paramref name="condition"/>.</summary>
-        public async Task<ProjectStatus> WaitForAsync(string projectId, Func<ProjectStatus, bool> condition, ServerProcess server)
-        {
-            ProjectStatus? found = null;
-            var ok = await LifecycleHarness.WaitForAsync(async () =>
-            {
-                found = _pushes.FirstOrDefault(s => s.Id == projectId && condition(s));
-                if (found != null) return true;
-                var current = await Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), projectId);
-                found = condition(current) ? current : null;
-                return found != null;
-            });
-            Assert.True(ok, $"project {projectId} never reached the expected status.\n{server.Output}");
-            return found!;
-        }
-
-        public ValueTask DisposeAsync() => Hub.DisposeAsync();
     }
 }
