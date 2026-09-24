@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
+using GodMode.Server.Models;
 using GodMode.Server.Services;
 using Microsoft.AspNetCore.SignalR;
 
@@ -97,7 +98,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         {
             await _projectManager.ReplyAndResumeAsync(projectId, text);
         }
-        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or TimeoutException)
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or TimeoutException or LaunchConfigException)
         {
             throw new HubException(ex.Message);
         }
