@@ -209,8 +209,6 @@ interface AppState {
   /** Closes a tile. */
   unsubscribeTail: (serverId: string, projectId: string) => Promise<void>;
   outputMessages: ClaudeMessage[];
-  appendOutput: (projectId: string, message: ClaudeMessage) => void;
-  clearOutput: () => void;
 
   // Question state
   question: QuestionState;
@@ -794,8 +792,6 @@ export const useAppStore = create<AppState>((set, get) => {
     await unsubscribe(serverId, projectId);
   },
   outputMessages: [],
-  appendOutput: (_projectId, message) => set(state => ({ outputMessages: [...state.outputMessages, message] })),
-  clearOutput: () => set({ outputMessages: [] }),
 
   // ── Questions ─────────────────────────────────────────────
 
