@@ -322,8 +322,8 @@ cd src/GodMode.Client.React; npm run lint; npm test
 
 **The base is not green on this gate**, so "green" means **no new failures against the base**. On
 2026-09-24 the epic #168 branch (`41d60c4`) built with 0 errors, passed all 278 `GodMode.Server.Tests`,
-and had 7 errors and 2 warnings from `npm run lint` in `src/GodMode.Client.React`. `npm test` (Vitest,
-added by #169) had 14 tests, all passing. A build under load can print MSBuild `PLUGIN_TIMINGS`
+and had 7 errors and 2 warnings from `npm run lint` in `src/GodMode.Client.React`. It had no `npm test`:
+Vitest arrived with #169, whose merge brought 14 tests, all passing. A build under load can print MSBuild `PLUGIN_TIMINGS`
 warnings; they are about the machine, not the code. A body states the base's numbers
 next to its own. A pull request that removes a baseline failure says so. One that adds a failure is
 red, whatever else the gate shows.

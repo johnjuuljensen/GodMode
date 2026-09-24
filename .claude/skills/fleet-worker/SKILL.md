@@ -40,7 +40,8 @@ state lives; the user tracks by issue.
    Ready means done, and it is the only signal that says so. **Green means no new failures against
    your base.** The base is not clean: on 2026-09-24 the epic #168 branch (`41d60c4`) built with 0
    errors, passed all 278 `GodMode.Server.Tests`, and had 7 errors and 2 warnings from `npm run lint`
-   in the React client. `npm test` (Vitest, added by #169) had 14 tests, all passing. A build under
+   in the React client. It had no `npm test`: Vitest arrived with #169, whose merge brought 14 tests,
+   all passing. A build under
    load can print MSBuild `PLUGIN_TIMINGS` warnings; they are about the machine, not the code.
    Your brief gives your base's numbers; if it does not, measure them once in a detached checkout
    (`git worktree add --detach <scratch dir> $env:AC_GWT_BASE_BRANCH`, then `git worktree remove` it)
