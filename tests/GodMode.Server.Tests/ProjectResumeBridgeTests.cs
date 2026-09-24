@@ -42,7 +42,7 @@ public class ProjectResumeBridgeTests
             var launch = Assert.Single(launcher.Launches);
             Assert.NotNull(launch.Env);
             Assert.Equal(ProjectId, launch.Env!["GODMODE_PROJECT_ID"]);
-            Assert.StartsWith("http://localhost:", launch.Env["GODMODE_SERVER_URL"]);
+            Assert.Equal(BridgeUrl.Default, launch.Env["GODMODE_SERVER_URL"]);
             var token = launch.Env["GODMODE_PROJECT_TOKEN"];
             Assert.NotNull(projects.ValidateProjectToken(ProjectId, token));
 

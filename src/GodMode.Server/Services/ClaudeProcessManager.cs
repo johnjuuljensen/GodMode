@@ -87,14 +87,8 @@ public class ClaudeProcessManager : IClaudeProcessManager
         var sessionId = project.SessionId ?? Guid.NewGuid().ToString();
         project.SessionId = sessionId;
 
-        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
-
-        // Save session ID to file
-        await File.WriteAllTextAsync(
-            Path.Combine(godModePath, "session-id"),
-            sessionId,
-            cancellationToken
-        );
+        // The ID asked for; claude's system/init replaces it if claude keeps another
+        await SessionIdFile.WriteAsync(project.ProjectPath, sessionId, cancellationToken);
 
         // Start with session ID, send prompt via stdin
         var args = BuildArgs(["--session-id", sessionId], extraArgs);
@@ -129,7 +123,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
                     project.Status.Id, project.SessionId);
                 try
                 {
-                    await File.WriteAllTextAsync(Path.Combine(project.ProjectPath, ".godmode", "session-id"), project.SessionId, cancellationToken);
+                    await SessionIdFile.WriteAsync(project.ProjectPath, project.SessionId, cancellationToken);
                     var freshArgs = BuildArgs(["--session-id", project.SessionId], extraArgs);
                     await RunClaudeProcessAsync(project, freshArgs, "Continue from where we left off. Review the codebase and previous work.",
                         cancellationToken, extraEnvironment);

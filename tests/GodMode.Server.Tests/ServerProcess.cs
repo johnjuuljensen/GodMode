@@ -13,6 +13,7 @@ internal sealed class ServerProcess : IDisposable
 {
     private readonly Process _process;
     private readonly StringBuilder _output = new();
+    private bool _disposed;
 
     public string WorkDir { get; }
     public string RootsDir { get; }
@@ -86,6 +87,22 @@ internal sealed class ServerProcess : IDisposable
         return port;
     }
 
+    /// <summary>The first address Kestrel reports it listens on: what a server bound to port 0 got.</summary>
+    public async Task<string> WaitForListeningUrlAsync()
+    {
+        const string marker = "Now listening on: ";
+        string? url = null;
+        var found = await Lifecycle.LifecycleHarness.WaitForAsync(() =>
+        {
+            url = Output.Split('\n')
+                .Select(line => line.IndexOf(marker, StringComparison.Ordinal) is var at and >= 0 ? line[(at + marker.Length)..].Trim() : null)
+                .FirstOrDefault(listening => listening != null);
+            return Task.FromResult(url != null || HasExited);
+        }, TimeSpan.FromSeconds(60));
+        Assert.True(found && url != null, $"Server did not report where it listens.\n{Output}");
+        return url!;
+    }
+
     public async Task WaitForHealthyAsync(HttpClient http)
     {
         var deadline = DateTime.UtcNow.AddSeconds(60);
@@ -119,8 +136,11 @@ internal sealed class ServerProcess : IDisposable
         }
     }
 
+    /// <summary>Kills the server with its children, as a crash would. A second call does nothing.</summary>
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         if (!_process.HasExited)
         {
             _process.Kill(entireProcessTree: true);

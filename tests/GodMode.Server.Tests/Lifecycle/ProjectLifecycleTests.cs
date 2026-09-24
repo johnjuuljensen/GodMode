@@ -105,15 +105,37 @@ public class ProjectLifecycleTests
         await harness.WaitForStateAsync(created.Id, ProjectState.WaitingInput);
         var project = harness.ProjectInfo(created.Id);
         var pid = project.Process.ProcessId;
+        // Every wait is bounded: the host runs this synchronously, so an unbounded one would hang the
+        // suite. A failure is kept for after StopHost, which logs and swallows a callback's exception
+        string? stopping = null;
         harness.OnHostStopping(() =>
         {
-            project.Process.StateLock.Wait();
-            harness.ProcessManager.SendInputAsync(project, "exit now").GetAwaiter().GetResult();
-            using (var fake = System.Diagnostics.Process.GetProcessById(pid)) fake.WaitForExit();
-            _ = Task.Delay(200).ContinueWith(_ => project.Process.StateLock.Release());
+            if (!project.Process.StateLock.Wait(LifecycleHarness.DefaultTimeout))
+            {
+                stopping = "the state lock was not free within the timeout";
+                return;
+            }
+            try
+            {
+                // Found before it is told to exit: once it has, there is no process by its pid to find
+                using var fake = System.Diagnostics.Process.GetProcessById(pid);
+                if (!harness.ProcessManager.SendInputAsync(project, "exit now").Wait(LifecycleHarness.DefaultTimeout))
+                    stopping = "sending the fake its input did not finish within the timeout";
+                else if (!fake.WaitForExit(LifecycleHarness.DefaultTimeout))
+                    stopping = $"the fake (pid {pid}) did not exit within the timeout";
+            }
+            catch (Exception ex)
+            {
+                stopping = $"the host-stopping callback threw: {ex}";
+            }
+            finally
+            {
+                _ = Task.Delay(200).ContinueWith(_ => project.Process.StateLock.Release());
+            }
         });
 
         harness.StopHost();
+        Assert.True(stopping == null, $"{stopping}.\n{harness.Describe(created.Id)}");
 
         Assert.Equal(1, (await harness.WaitForLaunchAsync(created.Id, l => l.ExitCode != null)).ExitCode);
         var onDisk = harness.ReadStatusFile(created.Id);

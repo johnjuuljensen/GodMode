@@ -1,6 +1,5 @@
 using System.Text.Json;
 using GodMode.Server.Services;
-using Microsoft.Extensions.Configuration;
 
 namespace GodMode.Server.Tests;
 
@@ -36,22 +35,6 @@ public class PermissionSummaryTests
         var summary = PermissionPrompts.Summarize("Bash", Input(new { command = new string('x', 500) }), ProjectPath);
 
         Assert.Equal("Bash: " + new string('x', 200) + " …", summary);
-    }
-
-    [Theory]
-    [InlineData(null, "http://localhost:31337")]
-    [InlineData("http://127.0.0.1:31337", "http://127.0.0.1:31337")]
-    [InlineData("http://100.64.0.1:31337;http://127.0.0.1:4000", "http://127.0.0.1:4000")]
-    [InlineData("http://+:31337", "http://localhost:31337")]
-    [InlineData("http://0.0.0.0:5000", "http://localhost:5000")]
-    [InlineData("http://localhost:6000", "http://localhost:6000")]
-    public void LoopbackUrl_IsTheLoopbackBinding_OrLocalhostOnTheBindingsPort(string? urls, string expected)
-    {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["Urls"] = urls })
-            .Build();
-
-        Assert.Equal(expected, ProjectManager.LoopbackUrl(configuration));
     }
 
     private static JsonElement Input(object value) => JsonSerializer.SerializeToElement(value);

@@ -61,11 +61,13 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <param name="rootConfig">Extra top-level properties for the root's config.json (for example <c>claudeArgs</c>).</param>
     /// <param name="settings">Extra server configuration, applied over the harness defaults.</param>
     /// <param name="extraRoots">More roots beside <see cref="RootName"/>, each in the profile given, configured as it is.</param>
+    /// <param name="profileEnvironment">The environment of <see cref="ProfileName"/>, in its <c>.profiles/</c> env.json.</param>
     public LifecycleHarness(
         FakeScript script,
         IReadOnlyDictionary<string, object>? rootConfig = null,
         IReadOnlyDictionary<string, string?>? settings = null,
-        IReadOnlyList<(string Root, string Profile)>? extraRoots = null)
+        IReadOnlyList<(string Root, string Profile)>? extraRoots = null,
+        IReadOnlyDictionary<string, string>? profileEnvironment = null)
     {
         _workDir = ServerProcess.CreateWorkDir("lifecycle");
         RootsDir = Path.Combine(_workDir, "roots");
@@ -75,6 +77,12 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         WriteRootConfig(RootPath, ProfileName, rootConfig);
         foreach (var (root, profile) in extraRoots ?? [])
             WriteRootConfig(Path.Combine(RootsDir, root), profile, rootConfig);
+        if (profileEnvironment != null)
+        {
+            var profileDir = Path.Combine(RootsDir, ".profiles", ProfileName);
+            Directory.CreateDirectory(profileDir);
+            File.WriteAllText(Path.Combine(profileDir, "env.json"), JsonSerializer.Serialize(profileEnvironment));
+        }
 
         var configuration = new Dictionary<string, string?>
         {

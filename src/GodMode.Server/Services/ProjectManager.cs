@@ -3,6 +3,8 @@ using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.SignalR;
 using GodMode.Server.Hubs;
 using System.Collections.Concurrent;
@@ -44,7 +46,8 @@ public class ProjectManager : IProjectManager
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
     private readonly string _mcpBridgePath;
-    private readonly string _serverUrl;
+    private readonly IServer? _server;
+    private readonly string[] _configuredUrls;
 
     /// <inheritdoc />
     public event Func<string, Task>? OnProjectCompleted
@@ -93,7 +96,8 @@ public class ProjectManager : IProjectManager
         ProfileFileManager profileFileManager,
         IConfiguration configuration,
         IHostApplicationLifetime lifetime,
-        ILogger<ProjectManager> logger)
+        ILogger<ProjectManager> logger,
+        IServer? server = null)
     {
         _lifecycle = lifecycle;
         _statusUpdater = statusUpdater;
@@ -103,7 +107,8 @@ public class ProjectManager : IProjectManager
         _profileFileManager = profileFileManager;
         _logger = logger;
         _mcpBridgePath = ResolveMcpBridgePath(configuration);
-        _serverUrl = LoopbackUrl(configuration);
+        _server = server;
+        _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         // Read optional autodiscovery directory (normalize empty/whitespace to null)
         var rawDir = configuration["ProjectRootsDir"];
@@ -683,26 +688,10 @@ public class ProjectManager : IProjectManager
         // Add to tracking
         _projects[projectId] = project;
 
-        // Build MCP config JSON (merges profile + action MCP servers)
-        var mcpConfigJson = BuildMcpConfigJson(profileConfig?.McpServers, action.McpServers);
-
-        // Inject GodMode MCP bridge into MCP config (always available to every project)
-        // Never logged: it carries the MCP servers' credentials
-        mcpConfigJson = InjectMcpBridge(mcpConfigJson);
-
-        // Build claude env/args from action config + project settings + profile env
-        var (claudeEnv, claudeArgs) = BuildClaudeConfig(project.ProjectPath, action, settings, model, profileEnv,
-            request.ProfileName, config.StripEnvVarProfile, mcpConfigJson);
-
-        claudeEnv = AddMcpBridgeEnvironment(project, claudeEnv);
-
-        if (claudeArgs != null)
-            _logger.LogInformation("Claude args: {Args}", string.Join(" ", claudeArgs));
-
-        // Start Claude process
+        // Start Claude process, configured from what is saved above, exactly as a resume will be
         try
         {
-            await _lifecycle.StartAsync(project, prompt ?? "Hello", claudeEnv, claudeArgs);
+            await _lifecycle.StartAsync(project, prompt ?? "Hello", BuildLaunchSpec(project));
         }
         catch (Exception ex)
         {
@@ -1031,64 +1020,19 @@ public class ProjectManager : IProjectManager
 
         await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Running, LastError = null, UpdatedAt = DateTime.UtcNow });
 
-        // Build claude env/args from action config + persisted project settings + profile env
-        Dictionary<string, string>? claudeEnv = null;
-        string[]? claudeArgs = null;
-        try
-        {
-            var settings = ProjectFiles.ProjectSettings.Load(project.ProjectPath);
-            // Restore action name from settings if not already set (recovery scenario)
-            project.ActionName ??= settings.ActionName;
-
-            var resumeSnap = _snapshot;
-            var resumeProfileName = project.ProfileName ?? project.Status.ProfileName;
-            resumeSnap.Profiles.TryGetValue(resumeProfileName ?? "", out var profileCfg);
-            var profileEnv = profileCfg?.Environment;
-
-            // Prefer the model the session was originally started with (persisted in status.json).
-            // Falls back to the current action config for projects created before the field existed.
-            var resumeModel = project.Status.Model;
-
-            if (project.Status.RootName != null && resumeProfileName != null)
-            {
-                var rootPath = resumeSnap.ProjectFiles.GetProjectRootPath(CompositeKey(resumeProfileName, project.Status.RootName));
-                var config = _rootConfigReader.ReadConfig(rootPath);
-                var action = config.ResolveAction(project.ActionName);
-                if (action != null)
-                {
-                    var mcpJson = InjectMcpBridge(BuildMcpConfigJson(profileCfg?.McpServers, action.McpServers));
-                    (claudeEnv, claudeArgs) = BuildClaudeConfig(project.ProjectPath, action, settings, resumeModel ?? action.Model, profileEnv,
-                        resumeProfileName, config.StripEnvVarProfile, mcpJson);
-                }
-                else
-                    // The process no longer inherits the server's environment: keep the profile's
-                    (claudeEnv, claudeArgs) = BuildClaudeConfig(project.ProjectPath, new CreateAction("Create"), settings, resumeModel,
-                        profileEnv: profileEnv, profileName: resumeProfileName,
-                        stripEnvVarProfile: config.StripEnvVarProfile, mcpConfigJson: InjectMcpBridge(null));
-            }
-            else
-            {
-                // No root config, just apply project settings
-                (claudeEnv, claudeArgs) = BuildClaudeConfig(project.ProjectPath, new CreateAction("Create"), settings, resumeModel, profileEnv: profileEnv,
-                    mcpConfigJson: InjectMcpBridge(null));
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not read config for project {ProjectId}, continuing without extra config", projectId);
-        }
-
-        claudeEnv = AddMcpBridgeEnvironment(project, claudeEnv);
-
         try
         {
             // Cancels the previous launch's token and gives this one its own
-            await _lifecycle.ResumeAsync(project, claudeEnv, claudeArgs);
+            await _lifecycle.ResumeAsync(project, BuildLaunchSpec(project));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to resume Claude process for project {ProjectId}", projectId);
-            await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Error });
+            await _lifecycle.UpdateStatusAsync(project, status => status with
+            {
+                State = ProjectState.Error,
+                LastError = ex is LaunchConfigException ? ex.Message : status.LastError,
+            });
             throw;
         }
 
@@ -1264,12 +1208,7 @@ public class ProjectManager : IProjectManager
                 var settings = ProjectFiles.ProjectSettings.Load(projectPath);
                 project.ActionName = settings.ActionName;
 
-                // Load session ID if exists
-                var sessionIdPath = Path.Combine(godModePath, "session-id");
-                if (File.Exists(sessionIdPath))
-                {
-                    project.SessionId = await File.ReadAllTextAsync(sessionIdPath, ct);
-                }
+                project.SessionId = await SessionIdFile.ReadAsync(projectPath, ct);
 
                 _projects[project.Status.Id] = project;
 
@@ -1525,6 +1464,54 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
+    /// The one place a claude launch is configured, for create and resume alike: everything comes
+    /// from the project (its profile, root, action and model) and what is saved in its folder
+    /// (settings.json), read fresh, so a resume, or a resume after a restart, launches as the
+    /// create did. The profile's environment and MCP servers, the action's, and the MCP bridge with
+    /// its <c>GODMODE_*</c> variables and a fresh project token are always there. A root config that
+    /// cannot be read, or an action that is gone, throws <see cref="LaunchConfigException"/>: a
+    /// launch with anything but the project's own action would not be the one it was created with.
+    /// </summary>
+    private ClaudeLaunchSpec BuildLaunchSpec(ProjectInfo project)
+    {
+        var snap = _snapshot;
+        var settings = ProjectFiles.ProjectSettings.Load(project.ProjectPath);
+        // Recovery reads the action name from settings too; a project created before it was saved has none
+        project.ActionName ??= settings.ActionName;
+        var profileName = project.ProfileName ?? project.Status.ProfileName;
+        snap.Profiles.TryGetValue(profileName ?? "", out var profile);
+
+        var (action, stripEnvVarProfile) = ResolveLaunchAction(snap, project, profileName);
+        // Never logged: it carries the MCP servers' credentials
+        var mcpConfigJson = InjectMcpBridge(BuildMcpConfigJson(profile?.McpServers, action.McpServers));
+        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, settings, project.Status.Model ?? action.Model,
+            profile?.Environment, profileName, stripEnvVarProfile, mcpConfigJson);
+        return new ClaudeLaunchSpec(AddMcpBridgeEnvironment(project, env), args ?? []);
+    }
+
+    /// <summary>
+    /// The project's action in its root's config (the default action for a project with no root).
+    /// Throws <see cref="LaunchConfigException"/> when the config cannot be read or lacks the action.
+    /// </summary>
+    private (CreateAction Action, bool StripEnvVarProfile) ResolveLaunchAction(ProfileSnapshot snap, ProjectInfo project, string? profileName)
+    {
+        if (project.Status.RootName == null || profileName == null) return (new CreateAction("Create"), false);
+
+        RootConfig config;
+        try
+        {
+            config = _rootConfigReader.ReadConfigStrict(snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName)));
+        }
+        catch (Exception ex)
+        {
+            throw new LaunchConfigException($"root config unreadable: {ex.Message}", ex);
+        }
+        return config.ResolveAction(project.ActionName) is { } action
+            ? (action, config.StripEnvVarProfile)
+            : throw new LaunchConfigException($"root config has no action '{project.ActionName}'");
+    }
+
+    /// <summary>
     /// Builds claude environment and args from action config + project settings + profile env.
     /// </summary>
     private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
@@ -1669,6 +1656,9 @@ public class ProjectManager : IProjectManager
     /// Sets the env vars the GodMode MCP bridge calls back to this server with, issuing a fresh
     /// project token for this launch. Tokens live only in memory, so a project recovered after a
     /// restart has none until it is launched again; a new launch also retires the previous token.
+    /// They are not persisted: shutdown kills every claude, and one that outlives a crash has lost
+    /// its pipes (its output reaches no server, its stdin is closed, so it ends with its turn) and
+    /// is not a process the next server tracks, so an old token would authorise nothing useful.
     /// </summary>
     private Dictionary<string, string> AddMcpBridgeEnvironment(ProjectInfo project, Dictionary<string, string>? env)
     {
@@ -1676,7 +1666,7 @@ public class ProjectManager : IProjectManager
         env ??= new Dictionary<string, string>();
         env["GODMODE_PROJECT_ID"] = project.Status.Id;
         env["GODMODE_PROJECT_TOKEN"] = project.ProjectToken;
-        env["GODMODE_SERVER_URL"] = _serverUrl;
+        env["GODMODE_SERVER_URL"] = ServerUrl();
         return env;
     }
 
@@ -1829,23 +1819,11 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
-    /// The URL the bridge calls this server on: the first loopback binding in Urls, or localhost on
-    /// the port of the first binding. A server bound to another address only (Docker's
-    /// http://+:31337) is still reached on localhost. Defaults to http://localhost:31337.
+    /// The URL the bridge calls this server on, from the addresses it is bound to once started
+    /// (port 0 resolved, --urls and URLS applied), else the configured Urls: see <see cref="BridgeUrl"/>.
     /// </summary>
-    internal static string LoopbackUrl(IConfiguration configuration)
-    {
-        var bindings = (configuration["Urls"] ?? "")
-            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(url => url.Replace("://+", "://placeholder").Replace("://*", "://placeholder"))
-            .Select(url => Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri : null)
-            .OfType<Uri>()
-            .Where(uri => uri.Scheme == Uri.UriSchemeHttp)
-            .ToList();
-        var loopback = bindings.FirstOrDefault(uri => uri.IsLoopback);
-        if (loopback != null) return $"http://{loopback.Authority}";
-        return $"http://localhost:{bindings.FirstOrDefault()?.Port ?? 31337}";
-    }
+    private string ServerUrl() =>
+        BridgeUrl.From(_server?.Features.Get<IServerAddressesFeature>()?.Addresses is { Count: > 0 } bound ? bound : _configuredUrls);
 
     /// <summary>
     /// Validates a project token and returns the project info if valid.
