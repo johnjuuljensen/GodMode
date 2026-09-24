@@ -166,6 +166,17 @@ internalApi.MapPost("/review", async (HttpContext ctx, IProjectManager pm) =>
     return Results.Ok(new { success = true });
 });
 
+// The bridge's permission_prompt: answered when the user answers, however long that takes. The
+// request is the wait: when it drops (claude exited), the prompt is withdrawn.
+internalApi.MapPost("/permission", async (HttpContext ctx, IProjectManager pm) =>
+{
+    var request = await ctx.Request.ReadFromJsonAsync<PermissionPromptRequest>();
+    if (request is not { ToolName.Length: > 0 })
+        return Results.BadRequest(new { error = "Invalid request body" });
+
+    return Results.Json(await pm.RequestPermissionAsync(ProjectId(ctx), request, ctx.RequestAborted));
+});
+
 // SPA fallback: serve index.html for non-API/non-hub routes (React client routing).
 // Anonymous for the same reason as the static files above: it is the client bundle's entry page.
 app.MapFallbackToFile("index.html").AllowAnonymous();

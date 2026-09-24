@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 
 namespace GodMode.Server.Models;
@@ -48,6 +49,34 @@ public sealed class ProjectProcess
     /// In-memory only; not persisted. Only the consumer touches it.
     /// </summary>
     public string? LastAssistantText { get; set; }
+
+    private readonly ConcurrentDictionary<string, PendingRequest> _pending = new();
+
+    /// <summary>The permission prompts claude is waiting on, by request id.</summary>
+    public void AddPending(PendingRequest request) => _pending[request.Id] = request;
+
+    /// <summary>The oldest permission prompt claude is waiting on, which the status shows; null for none.</summary>
+    public PendingRequest? OldestPending => _pending.Values.MinBy(r => r.Sequence);
+
+    public PendingRequest? FindPending(string requestId) => _pending.GetValueOrDefault(requestId);
+
+    /// <summary>
+    /// Answers the request, unless it was answered already or its caller gave up; true if this call
+    /// took it off the list.
+    /// </summary>
+    public bool CompletePending(PendingRequest request, PermissionPromptResult result)
+    {
+        if (!_pending.TryRemove(new KeyValuePair<string, PendingRequest>(request.Id, request))) return false;
+        request.Completion.TrySetResult(result);
+        return true;
+    }
+
+    /// <summary>Denies every waiting request: the process they came from is gone or going.</summary>
+    public void DenyAllPending(string message)
+    {
+        foreach (var request in _pending.Values)
+            CompletePending(request, PermissionPromptResult.Deny(message));
+    }
 
     private Task? _consumer;
 

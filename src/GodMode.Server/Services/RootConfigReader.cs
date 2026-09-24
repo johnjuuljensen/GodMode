@@ -31,7 +31,7 @@ public class RootConfigReader : IRootConfigReader
           "properties": {
             "name": { "type": "string", "title": "Project Name" },
             "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
-            "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions", "default": "true" }
+            "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions; otherwise tool calls that need approval wait for you", "default": false }
           },
           "required": ["name", "prompt"]
         }

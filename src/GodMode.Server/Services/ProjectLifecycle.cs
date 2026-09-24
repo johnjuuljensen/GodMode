@@ -93,11 +93,63 @@ public sealed class ProjectLifecycle
     public async Task StopAsync(ProjectInfo project)
     {
         await KillAsync(project);
-        await InOrderAsync(project, () => SetStatusAsync(project, status => status with
+        project.Process.DenyAllPending(StoppedMessage);
+        await InOrderAsync(project, () => SetStatusAsync(project, status => WithoutPending(status) with
         {
             State = ProjectState.Stopped,
             UpdatedAt = DateTime.UtcNow
         }));
+    }
+
+    /// <summary>What a permission prompt still waiting when its session ends is answered with.</summary>
+    private const string StoppedMessage = "The GodMode session stopped before the user answered.";
+
+    /// <summary>
+    /// The status without its pending request: none survives the process it came from. A question
+    /// keeps its text in <see cref="ProjectStatus.CurrentQuestion"/>, as a question in plain text does.
+    /// </summary>
+    private static ProjectStatus WithoutPending(ProjectStatus status) =>
+        status with { PendingPermission = null, PendingQuestion = null };
+
+    /// <summary>
+    /// Shows the oldest permission prompt claude is waiting on in the status: WaitingPermission for
+    /// a tool call, WaitingInput for an AskUserQuestion. With none left, a project that was waiting
+    /// on one is Running again, as claude is. Pushes the status when it changed.
+    /// </summary>
+    public async Task ShowPendingAsync(ProjectInfo project)
+    {
+        var changed = false;
+        await WithStateLockAsync(project, async () =>
+        {
+            var before = project.Status;
+            var after = project.Process.OldestPending switch
+            {
+                { Permission: { } permission } => before with
+                {
+                    State = ProjectState.WaitingPermission,
+                    PendingPermission = permission,
+                    PendingQuestion = null,
+                    CurrentQuestion = null,
+                },
+                { Question: { } question } => before with
+                {
+                    State = ProjectState.WaitingInput,
+                    PendingPermission = null,
+                    PendingQuestion = question,
+                    CurrentQuestion = question.Questions[0].Question,
+                },
+                _ when before.PendingPermission != null || before.PendingQuestion != null => WithoutPending(before) with
+                {
+                    State = before.State is ProjectState.WaitingPermission or ProjectState.WaitingInput ? ProjectState.Running : before.State,
+                    CurrentQuestion = before.PendingQuestion != null ? null : before.CurrentQuestion,
+                },
+                _ => before,
+            };
+            if (after == before) return;
+            await SetStatusAsync(project, status => after with { UpdatedAt = DateTime.UtcNow });
+            changed = true;
+        });
+        if (changed) await NotifyStatusChangedAsync(project);
     }
 
     /// <summary>Kills the process and lets the consumer finish, before the project is removed.</summary>
@@ -259,9 +311,12 @@ public sealed class ProjectLifecycle
                 // A later launch is already running; its own exit settles the state
                 if (project.Process.ProcessId != 0) return;
 
+                // Its bridge went with it; nothing can answer claude any more
+                project.Process.DenyAllPending(StoppedMessage);
+
                 var shuttingDown = _shuttingDown;
                 var finished = shuttingDown || exit.ExitCode == 0 && project.Status.State is ProjectState.Idle or ProjectState.WaitingInput;
-                await SetStatusAsync(project, status => status with
+                await SetStatusAsync(project, status => WithoutPending(status) with
                 {
                     State = finished ? ProjectState.Stopped : ProjectState.Error,
                     CurrentQuestion = shuttingDown ? status.CurrentQuestion : null,

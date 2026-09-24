@@ -38,6 +38,12 @@ public interface IProjectManager
     /// </summary>
     Task SendInputAsync(string projectId, string input);
 
+    /// <summary>Answers the project's pending permission prompt <paramref name="requestId"/> (hub RespondToPermission).</summary>
+    Task RespondToPermissionAsync(string projectId, string requestId, PermissionDecision decision);
+
+    /// <summary>Answers the project's pending question <paramref name="requestId"/> (hub AnswerQuestion).</summary>
+    Task AnswerQuestionAsync(string projectId, string requestId, IReadOnlyDictionary<string, string> answers);
+
     /// <summary>
     /// Stops a running project.
     /// </summary>
@@ -118,4 +124,10 @@ public interface IProjectManager
     Task StoreProjectResultAsync(string projectId, SubmitResultRequest resultRequest);
     Task UpdateCustomStatusAsync(string projectId, string message);
     Task RequestHumanReviewAsync(string projectId, RequestReviewRequest reviewRequest);
+
+    /// <summary>
+    /// The bridge's permission_prompt: waits until the user answers, and returns what claude gets.
+    /// Canceled by <paramref name="aborted"/> when the bridge's call goes away.
+    /// </summary>
+    Task<PermissionPromptResult> RequestPermissionAsync(string projectId, PermissionPromptRequest request, CancellationToken aborted);
 }
