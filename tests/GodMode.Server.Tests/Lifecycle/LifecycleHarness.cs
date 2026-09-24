@@ -52,6 +52,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public string ScriptPath { get; }
     public IProjectManager Projects { get; private set; }
 
+    /// <summary>The server's warnings and errors so far, across restarts.</summary>
+    public IReadOnlyCollection<string> Warnings => _logs.Lines;
+
     /// <summary>Every push the server makes to its hub clients (since the last <see cref="RestartAsync"/>).</summary>
     public RecordingHubContext Hub { get; private set; } = new();
 
@@ -101,9 +104,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     /// <summary>
     /// Restarts the server over the same roots: the host stops (every project is stopped and
-    /// persisted), then a new server, with a new hub, recovers the projects from their files.
+    /// persisted), then a new server, with a new hub, recovers the projects from their files and
+    /// carries on with those the shutdown interrupted, as Program.cs does once the server is started.
     /// </summary>
-    public async Task RestartAsync()
+    /// <param name="resume">False to leave carrying on to the test, which calls <see cref="IProjectManager.ResumeInterruptedProjectsAsync"/>.</param>
+    public async Task RestartAsync(bool resume = true)
     {
         StopHost();
         _stopped.Add(_services);
@@ -111,6 +116,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         _services = BuildServices(_configuration, _logs, Hub);
         Projects = _services.GetRequiredService<IProjectManager>();
         await Projects.RecoverProjectsAsync();
+        if (resume) await Projects.ResumeInterruptedProjectsAsync();
     }
 
     /// <summary>Replaces the script that the next launch plays. Running fakes keep the one they loaded.</summary>

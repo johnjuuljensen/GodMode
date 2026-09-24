@@ -186,7 +186,8 @@ if (authSettings.Mode == AuthMode.Loopback)
     app.Logger.LogWarning("No API key configured: unauthenticated access is allowed from loopback only. " +
         "Set {Setting} before binding to any other address.", AuthModeSelector.ApiKeySetting);
 
-// Recover existing projects AFTER server starts (non-blocking)
+// Recover existing projects AFTER server starts (non-blocking), then carry on with those the last
+// shutdown interrupted: a resume's bridge URL is an address the server is bound to by now
 IProjectManager projectManager;
 try
 {
@@ -205,6 +206,7 @@ app.Lifetime.ApplicationStarted.Register(() =>
         try
         {
             await projectManager.RecoverProjectsAsync();
+            await projectManager.ResumeInterruptedProjectsAsync();
         }
         catch (Exception ex)
         {

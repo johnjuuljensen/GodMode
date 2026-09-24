@@ -106,6 +106,12 @@ public sealed class ProjectProcess
         }
     }
 
+    /// <summary>
+    /// The last time the process ended on its own outside a shutdown, with the status before and
+    /// after. Only the consumer sets it, under the state lock.
+    /// </summary>
+    public ExitOnItsOwn? LastExit { get; set; }
+
     /// <summary>Held while a reply resumes the project, so two replies cannot launch two processes.</summary>
     public SemaphoreSlim ResumeLock { get; } = new(1, 1);
 
@@ -149,3 +155,8 @@ public abstract record PipelineItem
 /// <param name="Killed">The server killed it (Stop, shutdown, a relaunch), which then decides the project's state.</param>
 /// <param name="Stderr">The last lines it wrote to stderr, oldest first; null if it wrote none.</param>
 public sealed record ProcessExit(int ProcessId, int ExitCode, bool Killed, string? Stderr);
+
+/// <param name="At">When its exit was handled.</param>
+/// <param name="Before">The project's status before the exit changed it.</param>
+/// <param name="After">The status the exit left, the very instance: nothing has changed it since while it is still the project's.</param>
+public sealed record ExitOnItsOwn(DateTime At, Shared.Models.ProjectStatus Before, Shared.Models.ProjectStatus After);

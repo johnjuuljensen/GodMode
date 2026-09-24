@@ -17,10 +17,23 @@ namespace GodMode.Server.Services;
 /// Manages project folders, lifecycle, and state.
 /// Uses config-driven workflow: reads .godmode-root/config.json, runs scripts, starts Claude.
 /// </summary>
-public class ProjectManager : IProjectManager
+public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 {
     /// <summary>How long server shutdown waits for the projects' processes to be killed and marked Stopped.</summary>
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// How long before a shutdown a process may have exited on its own and still count as stopped
+    /// by it (a Ctrl+C reaches claude too): see <see cref="ProjectLifecycle.UndoExitBeforeShutdownAsync"/>.
+    /// </summary>
+    public const string ExitBeforeShutdownWindowSetting = "ExitBeforeShutdownWindowSeconds";
+    private readonly TimeSpan _exitBeforeShutdownWindow;
+
+    /// <summary>How many projects the start resumes at once: each is one claude process starting its session.</summary>
+    private const int ConcurrentResumes = 3;
+
+    /// <summary>ApplicationStopping: the start stops carrying on with interrupted projects.</summary>
+    private readonly CancellationToken _stopping;
 
     /// <summary>The name the GodMode MCP bridge has in every session's MCP config.</summary>
     internal const string McpBridgeServerName = "godmode-bridge";
@@ -56,6 +69,12 @@ public class ProjectManager : IProjectManager
     /// <summary>The attention list last pushed, and the lock that orders computing and pushing it.</summary>
     private AttentionItem[] _attention = [];
     private readonly SemaphoreSlim _attentionLock = new(1, 1);
+
+    /// <summary>How often an open pull request is checked, and how long its root's status script may take.</summary>
+    public const string PullRequestPollSetting = "PullRequestPollSeconds";
+    public const string StatusScriptTimeoutSetting = "StatusScriptTimeoutSeconds";
+    private readonly TimeSpan _statusScriptTimeout;
+    private readonly PullRequestPoller _pullRequests;
 
     /// <inheritdoc />
     public event Func<string, Task>? OnProjectCompleted
@@ -118,7 +137,11 @@ public class ProjectManager : IProjectManager
         _server = server;
         _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         _sessionStartTimeout = TimeSpan.FromSeconds(configuration.GetValue(SessionStartTimeoutSetting, 60.0));
-        _lifecycle.StatusNotified += PushAttentionIfChangedAsync;
+        _statusScriptTimeout = TimeSpan.FromSeconds(configuration.GetValue(StatusScriptTimeoutSetting, 30.0));
+        _exitBeforeShutdownWindow = TimeSpan.FromSeconds(configuration.GetValue(ExitBeforeShutdownWindowSetting, 5.0));
+        _pullRequests = new PullRequestPoller(CheckPullRequestAsync,
+            TimeSpan.FromSeconds(configuration.GetValue(PullRequestPollSetting, 600.0)), logger);
+        _lifecycle.StatusNotified += OnStatusNotifiedAsync;
 
         // Read optional autodiscovery directory (normalize empty/whitespace to null)
         var rawDir = configuration["ProjectRootsDir"];
@@ -136,40 +159,62 @@ public class ProjectManager : IProjectManager
         // Build initial profile/root snapshot
         _snapshot = BuildSnapshot();
 
+        _stopping = lifetime.ApplicationStopping;
         lifetime.ApplicationStopping.Register(StopProjectsOnShutdown);
     }
 
     /// <summary>
     /// Server shutdown: kills every claude process tree and persists Stopped, so recovery on the
-    /// next start does not launch a second process on a session an orphan still runs. A Ctrl+C
-    /// on a server run in a terminal reaches claude too, which may already have exited: from here
-    /// on its exit counts as stopped, and its project is stopped like the rest, so the exit is
-    /// persisted before the server goes. Blocks shutdown until done or <see cref="ShutdownTimeout"/> passes.
+    /// next start does not launch a second process on a session an orphan still runs. A project
+    /// that was working or waiting on the user keeps that in <see cref="ProjectStatus.StateAtShutdown"/>,
+    /// and the next start resumes it (<see cref="ResumeInterruptedProjectsAsync"/>). A Ctrl+C on a
+    /// server run in a terminal reaches claude too, which may already have exited: from here on its
+    /// exit counts as stopped, one handled just before is taken back, and its project is stopped
+    /// like the rest, so the exit is persisted before the server goes. Blocks shutdown until done or
+    /// <see cref="ShutdownTimeout"/> passes.
     /// </summary>
     private void StopProjectsOnShutdown()
     {
+        // Before the projects stop: going Stopped starts no status script now
+        _pullRequests.Stop();
         _lifecycle.BeginShutdown();
+        // What each was doing as the shutdown began, before stopping it changes that
         var running = _projects.Values
             .Where(project => project.Process.ProcessId != 0
                 || project.Status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission or ProjectState.Idle)
+            .Select(project => (Project: project, StateAtShutdown: ProjectLifecycle.ActiveState(project.Status.State)))
             .ToArray();
-        if (running.Length == 0) return;
+        var exited = _projects.Values.Except(running.Select(r => r.Project)).ToArray();
+        if (running.Length == 0 && exited.Length == 0) return;
 
         _logger.LogInformation("Server stopping: stopping {Count} running project(s)", running.Length);
-        var stops = Task.WhenAll(running.Select(async project =>
-        {
-            try
+        var stops = Task.WhenAll(
+            running.Select(r => StopOnShutdownAsync(r.Project, async () =>
             {
-                await _lifecycle.StopAsync(project);
-                await NotifyStatusChanged(project);
-            }
-            catch (Exception ex)
+                await _lifecycle.StopAsync(r.Project, r.StateAtShutdown);
+                return true;
+            })).Concat(exited.Select(project => StopOnShutdownAsync(project, async () =>
             {
-                _logger.LogError(ex, "Could not stop project {ProjectId} on shutdown", project.Status.Id);
-            }
-        }));
+                if (!await _lifecycle.UndoExitBeforeShutdownAsync(project, _exitBeforeShutdownWindow)) return false;
+                _logger.LogInformation("Project {ProjectId}: claude exited just before the server stopped; it is stopped by the shutdown instead",
+                    project.Status.Id);
+                return true;
+            }))));
         if (!stops.Wait(ShutdownTimeout))
             _logger.LogWarning("Server stopping: projects were not all stopped within {Timeout}", ShutdownTimeout);
+    }
+
+    /// <summary>Runs <paramref name="stop"/>, pushing the status when it changed it; a failure is logged, and stops no other project.</summary>
+    private async Task StopOnShutdownAsync(ProjectInfo project, Func<Task<bool>> stop)
+    {
+        try
+        {
+            if (await stop()) await NotifyStatusChanged(project);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not stop project {ProjectId} on shutdown", project.Status.Id);
+        }
     }
 
     private static Dictionary<string, ProfileConfig> LoadProfiles(IConfiguration configuration, bool hasAutoDiscovery)
@@ -474,7 +519,8 @@ public class ProjectManager : IProjectManager
                 s.RootName,
                 ProfileName: project.ProfileName ?? s.ProfileName,
                 PendingPermission: s.PendingPermission,
-                PendingQuestion: s.PendingQuestion
+                PendingQuestion: s.PendingQuestion,
+                PullRequest: s.PullRequest
             ));
         }
 
@@ -753,43 +799,57 @@ public class ProjectManager : IProjectManager
         await resumeLock.WaitAsync();
         try
         {
-            if (_lifecycle.IsRunning(project))
-            {
-                await SendInputAsync(projectId, text);
-                return;
-            }
-
-            // claude writes system/init once it has read its first input, so the reply is sent at
-            // once and the session start awaited after it
-            var sessionStart = project.Process.NextSessionStart();
-            await ResumeProjectAsync(projectId);
-            var sentTo = await TrySendInputAsync(project, text);
-            await NotifyStatusChanged(project);
-
-            int startedIn;
-            try
-            {
-                startedIn = await sessionStart.WaitAsync(_sessionStartTimeout);
-            }
-            catch (TimeoutException)
-            {
-                throw new TimeoutException(
-                    $"Project {projectId} was resumed, but claude did not start its session within {_sessionStartTimeout.TotalSeconds:0} seconds");
-            }
-
-            // The resume found no conversation and a fresh session took its place: the reply went
-            // to the process that gave up, or reached none
-            if (startedIn != sentTo)
-            {
-                _logger.LogInformation("Project {ProjectId}: its session started in another process than the reply went to; sending it again", projectId);
-                await _lifecycle.SendInputAsync(project, text);
-                await NotifyStatusChanged(project);
-            }
+            await ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false);
         }
         finally
         {
             resumeLock.Release();
         }
+    }
+
+    /// <summary>
+    /// <see cref="ReplyAndResumeAsync"/>, under the project's resume lock. With
+    /// <paramref name="onlyIfInterrupted"/> (the start carrying on after a shutdown), it sends
+    /// nothing to a running claude and resumes only while the project still has its
+    /// <see cref="ProjectStatus.StateAtShutdown"/>; false when it did neither.
+    /// </summary>
+    private async Task<bool> ReplyAndResumeLockedAsync(ProjectInfo project, string text, bool onlyIfInterrupted)
+    {
+        var projectId = project.Status.Id;
+        if (_lifecycle.IsRunning(project))
+        {
+            if (onlyIfInterrupted) return false;
+            await SendInputAsync(projectId, text);
+            return true;
+        }
+
+        // claude writes system/init once it has read its first input, so the reply is sent at
+        // once and the session start awaited after it
+        var sessionStart = project.Process.NextSessionStart();
+        if (!await TryResumeAsync(project, onlyIfInterrupted)) return false;
+        var sentTo = await TrySendInputAsync(project, text);
+        await NotifyStatusChanged(project);
+
+        int startedIn;
+        try
+        {
+            startedIn = await sessionStart.WaitAsync(_sessionStartTimeout);
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException(
+                $"Project {projectId} was resumed, but claude did not start its session within {_sessionStartTimeout.TotalSeconds:0} seconds");
+        }
+
+        // The resume found no conversation and a fresh session took its place: the reply went
+        // to the process that gave up, or reached none
+        if (startedIn != sentTo)
+        {
+            _logger.LogInformation("Project {ProjectId}: its session started in another process than the reply went to; sending it again", projectId);
+            await _lifecycle.SendInputAsync(project, text);
+            await NotifyStatusChanged(project);
+        }
+        return true;
     }
 
     /// <summary>Sends to the process just launched; 0 when it has exited already (a fresh session may take its place).</summary>
@@ -814,6 +874,80 @@ public class ProjectManager : IProjectManager
         await _lifecycle.UpdateStatusAsync(project, status => status with { SeenAt = DateTime.UtcNow });
         await NotifyStatusChanged(project);
     }
+
+    /// <summary>After every status push: the pull request check a transition to Idle or Stopped makes, then the attention list.</summary>
+    private Task OnStatusNotifiedAsync(ProjectInfo project)
+    {
+        _pullRequests.Observe(project.Status.Id, project.Status.State);
+        return PushAttentionIfChangedAsync();
+    }
+
+    /// <summary>
+    /// Runs the project's root's status script in its folder, and keeps the pull request it reports in
+    /// the status, pushing it when it changed. A root without one, a script that fails, times out or
+    /// prints anything but the documented JSON (<see cref="PullRequestScript"/>) changes nothing; the
+    /// failure is logged. Says whether to poll: while the pull request it knows is open.
+    /// </summary>
+    private async Task<PullRequestPoller.Outcome> CheckPullRequestAsync(string projectId, CancellationToken cancel)
+    {
+        if (!_projects.TryGetValue(projectId, out var project)) return PullRequestPoller.Outcome.Gone;
+        var unchanged = project.Status.PullRequest is { IsOpen: true } ? PullRequestPoller.Outcome.Poll : PullRequestPoller.Outcome.Wait;
+        var profileName = project.ProfileName ?? project.Status.ProfileName;
+        if (project.Status.RootName == null || profileName == null) return unchanged;
+
+        string? script = null;
+        PullRequestStatus? reported;
+        try
+        {
+            var snap = _snapshot;
+            var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
+            var config = _rootConfigReader.ReadConfig(rootPath);
+            if (config.ResolveAction(project.ActionName) is not { Status: { } status } action) return unchanged;
+            script = status;
+
+            snap.Profiles.TryGetValue(profileName, out var profileCfg);
+            var env = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+                profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            timeout.CancelAfter(_statusScriptTimeout);
+            var output = await _scriptRunner.RunForOutputAsync(script, rootPath, project.ProjectPath, env, PullRequestScript.MaxOutputChars, timeout.Token);
+            reported = PullRequestScript.Parse(output, DateTime.UtcNow);
+        }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Project {ProjectId}: status script {Script} failed, so its pull request is left as it was: {Reason}",
+                projectId, script, ex is OperationCanceledException ? $"it took longer than {_statusScriptTimeout.TotalSeconds}s" : ex.Message);
+            return unchanged;
+        }
+
+        cancel.ThrowIfCancellationRequested();
+        if (!_projects.TryGetValue(projectId, out var current) || current != project) return PullRequestPoller.Outcome.Gone;
+        var before = project.Status.PullRequest;
+        var after = PullRequestScript.Apply(before, reported);
+        if (after != before)
+        {
+            _logger.LogInformation("Project {ProjectId}: pull request {PullRequest}", projectId,
+                after is { } pr ? $"#{pr.Number} is {pr.State}, review {pr.Review}" : "none");
+            await _lifecycle.UpdateStatusAsync(project, status => status with { PullRequest = after });
+            await NotifyStatusChanged(project);
+        }
+        return after is { IsOpen: true } ? PullRequestPoller.Outcome.Poll : PullRequestPoller.Outcome.Wait;
+    }
+
+    /// <summary>A project that is back without a status push (recovered, restored): its open pull request is checked, then polled.</summary>
+    private void ResumeChecks(ProjectInfo project)
+    {
+        _pullRequests.Remember(project.Status.Id, project.Status.State);
+        if (project.Status.PullRequest is { IsOpen: true }) _pullRequests.CheckNow(project.Status.Id);
+    }
+
+    public async ValueTask DisposeAsync() => await _pullRequests.DisposeAsync();
+
+    public void Dispose() => _pullRequests.Dispose();
 
     /// <summary>Pushes the attention list to every client when it differs from the one last pushed.</summary>
     private async Task PushAttentionIfChangedAsync()
@@ -926,38 +1060,50 @@ public class ProjectManager : IProjectManager
         // Stop Claude process if running. Its output pipeline stays open until the delete is
         // committed: a delete script may refuse, and the project is then resumed as before
         await _lifecycle.KillAsync(project);
+        // Nor does a status script hold its folder while the delete scripts run
+        await _pullRequests.ForgetAsync(projectId);
 
         // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
         var snap = _snapshot;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
-        if (project.Status.RootName != null && profileName != null)
+        try
         {
-            var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
-            var config = _rootConfigReader.ReadConfig(rootPath);
-            var action = config.ResolveAction(project.ActionName);
-
-            if (action?.Delete is { Length: > 0 })
+            if (project.Status.RootName != null && profileName != null)
             {
-                snap.Profiles.TryGetValue(profileName, out var profileCfg);
-                var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
-                    profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
+                var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
+                var config = _rootConfigReader.ReadConfig(rootPath);
+                var action = config.ResolveAction(project.ActionName);
 
-                if (force)
-                    scriptEnv["GODMODE_FORCE"] = "true";
+                if (action?.Delete is { Length: > 0 })
+                {
+                    snap.Profiles.TryGetValue(profileName, out var profileCfg);
+                    var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+                        profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
 
-                await _scriptRunner.RunAsync(
-                    action.Delete,
-                    rootPath,
-                    rootPath,
-                    scriptEnv,
-                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+                    if (force)
+                        scriptEnv["GODMODE_FORCE"] = "true";
+
+                    await _scriptRunner.RunAsync(
+                        action.Delete,
+                        rootPath,
+                        rootPath,
+                        scriptEnv,
+                        msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+                }
             }
         }
+        catch
+        {
+            // Refused: the project stays, and so do its checks
+            ResumeChecks(project);
+            throw;
+        }
 
-        // Remove from tracking, and finish its output
+        // Remove from tracking, and finish its output and any check a push started since
         _projects.TryRemove(projectId, out _);
         await project.Process.CloseAsync();
+        await _pullRequests.ForgetAsync(projectId);
 
         // Delete project folder — use robust deletion to handle locked/read-only files
         // (common with .git directories on Windows after git init or process shutdown)
@@ -972,8 +1118,12 @@ public class ProjectManager : IProjectManager
         if (!_projects.TryRemove(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
 
-        // Stop process if running, and finish its output
+        // Stop process if running, and finish its output and its checks
         await _lifecycle.CloseAsync(project);
+        await _pullRequests.ForgetAsync(projectId);
+        // Archived by the user: nothing to carry on with, if it is ever restored
+        if (project.Status.StateAtShutdown != null)
+            await _lifecycle.UpdateStatusAsync(project, status => status with { StateAtShutdown = null });
 
         // Move project folder to .archived/ sibling directory
         var parentDir = Path.GetDirectoryName(project.ProjectPath)!;
@@ -1066,13 +1216,15 @@ public class ProjectManager : IProjectManager
                     var id = ProjectId(profileName, rootName, Path.GetFileName(destDir));
                     var project = new ProjectInfo
                     {
-                        Status = status with { Id = id, State = ProjectState.Stopped, RootName = rootName, ProfileName = profileName, OutputOffset = OutputLog.End(destDir) },
+                        // Restored by the user, not interrupted: the next start does not resume it
+                        Status = status with { Id = id, State = ProjectState.Stopped, StateAtShutdown = null, RootName = rootName, ProfileName = profileName, OutputOffset = OutputLog.End(destDir) },
                         ProjectPath = destDir,
                         ActionName = null,
                         ProfileName = profileName,
                     };
                     _projects[id] = project;
                     await _statusUpdater.SaveStatusAsync(project);
+                    ResumeChecks(project);
 
                     _logger.LogInformation("Unarchived project {ArchivedId} ({Name}) as {ProjectId}", projectId, status.Name, id);
                     await PushAttentionIfChangedAsync();
@@ -1115,28 +1267,60 @@ public class ProjectManager : IProjectManager
             return;
         }
 
-        // Process is not running - check if state needs correction
-        if (project.Status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission)
+        await TryResumeAsync(project, onlyIfInterrupted: false);
+    }
+
+    /// <summary>
+    /// Launches claude on the project's session, which has no process. Whether it may, and the claim
+    /// that it is Running, are one step under the state lock, so a Stop or a shutdown either comes
+    /// before it (and it launches nothing) or after it (and stops what it launches). With
+    /// <paramref name="onlyIfInterrupted"/>, only while <see cref="ProjectStatus.StateAtShutdown"/> is
+    /// still set: false when it is not, and nothing is launched. Once the server is stopping it
+    /// throws <see cref="ServerStoppingException"/>, leaving the project Stopped with its marker.
+    /// </summary>
+    private async Task<bool> TryResumeAsync(ProjectInfo project, bool onlyIfInterrupted)
+    {
+        var projectId = project.Status.Id;
+        ProjectState? interruptedAs = null;
+        var claimed = false;
+        await _lifecycle.UpdateStatusAsync(project, status =>
         {
-            _logger.LogWarning("Project {ProjectId} was marked as {State} but process is not running, resetting state",
-                projectId, project.Status.State);
-            project.Status = project.Status with { State = ProjectState.Stopped, PendingPermission = null, PendingQuestion = null };
-        }
+            if (_lifecycle.ShuttingDown) throw new ServerStoppingException();
+            if (onlyIfInterrupted && status.StateAtShutdown == null) return status;
 
-        if (project.Status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
-        {
-            throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {project.Status.State})");
-        }
+            // Process is not running - check if state needs correction
+            if (status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission)
+            {
+                _logger.LogInformation("Project {ProjectId} was {State} but its process is not running, resetting state", projectId, status.State);
+                status = status with { State = ProjectState.Stopped, PendingPermission = null, PendingQuestion = null };
+            }
+            if (status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
+                throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {status.State})");
 
-        _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}",
-            projectId, project.SessionId);
+            interruptedAs = status.StateAtShutdown;
+            claimed = true;
+            // A launch settles what a shutdown left: the project is not resumed again on the next start
+            return status with { State = ProjectState.Running, LastError = null, StateAtShutdown = null, UpdatedAt = DateTime.UtcNow };
+        });
+        if (!claimed) return false;
 
-        await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Running, LastError = null, UpdatedAt = DateTime.UtcNow });
-
+        _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}", projectId, project.SessionId);
         try
         {
             // Cancels the previous launch's token and gives this one its own
             await _lifecycle.ResumeAsync(project, BuildLaunchSpec(project));
+        }
+        catch (ServerStoppingException)
+        {
+            // The shutdown began after the claim: the project is left as the shutdown leaves it, or it
+            // would have been, keeping what it was interrupted as
+            _logger.LogInformation("Project {ProjectId} was not resumed: the server is stopping", projectId);
+            await _lifecycle.UpdateStatusAsync(project, status => status with
+            {
+                State = ProjectState.Stopped,
+                StateAtShutdown = status.StateAtShutdown ?? interruptedAs,
+            });
+            throw;
         }
         catch (Exception ex)
         {
@@ -1151,6 +1335,7 @@ public class ProjectManager : IProjectManager
         }
 
         await NotifyStatusChanged(project);
+        return true;
     }
 
     public async Task SubscribeProjectAsync(string projectId, long fromOffset, string connectionId)
@@ -1213,6 +1398,7 @@ public class ProjectManager : IProjectManager
                     project.Process.Cancellation?.Cancel();
                     project.Process.Output.TryComplete();
                     _projects.TryRemove(project.Status.Id, out _);
+                    await _pullRequests.ForgetAsync(project.Status.Id);
                 }
 
                 // Delete the entire root directory (including projects)
@@ -1332,6 +1518,7 @@ public class ProjectManager : IProjectManager
                 {
                     await _statusUpdater.SaveStatusAsync(project);
                 }
+                ResumeChecks(project);
 
                 _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Status.Id, project.Status.Name);
             }
@@ -1342,6 +1529,105 @@ public class ProjectManager : IProjectManager
         });
 
         await PushAttentionIfChangedAsync();
+    }
+
+    public async Task ResumeInterruptedProjectsAsync()
+    {
+        var interrupted = _projects.Values.Where(project => project.Status.StateAtShutdown != null).ToArray();
+        if (interrupted.Length == 0) return;
+
+        _logger.LogInformation("Carrying on with {Count} project(s) the last shutdown interrupted, {Concurrent} at a time",
+            interrupted.Length, ConcurrentResumes);
+        try
+        {
+            await Parallel.ForEachAsync(interrupted,
+                new ParallelOptions { MaxDegreeOfParallelism = ConcurrentResumes, CancellationToken = _stopping },
+                async (project, _) => await ResumeInterruptedAsync(project));
+        }
+        catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+        {
+            // Those not resumed yet keep their marker, for the start after this one
+            _logger.LogInformation("The server is stopping: no more interrupted projects are resumed");
+        }
+    }
+
+    /// <summary>
+    /// One project a shutdown stopped while it was active, as its action says: with
+    /// <c>resumeOnRestart</c> off it stays Stopped; one waiting on the user's answer is WaitingInput
+    /// again, with its question and no process, until a reply resumes it (a continue prompt would
+    /// answer it for the user); any other (working, or on a permission prompt the shutdown denied) is
+    /// resumed and told <c>resumePrompt</c>, and waited for until claude starts its session. A resume
+    /// that fails leaves the project Error, as any resume does; it is not tried again.
+    /// It may have waited behind others, so what it does is decided when its turn comes, under its
+    /// resume lock (which a reply takes) and the state lock (which a Stop takes): nothing, once the
+    /// user has stopped, resumed or answered it, it is gone, or the server is stopping.
+    /// </summary>
+    private async Task ResumeInterruptedAsync(ProjectInfo project)
+    {
+        var id = project.Status.Id;
+        var resumeLock = project.Process.ResumeLock;
+        try
+        {
+            var action = ResumeAction(project);
+            await resumeLock.WaitAsync(_stopping);
+            try
+            {
+                if (_stopping.IsCancellationRequested || !_projects.TryGetValue(id, out var current) || current != project) return;
+
+                if (!action.ResumeOnRestart || project.Status is { StateAtShutdown: ProjectState.WaitingInput, CurrentQuestion: not null })
+                {
+                    var state = action.ResumeOnRestart ? ProjectState.WaitingInput : ProjectState.Stopped;
+                    var changed = false;
+                    await _lifecycle.UpdateStatusAsync(project, status =>
+                    {
+                        if (status.StateAtShutdown == null || _lifecycle.ShuttingDown || _lifecycle.IsRunning(project)) return status;
+                        changed = true;
+                        return status with { State = state, StateAtShutdown = null };
+                    });
+                    if (!changed) return;
+                    _logger.LogInformation("Project {ProjectId} was interrupted when the server stopped; it is {State}", id, state);
+                    await NotifyStatusChanged(project);
+                    return;
+                }
+
+                _logger.LogInformation("Project {ProjectId} was {StateAtShutdown} when the server stopped; resuming it", id, project.Status.StateAtShutdown);
+                if (!await ReplyAndResumeLockedAsync(project, action.ResumePrompt, onlyIfInterrupted: true))
+                    _logger.LogInformation("Project {ProjectId} was stopped or resumed since; it is left as it is", id);
+            }
+            finally
+            {
+                resumeLock.Release();
+            }
+        }
+        catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Project {ProjectId} could not carry on after the restart: {Reason}", id, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// The project's action as its root's config says now, for what a restart does with it; the
+    /// defaults when it has none. A config that cannot be read gives the defaults too: the resume
+    /// then refuses, saying why (<see cref="BuildLaunchSpec"/>).
+    /// </summary>
+    private CreateAction ResumeAction(ProjectInfo project)
+    {
+        var profileName = project.ProfileName ?? project.Status.ProfileName;
+        if (project.Status.RootName == null || profileName == null) return new CreateAction("Create");
+        try
+        {
+            var rootPath = _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
+            return _rootConfigReader.ReadConfig(rootPath).ResolveAction(project.ActionName) ?? new CreateAction("Create");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Project {ProjectId}: its root config could not be read ({Reason}); resuming it as the default says",
+                project.Status.Id, ex.Message);
+            return new CreateAction("Create");
+        }
     }
 
     /// <summary>

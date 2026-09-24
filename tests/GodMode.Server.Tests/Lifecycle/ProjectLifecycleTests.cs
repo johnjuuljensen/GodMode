@@ -398,7 +398,7 @@ public class ProjectLifecycleTests
     }
 
     /// <summary>The text of a stream-json user message as GodMode writes it to claude's stdin.</summary>
-    private static string PromptText(string stdinLine)
+    internal static string PromptText(string stdinLine)
     {
         using var message = JsonDocument.Parse(stdinLine);
         Assert.Equal("user", message.RootElement.GetProperty("type").GetString());

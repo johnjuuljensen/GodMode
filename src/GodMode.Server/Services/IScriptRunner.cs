@@ -26,4 +26,17 @@ public interface IScriptRunner
         Func<string, Task> onProgress,
         string? logFilePath = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Runs one script and returns what it wrote to stdout, one line per line. Throws on a non-zero
+    /// exit code, on more than <paramref name="maxOutputChars"/> of output (the script is killed), and
+    /// with <see cref="OperationCanceledException"/> when cancelled (the script is killed).
+    /// </summary>
+    Task<string> RunForOutputAsync(
+        string script,
+        string rootPath,
+        string workingDirectory,
+        Dictionary<string, string> environment,
+        int maxOutputChars,
+        CancellationToken cancellationToken);
 }

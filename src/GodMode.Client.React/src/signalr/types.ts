@@ -8,7 +8,9 @@
 export type ProjectState = 'Idle' | 'Running' | 'WaitingInput' | 'WaitingPermission' | 'Error' | 'Stopped';
 export type ServerState = 'Running' | 'Stopped' | 'Starting' | 'Stopping' | 'Unknown';
 /** What a project needs from the user, most urgent first (AttentionKind in GodMode.Shared). */
-export type AttentionKind = 'Permission' | 'Question' | 'Error' | 'Finished';
+export type AttentionKind = 'Permission' | 'Question' | 'Error' | 'Review' | 'Finished';
+export type PullRequestState = 'Draft' | 'Open' | 'Merged' | 'Closed';
+export type PullRequestReview = 'None' | 'ChangesRequested' | 'Approved';
 
 // --- Models (PascalCase properties matching server serialization) ---
 
@@ -24,6 +26,21 @@ export interface ProjectSummary {
   PendingPermission?: PendingPermission | null;
   /** As ProjectStatus.PendingQuestion. */
   PendingQuestion?: PendingQuestion | null;
+  /** As ProjectStatus.PullRequest. */
+  PullRequest?: PullRequestStatus | null;
+}
+
+/**
+ * The pull request a project's work became, as its root's status script last reported it
+ * (PullRequestStatus in GodMode.Shared).
+ */
+export interface PullRequestStatus {
+  Url: string;
+  Number: number;
+  State: PullRequestState;
+  Review: PullRequestReview;
+  /** When the server first saw this State and Review together; stable across server restarts. */
+  ChangedAt: string;
 }
 
 export interface ProjectMetrics {
@@ -76,6 +93,10 @@ export interface ProjectStatus {
   QuestionAt?: string | null;
   /** When the user last saw the result (MarkSeen, or a reply). A result after it is unseen. */
   SeenAt?: string | null;
+  /** The pull request the project's work became; null when there is none or the root has no status script. */
+  PullRequest?: PullRequestStatus | null;
+  /** What the project was doing when a server shutdown stopped it, so the next start carries on with it; null otherwise. */
+  StateAtShutdown?: ProjectState | null;
 }
 
 /**
@@ -91,12 +112,14 @@ export interface AttentionItem {
   Kind: AttentionKind;
   /** When it started to need this; stable across server restarts. */
   Since: string;
-  /** Plain text (no code blocks, about 500 characters at most): the question, permission summary, error or result. */
+  /** Plain text (no code blocks, about 500 characters at most): the question, permission summary, error, review or result. */
   Text: string;
   /** The tool call to allow or deny, when Kind is 'Permission'. */
   Permission?: PendingPermission | null;
   /** The AskUserQuestion with its options, when Kind is 'Question' and claude asked with the tool. */
   Question?: PendingQuestion | null;
+  /** The project's pull request, when Kind is 'Review' or 'Finished' and it has one. */
+  PullRequestUrl?: string | null;
 }
 
 /** A tool call claude holds until the user answers it with RespondToPermission (PendingPermission in GodMode.Shared). */
