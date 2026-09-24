@@ -3,6 +3,8 @@ import { useAppStore, transcriptKey } from '../../store';
 import { ChatMessage } from './ChatMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
+import { ReplyInput } from './ReplyInput';
+import { confirmAction } from '../../confirmDialog';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
@@ -25,7 +27,7 @@ export function ProjectView({ serverId, projectId }: Props) {
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
   const messagesRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Loading until the server says the replay is complete, unless a transcript is already held
   const transcriptPhase = useAppStore(s => s.transcripts[transcriptKey(serverId, projectId)]?.phase);
@@ -135,7 +137,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   }, [dismissQuestion]);
 
   const handleStop = async () => {
-    if (!hub) return;
+    // A stray tap on the status pill must never end a session
+    if (!hub || !await confirmAction(`Stop "${projectName}"?`, 'Stop', { message: 'Claude stops mid-turn. Sending a message resumes it.', tone: 'danger' })) return;
     try { await hub.stopProject(projectId); } catch (err) { console.error(err); }
   };
 
@@ -163,16 +166,9 @@ export function ProjectView({ serverId, projectId }: Props) {
   };
 
   const handleDelete = async () => {
-    if (!hub || !confirm(`Permanently delete project "${projectName}"? This cannot be undone.`)) return;
     setShowProjectMenu(false);
+    if (!hub || !await confirmAction(`Delete "${projectName}" permanently?`, 'Delete', { message: 'This cannot be undone.', tone: 'danger' })) return;
     try { await hub.deleteProject(projectId, state === 'Running'); } catch (err) { console.error(err); }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendInput();
-    }
   };
 
   return (
@@ -266,13 +262,12 @@ export function ProjectView({ serverId, projectId }: Props) {
       )}
 
       <div className="project-input-bar">
-        <input
-          ref={inputRef}
-          type="text"
+        <ReplyInput
+          inputRef={inputRef}
           className="project-input"
           value={inputText}
-          onChange={e => setInputText(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onChange={setInputText}
+          onSubmit={handleSendInput}
           placeholder={canResume ? 'Type to resume...' : 'Type your response...'}
           disabled={!canSendInput}
         />

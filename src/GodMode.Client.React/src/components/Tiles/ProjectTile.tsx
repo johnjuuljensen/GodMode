@@ -1,8 +1,9 @@
 import type { ProjectSummary, ClaudeMessage } from '../../signalr/types';
-import { useAppStore } from '../../store';
+import { useAppStore, projectKey } from '../../store';
 
 interface Props {
   project: ProjectSummary;
+  serverId: string;
   messages: ClaudeMessage[];
   isLoading: boolean;
   isSelected: boolean;
@@ -19,9 +20,9 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-export function ProjectTile({ project, messages, isLoading, isSelected, onSelect }: Props) {
+export function ProjectTile({ project, serverId, messages, isLoading, isSelected, onSelect }: Props) {
   const state = project.State;
-  const clientQuestion = useAppStore(s => s.projectQuestions[project.Id]);
+  const clientQuestion = useAppStore(s => s.projectQuestions[projectKey(serverId, project.Id)]);
   const isWaiting = state === 'WaitingInput' || clientQuestion;
   const tileState = isWaiting ? 'WaitingInput' : state;
 

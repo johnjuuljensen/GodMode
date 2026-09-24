@@ -10,6 +10,13 @@ interface Props {
   onDismiss: () => void;
 }
 
+/** Where a key is typing: a key pressed there is text, not a shortcut. */
+function isTextField(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement
+    && (target.isContentEditable || target instanceof HTMLTextAreaElement
+      || (target instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'submit', 'reset'].includes(target.type)));
+}
+
 export function QuestionPrompt({ text, header, options, onSelectOption, onDismiss }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -19,7 +26,8 @@ export function QuestionPrompt({ text, header, options, onSelectOption, onDismis
   }, [options]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (options.length === 0) return;
+    // One key press is one action: not one another handler took, and not one typed into a text field (#170)
+    if (options.length === 0 || e.defaultPrevented || isTextField(e.target)) return;
 
     switch (e.key) {
       case 'ArrowUp':
