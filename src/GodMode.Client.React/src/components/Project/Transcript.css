@@ -1,0 +1,456 @@
+/* ── Transcript ── */
+/* The list and the button over it: the button stays inside the list, never over the input below */
+.transcript {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The list's side space is on its rows: the virtualized list sizes its content to the scroller's full width */
+.project-messages.transcript-list {
+  padding: 0;
+}
+
+.transcript-row {
+  padding: 0 16px;
+  /* A row's layout and paint stay inside it, so mounting one as the list scrolls does not lay out the rest */
+  contain: content;
+}
+
+.transcript-spacer {
+  height: 12px;
+}
+
+.ti {
+  padding: 3px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+/* My messages: prominent, on the right */
+.ti-user {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 0 6px;
+}
+
+.ti-user-bubble {
+  max-width: min(80%, 720px);
+  background: var(--accent-soft);
+  border: 1px solid rgba(94,158,255,0.2);
+  border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Claude's replies: full width prose */
+.ti-assistant {
+  padding: 6px 0;
+}
+
+/* ── Folded rows: tool calls and thinking ── */
+.ti-fold {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 2px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ti-fold:hover {
+  background: var(--glass-hover);
+  border-color: var(--glass-border);
+}
+
+.ti-fold:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.ti-chevron {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform 0.12s;
+}
+
+.ti-chevron.open {
+  transform: rotate(90deg);
+}
+
+.ti-fold-label,
+.ti-tool-name {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.ti-fold-label {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.ti-fold-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.ti-diffstat {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.ti-diffstat-add { color: var(--success); }
+.ti-diffstat-del { color: var(--error); }
+
+.ti-tool-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.ti-tool-status {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+  opacity: 0.8;
+}
+
+.ti-tool-status-pending {
+  background: var(--warning);
+  animation: ti-pulse 1.2s ease-in-out infinite;
+}
+
+.ti-tool-status-error {
+  background: var(--error);
+}
+
+@keyframes ti-pulse {
+  50% { opacity: 0.3; }
+}
+
+.ti-tool-error .ti-tool-name {
+  color: var(--error);
+}
+
+.ti-tool-error-line {
+  margin: 0 8px 2px 26px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--error);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ti-tool-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 6px 13px;
+  padding-left: 12px;
+  border-left: 1px solid var(--glass-border-strong);
+}
+
+.ti-tool-desc,
+.ti-tool-empty {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.ti-tool-prompt,
+.ti-thinking-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ti-thinking-text {
+  margin: 2px 0 6px 26px;
+  font-style: italic;
+}
+
+.ti-pre {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ti-command::before {
+  content: '$ ';
+  color: var(--text-tertiary);
+}
+
+.ti-output-error {
+  border-color: var(--error-soft);
+  color: var(--error);
+}
+
+.ti-diff {
+  padding: 4px 0;
+}
+
+.ti-diff > div {
+  padding: 0 10px;
+}
+
+.ti-diff-op {
+  display: inline-block;
+  width: 14px;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+
+.ti-diff-add { background: var(--success-soft); }
+.ti-diff-del { background: var(--error-soft); }
+.ti-diff-ctx { color: var(--text-secondary); }
+
+.ti-children {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Session status rows: system lines and results ── */
+.ti-status {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.ti-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+}
+
+.ti-status-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ti-status-done .ti-badge {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: transparent;
+}
+
+.ti-status-error,
+.ti-status-error .ti-badge {
+  color: var(--error);
+}
+
+.ti-status-error .ti-badge {
+  background: var(--error-soft);
+  border-color: transparent;
+}
+
+/* ── Markdown ── */
+.markdown {
+  word-break: break-word;
+}
+
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown pre,
+.markdown table,
+.markdown blockquote {
+  margin: 0 0 8px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 12px 0 6px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.markdown h1 { font-size: 17px; }
+.markdown h2 { font-size: 15px; }
+.markdown h3,
+.markdown h4 { font-size: 13.5px; }
+
+.markdown ul,
+.markdown ol {
+  padding-left: 20px;
+}
+
+.markdown li + li {
+  margin-top: 2px;
+}
+
+.markdown a {
+  color: var(--accent);
+}
+
+.markdown code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 1px 4px;
+  background: var(--glass-strong);
+  border-radius: 4px;
+}
+
+.markdown pre {
+  padding: 8px 10px;
+  overflow-x: auto;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: 11.5px;
+}
+
+.markdown blockquote {
+  padding-left: 10px;
+  border-left: 3px solid var(--glass-border-strong);
+  color: var(--text-secondary);
+}
+
+/* A wide table scrolls inside itself, not the page */
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+  word-break: normal;
+}
+
+.markdown table code {
+  white-space: nowrap;
+}
+
+.markdown th,
+.markdown td {
+  padding: 4px 10px;
+  border: 1px solid var(--glass-border);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--glass);
+  font-weight: 600;
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--glass-border);
+  margin: 10px 0;
+}
+
+.ti-agent-report {
+  padding: 8px 10px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  font-size: 12.5px;
+}
+
+/* ── Back to the latest: shown once the reader has scrolled up ── */
+.transcript-jump {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 9px;
+  background: var(--accent);
+  border: none;
+  border-radius: 16px;
+  box-shadow: var(--shadow-card-hover);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.transcript-jump.has-new {
+  padding: 0 14px 0 11px;
+}
+
+.transcript-jump:hover {
+  filter: brightness(1.08);
+}
+
+.transcript-jump:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  .transcript-jump {
+    min-width: 44px;
+    height: 44px;
+    border-radius: 22px;
+    font-size: 13px;
+  }
+
+  .ti-fold {
+    min-height: 44px;
+  }
+
+  .ti-user-bubble {
+    max-width: 88%;
+  }
+}

@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { useAppStore, TILE_TAIL_TURNS } from '../../store';
+import { useEffect } from 'react';
+import { useAppStore, TILE_TAIL_TURNS, projectKey, isListed } from '../../store';
 import { ProjectTile } from './ProjectTile';
 import './TileGrid.css';
 
@@ -10,56 +10,26 @@ export function TileGrid() {
   const tileMessages = useAppStore(s => s.tileMessages);
   const tileLoading = useAppStore(s => s.tileLoading);
   const subscribeTail = useAppStore(s => s.subscribeTail);
+  const unsubscribeTail = useAppStore(s => s.unsubscribeTail);
   const clearTileMessages = useAppStore(s => s.clearTileMessages);
-
-  const subscribedRef = useRef(new Set<string>());
 
   useEffect(() => {
     clearTileMessages();
-    const toSubscribe: { serverId: string; projectId: string }[] = [];
-
-    for (const conn of serverConnections) {
-      if (conn.connectionState !== 'connected') continue;
-      for (const project of conn.projects) {
-        if (!subscribedRef.current.has(project.Id)) {
-          toSubscribe.push({ serverId: conn.serverInfo.Id, projectId: project.Id });
-        }
-      }
-    }
-
-    const newSubscribed = new Set<string>();
-    for (const { serverId, projectId } of toSubscribe) {
-      newSubscribed.add(projectId);
-      // Tail mode: only the last turns; loading ends with the server's replay-complete
-      subscribeTail(serverId, projectId, TILE_TAIL_TURNS).catch(console.error);
-    }
-
-    for (const conn of serverConnections) {
-      if (conn.connectionState !== 'connected') continue;
-      for (const p of conn.projects) newSubscribed.add(p.Id);
-    }
-    subscribedRef.current = newSubscribed;
-
+    const tiles = serverConnections.flatMap(conn => conn.projects.map(p => ({ serverId: conn.serverInfo.Id, projectId: p.Id })));
+    // Tail mode: only the last turns; loading ends with the server's replay-complete. A tile is open
+    // while shown, and the store subscribes it again, from its offset, whenever its server reconnects
+    for (const { serverId, projectId } of tiles) subscribeTail(serverId, projectId, TILE_TAIL_TURNS).catch(console.error);
     return () => {
-      for (const conn of serverConnections) {
-        if (conn.connectionState !== 'connected') continue;
-        for (const project of conn.projects) {
-          conn.hub.unsubscribeProject(project.Id).catch(() => {});
-        }
-      }
-      subscribedRef.current.clear();
+      for (const { serverId, projectId } of tiles) unsubscribeTail(serverId, projectId).catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverConnections.map(s => `${s.connectionState}:${s.projects.map(p => p.Id).join(',')}`).join('|')]);
+  }, [serverConnections.map(s => `${s.serverInfo.Id}:${s.projects.map(p => p.Id).join(',')}`).join('|')]);
 
-  const hasConnected = serverConnections.some(s => s.connectionState === 'connected');
-  const allProjects = serverConnections.flatMap(conn =>
-    conn.connectionState === 'connected'
-      ? conn.projects.map(p => ({ serverId: conn.serverInfo.Id, project: p }))
-      : []
-  );
+  // A reconnecting server's tiles stay, as they were until it is back
+  const listed = serverConnections.filter(isListed);
+  const allProjects = listed.flatMap(conn => conn.projects.map(p => ({ serverId: conn.serverInfo.Id, project: p })));
 
-  if (!hasConnected) {
+  if (listed.length === 0) {
     return <div className="tile-grid-empty">No connected servers</div>;
   }
 
@@ -72,10 +42,11 @@ export function TileGrid() {
       <div className="tile-grid">
         {allProjects.map(({ serverId, project }) => (
           <ProjectTile
-            key={project.Id}
+            key={projectKey(serverId, project.Id)}
             project={project}
-            messages={tileMessages[project.Id] ?? []}
-            isLoading={tileLoading[project.Id] ?? false}
+            serverId={serverId}
+            messages={tileMessages[projectKey(serverId, project.Id)] ?? []}
+            isLoading={tileLoading[projectKey(serverId, project.Id)] ?? false}
             isSelected={
               selectedProject?.serverId === serverId &&
               selectedProject?.projectId === project.Id

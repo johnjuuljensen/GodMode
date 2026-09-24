@@ -423,6 +423,7 @@
   position: relative;
   border-top: 1px solid var(--glass-border);
   padding: 8px 10px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom));
 }
 
 .sidebar-footer-buttons {
@@ -738,4 +739,49 @@
 .archived-restore-btn:hover {
   color: var(--accent);
   background: var(--hover);
+}
+
+/* ── Connection indicator: a lost server, beside the title; never over the page ── */
+.connection-indicator {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+  margin: 0 8px;
+  overflow: hidden;
+}
+
+.connection-indicator-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 140px;
+  padding: 2px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.connection-indicator-item .server-dot {
+  animation: connection-indicator-pulse 1.4s ease-in-out infinite;
+}
+
+.connection-indicator-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes connection-indicator-pulse {
+  50% { opacity: 0.3; }
+}
+
+@media (max-width: 768px) {
+  .connection-indicator-item {
+    min-height: 44px;
+  }
 }

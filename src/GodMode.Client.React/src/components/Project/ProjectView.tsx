@@ -1,11 +1,17 @@
-import { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore, transcriptKey } from '../../store';
-import { ChatMessage } from './ChatMessage';
+import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
+import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
+import { ReplyInput } from './ReplyInput';
+import { confirmAction } from '../../confirmDialog';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
+
+/** Simple view: the conversation, without session bookkeeping (errors still show) */
+const isConversation = (item: TranscriptItem) => (item.kind !== 'system' && item.kind !== 'result') || item.isError;
 
 interface Props {
   serverId: string;
@@ -24,8 +30,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   const [inputText, setInputText] = useState('');
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
-  const messagesRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const transcriptRef = useRef<TranscriptListHandle>(null);
 
   // Loading until the server says the replay is complete, unless a transcript is already held
   const transcriptPhase = useAppStore(s => s.transcripts[transcriptKey(serverId, projectId)]?.phase);
@@ -37,23 +43,17 @@ export function ProjectView({ serverId, projectId }: Props) {
   const project = conn?.projects.find(p => p.Id === projectId);
 
   useEffect(() => {
-    if (!hub || conn?.connectionState !== 'connected') return;
-    // Resumes from the transcript held, so reopening only adds what is new
+    // Resumes from the transcript held, so reopening only adds what is new. Open while it shows: the
+    // store subscribes it again whenever the server reconnects
     subscribeOutput(serverId, projectId).catch(console.error);
     return () => {
       unsubscribeOutput(serverId, projectId).catch(console.error);
     };
-  }, [hub, serverId, projectId, conn?.connectionState, subscribeOutput, unsubscribeOutput]);
+  }, [hub, serverId, projectId, subscribeOutput, unsubscribeOutput]);
 
   useEffect(() => {
     if (project) setProjectName(project.Name);
   }, [project]);
-
-  useLayoutEffect(() => {
-    if (phase !== 'ready') return;
-    const el = messagesRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [phase, outputMessages.length]);
 
   const toggleSimpleView = useCallback(() => {
     setSimpleView(v => {
@@ -63,11 +63,12 @@ export function ProjectView({ serverId, projectId }: Props) {
     });
   }, []);
 
-  const visibleMessages = useMemo(
-    () => simpleView
-      ? outputMessages.filter(m => m.type !== 'system' && m.type !== 'result')
-      : outputMessages,
-    [outputMessages, simpleView],
+  // Built incrementally: a new line adds its items, and every other item stays the same object
+  const [buildTranscript] = useState(createTranscriptBuilder);
+  const transcript = useMemo(() => buildTranscript(outputMessages), [buildTranscript, outputMessages]);
+  const visibleItems = useMemo(
+    () => simpleView ? transcript.filter(isConversation) : transcript,
+    [transcript, simpleView],
   );
 
   const state = project?.State ?? 'Idle';
@@ -109,6 +110,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   const sendText = useCallback(async (text: string) => {
     if (!text.trim()) return;
     markInputSent();
+    // The reader's own message is one they want to see, wherever they had scrolled to
+    transcriptRef.current?.scrollToLatest();
     try {
       // The server resumes a stopped project and sends once claude runs
       await replyAndResume(serverId, projectId, text);
@@ -135,7 +138,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   }, [dismissQuestion]);
 
   const handleStop = async () => {
-    if (!hub) return;
+    // A stray tap on the status pill must never end a session
+    if (!hub || !await confirmAction(`Stop "${projectName}"?`, 'Stop', { message: 'Claude stops mid-turn. Sending a message resumes it.', tone: 'danger' })) return;
     try { await hub.stopProject(projectId); } catch (err) { console.error(err); }
   };
 
@@ -163,16 +167,9 @@ export function ProjectView({ serverId, projectId }: Props) {
   };
 
   const handleDelete = async () => {
-    if (!hub || !confirm(`Permanently delete project "${projectName}"? This cannot be undone.`)) return;
     setShowProjectMenu(false);
+    if (!hub || !await confirmAction(`Delete "${projectName}" permanently?`, 'Delete', { message: 'This cannot be undone.', tone: 'danger' })) return;
     try { await hub.deleteProject(projectId, state === 'Running'); } catch (err) { console.error(err); }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendInput();
-    }
   };
 
   return (
@@ -233,17 +230,15 @@ export function ProjectView({ serverId, projectId }: Props) {
         </div>
       </div>
 
-      <div className="project-messages" ref={messagesRef}>
-        {phase === 'loading' ? (
-          <div className="project-messages-empty">Loading...</div>
-        ) : visibleMessages.length === 0 ? (
+      {phase === 'ready' && visibleItems.length > 0 ? (
+        <TranscriptList ref={transcriptRef} key={transcriptKey(serverId, projectId)} items={visibleItems} />
+      ) : (
+        <div className="project-messages">
           <div className="project-messages-empty">
-            {conn?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
+            {phase === 'loading' ? 'Loading...' : conn?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
           </div>
-        ) : (
-          visibleMessages.map((msg, i) => <ChatMessage key={i} message={msg} />)
-        )}
-      </div>
+        </div>
+      )}
 
       {pendingPermission ? (
         <PermissionCard permission={pendingPermission} onAnswer={handlePermission} />
@@ -266,13 +261,12 @@ export function ProjectView({ serverId, projectId }: Props) {
       )}
 
       <div className="project-input-bar">
-        <input
-          ref={inputRef}
-          type="text"
+        <ReplyInput
+          inputRef={inputRef}
           className="project-input"
           value={inputText}
-          onChange={e => setInputText(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onChange={setInputText}
+          onSubmit={handleSendInput}
           placeholder={canResume ? 'Type to resume...' : 'Type your response...'}
           disabled={!canSendInput}
         />

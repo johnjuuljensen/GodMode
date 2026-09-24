@@ -1,7 +1,12 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useAppStore, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy } from '../../store';
+import { useShallow } from 'zustand/react/shallow';
+import {
+  useAppStore, projectKey,
+  type ProfileGroup, type ProjectKey, type RootGroup, type ServerConnection, type SidebarGroupBy,
+} from '../../store';
 import type { ProjectSummary } from '../../signalr/types';
 import { ProjectItem } from './ProjectItem';
+import { Inbox } from '../Inbox/Inbox';
 import { isMaui, clearApiKey } from '../../services/hostApi';
 import './Sidebar.css';
 
@@ -29,6 +34,7 @@ export function SidebarHeader() {
   return (
     <div className="sidebar-header">
       <span className="sidebar-title">GodMode</span>
+      <ConnectionIndicator />
       <div className="sidebar-header-actions">
         {showProfileFilter && (
           <select
@@ -73,7 +79,31 @@ export function SidebarHeader() {
   );
 }
 
-export function Sidebar() {
+/**
+ * Each server whose connection was lost and is being retried: small, beside the title in every layout,
+ * never over the page. A tap retries now.
+ */
+function ConnectionIndicator() {
+  // Changes when a server starts or stops reconnecting, not on each status change
+  const lost = useAppStore(useShallow(s => s.serverConnections
+    .filter(c => c.connectionState === 'reconnecting').map(c => c.serverInfo)));
+  const retryServers = useAppStore(s => s.retryServers);
+  if (lost.length === 0) return null;
+  return (
+    <div className="connection-indicator">
+      {lost.map(info => (
+        <button key={info.Id} className="connection-indicator-item" onClick={retryServers}
+          title={`Connection to ${info.Name} lost, retrying. Tap to retry now.`}>
+          <span className="server-dot reconnecting" />
+          <span className="connection-indicator-name">{info.Name}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** withInbox: the needs-you pane above the project list (wide screens; a phone has it as its home). */
+export function Sidebar({ withInbox = false }: { withInbox?: boolean }) {
   const profileGroups = useAppStore(s => s.profileGroups);
   const inactiveServers = useAppStore(s => s.inactiveServers);
   const setShowAddServer = useAppStore(s => s.setShowAddServer);
@@ -99,6 +129,8 @@ export function Sidebar() {
         <span>{GROUP_LABELS[sidebarGroupBy]}</span>
       </button>
 
+      {withInbox && <Inbox variant="pane" />}
+
       <div className="sidebar-content">
         {!hasAnything ? (
           <div className="sidebar-empty">
@@ -108,7 +140,7 @@ export function Sidebar() {
         ) : (
           <>
             {profileGroups.map(group => (
-              <ProfileSection key={group.name} group={group} />
+              <ProfileSection key={group.key} group={group} />
             ))}
             {inactiveServers.length > 0 && (
               <InactiveSection servers={inactiveServers} />
@@ -123,39 +155,51 @@ export function Sidebar() {
   );
 }
 
+/** An archived project and the server it is archived on. */
+interface ArchivedItem {
+  key: ProjectKey;
+  conn: ServerConnection;
+  project: ProjectSummary;
+}
+
 function ArchivedSection() {
-  const serverConnections = useAppStore(s => s.serverConnections);
-  const conn = serverConnections.find(c => c.connectionState === 'connected');
-  const hub = conn?.hub;
+  // Changes when a server connects or disconnects, not on each status change
+  const connectedIds = useAppStore(s => s.serverConnections
+    .filter(c => c.connectionState === 'connected').map(c => c.serverInfo.Id).join('|'));
+  const multiServer = connectedIds.includes('|');
 
   const [expanded, setExpanded] = useState(false);
-  const [archived, setArchived] = useState<ProjectSummary[]>([]);
+  const [archived, setArchived] = useState<ArchivedItem[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // Every connected server's archived projects; a server that fails to answer is left out
   const loadArchived = useCallback(async () => {
-    if (!hub) return;
     setLoading(true);
-    try {
-      setArchived(await hub.listArchivedProjects());
-    } catch { /* ignore */ }
+    const connected = useAppStore.getState().serverConnections.filter(c => connectedIds.split('|').includes(c.serverInfo.Id));
+    const lists = await Promise.all(connected.map(async conn => {
+      try {
+        const projects = await conn.hub.listArchivedProjects();
+        return projects.map(project => ({ key: projectKey(conn.serverInfo.Id, project.Id), conn, project }));
+      } catch { return []; }
+    }));
+    setArchived(lists.flat());
     setLoading(false);
-  }, [hub]);
+  }, [connectedIds]);
 
   useEffect(() => {
     if (expanded) loadArchived();
   }, [expanded, loadArchived]);
 
-  const handleUnarchive = async (projectId: string) => {
-    if (!hub) return;
+  const handleUnarchive = async ({ key, conn, project }: ArchivedItem) => {
     try {
-      await hub.unarchiveProject(projectId);
-      setArchived(prev => prev.filter(p => p.Id !== projectId));
+      await conn.hub.unarchiveProject(project.Id);
+      setArchived(prev => prev.filter(a => a.key !== key));
     } catch (err) { console.error(err); }
   };
 
   const filtered = search.trim()
-    ? archived.filter(p => p.Name.toLowerCase().includes(search.toLowerCase()))
+    ? archived.filter(a => a.project.Name.toLowerCase().includes(search.toLowerCase()))
     : archived;
 
   return (
@@ -186,13 +230,17 @@ function ArchivedSection() {
             <div className="archived-empty">{search ? 'No matches' : 'No archived projects'}</div>
           ) : (
             <div className="archived-list">
-              {filtered.map(p => (
-                <div key={p.Id} className="archived-item">
+              {filtered.map(a => (
+                <div key={a.key} className="archived-item">
                   <div className="archived-item-info">
-                    <span className="archived-item-name">{p.Name}</span>
-                    {p.RootName && <span className="archived-item-root">{p.RootName}</span>}
+                    <span className="archived-item-name">{a.project.Name}</span>
+                    {(multiServer || a.project.RootName) && (
+                      <span className="archived-item-root">
+                        {[multiServer && a.conn.serverInfo.Name, a.project.RootName].filter(Boolean).join(' · ')}
+                      </span>
+                    )}
                   </div>
-                  <button className="archived-restore-btn" onClick={() => handleUnarchive(p.Id)} title="Restore">
+                  <button className="archived-restore-btn" onClick={() => handleUnarchive(a)} title="Restore">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="1 4 1 10 7 10" />
                       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
@@ -310,7 +358,7 @@ function ProfileSection({ group }: { group: ProfileGroup }) {
         <span className="profile-group-count">{group.projectCount}</span>
       </div>
       {group.rootGroups.map(rg => (
-        <RootSection key={`${rg.serverId}:${rg.rootName}`} rootGroup={rg} />
+        <RootSection key={`${rg.serverId ?? ''}:${rg.rootName}`} rootGroup={rg} />
       ))}
     </div>
   );
@@ -320,35 +368,35 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
   const selectedProject = useAppStore(s => s.selectedProject);
   const selectProject = useAppStore(s => s.selectProject);
   const setShowCreateProject = useAppStore(s => s.setShowCreateProject);
+  const { serverId, rootName } = rootGroup;
 
   return (
     <div className="root-group">
       {!rootGroup.flat && (
         <div className="root-group-header">
           <span className="root-group-name">{rootGroup.name}</span>
-          {rootGroup.actions.length > 0 && (
+          {rootGroup.actions.length > 0 && serverId && (
             <button
               className="root-action-btn"
-              onClick={() => setShowCreateProject(true, { serverId: rootGroup.serverId, rootName: rootGroup.rootName })}
+              onClick={() => setShowCreateProject(true, { serverId, rootName })}
               title="New project"
             >+</button>
           )}
         </div>
       )}
       <div className={rootGroup.flat ? 'project-list project-list-flat' : 'project-list'}>
-        {rootGroup.projects.length === 0 ? (
+        {rootGroup.items.length === 0 ? (
           !rootGroup.flat && <div className="project-list-empty">No projects</div>
         ) : (
-          rootGroup.projects.map(project => (
+          rootGroup.items.map(item => (
             <ProjectItem
-              key={project.Id}
-              project={project}
-              serverId={rootGroup.serverId}
+              key={item.key}
+              item={item}
               isSelected={
-                selectedProject?.serverId === rootGroup.serverId &&
-                selectedProject?.projectId === project.Id
+                selectedProject?.serverId === item.serverId &&
+                selectedProject?.projectId === item.project.Id
               }
-              onSelect={() => selectProject(rootGroup.serverId, project.Id)}
+              onSelect={() => selectProject(item.serverId, item.project.Id)}
             />
           ))
         )}
