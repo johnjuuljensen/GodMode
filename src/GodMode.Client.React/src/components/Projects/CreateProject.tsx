@@ -48,7 +48,7 @@ const MODEL_OPTIONS = ['opus', 'sonnet', 'haiku'];
 
 export function CreateProject() {
   const serverConnections = useAppStore(s => s.serverConnections);
-  const closePage = useAppStore(s => s.closePage);
+  const openCreatedProject = useAppStore(s => s.openCreatedProject);
   const activePage = useAppStore(s => s.activePage);
   const createProjectContext = activePage?.type === 'createProject' ? activePage.context ?? null : null;
   const profileFilter = useAppStore(s => s.profileFilter);
@@ -137,8 +137,8 @@ export function CreateProject() {
       else if (val) inputs[field.key] = val;
     }
     try {
-      await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs);
-      closePage();
+      // Only this client opens what it created; other clients just list it (#170)
+      openCreatedProject(server.serverInfo.Id, await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs));
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create project';
       if (msg.includes('FOLDER_EXISTS:')) {
@@ -152,8 +152,7 @@ export function CreateProject() {
           } else {
             inputs.__autoSuffix = true;
           }
-          await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs);
-          closePage();
+          openCreatedProject(server.serverInfo.Id, await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs));
         } catch (retryErr) {
           setError(retryErr instanceof Error ? retryErr.message : 'Failed to create project');
         }
