@@ -181,16 +181,18 @@ All real-time communication uses strongly-typed SignalR on one hub, `/hubs/proje
 
 The hub is the session loop plus profiles and roots:
 
-| `IProjectHub` (18 methods) | |
+| `IProjectHub` (23 methods) | |
 |---|---|
 | Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `ArchiveProject`, `UnarchiveProject`, `ListArchivedProjects` |
+| Prompts | `RespondToPermission`, `AnswerQuestion` |
+| Attention | `GetAttention`, `MarkSeen`, `ReplyAndResume` |
 | Roots | `ListProjectRoots` |
 | Profiles | `ListProfiles`, `CreateProfile`, `DeleteProfile`, `UpdateProfileDescription` |
 | Utility | `CheckCommand` |
 
-| `IProjectHubClient` (8 callbacks) |
+| `IProjectHubClient` (11 callbacks) |
 |---|
-| `OutputReceived`, `StatusChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted`, `ProjectArchived`, `ProjectRestored`, `ProfilesChanged` |
+| `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted`, `ProjectArchived`, `ProjectRestored`, `ProfilesChanged` |
 
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
@@ -397,6 +399,8 @@ Every session also gets `godmode-bridge`, the stdio MCP server in `src/GodMode.M
 The server injects `GODMODE_PROJECT_ID`, `GODMODE_PROJECT_TOKEN` (per-project token that authorizes only `/api/internal/*` for that project) and `GODMODE_SERVER_URL`, an address this machine reaches the server on, picked from the addresses it is bound to (a loopback binding first, a wildcard's loopback next, else the one IP bound). It finds the bridge through the `McpBridgePath` setting (or `GODMODE_MCP_BRIDGE_PATH`), or next to its binaries, and refuses to start without it.
 
 **Permission prompts.** claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode-bridge__permission_prompt`, so a tool call that needs approval waits for the user instead of being denied. claude calls `permission_prompt` with `{tool_name, input, tool_use_id}`; the bridge POSTs it and holds the HTTP request open until the user answers (`node:http`, since `fetch` gives up after 5 minutes), then returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}`. The project is `WaitingPermission` with `ProjectStatus.PendingPermission` (a server-built one-line `Summary` such as `Bash: git push origin x`), answered with the hub's `RespondToPermission`. The same flag makes claude offer `AskUserQuestion` in `--print` mode, and ask it through the same tool: that is `WaitingInput` with `PendingQuestion`, answered with `AnswerQuestion`. A request survives a client disconnect, not a server restart: the bridge's call fails and claude sees a deny. A chat message sent while one waits answers it (a single question takes it as its answer; otherwise it is a deny carrying the text).
+
+**Attention.** `GetAttention` answers "what needs me on this server": one `AttentionItem` per project, oldest first, of kind `Permission`, `Question` (an AskUserQuestion, carried whole, or a turn that ended on `?`), `Error` or `Finished` (a result the user has not seen). It is derived from the status alone, and every field it reads is in `status.json` (`LastResult`, `LastResultAt`, `QuestionAt`, `SeenAt`), so a restart does not change the answer; `MarkSeen` and any reply move `SeenAt`. `AttentionChanged` pushes the whole list after a status push, only when the list differs from the last one pushed. `ReplyAndResume` answers any of it: `SendInput` to a running claude, otherwise a resume, the text, and a wait for `system/init`. claude writes nothing, not even `system/init`, until it has read its first input, so the text is sent first; the wait ends with an error if claude exits first or the `SessionStartTimeoutSeconds` setting (60) passes, and the text is sent again if the resume found no conversation and a fresh session replaced it.
 
 ---
 
