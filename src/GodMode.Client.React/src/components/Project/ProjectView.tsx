@@ -43,13 +43,13 @@ export function ProjectView({ serverId, projectId }: Props) {
   const project = conn?.projects.find(p => p.Id === projectId);
 
   useEffect(() => {
-    if (!hub || conn?.connectionState !== 'connected') return;
-    // Resumes from the transcript held, so reopening only adds what is new
+    // Resumes from the transcript held, so reopening only adds what is new. Open while it shows: the
+    // store subscribes it again whenever the server reconnects
     subscribeOutput(serverId, projectId).catch(console.error);
     return () => {
       unsubscribeOutput(serverId, projectId).catch(console.error);
     };
-  }, [hub, serverId, projectId, conn?.connectionState, subscribeOutput, unsubscribeOutput]);
+  }, [hub, serverId, projectId, subscribeOutput, unsubscribeOutput]);
 
   useEffect(() => {
     if (project) setProjectName(project.Name);

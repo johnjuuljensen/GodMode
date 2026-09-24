@@ -1,5 +1,5 @@
 /**
- * The sidebar's grouping of every connected server's projects. Pure: rebuilt from the server
+ * The sidebar's grouping of every connected (or reconnecting) server's projects. Pure: rebuilt from the server
  * connections on each change. An item carries the server it is from, so a group may mix servers.
  */
 import type { GodModeHub, ConnectionState } from '../signalr/hub';
@@ -55,19 +55,22 @@ export interface HierarchyResult {
 
 type RootEntry = { root: ProjectRootInfo; items: SidebarItem[]; conn: ServerConnection; profileName: string };
 
-/** Collect all connected projects + roots, filtered by profile. */
+/** A server whose projects are shown: connected, or reconnecting (shown as it was until it is back). */
+export const isListed = (c: ServerConnection) => c.connectionState === 'connected' || c.connectionState === 'reconnecting';
+
+/** Collect all listed projects + roots, filtered by profile. A reconnecting server keeps its last lists. */
 function collectFilteredData(connections: ServerConnection[], filter: string) {
   const allProfileNames = new Set<string>();
-  const connected = connections.filter(c => c.connectionState === 'connected');
+  const listed = connections.filter(isListed);
   const representedServerIds = new Set<string>();
 
-  for (const conn of connected) {
+  for (const conn of listed) {
     for (const p of conn.profiles) allProfileNames.add(p.Name);
   }
 
   // Collect all roots with their projects, respecting profile filter
   const allRoots: RootEntry[] = [];
-  for (const conn of connected) {
+  for (const conn of listed) {
     const serverId = conn.serverInfo.Id;
     const itemsByRoot = new Map<string, SidebarItem[]>();
     for (const p of conn.projects) {
