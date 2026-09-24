@@ -92,17 +92,18 @@ export function TranscriptList({ items, ref }: Props) {
       [window, 'touchcancel', letGo],
     ];
     for (const [target, type, listener] of listeners) target.addEventListener(type, listener, { passive: true });
-    // The list gets shorter as the input grows or an on-screen keyboard opens: a reader at the bottom stays there
+    // The list gets shorter as the input grows or an on-screen keyboard opens: a reader at the bottom stays there.
+    // Every browser has ResizeObserver; jsdom does not, and a throw here would unmount the whole view, so without one it goes without, as Virtuoso does
     let lastHeight = scroller.clientHeight;
-    const resized = new ResizeObserver(() => {
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
       if (scroller.clientHeight === lastHeight) return;
       lastHeight = scroller.clientHeight;
       if (followingRef.current) virtuoso.current?.scrollToIndex({ index: 'LAST', align: 'end' });
     });
-    resized.observe(scroller);
+    resized?.observe(scroller);
     return () => {
       for (const [target, type, listener] of listeners) target.removeEventListener(type, listener);
-      resized.disconnect();
+      resized?.disconnect();
     };
   }, [scroller, follow]);
 
