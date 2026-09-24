@@ -63,77 +63,43 @@ export function Shell() {
     return () => mq.removeEventListener('change', handler);
   }, [setIsMobile]);
 
-  const isTileFullscreen = isTileView && selectedProject !== null;
+  // One tree for every layout: the slots below keep their positions whichever layout shows,
+  // so crossing the phone breakpoint re-renders a page or a project instead of remounting it
+  // (which would drop a half-filled form or a typed reply). A slot a layout lacks renders null.
+  const showsPage = activePage !== null;
+  const project = showsPage ? null : selectedProject;
+  const showsTiles = !showsPage && !project && isTileView;
+  // On a phone the list is the home screen, with nothing beside it
+  const phoneHome = isMobile && !showsPage && !project && !isTileView;
 
-  // ── Mobile layout ──
-  if (isMobile) {
-    return (
-      <div className="shell shell-mobile">
-        {activePage ? (
-          <PageContent page={activePage} />
-        ) : selectedProject ? (
-          <div className="shell-mobile-project">
-            <div className="page-back-bar">
-              <button className="btn btn-secondary btn-sm" onClick={() => goBack(clearSelection)}>← Back</button>
-            </div>
-            <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
-          </div>
-        ) : isTileView ? (
-          <div className="shell-mobile-tiles">
-            <SidebarHeader />
-            <TileGrid />
-            <SidebarFooter />
-          </div>
-        ) : (
-          <Sidebar />
-        )}
-        <ConfirmDialog />
-      </div>
-    );
-  }
+  const sidebarSlot = isTileView
+    ? (!isMobile || showsTiles) && <SidebarHeader />
+    : (!isMobile || phoneHome) && <div className="shell-sidebar"><Sidebar /></div>;
+  const footerSlot = isTileView && (!isMobile || showsTiles) && <SidebarFooter />;
+  const backBar = project && (isMobile || isTileView) && (
+    <div className={isMobile ? 'page-back-bar' : 'shell-back-bar'}>
+      <button className="btn btn-secondary btn-sm" onClick={() => goBack(clearSelection)}>{isMobile ? '← Back' : '← Tiles'}</button>
+    </div>
+  );
 
-  // ── Desktop layout ──
+  const shellClass = ['shell', isMobile && 'shell-mobile', isTileView && 'shell-tile-mode'].filter(Boolean).join(' ');
+  const contentClass = ['shell-content', isMobile && project && 'shell-mobile-project'].filter(Boolean).join(' ');
+
   return (
-    <div className={`shell ${isTileView ? 'shell-tile-mode' : ''}`}>
-      {!isTileView ? (
-        <>
-          <div className="shell-sidebar">
-            <Sidebar />
-          </div>
-          <div className="shell-content">
-            {activePage ? (
-              <PageContent page={activePage} />
-            ) : selectedProject ? (
-              <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
-            ) : (
-              <div className="shell-empty"><p>Select a project from the sidebar</p></div>
-            )}
-          </div>
-        </>
-      ) : (
-        <>
-          <SidebarHeader />
-          <div className="shell-content">
-            {activePage ? (
-              <PageContent page={activePage} />
-            ) : (
-              <>
-                {isTileFullscreen && (
-                  <div className="shell-back-bar">
-                    <button className="btn btn-secondary btn-sm" onClick={() => goBack(clearSelection)}>← Tiles</button>
-                  </div>
-                )}
-                {isTileFullscreen ? (
-                  <ProjectView serverId={selectedProject!.serverId} projectId={selectedProject!.projectId} />
-                ) : (
-                  <TileGrid />
-                )}
-              </>
-            )}
-          </div>
-          <SidebarFooter />
-        </>
+    <div className={shellClass}>
+      {sidebarSlot}
+      {!phoneHome && (
+        <div className={contentClass}>
+          {backBar}
+          {activePage && <PageContent page={activePage} />}
+          {project && <ProjectView serverId={project.serverId} projectId={project.projectId} />}
+          {showsTiles && <TileGrid />}
+          {!isMobile && !isTileView && !showsPage && !project && (
+            <div className="shell-empty"><p>Select a project from the sidebar</p></div>
+          )}
+        </div>
       )}
+      {footerSlot}
       <ConfirmDialog />
     </div>
   );
