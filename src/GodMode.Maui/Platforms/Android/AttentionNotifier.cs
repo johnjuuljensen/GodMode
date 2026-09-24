@@ -4,6 +4,7 @@ using Android.Content;
 using AndroidX.Core.App;
 using GodMode.ClientBase.Attention;
 using GodMode.Shared.Enums;
+using Microsoft.Extensions.Logging;
 
 namespace GodMode.Maui;
 
@@ -12,7 +13,7 @@ namespace GodMode.Maui;
 /// item's <see cref="AttentionLink.Key"/> (server and project), grouped under one summary. A tap opens
 /// <c>godmode://attention/{key}</c> in <see cref="MainActivity"/>.
 /// </summary>
-public sealed class AttentionNotifier(Context context) : IAttentionNotifier
+public sealed class AttentionNotifier(Context context, ILogger logger) : IAttentionNotifier
 {
     public const string Channel = "attention";
     private const string Group = "godmode.attention";
@@ -53,6 +54,7 @@ public sealed class AttentionNotifier(Context context) : IAttentionNotifier
         // A changed item alerts again. One this process has not shown yet alerts only if nothing shows under its
         // key: after a restart, the items still showing from before stay quiet
         builder.SetOnlyAlertOnce(!_shown.ContainsKey(notice.Link.Key));
+        logger.LogDebug("Notification {Key}: {Kind}", notice.Link.Key, item.Kind);
         Notify(notice.Link.Key, ItemId, builder.Build()!);
         _shown[notice.Link.Key] = 0;
         UpdateSummary();
@@ -60,9 +62,10 @@ public sealed class AttentionNotifier(Context context) : IAttentionNotifier
 
     public void Cancel(AttentionLink link)
     {
+        logger.LogDebug("Notification {Key} cancelled", link.Key);
         _manager.Cancel(link.Key, ItemId);
         _shown.TryRemove(link.Key, out _);
-        UpdateSummary();
+        UpdateSummary(link.Key);
     }
 
     /// <summary>The items shown now, by this process or by one the system ended without stopping the service.</summary>
@@ -81,11 +84,16 @@ public sealed class AttentionNotifier(Context context) : IAttentionNotifier
         UpdateSummary();
     }
 
-    private void UpdateSummary()
+    /// <param name="cancelled">The key just cancelled, which the system may still list for a moment.</param>
+    private void UpdateSummary(string? cancelled = null)
     {
         var count = _shown.Count;
         if (count == 0)
         {
+            // Cancelling a group's summary cancels every notification in the group, even one posted a moment ago:
+            // leave it while anything else of ours shows (what an earlier run left, until the tracker reaches it)
+            if (Showing().Any(l => l.Key != cancelled)) return;
+            logger.LogDebug("Summary cancelled");
             _manager.Cancel(SummaryTag, SummaryId);
             return;
         }

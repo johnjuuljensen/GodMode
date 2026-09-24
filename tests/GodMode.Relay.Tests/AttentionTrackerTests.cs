@@ -60,7 +60,16 @@ public sealed class AttentionTrackerTests
         tracker.Update("alpha", "Alpha", [Item("Default/root/kept")]);
 
         // Beta has not listed yet: its item stays until it does
-        Assert.Equal(["cancel alpha:Default%2Froot%2Fgone", "show alpha:Default%2Froot%2Fkept"], _notifier.Log);
+        Assert.Equal(["show alpha:Default%2Froot%2Fkept", "cancel alpha:Default%2Froot%2Fgone"], _notifier.Log);
+    }
+
+    [Fact]
+    public void Within_one_list_the_new_items_are_shown_before_the_old_are_cancelled()
+    {
+        _tracker.Update("alpha", "Alpha", [Item("Default/root/old")]);
+        _tracker.Update("alpha", "Alpha", [Item("Default/root/new")]);
+
+        Assert.Equal(["show alpha:Default%2Froot%2Fold", "show alpha:Default%2Froot%2Fnew", "cancel alpha:Default%2Froot%2Fold"], _notifier.Log);
     }
 
     [Fact]

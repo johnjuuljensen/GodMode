@@ -37,10 +37,12 @@ public sealed class AttentionTracker
             foreach (var item in items)
                 fresh[item.ProjectId] = item;
 
-            foreach (var projectId in shown.Keys.Where(id => !fresh.ContainsKey(id)))
-                _notifier.Cancel(new AttentionLink(serverId, projectId));
+            // Shows first: a notifier that groups them may drop the group once nothing is left in it, and on Android
+            // that takes with it whatever is posted meanwhile
             foreach (var item in fresh.Values.OfType<AttentionItem>().Where(i => !shown.TryGetValue(i.ProjectId, out var was) || Changed(was, i)))
                 _notifier.Show(new AttentionNotice(new AttentionLink(serverId, item.ProjectId), serverName, item));
+            foreach (var projectId in shown.Keys.Where(id => !fresh.ContainsKey(id)))
+                _notifier.Cancel(new AttentionLink(serverId, projectId));
 
             if (fresh.Count > 0) _byServer[serverId] = fresh;
             else _byServer.Remove(serverId);

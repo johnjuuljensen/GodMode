@@ -70,7 +70,7 @@ public sealed class AttentionService : Service
         _logger = MauiProgram.LoggerFactory.CreateLogger<AttentionService>();
         AttentionNotifier.CreateChannel(this);
         CreateServiceChannel();
-        _notifier = new AttentionNotifier(this);
+        _notifier = new AttentionNotifier(this, MauiProgram.LoggerFactory.CreateLogger<AttentionNotifier>());
         var services = MauiProgram.Services;
         _watcher = new AttentionWatcher(services.GetRequiredService<IServerDirectory>(), _notifier, MauiProgram.LoggerFactory);
         Connectivity.Current.ConnectivityChanged += OnNetworkChanged;
