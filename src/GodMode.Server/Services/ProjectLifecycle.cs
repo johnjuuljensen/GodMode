@@ -45,17 +45,16 @@ public sealed class ProjectLifecycle
 
     // ── Process ──
 
-    public Task StartAsync(ProjectInfo project, string initialPrompt,
-        Dictionary<string, string>? environment, string[]? args)
+    public Task StartAsync(ProjectInfo project, string initialPrompt, ClaudeLaunchSpec launch)
     {
         var process = BeginLaunch(project);
-        return _processManager.StartClaudeProcessAsync(project, initialPrompt, process.Cancellation!.Token, environment, args);
+        return _processManager.StartClaudeProcessAsync(project, initialPrompt, process.Cancellation!.Token, launch.Environment, launch.Args);
     }
 
-    public Task ResumeAsync(ProjectInfo project, Dictionary<string, string>? environment, string[]? args)
+    public Task ResumeAsync(ProjectInfo project, ClaudeLaunchSpec launch)
     {
         var process = BeginLaunch(project);
-        return _processManager.ResumeClaudeProcessAsync(project, process.Cancellation!.Token, environment, args);
+        return _processManager.ResumeClaudeProcessAsync(project, process.Cancellation!.Token, launch.Environment, launch.Args);
     }
 
     /// <summary>Replaces the previous launch's cancellation and makes sure output has its consumer.</summary>
@@ -523,6 +522,11 @@ public sealed class ProjectLifecycle
 
         if (root.TryGetProperty("is_error", out var isError) && isError.ValueKind is JsonValueKind.True or JsonValueKind.False)
             metadata["is_error"] = isError.GetBoolean();
+
+        // Every line carries it; only system/init's is read, so only system lines keep it
+        if (root.TryGetProperty("type", out var type) && type.ValueEquals("system")
+            && root.TryGetProperty("session_id", out var sessionId) && sessionId.ValueKind == JsonValueKind.String)
+            metadata[StatusUpdater.SessionIdKey] = sessionId.GetString()!;
 
         return metadata.Count > 0 ? metadata : null;
     }

@@ -92,6 +92,14 @@ public class StatusUpdater : IStatusUpdater
                 break;
 
             case OutputEventType.System when Subtype(outputEvent) == "init":
+                // The session claude keeps is the one it reports, which a resume must name
+                if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string sessionId && sessionId != project.SessionId)
+                {
+                    _logger.LogInformation("Project {ProjectId} runs session {SessionId} (asked for {Requested})",
+                        project.Status.Id, sessionId, project.SessionId);
+                    project.SessionId = sessionId;
+                    await SessionIdFile.WriteAsync(project.ProjectPath, sessionId);
+                }
                 // The session (re)started - project is running
                 stateChanged = status.State != ProjectState.Running || status.LastError != null;
                 status = status with { State = ProjectState.Running, LastError = null };
@@ -114,6 +122,9 @@ public class StatusUpdater : IStatusUpdater
         await SaveStatusAsync(project);
         return true;
     }
+
+    /// <summary>The metadata key a <c>system</c> event carries claude's session ID under.</summary>
+    public const string SessionIdKey = "session_id";
 
     private static string? Subtype(OutputEvent outputEvent) =>
         outputEvent.Metadata?.GetValueOrDefault("subtype") as string;
