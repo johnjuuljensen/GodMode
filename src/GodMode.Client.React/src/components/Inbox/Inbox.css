@@ -85,6 +85,8 @@
   border-left: 3px solid var(--waiting);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  /* Full height in the scrolling list, never squeezed */
+  flex-shrink: 0;
 }
 .inbox-kind-Permission { border-left-color: var(--warning); }
 .inbox-kind-Error { border-left-color: var(--error); }

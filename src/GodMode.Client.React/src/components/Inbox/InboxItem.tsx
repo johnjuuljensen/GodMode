@@ -122,10 +122,10 @@ export function InboxItem({ item, serverName, now }: Props) {
   );
 }
 
-/** How long since `since`: "just now", "5m", "3h", "2d". */
+/** How long since `since`: "<1m", "5m", "3h", "2d". */
 function waitingFor(since: string, now: number): string {
   const min = Math.floor((now - new Date(since).getTime()) / 60000);
-  if (min < 1) return 'just now';
+  if (min < 1) return '<1m';
   if (min < 60) return `${min}m`;
   const hr = Math.floor(min / 60);
   return hr < 24 ? `${hr}h` : `${Math.floor(hr / 24)}d`;
