@@ -1,184 +1,205 @@
 using GodMode.ClientBase.Services.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
 
 namespace GodMode.ClientBase.Services;
 
 /// <summary>
-/// Manages server registrations stored in ~/.godmode/servers.json.
-/// On first load, migrates from profiles.json if servers.json doesn't exist.
+/// Manages server registrations stored in servers.json, with access tokens in an <see cref="ISecretStore"/>.
+/// On load, older files are upgraded in place: entries get an ID, a single Url becomes Urls,
+/// and a token found in the file moves to secure storage. profiles.json is migrated when servers.json doesn't exist.
 /// </summary>
 public class ServerRegistryService : IServerRegistryService
 {
     private const string ServersFileName = "servers.json";
     private const string ProfilesFileName = "profiles.json";
+    private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
+
     private readonly string _serversPath;
     private readonly string _appDataPath;
-    private readonly ITokenProtector _tokenProtector;
-    private ServersConfig? _cachedConfig;
+    private readonly ISecretStore _secrets;
+    private readonly ILogger _logger;
+    private readonly SemaphoreSlim _lock = new(1, 1);
+    private IReadOnlyList<ServerRegistration>? _cached;
 
-    public ServerRegistryService(string appDataPath, ITokenProtector tokenProtector)
+    public ServerRegistryService(string appDataPath, ISecretStore secrets, ILogger<ServerRegistryService>? logger = null)
     {
         _appDataPath = appDataPath;
         _serversPath = Path.Combine(appDataPath, ServersFileName);
-        _tokenProtector = tokenProtector;
+        _secrets = secrets;
+        _logger = logger ?? (ILogger)NullLogger.Instance;
     }
 
-    public async Task<List<ServerRegistration>> GetServersAsync()
+    /// <summary>The secure-storage key holding a registration's access token.</summary>
+    public static string TokenKey(string id) => $"godmode.server-token.{id}";
+
+    public async Task<IReadOnlyList<ServerRegistration>> GetServersAsync()
     {
-        var config = await LoadConfigAsync();
-        return config.Servers;
+        await _lock.WaitAsync();
+        try { return await LoadAsync(); }
+        finally { _lock.Release(); }
     }
 
-    public async Task AddServerAsync(ServerRegistration server)
+    public async Task<ServerRegistration> AddServerAsync(ServerRegistration server, string? accessToken)
     {
-        var config = await LoadConfigAsync();
-
-        // Encrypt token before saving
-        var toSave = CloneWithEncryptedToken(server);
-        config.Servers.Add(toSave);
-        await SaveConfigAsync(config);
-    }
-
-    public async Task UpdateServerAsync(int index, ServerRegistration server)
-    {
-        var config = await LoadConfigAsync();
-        if (index < 0 || index >= config.Servers.Count)
-            throw new ArgumentOutOfRangeException(nameof(index));
-
-        config.Servers[index] = CloneWithEncryptedToken(server);
-        await SaveConfigAsync(config);
-    }
-
-    public async Task RemoveServerAsync(int index)
-    {
-        var config = await LoadConfigAsync();
-        if (index < 0 || index >= config.Servers.Count)
-            throw new ArgumentOutOfRangeException(nameof(index));
-
-        config.Servers.RemoveAt(index);
-        await SaveConfigAsync(config);
-    }
-
-    public bool IsDuplicate(ServerRegistration server, int? excludeIndex = null)
-    {
-        var config = _cachedConfig ?? new ServersConfig();
-        for (int i = 0; i < config.Servers.Count; i++)
+        var added = server with
         {
-            if (i == excludeIndex) continue;
-            var existing = config.Servers[i];
-            if (!string.Equals(existing.Type, server.Type, StringComparison.OrdinalIgnoreCase)) continue;
-
-            if (server.Type == "local" &&
-                NormalizeUrl(existing.Url) == NormalizeUrl(server.Url))
-                return true;
-
-            if (server.Type == "github" &&
-                string.Equals(existing.Username, server.Username, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-        return false;
-    }
-
-    public string DecryptToken(string encryptedToken) =>
-        _tokenProtector.Unprotect(encryptedToken);
-
-    public string EncryptToken(string token) =>
-        _tokenProtector.Protect(token);
-
-    private ServerRegistration CloneWithEncryptedToken(ServerRegistration server)
-    {
-        return new ServerRegistration
-        {
-            Type = server.Type,
-            Url = server.Url,
-            Username = server.Username,
-            Token = server.Type == "github" && !string.IsNullOrEmpty(server.Token)
-                ? _tokenProtector.Protect(server.Token)
-                : server.Token,
-            DisplayName = server.DisplayName
+            Id = NewId(),
+            Urls = server.Urls.Select(u => u.Trim().TrimEnd('/')).Where(u => u.Length > 0).ToList(),
+            Url = null,
+            Token = null,
         };
+
+        await _lock.WaitAsync();
+        try
+        {
+            var servers = await LoadAsync();
+            if (!string.IsNullOrEmpty(accessToken))
+                await _secrets.SetAsync(TokenKey(added.Id), accessToken);
+            await SaveAsync([.. servers, added]);
+            return added;
+        }
+        finally { _lock.Release(); }
     }
 
-    private async Task<ServersConfig> LoadConfigAsync()
+    public async Task<bool> RemoveServerAsync(string id)
     {
-        if (_cachedConfig != null)
-            return _cachedConfig;
-
-        if (File.Exists(_serversPath))
+        await _lock.WaitAsync();
+        try
         {
-            try
-            {
-                var json = await File.ReadAllTextAsync(_serversPath);
-                _cachedConfig = JsonSerializer.Deserialize<ServersConfig>(json) ?? new ServersConfig();
-            }
-            catch
-            {
-                _cachedConfig = new ServersConfig();
-            }
-            return _cachedConfig;
+            var servers = await LoadAsync();
+            if (servers.All(s => s.Id != id)) return false;
+            await SaveAsync(servers.Where(s => s.Id != id).ToList());
+            _secrets.Remove(TokenKey(id));
+            return true;
+        }
+        finally { _lock.Release(); }
+    }
+
+    public async Task<string?> GetAccessTokenAsync(string id)
+    {
+        if (await _secrets.GetAsync(TokenKey(id)) is { } token)
+            return token;
+        // An entry whose token could not be moved to secure storage yet still carries it.
+        var legacy = (await GetServersAsync()).FirstOrDefault(s => s.Id == id)?.Token;
+        return legacy == null ? null : LegacyToken.Unprotect(legacy);
+    }
+
+    private static string NewId() => Guid.NewGuid().ToString("N");
+
+    private async Task<IReadOnlyList<ServerRegistration>> LoadAsync()
+    {
+        if (_cached != null) return _cached;
+
+        var stored = File.Exists(_serversPath) ? await ReadServersFileAsync() : await MigrateFromProfilesAsync();
+        var upgraded = new List<ServerRegistration>(stored.Count);
+        foreach (var server in stored)
+            upgraded.Add(await UpgradeAsync(server));
+
+        if (!upgraded.SequenceEqual(stored))
+            await SaveAsync(upgraded);
+        else
+            _cached = upgraded;
+        return _cached!;
+    }
+
+    private async Task<IReadOnlyList<ServerRegistration>> ReadServersFileAsync()
+    {
+        try
+        {
+            var json = await File.ReadAllTextAsync(_serversPath);
+            return JsonSerializer.Deserialize<ServersConfig>(json)?.Servers ?? [];
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not read {Path}", _serversPath);
+            return [];
+        }
+    }
+
+    /// <summary>Gives a registration written by an older build an ID and Urls, and moves its token to secure storage.</summary>
+    private async Task<ServerRegistration> UpgradeAsync(ServerRegistration server)
+    {
+        if (server.Id.Length > 0 && server.Url == null && server.Token == null)
+            return server;
+
+        var upgraded = server with
+        {
+            Id = server.Id.Length > 0 ? server.Id : NewId(),
+            Urls = server.Urls.Count > 0 || string.IsNullOrWhiteSpace(server.Url) ? server.Urls : [server.Url.TrimEnd('/')],
+            Url = null,
+            Token = null,
+        };
+
+        if (string.IsNullOrEmpty(server.Token))
+            return upgraded;
+
+        string token;
+        try
+        {
+            token = LegacyToken.Unprotect(server.Token);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Dropped the unreadable stored token of server {Id}; add the server again", upgraded.Id);
+            return upgraded;
         }
 
-        // Migration: extract unique servers from old profiles.json
-        _cachedConfig = await MigrateFromProfilesAsync();
-        if (_cachedConfig.Servers.Count > 0)
-            await SaveConfigAsync(_cachedConfig);
-
-        return _cachedConfig;
+        try
+        {
+            await _secrets.SetAsync(TokenKey(upgraded.Id), token);
+            return upgraded;
+        }
+        catch (Exception ex)
+        {
+            // Keep the entry as it was, token included, so the next load tries again.
+            _logger.LogError(ex, "Could not move the token of server {Id} to secure storage", upgraded.Id);
+            return server with { Id = upgraded.Id };
+        }
     }
 
-    private async Task<ServersConfig> MigrateFromProfilesAsync()
+    private async Task<IReadOnlyList<ServerRegistration>> MigrateFromProfilesAsync()
     {
         var profilesPath = Path.Combine(_appDataPath, ProfilesFileName);
         if (!File.Exists(profilesPath))
-            return new ServersConfig();
+            return [];
 
         try
         {
             var json = await File.ReadAllTextAsync(profilesPath);
             var profilesConfig = JsonSerializer.Deserialize<ProfilesConfig>(json);
             if (profilesConfig == null)
-                return new ServersConfig();
+                return [];
 
-            var servers = new List<ServerRegistration>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var profile in profilesConfig.Profiles)
-            {
-                foreach (var account in profile.Accounts)
+            return profilesConfig.Profiles
+                .SelectMany(p => p.Accounts)
+                .Where(a => seen.Add(a.Type == ServerTypes.GitHub
+                    ? $"github:{a.Username}"
+                    : $"local:{a.Path?.TrimEnd('/').ToLowerInvariant()}"))
+                .Select(a => new ServerRegistration
                 {
-                    var key = account.Type == "github"
-                        ? $"github:{account.Username}"
-                        : $"local:{NormalizeUrl(account.Path)}";
-
-                    if (seen.Add(key))
-                    {
-                        servers.Add(new ServerRegistration
-                        {
-                            Type = account.Type,
-                            Url = account.Type == "local" ? account.Path : null,
-                            Username = account.Username,
-                            Token = account.Token, // already encrypted
-                            DisplayName = account.Metadata?.GetValueOrDefault("name")
-                        });
-                    }
-                }
-            }
-
-            return new ServersConfig { Servers = servers };
+                    Type = a.Type,
+                    Url = a.Type == ServerTypes.Local ? a.Path : null,
+                    Username = a.Username,
+                    Token = a.Token,
+                    DisplayName = a.Metadata?.GetValueOrDefault("name"),
+                })
+                .ToList();
         }
-        catch
+        catch (Exception ex)
         {
-            return new ServersConfig();
+            _logger.LogError(ex, "Could not migrate {Path}", profilesPath);
+            return [];
         }
     }
 
-    private async Task SaveConfigAsync(ServersConfig config)
+    private async Task SaveAsync(IReadOnlyList<ServerRegistration> servers)
     {
-        _cachedConfig = config;
-        var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+        Directory.CreateDirectory(_appDataPath);
+        var json = JsonSerializer.Serialize(new ServersConfig { Servers = servers }, WriteOptions);
         await File.WriteAllTextAsync(_serversPath, json);
+        _cached = servers;
     }
-
-    private static string? NormalizeUrl(string? url) =>
-        url?.TrimEnd('/').ToLowerInvariant();
 }

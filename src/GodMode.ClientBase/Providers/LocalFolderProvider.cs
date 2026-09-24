@@ -1,72 +1,39 @@
 using GodMode.ClientBase.Abstractions;
+using GodMode.ClientBase.Services;
+using GodMode.ClientBase.Services.Models;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
-using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Logging;
+using SignalR.Proxy;
 
 namespace GodMode.ClientBase.Providers;
 
 /// <summary>
-/// Server provider for local GodMode.Server instances.
+/// Server provider for one registered GodMode.Server, reached at the first of its URLs that answers.
+/// The server's ID is its registration's ID.
 /// </summary>
-public class LocalFolderProvider : IServerProvider
+public class LocalFolderProvider(ServerRegistration registration, string? accessToken, ServerUrlSelector urlSelector)
+    : IServerProvider
 {
-    private readonly string _serverUrl;
-    private readonly string _serverId;
-    private readonly string _serverName;
-    private readonly ILogger _logger;
+    public string Type => ServerTypes.Local;
 
-    public string Type => "local";
+    private string Name => registration.DisplayName ?? registration.Urls.FirstOrDefault() ?? "Local Server";
 
-    public LocalFolderProvider(string serverUrl = "http://localhost:31337", string? serverName = null,
-        ILoggerFactory? loggerFactory = null)
+    public async Task<IReadOnlyList<ServerInfo>> ListServersAsync(CancellationToken ct = default)
     {
-        _serverUrl = serverUrl;
-        _serverId = "local-server";
-        _serverName = serverName ?? "Local Server";
-        _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
-                  .CreateLogger<LocalFolderProvider>();
+        var url = await urlSelector.SelectAsync(registration.Urls, ct);
+        var state = url != null ? ServerState.Running : ServerState.Stopped;
+        return [new ServerInfo(registration.Id, Name, ServerTypes.Local, state, url ?? registration.Urls.FirstOrDefault())];
     }
 
-    public async Task<IEnumerable<ServerInfo>> ListServersAsync()
-    {
-        var reachable = await IsServerReachableAsync();
-        var state = reachable ? ServerState.Running : ServerState.Stopped;
-        _logger.LogDebug("Local server {Url} reachable={Reachable} state={State}", _serverUrl, reachable, state);
-        return [new ServerInfo(_serverId, _serverName, "local", state, _serverUrl)];
-    }
-
-    public async Task<ServerStatus> GetServerStatusAsync(string serverId)
-    {
-        var state = await IsServerReachableAsync() ? ServerState.Running : ServerState.Stopped;
-        return new ServerStatus(_serverId, _serverName, "local", state, _serverUrl, 0, DateTime.UtcNow);
-    }
+    public Task<bool> OwnsAsync(string serverId) => Task.FromResult(serverId == registration.Id);
 
     public Task StartServerAsync(string serverId) => Task.CompletedTask;
     public Task StopServerAsync(string serverId) => Task.CompletedTask;
 
-    public async Task<HubConnection> ConnectAsync(string serverId)
+    public async Task<RelayTarget?> ResolveAsync(string serverId, CancellationToken ct = default)
     {
-        if (serverId != _serverId)
-            throw new ArgumentException($"Unknown server: {serverId}");
-
-        _logger.LogInformation("Connecting to local server at {Url}", _serverUrl);
-        return await HubConnectionFactory.CreateAndStartAsync(_serverUrl);
-    }
-
-    private async Task<bool> IsServerReachableAsync()
-    {
-        try
-        {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            var response = await client.GetAsync($"{_serverUrl}/health");
-            _logger.LogDebug("Health check {Url}/health -> {StatusCode}", _serverUrl, response.StatusCode);
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug("Health check {Url}/health failed: {Error}", _serverUrl, ex.Message);
-            return false;
-        }
+        if (serverId != registration.Id) return null;
+        var url = await urlSelector.SelectAsync(registration.Urls, ct);
+        return url == null ? null : new RelayTarget($"{url}/hubs/projects", accessToken);
     }
 }

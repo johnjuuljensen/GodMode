@@ -15,7 +15,7 @@ namespace SignalR.Proxy;
 /// <summary>
 /// Accepts a WebSocket from a client, connects to a SignalR server via the builder's
 /// IConnectionFactory (which handles negotiate + auth), and relays all messages
-/// bidirectionally. Exposes a tee'd HubConnection for typed callback handling.
+/// bidirectionally. Frames are forwarded as-is, so the relay needs no knowledge of the hub contract.
 /// </summary>
 public class SignalRRelay : IAsyncDisposable
 {
@@ -25,27 +25,20 @@ public class SignalRRelay : IAsyncDisposable
     private readonly WebSocket _clientWs;
     private readonly ConnectionContext _serverConnection;
     private readonly IDuplexPipe _serverPipe;
-    private readonly TeeConnection _tee;
     private readonly SemaphoreSlim _serverWriteLock = new(1, 1);
     private readonly ILogger _logger;
-
-    public HubConnection HubConnection { get; }
 
     private SignalRRelay(
         string connectionId,
         WebSocket clientWs,
         ConnectionContext serverConnection,
-        TeeConnection tee,
-        HubConnection hubConnection,
         ILogger logger)
     {
         _connectionId = connectionId;
         _clientWs = clientWs;
         _serverConnection = serverConnection;
         _serverPipe = serverConnection.Transport;
-        _tee = tee;
         _logger = logger;
-        HubConnection = hubConnection;
     }
 
     /// <summary>
@@ -109,23 +102,18 @@ public class SignalRRelay : IAsyncDisposable
         await SendWsMessageAsync(clientWs, response);
         log.LogInformation("[{ConnId}] Handshake complete, relay active", connectionId);
 
-        // Step 4: Create tee'd HubConnection for typed handlers
-        var (tee, hubConnection) = await TeeConnection.CreateHubConnectionAsync();
-        log.LogDebug("[{ConnId}] Tee'd HubConnection ready", connectionId);
-
-        return new SignalRRelay(connectionId, clientWs, serverConnection, tee, hubConnection, log);
+        return new SignalRRelay(connectionId, clientWs, serverConnection, log);
     }
 
     /// <summary>
     /// Runs the relay pumps until the client or server disconnects.
     /// </summary>
-    public async Task RunAsync()
+    public async Task RunAsync(CancellationToken ct = default)
     {
-        using var cts = new CancellationTokenSource();
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         var clientToServer = PumpClientToServerAsync(cts);
         var serverToClient = PumpServerToClientAsync(cts);
-        var proxyToServer = PumpProxyToServerAsync(cts);
 
         try { await Task.WhenAny(clientToServer, serverToClient); }
         catch { /* one side closed */ }
@@ -133,8 +121,6 @@ public class SignalRRelay : IAsyncDisposable
         await cts.CancelAsync();
         _logger.LogInformation("[{ConnId}] Relay closed", _connectionId);
 
-        try { await HubConnection.StopAsync(); } catch { /* best effort */ }
-        await _tee.DisposeAsync();
         await CloseWsGracefullyAsync(_clientWs);
         if (_serverConnection is IAsyncDisposable ad) await ad.DisposeAsync();
     }
@@ -201,36 +187,12 @@ public class SignalRRelay : IAsyncDisposable
 
                 await _clientWs.SendAsync(segment, WebSocketMessageType.Text, true, cts.Token);
 
-                await _tee.TeeWriter.WriteAsync(new ReadOnlyMemory<byte>(allBytes, 0, completeLen), cts.Token);
-                await _tee.TeeWriter.FlushAsync(cts.Token);
-
                 // Keep any remaining bytes for next iteration
                 pending = completeLen < allBytes.Length ? allBytes[completeLen..] : [];
             }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { _logger.LogWarning("[{ConnId}] S->C error: {Error}", _connectionId, ex.Message); }
-    }
-
-    private async Task PumpProxyToServerAsync(CancellationTokenSource cts)
-    {
-        try
-        {
-            while (!cts.IsCancellationRequested)
-            {
-                var result = await _tee.ProxyOutput.ReadAsync(cts.Token);
-                if (result.IsCompleted) break;
-
-                var bytes = result.Buffer.ToArray();
-                _tee.ProxyOutput.AdvanceTo(result.Buffer.End);
-                if (bytes.Length == 0) continue;
-
-                LogFrame(new ArraySegment<byte>(bytes), "P->S");
-                await WriteToServerPipeAsync(new ArraySegment<byte>(bytes), cts.Token);
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { _logger.LogWarning("[{ConnId}] P->S error: {Error}", _connectionId, ex.Message); }
     }
 
     private async Task WriteToServerPipeAsync(ArraySegment<byte> data, CancellationToken ct)
@@ -356,10 +318,9 @@ public class SignalRRelay : IAsyncDisposable
         ws.Dispose();
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        try { await HubConnection.DisposeAsync(); } catch { /* best effort */ }
-        await _tee.DisposeAsync();
         _serverWriteLock.Dispose();
+        return ValueTask.CompletedTask;
     }
 }
