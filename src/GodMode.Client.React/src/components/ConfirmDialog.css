@@ -1,0 +1,45 @@
+/* ── Confirm Dialog (replaces window.confirm) ── */
+.modal-overlay.confirm-overlay {
+  z-index: 200;
+  padding: 16px;
+}
+
+.modal.confirm-dialog {
+  min-width: 0;
+  width: min(420px, 100%);
+  max-width: 100%;
+}
+
+.confirm-dialog h2 {
+  margin-bottom: 8px;
+}
+
+.confirm-dialog-message {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+@media (max-width: 768px) {
+  .modal-overlay.confirm-overlay {
+    align-items: flex-end;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .confirm-dialog-actions {
+    flex-direction: column-reverse;
+  }
+
+  .confirm-dialog-actions .btn {
+    width: 100%;
+  }
+}

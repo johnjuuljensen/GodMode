@@ -1,4 +1,5 @@
 import { useAppStore } from '../../store';
+import { confirmAction } from '../../confirmDialog';
 import '../settings-common.css';
 
 interface Props {
@@ -11,8 +12,8 @@ export function EditServer({ serverId }: Props) {
 
   if (!conn) return null;
 
-  const handleDelete = () => {
-    if (confirm('Remove this server?')) {
+  const handleDelete = async () => {
+    if (await confirmAction(`Remove "${conn.serverInfo.Name}"?`, 'Remove', { tone: 'danger' })) {
       removeServer(serverId);
     }
   };
