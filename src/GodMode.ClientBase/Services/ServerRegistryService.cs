@@ -77,7 +77,14 @@ public class ServerRegistryService : IServerRegistryService
         finally { _lock.Release(); }
     }
 
-    public Task<string?> GetAccessTokenAsync(string id) => _secrets.GetAsync(TokenKey(id));
+    public async Task<string?> GetAccessTokenAsync(string id)
+    {
+        if (await _secrets.GetAsync(TokenKey(id)) is { } token)
+            return token;
+        // An entry whose token could not be moved to secure storage yet still carries it.
+        var legacy = (await GetServersAsync()).FirstOrDefault(s => s.Id == id)?.Token;
+        return legacy == null ? null : LegacyToken.Unprotect(legacy);
+    }
 
     private static string NewId() => Guid.NewGuid().ToString("N");
 
@@ -125,18 +132,31 @@ public class ServerRegistryService : IServerRegistryService
             Token = null,
         };
 
-        if (!string.IsNullOrEmpty(server.Token))
+        if (string.IsNullOrEmpty(server.Token))
+            return upgraded;
+
+        string token;
+        try
         {
-            try
-            {
-                await _secrets.SetAsync(TokenKey(upgraded.Id), LegacyToken.Unprotect(server.Token));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Dropped the unreadable stored token of server {Id}; add the server again", upgraded.Id);
-            }
+            token = LegacyToken.Unprotect(server.Token);
         }
-        return upgraded;
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Dropped the unreadable stored token of server {Id}; add the server again", upgraded.Id);
+            return upgraded;
+        }
+
+        try
+        {
+            await _secrets.SetAsync(TokenKey(upgraded.Id), token);
+            return upgraded;
+        }
+        catch (Exception ex)
+        {
+            // Keep the entry as it was, token included, so the next load tries again.
+            _logger.LogError(ex, "Could not move the token of server {Id} to secure storage", upgraded.Id);
+            return server with { Id = upgraded.Id };
+        }
     }
 
     private async Task<IReadOnlyList<ServerRegistration>> MigrateFromProfilesAsync()

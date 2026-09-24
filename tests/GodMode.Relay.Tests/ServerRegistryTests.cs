@@ -94,4 +94,26 @@ public sealed class ServerRegistryTests : IDisposable
         var reloaded = await new ServerRegistryService(_dataDir, _secrets).GetServersAsync();
         Assert.Equal(servers.Select(s => s.Id), reloaded.Select(s => s.Id));
     }
+
+    [Fact]
+    public async Task Token_that_cannot_be_moved_to_secure_storage_stays_in_the_file()
+    {
+        await File.WriteAllTextAsync(ServersFile, """
+            { "Servers": [ { "Type": "github", "Username": "octo", "Token": "plain:ghp_keep" } ] }
+            """);
+        var registry = new ServerRegistryService(_dataDir, new FailingSecretStore());
+
+        var server = Assert.Single(await registry.GetServersAsync());
+
+        Assert.NotEmpty(server.Id);
+        Assert.Equal("ghp_keep", await registry.GetAccessTokenAsync(server.Id));
+        Assert.Contains("ghp_keep", await File.ReadAllTextAsync(ServersFile));
+    }
+
+    private sealed class FailingSecretStore : ISecretStore
+    {
+        public Task<string?> GetAsync(string key) => Task.FromResult<string?>(null);
+        public Task SetAsync(string key, string value) => throw new InvalidOperationException("secure storage unavailable");
+        public bool Remove(string key) => false;
+    }
 }
