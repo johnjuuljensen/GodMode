@@ -30,7 +30,7 @@ public sealed class LocalServerTests : IAsyncLifetime
         _alpha = await FakeUpstream.StartAsync("alpha");
         _beta = await FakeUpstream.StartAsync("beta");
         _registry = new ServerRegistryService(_dataDir, _secrets);
-        var directory = new ServerDirectory(_registry, new ServerUrlSelector(new HttpClient()), NullLoggerFactory.Instance);
+        var directory = new ServerDirectory(_registry, new ServerUrlSelector(ServerUrlSelector.CreateHttpClient()), NullLoggerFactory.Instance);
         _relay = new LocalServer(directory.ResolveAsync, [WebViewOrigin], NullLoggerFactory.Instance);
         _relay.Start();
     }

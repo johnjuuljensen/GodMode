@@ -5,7 +5,7 @@ namespace GodMode.Relay.Tests;
 
 public sealed class ServerUrlSelectorTests : IAsyncLifetime
 {
-    private readonly ServerUrlSelector _selector = new(new HttpClient());
+    private readonly ServerUrlSelector _selector = new(ServerUrlSelector.CreateHttpClient());
     private FakeUpstream _first = null!;
     private FakeUpstream _second = null!;
 
@@ -49,6 +49,18 @@ public sealed class ServerUrlSelectorTests : IAsyncLifetime
     public async Task None_reachable_gives_null()
     {
         Assert.Null(await _selector.SelectAsync([Net.UnreachableUrl(), Net.UnreachableUrl()]));
+    }
+
+    /// <summary>
+    /// "localhost" resolves to ::1 before 127.0.0.1; on Windows a refused connect to ::1 takes about 2 s,
+    /// longer than the timeout, so trying the addresses in turn would call a running server unreachable.
+    /// </summary>
+    [Fact]
+    public async Task Localhost_url_of_a_server_on_127_0_0_1_answers_within_the_timeout()
+    {
+        var localhostUrl = _first.Url.Replace("127.0.0.1", "localhost");
+
+        Assert.Equal(localhostUrl, await _selector.SelectAsync([localhostUrl]));
     }
 
     [Fact]

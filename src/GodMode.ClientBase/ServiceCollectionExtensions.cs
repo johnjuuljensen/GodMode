@@ -25,7 +25,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ISecretStore>(),
             sp.GetRequiredService<ILogger<ServerRegistryService>>()));
         services.AddSingleton(sp => new ServerUrlSelector(
-            new HttpClient(), logger: sp.GetRequiredService<ILogger<ServerUrlSelector>>()));
+            ServerUrlSelector.CreateHttpClient(), logger: sp.GetRequiredService<ILogger<ServerUrlSelector>>()));
         services.AddSingleton<IServerDirectory, ServerDirectory>();
         return services;
     }
