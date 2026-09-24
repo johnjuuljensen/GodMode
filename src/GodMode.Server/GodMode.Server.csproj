@@ -42,6 +42,39 @@
     <_ReactSource Include="$(_ReactDir)\tsconfig*.json" />
   </ItemGroup>
 
+  <!-- ── Hub types for the React client ─────────────────────────
+       tools/GodMode.TypeGen writes signalr/generated/hub-types.ts from GodMode.Shared on every
+       build, before the client builds, so the client compiles against the contract as it is. It
+       rewrites the file only when its text changes, which keeps BuildReact incremental. The file is
+       committed so `npm run dev` needs no .NET build, and a hand edit is undone by the next build. -->
+
+  <PropertyGroup>
+    <_HubTypesFile>$(_ReactDir)\src\signalr\generated\hub-types.ts</_HubTypesFile>
+  </PropertyGroup>
+
+  <!-- Only when the client is built here: the Dockerfile builds it on its own and copies no tools/ -->
+  <ItemGroup Condition="'$(PublishReactClient)' != 'false'">
+    <ProjectReference Include="..\..\tools\GodMode.TypeGen\GodMode.TypeGen.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <Target Name="GenerateHubTypes"
+          BeforeTargets="BuildReact"
+          DependsOnTargets="ResolveProjectReferences"
+          Condition="'$(PublishReactClient)' != 'false'">
+    <!-- ResolveProjectReferences built it but keeps no output of a ReferenceOutputAssembly="false"
+         reference, so ask it for its path, with the properties that build used -->
+    <MSBuild Projects="@(_MSBuildProjectReferenceExistent)"
+             Condition="'%(Filename)' == 'GodMode.TypeGen'"
+             Targets="GetTargetPath"
+             Properties="%(_MSBuildProjectReferenceExistent.SetConfiguration); %(_MSBuildProjectReferenceExistent.SetPlatform); %(_MSBuildProjectReferenceExistent.SetTargetFramework)"
+             RemoveProperties="%(_MSBuildProjectReferenceExistent.GlobalPropertiesToRemove)$(_GlobalPropertiesToRemoveFromProjectReferences)">
+      <Output TaskParameter="TargetOutputs" ItemName="_TypeGenAssembly" />
+    </MSBuild>
+    <Error Condition="'@(_TypeGenAssembly)' == ''" Text="GodMode.TypeGen was not built; cannot generate the client's hub types." />
+    <Exec Command="dotnet &quot;@(_TypeGenAssembly)&quot; &quot;$(_HubTypesFile)&quot;" />
+  </Target>
+
   <!-- Build React and copy to wwwroot (incremental: skipped when sources unchanged). Its packages
        are installed first when they are missing, as in a fresh clone (the codespace's publish) -->
   <Target Name="BuildReact"
