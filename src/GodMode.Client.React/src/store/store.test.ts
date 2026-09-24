@@ -3,12 +3,9 @@
  * them apart (#169). Drives the real store through fake hubs.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HubCallbacks } from '../signalr/hub';
-import type {
-  ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
-} from '../signalr/types';
 import { parseClaudeMessage } from '../signalr/parseMessage';
-import { useAppStore, type ServerConnection, type SidebarGroupBy } from './index';
+import { FakeHub, project, root, status, connectServers } from '../test/fakeHub';
+import { useAppStore, type SidebarGroupBy } from './index';
 import { projectKey } from './projectKey';
 
 vi.mock('../signalr/hub', () => ({ GodModeHub: class {} }));
@@ -22,31 +19,6 @@ vi.mock('../services/hostApi', () => ({
 
 const DISMISSED_KEY = 'godmode-dismissed-projects-v2';
 
-class FakeHub {
-  callbacks: HubCallbacks = {};
-  projects: ProjectSummary[];
-  roots: ProjectRootInfo[];
-  constructor(projects: ProjectSummary[], roots: ProjectRootInfo[]) {
-    this.projects = projects;
-    this.roots = roots;
-  }
-  setCallbacks(callbacks: HubCallbacks) { this.callbacks = callbacks; }
-  async connect() { this.callbacks.onStateChanged?.('connected'); }
-  async disconnect() {}
-  async listProjects() { return this.projects; }
-  async listProjectRoots() { return this.roots; }
-  async listProfiles(): Promise<ProfileInfo[]> { return []; }
-  async getAttention() { return []; }
-  async subscribeProject() {}
-  async unsubscribeProject() {}
-}
-
-const project = (id: string, name: string, state: ProjectState, updatedAt: string): ProjectSummary => ({
-  Id: id, Name: name, State: state, UpdatedAt: updatedAt, RootName: 'work', ProfileName: 'Default',
-});
-const root: ProjectRootInfo = { Name: 'work', ProfileName: 'Default', Actions: [] } as unknown as ProjectRootInfo;
-const status = (id: string, state: ProjectState) =>
-  ({ Id: id, Name: id, State: state, UpdatedAt: '2026-09-24T12:00:00Z' }) as ProjectStatus;
 const question = parseClaudeMessage(JSON.stringify({
   type: 'assistant', message: { content: [{ type: 'text', text: 'Shall I continue?' }] },
 }));
@@ -65,14 +37,7 @@ async function connectTwoServers() {
     project('p1', 'shared', 'WaitingInput', '2026-09-24T11:00:00Z'),
     project('p3', 'only-b', 'Idle', '2026-09-24T08:00:00Z'),
   ], [root]);
-  const conn = (id: string, hub: FakeHub): ServerConnection => ({
-    serverInfo: { Id: id, Name: `Server ${id}`, Type: 'local', State: 'Running' } as ServerInfo,
-    hub: hub as unknown as ServerConnection['hub'],
-    connectionState: 'disconnected', projects: [], roots: [], profiles: [],
-  });
-  useAppStore.setState({ serverConnections: [conn('A', hubA), conn('B', hubB)] });
-  await useAppStore.getState().connectServer('A');
-  await useAppStore.getState().connectServer('B');
+  await connectServers({ A: hubA, B: hubB });
 }
 
 function groupBy(g: SidebarGroupBy) {
@@ -168,5 +133,46 @@ describe('dismissedProjects', () => {
     hubB.callbacks.onStatusChanged?.('p3', status('p3', 'Running'));
     expect(setItem.mock.calls.filter(([k]) => k === DISMISSED_KEY)).toHaveLength(1);
     expect(useAppStore.getState().dismissedProjects).toEqual({});
+  });
+});
+
+describe('a project created elsewhere (#170)', () => {
+  const created = status('p9', 'Running');
+
+  it('is listed without moving the selection', () => {
+    useAppStore.getState().selectProject('B', 'p3');
+    const before = useAppStore.getState();
+    hubA.callbacks.onProjectCreated?.(created);
+    const s = useAppStore.getState();
+    expect(s.selectedProject).toEqual({ serverId: 'B', projectId: 'p3' });
+    expect(s.outputMessages).toBe(before.outputMessages);
+    expect(s.question).toBe(before.question);
+    expect(s.getConnection('A')?.projects.map(p => p.Id)).toEqual(['p1', 'p2', 'p9']);
+  });
+
+  it('leaves the create page open', () => {
+    useAppStore.getState().setShowCreateProject(true, { serverId: 'B', rootName: 'work' });
+    hubA.callbacks.onProjectCreated?.(created);
+    const s = useAppStore.getState();
+    expect(s.activePage).toEqual({ type: 'createProject', context: { serverId: 'B', rootName: 'work' } });
+    expect(s.selectedProject).toBeNull();
+  });
+});
+
+describe('a project this client created (#170)', () => {
+  const created = status('p9', 'Running');
+
+  it.each([
+    ['before', true],
+    ['after', false],
+  ])('opens once its own call returns, with the broadcast arriving %s', (_when, broadcastFirst) => {
+    useAppStore.getState().setShowCreateProject(true, { serverId: 'A', rootName: 'work' });
+    if (broadcastFirst) hubA.callbacks.onProjectCreated?.(created);
+    useAppStore.getState().openCreatedProject('A', created);
+    if (!broadcastFirst) hubA.callbacks.onProjectCreated?.(created);
+    const s = useAppStore.getState();
+    expect(s.selectedProject).toEqual({ serverId: 'A', projectId: 'p9' });
+    expect(s.activePage).toBeNull();
+    expect(s.getConnection('A')?.projects.map(p => p.Id)).toEqual(['p1', 'p2', 'p9']);
   });
 });
