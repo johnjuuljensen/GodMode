@@ -92,7 +92,18 @@ export function TranscriptList({ items, ref }: Props) {
       [window, 'touchcancel', letGo],
     ];
     for (const [target, type, listener] of listeners) target.addEventListener(type, listener, { passive: true });
-    return () => { for (const [target, type, listener] of listeners) target.removeEventListener(type, listener); };
+    // The list gets shorter as the input grows or an on-screen keyboard opens: a reader at the bottom stays there
+    let lastHeight = scroller.clientHeight;
+    const resized = new ResizeObserver(() => {
+      if (scroller.clientHeight === lastHeight) return;
+      lastHeight = scroller.clientHeight;
+      if (followingRef.current) virtuoso.current?.scrollToIndex({ index: 'LAST', align: 'end' });
+    });
+    resized.observe(scroller);
+    return () => {
+      for (const [target, type, listener] of listeners) target.removeEventListener(type, listener);
+      resized.disconnect();
+    };
   }, [scroller, follow]);
 
   const renderItem = useCallback((_: number, item: TranscriptItem) => (

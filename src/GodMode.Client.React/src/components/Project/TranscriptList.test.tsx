@@ -4,16 +4,18 @@
  * they are at the bottom, and once they scroll up nothing moves and a button counts what is new.
  * Virtuoso is replaced by a plain scroller whose size the test sets, since jsdom lays nothing out.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, createRef, useState, type ReactNode, type Ref } from 'react';
-import { render, type Rendered } from '../../test/render';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { act, createRef, type ReactNode, type Ref } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+// For its act() environment: this test keeps its own root, to re-render the list with more items
+import '../../test/render';
 import type { TranscriptItem } from '../../signalr/parseMessage';
 import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
 
 const virtuoso = vi.hoisted(() => ({
   followOutput: undefined as ((atBottom: boolean) => unknown) | undefined,
   totalListHeightChanged: undefined as ((height: number) => void) | undefined,
-  scrollToIndex: undefined as unknown as ReturnType<typeof vi.fn>,
+  scrollToIndex: undefined as unknown as Mock<(location: unknown) => void>,
 }));
 
 vi.mock('react-virtuoso', async () => {
@@ -38,27 +40,34 @@ vi.mock('react-virtuoso', async () => {
   };
 });
 
-// The scroller is 400px tall over content the test sizes: the bottom is scrollHeight - 400
+// The scroller is 400px tall over content the test sizes: the bottom is scrollHeight - viewport
 let scrollHeight = 2000;
-const bottom = () => scrollHeight - 400;
-let view: Rendered;
-let setItems: (items: TranscriptItem[]) => void;
+let viewport = 400;
+const bottom = () => scrollHeight - viewport;
+
+// jsdom has no ResizeObserver: this one reports when the test resizes the scroller
+const observers = new Set<() => void>();
+globalThis.ResizeObserver = class {
+  private readonly notify: () => void;
+  constructor(callback: ResizeObserverCallback) { this.notify = () => callback([], this); }
+  observe() { observers.add(this.notify); }
+  unobserve() {}
+  disconnect() { observers.delete(this.notify); }
+};
+let container: HTMLElement;
+let root: Root;
 const handle = createRef<TranscriptListHandle>();
 
 const reply = (n: number): TranscriptItem => ({ kind: 'assistantText', key: `a${n}`, text: `reply ${n}` });
 const replies = (count: number) => Array.from({ length: count }, (_, i) => reply(i));
 
-function Harness() {
-  const [items, set] = useState(() => replies(20));
-  setItems = set;
-  return <TranscriptList ref={handle} items={items} />;
-}
+const show = (count: number) => act(async () => root.render(<TranscriptList ref={handle} items={replies(count)} />));
 
-const scroller = () => view.container.querySelector<HTMLElement>('.transcript-list')!;
-const button = () => view.container.querySelector<HTMLButtonElement>('.transcript-jump');
+const scroller = () => container.querySelector<HTMLElement>('.transcript-list')!;
+const button = () => container.querySelector<HTMLButtonElement>('.transcript-jump');
 const follows = () => virtuoso.followOutput?.(false);
 const fire = (event: Event, target: EventTarget = scroller()) => act(async () => { target.dispatchEvent(event); });
-const show = (count: number) => act(async () => setItems(replies(count)));
+const resize = (to: number) => act(async () => { viewport = to; observers.forEach(notify => notify()); });
 const grow = (to: number) => act(async () => { scrollHeight = to; virtuoso.totalListHeightChanged?.(to); });
 
 function scrollNow(top: number) {
@@ -75,16 +84,20 @@ async function wheelUp(to: number) {
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['performance'] });
   scrollHeight = 2000;
+  viewport = 400;
   // Scrolling to the latest lands at the bottom, as Virtuoso does
   virtuoso.scrollToIndex = vi.fn(() => scrollNow(bottom()));
-  view = await render(<Harness />);
+  container = document.body.appendChild(document.createElement('div'));
+  root = createRoot(container);
+  await show(20);
   Object.defineProperty(scroller(), 'scrollHeight', { configurable: true, get: () => scrollHeight });
-  Object.defineProperty(scroller(), 'clientHeight', { configurable: true, get: () => 400 });
+  Object.defineProperty(scroller(), 'clientHeight', { configurable: true, get: () => viewport });
   await scrollTo(bottom());
 });
 
 afterEach(() => {
-  view.unmount();
+  act(() => root.unmount());
+  container.remove();
   vi.useRealTimers();
 });
 
@@ -104,6 +117,13 @@ describe('at the bottom', () => {
     expect(virtuoso.scrollToIndex).toHaveBeenCalledWith({ index: 'LAST', align: 'end' });
     expect(scroller().scrollTop).toBe(bottom());
     expect(follows()).toBe('auto');
+    expect(button()).toBeNull();
+  });
+
+  it('stays pinned when the list gets shorter: the input grew, a keyboard opened', async () => {
+    await resize(300);
+    expect(virtuoso.scrollToIndex).toHaveBeenCalledWith({ index: 'LAST', align: 'end' });
+    expect(scroller().scrollTop).toBe(bottom());
     expect(button()).toBeNull();
   });
 
@@ -148,9 +168,10 @@ describe('scrolled up', () => {
     expect(button()).toBeNull();
   });
 
-  it('does not re-pin a row that grows', async () => {
+  it('does not re-pin a row that grows, or the list getting shorter', async () => {
     await wheelUp(800);
     await grow(2600);
+    await resize(300);
     expect(virtuoso.scrollToIndex).not.toHaveBeenCalled();
     expect(scroller().scrollTop).toBe(800);
   });
