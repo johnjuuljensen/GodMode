@@ -61,7 +61,8 @@ public class ProjectCreationFromFilesTests
             var status = await projects.CreateProjectAsync(new CreateProjectRequest("team", "shipit", inputs, "issue"));
 
             Assert.Equal("issue_42", status.Name);
-            var marker = Path.Combine(rootsDir, "shipit", status.Id, "created-by-script.txt");
+            Assert.Equal("team/shipit/issue_42", status.Id);
+            var marker = Path.Combine(rootsDir, "shipit", "issue_42", "created-by-script.txt");
             Assert.True(File.Exists(marker), $"create script did not run: no {marker}");
             Assert.Equal("42", File.ReadAllText(marker).Trim());
 
@@ -104,7 +105,7 @@ public class ProjectCreationFromFilesTests
 
             var args = Assert.Single(launcher.Launches).Args!;
             var configPath = args[Array.IndexOf(args, "--mcp-config") + 1];
-            Assert.Equal(Path.Combine(rootsDir, "shipit", status.Id, ".godmode", "mcp-config.json"), configPath);
+            Assert.Equal(Path.Combine(rootsDir, "shipit", "issue_7", ".godmode", "mcp-config.json"), configPath);
             // The header did reach the config, so its absence from the log below means something
             Assert.Contains($"Bearer {canary}", File.ReadAllText(configPath));
 

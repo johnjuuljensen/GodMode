@@ -374,6 +374,29 @@ public class ProjectManager : IProjectManager
     /// </summary>
     private static string CompositeKey(string profile, string root) => $"{profile}/{root}";
 
+    /// <summary>
+    /// A project's ID: <c>{profile}/{root}/{folder}</c>, where it lives, so a folder name used in two
+    /// roots is two projects. Clients treat it as opaque; it is never parsed. It is derived again
+    /// from the folder's location on every recovery, not trusted from status.json.
+    /// </summary>
+    private static string ProjectId(string profile, string root, string folder) => $"{CompositeKey(profile, root)}/{folder}";
+
+    /// <summary>Every root with its profile and root names as configured, and its full path.</summary>
+    private static IEnumerable<(string Profile, string Root, string Path)> AllRoots(ProfileSnapshot snap) =>
+        snap.RootLookup.Keys.Select(key => (key.Item1, key.Item2, snap.ProjectFiles.GetProjectRootPath(CompositeKey(key.Item1, key.Item2))));
+
+    /// <summary>The profile and root names as configured, for names a client may have cased differently.</summary>
+    private static (string Profile, string Root) ConfiguredNames(ProfileSnapshot snap, string profile, string root) =>
+        snap.RootLookup.Keys.FirstOrDefault(key => TupleComparer.Instance.Equals(key, (profile, root))) is ({ } p, { } r) ? (p, r) : (profile, root);
+
+    /// <summary>Whether <paramref name="path"/> is <paramref name="dir"/> or inside it, by whole path segments.</summary>
+    private static bool IsSameOrUnder(string path, string dir)
+    {
+        var relative = Path.GetRelativePath(Path.GetFullPath(dir), Path.GetFullPath(path));
+        return relative == "."
+            || !Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar);
+    }
+
     public Task<ProfileInfo[]> ListProfilesAsync()
     {
         // Rebuild to pick up newly added autodiscovered roots
@@ -468,8 +491,9 @@ public class ProjectManager : IProjectManager
         // Resolve prompt from inputs or promptTemplate
         var prompt = ResolvePrompt(action, request.Inputs);
 
-        // Create project folder — either server-managed or script-managed
-        var projectId = ProjectFiles.ProjectManager.ConvertNameToPath(name);
+        // Create project folder — either server-managed or script-managed. A name that leaves no
+        // folder of its own ("..", ".") is refused here, before any script runs or file is written
+        var folder = ProjectFiles.ProjectManager.ConvertNameToPath(name);
         var reuseExisting = request.Inputs.TryGetValue("__reuseExisting", out var reuse) &&
                             reuse.ValueKind == System.Text.Json.JsonValueKind.True;
         var autoSuffix = request.Inputs.TryGetValue("__autoSuffix", out var suffix) &&
@@ -479,31 +503,31 @@ public class ProjectManager : IProjectManager
         if (action.ScriptsCreateFolder)
         {
             // Scripts will create the project directory (e.g. git worktree add)
-            projectPath = Path.Combine(rootPath, projectId);
+            projectPath = Path.Combine(rootPath, folder);
         }
         else if (reuseExisting)
         {
             // Reuse existing folder — reinitialize .godmode state
-            var projectFolder = ProjectFiles.ProjectFolder.Reuse(rootPath, projectId, name);
+            var projectFolder = ProjectFiles.ProjectFolder.Reuse(rootPath, folder, name);
             projectPath = projectFolder.ProjectPath;
-            projectId = Path.GetFileName(projectPath);
+            folder = Path.GetFileName(projectPath);
         }
-        else if (autoSuffix && Directory.Exists(Path.Combine(rootPath, projectId)))
+        else if (autoSuffix && Directory.Exists(Path.Combine(rootPath, folder)))
         {
             // Auto-suffix: find next available _N
-            var baseId = projectId;
+            var baseFolder = folder;
             var baseName = name;
             for (var i = 2; i <= 999; i++)
             {
-                var candidateId = $"{baseId}_{i}";
-                if (!Directory.Exists(Path.Combine(rootPath, candidateId)))
+                var candidate = $"{baseFolder}_{i}";
+                if (!Directory.Exists(Path.Combine(rootPath, candidate)))
                 {
-                    projectId = candidateId;
+                    folder = candidate;
                     name = $"{baseName} ({i})";
                     break;
                 }
             }
-            var suffixedFolder = ProjectFiles.ProjectFolder.Create(rootPath, projectId, name);
+            var suffixedFolder = ProjectFiles.ProjectFolder.Create(rootPath, folder, name);
             projectPath = suffixedFolder.ProjectPath;
         }
         else
@@ -512,6 +536,9 @@ public class ProjectManager : IProjectManager
             var (projectFolder, _) = snap.ProjectFiles.CreateProject(compositeKey, name);
             projectPath = projectFolder.ProjectPath;
         }
+
+        var (profileName, rootName) = ConfiguredNames(snap, request.ProfileName, request.ProjectRootName);
+        var projectId = ProjectId(profileName, rootName, folder);
 
         var now = DateTime.UtcNow;
         var project = new ProjectInfo
@@ -527,16 +554,16 @@ public class ProjectManager : IProjectManager
                 Git: null,
                 Tests: null,
                 OutputOffset: 0,
-                RootName: request.ProjectRootName,
-                ProfileName: request.ProfileName
+                RootName: rootName,
+                ProfileName: profileName
             ),
             ProjectPath = projectPath,
             ActionName = action.Name,
-            ProfileName = request.ProfileName,
+            ProfileName = profileName,
         };
 
         // Result file — scripts can write key=value pairs to override project path/name
-        var resultFilePath = GetResultFilePath(rootPath, projectId);
+        var resultFilePath = GetResultFilePath(rootPath, folder);
         if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
 
         // Build environment variables for scripts (profile env merged in)
@@ -544,7 +571,7 @@ public class ProjectManager : IProjectManager
             request.ProfileName, config.StripEnvVarProfile);
 
         // Script log file — at root level so it persists regardless of what scripts do
-        var logFilePath = GetScriptLogPath(rootPath, projectId);
+        var logFilePath = GetScriptLogPath(rootPath, folder);
 
         // Run prepare scripts (always runs in root directory)
         if (action.Prepare is { Length: > 0 })
@@ -596,8 +623,19 @@ public class ProjectManager : IProjectManager
         var scriptResults = ReadResultFile(resultFilePath);
         if (scriptResults.TryGetValue("project_path", out var overridePath) && !string.IsNullOrWhiteSpace(overridePath))
         {
-            projectPath = overridePath;
-            projectId = Path.GetFileName(overridePath);
+            try
+            {
+                (projectPath, folder) = ValidateScriptProjectPath(overridePath, rootPath);
+            }
+            catch (ArgumentException ex)
+            {
+                // The project keeps the folder it was given, so a delete removes only that
+                _logger.LogError("Create script for project {ProjectId} returned an invalid project_path: {Message}", projectId, ex.Message);
+                project.Status = project.Status with { State = ProjectState.Error };
+                _projects[projectId] = project;
+                throw;
+            }
+            projectId = ProjectId(profileName, rootName, folder);
             project.ProjectPath = projectPath;
             _logger.LogInformation("Script overrode project path to {ProjectPath} (id: {ProjectId})", projectPath, projectId);
         }
@@ -769,8 +807,9 @@ public class ProjectManager : IProjectManager
         var results = new List<ProjectSummary>();
         var snap = _snapshot;
 
-        // Scan all root directories for .archived/ folders
-        foreach (var (compositeKey, rootPath) in snap.ProjectFiles.GetAllRootPaths())
+        // Scan all root directories for .archived/ folders. An archived project's ID is where it
+        // returns to, its root and folder, whatever ID its status.json was archived with
+        foreach (var (profileName, rootName, rootPath) in AllRoots(snap))
         {
             var archiveDir = Path.Combine(rootPath, ".archived");
             if (!Directory.Exists(archiveDir)) continue;
@@ -778,7 +817,6 @@ public class ProjectManager : IProjectManager
             foreach (var projDir in Directory.GetDirectories(archiveDir))
             {
                 var statusPath = Path.Combine(projDir, ".godmode", "status.json");
-                var archivePath = Path.Combine(projDir, ".godmode", "archive.json");
                 if (!File.Exists(statusPath)) continue;
 
                 try
@@ -787,16 +825,9 @@ public class ProjectManager : IProjectManager
                     var status = JsonSerializer.Deserialize<ProjectStatus>(statusJson);
                     if (status == null) continue;
 
-                    string? profileName = null;
-                    if (File.Exists(archivePath))
-                    {
-                        var archiveJson = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(archivePath));
-                        profileName = archiveJson.TryGetProperty("ProfileName", out var pn) ? pn.GetString() : null;
-                    }
-
                     results.Add(new ProjectSummary(
-                        status.Id, status.Name, ProjectState.Stopped, status.UpdatedAt,
-                        RootName: status.RootName, ProfileName: profileName ?? status.ProfileName));
+                        ProjectId(profileName, rootName, Path.GetFileName(projDir)), status.Name, ProjectState.Stopped, status.UpdatedAt,
+                        RootName: rootName, ProfileName: profileName));
                 }
                 catch (Exception ex)
                 {
@@ -812,21 +843,22 @@ public class ProjectManager : IProjectManager
     {
         // Find the archived project folder
         var snap = _snapshot;
-        foreach (var (compositeKey, rootPath) in snap.ProjectFiles.GetAllRootPaths())
+        foreach (var (profileName, rootName, rootPath) in AllRoots(snap))
         {
             var archiveDir = Path.Combine(rootPath, ".archived");
             if (!Directory.Exists(archiveDir)) continue;
 
             foreach (var projDir in Directory.GetDirectories(archiveDir))
             {
+                if (ProjectId(profileName, rootName, Path.GetFileName(projDir)) != projectId) continue;
                 var statusPath = Path.Combine(projDir, ".godmode", "status.json");
                 if (!File.Exists(statusPath)) continue;
 
                 try
                 {
                     var statusJson = File.ReadAllText(statusPath);
-                    var status = JsonSerializer.Deserialize<ProjectStatus>(statusJson);
-                    if (status?.Id != projectId) continue;
+                    var status = JsonSerializer.Deserialize<ProjectStatus>(statusJson)
+                        ?? throw new InvalidDataException($"{statusPath} is empty");
 
                     // Move back to root directory
                     var destDir = Path.Combine(rootPath, Path.GetFileName(projDir));
@@ -838,21 +870,22 @@ public class ProjectManager : IProjectManager
                     var archiveMeta = Path.Combine(destDir, ".godmode", "archive.json");
                     if (File.Exists(archiveMeta)) File.Delete(archiveMeta);
 
-                    // Re-register project
-                    var profileName = status.ProfileName;
+                    // Re-register project, under the folder it returned to
+                    var id = ProjectId(profileName, rootName, Path.GetFileName(destDir));
                     var project = new ProjectInfo
                     {
-                        Status = status with { State = ProjectState.Stopped },
+                        Status = status with { Id = id, State = ProjectState.Stopped, RootName = rootName, ProfileName = profileName },
                         ProjectPath = destDir,
                         ActionName = null,
                         ProfileName = profileName,
                     };
-                    _projects[projectId] = project;
+                    _projects[id] = project;
+                    await _statusUpdater.SaveStatusAsync(project);
 
-                    _logger.LogInformation("Unarchived project {ProjectId} ({Name})", projectId, status.Name);
+                    _logger.LogInformation("Unarchived project {ArchivedId} ({Name}) as {ProjectId}", projectId, status.Name, id);
 
-                    return new ProjectSummary(status.Id, status.Name, ProjectState.Stopped,
-                        DateTime.UtcNow, RootName: status.RootName, ProfileName: profileName);
+                    return new ProjectSummary(id, status.Name, ProjectState.Stopped,
+                        DateTime.UtcNow, RootName: rootName, ProfileName: profileName);
                 }
                 catch (Exception ex)
                 {
@@ -1026,7 +1059,7 @@ public class ProjectManager : IProjectManager
             {
                 // Stop and remove all projects under this root
                 var projectsInRoot = _projects.Values
-                    .Where(p => p.ProjectPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+                    .Where(p => IsSameOrUnder(p.ProjectPath, rootPath))
                     .ToList();
                 foreach (var project in projectsInRoot)
                 {
@@ -1085,11 +1118,19 @@ public class ProjectManager : IProjectManager
         var recoverSnap = _snapshot;
         _logger.LogInformation("Recovering projects from all project roots");
 
-        var projectPaths = recoverSnap.ProjectFiles.ListProjectPaths().ToList();
+        // Each root's own folders, so the root is known exactly: "root" is not a prefix match for
+        // "root2". A folder two roots share (two profiles naming one path) is recovered once
+        var seen = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var projectPaths = AllRoots(recoverSnap)
+            .SelectMany(root => recoverSnap.ProjectFiles.ListProjectPaths(CompositeKey(root.Profile, root.Root))
+                .Select(path => (Path: path, root.Profile, root.Root)))
+            .Where(project => seen.Add(project.Path))
+            .ToList();
 
         // Process all projects in parallel for faster startup
-        await Parallel.ForEachAsync(projectPaths, async (projectPath, ct) =>
+        await Parallel.ForEachAsync(projectPaths, async (found, ct) =>
         {
+            var (projectPath, profileName, rootName) = found;
             try
             {
                 var godModePath = Path.Combine(projectPath, ".godmode");
@@ -1107,31 +1148,17 @@ public class ProjectManager : IProjectManager
                 // Check if state needs to be corrected (was running when server stopped)
                 var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput;
 
-                // Determine which profile and root this project belongs to
-                string? rootName = null;
-                string? profileName = null;
-                foreach (var (rn, rp) in recoverSnap.ProjectFiles.ProjectRoots)
-                {
-                    if (projectPath.StartsWith(rp, StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Composite key is "profile/root" — split to extract both
-                        var slashIdx = rn.IndexOf('/');
-                        if (slashIdx > 0)
-                        {
-                            profileName = rn[..slashIdx];
-                            rootName = rn[(slashIdx + 1)..];
-                        }
-                        else
-                        {
-                            rootName = rn;
-                        }
-                        break;
-                    }
-                }
+                // The ID is where the folder is. One written before IDs carried the profile and root
+                // (the bare folder name), or before its root moved profile, is migrated: status.json
+                // is rewritten below. Nothing else in .godmode holds the ID
+                var id = ProjectId(profileName, rootName, Path.GetFileName(projectPath));
+                var idChanged = status.Id != id;
+                if (idChanged)
+                    _logger.LogInformation("Project at {Path} had ID {OldId}; it is now {ProjectId}", projectPath, status.Id, id);
 
                 var correctedStatus = stateChanged
-                    ? status with { State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName }
-                    : status with { RootName = rootName, ProfileName = profileName };
+                    ? status with { Id = id, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName }
+                    : status with { Id = id, RootName = rootName, ProfileName = profileName };
 
                 var project = new ProjectInfo
                 {
@@ -1153,8 +1180,8 @@ public class ProjectManager : IProjectManager
 
                 _projects[project.Status.Id] = project;
 
-                // Only save if state changed
-                if (stateChanged)
+                // Only save if state or ID changed
+                if (stateChanged || idChanged)
                 {
                     await _statusUpdater.SaveStatusAsync(project);
                 }
@@ -1218,24 +1245,39 @@ public class ProjectManager : IProjectManager
 
     /// <summary>
     /// Returns a log file path at the root level for script output.
-    /// Uses {rootPath}/logs/{projectId}.log so it survives create script's project dir delete.
+    /// Uses {rootPath}/logs/{folder}.log so it survives create script's project dir delete.
     /// </summary>
-    private static string GetScriptLogPath(string rootPath, string projectId)
+    private static string GetScriptLogPath(string rootPath, string folder)
     {
         var logsDir = Path.Combine(rootPath, "logs");
         Directory.CreateDirectory(logsDir);
-        return Path.Combine(logsDir, $"{projectId}.log");
+        return Path.Combine(logsDir, $"{folder}.log");
     }
 
     /// <summary>
     /// Returns a result file path for script-to-server communication.
     /// Scripts can write key=value pairs (e.g. project_path, project_name) to override defaults.
     /// </summary>
-    private static string GetResultFilePath(string rootPath, string projectId)
+    private static string GetResultFilePath(string rootPath, string folder)
     {
         var logsDir = Path.Combine(rootPath, "logs");
         Directory.CreateDirectory(logsDir);
-        return Path.Combine(logsDir, $"{projectId}.result");
+        return Path.Combine(logsDir, $"{folder}.result");
+    }
+
+    /// <summary>
+    /// The full path and folder name of a create script's <c>project_path</c>. Refused when it is
+    /// the root or above it, or its folder name is not one of its own (<c>x/..</c>): a delete of the
+    /// project would delete that recursively.
+    /// </summary>
+    private static (string Path, string Folder) ValidateScriptProjectPath(string projectPath, string rootPath)
+    {
+        var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
+        if (IsSameOrUnder(rootPath, fullPath))
+            throw new ArgumentException($"The create script's project_path '{projectPath}' is the project root or above it.");
+        var folder = Path.GetFileName(fullPath);
+        ProjectFiles.ProjectFolder.ValidateFolderName(folder, "project_path");
+        return (fullPath, folder);
     }
 
     /// <summary>
@@ -1659,7 +1701,9 @@ public class ProjectManager : IProjectManager
         // GODMODE_* vars always win
         env["GODMODE_ROOT_PATH"] = rootPath;
         env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
-        env["GODMODE_PROJECT_ID"] = project.Status.Id;
+        // Scripts name branches and folders after it: the folder name, as before project IDs carried
+        // the profile and root. Claude's own GODMODE_PROJECT_ID, for the MCP bridge, is the project ID
+        env["GODMODE_PROJECT_ID"] = Path.GetFileName(project.ProjectPath);
         env["GODMODE_PROJECT_NAME"] = project.Status.Name;
 
         if (resultFilePath != null)

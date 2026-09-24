@@ -18,6 +18,9 @@ namespace GodMode.Server.Tests;
 /// </summary>
 public class ProjectResumeBridgeTests
 {
+    /// <summary>proj1 in the legacy <c>ProjectRoots:work</c> root, which is the Default profile's.</summary>
+    private const string ProjectId = "Default/work/proj1";
+
     [Fact]
     public async Task ResumeAfterRestart_LaunchesTheBridgeWithATokenTheServerAccepts()
     {
@@ -34,14 +37,14 @@ public class ProjectResumeBridgeTests
             var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
 
             await projects.RecoverProjectsAsync();
-            await projects.ResumeProjectAsync("proj1");
+            await projects.ResumeProjectAsync(ProjectId);
 
             var launch = Assert.Single(launcher.Launches);
             Assert.NotNull(launch.Env);
-            Assert.Equal("proj1", launch.Env!["GODMODE_PROJECT_ID"]);
+            Assert.Equal(ProjectId, launch.Env!["GODMODE_PROJECT_ID"]);
             Assert.StartsWith("http://localhost:", launch.Env["GODMODE_SERVER_URL"]);
             var token = launch.Env["GODMODE_PROJECT_TOKEN"];
-            Assert.NotNull(projects.ValidateProjectToken("proj1", token));
+            Assert.NotNull(projects.ValidateProjectToken(ProjectId, token));
 
             Assert.Contains("godmode-bridge", McpConfigOf(launch.Args));
         }
@@ -65,16 +68,16 @@ public class ProjectResumeBridgeTests
             var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
 
             await projects.RecoverProjectsAsync();
-            await projects.ResumeProjectAsync("proj1");
+            await projects.ResumeProjectAsync(ProjectId);
             launcher.Running = false; // the first process exits
-            await projects.ResumeProjectAsync("proj1");
+            await projects.ResumeProjectAsync(ProjectId);
 
             Assert.Equal(2, launcher.Launches.Count);
             var first = launcher.Launches[0].Env!["GODMODE_PROJECT_TOKEN"];
             var second = launcher.Launches[1].Env!["GODMODE_PROJECT_TOKEN"];
             Assert.NotEqual(first, second);
-            Assert.Null(projects.ValidateProjectToken("proj1", first));
-            Assert.NotNull(projects.ValidateProjectToken("proj1", second));
+            Assert.Null(projects.ValidateProjectToken(ProjectId, first));
+            Assert.NotNull(projects.ValidateProjectToken(ProjectId, second));
         }
         finally
         {
