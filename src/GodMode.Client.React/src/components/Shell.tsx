@@ -8,6 +8,8 @@ import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
+import { ConfirmDialog } from './ConfirmDialog';
+import { goBack, useHashRoute } from '../routing';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -21,7 +23,7 @@ function PageContent({ page }: { page: ActivePage }) {
   return (
     <div className="page-view">
       <div className="page-back-bar">
-        <button className="btn btn-secondary btn-sm" onClick={closePage}>← Back</button>
+        <button className="btn btn-secondary btn-sm" onClick={() => goBack(closePage)}>← Back</button>
       </div>
       <div className="page-body">
         {page.type === 'profileSettings' && <ProfileSettings />}
@@ -43,6 +45,9 @@ export function Shell() {
   const setIsMobile = useAppStore(s => s.setIsMobile);
 
   const [theme] = useState<'dark' | 'light'>(getInitialTheme);
+
+  // Each screen is a history entry, so browser and Android back walk back through them
+  useHashRoute();
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -69,7 +74,7 @@ export function Shell() {
         ) : selectedProject ? (
           <div className="shell-mobile-project">
             <div className="page-back-bar">
-              <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Back</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => goBack(clearSelection)}>← Back</button>
             </div>
             <ProjectView serverId={selectedProject.serverId} projectId={selectedProject.projectId} />
           </div>
@@ -82,6 +87,7 @@ export function Shell() {
         ) : (
           <Sidebar />
         )}
+        <ConfirmDialog />
       </div>
     );
   }
@@ -114,7 +120,7 @@ export function Shell() {
               <>
                 {isTileFullscreen && (
                   <div className="shell-back-bar">
-                    <button className="btn btn-secondary btn-sm" onClick={clearSelection}>← Tiles</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => goBack(clearSelection)}>← Tiles</button>
                   </div>
                 )}
                 {isTileFullscreen ? (
@@ -128,6 +134,7 @@ export function Shell() {
           <SidebarFooter />
         </>
       )}
+      <ConfirmDialog />
     </div>
   );
 }
