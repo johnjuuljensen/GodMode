@@ -47,7 +47,7 @@ export const ChatMessage = memo(function ChatMessage({ item, expanded, onToggle,
       return (
         <div className={`ti ti-status ${item.isError ? 'ti-status-error' : 'ti-status-done'}`}>
           <span className="ti-badge">{item.isError ? 'ERROR' : 'DONE'}</span>
-          <span className="ti-status-text">{item.summary.split('\n').find(l => l.trim()) ?? ''}</span>
+          <span className="ti-status-text">{(item.summary.split('\n').find(l => l.trim()) ?? '').replace(/^#+\s*/, '')}</span>
         </div>
       );
     case 'system':
@@ -105,7 +105,8 @@ function ToolCallRow({ call, expanded, onToggle, expandedKeys }: {
         <div className="ti-tool-body">
           {call.input.description && call.input.command !== undefined && <div className="ti-tool-desc">{call.input.description}</div>}
           {call.input.command !== undefined && <pre className="ti-pre ti-command">{call.input.command}</pre>}
-          {call.input.prompt !== undefined && <div className="ti-tool-prompt">{call.input.prompt}</div>}
+          {/* A subagent's first step is this prompt */}
+          {call.input.prompt !== undefined && call.children.length === 0 && <div className="ti-tool-prompt">{call.input.prompt}</div>}
           {diff && <DiffView lines={diff} />}
           {call.children.length > 0 && (
             <div className="ti-children">

@@ -1,4 +1,13 @@
 /* ── Transcript ── */
+/* The list's side space is on its rows: the virtualized list sizes its content to the scroller's full width */
+.project-messages.transcript-list {
+  padding: 0;
+}
+
+.transcript-row {
+  padding: 0 16px;
+}
+
 .transcript-spacer {
   height: 12px;
 }

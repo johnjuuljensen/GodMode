@@ -170,8 +170,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  /* The top and bottom space is the list's own header and footer (Transcript.css): a virtualized list measures its rows, not the scroller's padding */
-  padding: 0 16px;
+  padding: 12px 16px;
 }
 
 .project-messages-empty {

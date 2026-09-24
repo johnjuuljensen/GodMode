@@ -31,17 +31,19 @@ export function TranscriptList({ items }: Props) {
   }), []);
 
   const renderItem = useCallback((_: number, item: TranscriptItem) => (
-    <ChatMessage
-      item={item}
-      expanded={expanded.has(item.key)}
-      onToggle={toggle}
-      expandedKeys={item.kind === 'toolCall' && item.children.length > 0 ? expanded : undefined}
-    />
+    <div className="transcript-row">
+      <ChatMessage
+        item={item}
+        expanded={expanded.has(item.key)}
+        onToggle={toggle}
+        expandedKeys={item.kind === 'toolCall' && item.children.length > 0 ? expanded : undefined}
+      />
+    </div>
   ), [expanded, toggle]);
 
   return (
     <Virtuoso
-      className="project-messages"
+      className="project-messages transcript-list"
       data={items}
       computeItemKey={itemKey}
       itemContent={renderItem}
