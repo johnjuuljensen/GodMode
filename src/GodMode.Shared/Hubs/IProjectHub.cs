@@ -53,6 +53,20 @@ public interface IProjectHub
     Task ResumeProject(string projectId);
 
     /// <summary>
+    /// Answers the project's <see cref="ProjectStatus.PendingPermission"/>: the tool call runs, or
+    /// claude is told it was denied. Fails when the project has no pending request with that id
+    /// (it was answered already, or claude stopped waiting).
+    /// </summary>
+    Task RespondToPermission(string projectId, string requestId, PermissionDecision decision);
+
+    /// <summary>
+    /// Answers the project's <see cref="ProjectStatus.PendingQuestion"/>. <paramref name="answers"/>
+    /// maps each <see cref="QuestionItem.Question"/> to the chosen label (labels joined with ", " for
+    /// a multi-select) or to the user's own text. Fails as <see cref="RespondToPermission"/> does.
+    /// </summary>
+    Task AnswerQuestion(string projectId, string requestId, Dictionary<string, string> answers);
+
+    /// <summary>
     /// Subscribes to a project's output. The server replays output.jsonl from fromOffset in
     /// <see cref="IProjectHubClient.OutputBatch"/> messages, sends
     /// <see cref="IProjectHubClient.OutputReplayComplete"/>, and only then live lines, so each line

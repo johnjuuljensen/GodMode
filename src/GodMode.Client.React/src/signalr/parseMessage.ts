@@ -2,7 +2,7 @@
  * Parses raw JSON from Claude's output stream into a ClaudeMessage.
  * Mirrors the eager parsing logic from GodMode.Shared/Models/ClaudeMessage.cs.
  */
-import type { ClaudeMessage, ClaudeContentItem, QuestionOptionData } from './types';
+import type { ClaudeMessage, ClaudeContentItem } from './types';
 
 const MAX_SUMMARY = 200;
 const MAX_CONTENT_SUMMARY = 300;
@@ -19,7 +19,6 @@ export function parseClaudeMessage(rawJson: string): ClaudeMessage {
     const hasContentItems = contentItems.length > 0;
     const hasErrorContent = contentItems.some(i => i.isError);
     const isToolOnly = hasContentItems && contentItems.every(i => i.type === 'tool_use' || i.type === 'tool_result');
-    const question = extractQuestionData(root);
 
     return {
       type,
@@ -35,7 +34,6 @@ export function parseClaudeMessage(rawJson: string): ClaudeMessage {
       formattedJson: JSON.stringify(root, null, 2),
       isToolOnly,
       textOnlyContentSummary: contentItems.filter(i => i.type === 'text').map(i => i.summary).join('\n'),
-      ...question,
     };
   } catch {
     return {
@@ -43,7 +41,6 @@ export function parseClaudeMessage(rawJson: string): ClaudeMessage {
       summary: rawJson.length > MAX_SUMMARY ? rawJson.slice(0, MAX_SUMMARY) + '...' : rawJson,
       contentItems: [], hasContentItems: false, hasErrorContent: false, contentSummary: '',
       formattedJson: rawJson, isToolOnly: false, textOnlyContentSummary: '',
-      isQuestion: false, questionText: null, questionOptions: [], questionHeader: null,
     };
   }
 }
@@ -129,33 +126,4 @@ function buildContentSummary(items: ClaudeContentItem[]): string {
     if (item.type === 'tool_result' && item.isError) return `[ERROR] ${item.summary}`;
     return `[${item.type}] ${item.summary}`;
   }).join('\n');
-}
-
-function extractQuestionData(root: any): {
-  isQuestion: boolean;
-  questionText: string | null;
-  questionOptions: QuestionOptionData[];
-  questionHeader: string | null;
-} {
-  const content = root.message?.content;
-  if (!Array.isArray(content)) return { isQuestion: false, questionText: null, questionOptions: [], questionHeader: null };
-
-  for (const item of content) {
-    if (item.type !== 'tool_use' || item.name !== 'AskUserQuestion') continue;
-    const input = item.input;
-    if (!input) continue;
-
-    const options: QuestionOptionData[] = Array.isArray(input.options)
-      ? input.options.map((o: any) => ({ label: o.label ?? '', description: o.description ?? null }))
-      : [];
-
-    return {
-      isQuestion: true,
-      questionText: input.question ?? null,
-      questionOptions: options,
-      questionHeader: input.header ?? null,
-    };
-  }
-
-  return { isQuestion: false, questionText: null, questionOptions: [], questionHeader: null };
 }

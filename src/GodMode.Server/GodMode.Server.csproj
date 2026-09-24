@@ -42,13 +42,15 @@
     <_ReactSource Include="$(_ReactDir)\tsconfig*.json" />
   </ItemGroup>
 
-  <!-- Build React and copy to wwwroot (incremental: skipped when sources unchanged) -->
+  <!-- Build React and copy to wwwroot (incremental: skipped when sources unchanged). Its packages
+       are installed first when they are missing, as in a fresh clone (the codespace's publish) -->
   <Target Name="BuildReact"
           BeforeTargets="PrepareForBuild"
           Condition="'$(PublishReactClient)' != 'false'"
           Inputs="@(_ReactSource)"
           Outputs="$(_ReactDir)\dist\index.html">
     <Message Importance="high" Text="Building React client..." />
+    <Exec Command="npm ci" WorkingDirectory="$(_ReactDir)" Condition="!Exists('$(_ReactDir)\node_modules')" />
     <Exec Command="npm run build" WorkingDirectory="$(_ReactDir)" />
   </Target>
 
@@ -64,6 +66,41 @@
     <Copy SourceFiles="@(_ReactDist)"
           DestinationFiles="@(_ReactDist->'wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- ── MCP bridge build ──────────────────────────────────────
+       Every claude session gets the bridge (ProjectManager.ResolveMcpBridgePath). It is bundled
+       into one file with no runtime dependencies and ships next to the server, in the build output
+       and in a publish, at mcp-bridge/godmode-mcp-bridge.cjs. -p:BuildMcpBridge=false skips it
+       for a build that puts the bundle there itself (the Dockerfile). -->
+
+  <PropertyGroup>
+    <_McpBridgeDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)', '..', 'GodMode.McpBridge'))</_McpBridgeDir>
+    <_McpBridgeBundle>$(_McpBridgeDir)dist\godmode-mcp-bridge.cjs</_McpBridgeBundle>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <_McpBridgeSource Include="$(_McpBridgeDir)src\**\*" />
+    <_McpBridgeSource Include="$(_McpBridgeDir)package.json" />
+    <_McpBridgeSource Include="$(_McpBridgeDir)package-lock.json" />
+    <_McpBridgeSource Include="$(_McpBridgeDir)tsconfig.json" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(BuildMcpBridge)' != 'false'">
+    <None Include="$(_McpBridgeBundle)" Link="mcp-bridge\godmode-mcp-bridge.cjs"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Installs the bridge's packages when they are missing (a fresh clone), then bundles it
+       (incremental: skipped when sources unchanged) -->
+  <Target Name="BuildMcpBridge"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(BuildMcpBridge)' != 'false'"
+          Inputs="@(_McpBridgeSource)"
+          Outputs="$(_McpBridgeBundle)">
+    <Message Importance="high" Text="Building MCP bridge..." />
+    <Exec Command="npm ci" WorkingDirectory="$(_McpBridgeDir)" Condition="!Exists('$(_McpBridgeDir)node_modules')" />
+    <Exec Command="npm run build" WorkingDirectory="$(_McpBridgeDir)" />
   </Target>
 
 </Project>

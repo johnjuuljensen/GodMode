@@ -45,6 +45,14 @@ public abstract record ScriptStep
     /// conversation for: the error on stderr, exit 1. Otherwise does nothing.
     /// </summary>
     public sealed record RejectResume : ScriptStep;
+
+    /// <summary>
+    /// Asks for permission as claude does through the GodMode bridge's permission_prompt tool: POSTs
+    /// what the bridge POSTs to the server's internal API with the project token, waits for the
+    /// answer however long it takes, and records it. <paramref name="Arguments"/> is the tool call's
+    /// arguments as claude sends them: <c>{"tool_name":…,"input":{…},"tool_use_id":…}</c>.
+    /// </summary>
+    public sealed record AskPermission(string Arguments) : ScriptStep;
 }
 
 /// <summary>
@@ -57,6 +65,7 @@ public abstract record ScriptStep
 /// stderr some text
 /// exit 1
 /// reject-resume
+/// permission {"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_1"}
 /// </code>
 /// Blank lines and lines starting with <c>#</c> are ignored. A script that runs off its end keeps
 /// the process alive until stdin closes (then exits 0), like the real CLI between turns.
@@ -78,6 +87,8 @@ public sealed class FakeScript
     public FakeScript Stderr(string text) => Add(new ScriptStep.Stderr(text));
     public FakeScript Exit(int code) => Add(new ScriptStep.Exit(code));
     public FakeScript RejectResume() => Add(new ScriptStep.RejectResume());
+    public FakeScript AskPermission(string toolName, object input, string toolUseId = "toolu_fake") =>
+        Add(new ScriptStep.AskPermission(Json(new { tool_name = toolName, input, tool_use_id = toolUseId })));
 
     /// <summary>What the real CLI writes to stderr when <c>--resume</c> names a session it has no conversation for.</summary>
     public const string NoConversationError = "No conversation found with session ID: ";
@@ -132,6 +143,7 @@ public sealed class FakeScript
                 ScriptStep.Stderr s => $"stderr {s.Text}",
                 ScriptStep.Exit e => $"exit {e.Code}",
                 ScriptStep.RejectResume => "reject-resume",
+                ScriptStep.AskPermission p => $"permission {p.Arguments}",
                 _ => throw new InvalidOperationException($"Unknown step {step}"),
             });
         return text.ToString();
@@ -159,6 +171,7 @@ public sealed class FakeScript
                 "stderr" => new ScriptStep.Stderr(argument),
                 "exit" => new ScriptStep.Exit(int.Parse(argument)),
                 "reject-resume" => new ScriptStep.RejectResume(),
+                "permission" => new ScriptStep.AskPermission(argument),
                 _ => throw new FormatException($"Unknown fake claude script step: {raw}"),
             });
         }

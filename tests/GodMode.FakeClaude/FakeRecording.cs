@@ -5,7 +5,8 @@ namespace GodMode.FakeClaude;
 
 /// <summary>
 /// One line of the sidecar. Every launch appends a <c>start</c> line, then a <c>stdin</c> line per
-/// line received, then an <c>exit</c> line if it exits on its own (a killed fake writes none).
+/// line received, a <c>permission</c> line per permission prompt answered (the answer's JSON, or
+/// <c>error: …</c> when the call failed), then an <c>exit</c> line if it exits on its own (a killed fake writes none).
 /// </summary>
 public sealed record RecordLine(
     string Kind,
@@ -17,6 +18,7 @@ public sealed record RecordLine(
 {
     public const string Start = "start";
     public const string Stdin = "stdin";
+    public const string Permission = "permission";
     public const string Exited = "exit";
 }
 
@@ -26,7 +28,8 @@ public sealed record FakeLaunch(
     IReadOnlyList<string> Argv,
     IReadOnlyDictionary<string, string> Environment,
     IReadOnlyList<string> Stdin,
-    int? ExitCode)
+    int? ExitCode,
+    IReadOnlyList<string> Permissions)
 {
     /// <summary>The value following <paramref name="flag"/> in argv, or null.</summary>
     public string? ArgValue(string flag)
@@ -83,7 +86,8 @@ public static class FakeRecording
                     start.Argv ?? [],
                     start.Environment ?? new Dictionary<string, string>(),
                     own.Where(l => l.Kind == RecordLine.Stdin).Select(l => l.Line ?? "").ToList(),
-                    own.LastOrDefault(l => l.Kind == RecordLine.Exited)?.Code);
+                    own.LastOrDefault(l => l.Kind == RecordLine.Exited)?.Code,
+                    own.Where(l => l.Kind == RecordLine.Permission).Select(l => l.Line ?? "").ToList());
             })
             .ToList();
     }

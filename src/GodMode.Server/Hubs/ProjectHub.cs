@@ -71,6 +71,34 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.SendInputAsync(projectId, input);
     }
 
+    public async Task RespondToPermission(string projectId, string requestId, PermissionDecision decision)
+    {
+        _logger.LogInformation("Client {ConnectionId} answering permission request {RequestId} of project {ProjectId}",
+            Context.ConnectionId, requestId, projectId);
+        try
+        {
+            await _projectManager.RespondToPermissionAsync(projectId, requestId, decision);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task AnswerQuestion(string projectId, string requestId, Dictionary<string, string> answers)
+    {
+        _logger.LogInformation("Client {ConnectionId} answering question {RequestId} of project {ProjectId}",
+            Context.ConnectionId, requestId, projectId);
+        try
+        {
+            await _projectManager.AnswerQuestionAsync(projectId, requestId, answers);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or ArgumentException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
     public async Task StopProject(string projectId)
     {
         _logger.LogInformation("Client {ConnectionId} stopping project {ProjectId}",

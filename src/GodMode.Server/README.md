@@ -172,13 +172,13 @@ Supported JSON Schema types:
   "properties": {
     "name": { "type": "string", "title": "Project Name" },
     "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
-    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": false }
   },
   "required": ["name", "prompt"]
 }
 ```
 
-Some keys have special meaning: `name` and `prompt` are the project name and initial Claude prompt unless `nameTemplate`/`promptTemplate` override them, `skipPermissions` starts Claude with `--dangerously-skip-permissions`, and `model` overrides the action's model.
+Some keys have special meaning: `name` and `prompt` are the project name and initial Claude prompt unless `nameTemplate`/`promptTemplate` override them, `skipPermissions` starts Claude with `--dangerously-skip-permissions` (without it, a tool call that needs approval waits for the user: `WaitingPermission`), and `model` overrides the action's model.
 
 ### Scripts
 
@@ -247,7 +247,7 @@ cd publish
 ./GodMode.Server
 ```
 
-The machine also needs `claude` on the `PATH`, `pwsh` for root scripts, and Node for the MCP bridge (`npm ci && npm run build` in `src/GodMode.McpBridge`, or point `GODMODE_MCP_BRIDGE_PATH` at its `dist/index.js`).
+The machine also needs `claude` on the `PATH`, `pwsh` for root scripts, and Node to run the MCP bridge. The build and a publish put the bridge at `mcp-bridge/godmode-mcp-bridge.cjs` next to the server (`npm run build` in `src/GodMode.McpBridge` makes it, in `dist/`); `McpBridgePath` or `GODMODE_MCP_BRIDGE_PATH` points elsewhere. The server does not start without it.
 
 ## SignalR Hub API
 
@@ -257,7 +257,9 @@ Projects:
 - `Task<ProjectSummary[]> ListProjects()` — Get all projects
 - `Task<ProjectStatus> GetStatus(projectId)` — Get project status
 - `Task<ProjectStatus> CreateProject(profileName, projectRootName, actionName, inputs)` — Create a project with form inputs (`actionName` null = default action)
-- `Task SendInput(projectId, input)` — Send input to Claude
+- `Task SendInput(projectId, input)` — Send input to Claude (while a permission prompt or question waits, it answers that instead)
+- `Task RespondToPermission(projectId, requestId, decision)` — Allow or deny the project's `PendingPermission`
+- `Task AnswerQuestion(projectId, requestId, answers)` — Answer the project's `PendingQuestion` (question text → chosen label or free text)
 - `Task StopProject(projectId)` — Stop running project
 - `Task ResumeProject(projectId)` — Resume stopped project
 - `Task SubscribeProject(projectId, fromOffset)` — Replay `output.jsonl` from `fromOffset` (the byte offset after the last line the client has; 0 for all, `-N` for the last N turns) in `OutputBatch` messages, then `OutputReplayComplete`, then live `OutputReceived` lines, each line once and in order
@@ -289,7 +291,7 @@ Utility:
 
 - `GET /health` — Anonymous liveness probe
 - `GET /servers`, `GET /events` — The same shape as the MAUI app's local proxy, so the React client works against either
-- `POST /api/internal/result`, `/status`, `/review` — Called by the MCP bridge with its per-project token
+- `POST /api/internal/result`, `/status`, `/review`, `/permission` — Called by the MCP bridge with its per-project token (`/permission` answers when the user does)
 
 ## Dependencies
 

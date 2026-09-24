@@ -166,6 +166,17 @@ internalApi.MapPost("/review", async (HttpContext ctx, IProjectManager pm) =>
     return Results.Ok(new { success = true });
 });
 
+// The bridge's permission_prompt: answered when the user answers, however long that takes. The
+// request is the wait: when it drops (claude exited), the prompt is withdrawn.
+internalApi.MapPost("/permission", async (HttpContext ctx, IProjectManager pm) =>
+{
+    var request = await ctx.Request.ReadFromJsonAsync<PermissionPromptRequest>();
+    if (request is not { ToolName.Length: > 0 })
+        return Results.BadRequest(new { error = "Invalid request body" });
+
+    return Results.Json(await pm.RequestPermissionAsync(ProjectId(ctx), request, ctx.RequestAborted));
+});
+
 // SPA fallback: serve index.html for non-API/non-hub routes (React client routing).
 // Anonymous for the same reason as the static files above: it is the client bundle's entry page.
 app.MapFallbackToFile("index.html").AllowAnonymous();
@@ -176,7 +187,17 @@ if (authSettings.Mode == AuthMode.Loopback)
         "Set {Setting} before binding to any other address.", AuthModeSelector.ApiKeySetting);
 
 // Recover existing projects AFTER server starts (non-blocking)
-var projectManager = app.Services.GetRequiredService<IProjectManager>();
+IProjectManager projectManager;
+try
+{
+    projectManager = app.Services.GetRequiredService<IProjectManager>();
+}
+catch (FileNotFoundException ex)
+{
+    // The MCP bridge is missing: every session would deny what needs approval without asking
+    Console.Error.WriteLine(ex.Message);
+    return 1;
+}
 app.Lifetime.ApplicationStarted.Register(() =>
 {
     _ = Task.Run(async () =>

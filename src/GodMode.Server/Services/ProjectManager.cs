@@ -20,14 +20,20 @@ public class ProjectManager : IProjectManager
     /// <summary>How long server shutdown waits for the projects' processes to be killed and marked Stopped.</summary>
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
 
+    /// <summary>The name the GodMode MCP bridge has in every session's MCP config.</summary>
+    internal const string McpBridgeServerName = "godmode-bridge";
+
     /// <summary>
-    /// Appended to every Claude invocation's system prompt so questions always
-    /// come through as structured AskUserQuestion tool calls. See issue #131.
+    /// The bridge tool claude asks for permission with (--permission-prompt-tool), and puts its
+    /// AskUserQuestion calls to: see <see cref="RequestPermissionAsync"/>.
     /// </summary>
-    private const string QuestionPromptInjection =
-        "If you need to ask the user a question — including clarifications, " +
-        "multiple-choice decisions, or confirmations — you MUST use the " +
-        "AskUserQuestion tool. Do not ask questions in plain assistant text.";
+    internal const string PermissionPromptTool = $"mcp__{McpBridgeServerName}__permission_prompt";
+
+    /// <summary>The setting that points at the MCP bridge bundle, overriding where the build puts it.</summary>
+    public const string McpBridgePathSetting = "McpBridgePath";
+
+    /// <summary>Where the build and a publish put the bridge bundle, relative to the server's binaries.</summary>
+    private static readonly string BundledMcpBridge = Path.Combine("mcp-bridge", "godmode-mcp-bridge.cjs");
 
     private readonly ProjectLifecycle _lifecycle;
     private readonly IStatusUpdater _statusUpdater;
@@ -37,6 +43,8 @@ public class ProjectManager : IProjectManager
     private readonly ProfileFileManager _profileFileManager;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
+    private readonly string _mcpBridgePath;
+    private readonly string _serverUrl;
 
     /// <inheritdoc />
     public event Func<string, Task>? OnProjectCompleted
@@ -94,6 +102,8 @@ public class ProjectManager : IProjectManager
         _hubContext = hubContext;
         _profileFileManager = profileFileManager;
         _logger = logger;
+        _mcpBridgePath = ResolveMcpBridgePath(configuration);
+        _serverUrl = LoopbackUrl(configuration);
 
         // Read optional autodiscovery directory (normalize empty/whitespace to null)
         var rawDir = configuration["ProjectRootsDir"];
@@ -126,7 +136,7 @@ public class ProjectManager : IProjectManager
         _lifecycle.BeginShutdown();
         var running = _projects.Values
             .Where(project => project.Process.ProcessId != 0
-                || project.Status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.Idle)
+                || project.Status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission or ProjectState.Idle)
             .ToArray();
         if (running.Length == 0) return;
 
@@ -447,7 +457,9 @@ public class ProjectManager : IProjectManager
                 s.UpdatedAt,
                 s.CurrentQuestion,
                 s.RootName,
-                ProfileName: project.ProfileName ?? s.ProfileName
+                ProfileName: project.ProfileName ?? s.ProfileName,
+                PendingPermission: s.PendingPermission,
+                PendingQuestion: s.PendingQuestion
             ));
         }
 
@@ -709,8 +721,87 @@ public class ProjectManager : IProjectManager
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
+        // claude is blocked on a permission prompt and reads no input until it is answered: a reply
+        // in the chat answers it. A single question takes it as its answer; anything else is a deny
+        // that tells claude what the user said instead
+        if (project.Process.OldestPending is { } pending)
+        {
+            var result = pending.Question is { Questions: [var only] }
+                ? PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, new Dictionary<string, string> { [only.Question] = input }))
+                : PermissionPromptResult.Deny($"The user did not answer this and wrote instead: {input}");
+            await CompletePendingAsync(project, pending, result);
+            return;
+        }
+
         await _lifecycle.SendInputAsync(project, input);
         await NotifyStatusChanged(project);
+    }
+
+    public async Task RespondToPermissionAsync(string projectId, string requestId, PermissionDecision decision)
+    {
+        var (project, pending) = FindPending(projectId, requestId);
+        if (decision.Allow && pending.Question != null)
+            throw new InvalidOperationException($"Request {requestId} is a question: answer it with AnswerQuestion");
+
+        var result = decision.Allow
+            ? PermissionPromptResult.Allow(decision.UpdatedInput ?? pending.Input)
+            : PermissionPromptResult.Deny(decision.Message is { Length: > 0 } message ? message : "The user denied this.");
+        _logger.LogInformation("Project {ProjectId}: permission request {RequestId} {Decision}",
+            projectId, requestId, decision.Allow ? "allowed" : "denied");
+        await CompletePendingAsync(project, pending, result);
+    }
+
+    public async Task AnswerQuestionAsync(string projectId, string requestId, IReadOnlyDictionary<string, string> answers)
+    {
+        var (project, pending) = FindPending(projectId, requestId);
+        if (pending.Question == null)
+            throw new InvalidOperationException($"Request {requestId} is not a question: answer it with RespondToPermission");
+        if (answers.Count == 0)
+            throw new ArgumentException("An answer needs at least one question answered", nameof(answers));
+
+        _logger.LogInformation("Project {ProjectId}: question {RequestId} answered", projectId, requestId);
+        await CompletePendingAsync(project, pending, PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, answers)));
+    }
+
+    public async Task<PermissionPromptResult> RequestPermissionAsync(string projectId, PermissionPromptRequest request, CancellationToken aborted)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+
+        var pending = PermissionPrompts.Create(request, project.ProjectPath, DateTime.UtcNow);
+        // Tool name only: the input and its summary can carry secrets (a command with a token in it)
+        _logger.LogInformation("Project {ProjectId} asks permission for {ToolName} (request {RequestId})",
+            projectId, request.ToolName, pending.Id);
+        project.Process.AddPending(pending);
+        await _lifecycle.ShowPendingAsync(project);
+
+        try
+        {
+            return await pending.Completion.Task.WaitAsync(aborted);
+        }
+        catch (OperationCanceledException)
+        {
+            // The bridge went away (claude exited or was killed): nobody is waiting for the answer
+            _logger.LogInformation("Project {ProjectId}: permission request {RequestId} was abandoned", projectId, pending.Id);
+            await CompletePendingAsync(project, pending, PermissionPromptResult.Deny("The request was abandoned."));
+            throw;
+        }
+    }
+
+    private (ProjectInfo Project, PendingRequest Pending) FindPending(string projectId, string requestId)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        return project.Process.FindPending(requestId) is { } pending
+            ? (project, pending)
+            : throw new KeyNotFoundException($"Project {projectId} has no pending request {requestId}: it was answered, or claude stopped waiting");
+    }
+
+    /// <summary>Answers the request, if nothing else did first, and shows the next one or none.</summary>
+    private async Task CompletePendingAsync(ProjectInfo project, PendingRequest pending, PermissionPromptResult result)
+    {
+        if (project.Process.CompletePending(pending, result))
+            await _lifecycle.ShowPendingAsync(project);
     }
 
     public async Task StopProjectAsync(string projectId)
@@ -923,11 +1014,11 @@ public class ProjectManager : IProjectManager
         }
 
         // Process is not running - check if state needs correction
-        if (project.Status.State is ProjectState.Running or ProjectState.WaitingInput)
+        if (project.Status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission)
         {
             _logger.LogWarning("Project {ProjectId} was marked as {State} but process is not running, resetting state",
                 projectId, project.Status.State);
-            project.Status = project.Status with { State = ProjectState.Stopped };
+            project.Status = project.Status with { State = ProjectState.Stopped, PendingPermission = null, PendingQuestion = null };
         }
 
         if (project.Status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
@@ -1144,7 +1235,9 @@ public class ProjectManager : IProjectManager
                 if (status == null) return;
 
                 // Check if state needs to be corrected (was running when server stopped)
-                var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput;
+                var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission;
+                // A permission prompt ended with the process that asked: its bridge's call failed with the server
+                status = status with { PendingPermission = null, PendingQuestion = null };
 
                 // The ID is where the folder is. One written before IDs carried the profile and root
                 // (the bare folder name), or before its root moved profile, is migrated: status.json
@@ -1450,11 +1543,12 @@ public class ProjectManager : IProjectManager
         if (settings.DangerouslySkipPermissions)
             args.Add("--dangerously-skip-permissions");
 
-        // Route all user-facing questions through the AskUserQuestion tool so
-        // the UI can render structured options and we don't have to guess from
-        // free-form text. See issue #131.
-        args.Add("--append-system-prompt");
-        args.Add(QuestionPromptInjection);
+        // Tool calls that need approval wait for the user's answer through the bridge. It also makes
+        // claude offer AskUserQuestion in --print mode, skip-permissions or not, and ask it the same way
+        args.Add("--permission-prompts");
+        args.Add("host");
+        args.Add("--permission-prompt-tool");
+        args.Add(PermissionPromptTool);
         if (!string.IsNullOrWhiteSpace(model))
         {
             args.Add("--model");
@@ -1582,7 +1676,7 @@ public class ProjectManager : IProjectManager
         env ??= new Dictionary<string, string>();
         env["GODMODE_PROJECT_ID"] = project.Status.Id;
         env["GODMODE_PROJECT_TOKEN"] = project.ProjectToken;
-        env["GODMODE_SERVER_URL"] = $"http://localhost:{GetListenPort()}";
+        env["GODMODE_SERVER_URL"] = _serverUrl;
         return env;
     }
 
@@ -1590,10 +1684,9 @@ public class ProjectManager : IProjectManager
     /// Injects the GodMode MCP bridge server into an MCP config JSON string.
     /// The bridge env vars (GODMODE_PROJECT_ID, etc.) are inherited from the Claude process env.
     /// </summary>
-    private static string InjectMcpBridge(string? existingJson)
+    private string InjectMcpBridge(string? existingJson)
     {
-        // Find the bridge script path (relative to the server binary)
-        var bridgePath = ResolveMcpBridgePath();
+        var bridgePath = _mcpBridgePath;
 
         Dictionary<string, object>? mcpConfig;
         Dictionary<string, object> servers;
@@ -1618,7 +1711,7 @@ public class ProjectManager : IProjectManager
         }
 
         // Add the bridge as a stdio MCP server — env vars are inherited from the Claude process
-        servers["godmode-bridge"] = new
+        servers[McpBridgeServerName] = new
         {
             command = "node",
             args = new[] { bridgePath },
@@ -1630,38 +1723,23 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
-    /// Resolves the path to the GodMode MCP bridge dist/index.js.
-    /// Looks in common locations relative to the running server.
+    /// The bridge bundle every session runs: <see cref="McpBridgePathSetting"/> (or the
+    /// GODMODE_MCP_BRIDGE_PATH environment variable), else where the server build puts it. Throws
+    /// when it is not there: a session without it cannot ask for permission, and would deny every
+    /// tool call that needs approval without asking.
     /// </summary>
-    private static string ResolveMcpBridgePath()
+    private static string ResolveMcpBridgePath(IConfiguration configuration)
     {
-        // Check GODMODE_MCP_BRIDGE_PATH env var override first
-        var envPath = Environment.GetEnvironmentVariable("GODMODE_MCP_BRIDGE_PATH");
-        if (!string.IsNullOrEmpty(envPath) && File.Exists(envPath))
-            return Path.GetFullPath(envPath);
-
-        // Common locations relative to the project structure
-        var candidates = new[]
-        {
-            // Development: running from src/GodMode.Server/
-            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "GodMode.McpBridge", "dist", "index.js"),
-            // Development: running from repo root
-            Path.Combine(AppContext.BaseDirectory, "src", "GodMode.McpBridge", "dist", "index.js"),
-            // Sibling to server binary
-            Path.Combine(AppContext.BaseDirectory, "mcp-bridge", "index.js"),
-            // Published alongside
-            Path.Combine(AppContext.BaseDirectory, "GodMode.McpBridge", "dist", "index.js"),
-        };
-
-        foreach (var candidate in candidates)
-        {
-            var full = Path.GetFullPath(candidate);
-            if (File.Exists(full))
-                return full;
-        }
-
-        // Fallback: use npx to run it (requires package to be installed)
-        return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "GodMode.McpBridge", "dist", "index.js"));
+        var configured = configuration[McpBridgePathSetting] is { Length: > 0 } setting ? setting
+            : Environment.GetEnvironmentVariable("GODMODE_MCP_BRIDGE_PATH") is { Length: > 0 } env ? env
+            : null;
+        var path = Path.GetFullPath(configured ?? Path.Combine(AppContext.BaseDirectory, BundledMcpBridge));
+        if (!File.Exists(path))
+            throw new FileNotFoundException(configured != null
+                ? $"The GodMode MCP bridge is not at {path}, where {McpBridgePathSetting} (or GODMODE_MCP_BRIDGE_PATH) points."
+                : $"The GodMode MCP bridge is not at {path}. The server build puts it there (src/GodMode.McpBridge, " +
+                  "built with -p:BuildMcpBridge left on), or set " + McpBridgePathSetting + " to its godmode-mcp-bridge.cjs.", path);
+        return path;
     }
 
     /// <summary>
@@ -1751,12 +1829,22 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
-    /// Gets the server listen port from the Urls configuration.
+    /// The URL the bridge calls this server on: the first loopback binding in Urls, or localhost on
+    /// the port of the first binding. A server bound to another address only (Docker's
+    /// http://+:31337) is still reached on localhost. Defaults to http://localhost:31337.
     /// </summary>
-    private int GetListenPort()
+    internal static string LoopbackUrl(IConfiguration configuration)
     {
-        // Default GodMode server port
-        return 31337;
+        var bindings = (configuration["Urls"] ?? "")
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(url => url.Replace("://+", "://placeholder").Replace("://*", "://placeholder"))
+            .Select(url => Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri : null)
+            .OfType<Uri>()
+            .Where(uri => uri.Scheme == Uri.UriSchemeHttp)
+            .ToList();
+        var loopback = bindings.FirstOrDefault(uri => uri.IsLoopback);
+        if (loopback != null) return $"http://{loopback.Authority}";
+        return $"http://localhost:{bindings.FirstOrDefault()?.Port ?? 31337}";
     }
 
     /// <summary>

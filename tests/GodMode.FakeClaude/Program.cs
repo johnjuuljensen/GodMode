@@ -1,9 +1,12 @@
 // Stands in for the `claude` CLI in GodMode's lifecycle tests: plays a scripted stream-json
-// conversation on stdout and records its argv, environment, stdin and exit code to a sidecar.
+// conversation on stdout, asks for permission as the GodMode bridge does, and records its argv,
+// environment, stdin, permission answers and exit code to a sidecar.
 // Every CLI flag GodMode passes is accepted and ignored; --session-id / --resume only feed
 // the {{session_id}} placeholder.
 using System.Collections;
+using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Channels;
 using GodMode.FakeClaude;
 
@@ -64,6 +67,9 @@ for (var i = 0; i < script.Steps.Count; i++)
             break;
         case ScriptStep.Exit exit:
             return Exit(exit.Code);
+        case ScriptStep.AskPermission ask:
+            FakeRecording.Append(recordPath, new RecordLine(RecordLine.Permission, pid, Line: await AskPermissionAsync(ask.Arguments)));
+            break;
         case ScriptStep.RejectResume when ArgValue("--resume") is { } resumed:
             await stderr.WriteLineAsync(FakeScript.NoConversationError + resumed);
             return Exit(1);
@@ -79,6 +85,37 @@ int Exit(int code)
 {
     FakeRecording.Append(recordPath, new RecordLine(RecordLine.Exited, pid, Code: code));
     return code;
+}
+
+// What the bridge's permission_prompt does (src/GodMode.McpBridge): POST, wait, hand the answer back
+static async Task<string> AskPermissionAsync(string arguments)
+{
+    using var args = JsonDocument.Parse(arguments);
+    var root = args.RootElement;
+    var body = JsonSerializer.Serialize(new
+    {
+        toolName = root.GetProperty("tool_name").GetString(),
+        input = root.GetProperty("input"),
+        toolUseId = root.TryGetProperty("tool_use_id", out var id) ? id.GetString() : null,
+    });
+    var serverUrl = Environment.GetEnvironmentVariable("GODMODE_SERVER_URL") ?? "http://localhost:31337";
+    using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+    using var request = new HttpRequestMessage(HttpMethod.Post, $"{serverUrl}/api/internal/permission")
+    {
+        Content = new StringContent(body, Encoding.UTF8, "application/json"),
+    };
+    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Environment.GetEnvironmentVariable("GODMODE_PROJECT_TOKEN"));
+    request.Headers.Add("X-GodMode-Project-Id", Environment.GetEnvironmentVariable("GODMODE_PROJECT_ID"));
+    try
+    {
+        using var response = await http.SendAsync(request);
+        var text = await response.Content.ReadAsStringAsync();
+        return response.IsSuccessStatusCode ? text : $"error: HTTP {(int)response.StatusCode} {text}";
+    }
+    catch (HttpRequestException ex)
+    {
+        return $"error: {ex.Message}";
+    }
 }
 
 string? ArgValue(string flag)

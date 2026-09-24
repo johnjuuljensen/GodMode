@@ -104,26 +104,6 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
     public string TextOnlyContentSummary { get; }
 
     /// <summary>
-    /// Whether this message is a question/permission prompt requiring user input.
-    /// </summary>
-    public bool IsQuestion { get; }
-
-    /// <summary>
-    /// The question text if this is a question message.
-    /// </summary>
-    public string? QuestionText { get; }
-
-    /// <summary>
-    /// Available options for question messages.
-    /// </summary>
-    public IReadOnlyList<QuestionOptionData> QuestionOptions { get; }
-
-    /// <summary>
-    /// Short header/category label from the question (e.g., "Auth method", "Library").
-    /// </summary>
-    public string? QuestionHeader { get; }
-
-    /// <summary>
     /// Creates a new ClaudeMessage from raw JSON.
     /// All parsing is done eagerly for UI performance.
     /// </summary>
@@ -159,7 +139,6 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             FormattedJson = JsonSerializer.Serialize(document, IndentedOptions);
             IsToolOnly = HasContentItems && ContentItems.All(i => i.Type is "tool_use" or "tool_result");
             TextOnlyContentSummary = BuildTextOnlyContentSummary();
-            (IsQuestion, QuestionText, QuestionOptions, QuestionHeader) = ExtractQuestionData(root);
         }
         catch
         {
@@ -176,53 +155,7 @@ public sealed class ClaudeMessage : INotifyPropertyChanged
             FormattedJson = rawJson;
             IsToolOnly = false;
             TextOnlyContentSummary = "";
-            IsQuestion = false;
-            QuestionText = null;
-            QuestionOptions = [];
-            QuestionHeader = null;
         }
-    }
-
-    private static (bool isQuestion, string? text, IReadOnlyList<QuestionOptionData> options, string? header) ExtractQuestionData(JsonElement root)
-    {
-        // Claude Code question prompts come as assistant messages with specific patterns
-        // Check for tool_use with AskUserQuestion or permission prompts
-        if (!root.TryGetProperty("message", out var message)) return (false, null, [], null);
-        if (!message.TryGetProperty("content", out var content)) return (false, null, [], null);
-        if (content.ValueKind != JsonValueKind.Array) return (false, null, [], null);
-
-        foreach (var item in content.EnumerateArray())
-        {
-            if (!item.TryGetProperty("type", out var type)) continue;
-            if (type.GetString() != "tool_use") continue;
-            if (!item.TryGetProperty("name", out var name)) continue;
-
-            var toolName = name.GetString();
-            if (toolName == "AskUserQuestion" && item.TryGetProperty("input", out var input))
-            {
-                var questionText = input.TryGetProperty("question", out var q)
-                    ? q.GetString() : null;
-                var header = input.TryGetProperty("header", out var h)
-                    ? h.GetString() : null;
-                var options = new List<QuestionOptionData>();
-
-                if (input.TryGetProperty("options", out var opts) && opts.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var opt in opts.EnumerateArray())
-                    {
-                        var label = opt.TryGetProperty("label", out var l)
-                            ? l.GetString() ?? "" : "";
-                        var description = opt.TryGetProperty("description", out var d)
-                            ? d.GetString() : null;
-                        options.Add(new QuestionOptionData(label, description));
-                    }
-                }
-
-                return (true, questionText, options, header);
-            }
-        }
-
-        return (false, null, [], null);
     }
 
     private string ExtractSummary(JsonElement root)
@@ -498,8 +431,3 @@ public sealed class ClaudeContentItem : INotifyPropertyChanged
         return "";
     }
 }
-
-/// <summary>
-/// Data for a single question option with label and optional description.
-/// </summary>
-public record QuestionOptionData(string Label, string? Description);
