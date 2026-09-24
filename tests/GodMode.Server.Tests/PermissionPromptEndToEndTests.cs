@@ -66,7 +66,7 @@ public class PermissionPromptEndToEndTests
             await server.WaitForHealthyAsync(http);
 
             // ── Allowed with an edited input; the request outlives the client that saw it ──
-            var first = new Client(baseUrl);
+            await using var first = new Client(baseUrl);
             await first.StartAsync();
             var created = await first.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.CreateProject), Profile, Root, null,
                 new Dictionary<string, JsonElement>
@@ -81,7 +81,7 @@ public class PermissionPromptEndToEndTests
             Assert.Equal("git push origin feature/12-x", push.PendingPermission.Input.GetProperty("command").GetString());
             await first.DisposeAsync();
 
-            var second = new Client(baseUrl);
+            await using var second = new Client(baseUrl);
             await second.StartAsync();
             var listed = Assert.Single(await second.Hub.InvokeAsync<ProjectSummary[]>(nameof(IProjectHub.ListProjects)));
             Assert.Equal(ProjectState.WaitingPermission, listed.State);
@@ -111,7 +111,6 @@ public class PermissionPromptEndToEndTests
             var idle = await second.WaitForAsync(created.Id, s => s.State == ProjectState.Idle, server);
             Assert.Null(idle.PendingPermission);
             Assert.Null(idle.PendingQuestion);
-            await second.DisposeAsync();
 
             // What the fake got back is what the bridge hands claude
             var folder = created.Id.Split('/')[^1];
