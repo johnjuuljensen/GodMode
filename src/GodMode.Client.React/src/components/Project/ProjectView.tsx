@@ -1,21 +1,14 @@
-import { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore, transcriptKey } from '../../store';
 import { TranscriptList } from './TranscriptList';
 import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
+import { ReplyInput } from './ReplyInput';
 import { confirmAction } from '../../confirmDialog';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
-
-// A touch-first device, whose on-screen keyboard has no Shift+Enter (a narrow laptop window is not one)
-const touchKeyboardQuery = window.matchMedia('(hover: none) and (pointer: coarse)');
-const subscribeTouchKeyboard = (onChange: () => void) => {
-  touchKeyboardQuery.addEventListener('change', onChange);
-  return () => touchKeyboardQuery.removeEventListener('change', onChange);
-};
-const getTouchKeyboard = () => touchKeyboardQuery.matches;
 
 /** Simple view: the conversation, without session bookkeeping (errors still show) */
 const isConversation = (item: TranscriptItem) => (item.kind !== 'system' && item.kind !== 'result') || item.isError;
@@ -38,15 +31,6 @@ export function ProjectView({ serverId, projectId }: Props) {
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const touchKeyboard = useSyncExternalStore(subscribeTouchKeyboard, getTouchKeyboard);
-
-  // Grows with its content up to the CSS max-height, then scrolls
-  useLayoutEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
-  }, [inputText]);
 
   // Loading until the server says the replay is complete, unless a transcript is already held
   const transcriptPhase = useAppStore(s => s.transcripts[transcriptKey(serverId, projectId)]?.phase);
@@ -185,22 +169,6 @@ export function ProjectView({ serverId, projectId }: Props) {
     try { await hub.deleteProject(projectId, state === 'Running'); } catch (err) { console.error(err); }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Enter that confirms an IME composition is not a send (Safari reports it after compositionend, as keyCode 229)
-    if (e.key !== 'Enter' || e.nativeEvent.isComposing || e.keyCode === 229) return;
-    // Plain Enter sends. A touch keyboard has no Shift+Enter, so there every Enter is a newline and the Send button sends
-    if (!touchKeyboard && !(e.shiftKey || e.ctrlKey || e.metaKey || e.altKey)) {
-      e.preventDefault();
-      handleSendInput();
-    } else if (e.ctrlKey || e.metaKey || e.altKey) {
-      // Shift+Enter and plain Enter insert a newline natively; Ctrl/Cmd/Alt+Enter insert nothing
-      e.preventDefault();
-      const el = e.currentTarget;
-      el.setRangeText('\n', el.selectionStart, el.selectionEnd, 'end');
-      setInputText(el.value);
-    }
-  };
-
   return (
     <div className="project-view">
       <div className="project-header">
@@ -290,14 +258,12 @@ export function ProjectView({ serverId, projectId }: Props) {
       )}
 
       <div className="project-input-bar">
-        <textarea
-          ref={inputRef}
-          rows={1}
+        <ReplyInput
+          inputRef={inputRef}
           className="project-input"
           value={inputText}
-          onChange={e => setInputText(e.target.value)}
-          onKeyDown={handleKeyDown}
-          enterKeyHint={touchKeyboard ? 'enter' : 'send'}
+          onChange={setInputText}
+          onSubmit={handleSendInput}
           placeholder={canResume ? 'Type to resume...' : 'Type your response...'}
           disabled={!canSendInput}
         />

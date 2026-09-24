@@ -9,6 +9,8 @@ import { CreateProject } from './Projects/CreateProject';
 import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
 import { ConfirmDialog } from './ConfirmDialog';
+import { Inbox, HomeTabBar } from './Inbox/Inbox';
+import { useAttentionTitle } from './Inbox/useAttentionTitle';
 import { goBack, useHashRoute } from '../routing';
 import './Shell.css';
 
@@ -43,11 +45,14 @@ export function Shell() {
   const activePage = useAppStore(s => s.activePage);
   const isMobile = useAppStore(s => s.isMobile);
   const setIsMobile = useAppStore(s => s.setIsMobile);
+  const homeView = useAppStore(s => s.homeView);
+  const setHomeView = useAppStore(s => s.setHomeView);
 
   const [theme] = useState<'dark' | 'light'>(getInitialTheme);
 
   // Each screen is a history entry, so browser and Android back walk back through them
   useHashRoute();
+  useAttentionTitle();
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -69,12 +74,18 @@ export function Shell() {
   const showsPage = activePage !== null;
   const project = showsPage ? null : selectedProject;
   const showsTiles = !showsPage && !project && isTileView;
-  // On a phone the list is the home screen, with nothing beside it
+  // On a phone home is the inbox, or the project list, with nothing beside it
   const phoneHome = isMobile && !showsPage && !project && !isTileView;
 
   const sidebarSlot = isTileView
     ? (!isMobile || showsTiles) && <SidebarHeader />
-    : (!isMobile || phoneHome) && <div className="shell-sidebar"><Sidebar /></div>;
+    : !isMobile ? <div className="shell-sidebar"><Sidebar withInbox /></div>
+    : phoneHome && (
+      <div className="shell-sidebar shell-mobile-home">
+        {homeView === 'inbox' ? <><SidebarHeader /><Inbox variant="screen" /></> : <Sidebar />}
+        <HomeTabBar tab={homeView} onChange={setHomeView} />
+      </div>
+    );
   const footerSlot = isTileView && (!isMobile || showsTiles) && <SidebarFooter />;
   const backBar = project && (isMobile || isTileView) && (
     <div className={isMobile ? 'page-back-bar' : 'shell-back-bar'}>
@@ -93,6 +104,7 @@ export function Shell() {
           {backBar}
           {activePage && <PageContent page={activePage} />}
           {project && <ProjectView serverId={project.serverId} projectId={project.projectId} />}
+          {showsTiles && !isMobile && <Inbox variant="pane" />}
           {showsTiles && <TileGrid />}
           {!isMobile && !isTileView && !showsPage && !project && (
             <div className="shell-empty"><p>Select a project from the sidebar</p></div>
