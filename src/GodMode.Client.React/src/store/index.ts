@@ -597,6 +597,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
             RootName: status.RootName, ProfileName: status.ProfileName,
             PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
+            PullRequest: status.PullRequest,
           };
           const connections = state.serverConnections.map(c =>
             c.serverInfo.Id === serverId
@@ -680,6 +681,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                   ? {
                       ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
                       PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
+                      PullRequest: status.PullRequest,
                     }
                   : p) }
               : c

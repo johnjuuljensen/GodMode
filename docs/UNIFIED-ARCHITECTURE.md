@@ -208,14 +208,15 @@ A root is a subdirectory of `ProjectRootsDir` that contains `.godmode-root/`. Th
 ```
 root-name/
 ├── .godmode-root/
-│   ├── config.json                # Base config (profileName, prepare, delete, environment, claudeArgs, mcpServers)
+│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, mcpServers)
 │   ├── config.{action}.json       # Per-action overlays (merged with base)
 │   ├── {action}/
 │   │   ├── schema.json            # Input form schema (JSON Schema)
 │   │   └── create.ps1             # Action-specific creation script
 │   └── scripts/
 │       ├── prepare.ps1            # Shared prepare script
-│       └── delete.ps1             # Shared delete script
+│       ├── delete.ps1             # Shared delete script
+│       └── status.ps1             # Reports the project's pull request (optional)
 └── {project-id}/                  # Projects created from this root
 ```
 
@@ -224,6 +225,8 @@ root-name/
 **Profile assignment**: `profileName` in `config.json` puts the root in that profile. Roots without it go to `Default`.
 
 **MCP server merge order**: Profile → Root → Action (three layers, later wins on conflict).
+
+**Pull request status**: a root's optional `status` script prints the project's pull request as JSON (`{"pullRequest": {url, number, state, review}}`, or `{}`), and the server keeps it in `ProjectStatus.PullRequest` in `status.json`. It runs on each transition to Idle or Stopped and, while the pull request is open, every 10 minutes. Only that schedule is in memory. The server parses the output strictly and knows nothing of the VCS.
 
 Key services:
 - `RootConfigReader` — discovers and merges configs fresh on each operation (no caching, no restart needed)
@@ -353,6 +356,7 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 | `TemplateResolver` | Resolves `{field}` placeholders |
 | `EnvironmentExpander` | Expands `${VAR}` in config values and strips profile prefixes from server env vars |
 | `QuestionDetection` | Detects when Claude's turn ends in a question for the user |
+| `PullRequestPoller` / `PullRequestScript` | When a root's status script runs for each project, and the strict reading of its output (owned by `ProjectManager`, not registered) |
 
 All services are registered as **singletons** in `Program.cs`. Authentication lives in `Auth/` (`AuthModeSelector`, `GodModeAuthenticationHandler`).
 
@@ -400,7 +404,7 @@ The server injects `GODMODE_PROJECT_ID`, `GODMODE_PROJECT_TOKEN` (per-project to
 
 **Permission prompts.** claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode-bridge__permission_prompt`, so a tool call that needs approval waits for the user instead of being denied. claude calls `permission_prompt` with `{tool_name, input, tool_use_id}`; the bridge POSTs it and holds the HTTP request open until the user answers (`node:http`, since `fetch` gives up after 5 minutes), then returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}`. The project is `WaitingPermission` with `ProjectStatus.PendingPermission` (a server-built one-line `Summary` such as `Bash: git push origin x`), answered with the hub's `RespondToPermission`. The same flag makes claude offer `AskUserQuestion` in `--print` mode, and ask it through the same tool: that is `WaitingInput` with `PendingQuestion`, answered with `AnswerQuestion`. A request survives a client disconnect, not a server restart: the bridge's call fails and claude sees a deny. A chat message sent while one waits answers it (a single question takes it as its answer; otherwise it is a deny carrying the text).
 
-**Attention.** `GetAttention` answers "what needs me on this server": one `AttentionItem` per project, oldest first, of kind `Permission`, `Question` (an AskUserQuestion, carried whole, or a turn that ended on `?`), `Error` or `Finished` (a result the user has not seen). It is derived from the status alone, and every field it reads is in `status.json` (`LastResult`, `LastResultAt`, `QuestionAt`, `SeenAt`), so a restart does not change the answer; `MarkSeen` and any reply move `SeenAt`. `AttentionChanged` pushes the whole list after a status push, only when the list differs from the last one pushed. `ReplyAndResume` answers any of it: `SendInput` to a running claude, otherwise a resume, the text, and a wait for `system/init`. claude writes nothing, not even `system/init`, until it has read its first input, so the text is sent first; the wait ends with an error if claude exits first or the `SessionStartTimeoutSeconds` setting (60) passes, and the text is sent again if the resume found no conversation and a fresh session replaced it.
+**Attention.** `GetAttention` answers "what needs me on this server": one `AttentionItem` per project, oldest first, of kind `Permission`, `Question` (an AskUserQuestion, carried whole, or a turn that ended on `?`), `Error`, `Review` (changes requested on the project's open pull request) or `Finished` (a result the user has not seen; it and `Review` carry `PullRequestUrl`). It is derived from the status alone, and every field it reads is in `status.json` (`LastResult`, `LastResultAt`, `QuestionAt`, `SeenAt`, `PullRequest`), so a restart does not change the answer; `MarkSeen` and any reply move `SeenAt`. `AttentionChanged` pushes the whole list after a status push, only when the list differs from the last one pushed. `ReplyAndResume` answers any of it: `SendInput` to a running claude, otherwise a resume, the text, and a wait for `system/init`. claude writes nothing, not even `system/init`, until it has read its first input, so the text is sent first; the wait ends with an error if claude exits first or the `SessionStartTimeoutSeconds` setting (60) passes, and the text is sent again if the resume found no conversation and a fresh session replaced it.
 
 ---
 

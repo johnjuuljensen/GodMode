@@ -21,6 +21,7 @@ namespace GodMode.Shared.Models;
 /// <param name="PendingPermission">The tool call waiting for the user to allow or deny it, while the project is <see cref="ProjectState.WaitingPermission"/>. Null otherwise.</param>
 /// <param name="PendingQuestion">The AskUserQuestion waiting for the user's answer, while the project is <see cref="ProjectState.WaitingInput"/> on it. Null otherwise.</param>
 /// <param name="LastError">Why the project is in <see cref="ProjectState.Error"/>: the last lines claude wrote to stderr before it exited, or an error result's text. Null otherwise.</param>
+/// <param name="PullRequest">The pull request the project's work became, as its root's <c>status</c> script last reported it. Null when there is none, or the root has no status script.</param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -42,5 +43,6 @@ public record ProjectStatus(
     string? LastResult = null,
     DateTime? LastResultAt = null,
     DateTime? QuestionAt = null,
-    DateTime? SeenAt = null
+    DateTime? SeenAt = null,
+    PullRequestStatus? PullRequest = null
 );

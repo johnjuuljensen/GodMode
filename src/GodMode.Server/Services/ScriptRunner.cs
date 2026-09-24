@@ -18,6 +18,9 @@ public class ScriptRunner : IScriptRunner
     private static readonly string[] WindowsExtensions = [".ps1", ".cmd", ".bat"];
     private static readonly string[] UnixExtensions = [".sh", ".ps1"];
 
+    /// <summary>The stderr lines a script run for its output keeps for its error.</summary>
+    private const int MaxStderrLines = 20;
+
     private readonly ILogger<ScriptRunner> _logger;
 
     public ScriptRunner(ILogger<ScriptRunner> logger)
@@ -48,7 +51,9 @@ public class ScriptRunner : IScriptRunner
             foreach (var script in scripts)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await RunScriptAsync(script, rootPath, workingDirectory, environment, onProgress, logWriter, cancellationToken);
+                var scriptPath = ResolveScriptPath(script, rootPath);
+                await onProgress($"Running: {Path.GetFileName(scriptPath)}");
+                await RunScriptAsync(script, scriptPath, workingDirectory, environment, onProgress, logWriter, forOutput: false, cancellationToken);
             }
         }
         finally
@@ -58,19 +63,54 @@ public class ScriptRunner : IScriptRunner
         }
     }
 
-    private async Task RunScriptAsync(
+    public async Task<string> RunForOutputAsync(
         string script,
         string rootPath,
         string workingDirectory,
         Dictionary<string, string> environment,
-        Func<string, Task> onProgress,
-        StreamWriter? logWriter,
+        int maxOutputChars,
         CancellationToken cancellationToken)
     {
         var scriptPath = ResolveScriptPath(script, rootPath);
+        var output = new StringBuilder();
+        using var tooMuch = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task Collect(string line)
+        {
+            lock (output)
+            {
+                if (tooMuch.IsCancellationRequested) return Task.CompletedTask;
+                if (output.Length + line.Length + 1 > maxOutputChars) tooMuch.Cancel();
+                else output.Append(line).Append('\n');
+            }
+            return Task.CompletedTask;
+        }
 
+        try
+        {
+            await RunScriptAsync(script, scriptPath, workingDirectory, environment, Collect, logWriter: null, forOutput: true, tooMuch.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidDataException($"Script '{script}' wrote more than {maxOutputChars} characters to stdout");
+        }
+        lock (output) return output.ToString();
+    }
+
+    /// <param name="forOutput">
+    /// Run for its output, which is untrusted: wait for stdout to be read to its end, not only for the
+    /// exit, and keep only the last <see cref="MaxStderrLines"/> lines of stderr for the error.
+    /// </param>
+    private async Task RunScriptAsync(
+        string script,
+        string scriptPath,
+        string workingDirectory,
+        Dictionary<string, string> environment,
+        Func<string, Task> onProgress,
+        StreamWriter? logWriter,
+        bool forOutput,
+        CancellationToken cancellationToken)
+    {
         _logger.LogInformation("Running script: {Script}", scriptPath);
-        await onProgress($"Running: {Path.GetFileName(scriptPath)}");
         await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] === Running: {scriptPath} ===");
         await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Working directory: {workingDirectory}");
 
@@ -114,7 +154,11 @@ public class ScriptRunner : IScriptRunner
         {
             if (e.Data != null)
             {
-                stderrLines.Add(e.Data);
+                lock (stderrLines)
+                {
+                    stderrLines.Add(e.Data);
+                    if (forOutput && stderrLines.Count > MaxStderrLines) stderrLines.RemoveAt(0);
+                }
                 await LogLineAsync(logWriter, $"[stderr] {e.Data}");
             }
         };
@@ -130,17 +174,22 @@ public class ScriptRunner : IScriptRunner
         });
 
         var exitCode = await exitTcs.Task;
+        // Killed: the exit code says only that
+        cancellationToken.ThrowIfCancellationRequested();
+        if (forOutput) await process.WaitForExitAsync(cancellationToken);
 
         await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Exit code: {exitCode}");
 
         if (exitCode != 0)
         {
-            var stderr = string.Join(Environment.NewLine, stderrLines);
+            string stderr;
+            lock (stderrLines) stderr = string.Join(Environment.NewLine, stderrLines);
             var message = $"Script '{script}' exited with code {exitCode}";
             if (!string.IsNullOrEmpty(stderr))
                 message += $": {stderr}";
 
-            _logger.LogError("{Message}", message);
+            // Run for its output, the caller says what the failure means
+            if (!forOutput) _logger.LogError("{Message}", message);
             await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] FAILED: {message}");
             throw new InvalidOperationException(message);
         }

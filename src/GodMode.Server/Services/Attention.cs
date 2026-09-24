@@ -27,6 +27,9 @@ public static partial class Attention
             { CurrentQuestion: { } question, State: ProjectState.WaitingInput or ProjectState.Stopped } =>
                 (AttentionKind.Question, status.QuestionAt ?? status.UpdatedAt, question),
             { State: ProjectState.Error } => (AttentionKind.Error, status.UpdatedAt, status.LastError ?? "The project failed."),
+            { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { IsOpen: true, Review: PullRequestReview.ChangesRequested } pr }
+                when pr.ChangedAt > (status.SeenAt ?? DateTime.MinValue) =>
+                (AttentionKind.Review, pr.ChangedAt, $"Changes requested on pull request #{pr.Number}."),
             { State: ProjectState.Idle or ProjectState.Stopped, LastResultAt: { } at } when at > (status.SeenAt ?? DateTime.MinValue) =>
                 (AttentionKind.Finished, at, status.LastResult is { Length: > 0 } result ? result : "The turn finished."),
             _ => null,
@@ -35,7 +38,8 @@ public static partial class Attention
 
         return new AttentionItem(status.Id, status.Name, status.ProfileName, status.RootName, kind, since, PlainText(text),
             kind == AttentionKind.Permission ? status.PendingPermission : null,
-            kind == AttentionKind.Question ? status.PendingQuestion : null);
+            kind == AttentionKind.Question ? status.PendingQuestion : null,
+            kind is AttentionKind.Review or AttentionKind.Finished ? status.PullRequest?.Url : null);
     }
 
     /// <summary>Every project's item, oldest first (by project ID when two are as old).</summary>
@@ -46,14 +50,14 @@ public static partial class Attention
 
     /// <summary>
     /// Whether two lists say the same: the same projects needing the same, since the same time,
-    /// with the same text and request. Compared by those, not by record equality, which would
+    /// with the same text, request and pull request. Compared by those, not by record equality, which would
     /// compare a pending request's input and questions by reference.
     /// </summary>
     public static bool Same(IReadOnlyList<AttentionItem> a, IReadOnlyList<AttentionItem> b) =>
         a.Select(Key).SequenceEqual(b.Select(Key));
 
-    private static (string, AttentionKind, DateTime, string, string?) Key(AttentionItem item) =>
-        (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId);
+    private static (string, AttentionKind, DateTime, string, string?, string?) Key(AttentionItem item) =>
+        (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId, item.PullRequestUrl);
 
     /// <summary>
     /// Text to show on a phone or read aloud: code blocks become "(code)", markdown's backticks go,

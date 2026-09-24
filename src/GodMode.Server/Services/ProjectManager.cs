@@ -17,7 +17,7 @@ namespace GodMode.Server.Services;
 /// Manages project folders, lifecycle, and state.
 /// Uses config-driven workflow: reads .godmode-root/config.json, runs scripts, starts Claude.
 /// </summary>
-public class ProjectManager : IProjectManager
+public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 {
     /// <summary>How long server shutdown waits for the projects' processes to be killed and marked Stopped.</summary>
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
@@ -56,6 +56,12 @@ public class ProjectManager : IProjectManager
     /// <summary>The attention list last pushed, and the lock that orders computing and pushing it.</summary>
     private AttentionItem[] _attention = [];
     private readonly SemaphoreSlim _attentionLock = new(1, 1);
+
+    /// <summary>How often an open pull request is checked, and how long its root's status script may take.</summary>
+    public const string PullRequestPollSetting = "PullRequestPollSeconds";
+    public const string StatusScriptTimeoutSetting = "StatusScriptTimeoutSeconds";
+    private readonly TimeSpan _statusScriptTimeout;
+    private readonly PullRequestPoller _pullRequests;
 
     /// <inheritdoc />
     public event Func<string, Task>? OnProjectCompleted
@@ -118,7 +124,10 @@ public class ProjectManager : IProjectManager
         _server = server;
         _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         _sessionStartTimeout = TimeSpan.FromSeconds(configuration.GetValue(SessionStartTimeoutSetting, 60.0));
-        _lifecycle.StatusNotified += PushAttentionIfChangedAsync;
+        _statusScriptTimeout = TimeSpan.FromSeconds(configuration.GetValue(StatusScriptTimeoutSetting, 30.0));
+        _pullRequests = new PullRequestPoller(CheckPullRequestAsync,
+            TimeSpan.FromSeconds(configuration.GetValue(PullRequestPollSetting, 600.0)), logger);
+        _lifecycle.StatusNotified += OnStatusNotifiedAsync;
 
         // Read optional autodiscovery directory (normalize empty/whitespace to null)
         var rawDir = configuration["ProjectRootsDir"];
@@ -148,6 +157,8 @@ public class ProjectManager : IProjectManager
     /// </summary>
     private void StopProjectsOnShutdown()
     {
+        // Before the projects stop: going Stopped starts no status script now
+        _pullRequests.Stop();
         _lifecycle.BeginShutdown();
         var running = _projects.Values
             .Where(project => project.Process.ProcessId != 0
@@ -474,7 +485,8 @@ public class ProjectManager : IProjectManager
                 s.RootName,
                 ProfileName: project.ProfileName ?? s.ProfileName,
                 PendingPermission: s.PendingPermission,
-                PendingQuestion: s.PendingQuestion
+                PendingQuestion: s.PendingQuestion,
+                PullRequest: s.PullRequest
             ));
         }
 
@@ -815,6 +827,80 @@ public class ProjectManager : IProjectManager
         await NotifyStatusChanged(project);
     }
 
+    /// <summary>After every status push: the pull request check a transition to Idle or Stopped makes, then the attention list.</summary>
+    private Task OnStatusNotifiedAsync(ProjectInfo project)
+    {
+        _pullRequests.Observe(project.Status.Id, project.Status.State);
+        return PushAttentionIfChangedAsync();
+    }
+
+    /// <summary>
+    /// Runs the project's root's status script in its folder, and keeps the pull request it reports in
+    /// the status, pushing it when it changed. A root without one, a script that fails, times out or
+    /// prints anything but the documented JSON (<see cref="PullRequestScript"/>) changes nothing; the
+    /// failure is logged. Says whether to poll: while the pull request it knows is open.
+    /// </summary>
+    private async Task<PullRequestPoller.Outcome> CheckPullRequestAsync(string projectId, CancellationToken cancel)
+    {
+        if (!_projects.TryGetValue(projectId, out var project)) return PullRequestPoller.Outcome.Gone;
+        var unchanged = project.Status.PullRequest is { IsOpen: true } ? PullRequestPoller.Outcome.Poll : PullRequestPoller.Outcome.Wait;
+        var profileName = project.ProfileName ?? project.Status.ProfileName;
+        if (project.Status.RootName == null || profileName == null) return unchanged;
+
+        string? script = null;
+        PullRequestStatus? reported;
+        try
+        {
+            var snap = _snapshot;
+            var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
+            var config = _rootConfigReader.ReadConfig(rootPath);
+            if (config.ResolveAction(project.ActionName) is not { Status: { } status } action) return unchanged;
+            script = status;
+
+            snap.Profiles.TryGetValue(profileName, out var profileCfg);
+            var env = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+                profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            timeout.CancelAfter(_statusScriptTimeout);
+            var output = await _scriptRunner.RunForOutputAsync(script, rootPath, project.ProjectPath, env, PullRequestScript.MaxOutputChars, timeout.Token);
+            reported = PullRequestScript.Parse(output, DateTime.UtcNow);
+        }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Project {ProjectId}: status script {Script} failed, so its pull request is left as it was: {Reason}",
+                projectId, script, ex is OperationCanceledException ? $"it took longer than {_statusScriptTimeout.TotalSeconds}s" : ex.Message);
+            return unchanged;
+        }
+
+        cancel.ThrowIfCancellationRequested();
+        if (!_projects.TryGetValue(projectId, out var current) || current != project) return PullRequestPoller.Outcome.Gone;
+        var before = project.Status.PullRequest;
+        var after = PullRequestScript.Apply(before, reported);
+        if (after != before)
+        {
+            _logger.LogInformation("Project {ProjectId}: pull request {PullRequest}", projectId,
+                after is { } pr ? $"#{pr.Number} is {pr.State}, review {pr.Review}" : "none");
+            await _lifecycle.UpdateStatusAsync(project, status => status with { PullRequest = after });
+            await NotifyStatusChanged(project);
+        }
+        return after is { IsOpen: true } ? PullRequestPoller.Outcome.Poll : PullRequestPoller.Outcome.Wait;
+    }
+
+    /// <summary>A project that is back without a status push (recovered, restored): its open pull request is checked, then polled.</summary>
+    private void ResumeChecks(ProjectInfo project)
+    {
+        _pullRequests.Remember(project.Status.Id, project.Status.State);
+        if (project.Status.PullRequest is { IsOpen: true }) _pullRequests.CheckNow(project.Status.Id);
+    }
+
+    public async ValueTask DisposeAsync() => await _pullRequests.DisposeAsync();
+
+    public void Dispose() => _pullRequests.Dispose();
+
     /// <summary>Pushes the attention list to every client when it differs from the one last pushed.</summary>
     private async Task PushAttentionIfChangedAsync()
     {
@@ -926,38 +1012,50 @@ public class ProjectManager : IProjectManager
         // Stop Claude process if running. Its output pipeline stays open until the delete is
         // committed: a delete script may refuse, and the project is then resumed as before
         await _lifecycle.KillAsync(project);
+        // Nor does a status script hold its folder while the delete scripts run
+        await _pullRequests.ForgetAsync(projectId);
 
         // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
         var snap = _snapshot;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
-        if (project.Status.RootName != null && profileName != null)
+        try
         {
-            var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
-            var config = _rootConfigReader.ReadConfig(rootPath);
-            var action = config.ResolveAction(project.ActionName);
-
-            if (action?.Delete is { Length: > 0 })
+            if (project.Status.RootName != null && profileName != null)
             {
-                snap.Profiles.TryGetValue(profileName, out var profileCfg);
-                var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
-                    profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
+                var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
+                var config = _rootConfigReader.ReadConfig(rootPath);
+                var action = config.ResolveAction(project.ActionName);
 
-                if (force)
-                    scriptEnv["GODMODE_FORCE"] = "true";
+                if (action?.Delete is { Length: > 0 })
+                {
+                    snap.Profiles.TryGetValue(profileName, out var profileCfg);
+                    var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+                        profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
 
-                await _scriptRunner.RunAsync(
-                    action.Delete,
-                    rootPath,
-                    rootPath,
-                    scriptEnv,
-                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+                    if (force)
+                        scriptEnv["GODMODE_FORCE"] = "true";
+
+                    await _scriptRunner.RunAsync(
+                        action.Delete,
+                        rootPath,
+                        rootPath,
+                        scriptEnv,
+                        msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+                }
             }
         }
+        catch
+        {
+            // Refused: the project stays, and so do its checks
+            ResumeChecks(project);
+            throw;
+        }
 
-        // Remove from tracking, and finish its output
+        // Remove from tracking, and finish its output and any check a push started since
         _projects.TryRemove(projectId, out _);
         await project.Process.CloseAsync();
+        await _pullRequests.ForgetAsync(projectId);
 
         // Delete project folder — use robust deletion to handle locked/read-only files
         // (common with .git directories on Windows after git init or process shutdown)
@@ -972,8 +1070,9 @@ public class ProjectManager : IProjectManager
         if (!_projects.TryRemove(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
 
-        // Stop process if running, and finish its output
+        // Stop process if running, and finish its output and its checks
         await _lifecycle.CloseAsync(project);
+        await _pullRequests.ForgetAsync(projectId);
 
         // Move project folder to .archived/ sibling directory
         var parentDir = Path.GetDirectoryName(project.ProjectPath)!;
@@ -1073,6 +1172,7 @@ public class ProjectManager : IProjectManager
                     };
                     _projects[id] = project;
                     await _statusUpdater.SaveStatusAsync(project);
+                    ResumeChecks(project);
 
                     _logger.LogInformation("Unarchived project {ArchivedId} ({Name}) as {ProjectId}", projectId, status.Name, id);
                     await PushAttentionIfChangedAsync();
@@ -1213,6 +1313,7 @@ public class ProjectManager : IProjectManager
                     project.Process.Cancellation?.Cancel();
                     project.Process.Output.TryComplete();
                     _projects.TryRemove(project.Status.Id, out _);
+                    await _pullRequests.ForgetAsync(project.Status.Id);
                 }
 
                 // Delete the entire root directory (including projects)
@@ -1332,6 +1433,7 @@ public class ProjectManager : IProjectManager
                 {
                     await _statusUpdater.SaveStatusAsync(project);
                 }
+                ResumeChecks(project);
 
                 _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Status.Id, project.Status.Name);
             }

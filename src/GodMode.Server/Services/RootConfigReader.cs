@@ -157,6 +157,7 @@ public class RootConfigReader : IRootConfigReader
         Prepare = overlay.Prepare ?? baseConfig.Prepare,
         Create = overlay.Create ?? baseConfig.Create,
         Delete = overlay.Delete ?? baseConfig.Delete,
+        Status = overlay.Status ?? baseConfig.Status,
         Environment = MergeDictionaries(baseConfig.Environment, overlay.Environment),
         ClaudeArgs = ConcatArrays(baseConfig.ClaudeArgs, overlay.ClaudeArgs),
         NameTemplate = overlay.NameTemplate ?? baseConfig.NameTemplate,
@@ -185,7 +186,9 @@ public class RootConfigReader : IRootConfigReader
             PromptTemplate: raw.PromptTemplate,
             ScriptsCreateFolder: raw.ScriptsCreateFolder ?? false,
             Model: raw.Model,
-            McpServers: raw.McpServers
+            McpServers: raw.McpServers,
+            // One script: its output is the answer, and two would give two
+            Status: NormalizeScriptPaths(raw.Status, godModeRootPath) is [var status] ? status : null
         );
     }
 
@@ -288,6 +291,7 @@ public class RootConfigReader : IRootConfigReader
         public JsonElement? Prepare { get; init; }
         public JsonElement? Create { get; init; }
         public JsonElement? Delete { get; init; }
+        public JsonElement? Status { get; init; }
         public Dictionary<string, string>? Environment { get; init; }
         public string[]? ClaudeArgs { get; init; }
         public string? NameTemplate { get; init; }

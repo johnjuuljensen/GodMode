@@ -31,8 +31,8 @@ public sealed class ProjectLifecycle
     /// <summary>Raised, on the project's consumer, when output takes a project to Idle. A handler must not wait for a Stop.</summary>
     public event Func<string, Task>? OnProjectCompleted;
 
-    /// <summary>Raised after every <see cref="NotifyStatusChangedAsync"/>, once clients have the status.</summary>
-    public event Func<Task>? StatusNotified;
+    /// <summary>Raised after every <see cref="NotifyStatusChangedAsync"/>, with its project, once clients have the status.</summary>
+    public event Func<ProjectInfo, Task>? StatusNotified;
 
     public ProjectLifecycle(
         IClaudeProcessManager processManager,
@@ -234,7 +234,7 @@ public sealed class ProjectLifecycle
         }
 
         if (StatusNotified == null) return;
-        try { await StatusNotified(); }
+        try { await StatusNotified(project); }
         catch (Exception ex) { _logger.LogError(ex, "Error in StatusNotified handler for project {ProjectId}", project.Status.Id); }
     }
 
