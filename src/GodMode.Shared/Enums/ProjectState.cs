@@ -24,6 +24,11 @@ public enum ProjectState
     WaitingInput,
 
     /// <summary>
+    /// Project is waiting for the user to allow or deny a tool call (see <see cref="Models.PendingPermission"/>).
+    /// </summary>
+    WaitingPermission,
+
+    /// <summary>
     /// Project encountered an error.
     /// </summary>
     Error,

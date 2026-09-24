@@ -1,3 +1,4 @@
+using GodMode.ProjectFiles;
 using GodMode.Server.Models;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
@@ -26,13 +27,15 @@ public class StatusUpdater : IStatusUpdater
 
         var json = JsonSerializer.Serialize(project.Status, JsonDefaults.Options);
 
-        await File.WriteAllTextAsync(statusPath, json);
+        // Atomic, so a reader (recovery, a restarted server) never meets a half-written file
+        await AtomicFile.WriteAllTextAsync(statusPath, json);
     }
 
-    public async Task UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent, string rawJson)
+    public async Task<bool> UpdateFromOutputEventAsync(ProjectInfo project, OutputEvent outputEvent, string rawJson)
     {
         var stateChanged = false;
         var status = project.Status;
+        var process = project.Process;
 
         // Parse Claude output events to update state
         switch (outputEvent.Type)
@@ -40,7 +43,7 @@ public class StatusUpdater : IStatusUpdater
             case OutputEventType.User:
                 // A new turn is starting — clear any memo of the previous turn's
                 // trailing assistant text so stale questions don't leak forward.
-                project.LastAssistantText = null;
+                process.LastAssistantText = null;
                 break;
 
             case OutputEventType.Assistant:
@@ -49,59 +52,55 @@ public class StatusUpdater : IStatusUpdater
                 // Tool-only assistant events return null here; don't overwrite
                 // a previously-seen text block in that case.
                 var lastText = QuestionDetection.ExtractLastAssistantText(rawJson);
-                if (lastText != null) project.LastAssistantText = lastText;
+                if (lastText != null) process.LastAssistantText = lastText;
                 break;
 
-            case OutputEventType.Error:
-                status = status with { State = ProjectState.Error };
+            // Error events are stderr lines shown in the UI; the process's exit and error results
+            // decide whether the session failed
+
+            case OutputEventType.Result when IsErrorResult(outputEvent):
+                status = status with
+                {
+                    State = ProjectState.Error,
+                    CurrentQuestion = null,
+                    LastError = outputEvent.Content is { Length: > 0 } text ? text : Subtype(outputEvent) ?? "error result",
+                };
+                process.LastAssistantText = null;
                 stateChanged = true;
+                status = WithTokenMetrics(status, outputEvent);
                 break;
 
             case OutputEventType.Result:
                 // End of turn: decide Idle vs WaitingInput based on whether the
                 // last assistant text block (trimmed) ends with '?'. See issue #131.
-                if (QuestionDetection.IsQuestion(project.LastAssistantText))
-                {
-                    status = status with
-                    {
-                        State = ProjectState.WaitingInput,
-                        CurrentQuestion = project.LastAssistantText,
-                    };
-                }
-                else
-                {
-                    status = status with { State = ProjectState.Idle, CurrentQuestion = null };
-                }
-                project.LastAssistantText = null;
+                // The result's text is claude's summary of the turn, whichever it is
+                var endedAt = DateTime.UtcNow;
+                status = status with { LastResult = outputEvent.Content, LastResultAt = endedAt, LastError = null };
+                status = QuestionDetection.IsQuestion(process.LastAssistantText)
+                    ? status with { State = ProjectState.WaitingInput, CurrentQuestion = process.LastAssistantText, QuestionAt = endedAt }
+                    : status with { State = ProjectState.Idle, CurrentQuestion = null };
+                process.LastAssistantText = null;
                 stateChanged = true;
-
-                // Update metrics from result metadata
-                if (outputEvent.Metadata != null)
-                {
-                    if (outputEvent.Metadata.TryGetValue("input_tokens", out var inputTokens))
-                    {
-                        if (long.TryParse(inputTokens?.ToString(), out var tokens))
-                        {
-                            status = status with { Metrics = status.Metrics with { InputTokens = tokens } };
-                        }
-                    }
-
-                    if (outputEvent.Metadata.TryGetValue("output_tokens", out var outputTokens))
-                    {
-                        if (long.TryParse(outputTokens?.ToString(), out var tokens))
-                        {
-                            status = status with { Metrics = status.Metrics with { OutputTokens = tokens } };
-                        }
-                    }
-                }
+                status = WithTokenMetrics(status, outputEvent);
                 break;
 
-            case OutputEventType.System:
-                // System init event - project is running
-                status = status with { State = ProjectState.Running };
-                stateChanged = true;
+            case OutputEventType.System when IsSessionStart(outputEvent):
+                // The session claude keeps is the one it reports, which a resume must name
+                if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string sessionId && sessionId != project.SessionId)
+                {
+                    _logger.LogInformation("Project {ProjectId} runs session {SessionId} (asked for {Requested})",
+                        project.Status.Id, sessionId, project.SessionId);
+                    project.SessionId = sessionId;
+                    await SessionIdFile.WriteAsync(project.ProjectPath, sessionId);
+                }
+                // The session (re)started - project is running
+                stateChanged = status.State != ProjectState.Running || status.LastError != null;
+                status = status with { State = ProjectState.Running, LastError = null };
                 break;
         }
+
+        // Most lines (assistant text, tool use, echoed user messages) change nothing on disk
+        if (!stateChanged) return false;
 
         // Update duration
         var duration = DateTime.UtcNow - status.CreatedAt;
@@ -112,13 +111,39 @@ public class StatusUpdater : IStatusUpdater
         var outputCost = (status.Metrics.OutputTokens / 1_000_000m) * 15m;
         status = status with { Metrics = status.Metrics with { CostEstimate = inputCost + outputCost } };
 
-        if (stateChanged)
-        {
-            status = status with { UpdatedAt = DateTime.UtcNow };
-        }
-
-        project.Status = status;
+        project.Status = status with { UpdatedAt = DateTime.UtcNow };
         await SaveStatusAsync(project);
+        return true;
+    }
+
+    /// <summary>The metadata key a <c>system</c> event carries claude's session ID under.</summary>
+    public const string SessionIdKey = "session_id";
+
+    /// <summary><c>system/init</c>: claude (re)started its session. It writes it once it has read its first input.</summary>
+    public static bool IsSessionStart(OutputEvent outputEvent) =>
+        outputEvent.Type == OutputEventType.System && Subtype(outputEvent) == "init";
+
+    private static string? Subtype(OutputEvent outputEvent) =>
+        outputEvent.Metadata?.GetValueOrDefault("subtype") as string;
+
+    /// <summary><c>is_error</c>, or for a CLI that omits it, a subtype other than <c>success</c>.</summary>
+    private static bool IsErrorResult(OutputEvent outputEvent) =>
+        outputEvent.Metadata?.GetValueOrDefault("is_error") is bool isError
+            ? isError
+            : Subtype(outputEvent) is { } subtype && subtype != "success";
+
+    /// <summary>Takes the token counts from a result's metadata.</summary>
+    private static ProjectStatus WithTokenMetrics(ProjectStatus status, OutputEvent outputEvent)
+    {
+        if (outputEvent.Metadata == null) return status;
+
+        if (outputEvent.Metadata.TryGetValue("input_tokens", out var inputTokens) && long.TryParse(inputTokens?.ToString(), out var input))
+            status = status with { Metrics = status.Metrics with { InputTokens = input } };
+
+        if (outputEvent.Metadata.TryGetValue("output_tokens", out var outputTokens) && long.TryParse(outputTokens?.ToString(), out var output))
+            status = status with { Metrics = status.Metrics with { OutputTokens = output } };
+
+        return status;
     }
 
     public async Task UpdateGitStatusAsync(ProjectInfo project)

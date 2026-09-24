@@ -3,30 +3,12 @@ using GodMode.Server.Models;
 namespace GodMode.Server.Services;
 
 /// <summary>
-/// Callback invoked when Claude process produces output.
-/// </summary>
-public delegate Task OutputReceivedHandler(ProjectInfo project, string jsonLine);
-
-/// <summary>
-/// Callback invoked when a Claude process exits.
-/// </summary>
-public delegate Task ProcessExitedHandler(ProjectInfo project, int exitCode);
-
-/// <summary>
-/// Interface for managing Claude Code processes.
+/// Interface for managing Claude Code processes. A process's stdout goes to its project's
+/// <see cref="ProjectProcess.Output"/> pipeline, and its exit follows as the last item
+/// (<see cref="PipelineItem.Exited"/>). The manager keeps <see cref="ProjectProcess.ProcessId"/>.
 /// </summary>
 public interface IClaudeProcessManager
 {
-    /// <summary>
-    /// Event raised when a Claude process produces output.
-    /// </summary>
-    event OutputReceivedHandler? OnOutputReceived;
-
-    /// <summary>
-    /// Event raised when a Claude process exits (normally or abnormally).
-    /// </summary>
-    event ProcessExitedHandler? OnProcessExited;
-
     /// <summary>
     /// Starts a new Claude process with an initial prompt and new session ID.
     /// </summary>
@@ -56,6 +38,8 @@ public interface IClaudeProcessManager
         string[]? extraArgs = null);
 
     Task SendInputAsync(ProjectInfo project, string input);
+
+    /// <summary>Kills the process tree; returns once its exit is on the pipeline, after all its output.</summary>
     Task StopProcessAsync(ProjectInfo project);
     bool IsProcessRunning(int processId);
 }

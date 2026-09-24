@@ -1,0 +1,23 @@
+/* ── Permission card (builds on the question prompt's banner and text) ── */
+.permission-summary {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.permission-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 16px 12px;
+}
+
+.permission-deny {
+  color: var(--error);
+  border-color: rgba(248,113,113,0.3);
+}
+
+.permission-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}

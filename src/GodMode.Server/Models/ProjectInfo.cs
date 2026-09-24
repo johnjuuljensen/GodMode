@@ -42,18 +42,10 @@ public class ProjectInfo
     /// </summary>
     public string? CustomStatus { get; set; }
 
-    public int ProcessId { get; set; }
-    public CancellationTokenSource? ProcessCancellation { get; set; }
+    /// <summary>The process, its output pipeline and the locks that order changes to <see cref="Status"/>.</summary>
+    public ProjectProcess Process { get; } = new();
 
     public HashSet<string> SubscribedConnections { get; } = new();
-
-    /// <summary>
-    /// The most recent assistant text content block seen on the stream, used by
-    /// the deterministic question detector to decide (on <c>result</c>) whether
-    /// the turn ended with a question. Reset when a new turn starts.
-    /// In-memory only; not persisted.
-    /// </summary>
-    public string? LastAssistantText { get; set; }
 }
 
 /// <summary>MCP bridge request to submit a project result.</summary>

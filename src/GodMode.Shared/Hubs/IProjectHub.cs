@@ -53,9 +53,52 @@ public interface IProjectHub
     Task ResumeProject(string projectId);
 
     /// <summary>
-    /// Subscribes to output events from a project.
+    /// Answers the project's <see cref="ProjectStatus.PendingPermission"/>: the tool call runs, or
+    /// claude is told it was denied. Fails when the project has no pending request with that id
+    /// (it was answered already, or claude stopped waiting).
     /// </summary>
-    Task SubscribeProject(string projectId, long outputOffset);
+    Task RespondToPermission(string projectId, string requestId, PermissionDecision decision);
+
+    /// <summary>
+    /// Answers the project's <see cref="ProjectStatus.PendingQuestion"/>. <paramref name="answers"/>
+    /// maps each <see cref="QuestionItem.Question"/> to the chosen label (labels joined with ", " for
+    /// a multi-select) or to the user's own text. Fails as <see cref="RespondToPermission"/> does.
+    /// </summary>
+    Task AnswerQuestion(string projectId, string requestId, Dictionary<string, string> answers);
+
+    /// <summary>
+    /// Every project on this server that needs the user, oldest <see cref="AttentionItem.Since"/>
+    /// first, one item per project. <see cref="IProjectHubClient.AttentionChanged"/> pushes the
+    /// same list whenever it changes.
+    /// </summary>
+    Task<AttentionItem[]> GetAttention();
+
+    /// <summary>
+    /// The user has seen the project's last result: it is no longer <see cref="Enums.AttentionKind.Finished"/>.
+    /// Persisted, so it holds after a server restart. Other kinds are unaffected.
+    /// </summary>
+    Task MarkSeen(string projectId);
+
+    /// <summary>
+    /// Answers the project, whatever it is waiting on and whether or not its claude is running.
+    /// With claude running this is <see cref="SendInput"/>: a pending permission request is denied
+    /// with <paramref name="text"/> as the reason, a pending question with a single question is
+    /// answered with it, and otherwise it is a new user turn. With claude not running the project is
+    /// resumed with its session (as <see cref="ResumeProject"/>), sent <paramref name="text"/>, and
+    /// the call returns once claude has reported its session started (<c>system/init</c>). It fails,
+    /// saying why, when claude exits before that (the project is then Error, with its
+    /// <see cref="ProjectStatus.LastError"/>) or does not report it within the server's timeout.
+    /// </summary>
+    Task ReplyAndResume(string projectId, string text);
+
+    /// <summary>
+    /// Subscribes to a project's output. The server replays output.jsonl from fromOffset in
+    /// <see cref="IProjectHubClient.OutputBatch"/> messages, sends
+    /// <see cref="IProjectHubClient.OutputReplayComplete"/>, and only then live lines, so each line
+    /// arrives once and in order. fromOffset is the offset of the last line the client has (0 for
+    /// everything; an offset inside a line snaps forward to the next line), or -N for the last N turns.
+    /// </summary>
+    Task SubscribeProject(string projectId, long fromOffset);
 
     /// <summary>
     /// Unsubscribes from output events from a project.

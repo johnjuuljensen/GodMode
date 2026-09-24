@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.Internal;
 using System.Text.Json;
 using GodMode.Server.Models;
 using GodMode.Server.Services;
@@ -16,6 +18,9 @@ namespace GodMode.Server.Tests;
 /// </summary>
 public class ProjectResumeBridgeTests
 {
+    /// <summary>proj1 in the legacy <c>ProjectRoots:work</c> root, which is the Default profile's.</summary>
+    private const string ProjectId = "Default/work/proj1";
+
     [Fact]
     public async Task ResumeAfterRestart_LaunchesTheBridgeWithATokenTheServerAccepts()
     {
@@ -32,14 +37,14 @@ public class ProjectResumeBridgeTests
             var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
 
             await projects.RecoverProjectsAsync();
-            await projects.ResumeProjectAsync("proj1");
+            await projects.ResumeProjectAsync(ProjectId);
 
             var launch = Assert.Single(launcher.Launches);
             Assert.NotNull(launch.Env);
-            Assert.Equal("proj1", launch.Env!["GODMODE_PROJECT_ID"]);
-            Assert.StartsWith("http://localhost:", launch.Env["GODMODE_SERVER_URL"]);
+            Assert.Equal(ProjectId, launch.Env!["GODMODE_PROJECT_ID"]);
+            Assert.Equal(BridgeUrl.Default, launch.Env["GODMODE_SERVER_URL"]);
             var token = launch.Env["GODMODE_PROJECT_TOKEN"];
-            Assert.NotNull(projects.ValidateProjectToken("proj1", token));
+            Assert.NotNull(projects.ValidateProjectToken(ProjectId, token));
 
             Assert.Contains("godmode-bridge", McpConfigOf(launch.Args));
         }
@@ -63,16 +68,16 @@ public class ProjectResumeBridgeTests
             var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
 
             await projects.RecoverProjectsAsync();
-            await projects.ResumeProjectAsync("proj1");
+            await projects.ResumeProjectAsync(ProjectId);
             launcher.Running = false; // the first process exits
-            await projects.ResumeProjectAsync("proj1");
+            await projects.ResumeProjectAsync(ProjectId);
 
             Assert.Equal(2, launcher.Launches.Count);
             var first = launcher.Launches[0].Env!["GODMODE_PROJECT_TOKEN"];
             var second = launcher.Launches[1].Env!["GODMODE_PROJECT_TOKEN"];
             Assert.NotEqual(first, second);
-            Assert.Null(projects.ValidateProjectToken("proj1", first));
-            Assert.NotNull(projects.ValidateProjectToken("proj1", second));
+            Assert.Null(projects.ValidateProjectToken(ProjectId, first));
+            Assert.NotNull(projects.ValidateProjectToken(ProjectId, second));
         }
         finally
         {
@@ -85,7 +90,7 @@ public class ProjectResumeBridgeTests
         Assert.NotNull(args);
         var index = Array.IndexOf(args!, "--mcp-config");
         Assert.True(index >= 0 && index + 1 < args!.Length, $"no --mcp-config in: {string.Join(' ', args!)}");
-        // --mcp-config takes a file path; the server writes the JSON to a temp file
+        // --mcp-config takes a file path; the server writes the JSON to .godmode/mcp-config.json
         return File.ReadAllText(args[index + 1]);
     }
 
@@ -115,9 +120,11 @@ public class ProjectResumeBridgeTests
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton<IClaudeProcessManager, RecordingProcessManager>();
         services.AddSingleton<IStatusUpdater, StatusUpdater>();
+        services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
         services.AddSingleton<ProfileFileManager>();
+        services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();
     }
@@ -126,9 +133,6 @@ public class ProjectResumeBridgeTests
     {
         public List<(Dictionary<string, string>? Env, string[]? Args)> Launches { get; } = [];
         public bool Running { get; set; }
-
-        public event OutputReceivedHandler? OnOutputReceived { add { } remove { } }
-        public event ProcessExitedHandler? OnProcessExited { add { } remove { } }
 
         public Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
             Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null) => Record(extraEnvironment, extraArgs);

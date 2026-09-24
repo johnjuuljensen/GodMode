@@ -6,15 +6,28 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, OutputLine, PermissionDecision, AttentionItem } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
+/** A line of output, parsed, with the byte offset in output.jsonl just after it. */
+export interface OutputMessage {
+  offset: number;
+  message: ClaudeMessage;
+}
+
 export interface HubCallbacks {
-  onOutputReceived?: (projectId: string, message: ClaudeMessage) => void;
+  /** A live line, after the subscription's replay is complete. */
+  onOutputReceived?: (projectId: string, line: OutputMessage) => void;
+  /** Replayed lines, covering output.jsonl from fromOffset to the last line's offset. */
+  onOutputBatch?: (projectId: string, fromOffset: number, lines: OutputMessage[]) => void;
+  /** The replay is done at offset; live lines follow. */
+  onOutputReplayComplete?: (projectId: string, offset: number) => void;
   onStatusChanged?: (projectId: string, status: ProjectStatus) => void;
+  /** The projects needing the user changed; items is the server's whole list, oldest first. */
+  onAttentionChanged?: (items: AttentionItem[]) => void;
   onProjectCreated?: (status: ProjectStatus) => void;
   onCreationProgress?: (projectId: string, message: string) => void;
   onProjectDeleted?: (projectId: string) => void;
@@ -59,13 +72,25 @@ export class GodModeHub {
       .build();
 
     // Register server→client callbacks (IProjectHubClient)
-    this.connection.on('OutputReceived', (projectId: string, rawJson: string) => {
-      const message = parseClaudeMessage(rawJson);
-      this.callbacks.onOutputReceived?.(projectId, message);
+    this.connection.on('OutputReceived', (projectId: string, offset: number, rawJson: string) => {
+      this.callbacks.onOutputReceived?.(projectId, { offset, message: parseClaudeMessage(rawJson) });
+    });
+
+    this.connection.on('OutputBatch', (projectId: string, fromOffset: number, lines: OutputLine[]) => {
+      this.callbacks.onOutputBatch?.(projectId, fromOffset,
+        lines.map(l => ({ offset: l.Offset, message: parseClaudeMessage(l.RawJson) })));
+    });
+
+    this.connection.on('OutputReplayComplete', (projectId: string, offset: number) => {
+      this.callbacks.onOutputReplayComplete?.(projectId, offset);
     });
 
     this.connection.on('StatusChanged', (projectId: string, status: ProjectStatus) => {
       this.callbacks.onStatusChanged?.(projectId, status);
+    });
+
+    this.connection.on('AttentionChanged', (items: AttentionItem[]) => {
+      this.callbacks.onAttentionChanged?.(items);
     });
 
     this.connection.on('ProjectCreated', (status: ProjectStatus) => {
@@ -140,6 +165,35 @@ export class GodModeHub {
     await this.connection!.invoke('SendInput', projectId, input);
   }
 
+  /** Answers the project's PendingPermission: the tool call runs, or claude is told it was denied. */
+  async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision): Promise<void> {
+    await this.connection!.invoke('RespondToPermission', projectId, requestId, decision);
+  }
+
+  /** Answers the project's PendingQuestion: each question's text to the chosen label or the user's own text. */
+  async answerQuestion(projectId: string, requestId: string, answers: Record<string, string>): Promise<void> {
+    await this.connection!.invoke('AnswerQuestion', projectId, requestId, answers);
+  }
+
+  /** Every project on this server that needs the user, oldest first. */
+  async getAttention(): Promise<AttentionItem[]> {
+    return await this.connection!.invoke('GetAttention');
+  }
+
+  /** The user has seen the project's last result: it is no longer 'Finished'. */
+  async markSeen(projectId: string): Promise<void> {
+    await this.connection!.invoke('MarkSeen', projectId);
+  }
+
+  /**
+   * Answers the project whether claude runs or not: input to a running one (denying a pending
+   * permission with it, or answering a single pending question), else a resume and then the input.
+   * Resolves once a resumed claude has started its session; rejects if it fails to.
+   */
+  async replyAndResume(projectId: string, text: string): Promise<void> {
+    await this.connection!.invoke('ReplyAndResume', projectId, text);
+  }
+
   async stopProject(projectId: string): Promise<void> {
     await this.connection!.invoke('StopProject', projectId);
   }
@@ -148,8 +202,12 @@ export class GodModeHub {
     await this.connection!.invoke('ResumeProject', projectId);
   }
 
-  async subscribeProject(projectId: string, outputOffset: number): Promise<void> {
-    await this.connection!.invoke('SubscribeProject', projectId, outputOffset);
+  /**
+   * Replays the project's output from fromOffset (the offset of the last line held, 0 for all, or
+   * -N for the last N turns), then streams it live. Resolves once the replay is complete.
+   */
+  async subscribeProject(projectId: string, fromOffset: number): Promise<void> {
+    await this.connection!.invoke('SubscribeProject', projectId, fromOffset);
   }
 
   async unsubscribeProject(projectId: string): Promise<void> {

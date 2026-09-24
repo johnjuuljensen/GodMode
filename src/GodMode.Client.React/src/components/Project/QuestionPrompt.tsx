@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import type { QuestionOptionData } from '../../signalr/types';
+import type { QuestionOption } from '../../signalr/types';
 import './QuestionPrompt.css';
 
 interface Props {
   text: string | null;
   header: string | null;
-  options: QuestionOptionData[];
+  options: QuestionOption[];
   onSelectOption: (label: string) => void;
   onDismiss: () => void;
 }
@@ -32,7 +32,7 @@ export function QuestionPrompt({ text, header, options, onSelectOption, onDismis
         break;
       case 'Enter':
         e.preventDefault();
-        onSelectOption(options[activeIndex].label);
+        onSelectOption(options[activeIndex].Label);
         break;
       case 'Escape':
         e.preventDefault();
@@ -44,7 +44,7 @@ export function QuestionPrompt({ text, header, options, onSelectOption, onDismis
           const idx = parseInt(e.key) - 1;
           if (idx < options.length) {
             e.preventDefault();
-            onSelectOption(options[idx].label);
+            onSelectOption(options[idx].Label);
           }
         }
         break;
@@ -76,14 +76,14 @@ export function QuestionPrompt({ text, header, options, onSelectOption, onDismis
             <button
               key={i}
               className={`question-option ${i === activeIndex ? 'question-option-active' : ''}`}
-              onClick={() => onSelectOption(opt.label)}
+              onClick={() => onSelectOption(opt.Label)}
               onMouseEnter={() => setActiveIndex(i)}
             >
               <span className="question-option-bar" />
               <span className="question-option-num">{i + 1}</span>
-              <span className="question-option-label">{opt.label}</span>
-              {opt.description && (
-                <span className="question-option-desc">{opt.description}</span>
+              <span className="question-option-label">{opt.Label}</span>
+              {opt.Description && (
+                <span className="question-option-desc">{opt.Description}</span>
               )}
               {i === activeIndex && (
                 <span className="question-option-hint">Enter</span>

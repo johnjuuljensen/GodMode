@@ -39,6 +39,24 @@ public interface IProjectManager
     Task SendInputAsync(string projectId, string input);
 
     /// <summary>
+    /// Answers the project whether its claude runs or not (hub ReplyAndResume): input to a running
+    /// one, else a resume, the input, and a wait for claude to report its session started.
+    /// </summary>
+    Task ReplyAndResumeAsync(string projectId, string text);
+
+    /// <summary>Every project that needs the user, oldest first (hub GetAttention).</summary>
+    AttentionItem[] GetAttention();
+
+    /// <summary>The user has seen the project's last result (hub MarkSeen).</summary>
+    Task MarkSeenAsync(string projectId);
+
+    /// <summary>Answers the project's pending permission prompt <paramref name="requestId"/> (hub RespondToPermission).</summary>
+    Task RespondToPermissionAsync(string projectId, string requestId, PermissionDecision decision);
+
+    /// <summary>Answers the project's pending question <paramref name="requestId"/> (hub AnswerQuestion).</summary>
+    Task AnswerQuestionAsync(string projectId, string requestId, IReadOnlyDictionary<string, string> answers);
+
+    /// <summary>
     /// Stops a running project.
     /// </summary>
     Task StopProjectAsync(string projectId);
@@ -118,4 +136,10 @@ public interface IProjectManager
     Task StoreProjectResultAsync(string projectId, SubmitResultRequest resultRequest);
     Task UpdateCustomStatusAsync(string projectId, string message);
     Task RequestHumanReviewAsync(string projectId, RequestReviewRequest reviewRequest);
+
+    /// <summary>
+    /// The bridge's permission_prompt: waits until the user answers, and returns what claude gets.
+    /// Canceled by <paramref name="aborted"/> when the bridge's call goes away.
+    /// </summary>
+    Task<PermissionPromptResult> RequestPermissionAsync(string projectId, PermissionPromptRequest request, CancellationToken aborted);
 }

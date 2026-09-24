@@ -86,15 +86,10 @@ public sealed class ProjectFolder : IDisposable
         if (string.IsNullOrWhiteSpace(rootPath))
             throw new ArgumentException("Root path cannot be empty.", nameof(rootPath));
 
-        if (string.IsNullOrWhiteSpace(projectId))
-            throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
+        ValidateFolderName(projectId, nameof(projectId));
 
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Project name cannot be empty.", nameof(name));
-
-        // Validate project ID (no invalid path characters)
-        if (projectId.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            throw new ArgumentException("Project ID contains invalid characters.", nameof(projectId));
 
         var projectPath = Path.Combine(rootPath, projectId);
 
@@ -111,11 +106,30 @@ public sealed class ProjectFolder : IDisposable
     /// </summary>
     public static ProjectFolder Reuse(string rootPath, string projectId, string name)
     {
+        ValidateFolderName(projectId, nameof(projectId));
         var projectPath = Path.Combine(rootPath, projectId);
         if (!Directory.Exists(projectPath))
             throw new DirectoryNotFoundException($"Project folder not found: {projectPath}");
 
         return InitializeProjectFolder(projectPath, projectId, name);
+    }
+
+    /// <summary>
+    /// Throws unless <paramref name="folderName"/> names a folder of its own inside the root: not
+    /// empty, no path separators or other invalid characters, and not made of dots and spaces only.
+    /// <c>.</c> and <c>..</c> are the root and its parent, and Windows strips trailing dots and
+    /// spaces, so <c>...</c> is the root too; a delete of such a project deletes that recursively.
+    /// </summary>
+    public static void ValidateFolderName(string? folderName, string paramName = "folderName")
+    {
+        if (string.IsNullOrWhiteSpace(folderName))
+            throw new ArgumentException("Project folder name cannot be empty.", paramName);
+
+        if (folderName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || folderName.IndexOfAny(['/', '\\']) >= 0)
+            throw new ArgumentException($"Project folder name '{folderName}' contains invalid characters.", paramName);
+
+        if (folderName.All(c => c is '.' or ' '))
+            throw new ArgumentException($"'{folderName}' is not a valid project folder name.", paramName);
     }
 
     private static ProjectFolder InitializeProjectFolder(string projectPath, string projectId, string name)
@@ -250,7 +264,7 @@ public sealed class ProjectFolder : IDisposable
         try
         {
             var json = JsonSerializer.Serialize(status, ProjectJsonContext.Default.ProjectStatus);
-            await File.WriteAllTextAsync(StatusFilePath, json, Encoding.UTF8, cancellationToken);
+            await AtomicFile.WriteAllTextAsync(StatusFilePath, json, Encoding.UTF8, cancellationToken);
         }
         finally
         {
@@ -272,7 +286,7 @@ public sealed class ProjectFolder : IDisposable
         try
         {
             var json = JsonSerializer.Serialize(status, ProjectJsonContext.Default.ProjectStatus);
-            File.WriteAllText(StatusFilePath, json, Encoding.UTF8);
+            AtomicFile.WriteAllText(StatusFilePath, json, Encoding.UTF8);
         }
         finally
         {

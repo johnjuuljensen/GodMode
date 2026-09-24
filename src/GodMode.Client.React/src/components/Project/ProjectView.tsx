@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } from 'react';
-import { useAppStore } from '../../store';
+import { useAppStore, transcriptKey } from '../../store';
 import { ChatMessage } from './ChatMessage';
 import { QuestionPrompt } from './QuestionPrompt';
+import { PermissionCard } from './PermissionCard';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
@@ -14,36 +15,35 @@ interface Props {
 export function ProjectView({ serverId, projectId }: Props) {
   const conn = useAppStore(s => s.serverConnections.find(c => c.serverInfo.Id === serverId));
   const outputMessages = useAppStore(s => s.outputMessages);
-  const clearOutput = useAppStore(s => s.clearOutput);
   const question = useAppStore(s => s.question);
   const dismissQuestion = useAppStore(s => s.dismissQuestion);
   const markInputSent = useAppStore(s => s.markInputSent);
+  const respondToPermission = useAppStore(s => s.respondToPermission);
+  const answerQuestion = useAppStore(s => s.answerQuestion);
+  const replyAndResume = useAppStore(s => s.replyAndResume);
   const [inputText, setInputText] = useState('');
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [phase, setPhase] = useState<'loading' | 'ready'>('loading');
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Loading until the server says the replay is complete, unless a transcript is already held
+  const transcriptPhase = useAppStore(s => s.transcripts[transcriptKey(serverId, projectId)]?.phase);
+  const phase: 'loading' | 'ready' = transcriptPhase !== 'live' && outputMessages.length === 0 ? 'loading' : 'ready';
+  const subscribeOutput = useAppStore(s => s.subscribeOutput);
+  const unsubscribeOutput = useAppStore(s => s.unsubscribeOutput);
 
   const hub = conn?.hub;
   const project = conn?.projects.find(p => p.Id === projectId);
 
   useEffect(() => {
     if (!hub || conn?.connectionState !== 'connected') return;
-    clearOutput();
-    setPhase('loading');
-
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    settleTimerRef.current = setTimeout(() => setPhase('ready'), 800);
-
-    hub.subscribeProject(projectId, 0).catch(console.error);
+    // Resumes from the transcript held, so reopening only adds what is new
+    subscribeOutput(serverId, projectId).catch(console.error);
     return () => {
-      hub.unsubscribeProject(projectId).catch(console.error);
-      if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+      unsubscribeOutput(serverId, projectId).catch(console.error);
     };
-  }, [hub, projectId, conn?.connectionState, clearOutput]);
+  }, [hub, serverId, projectId, conn?.connectionState, subscribeOutput, unsubscribeOutput]);
 
   useEffect(() => {
     if (project) setProjectName(project.Name);
@@ -71,23 +71,51 @@ export function ProjectView({ serverId, projectId }: Props) {
   );
 
   const state = project?.State ?? 'Idle';
-  const canSendInput = state === 'WaitingInput' || state === 'Running' || state === 'Stopped' || state === 'Idle';
+  const canSendInput = state === 'WaitingInput' || state === 'WaitingPermission' || state === 'Running' || state === 'Stopped' || state === 'Idle';
   const canResume = state === 'Stopped' || state === 'Idle';
-  const canStop = state === 'Running' || state === 'WaitingInput';
+  const canStop = state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission';
+
+  // What claude is blocked on: a tool call to allow or deny, or AskUserQuestion's questions, asked one at a time
+  const pendingPermission = project?.PendingPermission ?? null;
+  const pendingQuestion = project?.PendingQuestion ?? null;
+  const [answers, setAnswers] = useState<{ requestId: string; byQuestion: Record<string, string> } | null>(null);
+  const answered = useMemo(
+    () => (answers && answers.requestId === pendingQuestion?.RequestId ? answers.byQuestion : {}),
+    [answers, pendingQuestion?.RequestId],
+  );
+  const openQuestion = pendingQuestion?.Questions.find(q => answered[q.Question] === undefined) ?? null;
+
+  const handlePermission = useCallback(async (allow: boolean) => {
+    if (!pendingPermission) return;
+    try {
+      await respondToPermission(serverId, projectId, pendingPermission.RequestId, { Allow: allow });
+    } catch (err) {
+      console.error('Failed to answer the permission request:', err);
+    }
+  }, [pendingPermission, respondToPermission, serverId, projectId]);
+
+  const handleQuestionAnswer = useCallback(async (label: string) => {
+    if (!pendingQuestion || !openQuestion) return;
+    const byQuestion = { ...answered, [openQuestion.Question]: label };
+    setAnswers({ requestId: pendingQuestion.RequestId, byQuestion });
+    if (pendingQuestion.Questions.some(q => byQuestion[q.Question] === undefined)) return;
+    try {
+      await answerQuestion(serverId, projectId, pendingQuestion.RequestId, byQuestion);
+    } catch (err) {
+      console.error('Failed to answer the question:', err);
+    }
+  }, [pendingQuestion, openQuestion, answered, answerQuestion, serverId, projectId]);
 
   const sendText = useCallback(async (text: string) => {
-    if (!text.trim() || !hub) return;
+    if (!text.trim()) return;
     markInputSent();
     try {
-      if (state === 'Stopped' || state === 'Idle') {
-        await hub.resumeProject(projectId);
-        await new Promise(r => setTimeout(r, 500));
-      }
-      await hub.sendInput(projectId, text);
+      // The server resumes a stopped project and sends once claude runs
+      await replyAndResume(serverId, projectId, text);
     } catch (err) {
       console.error('Failed to send input:', err);
     }
-  }, [hub, projectId, state, markInputSent]);
+  }, [replyAndResume, serverId, projectId, markInputSent]);
 
   const handleSendInput = async () => {
     if (!inputText.trim()) return;
@@ -217,11 +245,21 @@ export function ProjectView({ serverId, projectId }: Props) {
         )}
       </div>
 
-      {question.isActive && (
+      {pendingPermission ? (
+        <PermissionCard permission={pendingPermission} onAnswer={handlePermission} />
+      ) : openQuestion ? (
+        <QuestionPrompt
+          text={openQuestion.Question}
+          header={openQuestion.Header ?? null}
+          options={openQuestion.Options}
+          onSelectOption={handleQuestionAnswer}
+          onDismiss={handleDismiss}
+        />
+      ) : question.isActive && (
         <QuestionPrompt
           text={question.text}
           header={question.header}
-          options={question.options}
+          options={[]}
           onSelectOption={handleOptionSelect}
           onDismiss={handleDismiss}
         />

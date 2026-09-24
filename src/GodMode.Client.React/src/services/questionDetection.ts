@@ -8,28 +8,28 @@
  * on final summaries, so we don't use them.
  *
  * Layers, in priority order:
- *   1. Structured AskUserQuestion tool_use (see parseMessage.ts:extractQuestionData)
- *   2. Last text block of an assistant message, trimmed, ends with '?'
- *   3. Server-side CurrentQuestion from ProjectStatus (authoritative, also based on rule 2)
+ *   1. Last text block of an assistant message, trimmed, ends with '?'
+ *   2. Server-side CurrentQuestion from ProjectStatus (authoritative, also based on rule 1)
+ *
+ * A structured AskUserQuestion is not detected here: claude asks it through GodMode's permission
+ * prompt tool, and the server puts it in ProjectStatus.PendingQuestion.
  */
-import type { ClaudeMessage, QuestionOptionData } from '../signalr/types';
+import type { ClaudeMessage } from '../signalr/types';
 
 export interface QuestionState {
   isActive: boolean;
   text: string | null;
-  options: QuestionOptionData[];
   header: string | null;
 }
 
 export const emptyQuestion: QuestionState = {
   isActive: false,
   text: null,
-  options: [],
   header: null,
 };
 
 /**
- * Detects a question from a newly received message (layers 1 & 2).
+ * Detects a question from a newly received message (layer 1).
  * Returns a QuestionState if a question is detected, or null to clear/ignore.
  */
 export function detectQuestionFromMessage(
@@ -41,19 +41,8 @@ export function detectQuestionFromMessage(
   // Don't re-detect if user dismissed this project's question
   if (isDismissed) return null;
 
-  // Layer 1: Structured AskUserQuestion
-  if (message.isQuestion && message.questionOptions.length > 0) {
-    return {
-      isActive: true,
-      text: message.questionText ?? null,
-      options: message.questionOptions,
-      header: message.questionHeader ?? null,
-    };
-  }
-
-  // Layer 2: Last text block of this assistant message ends with '?'.
-  // Free-form question — no options. Structured choices come only from
-  // AskUserQuestion (layer 1); we can't reliably tell a multiple-choice
+  // Layer 1: Last text block of this assistant message ends with '?'.
+  // Free-form question — no options: we can't reliably tell a multiple-choice
   // question from a narrative summary that happens to contain bullets.
   if (message.type === 'assistant') {
     const lastText = getLastTextBlock(message);
@@ -61,7 +50,6 @@ export function detectQuestionFromMessage(
       return {
         isActive: true,
         text: lastText,
-        options: [],
         header: null,
       };
     }
@@ -76,19 +64,16 @@ export function detectQuestionFromMessage(
 }
 
 /**
- * Detects a question from server-side project status (layer 3).
+ * Detects a question from server-side project status (layer 2).
  */
 export function detectQuestionFromStatus(
   state: string,
   currentQuestion: string | null | undefined,
   projectName: string,
-  existingQuestion: QuestionState,
+  _existingQuestion: QuestionState,
   lastInputSentAt: number,
   outputMessages: ClaudeMessage[],
 ): QuestionState | null {
-  // Don't override an active structured question
-  if (existingQuestion.isActive && existingQuestion.options.length > 0) return null;
-
   // Don't re-detect right after user sent input
   if (Date.now() - lastInputSentAt < 5000) return null;
 
@@ -106,7 +91,6 @@ export function detectQuestionFromStatus(
     return {
       isActive: true,
       text: questionText,
-      options: [],
       header: projectName,
     };
   }
@@ -145,11 +129,10 @@ export function endsWithQuestionMark(text: string): boolean {
 }
 
 /**
- * True iff this message should surface as a question (structured tool_use or
- * assistant text ending with '?'). Used where a single bool decision is enough.
+ * True iff this message should surface as a question (assistant text ending
+ * with '?'). Used where a single bool decision is enough.
  */
 export function isQuestionMessage(message: ClaudeMessage): boolean {
-  if (message.isQuestion && message.questionOptions.length > 0) return true;
   if (message.type !== 'assistant') return false;
   const lastText = getLastTextBlock(message);
   return lastText !== null && endsWithQuestionMark(lastText);

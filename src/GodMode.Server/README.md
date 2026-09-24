@@ -172,13 +172,13 @@ Supported JSON Schema types:
   "properties": {
     "name": { "type": "string", "title": "Project Name" },
     "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
-    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": "true" }
+    "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": false }
   },
   "required": ["name", "prompt"]
 }
 ```
 
-Some keys have special meaning: `name` and `prompt` are the project name and initial Claude prompt unless `nameTemplate`/`promptTemplate` override them, `skipPermissions` starts Claude with `--dangerously-skip-permissions`, and `model` overrides the action's model.
+Some keys have special meaning: `name` and `prompt` are the project name and initial Claude prompt unless `nameTemplate`/`promptTemplate` override them, `skipPermissions` starts Claude with `--dangerously-skip-permissions` (without it, a tool call that needs approval waits for the user: `WaitingPermission`), and `model` overrides the action's model.
 
 ### Scripts
 
@@ -196,7 +196,7 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 |----------|-------------|
 | `GODMODE_ROOT_PATH` | Root directory path |
 | `GODMODE_PROJECT_PATH` | Project directory path |
-| `GODMODE_PROJECT_ID` | Folder name / project ID |
+| `GODMODE_PROJECT_ID` | The project's folder name (not the project ID below; claude's own `GODMODE_PROJECT_ID`, for the MCP bridge, is the project ID) |
 | `GODMODE_PROJECT_NAME` | Display name |
 | `GODMODE_INPUT_*` | All form inputs (key in upper snake case, e.g. `GODMODE_INPUT_ISSUE_NUMBER`) |
 | `GODMODE_RESULT_FILE` | Create scripts only: a file the script can write `key=value` lines to (see below) |
@@ -212,7 +212,7 @@ Script stdout is streamed to the client as creation progress. Non-zero exit code
 Each project is stored in a folder under its root:
 
 ```
-{root}/{project-id}/
+{root}/{folder}/
 ├── .godmode/
 │   ├── status.json      # Current project state
 │   ├── settings.json    # Per-project settings (e.g. skip-permissions)
@@ -223,7 +223,11 @@ Each project is stored in a folder under its root:
 └── (project files)      # Working directory for Claude
 ```
 
-Archived projects move to `{root}/.archived/{project-id}/`.
+Archived projects move to `{root}/.archived/{folder}/`.
+
+**Project ID.** A project is identified by `{profile}/{root}/{folder}`: where its folder is. Two projects with the same name in different roots or profiles are separate projects, with their own process, output and SignalR group. Clients treat the ID as opaque and pass it back as they received it. The server derives it from the folder's location on every start and writes it to `status.json`, so a folder from before this format (its `Id` the bare folder name), or one whose root has moved to another profile, is recovered under its current ID. Nothing else in `.godmode` holds the ID.
+
+The folder name comes from the project's name: spaces become underscores and characters that are invalid in a file name are dropped. A name that leaves no folder of its own (empty, `.`, `..`, or dots only) is refused before anything is created or run. So is a create script's `project_path` at or above the root.
 
 ## Running the Server
 
@@ -243,7 +247,7 @@ cd publish
 ./GodMode.Server
 ```
 
-The machine also needs `claude` on the `PATH`, `pwsh` for root scripts, and Node for the MCP bridge (`npm ci && npm run build` in `src/GodMode.McpBridge`, or point `GODMODE_MCP_BRIDGE_PATH` at its `dist/index.js`).
+The machine also needs `claude` on the `PATH`, `pwsh` for root scripts, and Node to run the MCP bridge. The build and a publish put the bridge at `mcp-bridge/godmode-mcp-bridge.cjs` next to the server (`npm run build` in `src/GodMode.McpBridge` makes it, in `dist/`); `McpBridgePath` or `GODMODE_MCP_BRIDGE_PATH` points elsewhere. The server does not start without it.
 
 ## SignalR Hub API
 
@@ -253,14 +257,21 @@ Projects:
 - `Task<ProjectSummary[]> ListProjects()` — Get all projects
 - `Task<ProjectStatus> GetStatus(projectId)` — Get project status
 - `Task<ProjectStatus> CreateProject(profileName, projectRootName, actionName, inputs)` — Create a project with form inputs (`actionName` null = default action)
-- `Task SendInput(projectId, input)` — Send input to Claude
+- `Task SendInput(projectId, input)` — Send input to Claude (while a permission prompt or question waits, it answers that instead)
+- `Task RespondToPermission(projectId, requestId, decision)` — Allow or deny the project's `PendingPermission`
+- `Task AnswerQuestion(projectId, requestId, answers)` — Answer the project's `PendingQuestion` (question text → chosen label or free text)
 - `Task StopProject(projectId)` — Stop running project
 - `Task ResumeProject(projectId)` — Resume stopped project
-- `Task SubscribeProject(projectId, outputOffset)` — Subscribe to output events
+- `Task SubscribeProject(projectId, fromOffset)` — Replay `output.jsonl` from `fromOffset` (the byte offset after the last line the client has; 0 for all, `-N` for the last N turns) in `OutputBatch` messages, then `OutputReplayComplete`, then live `OutputReceived` lines, each line once and in order
 - `Task UnsubscribeProject(projectId)` — Unsubscribe from output
 - `Task DeleteProject(projectId, force)` — Run delete scripts and remove the project
 - `Task ArchiveProject(projectId)` / `Task UnarchiveProject(projectId)` — Move to and from `.archived/`
 - `Task<ProjectSummary[]> ListArchivedProjects()` — Get archived projects
+
+Attention:
+- `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Finished`), oldest first, with a short plain `Text`; the same after a restart
+- `Task MarkSeen(projectId)` — The last result is seen: no longer `Finished` (a reply does the same)
+- `Task ReplyAndResume(projectId, text)` — `SendInput` to a running claude; otherwise resume, send, and return once claude reports `system/init` (fails on exit or after `SessionStartTimeoutSeconds`, default 60)
 
 Roots and profiles:
 - `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas
@@ -272,8 +283,11 @@ Utility:
 
 ### Server → Client Events
 
-- `OutputReceived(projectId, rawJson)` — Raw Claude JSON output line
+- `OutputReceived(projectId, offset, rawJson)` — A live raw Claude JSON output line; `offset` is the byte offset in `output.jsonl` just after it
+- `OutputBatch(projectId, fromOffset, lines)` — Replayed `OutputLine`s (`Offset`, `RawJson`) covering `output.jsonl` from `fromOffset`; a replay from 0 when more was asked for means the client's transcript is not from this file
+- `OutputReplayComplete(projectId, offset)` — The subscription's replay is done at `offset`; live lines follow
 - `StatusChanged(projectId, status)` — Project status changed
+- `AttentionChanged(items)` — The whole `GetAttention` list, pushed only when it differs from the last one pushed
 - `ProjectCreated(status)` — New project created
 - `CreationProgress(projectId, message)` — Script progress during project creation
 - `ProjectDeleted(projectId)`, `ProjectArchived(projectId)`, `ProjectRestored(project)` — Project list changes
@@ -283,7 +297,7 @@ Utility:
 
 - `GET /health` — Anonymous liveness probe
 - `GET /servers`, `GET /events` — The same shape as the MAUI app's local proxy, so the React client works against either
-- `POST /api/internal/result`, `/status`, `/review` — Called by the MCP bridge with its per-project token
+- `POST /api/internal/result`, `/status`, `/review`, `/permission` — Called by the MCP bridge with its per-project token (`/permission` answers when the user does)
 
 ## Dependencies
 

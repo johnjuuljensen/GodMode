@@ -5,8 +5,10 @@
 
 // --- Enums (serialized as strings by JsonStringEnumConverter) ---
 
-export type ProjectState = 'Idle' | 'Running' | 'WaitingInput' | 'Error' | 'Stopped';
+export type ProjectState = 'Idle' | 'Running' | 'WaitingInput' | 'WaitingPermission' | 'Error' | 'Stopped';
 export type ServerState = 'Running' | 'Stopped' | 'Starting' | 'Stopping' | 'Unknown';
+/** What a project needs from the user, most urgent first (AttentionKind in GodMode.Shared). */
+export type AttentionKind = 'Permission' | 'Question' | 'Error' | 'Finished';
 
 // --- Models (PascalCase properties matching server serialization) ---
 
@@ -18,6 +20,10 @@ export interface ProjectSummary {
   CurrentQuestion?: string | null;
   RootName?: string | null;
   ProfileName?: string | null;
+  /** As ProjectStatus.PendingPermission. */
+  PendingPermission?: PendingPermission | null;
+  /** As ProjectStatus.PendingQuestion. */
+  PendingQuestion?: PendingQuestion | null;
 }
 
 export interface ProjectMetrics {
@@ -52,9 +58,93 @@ export interface ProjectStatus {
   Metrics: ProjectMetrics;
   Git?: GitStatus | null;
   Tests?: TestStatus | null;
+  /** The byte offset in output.jsonl after its last line. */
   OutputOffset: number;
   RootName?: string | null;
   ProfileName?: string | null;
+  /** Why the project is in Error: claude's last stderr lines before it exited, or an error result's text. */
+  LastError?: string | null;
+  /** The tool call waiting for the user to allow or deny it, while the project is WaitingPermission. */
+  PendingPermission?: PendingPermission | null;
+  /** The AskUserQuestion waiting for the user's answer, while the project is WaitingInput on it. */
+  PendingQuestion?: PendingQuestion | null;
+  /** The text of the last successful result: claude's own summary of its turn. */
+  LastResult?: string | null;
+  /** When LastResult came. */
+  LastResultAt?: string | null;
+  /** When CurrentQuestion was asked; only meaningful while it is set. */
+  QuestionAt?: string | null;
+  /** When the user last saw the result (MarkSeen, or a reply). A result after it is unseen. */
+  SeenAt?: string | null;
+}
+
+/**
+ * One project that needs the user, from GetAttention and AttentionChanged (AttentionItem in
+ * GodMode.Shared). Per server: key it by server and ProjectId (IDs contain '/').
+ */
+export interface AttentionItem {
+  ProjectId: string;
+  ProjectName: string;
+  /** The profile (account) the project belongs to. */
+  Profile?: string | null;
+  Root?: string | null;
+  Kind: AttentionKind;
+  /** When it started to need this; stable across server restarts. */
+  Since: string;
+  /** Plain text (no code blocks, about 500 characters at most): the question, permission summary, error or result. */
+  Text: string;
+  /** The tool call to allow or deny, when Kind is 'Permission'. */
+  Permission?: PendingPermission | null;
+  /** The AskUserQuestion with its options, when Kind is 'Question' and claude asked with the tool. */
+  Question?: PendingQuestion | null;
+}
+
+/** A tool call claude holds until the user answers it with RespondToPermission (PendingPermission in GodMode.Shared). */
+export interface PendingPermission {
+  RequestId: string;
+  ToolName: string;
+  /** The tool's input as claude sent it. Show Summary rather than parsing this. */
+  Input: unknown;
+  /** One line saying what the call does, e.g. "Bash: git push origin feature/12-x". */
+  Summary: string;
+  RequestedAt: string;
+}
+
+/** The answer to a PendingPermission (PermissionDecision in GodMode.Shared). */
+export interface PermissionDecision {
+  Allow: boolean;
+  /** Why it was denied; claude reads it. */
+  Message?: string | null;
+  /** The input to run the tool with instead. Only read when allowed. */
+  UpdatedInput?: unknown;
+}
+
+/** Questions claude asked with AskUserQuestion, answered with AnswerQuestion (PendingQuestion in GodMode.Shared). */
+export interface PendingQuestion {
+  RequestId: string;
+  Questions: QuestionItem[];
+  RequestedAt: string;
+}
+
+export interface QuestionItem {
+  /** The question; its answer is keyed by this text. */
+  Question: string;
+  Header?: string | null;
+  Options: QuestionOption[];
+  /** More than one option may be chosen; their labels are joined with ", ". */
+  MultiSelect: boolean;
+}
+
+export interface QuestionOption {
+  Label: string;
+  Description?: string | null;
+}
+
+/** One replayed line of a project's output (OutputLine in GodMode.Shared). */
+export interface OutputLine {
+  /** The byte offset in output.jsonl just after this line: subscribe from it to get only what follows. */
+  Offset: number;
+  RawJson: string;
 }
 
 export interface ProfileInfo {
@@ -87,11 +177,6 @@ export interface ServerInfo {
 
 // --- Claude output (parsed client-side from raw JSON, uses our own casing) ---
 
-export interface QuestionOptionData {
-  label: string;
-  description?: string | null;
-}
-
 export interface ClaudeContentItem {
   type: string;
   summary: string;
@@ -121,8 +206,4 @@ export interface ClaudeMessage {
   formattedJson: string;
   isToolOnly: boolean;
   textOnlyContentSummary: string;
-  isQuestion: boolean;
-  questionText?: string | null;
-  questionOptions: QuestionOptionData[];
-  questionHeader?: string | null;
 }

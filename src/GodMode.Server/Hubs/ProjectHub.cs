@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
+using GodMode.Server.Models;
 using GodMode.Server.Services;
 using Microsoft.AspNetCore.SignalR;
 
@@ -71,6 +72,66 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.SendInputAsync(projectId, input);
     }
 
+    public Task<AttentionItem[]> GetAttention()
+    {
+        _logger.LogInformation("Client {ConnectionId} requested the attention list", Context.ConnectionId);
+        return Task.FromResult(_projectManager.GetAttention());
+    }
+
+    public async Task MarkSeen(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} saw project {ProjectId}", Context.ConnectionId, projectId);
+        try
+        {
+            await _projectManager.MarkSeenAsync(projectId);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task ReplyAndResume(string projectId, string text)
+    {
+        _logger.LogInformation("Client {ConnectionId} replying to project {ProjectId}", Context.ConnectionId, projectId);
+        try
+        {
+            await _projectManager.ReplyAndResumeAsync(projectId, text);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or TimeoutException or LaunchConfigException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task RespondToPermission(string projectId, string requestId, PermissionDecision decision)
+    {
+        _logger.LogInformation("Client {ConnectionId} answering permission request {RequestId} of project {ProjectId}",
+            Context.ConnectionId, requestId, projectId);
+        try
+        {
+            await _projectManager.RespondToPermissionAsync(projectId, requestId, decision);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task AnswerQuestion(string projectId, string requestId, Dictionary<string, string> answers)
+    {
+        _logger.LogInformation("Client {ConnectionId} answering question {RequestId} of project {ProjectId}",
+            Context.ConnectionId, requestId, projectId);
+        try
+        {
+            await _projectManager.AnswerQuestionAsync(projectId, requestId, answers);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or ArgumentException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
     public async Task StopProject(string projectId)
     {
         _logger.LogInformation("Client {ConnectionId} stopping project {ProjectId}",
@@ -85,13 +146,13 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.ResumeProjectAsync(projectId);
     }
 
-    public async Task SubscribeProject(string projectId, long outputOffset)
+    public async Task SubscribeProject(string projectId, long fromOffset)
     {
         _logger.LogInformation("Client {ConnectionId} subscribing to project {ProjectId} from offset {Offset}",
-            Context.ConnectionId, projectId, outputOffset);
+            Context.ConnectionId, projectId, fromOffset);
 
-        await Groups.AddToGroupAsync(Context.ConnectionId, $"project-{projectId}");
-        await _projectManager.SubscribeProjectAsync(projectId, outputOffset, Context.ConnectionId);
+        // Replays, then joins the project's group, in the order that loses and repeats nothing
+        await _projectManager.SubscribeProjectAsync(projectId, fromOffset, Context.ConnectionId);
     }
 
     public async Task UnsubscribeProject(string projectId)
@@ -99,7 +160,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} unsubscribing from project {ProjectId}",
             Context.ConnectionId, projectId);
 
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"project-{projectId}");
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, ProjectLifecycle.OutputGroup(projectId));
         await _projectManager.UnsubscribeProjectAsync(projectId, Context.ConnectionId);
     }
 

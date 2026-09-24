@@ -3,10 +3,10 @@
  * Matches Avalonia's data model: Profile → Root:Server → Projects.
  */
 import { create } from 'zustand';
-import { GodModeHub, type ConnectionState } from '../signalr/hub';
+import { GodModeHub, type ConnectionState, type OutputMessage } from '../signalr/hub';
 import type {
   ProjectSummary, ProjectRootInfo, ProfileInfo, ClaudeMessage,
-  ServerInfo, CreateActionInfo,
+  ServerInfo, CreateActionInfo, PermissionDecision, AttentionItem,
 } from '../signalr/types';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../services/hostApi';
@@ -55,6 +55,70 @@ export interface ProfileGroup {
   projectCount: number;
 }
 
+// ── Transcripts (a project's output, per server) ───────────────
+
+/**
+ * A project's output as this client holds it. `offset` is the byte offset in the server's
+ * output.jsonl after the last message held: subscribing from it gets only what follows.
+ * `phase`: 'replaying' from subscribe until the server's OutputReplayComplete, then 'live'; 'idle'
+ * once unsubscribed, when the transcript is kept to resume from.
+ */
+export interface Transcript {
+  messages: ClaudeMessage[];
+  offset: number;
+  phase: 'idle' | 'replaying' | 'live';
+}
+
+/** An attention item and the server it is from: attention is per server, merged here. */
+export interface ServerAttentionItem extends AttentionItem {
+  serverId: string;
+}
+
+/** Replaces one server's items in the merged list, keeping it oldest first. */
+function mergeAttention(all: ServerAttentionItem[], serverId: string, items: AttentionItem[]): ServerAttentionItem[] {
+  return [...all.filter(i => i.serverId !== serverId), ...items.map(i => ({ ...i, serverId }))]
+    .sort((a, b) => a.Since.localeCompare(b.Since)
+      || transcriptKey(a.serverId, a.ProjectId).localeCompare(transcriptKey(b.serverId, b.ProjectId)));
+}
+
+/** The key of a transcript. Project IDs contain '/', so a key is only ever built, never split. */
+export const transcriptKey = (serverId: string, projectId: string) => `${serverId}:${projectId}`;
+
+/** How many turns a tile asks for (tail mode: subscribe from -N). */
+export const TILE_TAIL_TURNS = 2;
+
+/**
+ * Appends the lines past the transcript's offset, so a line received twice is kept once. A batch
+ * from offset 0 is the whole file, so what was held is dropped first; a batch that starts past the
+ * offset would leave a gap, and is not applied.
+ */
+function appendLines(t: Transcript, lines: OutputMessage[], fromOffset?: number): { transcript: Transcript; added: ClaudeMessage[] } {
+  const base = fromOffset === 0 ? { ...t, messages: [], offset: 0 } : t;
+  if (fromOffset !== undefined && fromOffset > base.offset) return { transcript: t, added: [] };
+  const fresh = lines.filter(l => l.offset > base.offset);
+  if (fresh.length === 0) return { transcript: base, added: [] };
+  const added = fresh.map(l => l.message);
+  return { transcript: { ...base, messages: [...base.messages, ...added], offset: fresh[fresh.length - 1].offset }, added };
+}
+
+/**
+ * The question a held transcript is waiting on, as detection over a full replay would find it:
+ * the current turn's messages (those after the last user message), then the server's status.
+ * None when the project is not waiting or its question was dismissed.
+ */
+function heldQuestion(
+  messages: ClaudeMessage[], project: ProjectSummary | undefined, dismissed: boolean | undefined, lastInputSentAt: number,
+): QuestionState {
+  if (!project || dismissed || (project.State !== 'WaitingInput' && project.State !== 'Idle')) return emptyQuestion;
+  let turnStart = messages.length;
+  while (turnStart > 0 && messages[turnStart - 1].type !== 'user') turnStart--;
+  let question = emptyQuestion;
+  for (const message of messages.slice(turnStart)) {
+    question = detectQuestionFromMessage(message, question, lastInputSentAt, dismissed) ?? question;
+  }
+  return detectQuestionFromStatus(project.State, project.CurrentQuestion, project.Name, question, lastInputSentAt, messages) ?? question;
+}
+
 // ── Active page (replaces modal booleans) ─────────────────────
 export type ActivePage =
   | { type: 'profileSettings' }
@@ -100,7 +164,14 @@ interface AppState {
   selectProject: (serverId: string, projectId: string) => void;
   clearSelection: () => void;
 
-  // Project output
+  // Project output: transcripts by transcriptKey(serverId, projectId); outputMessages is the selected one's
+  transcripts: Record<string, Transcript>;
+  /** Subscribes to a project's output, resuming from the offset of the transcript held (0 if none). Resolves after the replay. */
+  subscribeOutput: (serverId: string, projectId: string) => Promise<void>;
+  /** Stops a project's live output. The transcript is kept, to resume from. */
+  unsubscribeOutput: (serverId: string, projectId: string) => Promise<void>;
+  /** Subscribes a tile to the last `turns` turns of a project's output (tileMessages, not a transcript). */
+  subscribeTail: (serverId: string, projectId: string, turns: number) => Promise<void>;
   outputMessages: ClaudeMessage[];
   appendOutput: (projectId: string, message: ClaudeMessage) => void;
   clearOutput: () => void;
@@ -111,6 +182,16 @@ interface AppState {
   setQuestion: (q: QuestionState) => void;
   dismissQuestion: () => void;
   markInputSent: () => void;
+
+  // Permission prompts and AskUserQuestion (ProjectSummary.PendingPermission / PendingQuestion)
+  respondToPermission: (serverId: string, projectId: string, requestId: string, decision: PermissionDecision) => Promise<void>;
+  answerQuestion: (serverId: string, projectId: string, requestId: string, answers: Record<string, string>) => Promise<void>;
+
+  // What needs the user, across every connected server, oldest first. Key an item by transcriptKey(serverId, ProjectId)
+  attention: ServerAttentionItem[];
+  markSeen: (serverId: string, projectId: string) => Promise<void>;
+  /** Answers a project whether its claude runs or not (resuming it if needed). */
+  replyAndResume: (serverId: string, projectId: string, text: string) => Promise<void>;
 
   // Per-project question tracking
   projectQuestions: Record<string, boolean>;
@@ -277,7 +358,7 @@ function buildByRecent(
   return { profileGroups, inactiveServers, profileFilterOptions };
 }
 
-const STATUS_ORDER: Record<string, number> = { Running: 0, WaitingInput: 1, Idle: 2, Error: 3, Stopped: 4 };
+const STATUS_ORDER: Record<string, number> = { Running: 0, WaitingPermission: 1, WaitingInput: 1, Idle: 2, Error: 3, Stopped: 4 };
 
 function buildByStatus(
   allRoots: RootEntry[], _multiServer: boolean,
@@ -310,7 +391,8 @@ function computeTotalWaiting(connections: ServerConnection[], pq: Record<string,
   let total = 0;
   for (const conn of connections) {
     for (const p of conn.projects) {
-      if (!dp[p.Id] && (p.State === 'WaitingInput' || pq[p.Id])) total++;
+      // A permission prompt cannot be dismissed: claude waits until it is answered
+      if (p.State === 'WaitingPermission' || (!dp[p.Id] && (p.State === 'WaitingInput' || pq[p.Id]))) total++;
     }
   }
   return total;
@@ -458,14 +540,63 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     };
 
+    /** Output lines for a project: a replayed batch (with its fromOffset) or one live line. */
+    const receiveOutput = (projectId: string, lines: OutputMessage[], fromOffset?: number) => {
+      const key = transcriptKey(serverId, projectId);
+      const replayed = fromOffset !== undefined;
+      set(state => {
+        const updates: Partial<AppState> = {};
+        const messages = lines.map(l => l.message);
+
+        if (!state.dismissedProjects[projectId] && messages.some(isQuestionMessage)) {
+          const pq = { ...state.projectQuestions, [projectId]: true };
+          updates.projectQuestions = pq;
+          updates.totalWaitingCount = computeTotalWaiting(state.serverConnections, pq, state.dismissedProjects);
+        }
+
+        const held = state.transcripts[key];
+        if (held && (replayed ? held.phase !== 'idle' : held.phase === 'live')) {
+          const { transcript, added } = appendLines(held, lines, fromOffset);
+          updates.transcripts = { ...state.transcripts, [key]: transcript };
+          const sel = state.selectedProject;
+          if (sel?.serverId === serverId && sel.projectId === projectId) {
+            updates.outputMessages = transcript.messages;
+            let question = state.question;
+            for (const message of added) {
+              question = detectQuestionFromMessage(message, question, state.lastInputSentAt, state.dismissedProjects[projectId]) ?? question;
+            }
+            if (question !== state.question) updates.question = question;
+          }
+        }
+
+        // A tile takes its replay while loading, then live lines
+        if (state.isTileView && replayed === !!state.tileLoading[projectId]) {
+          updates.tileMessages = { ...state.tileMessages, [projectId]: [...(state.tileMessages[projectId] ?? []), ...messages] };
+        }
+        return updates;
+      });
+    };
+
     conn.hub.setCallbacks({
-      onStateChanged: (connectionState) => updateConn({ connectionState }),
+      onStateChanged: (connectionState) => {
+        updateConn({ connectionState });
+        if (connectionState === 'connected') {
+          // A reconnect may have missed pushes: take the whole list again
+          conn.hub.getAttention()
+            .then(items => set(state => ({ attention: mergeAttention(state.attention, serverId, items) })))
+            .catch(err => console.error('[store] getAttention failed:', serverId, err));
+        } else if (connectionState === 'disconnected') {
+          set(state => ({ attention: mergeAttention(state.attention, serverId, []) }));
+        }
+      },
+      onAttentionChanged: (items) => set(state => ({ attention: mergeAttention(state.attention, serverId, items) })),
       onProjectCreated: (status) => {
         set(state => {
           const summary: ProjectSummary = {
             Id: status.Id, Name: status.Name, State: status.State,
             UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
             RootName: status.RootName, ProfileName: status.ProfileName,
+            PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
           };
           const connections = state.serverConnections.map(c =>
             c.serverInfo.Id === serverId
@@ -495,11 +626,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           const clearSel = sel?.serverId === serverId && sel?.projectId === projectId;
           const pq = { ...state.projectQuestions };
           delete pq[projectId];
+          const transcripts = { ...state.transcripts };
+          delete transcripts[transcriptKey(serverId, projectId)];
           const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
           const total = computeTotalWaiting(connections, pq, state.dismissedProjects);
           return {
             serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
-            projectQuestions: pq, totalWaitingCount: total,
+            projectQuestions: pq, totalWaitingCount: total, transcripts,
             ...(clearSel ? { selectedProject: null, outputMessages: [], question: emptyQuestion } : {}),
           };
         });
@@ -516,11 +649,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           const clearSel = sel?.serverId === serverId && sel?.projectId === projectId;
           const pq = { ...state.projectQuestions };
           delete pq[projectId];
+          const transcripts = { ...state.transcripts };
+          delete transcripts[transcriptKey(serverId, projectId)];
           const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
           const total = computeTotalWaiting(connections, pq, state.dismissedProjects);
           return {
             serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
-            projectQuestions: pq, totalWaitingCount: total,
+            projectQuestions: pq, totalWaitingCount: total, transcripts,
             ...(clearSel ? { selectedProject: null, outputMessages: [], question: emptyQuestion } : {}),
           };
         });
@@ -542,7 +677,10 @@ export const useAppStore = create<AppState>((set, get) => ({
           const connections = state.serverConnections.map(c =>
             c.serverInfo.Id === serverId
               ? { ...c, projects: c.projects.map(p => p.Id === status.Id
-                  ? { ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion }
+                  ? {
+                      ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
+                      PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
+                    }
                   : p) }
               : c
           );
@@ -586,36 +724,27 @@ export const useAppStore = create<AppState>((set, get) => ({
           };
         });
       },
-      onOutputReceived: (projectId, message) => {
-        const s = get();
-        const sel = s.selectedProject;
-        const isDismissed = s.dismissedProjects[projectId];
-        const isQuestion = !isDismissed && isQuestionMessage(message);
-
-        if (isQuestion) {
-          set(state => {
-            const pq = { ...state.projectQuestions, [projectId]: true };
-            const total = computeTotalWaiting(state.serverConnections, pq, state.dismissedProjects);
-            return { projectQuestions: pq, totalWaitingCount: total };
-          });
-        }
-
-        if (sel?.serverId === serverId && sel?.projectId === projectId) {
-          const detected = detectQuestionFromMessage(message, s.question, s.lastInputSentAt, s.dismissedProjects[projectId]);
-          set(state => ({
-            outputMessages: [...state.outputMessages, message],
-            ...(detected ? { question: detected } : {}),
-          }));
-        }
-
-        if (s.isTileView) {
-          set(state => ({
-            tileMessages: {
-              ...state.tileMessages,
-              [projectId]: [...(state.tileMessages[projectId] ?? []), message],
-            },
-          }));
-        }
+      // A live line only counts once its subscription's replay is complete: one broadcast before
+      // that is in output.jsonl already, and so in the replay
+      onOutputReceived: (projectId, line) => receiveOutput(projectId, [line]),
+      onOutputBatch: (projectId, fromOffset, lines) => receiveOutput(projectId, lines, fromOffset),
+      onOutputReplayComplete: (projectId, offset) => {
+        const key = transcriptKey(serverId, projectId);
+        set(state => {
+          const updates: Partial<AppState> = {};
+          const held = state.transcripts[key];
+          if (held && held.phase !== 'idle') {
+            // output.jsonl is shorter than what is held: the transcript is not from this file
+            const transcript: Transcript = offset < held.offset
+              ? { messages: [], offset, phase: 'live' }
+              : { ...held, phase: 'live' };
+            updates.transcripts = { ...state.transcripts, [key]: transcript };
+            const sel = state.selectedProject;
+            if (sel?.serverId === serverId && sel.projectId === projectId) updates.outputMessages = transcript.messages;
+          }
+          if (state.isTileView) updates.tileLoading = { ...state.tileLoading, [projectId]: false };
+          return updates;
+        });
       },
       onCreationProgress: () => {},
       onProfilesChanged: () => {
@@ -687,11 +816,44 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ── Selection ─────────────────────────────────────────────
 
   selectedProject: null,
-  selectProject: (serverId, projectId) => set({ selectedProject: { serverId, projectId }, activePage: null, outputMessages: [], question: emptyQuestion }),
+  selectProject: (serverId, projectId) => set(state => {
+    const messages = state.transcripts[transcriptKey(serverId, projectId)]?.messages ?? [];
+    const project = state.serverConnections.find(c => c.serverInfo.Id === serverId)?.projects.find(p => p.Id === projectId);
+    return {
+      selectedProject: { serverId, projectId }, activePage: null, outputMessages: messages,
+      // A resume replays only what is new, so the question comes from what is held
+      question: heldQuestion(messages, project, state.dismissedProjects[projectId], state.lastInputSentAt),
+    };
+  }),
   clearSelection: () => set({ selectedProject: null, outputMessages: [], question: emptyQuestion }),
 
   // ── Output ────────────────────────────────────────────────
 
+  transcripts: {},
+  subscribeOutput: async (serverId, projectId) => {
+    const hub = get().getHub(serverId);
+    if (!hub) return;
+    const key = transcriptKey(serverId, projectId);
+    const held = get().transcripts[key] ?? { messages: [], offset: 0, phase: 'idle' };
+    set(state => ({ transcripts: { ...state.transcripts, [key]: { ...held, phase: 'replaying' } } }));
+    await hub.subscribeProject(projectId, held.offset);
+  },
+  unsubscribeOutput: async (serverId, projectId) => {
+    const key = transcriptKey(serverId, projectId);
+    set(state => state.transcripts[key]
+      ? { transcripts: { ...state.transcripts, [key]: { ...state.transcripts[key], phase: 'idle' } } }
+      : {});
+    await get().getHub(serverId)?.unsubscribeProject(projectId);
+  },
+  subscribeTail: async (serverId, projectId, turns) => {
+    const hub = get().getHub(serverId);
+    if (!hub) return;
+    set(state => ({
+      tileMessages: { ...state.tileMessages, [projectId]: [] },
+      tileLoading: { ...state.tileLoading, [projectId]: true },
+    }));
+    await hub.subscribeProject(projectId, -turns);
+  },
   outputMessages: [],
   appendOutput: (_projectId, message) => set(state => ({ outputMessages: [...state.outputMessages, message] })),
   clearOutput: () => set({ outputMessages: [] }),
@@ -717,6 +879,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     const total = computeTotalWaiting(state.serverConnections, pq, dp);
     return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total };
   }),
+
+  respondToPermission: async (serverId, projectId, requestId, decision) => {
+    await get().getHub(serverId)?.respondToPermission(projectId, requestId, decision);
+  },
+  answerQuestion: async (serverId, projectId, requestId, answers) => {
+    await get().getHub(serverId)?.answerQuestion(projectId, requestId, answers);
+  },
+
+  attention: [],
+  markSeen: async (serverId, projectId) => {
+    await get().getHub(serverId)?.markSeen(projectId);
+  },
+  replyAndResume: async (serverId, projectId, text) => {
+    await get().getHub(serverId)?.replyAndResume(projectId, text);
+  },
 
   projectQuestions: {},
   dismissedProjects: loadDismissed(),

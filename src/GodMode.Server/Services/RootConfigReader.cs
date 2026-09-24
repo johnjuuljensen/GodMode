@@ -31,7 +31,7 @@ public class RootConfigReader : IRootConfigReader
           "properties": {
             "name": { "type": "string", "title": "Project Name" },
             "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
-            "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions", "default": "true" }
+            "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions; otherwise tool calls that need approval wait for you", "default": false }
           },
           "required": ["name", "prompt"]
         }
@@ -46,6 +46,22 @@ public class RootConfigReader : IRootConfigReader
 
     public RootConfig ReadConfig(string rootPath)
     {
+        try
+        {
+            return Read(rootPath, strict: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read config from {RootPath}, using default config", rootPath);
+            return BuildDefaultConfig();
+        }
+    }
+
+    public RootConfig ReadConfigStrict(string rootPath) => Read(rootPath, strict: true);
+
+    /// <param name="strict">An action overlay that cannot be read throws, rather than being skipped.</param>
+    private RootConfig Read(string rootPath, bool strict)
+    {
         var godModeRootPath = Path.Combine(rootPath, GodModeRootDir);
         var baseConfigPath = Path.Combine(godModeRootPath, BaseConfigFileName);
 
@@ -55,47 +71,39 @@ public class RootConfigReader : IRootConfigReader
             return BuildDefaultConfig();
         }
 
-        try
+        var baseRaw = ReadRawConfig(baseConfigPath);
+        var actionOverlays = DiscoverActionConfigs(godModeRootPath, strict);
+
+        Dictionary<string, CreateAction> actions;
+
+        if (actionOverlays.Count == 0)
         {
-            var baseRaw = ReadRawConfig(baseConfigPath);
-            var actionOverlays = DiscoverActionConfigs(godModeRootPath);
-
-            Dictionary<string, CreateAction> actions;
-
-            if (actionOverlays.Count == 0)
+            // config.json is the single action (named "Create")
+            var merged = baseRaw;
+            var schema = LoadSchema(godModeRootPath, null);
+            var action = BuildAction("Create", merged, godModeRootPath, schema);
+            actions = new Dictionary<string, CreateAction>(StringComparer.OrdinalIgnoreCase)
             {
-                // config.json is the single action (named "Create")
-                var merged = baseRaw;
-                var schema = LoadSchema(godModeRootPath, null);
-                var action = BuildAction("Create", merged, godModeRootPath, schema);
-                actions = new Dictionary<string, CreateAction>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["Create"] = action
-                };
-            }
-            else
-            {
-                actions = new Dictionary<string, CreateAction>(StringComparer.OrdinalIgnoreCase);
-                foreach (var (actionName, overlayRaw) in actionOverlays)
-                {
-                    var merged = MergeRawConfigs(baseRaw, overlayRaw);
-                    var schema = LoadSchema(godModeRootPath, actionName);
-                    var action = BuildAction(actionName, merged, godModeRootPath, schema);
-                    actions[actionName] = action;
-                }
-            }
-
-            return new RootConfig(
-                Description: baseRaw.Description,
-                Actions: actions,
-                ProfileName: baseRaw.ProfileName,
-                StripEnvVarProfile: baseRaw.StripEnvVarProfile ?? false);
+                ["Create"] = action
+            };
         }
-        catch (Exception ex)
+        else
         {
-            _logger.LogWarning(ex, "Failed to read config from {ConfigPath}, using default config", baseConfigPath);
-            return BuildDefaultConfig();
+            actions = new Dictionary<string, CreateAction>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (actionName, overlayRaw) in actionOverlays)
+            {
+                var merged = MergeRawConfigs(baseRaw, overlayRaw);
+                var schema = LoadSchema(godModeRootPath, actionName);
+                var action = BuildAction(actionName, merged, godModeRootPath, schema);
+                actions[actionName] = action;
+            }
         }
+
+        return new RootConfig(
+            Description: baseRaw.Description,
+            Actions: actions,
+            ProfileName: baseRaw.ProfileName,
+            StripEnvVarProfile: baseRaw.StripEnvVarProfile ?? false);
     }
 
     private static RootConfig BuildDefaultConfig() =>
@@ -107,7 +115,7 @@ public class RootConfigReader : IRootConfigReader
     /// <summary>
     /// Discovers config.*.json files and returns a dictionary of actionName → RawConfig.
     /// </summary>
-    private Dictionary<string, RawConfig> DiscoverActionConfigs(string godModeRootPath)
+    private Dictionary<string, RawConfig> DiscoverActionConfigs(string godModeRootPath, bool strict)
     {
         var result = new Dictionary<string, RawConfig>(StringComparer.OrdinalIgnoreCase);
 
@@ -124,7 +132,7 @@ public class RootConfigReader : IRootConfigReader
                 result[actionName] = raw;
                 _logger.LogDebug("Discovered action config '{ActionName}' from {FilePath}", actionName, filePath);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (!strict)
             {
                 _logger.LogWarning(ex, "Failed to read action config from {FilePath}, skipping", filePath);
             }
