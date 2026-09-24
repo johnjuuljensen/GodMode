@@ -15,19 +15,21 @@ public class PullRequestPollerTests
         public int Calls;
         public int MaxRunning;
         public PullRequestPoller.Outcome Outcome = PullRequestPoller.Outcome.Wait;
+        /// <summary>When set, the checks up to this one say Poll, and the rest Wait.</summary>
+        public int? PollUntil;
         public TaskCompletionSource? Gate;
         public readonly TaskCompletionSource FirstStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public async Task<PullRequestPoller.Outcome> CheckAsync(string projectId, CancellationToken cancel)
         {
-            Interlocked.Increment(ref Calls);
+            var call = Interlocked.Increment(ref Calls);
             var running = Interlocked.Increment(ref _running);
             lock (this) MaxRunning = Math.Max(MaxRunning, running);
             FirstStarted.TrySetResult();
             try
             {
                 if (Gate is { } gate) await gate.Task.WaitAsync(cancel);
-                return Outcome;
+                return PollUntil is { } last ? call < last ? PullRequestPoller.Outcome.Poll : PullRequestPoller.Outcome.Wait : Outcome;
             }
             finally { Interlocked.Decrement(ref _running); }
         }
@@ -78,18 +80,14 @@ public class PullRequestPollerTests
     [Fact]
     public async Task Open_IsPolled_UntilACheckSaysOtherwise()
     {
-        var checks = new Checks { Outcome = PullRequestPoller.Outcome.Poll };
+        var checks = new Checks { PollUntil = 4 };
         await using var poller = Poller(checks, TimeSpan.FromMilliseconds(50));
 
         poller.CheckNow("p");
         await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(checks.Calls >= 4), null, () => $"{checks.Calls} checks while polling");
-        checks.Outcome = PullRequestPoller.Outcome.Wait;
-        // The check under way may have read Poll: at most one more after it
-        await Task.Delay(200);
-        var afterLastPoll = checks.Calls;
         await Task.Delay(300);
 
-        Assert.Equal(afterLastPoll, checks.Calls);
+        Assert.Equal(4, checks.Calls);
     }
 
     [Fact]

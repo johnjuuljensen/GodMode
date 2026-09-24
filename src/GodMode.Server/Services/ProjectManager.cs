@@ -1012,36 +1012,47 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Stop Claude process if running. Its output pipeline stays open until the delete is
         // committed: a delete script may refuse, and the project is then resumed as before
         await _lifecycle.KillAsync(project);
+        // Nor does a status script hold its folder while the delete scripts run
+        await _pullRequests.ForgetAsync(projectId);
 
         // Run delete scripts if configured (failures block deletion)
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
         var snap = _snapshot;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
-        if (project.Status.RootName != null && profileName != null)
+        try
         {
-            var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
-            var config = _rootConfigReader.ReadConfig(rootPath);
-            var action = config.ResolveAction(project.ActionName);
-
-            if (action?.Delete is { Length: > 0 })
+            if (project.Status.RootName != null && profileName != null)
             {
-                snap.Profiles.TryGetValue(profileName, out var profileCfg);
-                var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
-                    profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
+                var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
+                var config = _rootConfigReader.ReadConfig(rootPath);
+                var action = config.ResolveAction(project.ActionName);
 
-                if (force)
-                    scriptEnv["GODMODE_FORCE"] = "true";
+                if (action?.Delete is { Length: > 0 })
+                {
+                    snap.Profiles.TryGetValue(profileName, out var profileCfg);
+                    var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+                        profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
 
-                await _scriptRunner.RunAsync(
-                    action.Delete,
-                    rootPath,
-                    rootPath,
-                    scriptEnv,
-                    msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+                    if (force)
+                        scriptEnv["GODMODE_FORCE"] = "true";
+
+                    await _scriptRunner.RunAsync(
+                        action.Delete,
+                        rootPath,
+                        rootPath,
+                        scriptEnv,
+                        msg => _hubContext.Clients.All.CreationProgress(projectId, msg));
+                }
             }
         }
+        catch
+        {
+            // Refused: the project stays, and so do its checks
+            ResumeChecks(project);
+            throw;
+        }
 
-        // Remove from tracking, and finish its output and its checks (a status script runs in its folder)
+        // Remove from tracking, and finish its output and any check a push started since
         _projects.TryRemove(projectId, out _);
         await project.Process.CloseAsync();
         await _pullRequests.ForgetAsync(projectId);

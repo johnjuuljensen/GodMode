@@ -188,7 +188,8 @@ public class ScriptRunner : IScriptRunner
             if (!string.IsNullOrEmpty(stderr))
                 message += $": {stderr}";
 
-            _logger.LogError("{Message}", message);
+            // Run for its output, the caller says what the failure means
+            if (!forOutput) _logger.LogError("{Message}", message);
             await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] FAILED: {message}");
             throw new InvalidOperationException(message);
         }
