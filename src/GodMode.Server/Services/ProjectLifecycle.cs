@@ -28,6 +28,12 @@ public sealed class ProjectLifecycle
 
     private volatile bool _shuttingDown;
 
+    /// <summary>Held from a launch's check for shutdown until its process is started: see <see cref="BeginShutdown"/>.</summary>
+    private readonly SemaphoreSlim _launchGate = new(1, 1);
+
+    /// <summary>How long <see cref="BeginShutdown"/> waits for a launch under way to have started its process.</summary>
+    private static readonly TimeSpan LaunchGateTimeout = TimeSpan.FromSeconds(10);
+
     /// <summary>Raised, on the project's consumer, when output takes a project to Idle. A handler must not wait for a Stop.</summary>
     public event Func<string, Task>? OnProjectCompleted;
 
@@ -48,16 +54,29 @@ public sealed class ProjectLifecycle
 
     // ── Process ──
 
-    public Task StartAsync(ProjectInfo project, string initialPrompt, ClaudeLaunchSpec launch)
-    {
-        var process = BeginLaunch(project);
-        return _processManager.StartClaudeProcessAsync(project, initialPrompt, process.Cancellation!.Token, launch.Environment, launch.Args);
-    }
+    public Task StartAsync(ProjectInfo project, string initialPrompt, ClaudeLaunchSpec launch) =>
+        LaunchAsync(project, cancel => _processManager.StartClaudeProcessAsync(project, initialPrompt, cancel, launch.Environment, launch.Args));
 
-    public Task ResumeAsync(ProjectInfo project, ClaudeLaunchSpec launch)
+    public Task ResumeAsync(ProjectInfo project, ClaudeLaunchSpec launch) =>
+        LaunchAsync(project, cancel => _processManager.ResumeClaudeProcessAsync(project, cancel, launch.Environment, launch.Args));
+
+    /// <summary>
+    /// Starts a process, unless the server is stopping (<see cref="ServerStoppingException"/>): one
+    /// started after the shutdown stopped the projects would outlive the server.
+    /// </summary>
+    private async Task LaunchAsync(ProjectInfo project, Func<CancellationToken, Task<int>> launch)
     {
-        var process = BeginLaunch(project);
-        return _processManager.ResumeClaudeProcessAsync(project, process.Cancellation!.Token, launch.Environment, launch.Args);
+        await _launchGate.WaitAsync();
+        try
+        {
+            if (_shuttingDown) throw new ServerStoppingException();
+            var process = BeginLaunch(project);
+            await launch(process.Cancellation!.Token);
+        }
+        finally
+        {
+            _launchGate.Release();
+        }
     }
 
     /// <summary>Replaces the previous launch's cancellation and makes sure output has its consumer.</summary>
@@ -79,9 +98,17 @@ public sealed class ProjectLifecycle
 
     /// <summary>
     /// The server is stopping: from now on a process that exits on its own went with it (a Ctrl+C
-    /// reaches claude too) and is Stopped, keeping its question, rather than failed.
+    /// reaches claude too) and is Stopped, keeping its question, rather than failed, and nothing is
+    /// launched. A launch under way is waited for, so its process is there for the shutdown to stop.
     /// </summary>
-    public void BeginShutdown() => _shuttingDown = true;
+    public void BeginShutdown()
+    {
+        var entered = _launchGate.Wait(LaunchGateTimeout);
+        _shuttingDown = true;
+        if (entered) _launchGate.Release();
+    }
+
+    public bool ShuttingDown => _shuttingDown;
 
     public bool IsRunning(ProjectInfo project) => _processManager.IsProcessRunning(project.Process.ProcessId);
 

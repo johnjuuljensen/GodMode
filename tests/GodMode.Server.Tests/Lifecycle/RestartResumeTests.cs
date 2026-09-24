@@ -238,6 +238,95 @@ public class RestartResumeTests
             Assert.Equal(CreateAction.DefaultResumePrompt, Prompt(await harness.WaitForStdinAsync(project.Id, index: 1)));
     }
 
+    /// <summary>A resumed claude that holds its slot a while: it starts its session 3 s after its first input.</summary>
+    private static FakeScript SlowToStart() => new FakeScript().AwaitStdin().Sleep(3000).EmitInit().AwaitStdin();
+
+    /// <summary>Restarts without carrying on, then starts carrying on and waits until 3 projects have their resume launched.</summary>
+    private static async Task<Task> RestartResumingAsync(LifecycleHarness harness, IReadOnlyList<ProjectStatus> projects)
+    {
+        harness.UseScript(SlowToStart());
+        await harness.RestartAsync(resume: false);
+        var resuming = harness.Projects.ResumeInterruptedProjectsAsync();
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Resumed(harness, projects).Count() == 3), null,
+            () => $"{Resumed(harness, projects).Count()} projects were resumed, not 3");
+        return resuming;
+    }
+
+    private static IEnumerable<ProjectStatus> Resumed(LifecycleHarness harness, IEnumerable<ProjectStatus> projects) =>
+        projects.Where(p => harness.Launches(p.Id).Count > 1);
+
+    /// <summary>
+    /// Three are resumed at a time, and one queued behind them is decided when its turn comes: the
+    /// user stopped it meanwhile, so it is not launched.
+    /// </summary>
+    [Fact]
+    public async Task StoppedWhileQueued_IsNotResumed_AndThreeAreResumedAtATime()
+    {
+        await using var harness = new LifecycleHarness(Working());
+        var created = new List<ProjectStatus>();
+        for (var i = 1; i <= 4; i++) created.Add(await CreateWorkingAsync(harness, $"p{i}"));
+
+        var resuming = await RestartResumingAsync(harness, created);
+        await Task.Delay(500);
+        Assert.Equal(3, Resumed(harness, created).Count());
+        var queued = Assert.Single(created.Except(Resumed(harness, created)));
+        await harness.Projects.StopProjectAsync(queued.Id);
+        await resuming.WaitAsync(LifecycleHarness.DefaultTimeout);
+
+        Assert.Single(harness.Launches(queued.Id));
+        var status = await harness.Projects.GetStatusAsync(queued.Id);
+        Assert.Equal((ProjectState.Stopped, (ProjectState?)null), (status.State, status.StateAtShutdown));
+    }
+
+    /// <summary>
+    /// A shutdown while the start is still carrying on launches nothing more: the queued projects keep
+    /// their marker, those under way are stopped with theirs, no claude outlives the server, and the
+    /// start after it resumes all of them.
+    /// </summary>
+    [Fact]
+    public async Task ShutdownWhileResuming_LaunchesNoMore_AndEveryProjectKeepsItsMarker()
+    {
+        await using var harness = new LifecycleHarness(Working());
+        var created = new List<ProjectStatus>();
+        for (var i = 1; i <= 5; i++) created.Add(await CreateWorkingAsync(harness, $"p{i}"));
+
+        var resuming = await RestartResumingAsync(harness, created);
+        var queued = created.Except(Resumed(harness, created)).ToList();
+        harness.StopHost();
+        await resuming.WaitAsync(LifecycleHarness.DefaultTimeout);
+
+        Assert.Equal(2, queued.Count);
+        Assert.All(queued, p => Assert.Single(harness.Launches(p.Id)));
+        Assert.All(created, p => Assert.Equal((ProjectState.Stopped, (ProjectState?)ProjectState.Running),
+            (harness.ReadStatusFile(p.Id).State, harness.ReadStatusFile(p.Id).StateAtShutdown)));
+        Assert.All(created.SelectMany(p => harness.Launches(p.Id)),
+            launch => Assert.False(LifecycleHarness.IsProcessAlive(launch.Pid), $"fake claude (pid {launch.Pid}) outlived the server"));
+
+        var before = created.ToDictionary(p => p.Id, p => harness.Launches(p.Id).Count);
+        harness.UseScript(Working());
+        await harness.RestartAsync();
+        foreach (var project in created)
+            Assert.Equal(CreateAction.DefaultResumePrompt, Prompt(await harness.WaitForStdinAsync(project.Id, index: before[project.Id])));
+    }
+
+    /// <summary>Archived and restored by the user: it was not running when restored, and the next start does not resume it.</summary>
+    [Fact]
+    public async Task ArchivedAndRestored_IsNotResumed()
+    {
+        await using var harness = new LifecycleHarness(Working());
+        var created = await CreateWorkingAsync(harness);
+        await harness.RestartAsync(resume: false);
+        Assert.Equal(ProjectState.Running, (await harness.Projects.GetStatusAsync(created.Id)).StateAtShutdown);
+
+        await harness.Projects.ArchiveProjectAsync(created.Id);
+        await harness.Projects.UnarchiveProjectAsync(created.Id);
+        await harness.RestartAsync();
+
+        Assert.Equal(ProjectState.Stopped, (await harness.Projects.GetStatusAsync(created.Id)).State);
+        Assert.Null(harness.ReadStatusFile(created.Id).StateAtShutdown);
+        Assert.Single(harness.Launches(created.Id));
+    }
+
     /// <summary>
     /// The Ctrl+C gap: claude got the Ctrl+C too, and its exit was handled (Error; or Stopped with
     /// its question gone, for a clean exit while waiting) before the server's shutdown began. The

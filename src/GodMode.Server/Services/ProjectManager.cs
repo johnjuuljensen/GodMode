@@ -32,6 +32,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>How many projects the start resumes at once: each is one claude process starting its session.</summary>
     private const int ConcurrentResumes = 3;
 
+    /// <summary>ApplicationStopping: the start stops carrying on with interrupted projects.</summary>
+    private readonly CancellationToken _stopping;
+
     /// <summary>The name the GodMode MCP bridge has in every session's MCP config.</summary>
     internal const string McpBridgeServerName = "godmode-bridge";
 
@@ -156,6 +159,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Build initial profile/root snapshot
         _snapshot = BuildSnapshot();
 
+        _stopping = lifetime.ApplicationStopping;
         lifetime.ApplicationStopping.Register(StopProjectsOnShutdown);
     }
 
@@ -795,43 +799,57 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await resumeLock.WaitAsync();
         try
         {
-            if (_lifecycle.IsRunning(project))
-            {
-                await SendInputAsync(projectId, text);
-                return;
-            }
-
-            // claude writes system/init once it has read its first input, so the reply is sent at
-            // once and the session start awaited after it
-            var sessionStart = project.Process.NextSessionStart();
-            await ResumeProjectAsync(projectId);
-            var sentTo = await TrySendInputAsync(project, text);
-            await NotifyStatusChanged(project);
-
-            int startedIn;
-            try
-            {
-                startedIn = await sessionStart.WaitAsync(_sessionStartTimeout);
-            }
-            catch (TimeoutException)
-            {
-                throw new TimeoutException(
-                    $"Project {projectId} was resumed, but claude did not start its session within {_sessionStartTimeout.TotalSeconds:0} seconds");
-            }
-
-            // The resume found no conversation and a fresh session took its place: the reply went
-            // to the process that gave up, or reached none
-            if (startedIn != sentTo)
-            {
-                _logger.LogInformation("Project {ProjectId}: its session started in another process than the reply went to; sending it again", projectId);
-                await _lifecycle.SendInputAsync(project, text);
-                await NotifyStatusChanged(project);
-            }
+            await ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false);
         }
         finally
         {
             resumeLock.Release();
         }
+    }
+
+    /// <summary>
+    /// <see cref="ReplyAndResumeAsync"/>, under the project's resume lock. With
+    /// <paramref name="onlyIfInterrupted"/> (the start carrying on after a shutdown), it sends
+    /// nothing to a running claude and resumes only while the project still has its
+    /// <see cref="ProjectStatus.StateAtShutdown"/>; false when it did neither.
+    /// </summary>
+    private async Task<bool> ReplyAndResumeLockedAsync(ProjectInfo project, string text, bool onlyIfInterrupted)
+    {
+        var projectId = project.Status.Id;
+        if (_lifecycle.IsRunning(project))
+        {
+            if (onlyIfInterrupted) return false;
+            await SendInputAsync(projectId, text);
+            return true;
+        }
+
+        // claude writes system/init once it has read its first input, so the reply is sent at
+        // once and the session start awaited after it
+        var sessionStart = project.Process.NextSessionStart();
+        if (!await TryResumeAsync(project, onlyIfInterrupted)) return false;
+        var sentTo = await TrySendInputAsync(project, text);
+        await NotifyStatusChanged(project);
+
+        int startedIn;
+        try
+        {
+            startedIn = await sessionStart.WaitAsync(_sessionStartTimeout);
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException(
+                $"Project {projectId} was resumed, but claude did not start its session within {_sessionStartTimeout.TotalSeconds:0} seconds");
+        }
+
+        // The resume found no conversation and a fresh session took its place: the reply went
+        // to the process that gave up, or reached none
+        if (startedIn != sentTo)
+        {
+            _logger.LogInformation("Project {ProjectId}: its session started in another process than the reply went to; sending it again", projectId);
+            await _lifecycle.SendInputAsync(project, text);
+            await NotifyStatusChanged(project);
+        }
+        return true;
     }
 
     /// <summary>Sends to the process just launched; 0 when it has exited already (a fresh session may take its place).</summary>
@@ -1103,6 +1121,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Stop process if running, and finish its output and its checks
         await _lifecycle.CloseAsync(project);
         await _pullRequests.ForgetAsync(projectId);
+        // Archived by the user: nothing to carry on with, if it is ever restored
+        if (project.Status.StateAtShutdown != null)
+            await _lifecycle.UpdateStatusAsync(project, status => status with { StateAtShutdown = null });
 
         // Move project folder to .archived/ sibling directory
         var parentDir = Path.GetDirectoryName(project.ProjectPath)!;
@@ -1195,7 +1216,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                     var id = ProjectId(profileName, rootName, Path.GetFileName(destDir));
                     var project = new ProjectInfo
                     {
-                        Status = status with { Id = id, State = ProjectState.Stopped, RootName = rootName, ProfileName = profileName, OutputOffset = OutputLog.End(destDir) },
+                        // Restored by the user, not interrupted: the next start does not resume it
+                        Status = status with { Id = id, State = ProjectState.Stopped, StateAtShutdown = null, RootName = rootName, ProfileName = profileName, OutputOffset = OutputLog.End(destDir) },
                         ProjectPath = destDir,
                         ActionName = null,
                         ProfileName = profileName,
@@ -1245,35 +1267,60 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             return;
         }
 
-        // Process is not running - check if state needs correction
-        if (project.Status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission)
-        {
-            _logger.LogWarning("Project {ProjectId} was marked as {State} but process is not running, resetting state",
-                projectId, project.Status.State);
-            project.Status = project.Status with { State = ProjectState.Stopped, PendingPermission = null, PendingQuestion = null };
-        }
+        await TryResumeAsync(project, onlyIfInterrupted: false);
+    }
 
-        if (project.Status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
+    /// <summary>
+    /// Launches claude on the project's session, which has no process. Whether it may, and the claim
+    /// that it is Running, are one step under the state lock, so a Stop or a shutdown either comes
+    /// before it (and it launches nothing) or after it (and stops what it launches). With
+    /// <paramref name="onlyIfInterrupted"/>, only while <see cref="ProjectStatus.StateAtShutdown"/> is
+    /// still set: false when it is not, and nothing is launched. Once the server is stopping it
+    /// throws <see cref="ServerStoppingException"/>, leaving the project Stopped with its marker.
+    /// </summary>
+    private async Task<bool> TryResumeAsync(ProjectInfo project, bool onlyIfInterrupted)
+    {
+        var projectId = project.Status.Id;
+        ProjectState? interruptedAs = null;
+        var claimed = false;
+        await _lifecycle.UpdateStatusAsync(project, status =>
         {
-            throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {project.Status.State})");
-        }
+            if (_lifecycle.ShuttingDown) throw new ServerStoppingException();
+            if (onlyIfInterrupted && status.StateAtShutdown == null) return status;
 
-        _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}",
-            projectId, project.SessionId);
+            // Process is not running - check if state needs correction
+            if (status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission)
+            {
+                _logger.LogInformation("Project {ProjectId} was {State} but its process is not running, resetting state", projectId, status.State);
+                status = status with { State = ProjectState.Stopped, PendingPermission = null, PendingQuestion = null };
+            }
+            if (status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
+                throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {status.State})");
 
-        // A launch settles what a shutdown left: the project is not resumed again on the next start
-        await _lifecycle.UpdateStatusAsync(project, status => status with
-        {
-            State = ProjectState.Running,
-            LastError = null,
-            StateAtShutdown = null,
-            UpdatedAt = DateTime.UtcNow
+            interruptedAs = status.StateAtShutdown;
+            claimed = true;
+            // A launch settles what a shutdown left: the project is not resumed again on the next start
+            return status with { State = ProjectState.Running, LastError = null, StateAtShutdown = null, UpdatedAt = DateTime.UtcNow };
         });
+        if (!claimed) return false;
 
+        _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}", projectId, project.SessionId);
         try
         {
             // Cancels the previous launch's token and gives this one its own
             await _lifecycle.ResumeAsync(project, BuildLaunchSpec(project));
+        }
+        catch (ServerStoppingException)
+        {
+            // The shutdown began after the claim: the project is left as the shutdown leaves it, or it
+            // would have been, keeping what it was interrupted as
+            _logger.LogInformation("Project {ProjectId} was not resumed: the server is stopping", projectId);
+            await _lifecycle.UpdateStatusAsync(project, status => status with
+            {
+                State = ProjectState.Stopped,
+                StateAtShutdown = status.StateAtShutdown ?? interruptedAs,
+            });
+            throw;
         }
         catch (Exception ex)
         {
@@ -1288,6 +1335,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         await NotifyStatusChanged(project);
+        return true;
     }
 
     public async Task SubscribeProjectAsync(string projectId, long fromOffset, string connectionId)
@@ -1490,8 +1538,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         _logger.LogInformation("Carrying on with {Count} project(s) the last shutdown interrupted, {Concurrent} at a time",
             interrupted.Length, ConcurrentResumes);
-        await Parallel.ForEachAsync(interrupted, new ParallelOptions { MaxDegreeOfParallelism = ConcurrentResumes },
-            async (project, _) => await ResumeInterruptedAsync(project));
+        try
+        {
+            await Parallel.ForEachAsync(interrupted,
+                new ParallelOptions { MaxDegreeOfParallelism = ConcurrentResumes, CancellationToken = _stopping },
+                async (project, _) => await ResumeInterruptedAsync(project));
+        }
+        catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+        {
+            // Those not resumed yet keep their marker, for the start after this one
+            _logger.LogInformation("The server is stopping: no more interrupted projects are resumed");
+        }
     }
 
     /// <summary>
@@ -1501,25 +1558,49 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// answer it for the user); any other (working, or on a permission prompt the shutdown denied) is
     /// resumed and told <c>resumePrompt</c>, and waited for until claude starts its session. A resume
     /// that fails leaves the project Error, as any resume does; it is not tried again.
+    /// It may have waited behind others, so what it does is decided when its turn comes, under its
+    /// resume lock (which a reply takes) and the state lock (which a Stop takes): nothing, once the
+    /// user has stopped, resumed or answered it, it is gone, or the server is stopping.
     /// </summary>
     private async Task ResumeInterruptedAsync(ProjectInfo project)
     {
         var id = project.Status.Id;
-        var action = ResumeAction(project);
+        var resumeLock = project.Process.ResumeLock;
         try
         {
-            if (!action.ResumeOnRestart || project.Status is { StateAtShutdown: ProjectState.WaitingInput, CurrentQuestion: not null })
+            var action = ResumeAction(project);
+            await resumeLock.WaitAsync(_stopping);
+            try
             {
-                var state = action.ResumeOnRestart ? ProjectState.WaitingInput : ProjectState.Stopped;
-                _logger.LogInformation("Project {ProjectId} was {StateAtShutdown} when the server stopped; it is {State}",
-                    id, project.Status.StateAtShutdown, state);
-                await _lifecycle.UpdateStatusAsync(project, status => status with { State = state, StateAtShutdown = null });
-                await NotifyStatusChanged(project);
-                return;
-            }
+                if (_stopping.IsCancellationRequested || !_projects.TryGetValue(id, out var current) || current != project) return;
 
-            _logger.LogInformation("Project {ProjectId} was {StateAtShutdown} when the server stopped; resuming it", id, project.Status.StateAtShutdown);
-            await ReplyAndResumeAsync(id, action.ResumePrompt);
+                if (!action.ResumeOnRestart || project.Status is { StateAtShutdown: ProjectState.WaitingInput, CurrentQuestion: not null })
+                {
+                    var state = action.ResumeOnRestart ? ProjectState.WaitingInput : ProjectState.Stopped;
+                    var changed = false;
+                    await _lifecycle.UpdateStatusAsync(project, status =>
+                    {
+                        if (status.StateAtShutdown == null || _lifecycle.ShuttingDown || _lifecycle.IsRunning(project)) return status;
+                        changed = true;
+                        return status with { State = state, StateAtShutdown = null };
+                    });
+                    if (!changed) return;
+                    _logger.LogInformation("Project {ProjectId} was interrupted when the server stopped; it is {State}", id, state);
+                    await NotifyStatusChanged(project);
+                    return;
+                }
+
+                _logger.LogInformation("Project {ProjectId} was {StateAtShutdown} when the server stopped; resuming it", id, project.Status.StateAtShutdown);
+                if (!await ReplyAndResumeLockedAsync(project, action.ResumePrompt, onlyIfInterrupted: true))
+                    _logger.LogInformation("Project {ProjectId} was stopped or resumed since; it is left as it is", id);
+            }
+            finally
+            {
+                resumeLock.Release();
+            }
+        }
+        catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+        {
         }
         catch (Exception ex)
         {

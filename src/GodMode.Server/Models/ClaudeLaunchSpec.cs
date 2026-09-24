@@ -15,3 +15,6 @@ public sealed record ClaudeLaunchSpec(Dictionary<string, string> Environment, st
 /// action's environment and arguments (its account's <c>CLAUDE_CONFIG_DIR</c>, say).
 /// </summary>
 public sealed class LaunchConfigException(string message, Exception? inner = null) : Exception(message, inner);
+
+/// <summary>The server is stopping, and launches nothing more: a process started now would outlive it.</summary>
+public sealed class ServerStoppingException() : InvalidOperationException("The server is stopping");
