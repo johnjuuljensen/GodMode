@@ -169,8 +169,10 @@ export function goBack(fallback: () => void) {
   if ((currentEntry()?.godmodeDepth ?? 0) > 0) {
     history.back();
   } else {
+    // The store notifies synchronously, so the flag covers exactly this change
     replaceNext = true;
     fallback();
+    replaceNext = false;
   }
 }
 
