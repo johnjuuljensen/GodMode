@@ -12,6 +12,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { Inbox, HomeTabBar } from './Inbox/Inbox';
 import { useAttentionTitle } from './Inbox/useAttentionTitle';
 import { goBack, useHashRoute } from '../routing';
+import { subscribeAttentionLinks } from '../services/hostApi';
 import './Shell.css';
 
 function getInitialTheme(): 'dark' | 'light' {
@@ -53,6 +54,8 @@ export function Shell() {
   // Each screen is a history entry, so browser and Android back walk back through them
   useHashRoute();
   useAttentionTitle();
+  // A tapped notification opens the inbox on its item
+  useEffect(() => subscribeAttentionLinks(useAppStore.getState().openInboxItem), []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);

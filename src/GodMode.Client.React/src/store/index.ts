@@ -226,6 +226,10 @@ interface AppState {
   /** What the phone's home screen shows: the inbox (the default), or the project list. A wide screen shows both. */
   homeView: 'inbox' | 'projects';
   setHomeView: (view: 'inbox' | 'projects') => void;
+  /** The inbox item a notification tap opened, and when (Date.now()): a new object for each tap, even on the same item. */
+  inboxFocus: { key: ProjectKey; at: number } | null;
+  /** Shows the inbox on one item: a tapped notification. */
+  openInboxItem: (serverId: string, projectId: string) => void;
   markSeen: (serverId: string, projectId: string) => Promise<void>;
   /** Answers a project whether its claude runs or not (resuming it if needed). */
   replyAndResume: (serverId: string, projectId: string, text: string) => Promise<void>;
@@ -811,6 +815,11 @@ export const useAppStore = create<AppState>((set, get) => {
   attention: [],
   homeView: 'inbox',
   setHomeView: (view) => set({ homeView: view }),
+  inboxFocus: null,
+  openInboxItem: (serverId, projectId) => set({
+    activePage: null, selectedProject: null, outputMessages: [], question: emptyQuestion, homeView: 'inbox',
+    inboxFocus: { key: projectKey(serverId, projectId), at: Date.now() },
+  }),
   markSeen: async (serverId, projectId) => {
     await get().getHub(serverId)?.markSeen(projectId);
   },

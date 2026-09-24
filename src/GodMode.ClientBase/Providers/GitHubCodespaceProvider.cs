@@ -2,8 +2,8 @@ using System.Net.Http.Json;
 using GodMode.ClientBase.Abstractions;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
-using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
+using SignalR.Proxy;
 using Octokit;
 
 namespace GodMode.ClientBase.Providers;
@@ -19,7 +19,7 @@ public class GitHubCodespaceProvider : IServerProvider
 
     public string Type => "github";
 
-    public GitHubCodespaceProvider(string token, string username, ILoggerFactory? loggerFactory = null)
+    public GitHubCodespaceProvider(string token, ILoggerFactory? loggerFactory = null)
     {
         _token = token;
         _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
@@ -30,60 +30,47 @@ public class GitHubCodespaceProvider : IServerProvider
         };
     }
 
-    public async Task<IEnumerable<ServerInfo>> ListServersAsync()
+    /// <summary>The account's GodMode codespaces. Throws when GitHub cannot be asked: an empty list means there are none.</summary>
+    public async Task<IReadOnlyList<ServerInfo>> ListServersAsync(CancellationToken ct = default)
     {
         var servers = new List<ServerInfo>();
 
-        try
+        var codespaces = await GetCodespacesViaRestApi();
+        _logger.LogDebug("GitHub API returned {Count} codespaces", codespaces.Count);
+
+        var running = codespaces.Where(c => c.State == "Available").ToList();
+        var notRunning = codespaces.Where(c => c.State != "Available").ToList();
+
+        foreach (var c in codespaces)
+            _logger.LogDebug("  Codespace: {Name} ({DisplayName}) state={State}", c.Name, c.DisplayName, c.State);
+
+        var probeResults = await Task.WhenAll(
+            running.Select(async c => (Codespace: c, HasGodMode: await ProbeGodModeServerAsync(c.Name, _token))));
+
+        foreach (var (codespace, hasGodMode) in probeResults)
+            _logger.LogDebug("  Probe {Name}: hasGodMode={HasGodMode}", codespace.Name, hasGodMode);
+
+        foreach (var (codespace, _) in probeResults.Where(r => r.HasGodMode))
+            servers.Add(ToServerInfo(codespace, ServerState.Running));
+
+        foreach (var (codespace, _) in probeResults.Where(r =>
+            !r.HasGodMode && (r.Codespace.DisplayName ?? r.Codespace.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
+            servers.Add(ToServerInfo(codespace, ServerState.Running));
+
+        foreach (var codespace in notRunning.Where(c =>
+            (c.DisplayName ?? c.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
         {
-            var codespaces = await GetCodespacesViaRestApi();
-            _logger.LogDebug("GitHub API returned {Count} codespaces", codespaces.Count);
-
-            var running = codespaces.Where(c => c.State == "Available").ToList();
-            var notRunning = codespaces.Where(c => c.State != "Available").ToList();
-
-            foreach (var c in codespaces)
-                _logger.LogDebug("  Codespace: {Name} ({DisplayName}) state={State}", c.Name, c.DisplayName, c.State);
-
-            var probeResults = await Task.WhenAll(
-                running.Select(async c => (Codespace: c, HasGodMode: await ProbeGodModeServerAsync(c.Name, _token))));
-
-            foreach (var (codespace, hasGodMode) in probeResults)
-                _logger.LogDebug("  Probe {Name}: hasGodMode={HasGodMode}", codespace.Name, hasGodMode);
-
-            foreach (var (codespace, _) in probeResults.Where(r => r.HasGodMode))
-                servers.Add(ToServerInfo(codespace, ServerState.Running));
-
-            foreach (var (codespace, _) in probeResults.Where(r =>
-                !r.HasGodMode && (r.Codespace.DisplayName ?? r.Codespace.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
-                servers.Add(ToServerInfo(codespace, ServerState.Running));
-
-            foreach (var codespace in notRunning.Where(c =>
-                (c.DisplayName ?? c.Name).Contains("godmode", StringComparison.OrdinalIgnoreCase)))
-            {
-                var mapped = MapCodespaceState(codespace.State);
-                _logger.LogDebug("  Non-running godmode codespace: {Name} ghState={GhState} mapped={Mapped}",
-                    codespace.Name, codespace.State, mapped);
-                servers.Add(ToServerInfo(codespace, mapped));
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error listing codespaces");
+            var mapped = MapCodespaceState(codespace.State);
+            _logger.LogDebug("  Non-running godmode codespace: {Name} ghState={GhState} mapped={Mapped}",
+                codespace.Name, codespace.State, mapped);
+            servers.Add(ToServerInfo(codespace, mapped));
         }
 
         _logger.LogInformation("GitHub provider found {Count} godmode servers", servers.Count);
         return servers;
     }
 
-    public async Task<ServerStatus> GetServerStatusAsync(string serverId)
-    {
-        var codespace = await GetCodespaceByName(serverId)
-            ?? throw new InvalidOperationException($"Codespace {serverId} not found");
-
-        return new ServerStatus(codespace.Name, codespace.DisplayName ?? codespace.Name,
-            "github", MapCodespaceState(codespace.State), codespace.WebUrl, 0, codespace.LastUsedAt);
-    }
+    public async Task<bool> OwnsAsync(string serverId) => await GetCodespaceByName(serverId) != null;
 
     public async Task StartServerAsync(string serverId)
     {
@@ -97,18 +84,18 @@ public class GitHubCodespaceProvider : IServerProvider
         await StopCodespaceViaRestApi(serverId);
     }
 
-    public async Task<HubConnection> ConnectAsync(string serverId)
+    public async Task<RelayTarget?> ResolveAsync(string serverId, CancellationToken ct = default)
     {
-        var codespace = await GetCodespaceByName(serverId)
-            ?? throw new InvalidOperationException($"Codespace {serverId} not found");
-
-        if (codespace.State != "Available")
-            throw new InvalidOperationException($"Codespace {serverId} is not running (state={codespace.State})");
-
-        var serverUrl = $"https://{codespace.Name}-31337.app.github.dev";
-        _logger.LogInformation("Connecting to codespace {ServerId} at {Url}", serverId, serverUrl);
-        return await HubConnectionFactory.CreateAndStartAsync(serverUrl, _token);
+        var codespace = await GetCodespaceByName(serverId);
+        if (codespace?.State != "Available")
+        {
+            _logger.LogWarning("Codespace {ServerId} is not running (state={State})", serverId, codespace?.State);
+            return null;
+        }
+        return new RelayTarget($"{ServerUrl(codespace.Name)}/hubs/projects", _token);
     }
+
+    private static string ServerUrl(string codespaceName) => $"https://{codespaceName}-31337.app.github.dev";
 
     private static ServerInfo ToServerInfo(CodespaceInfo c, ServerState state)
     {
@@ -116,7 +103,7 @@ public class GitHubCodespaceProvider : IServerProvider
         if (!string.IsNullOrEmpty(c.Branch))
             description = $"{description} · {c.Branch}";
         return new ServerInfo(c.Name, c.DisplayName ?? c.Name, "github", state,
-            $"https://{c.Name}-31337.app.github.dev", description);
+            ServerUrl(c.Name), description);
     }
 
     private static async Task<bool> ProbeGodModeServerAsync(string codespaceName, string token)
@@ -127,7 +114,7 @@ public class GitHubCodespaceProvider : IServerProvider
             client.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
             var response = await client.GetFromJsonAsync<ServerProbeResponse>(
-                $"https://{codespaceName}-31337.app.github.dev/");
+                $"{ServerUrl(codespaceName)}/");
             return response?.Service == "GodMode.Server";
         }
         catch { return false; }

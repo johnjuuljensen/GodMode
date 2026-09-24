@@ -22,10 +22,12 @@ interface Props {
   serverName: string;
   /** Now, in ms, from the inbox's clock, so every item's waiting time moves together. */
   now: number;
+  /** A tapped notification opened this item: it is marked (and the inbox scrolls to it). */
+  focused?: boolean;
 }
 
 /** One project that needs the user, answerable where it is. */
-export function InboxItem({ item, serverName, now }: Props) {
+export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const selectProject = useAppStore(s => s.selectProject);
   const replyAndResume = useAppStore(s => s.replyAndResume);
   const respondToPermission = useAppStore(s => s.respondToPermission);
@@ -69,7 +71,7 @@ export function InboxItem({ item, serverName, now }: Props) {
     .filter(Boolean).join(' · ');
 
   return (
-    <article className={`inbox-item inbox-kind-${kind}`}>
+    <article className={`inbox-item inbox-kind-${kind}${focused ? ' inbox-item-focused' : ''}`}>
       <button className="inbox-item-header" onClick={() => selectProject(serverId, projectId)} title="Open the project">
         <span className="inbox-item-kind">{KIND_LABELS[kind]}</span>
         <span className="inbox-item-name">{item.ProjectName}</span>

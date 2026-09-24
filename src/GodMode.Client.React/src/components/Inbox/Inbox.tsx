@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore, projectKey } from '../../store';
 import { InboxItem } from './InboxItem';
 import './Inbox.css';
 
 const COLLAPSED_KEY = 'godmode-inbox-collapsed';
 const CLOCK_MS = 30_000;
+/** After a notification tap, how long the inbox keeps its item in view while the list fills (servers connect one by one). */
+const FOCUS_SETTLE_MS = 5_000;
 
 interface Props {
   /** 'screen' fills the phone's home screen; 'pane' sits above the project list or tile grid, and collapses. */
@@ -16,7 +18,9 @@ export function Inbox({ variant }: Props) {
   const attention = useAppStore(s => s.attention);
   const serverConnections = useAppStore(s => s.serverConnections);
   const selectProject = useAppStore(s => s.selectProject);
+  const focus = useAppStore(s => s.inboxFocus);
   const [now, setNow] = useState(Date.now);
+  const listRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSED_KEY) === 'true'; } catch { return false; }
   });
@@ -25,6 +29,19 @@ export function Inbox({ variant }: Props) {
     const id = setInterval(() => setNow(Date.now()), CLOCK_MS);
     return () => clearInterval(id);
   }, []);
+
+  // A tapped notification's item must be in view, so a collapsed pane opens (once per tap)
+  const [focusSeen, setFocusSeen] = useState(focus);
+  if (focus !== focusSeen) {
+    setFocusSeen(focus);
+    if (focus) setCollapsed(false);
+  }
+
+  // Brings the tapped item into view, again as items arrive above it, but only just after the tap
+  useEffect(() => {
+    if (!focus || Date.now() - focus.at > FOCUS_SETTLE_MS) return;
+    listRef.current?.querySelector('.inbox-item-focused')?.scrollIntoView?.({ block: 'nearest' });
+  }, [focus, attention, collapsed]);
 
   const serverNames = useMemo(
     () => Object.fromEntries(serverConnections.map(c => [c.serverInfo.Id, c.serverInfo.Name])),
@@ -64,13 +81,14 @@ export function Inbox({ variant }: Props) {
       </header>
 
       {open && attention.length > 0 && (
-        <div className="inbox-list">
+        <div className="inbox-list" ref={listRef}>
           {attention.map(item => (
             <InboxItem
               key={projectKey(item.serverId, item.ProjectId)}
               item={item}
               serverName={serverNames[item.serverId] ?? item.serverId}
               now={now}
+              focused={focus?.key === projectKey(item.serverId, item.ProjectId)}
             />
           ))}
         </div>

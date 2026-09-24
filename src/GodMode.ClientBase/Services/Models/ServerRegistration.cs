@@ -1,41 +1,54 @@
+using System.Text.Json.Serialization;
+
 namespace GodMode.ClientBase.Services.Models;
 
-/// <summary>
-/// A registered server connection.
-/// Replaces the old per-profile Account model — servers are now global, not profile-scoped.
-/// </summary>
-public class ServerRegistration
+/// <summary>Server registration types.</summary>
+public static class ServerTypes
 {
-    /// <summary>
-    /// Server type: "local" or "github".
-    /// </summary>
-    public string Type { get; set; } = string.Empty;
+    /// <summary>A GodMode.Server reached at one or more URLs.</summary>
+    public const string Local = "local";
+
+    /// <summary>A GitHub account whose codespaces run GodMode.Server.</summary>
+    public const string GitHub = "github";
+}
+
+/// <summary>
+/// A registered server connection, stored in servers.json.
+/// The access token is never part of it: it lives in the platform's secure storage, keyed by <see cref="Id"/>.
+/// </summary>
+public sealed record ServerRegistration
+{
+    /// <summary>Unique ID (a GUID) assigned when the server is registered.</summary>
+    public string Id { get; init; } = "";
+
+    /// <summary>Server type: <see cref="ServerTypes.Local"/> or <see cref="ServerTypes.GitHub"/>.</summary>
+    public string Type { get; init; } = ServerTypes.Local;
 
     /// <summary>
-    /// Server URL for local servers (e.g., "http://localhost:31337").
+    /// URLs of a local server, in order of preference. The relay connects to the first that answers /health.
+    /// All of them share the server's access token.
     /// </summary>
-    public string? Url { get; set; }
+    public IReadOnlyList<string> Urls { get; init; } = [];
 
-    /// <summary>
-    /// Username for GitHub Codespaces accounts.
-    /// </summary>
-    public string? Username { get; set; }
+    /// <summary>Username for GitHub Codespaces accounts.</summary>
+    public string? Username { get; init; }
 
-    /// <summary>
-    /// Encrypted token for GitHub accounts.
-    /// </summary>
-    public string? Token { get; set; }
+    /// <summary>Optional display name for the server.</summary>
+    public string? DisplayName { get; init; }
 
-    /// <summary>
-    /// Optional display name for the server.
-    /// </summary>
-    public string? DisplayName { get; set; }
+    /// <summary>Legacy single URL. Read once and moved into <see cref="Urls"/>; never written.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Url { get; init; }
+
+    /// <summary>Legacy protected token. Read once and moved into secure storage; never written.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Token { get; init; }
 }
 
 /// <summary>
 /// Container for server registrations stored in servers.json.
 /// </summary>
-public class ServersConfig
+public sealed record ServersConfig
 {
-    public List<ServerRegistration> Servers { get; set; } = new();
+    public IReadOnlyList<ServerRegistration> Servers { get; init; } = [];
 }

@@ -3,43 +3,23 @@ using GodMode.ClientBase.Services.Models;
 namespace GodMode.ClientBase.Services;
 
 /// <summary>
-/// Manages server registrations (replacing profile-scoped accounts).
-/// Servers are global — profiles are now discovered from servers, not defined on the client.
+/// Manages server registrations. Registrations are kept in servers.json;
+/// their access tokens are kept in secure storage and never written to a file.
 /// </summary>
 public interface IServerRegistryService
 {
-    /// <summary>
-    /// Gets all registered servers.
-    /// </summary>
-    Task<List<ServerRegistration>> GetServersAsync();
+    /// <summary>Gets all registered servers.</summary>
+    Task<IReadOnlyList<ServerRegistration>> GetServersAsync();
 
     /// <summary>
-    /// Adds a new server registration.
+    /// Registers a server under a new unique ID (any <see cref="ServerRegistration.Id"/> passed in is ignored)
+    /// and puts its access token, if any, in secure storage.
     /// </summary>
-    Task AddServerAsync(ServerRegistration server);
+    Task<ServerRegistration> AddServerAsync(ServerRegistration server, string? accessToken);
 
-    /// <summary>
-    /// Updates a server registration at the given index.
-    /// </summary>
-    Task UpdateServerAsync(int index, ServerRegistration server);
+    /// <summary>Removes a registration and its stored token. False when no registration has that ID.</summary>
+    Task<bool> RemoveServerAsync(string id);
 
-    /// <summary>
-    /// Removes a server registration at the given index.
-    /// </summary>
-    Task RemoveServerAsync(int index);
-
-    /// <summary>
-    /// Checks if a duplicate server already exists.
-    /// </summary>
-    bool IsDuplicate(ServerRegistration server, int? excludeIndex = null);
-
-    /// <summary>
-    /// Decrypts a token that was encrypted for storage.
-    /// </summary>
-    string DecryptToken(string encryptedToken);
-
-    /// <summary>
-    /// Encrypts a token for storage.
-    /// </summary>
-    string EncryptToken(string token);
+    /// <summary>The access token stored for a registration, or null when it has none.</summary>
+    Task<string?> GetAccessTokenAsync(string id);
 }

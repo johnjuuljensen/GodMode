@@ -44,11 +44,11 @@ GodMode.ProjectFiles
     ↑
 GodMode.Server  ← GodMode.Server.Tests
 
-GodMode.Shared
+GodMode.Shared    SignalR.Proxy  (WebSocket relay, LocalServer)
+    ↑                 ↑
+GodMode.ClientBase  ← (host providers, server registry, URL selection)  ← GodMode.Relay.Tests
     ↑
-GodMode.ClientBase  ← (host providers, server registry, token protection)
-    ↑
-GodMode.Maui  ← SignalR.Proxy
+GodMode.Maui
 ```
 
 The server's and the MAUI app's builds run `npm run build` in `GodMode.Client.React` and copy its `dist/` into their `wwwroot`.
@@ -91,13 +91,14 @@ When building UI features:
 │  │  (serves React from       │  │
 │  │   embedded resources)     │  │
 │  └───────────┬───────────────┘  │
-│              │ HTTP/WebSocket    │
+│     bridge   │ WebSocket only    │
+│ (relay.info, │                   │
+│  servers.*)  │                   │
 │  ┌───────────▼───────────────┐  │
 │  │  LocalServer              │  │
 │  │  (127.0.0.1:{port})       │  │
-│  │  ├─ REST: /servers        │  │
-│  │  ├─ SSE: /events          │  │
-│  │  └─ WS: /?serverId=X     │  │
+│  │  WS: /?serverId=X         │  │
+│  │      &access_token=secret │  │
 │  └───────────┬───────────────┘  │
 │              │ SignalR.Proxy     │
 │              │ (WebSocket relay) │
@@ -112,7 +113,9 @@ When building UI features:
 
 **Build integration**: The MAUI csproj has MSBuild targets that run `npm run build` and copy the React `dist/` to `Resources/Raw/wwwroot/`. HybridWebView serves these embedded files.
 
-**Base URL injection**: On page load, MAUI injects `window.__GODMODE_BASE_URL__` pointing to the local proxy.
+**Host bridge**: React talks to the shell over HybridWebView's raw-message channel (`services/hostBridge.ts` ↔ `Bridge/HostBridge.cs` + `Bridge/ShellBridge.cs`), a typed request/response API. `relay.info` returns the relay's base URL and a per-launch secret; `servers.list`, `servers.add`, `servers.remove`, `servers.start` and `servers.stop` manage servers; the `servers.changed` event says the list or a server's state changed. No bridge message carries a server's access token back to React.
+
+**The relay** (`LocalServer`) serves only the WebSocket relay, and only to a request with the WebView's `Origin` (`https://0.0.0.1`, or `app://0.0.0.1` on Apple platforms; else 403) and the per-launch secret as the `access_token` query parameter (else 401). It forwards to registered servers by server ID and adds that server's key itself. SignalR frames pass through untouched, so the hub contract needs no relay changes.
 
 **React detects hosting mode** via hostname:
 ```typescript
@@ -126,28 +129,28 @@ export const isMaui = window.location.hostname === '0.0.0.1';
 |---|---|---|
 | React source | Served by GodMode.Server `/wwwroot` | Embedded in MAUI resources |
 | SignalR connection | Direct to server `/hubs/projects` | Via LocalServer WebSocket relay |
-| Server discovery | Single server (the one serving the page) | Multiple servers via `/servers` REST API |
-| Authentication | API key entered once, kept in that browser (Section 4.4) | Access token stored per server in `~/.godmode/servers.json`, added by the proxy when relaying |
+| Server discovery | Single server (the one serving the page) | Multiple servers via the bridge (`servers.list`) |
+| Authentication | API key entered once, kept in that browser (Section 4.4) | Access token per server in platform secure storage (Android Keystore, DPAPI, Keychain), added by the relay; React sends the relay only its per-launch secret |
 | SignalR negotiate | Standard | Skipped (`skipNegotiation: true`, relay handles it) |
-| Server management | Not available | Add/remove/start/stop servers via `/servers/registrations` |
+| Server management | Not available | Add/remove/start/stop servers via the bridge (`servers.*`) |
 
 ### 3.4 What MAUI Developers Need to Know
 
 The MAUI project (`GodMode.Maui/`) contains:
-- `MainPage.xaml` + `MainPage.xaml.cs` — HybridWebView setup, injects base URL, Windows DevTools integration
-- `LocalServer.cs` — HTTP listener providing REST API, SSE events, and WebSocket relay
-- `MauiProgram.cs` — DI registration, using `ServiceCollectionExtensions.cs` from GodMode.ClientBase
-- `Bridge/` — `HostBridge` messages between the WebView and the host
-- `Platforms/` — Platform-specific entry points (minimal)
+- `MainPage.xaml` + `MainPage.xaml.cs` — HybridWebView setup, attaches the bridge, Windows DevTools integration
+- `MauiProgram.cs` — DI registration (using `ServiceCollectionExtensions.cs` from GodMode.ClientBase), starts the relay
+- `MauiSecretStore.cs` — `ISecretStore` over MAUI `SecureStorage`
+- `Bridge/` — `HostBridge` (the message channel), `ShellBridge` (the shell API), `ShellMessages.cs` (its types)
+- `Platforms/` — Platform-specific entry points (minimal). Android disables backup and device transfer.
 
 **Key services in GodMode.ClientBase/**:
-- `IServerRegistryService` — manages server registrations in `~/.godmode/servers.json`
-- `IServerConnectionService` — provides `IServerProvider` implementations (local folders, GitHub Codespaces)
-- `ITokenProtector` — encrypts/decrypts access tokens
+- `IServerRegistryService` — server registrations in `~/.godmode/servers.json` (each with a GUID ID and an ordered URL list); tokens in `ISecretStore`, never in the file
+- `IServerDirectory` — builds an `IServerProvider` per registration (local servers, GitHub Codespaces), lists servers and resolves one to a relay target
+- `ServerUrlSelector` — picks a server's URL: the first, in order, that answers `/health` within 1.5 s. Checked on every relay connection; a network change drops the relays so they reconnect and check again
 
 **SignalR.Proxy/** handles the WebSocket relay:
+- `LocalServer` — the loopback listener with the Origin and secret checks (tested in `tests/GodMode.Relay.Tests`)
 - `SignalRRelay` — bidirectional message relay with proper SignalR framing
-- `TeeConnection` — tees server messages to a local HubConnection for typed callbacks
 
 ### 3.5 Considerations When Changing React
 

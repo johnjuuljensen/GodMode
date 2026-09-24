@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace GodMode.ClientBase;
 
 /// <summary>
-/// Registers GodMode client services.
+/// Registers GodMode client services. The host registers the <see cref="ISecretStore"/>.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
@@ -20,10 +20,13 @@ public static class ServiceCollectionExtensions
             builder.AddProvider(new FileLoggerProvider(logDir));
         });
 
-        services.AddSingleton<ITokenProtector, TokenProtector>();
-        services.AddSingleton<IServerRegistryService>(sp =>
-            new ServerRegistryService(GodModePaths.AppDataDirectory, sp.GetRequiredService<ITokenProtector>()));
-        services.AddSingleton<IServerConnectionService, ServerConnectionService>();
+        services.AddSingleton<IServerRegistryService>(sp => new ServerRegistryService(
+            GodModePaths.AppDataDirectory,
+            sp.GetRequiredService<ISecretStore>(),
+            sp.GetRequiredService<ILogger<ServerRegistryService>>()));
+        services.AddSingleton(sp => new ServerUrlSelector(
+            ServerUrlSelector.CreateHttpClient(), logger: sp.GetRequiredService<ILogger<ServerUrlSelector>>()));
+        services.AddSingleton<IServerDirectory, ServerDirectory>();
         return services;
     }
 }

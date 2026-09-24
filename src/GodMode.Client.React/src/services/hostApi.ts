@@ -4,40 +4,41 @@
  * React always talks to a server that provides REST endpoints and a SignalR hub.
  * Two hosting modes, identical from React's perspective:
  *
- *  - MAUI: base URL injected via window.__GODMODE_BASE_URL__ (local proxy that
- *    relays to remote servers). Hub connection goes through the relay.
+ *  - MAUI: the shell's local relay forwards hub connections to the registered servers.
+ *    React learns the relay's URL and per-launch secret from the host bridge
+ *    (hostBridge.ts, `relay.info`), and manages servers over the bridge too.
  *  - Server-hosted: base URL is window.location.origin (GodMode.Server serves
  *    the React client AND is the project hub). Hub connects directly.
  *
  * The only behavioral difference is how the SignalR hub URL is constructed:
- *  - MAUI relay: {baseUrl}/?serverId={id} (skipNegotiation, WebSocket-only)
+ *  - MAUI relay: {relayUrl}/?serverId={id}&access_token={secret} (skipNegotiation, WebSocket-only)
  *  - Direct:     {baseUrl}/hubs/projects  (standard negotiation)
  *
  * Authentication: the server requires its API key on every request except /health
- * and the client's static files. In MAUI the local proxy holds each server's key
- * (registered with the server) and adds it when relaying, so React sends none.
+ * and the client's static files. In MAUI the shell keeps each server's key in secure
+ * storage and the relay adds it when relaying; React hands a key over once, when adding
+ * a server, and never gets it back. It sends the relay only the relay's own secret.
  * Server-hosted, the user enters the key once; it is kept in this browser's
  * localStorage and sent as a bearer token (HTTP header, hub accessTokenFactory).
  */
 import type { ServerInfo } from '../signalr/types';
+import * as bridge from './hostBridge';
+import type { RelayInfo } from './hostBridge';
 
 // ── Public types ───────────────────────────────────────────────
 
 export interface AddServerRequest {
   DisplayName: string;
+  /** In MAUI, several URLs may be given separated by commas or spaces, in order of preference. */
   Url: string;
+  /** Local server URLs in order of preference (MAUI); overrides Url. */
+  Urls?: string[] | null;
   AccessToken?: string | null;
   Type?: string;
   Username?: string | null;
 }
 
 // ── Mode detection ─────────────────────────────────────────────
-
-declare global {
-  interface Window {
-    __GODMODE_BASE_URL__?: string;
-  }
-}
 
 /** HybridWebView serves from 0.0.0.1 — if we're on that host, we're in MAUI. */
 export const isMaui = window.location.hostname === '0.0.0.1';
@@ -80,8 +81,12 @@ function authHeaders(): Record<string, string> {
 
 // ── Unified API ────────────────────────────────────────────────
 
+/** The MAUI relay's URL and secret, once the bridge has answered relay.info. */
+let relayInfo: RelayInfo | null = null;
+let relayInfoRequest: Promise<void> | null = null;
+
 function getBaseUrl(): string {
-  if (isMaui) return window.__GODMODE_BASE_URL__ || '';
+  if (isMaui) return relayInfo?.BaseUrl ?? '';
   return window.location.origin;
 }
 
@@ -103,24 +108,48 @@ export async function isAuthorized(): Promise<boolean> {
   return res.status !== 401;
 }
 
-/** Wait for the base URL to be available (MAUI injects it async). */
+/** In MAUI, ask the shell for the relay's URL and secret (once). */
 export async function waitUntilReady(timeoutMs = 5000): Promise<void> {
-  if (!isMaui) return;
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (window.__GODMODE_BASE_URL__) return;
-    await new Promise(r => setTimeout(r, 50));
+  if (!isMaui || relayInfo) return;
+  relayInfoRequest ??= bridge.request('relay.info')
+    .then(info => { relayInfo = info; })
+    .finally(() => { relayInfoRequest = null; });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timed out')), timeoutMs);
+  });
+  try {
+    await Promise.race([relayInfoRequest, timeout]);
+  } catch (err) {
+    console.warn('[api] Could not get the relay info from the MAUI shell:', err);
+  } finally {
+    clearTimeout(timer);
   }
-  console.warn('[api] Timed out waiting for MAUI base URL injection');
+}
+
+/** Splits "url1, url2" into its URLs. */
+function splitUrls(urls: string): string[] {
+  return urls.split(/[\s,]+/).filter(u => u.length > 0);
 }
 
 export async function fetchServers(): Promise<ServerInfo[]> {
+  if (isMaui) return bridge.request('servers.list');
   const res = await apiFetch('/servers');
   if (!res.ok) throw new Error(`Failed to fetch servers: ${res.status}`);
   return res.json();
 }
 
 export async function addServer(req: AddServerRequest): Promise<void> {
+  if (isMaui) {
+    await bridge.request('servers.add', {
+      Type: req.Type ?? 'local',
+      DisplayName: req.DisplayName,
+      Urls: req.Urls ?? splitUrls(req.Url),
+      Username: req.Username ?? null,
+      AccessToken: req.AccessToken ?? null,
+    });
+    return;
+  }
   const res = await apiFetch('/servers/registrations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -130,7 +159,10 @@ export async function addServer(req: AddServerRequest): Promise<void> {
 }
 
 export async function removeServer(serverId: string): Promise<void> {
-  // MAUI LocalServer uses index-based deletion — resolve serverId to index
+  if (isMaui) {
+    await bridge.request('servers.remove', { ServerId: serverId });
+    return;
+  }
   const servers = await fetchServers();
   const index = servers.findIndex(s => s.Id === serverId);
   if (index < 0) throw new Error(`Server not found: ${serverId}`);
@@ -139,16 +171,28 @@ export async function removeServer(serverId: string): Promise<void> {
 }
 
 export async function startServer(serverId: string): Promise<void> {
+  if (isMaui) {
+    await bridge.request('servers.start', { ServerId: serverId });
+    return;
+  }
   const res = await apiFetch(`/servers/${encodeURIComponent(serverId)}/start`, { method: 'POST' });
   if (!res.ok) throw new Error(`Failed to start server: ${res.status}`);
 }
 
 export async function stopServer(serverId: string): Promise<void> {
+  if (isMaui) {
+    await bridge.request('servers.stop', { ServerId: serverId });
+    return;
+  }
   const res = await apiFetch(`/servers/${encodeURIComponent(serverId)}/stop`, { method: 'POST' });
   if (!res.ok) throw new Error(`Failed to stop server: ${res.status}`);
 }
 
 export async function openDevTools(): Promise<void> {
+  if (isMaui) {
+    await bridge.request('host.openDevTools');
+    return;
+  }
   await apiFetch('/devtools', { method: 'POST' });
 }
 
@@ -156,12 +200,21 @@ export function subscribeEvents(onEvent: (type: string, data: unknown) => void):
   // Only MAUI's local proxy emits server-list changes. GodMode.Server's /events is a
   // placeholder that never does, and EventSource cannot send the API key header.
   if (!isMaui) return () => {};
-  const baseUrl = getBaseUrl();
-  if (!baseUrl) return () => {};
-  const source = new EventSource(`${baseUrl}/events`);
-  source.addEventListener('serversChanged', () => onEvent('serversChanged', null));
-  source.onerror = () => {};
-  return () => source.close();
+  return bridge.on('servers.changed', () => onEvent('serversChanged', null));
+}
+
+/**
+ * Calls `open` with the item each tapped notification names (the Android shell's; see AttentionNotifier),
+ * including the tap that launched the app, which came before this page loaded. Elsewhere, never.
+ */
+export function subscribeAttentionLinks(open: (serverId: string, projectId: string) => void): () => void {
+  if (!isMaui) return () => {};
+  const take = () => bridge.request('attention.take')
+    .then(link => { if (link) open(link.ServerId, link.ProjectId); })
+    .catch(err => console.error('[hostApi] attention.take failed:', err));
+  const unsubscribe = bridge.on('attention.open', take);
+  take();
+  return unsubscribe;
 }
 
 // ── Hub connection helpers ─────────────────────────────────────
@@ -181,6 +234,8 @@ export function getHubOptions(_serverId: string): import('@microsoft/signalr').I
     return {
       skipNegotiation: true,
       transport: 1, // signalR.HttpTransportType.WebSockets
+      // The relay's per-launch secret; SignalR puts it on the WebSocket URL as access_token.
+      accessTokenFactory: () => relayInfo?.Secret ?? '',
     };
   }
   // No key (loopback server) → empty token, which SignalR does not send.

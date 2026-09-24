@@ -89,6 +89,8 @@
   flex-shrink: 0;
 }
 .inbox-kind-Permission { border-left-color: var(--warning); }
+/* The item a tapped notification opened */
+.inbox-item-focused { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .inbox-kind-Error { border-left-color: var(--error); }
 .inbox-kind-Finished { border-left-color: var(--success); }
 .inbox-kind-Review { border-left-color: var(--purple); }

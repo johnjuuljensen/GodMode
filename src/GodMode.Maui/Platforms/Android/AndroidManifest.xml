@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:allowBackup="true"
+    <!-- No backup or device transfer: servers.json and the SecureStorage preferences stay on this device. -->
+    <application android:allowBackup="false"
+                 android:dataExtractionRules="@xml/data_extraction_rules"
                  android:label="GodMode"
                  android:supportsRtl="true"
                  android:usesCleartextTraffic="true">
     </application>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- AttentionService: a foreground service (dataSync) that raises a notification when a session needs you. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 </manifest>

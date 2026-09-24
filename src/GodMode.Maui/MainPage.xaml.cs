@@ -1,3 +1,4 @@
+using GodMode.Maui.Bridge;
 using Microsoft.Extensions.Logging;
 
 namespace GodMode.Maui;
@@ -11,15 +12,8 @@ public partial class MainPage : ContentPage
         _instance = this;
         InitializeComponent();
 
-        // Inject the local proxy base URL after the WebView loads.
-        // The React client detects MAUI mode synchronously via the 0.0.0.1
-        // hostname and polls for this value in hostApi.waitUntilReady().
-        Loaded += async (_, _) =>
-        {
-            await Task.Delay(200);
-            await WebView.EvaluateJavaScriptAsync(
-                $"window.__GODMODE_BASE_URL__ = '{MauiProgram.LocalBaseUrl}'");
-        };
+        // React asks the shell for the relay's URL and secret over the bridge (relay.info).
+        ShellBridge.Attach(WebView, MauiProgram.Services);
 
 #if WINDOWS
         WebView.HandlerChanged += (_, _) =>
