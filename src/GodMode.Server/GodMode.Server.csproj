@@ -42,13 +42,15 @@
     <_ReactSource Include="$(_ReactDir)\tsconfig*.json" />
   </ItemGroup>
 
-  <!-- Build React and copy to wwwroot (incremental: skipped when sources unchanged) -->
+  <!-- Build React and copy to wwwroot (incremental: skipped when sources unchanged). Its packages
+       are installed first when they are missing, as in a fresh clone (the codespace's publish) -->
   <Target Name="BuildReact"
           BeforeTargets="PrepareForBuild"
           Condition="'$(PublishReactClient)' != 'false'"
           Inputs="@(_ReactSource)"
           Outputs="$(_ReactDir)\dist\index.html">
     <Message Importance="high" Text="Building React client..." />
+    <Exec Command="npm ci" WorkingDirectory="$(_ReactDir)" Condition="!Exists('$(_ReactDir)\node_modules')" />
     <Exec Command="npm run build" WorkingDirectory="$(_ReactDir)" />
   </Target>
 
