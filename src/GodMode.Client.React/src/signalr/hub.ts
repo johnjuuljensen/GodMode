@@ -180,7 +180,7 @@ export class GodModeHub {
     return await this.connection!.invoke('GetAttention');
   }
 
-  /** The user has seen the project's last result: it is no longer 'Finished'. */
+  /** The user has seen the project's last result: it is no longer 'Finished', nor 'Review' until its pull request changes. */
   async markSeen(projectId: string): Promise<void> {
     await this.connection!.invoke('MarkSeen', projectId);
   }

@@ -15,8 +15,8 @@ namespace GodMode.Shared.Models;
 /// <param name="Kind">What it needs.</param>
 /// <param name="Since">When it started to need it; the same after a server restart.</param>
 /// <param name="Text">
-/// Plain text to show or read aloud: the question, the permission's summary, the error, or the
-/// result. Code blocks are left out and it is cut to about 500 characters; the transcript has it all.
+/// Plain text to show or read aloud: the question, the permission's summary, the error, the review,
+/// or the result. Code blocks are left out and it is cut to about 500 characters; the transcript has it all.
 /// </param>
 /// <param name="Permission">The tool call to allow or deny, when <paramref name="Kind"/> is <see cref="AttentionKind.Permission"/>.</param>
 /// <param name="Question">The AskUserQuestion with its options, when <paramref name="Kind"/> is <see cref="AttentionKind.Question"/> and claude asked with the tool; null for a question in plain text.</param>

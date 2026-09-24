@@ -6,6 +6,10 @@ namespace GodMode.Shared.Models;
 /// A named create action within a project root.
 /// Each action defines its own input schema, scripts, templates, and configuration.
 /// </summary>
+/// <param name="Status">
+/// The script that reports the project's pull request, run in the project folder: it prints one JSON
+/// object, <c>{"pullRequest": {...}}</c>, or <c>{}</c> when there is none. Null when the root has none.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -19,5 +23,6 @@ public record CreateAction(
     string? PromptTemplate = null,
     bool ScriptsCreateFolder = false,
     string? Model = null,
-    Dictionary<string, McpServerConfig>? McpServers = null
+    Dictionary<string, McpServerConfig>? McpServers = null,
+    string? Status = null
 );
