@@ -358,6 +358,11 @@
   overflow-x: auto;
   border-collapse: collapse;
   font-size: 12px;
+  word-break: normal;
+}
+
+.markdown table code {
+  white-space: nowrap;
 }
 
 .markdown th,
