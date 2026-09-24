@@ -16,4 +16,10 @@ public interface IAttentionNotifier
 
     /// <summary>Removes what is shown under the link's key, if anything.</summary>
     void Cancel(AttentionLink link);
+
+    /// <summary>
+    /// What is shown now, including what an earlier run of the app left when the system ended it: nothing
+    /// else would cancel those once their items are answered.
+    /// </summary>
+    IReadOnlyCollection<AttentionLink> Showing();
 }

@@ -26,6 +26,11 @@ internal sealed class RecordingNotifier : IAttentionNotifier
         Log.Enqueue($"cancel {link.Key}");
     }
 
+    /// <summary>Links an earlier run of the app left showing, before any tracker saw them.</summary>
+    public List<AttentionLink> LeftShowing { get; } = [];
+
+    public IReadOnlyCollection<AttentionLink> Showing() => [.. LeftShowing, .. Shown.Values.Select(n => n.Link)];
+
     /// <summary>What is shown, as (server, project) pairs.</summary>
     public IReadOnlyList<(string ServerId, string ProjectId)> Items =>
         [.. Shown.Values.Select(n => (n.Link.ServerId, n.Link.ProjectId)).Order()];

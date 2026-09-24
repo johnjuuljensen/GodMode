@@ -65,6 +65,13 @@ public sealed class AttentionNotifier(Context context) : IAttentionNotifier
         UpdateSummary();
     }
 
+    /// <summary>The items shown now, by this process or by one the system ended without stopping the service.</summary>
+    public IReadOnlyCollection<AttentionLink> Showing() =>
+        [.. ((NotificationManager)context.GetSystemService(Context.NotificationService)!).GetActiveNotifications()!
+            .Where(n => n.Id == ItemId)
+            .Select(n => AttentionLink.FromKey(n.Tag))
+            .OfType<AttentionLink>()];
+
     /// <summary>Removes everything this notifier showed (the service is stopping and can no longer keep it right).</summary>
     public void CancelAll()
     {

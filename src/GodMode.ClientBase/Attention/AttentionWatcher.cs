@@ -58,6 +58,7 @@ public sealed class AttentionWatcher : IAsyncDisposable
             }
             foreach (var gone in _watches.Keys.Except(servers.Select(s => s.Id)).ToList())
                 await StopAsync(gone);
+            _tracker.RemoveAllExcept(servers.Select(s => s.Id));
         }
         finally
         {

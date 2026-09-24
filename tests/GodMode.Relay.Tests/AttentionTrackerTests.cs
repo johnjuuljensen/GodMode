@@ -52,6 +52,18 @@ public sealed class AttentionTrackerTests
     }
 
     [Fact]
+    public void What_an_earlier_run_left_showing_is_cancelled_once_its_server_no_longer_lists_it()
+    {
+        _notifier.LeftShowing.AddRange([new("alpha", "Default/root/gone"), new("alpha", "Default/root/kept"), new("beta", "Default/root/b")]);
+        var tracker = new AttentionTracker(_notifier);
+
+        tracker.Update("alpha", "Alpha", [Item("Default/root/kept")]);
+
+        // Beta has not listed yet: its item stays until it does
+        Assert.Equal(["cancel alpha:Default%2Froot%2Fgone", "show alpha:Default%2Froot%2Fkept"], _notifier.Log);
+    }
+
+    [Fact]
     public void Removing_a_server_cancels_only_its_items()
     {
         _tracker.Update("alpha", "Alpha", [Item("Default/root/a")]);

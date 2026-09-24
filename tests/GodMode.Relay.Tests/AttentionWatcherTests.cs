@@ -133,6 +133,24 @@ public sealed class AttentionWatcherTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task What_an_earlier_run_left_showing_is_put_right_once_the_servers_are_listed()
+    {
+        var alpha = await AddAsync(_alpha, "key-alpha");
+        _alpha.SetQuietly(Item("Default/root/kept"));
+        var notifier = new RecordingNotifier();
+        notifier.LeftShowing.AddRange([new(alpha, "Default/root/answered"), new(alpha, "Default/root/kept"), new("unregistered", "Default/root/x")]);
+        var directory = new ServerDirectory(_registry, new ServerUrlSelector(ServerUrlSelector.CreateHttpClient()), NullLoggerFactory.Instance);
+        await using var watcher = new AttentionWatcher(directory, notifier, NullLoggerFactory.Instance);
+
+        await watcher.RefreshAsync();
+
+        await UntilAsync(() => notifier.Items.Count == 1, "the listed item");
+        Assert.Equal([(alpha, "Default/root/kept")], notifier.Items);
+        Assert.Contains($"cancel {new AttentionLink(alpha, "Default/root/answered").Key}", notifier.Log);
+        Assert.Contains($"cancel {new AttentionLink("unregistered", "Default/root/x").Key}", notifier.Log);
+    }
+
+    [Fact]
     public async Task A_server_that_is_down_does_not_hold_up_the_others()
     {
         var url = Net.UnreachableUrl();
