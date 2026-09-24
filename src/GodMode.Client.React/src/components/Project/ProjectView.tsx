@@ -260,7 +260,7 @@ export function ProjectView({ serverId, projectId }: Props) {
       </div>
 
       {phase === 'ready' && visibleItems.length > 0 ? (
-        <TranscriptList key={`${serverId}:${projectId}`} items={visibleItems} replaying={transcriptPhase === 'replaying'} />
+        <TranscriptList key={`${serverId}:${projectId}`} items={visibleItems} />
       ) : (
         <div className="project-messages">
           <div className="project-messages-empty">

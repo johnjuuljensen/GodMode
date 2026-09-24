@@ -6,6 +6,8 @@
 
 .transcript-row {
   padding: 0 16px;
+  /* A row's layout and paint stay inside it, so mounting one as the list scrolls does not lay out the rest */
+  contain: content;
 }
 
 .transcript-spacer {
