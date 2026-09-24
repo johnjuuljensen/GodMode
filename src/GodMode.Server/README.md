@@ -268,6 +268,11 @@ Projects:
 - `Task ArchiveProject(projectId)` / `Task UnarchiveProject(projectId)` — Move to and from `.archived/`
 - `Task<ProjectSummary[]> ListArchivedProjects()` — Get archived projects
 
+Attention:
+- `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Finished`), oldest first, with a short plain `Text`; the same after a restart
+- `Task MarkSeen(projectId)` — The last result is seen: no longer `Finished` (a reply does the same)
+- `Task ReplyAndResume(projectId, text)` — `SendInput` to a running claude; otherwise resume, send, and return once claude reports `system/init` (fails on exit or after `SessionStartTimeoutSeconds`, default 60)
+
 Roots and profiles:
 - `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas
 - `Task<ProfileInfo[]> ListProfiles()` — Get profiles
@@ -282,6 +287,7 @@ Utility:
 - `OutputBatch(projectId, fromOffset, lines)` — Replayed `OutputLine`s (`Offset`, `RawJson`) covering `output.jsonl` from `fromOffset`; a replay from 0 when more was asked for means the client's transcript is not from this file
 - `OutputReplayComplete(projectId, offset)` — The subscription's replay is done at `offset`; live lines follow
 - `StatusChanged(projectId, status)` — Project status changed
+- `AttentionChanged(items)` — The whole `GetAttention` list, pushed only when it differs from the last one pushed
 - `ProjectCreated(status)` — New project created
 - `CreationProgress(projectId, message)` — Script progress during project creation
 - `ProjectDeleted(projectId)`, `ProjectArchived(projectId)`, `ProjectRestored(project)` — Project list changes

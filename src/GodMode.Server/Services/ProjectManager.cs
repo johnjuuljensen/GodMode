@@ -1146,6 +1146,7 @@ public class ProjectManager : IProjectManager
                 State = ProjectState.Error,
                 LastError = ex is LaunchConfigException ? ex.Message : status.LastError,
             });
+            await NotifyStatusChanged(project);
             throw;
         }
 
@@ -1189,7 +1190,7 @@ public class ProjectManager : IProjectManager
         return Task.CompletedTask;
     }
 
-    public Task DeleteProfileAsync(string name, bool deleteContents = false)
+    public async Task DeleteProfileAsync(string name, bool deleteContents = false)
     {
         _profileFileManager.DeleteProfile(name);
 
@@ -1243,7 +1244,8 @@ public class ProjectManager : IProjectManager
         }
 
         RebuildSnapshot();
-        return Task.CompletedTask;
+        // A cascade removed projects, which may have needed the user
+        await PushAttentionIfChangedAsync();
     }
 
     public Task UpdateProfileDescriptionAsync(string name, string? description)
