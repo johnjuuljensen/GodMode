@@ -203,6 +203,20 @@ export function subscribeEvents(onEvent: (type: string, data: unknown) => void):
   return bridge.on('servers.changed', () => onEvent('serversChanged', null));
 }
 
+/**
+ * Calls `open` with the item each tapped notification names (the Android shell's; see AttentionNotifier),
+ * including the tap that launched the app, which came before this page loaded. Elsewhere, never.
+ */
+export function subscribeAttentionLinks(open: (serverId: string, projectId: string) => void): () => void {
+  if (!isMaui) return () => {};
+  const take = () => bridge.request('attention.take')
+    .then(link => { if (link) open(link.ServerId, link.ProjectId); })
+    .catch(err => console.error('[hostApi] attention.take failed:', err));
+  const unsubscribe = bridge.on('attention.open', take);
+  take();
+  return unsubscribe;
+}
+
 // ── Hub connection helpers ─────────────────────────────────────
 
 export function getHubUrl(serverId: string): string {

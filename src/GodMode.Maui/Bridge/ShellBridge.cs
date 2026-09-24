@@ -50,6 +50,9 @@ public sealed class ShellBridge
             await _directory.StartServerAsync(p.ServerId) ? Polling(p.ServerId) : throw NotFound(p));
         _bridge.Handle<ServerIdPayload, bool>(ShellMessageTypes.ServersStop, async p =>
             await _directory.StopServerAsync(p.ServerId) ? Polling(p.ServerId) : throw NotFound(p));
+        _bridge.Handle(ShellMessageTypes.AttentionTake, () => Task.FromResult(
+            PendingAttentionLink.Take() is { } link ? new AttentionLinkPayload(link.ServerId, link.ProjectId) : null));
+        PendingAttentionLink.Arrived += () => _bridge.Send(ShellMessageTypes.AttentionOpen);
         _bridge.Handle(ShellMessageTypes.OpenDevTools, () =>
         {
             MainPage.OpenDevTools();
@@ -81,6 +84,9 @@ public sealed class ShellBridge
     private T Changed<T>(T result)
     {
         _bridge.Send(ShellMessageTypes.ServersChanged);
+#if ANDROID
+        AttentionService.Refresh();
+#endif
         return result;
     }
 

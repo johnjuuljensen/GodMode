@@ -104,6 +104,27 @@ describe('the inbox', () => {
     expect(useAppStore.getState().selectedProject).toEqual({ serverId: 'B', projectId: 'p1' });
   });
 
+  it('opens on the item a tapped notification names, from another screen, and again on a second tap', async () => {
+    const scrolled: Element[] = [];
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) { scrolled.push(this); };
+    try {
+      useAppStore.getState().selectProject('B', 'p1');
+      await act(async () => useAppStore.getState().openInboxItem('A', 'p1'));
+
+      const state = useAppStore.getState();
+      expect([state.selectedProject, state.activePage, state.homeView]).toEqual([null, null, 'inbox']);
+      // Server B has a p1 too: only server A's is the one opened
+      const focused = [...view.container.querySelectorAll('.inbox-item-focused')];
+      expect(focused).toEqual([itemEl('p1', 'Server A')]);
+      expect(scrolled).toEqual(focused);
+
+      await act(async () => useAppStore.getState().openInboxItem('A', 'p1'));
+      expect(scrolled).toEqual([...focused, ...focused]);
+    } finally {
+      delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+    }
+  });
+
   it('says so when nothing needs the user', async () => {
     await act(async () => { hubA.callbacks.onAttentionChanged?.([]); hubB.callbacks.onAttentionChanged?.([]); });
     expect(view.container.textContent).toContain('Nothing needs you.');

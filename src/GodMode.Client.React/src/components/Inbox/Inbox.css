@@ -89,6 +89,12 @@
   flex-shrink: 0;
 }
 .inbox-kind-Permission { border-left-color: var(--warning); }
+/* The item a tapped notification opened */
+.inbox-item-focused { animation: inbox-item-flash 1.6s ease-out; }
+@keyframes inbox-item-flash {
+  from { box-shadow: 0 0 0 2px var(--accent); }
+  to { box-shadow: 0 0 0 2px transparent; }
+}
 .inbox-kind-Error { border-left-color: var(--error); }
 .inbox-kind-Finished { border-left-color: var(--success); }
 .inbox-kind-Review { border-left-color: var(--purple); }

@@ -29,6 +29,12 @@ public static class ShellMessageTypes
 
     /// <summary>Event from the shell: the server list or a server's state changed.</summary>
     public const string ServersChanged = "servers.changed";
+
+    /// <summary>Request → <see cref="AttentionLinkPayload"/>, or null: the item a notification tap opened, once.</summary>
+    public const string AttentionTake = "attention.take";
+
+    /// <summary>Event from the shell: a notification was tapped; attention.take has its item.</summary>
+    public const string AttentionOpen = "attention.open";
 }
 
 /// <summary>The relay's base URL and the per-launch secret it requires (as the access_token query parameter).</summary>
@@ -45,3 +51,6 @@ public sealed record AddServerPayload(
 public sealed record AddServerResult(string Id);
 
 public sealed record ServerIdPayload(string ServerId);
+
+/// <summary>An attention item to open in the inbox: a project on a server, both IDs as the server gave them.</summary>
+public sealed record AttentionLinkPayload(string ServerId, string ProjectId);

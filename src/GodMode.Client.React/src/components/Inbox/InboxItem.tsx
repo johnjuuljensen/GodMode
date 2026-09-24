@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore, type ServerAttentionItem } from '../../store';
 import type { AttentionKind } from '../../signalr/types';
 import { PermissionCard } from '../Project/PermissionCard';
@@ -22,10 +22,12 @@ interface Props {
   serverName: string;
   /** Now, in ms, from the inbox's clock, so every item's waiting time moves together. */
   now: number;
+  /** Set when a tapped notification opened this item (a new value for each tap): it scrolls into view (again on each tap) and flashes. */
+  focus?: number;
 }
 
 /** One project that needs the user, answerable where it is. */
-export function InboxItem({ item, serverName, now }: Props) {
+export function InboxItem({ item, serverName, now, focus }: Props) {
   const selectProject = useAppStore(s => s.selectProject);
   const replyAndResume = useAppStore(s => s.replyAndResume);
   const respondToPermission = useAppStore(s => s.respondToPermission);
@@ -33,6 +35,11 @@ export function InboxItem({ item, serverName, now }: Props) {
   const [reply, setReply] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ref = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (focus !== undefined) ref.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [focus]);
 
   const { serverId, ProjectId: projectId, Kind: kind } = item;
   const permission = kind === 'Permission' ? item.Permission ?? null : null;
@@ -69,7 +76,7 @@ export function InboxItem({ item, serverName, now }: Props) {
     .filter(Boolean).join(' · ');
 
   return (
-    <article className={`inbox-item inbox-kind-${kind}`}>
+    <article ref={ref} className={`inbox-item inbox-kind-${kind}${focus !== undefined ? ' inbox-item-focused' : ''}`}>
       <button className="inbox-item-header" onClick={() => selectProject(serverId, projectId)} title="Open the project">
         <span className="inbox-item-kind">{KIND_LABELS[kind]}</span>
         <span className="inbox-item-name">{item.ProjectName}</span>

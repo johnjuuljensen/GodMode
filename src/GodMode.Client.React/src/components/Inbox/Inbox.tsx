@@ -16,6 +16,7 @@ export function Inbox({ variant }: Props) {
   const attention = useAppStore(s => s.attention);
   const serverConnections = useAppStore(s => s.serverConnections);
   const selectProject = useAppStore(s => s.selectProject);
+  const focus = useAppStore(s => s.inboxFocus);
   const [now, setNow] = useState(Date.now);
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(COLLAPSED_KEY) === 'true'; } catch { return false; }
@@ -25,6 +26,13 @@ export function Inbox({ variant }: Props) {
     const id = setInterval(() => setNow(Date.now()), CLOCK_MS);
     return () => clearInterval(id);
   }, []);
+
+  // A tapped notification's item must be in view, so a collapsed pane opens (once per tap)
+  const [focusSeen, setFocusSeen] = useState(focus);
+  if (focus !== focusSeen) {
+    setFocusSeen(focus);
+    if (focus) setCollapsed(false);
+  }
 
   const serverNames = useMemo(
     () => Object.fromEntries(serverConnections.map(c => [c.serverInfo.Id, c.serverInfo.Name])),
@@ -71,6 +79,7 @@ export function Inbox({ variant }: Props) {
               item={item}
               serverName={serverNames[item.serverId] ?? item.serverId}
               now={now}
+              focus={focus?.key === projectKey(item.serverId, item.ProjectId) ? focus.seq : undefined}
             />
           ))}
         </div>
