@@ -36,6 +36,13 @@ public interface IProjectHubClient
     Task StatusChanged(string projectId, ProjectStatus status);
 
     /// <summary>
+    /// The projects that need the user changed: <paramref name="items"/> is the whole list, as
+    /// <see cref="IProjectHub.GetAttention"/> returns it. Pushed only when the list differs from
+    /// the last one pushed, not on every status change.
+    /// </summary>
+    Task AttentionChanged(AttentionItem[] items);
+
+    /// <summary>
     /// Called when a new project is created.
     /// </summary>
     Task ProjectCreated(ProjectStatus status);

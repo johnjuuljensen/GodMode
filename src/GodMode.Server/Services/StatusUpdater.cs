@@ -73,25 +73,18 @@ public class StatusUpdater : IStatusUpdater
             case OutputEventType.Result:
                 // End of turn: decide Idle vs WaitingInput based on whether the
                 // last assistant text block (trimmed) ends with '?'. See issue #131.
-                if (QuestionDetection.IsQuestion(process.LastAssistantText))
-                {
-                    status = status with
-                    {
-                        State = ProjectState.WaitingInput,
-                        CurrentQuestion = process.LastAssistantText,
-                        LastError = null,
-                    };
-                }
-                else
-                {
-                    status = status with { State = ProjectState.Idle, CurrentQuestion = null, LastError = null };
-                }
+                // The result's text is claude's summary of the turn, whichever it is
+                var endedAt = DateTime.UtcNow;
+                status = status with { LastResult = outputEvent.Content, LastResultAt = endedAt, LastError = null };
+                status = QuestionDetection.IsQuestion(process.LastAssistantText)
+                    ? status with { State = ProjectState.WaitingInput, CurrentQuestion = process.LastAssistantText, QuestionAt = endedAt }
+                    : status with { State = ProjectState.Idle, CurrentQuestion = null };
                 process.LastAssistantText = null;
                 stateChanged = true;
                 status = WithTokenMetrics(status, outputEvent);
                 break;
 
-            case OutputEventType.System when Subtype(outputEvent) == "init":
+            case OutputEventType.System when IsSessionStart(outputEvent):
                 // The session claude keeps is the one it reports, which a resume must name
                 if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string sessionId && sessionId != project.SessionId)
                 {
@@ -125,6 +118,10 @@ public class StatusUpdater : IStatusUpdater
 
     /// <summary>The metadata key a <c>system</c> event carries claude's session ID under.</summary>
     public const string SessionIdKey = "session_id";
+
+    /// <summary><c>system/init</c>: claude (re)started its session. It writes it once it has read its first input.</summary>
+    public static bool IsSessionStart(OutputEvent outputEvent) =>
+        outputEvent.Type == OutputEventType.System && Subtype(outputEvent) == "init";
 
     private static string? Subtype(OutputEvent outputEvent) =>
         outputEvent.Metadata?.GetValueOrDefault("subtype") as string;

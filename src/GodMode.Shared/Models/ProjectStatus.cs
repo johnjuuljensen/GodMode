@@ -38,5 +38,9 @@ public record ProjectStatus(
     string? Model = null,
     string? LastError = null,
     PendingPermission? PendingPermission = null,
-    PendingQuestion? PendingQuestion = null
+    PendingQuestion? PendingQuestion = null,
+    string? LastResult = null,
+    DateTime? LastResultAt = null,
+    DateTime? QuestionAt = null,
+    DateTime? SeenAt = null
 );

@@ -38,6 +38,18 @@ public interface IProjectManager
     /// </summary>
     Task SendInputAsync(string projectId, string input);
 
+    /// <summary>
+    /// Answers the project whether its claude runs or not (hub ReplyAndResume): input to a running
+    /// one, else a resume, the input, and a wait for claude to report its session started.
+    /// </summary>
+    Task ReplyAndResumeAsync(string projectId, string text);
+
+    /// <summary>Every project that needs the user, oldest first (hub GetAttention).</summary>
+    AttentionItem[] GetAttention();
+
+    /// <summary>The user has seen the project's last result (hub MarkSeen).</summary>
+    Task MarkSeenAsync(string projectId);
+
     /// <summary>Answers the project's pending permission prompt <paramref name="requestId"/> (hub RespondToPermission).</summary>
     Task RespondToPermissionAsync(string projectId, string requestId, PermissionDecision decision);
 
