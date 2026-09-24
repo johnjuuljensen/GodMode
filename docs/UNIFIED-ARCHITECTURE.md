@@ -62,7 +62,7 @@ The server's and the MAUI app's builds run `npm run build` in `GodMode.Client.Re
 | New server-side service | `GodMode.Server/Services/` — register in `Program.cs` |
 | New React UI component | `src/GodMode.Client.React/src/components/{Feature}/` |
 | New React store action | `src/GodMode.Client.React/src/store/index.ts` |
-| New TypeScript hub type | `src/GodMode.Client.React/src/signalr/types.ts` |
+| New TypeScript hub type | Generated: add the C# type to `GodMode.Shared` and build GodMode.Server (`tools/GodMode.TypeGen` writes `signalr/generated/hub-types.ts`). Client-only types go in `signalr/types.ts` |
 | New tool for Claude sessions to call back into GodMode | `src/GodMode.McpBridge/src/index.ts` + an `/api/internal/*` endpoint in `Program.cs` |
 | Client-side .NET abstractions | `GodMode.ClientBase/` |
 | File system project utilities | `GodMode.ProjectFiles/` |
@@ -197,7 +197,7 @@ The hub is the session loop plus profiles and roots:
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
 2. Implement in `ProjectHub`
-3. Add TypeScript type in `signalr/types.ts`
+3. Build GodMode.Server: it regenerates `signalr/generated/hub-types.ts`; commit the change
 4. Wire up in `signalr/hub.ts` (GodModeHub class)
 5. Expose in Zustand store if UI needs it
 

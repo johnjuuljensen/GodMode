@@ -2,6 +2,10 @@
 
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- tools/GodMode.TypeGen copies the docs into the React client's generated hub types.
+         Not every member is documented, so a missing comment or param tag is no warning. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
   </PropertyGroup>
 
 </Project>
