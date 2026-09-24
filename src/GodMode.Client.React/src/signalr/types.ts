@@ -7,6 +7,8 @@
 
 export type ProjectState = 'Idle' | 'Running' | 'WaitingInput' | 'WaitingPermission' | 'Error' | 'Stopped';
 export type ServerState = 'Running' | 'Stopped' | 'Starting' | 'Stopping' | 'Unknown';
+/** What a project needs from the user, most urgent first (AttentionKind in GodMode.Shared). */
+export type AttentionKind = 'Permission' | 'Question' | 'Error' | 'Finished';
 
 // --- Models (PascalCase properties matching server serialization) ---
 
@@ -66,6 +68,35 @@ export interface ProjectStatus {
   PendingPermission?: PendingPermission | null;
   /** The AskUserQuestion waiting for the user's answer, while the project is WaitingInput on it. */
   PendingQuestion?: PendingQuestion | null;
+  /** The text of the last successful result: claude's own summary of its turn. */
+  LastResult?: string | null;
+  /** When LastResult came. */
+  LastResultAt?: string | null;
+  /** When CurrentQuestion was asked; only meaningful while it is set. */
+  QuestionAt?: string | null;
+  /** When the user last saw the result (MarkSeen, or a reply). A result after it is unseen. */
+  SeenAt?: string | null;
+}
+
+/**
+ * One project that needs the user, from GetAttention and AttentionChanged (AttentionItem in
+ * GodMode.Shared). Per server: key it by server and ProjectId (IDs contain '/').
+ */
+export interface AttentionItem {
+  ProjectId: string;
+  ProjectName: string;
+  /** The profile (account) the project belongs to. */
+  Profile?: string | null;
+  Root?: string | null;
+  Kind: AttentionKind;
+  /** When it started to need this; stable across server restarts. */
+  Since: string;
+  /** Plain text (no code blocks, about 500 characters at most): the question, permission summary, error or result. */
+  Text: string;
+  /** The tool call to allow or deny, when Kind is 'Permission'. */
+  Permission?: PendingPermission | null;
+  /** The AskUserQuestion with its options, when Kind is 'Question' and claude asked with the tool. */
+  Question?: PendingQuestion | null;
 }
 
 /** A tool call claude holds until the user answers it with RespondToPermission (PendingPermission in GodMode.Shared). */

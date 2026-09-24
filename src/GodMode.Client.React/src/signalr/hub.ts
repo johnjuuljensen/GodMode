@@ -6,7 +6,7 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, OutputLine, PermissionDecision } from './types';
+import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, OutputLine, PermissionDecision, AttentionItem } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -26,6 +26,8 @@ export interface HubCallbacks {
   /** The replay is done at offset; live lines follow. */
   onOutputReplayComplete?: (projectId: string, offset: number) => void;
   onStatusChanged?: (projectId: string, status: ProjectStatus) => void;
+  /** The projects needing the user changed; items is the server's whole list, oldest first. */
+  onAttentionChanged?: (items: AttentionItem[]) => void;
   onProjectCreated?: (status: ProjectStatus) => void;
   onCreationProgress?: (projectId: string, message: string) => void;
   onProjectDeleted?: (projectId: string) => void;
@@ -85,6 +87,10 @@ export class GodModeHub {
 
     this.connection.on('StatusChanged', (projectId: string, status: ProjectStatus) => {
       this.callbacks.onStatusChanged?.(projectId, status);
+    });
+
+    this.connection.on('AttentionChanged', (items: AttentionItem[]) => {
+      this.callbacks.onAttentionChanged?.(items);
     });
 
     this.connection.on('ProjectCreated', (status: ProjectStatus) => {
@@ -167,6 +173,25 @@ export class GodModeHub {
   /** Answers the project's PendingQuestion: each question's text to the chosen label or the user's own text. */
   async answerQuestion(projectId: string, requestId: string, answers: Record<string, string>): Promise<void> {
     await this.connection!.invoke('AnswerQuestion', projectId, requestId, answers);
+  }
+
+  /** Every project on this server that needs the user, oldest first. */
+  async getAttention(): Promise<AttentionItem[]> {
+    return await this.connection!.invoke('GetAttention');
+  }
+
+  /** The user has seen the project's last result: it is no longer 'Finished'. */
+  async markSeen(projectId: string): Promise<void> {
+    await this.connection!.invoke('MarkSeen', projectId);
+  }
+
+  /**
+   * Answers the project whether claude runs or not: input to a running one (denying a pending
+   * permission with it, or answering a single pending question), else a resume and then the input.
+   * Resolves once a resumed claude has started its session; rejects if it fails to.
+   */
+  async replyAndResume(projectId: string, text: string): Promise<void> {
+    await this.connection!.invoke('ReplyAndResume', projectId, text);
   }
 
   async stopProject(projectId: string): Promise<void> {

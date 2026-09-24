@@ -20,6 +20,7 @@ export function ProjectView({ serverId, projectId }: Props) {
   const markInputSent = useAppStore(s => s.markInputSent);
   const respondToPermission = useAppStore(s => s.respondToPermission);
   const answerQuestion = useAppStore(s => s.answerQuestion);
+  const replyAndResume = useAppStore(s => s.replyAndResume);
   const [inputText, setInputText] = useState('');
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
@@ -106,18 +107,15 @@ export function ProjectView({ serverId, projectId }: Props) {
   }, [pendingQuestion, openQuestion, answered, answerQuestion, serverId, projectId]);
 
   const sendText = useCallback(async (text: string) => {
-    if (!text.trim() || !hub) return;
+    if (!text.trim()) return;
     markInputSent();
     try {
-      if (state === 'Stopped' || state === 'Idle') {
-        await hub.resumeProject(projectId);
-        await new Promise(r => setTimeout(r, 500));
-      }
-      await hub.sendInput(projectId, text);
+      // The server resumes a stopped project and sends once claude runs
+      await replyAndResume(serverId, projectId, text);
     } catch (err) {
       console.error('Failed to send input:', err);
     }
-  }, [hub, projectId, state, markInputSent]);
+  }, [replyAndResume, serverId, projectId, markInputSent]);
 
   const handleSendInput = async () => {
     if (!inputText.trim()) return;
