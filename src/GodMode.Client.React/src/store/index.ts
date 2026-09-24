@@ -5,7 +5,7 @@
 import { create } from 'zustand';
 import { GodModeHub, type ConnectionState, type OutputMessage } from '../signalr/hub';
 import type {
-  ProjectSummary, ClaudeMessage, PermissionDecision, AttentionItem,
+  ProjectSummary, ProjectStatus, ClaudeMessage, PermissionDecision, AttentionItem,
 } from '../signalr/types';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../services/hostApi';
@@ -54,6 +54,26 @@ function pruneServer<T>(map: Record<ProjectKey, T>, serverId: string, projects: 
   const next = { ...map };
   for (const k of stale) delete next[k];
   return next;
+}
+
+/** A server's project list with the project in it: replaced when listed already, else appended. */
+function withProject(connections: ServerConnection[], serverId: string, project: ProjectSummary): ServerConnection[] {
+  return connections.map(c => c.serverInfo.Id !== serverId ? c : {
+    ...c,
+    projects: c.projects.some(p => p.Id === project.Id)
+      ? c.projects.map(p => p.Id === project.Id ? project : p)
+      : [...c.projects, project],
+  });
+}
+
+function summaryOf(status: ProjectStatus): ProjectSummary {
+  return {
+    Id: status.Id, Name: status.Name, State: status.State,
+    UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
+    RootName: status.RootName, ProfileName: status.ProfileName,
+    PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
+    PullRequest: status.PullRequest,
+  };
 }
 
 // ── Transcripts (a project's output, per server) ───────────────
@@ -160,6 +180,11 @@ interface AppState {
   selectedProject: { serverId: string; projectId: string } | null;
   selectProject: (serverId: string, projectId: string) => void;
   clearSelection: () => void;
+  /**
+   * Lists and opens a project this client created, from its own createProject result. The
+   * ProjectCreated broadcast goes to every client and only lists it, so nobody else's view moves.
+   */
+  openCreatedProject: (serverId: string, status: ProjectStatus) => void;
 
   // Project output: transcripts by ProjectKey; outputMessages is the selected one's
   transcripts: Record<ProjectKey, Transcript>;
@@ -234,6 +259,14 @@ function questionCleared(state: AppState, dismissed: boolean): Partial<AppState>
   if (dp !== state.dismissedProjects) saveDismissed(dp);
   const total = computeTotalWaiting(state.serverConnections, pq, dp);
   return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total };
+}
+
+/** A project added to its server's list (replacing it if listed already), and what is derived from the lists. */
+function listed(state: AppState, serverId: string, project: ProjectSummary): Partial<AppState> {
+  const connections = withProject(state.serverConnections, serverId, project);
+  const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
+  const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
+  return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
 }
 
 // Helper to persist sidebar groupBy
@@ -440,6 +473,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     };
 
+    const addProject = (project: ProjectSummary) => set(state => listed(state, serverId, project));
+
     conn.hub.setCallbacks({
       onStateChanged: (connectionState) => {
         updateConn({ connectionState });
@@ -453,47 +488,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       },
       onAttentionChanged: (items) => set(state => ({ attention: mergeAttention(state.attention, serverId, items) })),
-      onProjectCreated: (status) => {
-        set(state => {
-          const summary: ProjectSummary = {
-            Id: status.Id, Name: status.Name, State: status.State,
-            UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
-            RootName: status.RootName, ProfileName: status.ProfileName,
-            PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
-            PullRequest: status.PullRequest,
-          };
-          const connections = state.serverConnections.map(c =>
-            c.serverInfo.Id === serverId
-              ? { ...c, projects: [...c.projects, summary] }
-              : c
-          );
-          const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
-          const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
-          return {
-            serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total,
-            // Auto-select the newly created project and close the create modal
-            selectedProject: { serverId, projectId: status.Id },
-            activePage: null,
-            outputMessages: [],
-            question: emptyQuestion,
-          };
-        });
-      },
+      // Every client hears of every created project: list it, and leave the view alone (#170)
+      onProjectCreated: (status) => addProject(summaryOf(status)),
       onProjectDeleted: removeProject,
       // Same as delete: remove from the active list
       onProjectArchived: removeProject,
-      onProjectRestored: (project) => {
-        // Add restored project back to active list
-        set(state => {
-          const connections = state.serverConnections.map(c =>
-            c.serverInfo.Id === serverId
-              ? { ...c, projects: [...c.projects, project] }
-              : c
-          );
-          const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
-          return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions };
-        });
-      },
+      onProjectRestored: addProject,
       onStatusChanged: (_projectId, status) => {
         set(state => {
           const connections = state.serverConnections.map(c =>
@@ -653,6 +653,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
   }),
   clearSelection: () => set({ selectedProject: null, outputMessages: [], question: emptyQuestion }),
+  openCreatedProject: (serverId, status) => {
+    // The call can return before or after the broadcast: listing it twice keeps one entry
+    set(state => listed(state, serverId, summaryOf(status)));
+    get().selectProject(serverId, status.Id);
+  },
 
   // ── Output ────────────────────────────────────────────────
 

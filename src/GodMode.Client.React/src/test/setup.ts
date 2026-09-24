@@ -11,5 +11,15 @@ class MemoryStorage implements Storage {
   setItem(key: string, value: string) { this.items.set(key, String(value)); }
 }
 
-globalThis.localStorage = new MemoryStorage();
+// jsdom brings its own
+if (typeof window === 'undefined') globalThis.localStorage = new MemoryStorage();
 beforeEach(() => localStorage.clear());
+
+// jsdom has no matchMedia; ProjectView reads it at import. Every query is unmatched (a desktop)
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  window.matchMedia = (query: string) => ({
+    matches: false, media: query, onchange: null,
+    addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {},
+    dispatchEvent: () => false,
+  });
+}
