@@ -60,11 +60,11 @@ public static class PullRequestScript
         {
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object) throw new FormatException($"the output is a JSON {root.ValueKind}, not an object");
-            if (root.EnumerateObject().FirstOrDefault(p => p.Name != "pullRequest") is { Name: { } unknown })
+            if (Unknown(root, ["pullRequest"]) is { } unknown)
                 throw new FormatException($"unknown property '{Cut(unknown)}'");
             if (!root.TryGetProperty("pullRequest", out var pr) || pr.ValueKind == JsonValueKind.Null) return null;
             if (pr.ValueKind != JsonValueKind.Object) throw new FormatException($"pullRequest is a JSON {pr.ValueKind}, not an object");
-            if (pr.EnumerateObject().FirstOrDefault(p => !Fields.Contains(p.Name)) is { Name: { } unknownField })
+            if (Unknown(pr, Fields) is { } unknownField)
                 throw new FormatException($"unknown property 'pullRequest.{Cut(unknownField)}'");
 
             return new PullRequestStatus(
@@ -88,6 +88,9 @@ public static class PullRequestScript
             && (before.Number, before.State, before.Review) == (after.Number, after.State, after.Review)
             ? after with { ChangedAt = before.ChangedAt }
             : reported;
+
+    private static string? Unknown(JsonElement obj, string[] known) =>
+        obj.EnumerateObject().Select(p => p.Name).FirstOrDefault(name => !known.Contains(name));
 
     private static JsonElement Required(JsonElement pr, string name, JsonValueKind kind) =>
         !pr.TryGetProperty(name, out var value) ? throw new FormatException($"pullRequest.{name} is missing")
