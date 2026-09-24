@@ -234,6 +234,9 @@ public class ProjectLifecycleTests
             .EmitAssistant("Almost").EmitResult("late"));
         var created = await harness.CreateProjectAsync();
         var launch = await harness.WaitForStdinAsync(created.Id);
+        // Hold only once init is broadcast: holding it would keep "Almost" out of output.jsonl
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.Hub.Pushes.Any(p => p.RawJson?.Contains("\"init\"") == true)), null,
+            () => $"the init line was never broadcast.\n{harness.Describe(created.Id)}");
         harness.Hub.HoldOutput();
         await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadOutputFile(created.Id).Contains("Almost")), null,
             () => $"the assistant line never reached output.jsonl.\n{harness.Describe(created.Id)}");

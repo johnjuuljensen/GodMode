@@ -53,9 +53,13 @@ public interface IProjectHub
     Task ResumeProject(string projectId);
 
     /// <summary>
-    /// Subscribes to output events from a project.
+    /// Subscribes to a project's output. The server replays output.jsonl from fromOffset in
+    /// <see cref="IProjectHubClient.OutputBatch"/> messages, sends
+    /// <see cref="IProjectHubClient.OutputReplayComplete"/>, and only then live lines, so each line
+    /// arrives once and in order. fromOffset is the offset of the last line the client has (0 for
+    /// everything; an offset inside a line snaps forward to the next line), or -N for the last N turns.
     /// </summary>
-    Task SubscribeProject(string projectId, long outputOffset);
+    Task SubscribeProject(string projectId, long fromOffset);
 
     /// <summary>
     /// Unsubscribes from output events from a project.

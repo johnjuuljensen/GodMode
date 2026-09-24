@@ -158,6 +158,10 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     public IClaudeProcessManager ProcessManager => _services.GetRequiredService<IClaudeProcessManager>();
 
+    /// <summary>Opens a client connection to the hub.</summary>
+    public HarnessConnection Connect(string connectionId) =>
+        new(connectionId, Hub, Projects, _services.GetRequiredService<ILogger<ProjectHub>>());
+
     /// <summary>Stops the host as the server's does on shutdown: raises ApplicationStopping and waits for its handlers.</summary>
     public void StopHost() => ((ApplicationLifetime)_services.GetRequiredService<IHostApplicationLifetime>()).StopApplication();
 

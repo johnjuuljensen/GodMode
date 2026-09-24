@@ -85,13 +85,13 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.ResumeProjectAsync(projectId);
     }
 
-    public async Task SubscribeProject(string projectId, long outputOffset)
+    public async Task SubscribeProject(string projectId, long fromOffset)
     {
         _logger.LogInformation("Client {ConnectionId} subscribing to project {ProjectId} from offset {Offset}",
-            Context.ConnectionId, projectId, outputOffset);
+            Context.ConnectionId, projectId, fromOffset);
 
-        await Groups.AddToGroupAsync(Context.ConnectionId, $"project-{projectId}");
-        await _projectManager.SubscribeProjectAsync(projectId, outputOffset, Context.ConnectionId);
+        // Replays, then joins the project's group, in the order that loses and repeats nothing
+        await _projectManager.SubscribeProjectAsync(projectId, fromOffset, Context.ConnectionId);
     }
 
     public async Task UnsubscribeProject(string projectId)
@@ -99,7 +99,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} unsubscribing from project {ProjectId}",
             Context.ConnectionId, projectId);
 
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"project-{projectId}");
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, ProjectLifecycle.OutputGroup(projectId));
         await _projectManager.UnsubscribeProjectAsync(projectId, Context.ConnectionId);
     }
 

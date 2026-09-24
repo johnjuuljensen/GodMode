@@ -14,7 +14,7 @@ namespace GodMode.Shared.Models;
 /// <param name="Metrics">Project metrics.</param>
 /// <param name="Git">Git status information, if available.</param>
 /// <param name="Tests">Test status information, if available.</param>
-/// <param name="OutputOffset">The byte offset in the output.jsonl file.</param>
+/// <param name="OutputOffset">The byte offset in output.jsonl after its last line: what a client that has all the output resumes from.</param>
 /// <param name="RootName">The name of the project root this project belongs to.</param>
 /// <param name="Model">The Claude model the session was started with. Used on resume so the session keeps running on the same model regardless of the current root config or machine default.</param>
 /// <param name="RepoUrl">Deprecated. Kept for backward compatibility with existing status.json files on disk.</param>

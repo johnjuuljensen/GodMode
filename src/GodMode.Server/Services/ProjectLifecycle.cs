@@ -13,7 +13,8 @@ namespace GodMode.Server.Services;
 /// <summary>
 /// Runs each project's Claude process: start, resume, input and stop, and the one consumer that
 /// handles its output. The consumer takes the project's lines in the order claude wrote them and,
-/// for each, appends it to <c>output.jsonl</c>, updates state, then broadcasts it, so state derived
+/// for each, appends it to <c>output.jsonl</c>, updates state, then broadcasts it with the offset after
+/// it (see <see cref="OutputLog"/>), so state derived
 /// from output is deterministic. The process's exit comes last, after all its lines, and a Stop
 /// marks the project Stopped behind whatever is still queued. Every change the consumer makes to
 /// the status is pushed to all clients. Per-project state lives in <see cref="ProjectInfo.Process"/>.
@@ -143,17 +144,18 @@ public sealed class ProjectLifecycle
     }
 
     /// <summary>
-    /// Runs <paramref name="change"/> on the consumer, under the state lock, after everything already
-    /// on the pipeline. Once the pipeline is closed nothing is queued, and it runs at once.
+    /// Runs <paramref name="change"/> on the consumer, under the state lock unless told otherwise,
+    /// after everything already on the pipeline. Once the pipeline is closed nothing is queued, and
+    /// it runs at once.
     /// </summary>
-    private async Task InOrderAsync(ProjectInfo project, Func<Task> change)
+    private async Task InOrderAsync(ProjectInfo project, Func<Task> change, bool underStateLock = true)
     {
         EnsureConsumer(project);
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (project.Process.Output.TryWrite(new PipelineItem.InOrder(change, done)))
+        if (project.Process.Output.TryWrite(new PipelineItem.InOrder(change, done, underStateLock)))
             await done.Task;
         else
-            await WithStateLockAsync(project, change);
+            await (underStateLock ? WithStateLockAsync(project, change) : change());
     }
 
     /// <summary>Pushes the project's current status to every client.</summary>
@@ -170,6 +172,45 @@ public sealed class ProjectLifecycle
     }
 
     // ── Output ──
+
+    /// <summary>The SignalR group of the connections that get a project's live output.</summary>
+    public static string OutputGroup(string projectId) => $"project-{projectId}";
+
+    /// <summary>
+    /// Replays output.jsonl to the connection from <paramref name="fromOffset"/> (see
+    /// <see cref="OutputLog.StartAsync"/>), then adds it to the project's live group. The
+    /// connection is out of the group while the file is read; the last read happens on the
+    /// consumer, between two lines, and the join with it, so every line is either in the replay or
+    /// broadcast to the connection afterwards, never both and never neither.
+    /// </summary>
+    public async Task SubscribeAsync(ProjectInfo project, long fromOffset, string connectionId)
+    {
+        var id = project.Status.Id;
+        var client = _hubContext.Clients.Client(connectionId);
+        await _hubContext.Groups.RemoveFromGroupAsync(connectionId, OutputGroup(id));
+
+        var offset = await ReplayAsync(project, client, await OutputLog.StartAsync(project.ProjectPath, fromOffset));
+        await InOrderAsync(project, async () =>
+        {
+            offset = await ReplayAsync(project, client, offset);
+            await _hubContext.Groups.AddToGroupAsync(connectionId, OutputGroup(id));
+            await client.OutputReplayComplete(id, offset);
+        }, underStateLock: false);
+
+        _logger.LogInformation("Replayed output of project {ProjectId} to {ConnectionId} from {FromOffset} to {Offset}",
+            id, connectionId, fromOffset, offset);
+    }
+
+    /// <summary>Sends the complete lines from <paramref name="offset"/> in batches; returns the offset after the last.</summary>
+    private static async Task<long> ReplayAsync(ProjectInfo project, IProjectHubClient client, long offset)
+    {
+        await foreach (var batch in OutputLog.ReadBatchesAsync(project.ProjectPath, offset))
+        {
+            await client.OutputBatch(project.Status.Id, offset, batch);
+            offset = batch[^1].Offset;
+        }
+        return offset;
+    }
 
     private async Task ConsumeAsync(ProjectInfo project, ChannelReader<PipelineItem> items)
     {
@@ -192,7 +233,7 @@ public sealed class ProjectLifecycle
     {
         try
         {
-            await WithStateLockAsync(project, item.Change);
+            await (item.UnderStateLock ? WithStateLockAsync(project, item.Change) : item.Change());
             item.Done.TrySetResult();
         }
         catch (Exception ex)
@@ -238,13 +279,11 @@ public sealed class ProjectLifecycle
         if (changed) await NotifyStatusChangedAsync(project);
     }
 
-    private StreamWriter? OpenOutput(ProjectInfo project)
+    private OutputLog.Writer? OpenOutput(ProjectInfo project)
     {
-        var outputPath = Path.Combine(project.ProjectPath, ".godmode", "output.jsonl");
         try
         {
-            var stream = new FileStream(outputPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-            return new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+            return OutputLog.OpenWriter(project.ProjectPath);
         }
         catch (Exception ex)
         {
@@ -253,7 +292,7 @@ public sealed class ProjectLifecycle
         }
     }
 
-    private async Task HandleOutputLineAsync(ProjectInfo project, StreamWriter? output, string jsonLine)
+    private async Task HandleOutputLineAsync(ProjectInfo project, OutputLog.Writer? output, string jsonLine)
     {
         if (string.IsNullOrWhiteSpace(jsonLine)) return;
         var id = project.Status.Id;
@@ -263,19 +302,22 @@ public sealed class ProjectLifecycle
 
         var completed = false;
         var statusChanged = false;
+        var offset = project.Status.OutputOffset;
         try
         {
             // 1. Persist, so a client subscribing from here on backfills this line
-            if (output != null) await output.WriteLineAsync(jsonLine);
+            if (output != null) offset = await output.AppendAsync(jsonLine);
 
             // 2. State
-            if (ParseClaudeOutput(jsonLine) is { } outputEvent)
-                await WithStateLockAsync(project, async () =>
-                {
-                    var previous = project.Status.State;
-                    statusChanged = await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
-                    completed = previous != ProjectState.Idle && project.Status.State == ProjectState.Idle;
-                });
+            await WithStateLockAsync(project, async () =>
+            {
+                // In memory only: status.json carries it when something else changes, and recovery reads it from the file
+                project.Status = project.Status with { OutputOffset = offset };
+                if (ParseClaudeOutput(jsonLine) is not { } outputEvent) return;
+                var previous = project.Status.State;
+                statusChanged = await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
+                completed = previous != ProjectState.Idle && project.Status.State == ProjectState.Idle;
+            });
         }
         catch (Exception ex)
         {
@@ -285,7 +327,7 @@ public sealed class ProjectLifecycle
         // 3. Broadcast the raw JSON to subscribed clients; the UI parses and renders it
         try
         {
-            await _hubContext.Clients.Group($"project-{id}").OutputReceived(id, jsonLine);
+            await _hubContext.Clients.Group(OutputGroup(id)).OutputReceived(id, offset, jsonLine);
         }
         catch (Exception ex)
         {
