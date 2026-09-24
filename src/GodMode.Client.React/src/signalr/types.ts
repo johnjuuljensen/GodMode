@@ -6,21 +6,37 @@
 
 export type * from './generated/hub-types';
 
-// --- Claude output (parsed client-side from raw JSON, uses our own casing) ---
+// --- Claude output (parsed client-side from raw JSON by parseMessage.ts, uses our own casing) ---
+
+/** The fields of a tool call's input that the transcript shows. */
+export interface ToolInput {
+  filePath?: string;
+  oldString?: string;
+  newString?: string;
+  content?: string;
+  edits?: { oldString: string; newString: string }[];
+  command?: string;
+  description?: string;
+  pattern?: string;
+  path?: string;
+  query?: string;
+  url?: string;
+  prompt?: string;
+  subagentType?: string;
+}
 
 export interface ClaudeContentItem {
+  /** text, thinking (redacted thinking too, with empty text), tool_use, tool_result, or claude's own name for another block */
   type: string;
+  /** One line: a text block's text, a tool call's name and target, a tool result's first line */
   summary: string;
-  formattedJson: string;
-  isExpanded: boolean;
-  toolName?: string | null;
-  toolFilePath?: string | null;
-  toolOldString?: string | null;
-  toolNewString?: string | null;
-  toolCommand?: string | null;
-  toolDescription?: string | null;
-  toolContent?: string | null;
+  /** The whole text of a text, thinking or tool_result block */
+  text?: string;
   isError: boolean;
+  /** A tool_use's id, or the id of the tool_use a tool_result answers */
+  toolUseId?: string;
+  toolName?: string;
+  toolInput?: ToolInput;
 }
 
 export interface ClaudeMessage {
@@ -28,13 +44,11 @@ export interface ClaudeMessage {
   subtype?: string | null;
   typeDisplay: string;
   isUserMessage: boolean;
-  typeInitial: string;
+  /** Set on a subagent's messages: the id of the Agent/Task call that started it */
+  parentToolUseId: string | null;
   summary: string;
+  /** An error line, or a result that reports an error */
+  isError: boolean;
   contentItems: ClaudeContentItem[];
-  hasContentItems: boolean;
-  hasErrorContent: boolean;
   contentSummary: string;
-  formattedJson: string;
-  isToolOnly: boolean;
-  textOnlyContentSummary: string;
 }
