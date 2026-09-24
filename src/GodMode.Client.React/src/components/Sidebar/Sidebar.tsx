@@ -6,6 +6,7 @@ import {
 } from '../../store';
 import type { ProjectSummary } from '../../signalr/types';
 import { ProjectItem } from './ProjectItem';
+import { Inbox } from '../Inbox/Inbox';
 import { isMaui, clearApiKey } from '../../services/hostApi';
 import './Sidebar.css';
 
@@ -101,7 +102,8 @@ function ConnectionIndicator() {
   );
 }
 
-export function Sidebar() {
+/** withInbox: the needs-you pane above the project list (wide screens; a phone has it as its home). */
+export function Sidebar({ withInbox = false }: { withInbox?: boolean }) {
   const profileGroups = useAppStore(s => s.profileGroups);
   const inactiveServers = useAppStore(s => s.inactiveServers);
   const setShowAddServer = useAppStore(s => s.setShowAddServer);
@@ -126,6 +128,8 @@ export function Sidebar() {
         </svg>
         <span>{GROUP_LABELS[sidebarGroupBy]}</span>
       </button>
+
+      {withInbox && <Inbox variant="pane" />}
 
       <div className="sidebar-content">
         {!hasAnything ? (

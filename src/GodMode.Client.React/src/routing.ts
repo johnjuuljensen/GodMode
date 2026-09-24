@@ -9,6 +9,8 @@ import { dismissConfirm, getOpenConfirm, subscribeConfirm } from './confirmDialo
 /** A screen the URL can name */
 export type Route =
   | { screen: 'home' }
+  /** The phone's project list; home on a phone is the inbox */
+  | { screen: 'projects' }
   | { screen: 'project'; serverId: string; projectId: string }
   | { screen: 'page'; page: ActivePage };
 
@@ -23,6 +25,7 @@ interface RouteDef {
 /** Every hash the client understands. A new screen (the inbox, say) adds a row here and a case in `formatRoute`. */
 const routeTable: readonly RouteDef[] = [
   { pattern: '', toRoute: () => ({ screen: 'home' }) },
+  { pattern: 'projects', toRoute: () => ({ screen: 'projects' }) },
   { pattern: 'project/:serverId/:projectId', toRoute: p => ({ screen: 'project', serverId: p.serverId, projectId: p.projectId }) },
   { pattern: 'settings/profiles', toRoute: () => ({ screen: 'page', page: { type: 'profileSettings' } }) },
   { pattern: 'settings/app', toRoute: () => ({ screen: 'page', page: { type: 'appSettings' } }) },
@@ -37,6 +40,7 @@ const hashOf = (...segments: string[]) => '#/' + segments.map(encodeURIComponent
 export function formatRoute(route: Route): string {
   switch (route.screen) {
     case 'home': return hashOf();
+    case 'projects': return hashOf('projects');
     case 'project': return hashOf('project', route.serverId, route.projectId);
     case 'page': {
       const page = route.page;
@@ -76,7 +80,7 @@ type StoreState = ReturnType<typeof useAppStore.getState>;
 function routeOf(state: StoreState): Route {
   if (state.activePage) return { screen: 'page', page: state.activePage };
   if (state.selectedProject) return { screen: 'project', ...state.selectedProject };
-  return { screen: 'home' };
+  return state.homeView === 'projects' ? { screen: 'projects' } : { screen: 'home' };
 }
 
 /** Set while the URL drives the store, so the store's intermediate states are not pushed back into history */
@@ -96,8 +100,10 @@ function applyRoute(route: Route) {
 function applyToStore(store: StoreState, route: Route) {
   switch (route.screen) {
     case 'home':
+    case 'projects':
       store.closePage();
       store.clearSelection();
+      store.setHomeView(route.screen === 'projects' ? 'projects' : 'inbox');
       break;
     case 'project':
       store.selectProject(route.serverId, route.projectId);
