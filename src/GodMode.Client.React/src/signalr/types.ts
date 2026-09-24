@@ -52,11 +52,19 @@ export interface ProjectStatus {
   Metrics: ProjectMetrics;
   Git?: GitStatus | null;
   Tests?: TestStatus | null;
+  /** The byte offset in output.jsonl after its last line. */
   OutputOffset: number;
   RootName?: string | null;
   ProfileName?: string | null;
   /** Why the project is in Error: claude's last stderr lines before it exited, or an error result's text. */
   LastError?: string | null;
+}
+
+/** One replayed line of a project's output (OutputLine in GodMode.Shared). */
+export interface OutputLine {
+  /** The byte offset in output.jsonl just after this line: subscribe from it to get only what follows. */
+  Offset: number;
+  RawJson: string;
 }
 
 export interface ProfileInfo {

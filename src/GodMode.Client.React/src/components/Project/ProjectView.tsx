@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useLayoutEffect, useMemo } from 'react';
-import { useAppStore } from '../../store';
+import { useAppStore, transcriptKey } from '../../store';
 import { ChatMessage } from './ChatMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import './ProjectView.css';
@@ -14,7 +14,6 @@ interface Props {
 export function ProjectView({ serverId, projectId }: Props) {
   const conn = useAppStore(s => s.serverConnections.find(c => c.serverInfo.Id === serverId));
   const outputMessages = useAppStore(s => s.outputMessages);
-  const clearOutput = useAppStore(s => s.clearOutput);
   const question = useAppStore(s => s.question);
   const dismissQuestion = useAppStore(s => s.dismissQuestion);
   const markInputSent = useAppStore(s => s.markInputSent);
@@ -24,26 +23,23 @@ export function ProjectView({ serverId, projectId }: Props) {
   const messagesRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [phase, setPhase] = useState<'loading' | 'ready'>('loading');
-  const settleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  // Loading until the server says the replay is complete, unless a transcript is already held
+  const transcriptPhase = useAppStore(s => s.transcripts[transcriptKey(serverId, projectId)]?.phase);
+  const phase: 'loading' | 'ready' = transcriptPhase !== 'live' && outputMessages.length === 0 ? 'loading' : 'ready';
+  const subscribeOutput = useAppStore(s => s.subscribeOutput);
+  const unsubscribeOutput = useAppStore(s => s.unsubscribeOutput);
 
   const hub = conn?.hub;
   const project = conn?.projects.find(p => p.Id === projectId);
 
   useEffect(() => {
     if (!hub || conn?.connectionState !== 'connected') return;
-    clearOutput();
-    setPhase('loading');
-
-    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
-    settleTimerRef.current = setTimeout(() => setPhase('ready'), 800);
-
-    hub.subscribeProject(projectId, 0).catch(console.error);
+    // Resumes from the transcript held, so reopening only adds what is new
+    subscribeOutput(serverId, projectId).catch(console.error);
     return () => {
-      hub.unsubscribeProject(projectId).catch(console.error);
-      if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+      unsubscribeOutput(serverId, projectId).catch(console.error);
     };
-  }, [hub, projectId, conn?.connectionState, clearOutput]);
+  }, [hub, serverId, projectId, conn?.connectionState, subscribeOutput, unsubscribeOutput]);
 
   useEffect(() => {
     if (project) setProjectName(project.Name);
