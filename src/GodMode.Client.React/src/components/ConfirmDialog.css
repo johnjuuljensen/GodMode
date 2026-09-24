@@ -1,5 +1,5 @@
 /* ── Confirm Dialog (replaces window.confirm) ── */
-.confirm-overlay {
+.modal-overlay.confirm-overlay {
   z-index: 200;
   padding: 16px;
 }
@@ -30,7 +30,7 @@
 }
 
 @media (max-width: 768px) {
-  .confirm-overlay {
+  .modal-overlay.confirm-overlay {
     align-items: flex-end;
     padding-bottom: calc(16px + env(safe-area-inset-bottom));
   }
