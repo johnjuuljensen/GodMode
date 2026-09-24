@@ -318,9 +318,6 @@ public class ClaudeProcessManager : IClaudeProcessManager
             _logger.LogInformation("Claude process exited for project {ProjectId} with exit code {ExitCode} (PID {ProcessId}{Killed})",
                 id, exitCode, launch.Id, launch.Killed ? ", killed" : "");
 
-            _processes.TryRemove(new KeyValuePair<string, Launch>(id, launch));
-            launch.Process.Dispose();
-
             if (!launch.Killed && takeover != null && await takeover(exitCode, tail))
                 return;
 
@@ -338,6 +335,9 @@ public class ClaudeProcessManager : IClaudeProcessManager
         }
         finally
         {
+            // Only now, so a Stop until here finds the launch, marks it killed and waits for its exit
+            _processes.TryRemove(new KeyValuePair<string, Launch>(id, launch));
+            launch.Process.Dispose();
             launch.Handled.TrySetResult();
         }
     }

@@ -17,13 +17,13 @@ namespace GodMode.Server.Services;
 /// </summary>
 public class ProjectManager : IProjectManager
 {
+    /// <summary>How long server shutdown waits for the projects' processes to be killed and marked Stopped.</summary>
+    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
+
     /// <summary>
     /// Appended to every Claude invocation's system prompt so questions always
     /// come through as structured AskUserQuestion tool calls. See issue #131.
     /// </summary>
-    /// <summary>How long server shutdown waits for the projects' processes to be killed and marked Stopped.</summary>
-    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
-
     private const string QuestionPromptInjection =
         "If you need to ask the user a question — including clarifications, " +
         "multiple-choice decisions, or confirmations — you MUST use the " +
@@ -115,13 +115,19 @@ public class ProjectManager : IProjectManager
     }
 
     /// <summary>
-    /// Server shutdown: kills every running claude process tree and persists Stopped, so recovery
-    /// on the next start does not launch a second process on a session an orphan still runs.
-    /// Blocks shutdown until done or <see cref="ShutdownTimeout"/> passes.
+    /// Server shutdown: kills every claude process tree and persists Stopped, so recovery on the
+    /// next start does not launch a second process on a session an orphan still runs. A Ctrl+C
+    /// on a server run in a terminal reaches claude too, which may already have exited: from here
+    /// on its exit counts as stopped, and its project is stopped like the rest, so the exit is
+    /// persisted before the server goes. Blocks shutdown until done or <see cref="ShutdownTimeout"/> passes.
     /// </summary>
     private void StopProjectsOnShutdown()
     {
-        var running = _projects.Values.Where(_lifecycle.IsRunning).ToArray();
+        _lifecycle.BeginShutdown();
+        var running = _projects.Values
+            .Where(project => project.Process.ProcessId != 0
+                || project.Status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.Idle)
+            .ToArray();
         if (running.Length == 0) return;
 
         _logger.LogInformation("Server stopping: stopping {Count} running project(s)", running.Length);

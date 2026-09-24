@@ -139,6 +139,13 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <summary>Stops the host as the server's does on shutdown: raises ApplicationStopping and waits for its handlers.</summary>
     public void StopHost() => ((ApplicationLifetime)_services.GetRequiredService<IHostApplicationLifetime>()).StopApplication();
 
+    /// <summary>
+    /// Runs <paramref name="callback"/> when the host stops, before the server's own handlers
+    /// (ApplicationStopping runs the latest registration first).
+    /// </summary>
+    public void OnHostStopping(Action callback) =>
+        _services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(callback);
+
     /// <summary>The server's own record of a project, found as the MCP bridge finds it: by its latest launch's token.</summary>
     public ProjectInfo ProjectInfo(string projectId) =>
         Projects.ValidateProjectToken(projectId, Launches(projectId)[^1].Environment["GODMODE_PROJECT_TOKEN"])

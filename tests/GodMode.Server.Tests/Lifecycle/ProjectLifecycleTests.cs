@@ -89,6 +89,40 @@ public class ProjectLifecycleTests
         Assert.Equal(ProjectState.Stopped, harness.Hub.StatusPushes(created.Id)[^1].State);
     }
 
+    /// <summary>
+    /// A Ctrl+C on a server run in a terminal reaches claude too, which can die before the server's
+    /// shutdown handler runs. Here the fake exits 1 by itself as the host stops, and its exit is held
+    /// (the test takes the state lock) until the server's handler has begun. It is Stopped, question
+    /// kept, on disk by the time the host has stopped, not Error.
+    /// </summary>
+    [Fact]
+    public async Task ProcessExitingByItselfAsTheHostStops_IsStopped_WithItsQuestion()
+    {
+        const string question = "Which branch should I use?";
+        await using var harness = new LifecycleHarness(
+            new FakeScript().EmitInit().AwaitStdin().EmitAssistant(question).EmitResult().AwaitStdin().Exit(1));
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.WaitingInput);
+        var project = harness.ProjectInfo(created.Id);
+        var pid = project.Process.ProcessId;
+        harness.OnHostStopping(() =>
+        {
+            project.Process.StateLock.Wait();
+            harness.ProcessManager.SendInputAsync(project, "exit now").GetAwaiter().GetResult();
+            using (var fake = System.Diagnostics.Process.GetProcessById(pid)) fake.WaitForExit();
+            _ = Task.Delay(200).ContinueWith(_ => project.Process.StateLock.Release());
+        });
+
+        harness.StopHost();
+
+        Assert.Equal(1, (await harness.WaitForLaunchAsync(created.Id, l => l.ExitCode != null)).ExitCode);
+        var onDisk = harness.ReadStatusFile(created.Id);
+        Assert.Equal(ProjectState.Stopped, onDisk.State);
+        Assert.Equal(question, onDisk.CurrentQuestion);
+        Assert.Null(onDisk.LastError);
+        Assert.DoesNotContain(harness.Hub.StatusPushes(created.Id), s => s.State == ProjectState.Error);
+    }
+
     [Fact]
     public async Task ProcessExitsWithAnError_IsError_AndPushesItsStderr()
     {

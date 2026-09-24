@@ -25,6 +25,8 @@ public sealed class ProjectLifecycle
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
     private readonly ILogger<ProjectLifecycle> _logger;
 
+    private volatile bool _shuttingDown;
+
     /// <summary>Raised, on the project's consumer, when output takes a project to Idle. A handler must not wait for a Stop.</summary>
     public event Func<string, Task>? OnProjectCompleted;
 
@@ -71,6 +73,12 @@ public sealed class ProjectLifecycle
 
     private void EnsureConsumer(ProjectInfo project) =>
         project.Process.EnsureConsumer(items => ConsumeAsync(project, items));
+
+    /// <summary>
+    /// The server is stopping: from now on a process that exits on its own went with it (a Ctrl+C
+    /// reaches claude too) and is Stopped, keeping its question, rather than failed.
+    /// </summary>
+    public void BeginShutdown() => _shuttingDown = true;
 
     public bool IsRunning(ProjectInfo project) => _processManager.IsProcessRunning(project.Process.ProcessId);
 
@@ -195,7 +203,8 @@ public sealed class ProjectLifecycle
 
     /// <summary>
     /// The process ended on its own: Stopped if it exited cleanly with its turn over, Error with its
-    /// last stderr otherwise. A process the server killed changes nothing: whoever killed it decides.
+    /// last stderr otherwise. During shutdown it is Stopped, question kept. A process the server
+    /// killed changes nothing: whoever killed it decides.
     /// </summary>
     private async Task HandleExitAsync(ProjectInfo project, ProcessExit exit)
     {
@@ -209,11 +218,12 @@ public sealed class ProjectLifecycle
                 // A later launch is already running; its own exit settles the state
                 if (project.Process.ProcessId != 0) return;
 
-                var finished = exit.ExitCode == 0 && project.Status.State is ProjectState.Idle or ProjectState.WaitingInput;
+                var shuttingDown = _shuttingDown;
+                var finished = shuttingDown || exit.ExitCode == 0 && project.Status.State is ProjectState.Idle or ProjectState.WaitingInput;
                 await SetStatusAsync(project, status => status with
                 {
                     State = finished ? ProjectState.Stopped : ProjectState.Error,
-                    CurrentQuestion = null,
+                    CurrentQuestion = shuttingDown ? status.CurrentQuestion : null,
                     LastError = finished ? null : exit.Stderr ?? $"claude exited with code {exit.ExitCode}",
                     UpdatedAt = DateTime.UtcNow
                 });
