@@ -107,6 +107,13 @@ public interface IProjectManager
     Task RecoverProjectsAsync();
 
     /// <summary>
+    /// After recovery, once the server is listening: carries on with every project the last
+    /// shutdown stopped while it was active (<see cref="ProjectStatus.StateAtShutdown"/>), as its
+    /// root's <c>resumeOnRestart</c> and <c>resumePrompt</c> say.
+    /// </summary>
+    Task ResumeInterruptedProjectsAsync();
+
+    /// <summary>
     /// Creates a new profile and persists it to appsettings.json.
     /// </summary>
     Task CreateProfileAsync(string name, string? description);

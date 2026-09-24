@@ -90,17 +90,53 @@ public sealed class ProjectLifecycle
 
     /// <summary>
     /// Kills the process tree, then marks the project Stopped once every line it wrote has been
-    /// handled, so a result still queued cannot turn Stopped back into Idle.
+    /// handled, so a result still queued cannot turn Stopped back into Idle. A shutdown passes what
+    /// the project was doing (<see cref="ActiveState"/>), for the next start to carry on with; a
+    /// stop by the user passes nothing, and its project is not resumed.
     /// </summary>
-    public async Task StopAsync(ProjectInfo project)
+    public async Task StopAsync(ProjectInfo project, ProjectState? stateAtShutdown = null)
     {
         await KillAsync(project);
         project.Process.DenyAllPending(StoppedMessage);
         await InOrderAsync(project, () => SetStatusAsync(project, status => WithoutPending(status) with
         {
             State = ProjectState.Stopped,
+            StateAtShutdown = stateAtShutdown,
             UpdatedAt = DateTime.UtcNow
         }));
+    }
+
+    /// <summary>The state itself when it is one a restart carries on with (claude was working, or waiting on the user); null otherwise.</summary>
+    public static ProjectState? ActiveState(ProjectState state) =>
+        state is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission ? state : null;
+
+    /// <summary>
+    /// A Ctrl+C on a server run in a terminal reaches claude too, and claude can exit, and its exit
+    /// be handled (Error, or Stopped without its question), before the server's shutdown begins.
+    /// An exit on its own no more than <paramref name="window"/> before the shutdown, with nothing
+    /// changed since, is taken for that: the project is Stopped as the shutdown would have left it,
+    /// its question and what it was doing restored. True when it was.
+    /// </summary>
+    public async Task<bool> UndoExitBeforeShutdownAsync(ProjectInfo project, TimeSpan window)
+    {
+        var undone = false;
+        await WithStateLockAsync(project, async () =>
+        {
+            if (project.Process.LastExit is not { } exit || !ReferenceEquals(exit.After, project.Status)
+                || DateTime.UtcNow - exit.At > window || ActiveState(exit.Before.State) is not { } active)
+                return;
+            project.Process.LastExit = null;
+            await SetStatusAsync(project, status => status with
+            {
+                State = ProjectState.Stopped,
+                StateAtShutdown = active,
+                CurrentQuestion = exit.Before.CurrentQuestion,
+                LastError = null,
+                UpdatedAt = DateTime.UtcNow
+            });
+            undone = true;
+        });
+        return undone;
     }
 
     /// <summary>What a permission prompt still waiting when its session ends is answered with.</summary>
@@ -336,7 +372,8 @@ public sealed class ProjectLifecycle
                 project.Process.DenyAllPending(StoppedMessage);
 
                 var shuttingDown = _shuttingDown;
-                var finished = shuttingDown || exit.ExitCode == 0 && project.Status.State is ProjectState.Idle or ProjectState.WaitingInput;
+                var before = project.Status;
+                var finished = shuttingDown || exit.ExitCode == 0 && before.State is ProjectState.Idle or ProjectState.WaitingInput;
                 await SetStatusAsync(project, status => WithoutPending(status) with
                 {
                     State = finished ? ProjectState.Stopped : ProjectState.Error,
@@ -344,6 +381,8 @@ public sealed class ProjectLifecycle
                     LastError = finished ? null : exit.Stderr ?? $"claude exited with code {exit.ExitCode}",
                     UpdatedAt = DateTime.UtcNow
                 });
+                // A shutdown that follows at once may take it back: see UndoExitBeforeShutdownAsync
+                project.Process.LastExit = shuttingDown ? null : new ExitOnItsOwn(DateTime.UtcNow, before, project.Status);
                 changed = true;
             });
         }

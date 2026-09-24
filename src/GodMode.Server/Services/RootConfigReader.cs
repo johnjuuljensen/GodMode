@@ -158,6 +158,8 @@ public class RootConfigReader : IRootConfigReader
         Create = overlay.Create ?? baseConfig.Create,
         Delete = overlay.Delete ?? baseConfig.Delete,
         Status = overlay.Status ?? baseConfig.Status,
+        ResumeOnRestart = overlay.ResumeOnRestart ?? baseConfig.ResumeOnRestart,
+        ResumePrompt = overlay.ResumePrompt ?? baseConfig.ResumePrompt,
         Environment = MergeDictionaries(baseConfig.Environment, overlay.Environment),
         ClaudeArgs = ConcatArrays(baseConfig.ClaudeArgs, overlay.ClaudeArgs),
         NameTemplate = overlay.NameTemplate ?? baseConfig.NameTemplate,
@@ -188,7 +190,9 @@ public class RootConfigReader : IRootConfigReader
             Model: raw.Model,
             McpServers: raw.McpServers,
             // One script: its output is the answer, and two would give two
-            Status: NormalizeScriptPaths(raw.Status, godModeRootPath) is [var status] ? status : null
+            Status: NormalizeScriptPaths(raw.Status, godModeRootPath) is [var status] ? status : null,
+            ResumeOnRestart: raw.ResumeOnRestart ?? true,
+            ResumePrompt: raw.ResumePrompt is { Length: > 0 } resumePrompt ? resumePrompt : CreateAction.DefaultResumePrompt
         );
     }
 
@@ -292,6 +296,8 @@ public class RootConfigReader : IRootConfigReader
         public JsonElement? Create { get; init; }
         public JsonElement? Delete { get; init; }
         public JsonElement? Status { get; init; }
+        public bool? ResumeOnRestart { get; init; }
+        public string? ResumePrompt { get; init; }
         public Dictionary<string, string>? Environment { get; init; }
         public string[]? ClaudeArgs { get; init; }
         public string? NameTemplate { get; init; }

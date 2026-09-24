@@ -95,6 +95,8 @@ export interface ProjectStatus {
   SeenAt?: string | null;
   /** The pull request the project's work became; null when there is none or the root has no status script. */
   PullRequest?: PullRequestStatus | null;
+  /** What the project was doing when a server shutdown stopped it, so the next start carries on with it; null otherwise. */
+  StateAtShutdown?: ProjectState | null;
 }
 
 /**
