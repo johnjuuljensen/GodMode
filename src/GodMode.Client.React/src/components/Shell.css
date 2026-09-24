@@ -50,7 +50,7 @@
   --radius:           8px;
   --radius-lg:        12px;
   --radius-xl:        14px;
-  --font-sans:        'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans:        'DM Sans Variable', 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono:        'DM Mono', 'Cascadia Code', 'Fira Code', monospace;
 }
 
@@ -109,6 +109,7 @@ body {
   color: var(--text-primary);
   overflow: hidden;
   height: 100vh;
+  height: 100dvh;
   position: relative;
 }
 
@@ -137,6 +138,7 @@ body::after {
 
 #root {
   height: 100vh;
+  height: 100dvh;
   position: relative;
   z-index: 1;
 }
@@ -145,6 +147,7 @@ body::after {
 .shell {
   display: flex;
   height: 100vh;
+  height: 100dvh;
   background: transparent;
 }
 
@@ -220,57 +223,40 @@ body::after {
   flex-direction: column;
 }
 
-.shell.shell-mobile > .sidebar {
+/* The phone's home screen: the list, full width */
+.shell.shell-mobile > .shell-sidebar {
+  flex: 1;
   width: 100%;
-  height: 100vh;
-  height: 100dvh;
+  min-width: 0;
   border-right: none;
 }
 
-.shell-mobile-project {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
-}
-
-.shell-mobile-project > .page-back-bar {
+/* A project on a phone: the back bar over the project, in the content slot */
+.shell-content.shell-mobile-project > .page-back-bar {
   flex-shrink: 0;
   padding-top: calc(8px + env(safe-area-inset-top));
 }
 
-.shell-mobile-project > .project-view {
+.shell-content.shell-mobile-project > .project-view {
   flex: 1;
   overflow: hidden;
 }
 
-.shell-mobile-tiles {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
-}
-
-.shell-mobile-tiles > .sidebar-header {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--glass-border);
-  background: var(--sidebar-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+/* Notches and the gesture bar: headers, footers and the chat's input bar clear them */
+.shell.shell-mobile > .shell-sidebar > .sidebar > .sidebar-header,
+.shell.shell-mobile > .sidebar-header {
   padding-top: calc(14px + env(safe-area-inset-top));
 }
 
-.shell-mobile-tiles > .sidebar-footer {
-  flex-shrink: 0;
-  background: var(--sidebar-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+.shell.shell-mobile > .sidebar-footer {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-.shell-mobile-tiles > .tile-grid-scroll {
+.shell-content.shell-mobile-project .project-input-bar {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+.shell.shell-mobile > .shell-content > .tile-grid-scroll {
   flex: 1;
   min-height: 0;
 }
@@ -278,6 +264,68 @@ body::after {
 @media (max-width: 768px) {
   .page-body {
     padding: 16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .page-view > .page-back-bar {
+    padding-top: calc(8px + env(safe-area-inset-top));
+  }
+}
+
+/* ── Touch targets: 44px minimum on narrow screens ──
+   Laptop sizes are untouched; only the phone layout grows its controls. */
+@media (max-width: 768px) {
+  .btn,
+  .btn-sm,
+  .question-dismiss,
+  .server-action-btn,
+  .root-action-btn,
+  .sidebar-add-btn,
+  .sidebar-settings-btn,
+  .sidebar-footer-menu-item,
+  .sidebar-sort-bar,
+  .sidebar-profile-filter,
+  .project-detail-btn,
+  .archived-restore-btn,
+  .archived-toggle,
+  .project-status-btn,
+  .project-menu-item,
+  .delete-btn,
+  .settings-add-btn,
+  .form-group select,
+  .form-group input:not([type="checkbox"]):not([type="radio"]) {
+    min-height: 44px;
+  }
+
+  /* Square icon buttons grow both ways */
+  .question-dismiss,
+  .server-action-btn,
+  .root-action-btn,
+  .sidebar-add-btn,
+  .project-detail-btn,
+  .archived-restore-btn,
+  .delete-btn {
+    min-width: 44px;
+  }
+
+  .btn-sm {
+    font-size: 13px;
+    padding: 6px 14px;
+  }
+
+  /* The input bar pins Send to its own height; the phone rule wins */
+  .project-input-bar > .btn {
+    min-height: 44px;
+  }
+}
+
+/* No hover on touch: show the actions that otherwise appear on hover */
+@media (hover: none) {
+  .server-actions,
+  .root-action-btn,
+  .project-detail-btn,
+  .archived-restore-btn {
+    opacity: 1;
   }
 }
 
