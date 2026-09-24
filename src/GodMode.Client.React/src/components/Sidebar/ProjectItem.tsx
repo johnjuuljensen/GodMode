@@ -1,16 +1,15 @@
-import type { ProjectSummary } from '../../signalr/types';
-import { useAppStore } from '../../store';
+import { useAppStore, type SidebarItem } from '../../store';
 
 interface Props {
-  project: ProjectSummary;
-  serverId: string;
+  item: SidebarItem;
   isSelected: boolean;
   onSelect: () => void;
 }
 
-export function ProjectItem({ project, isSelected, onSelect }: Props) {
+export function ProjectItem({ item, isSelected, onSelect }: Props) {
+  const { project, serverLabel } = item;
   const timeAgo = formatRelativeTime(project.UpdatedAt);
-  const clientQuestion = useAppStore(s => s.projectQuestions[project.Id]);
+  const clientQuestion = useAppStore(s => s.projectQuestions[item.key]);
   const isWaiting = project.State === 'WaitingInput' || clientQuestion;
   const stateStr = String(project.State ?? 'Idle');
   const stateLabel = isWaiting ? 'WAIT' : stateStr.slice(0, 4).toUpperCase();
@@ -27,7 +26,7 @@ export function ProjectItem({ project, isSelected, onSelect }: Props) {
         <div className="project-info">
           <div className="project-name">{project.Name}</div>
           <div className="project-meta">
-            {project.RootName && `${project.RootName} · `}{timeAgo}
+            {serverLabel && `${serverLabel} · `}{project.RootName && `${project.RootName} · `}{timeAgo}
             {isWaiting && project.CurrentQuestion && (
               <span className="project-question-hint" title={project.CurrentQuestion}>
                 {' · '}{project.CurrentQuestion.length > 30
