@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore, transcriptKey } from '../../store';
-import { TranscriptList } from './TranscriptList';
+import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
 import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
@@ -31,6 +31,7 @@ export function ProjectView({ serverId, projectId }: Props) {
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const transcriptRef = useRef<TranscriptListHandle>(null);
 
   // Loading until the server says the replay is complete, unless a transcript is already held
   const transcriptPhase = useAppStore(s => s.transcripts[transcriptKey(serverId, projectId)]?.phase);
@@ -109,6 +110,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   const sendText = useCallback(async (text: string) => {
     if (!text.trim()) return;
     markInputSent();
+    // The reader's own message is one they want to see, wherever they had scrolled to
+    transcriptRef.current?.scrollToLatest();
     try {
       // The server resumes a stopped project and sends once claude runs
       await replyAndResume(serverId, projectId, text);
@@ -228,7 +231,7 @@ export function ProjectView({ serverId, projectId }: Props) {
       </div>
 
       {phase === 'ready' && visibleItems.length > 0 ? (
-        <TranscriptList key={transcriptKey(serverId, projectId)} items={visibleItems} />
+        <TranscriptList ref={transcriptRef} key={transcriptKey(serverId, projectId)} items={visibleItems} />
       ) : (
         <div className="project-messages">
           <div className="project-messages-empty">
