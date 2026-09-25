@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore, transcriptKey } from '../../store';
 import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
-import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
+import { createTranscriptBuilder } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
 import { ReplyInput } from './ReplyInput';
+import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
-
-/** Simple view: the conversation, without session bookkeeping (errors still show) */
-const isConversation = (item: TranscriptItem) => (item.kind !== 'system' && item.kind !== 'result') || item.isError;
 
 interface Props {
   serverId: string;
@@ -41,6 +39,11 @@ export function ProjectView({ serverId, projectId }: Props) {
 
   const hub = conn?.hub;
   const project = conn?.projects.find(p => p.Id === projectId);
+  // Connected, the server's list taken on this connection, and the project not in it: deleted (here,
+  // elsewhere, or while this client slept), or a link to one it does not have. Nothing here acts on it (#239)
+  const projectsListed = useAppStore(s => !!s.projectsListed[serverId]);
+  const notFound = conn?.connectionState === 'connected' && projectsListed && !project;
+  const clearSelection = useAppStore(s => s.clearSelection);
 
   useEffect(() => {
     // Resumes from the transcript held, so reopening only adds what is new. Open while it shows: the
@@ -72,8 +75,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   );
 
   const state = project?.State ?? 'Idle';
-  const canResume = state === 'Stopped' || state === 'Idle';
-  const canStop = state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission';
+  const canResume = !notFound && (state === 'Stopped' || state === 'Idle');
+  const canStop = !notFound && (state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission');
 
   // What claude is blocked on: a tool call to allow or deny, or AskUserQuestion's questions, asked one at a time
   const pendingPermission = project?.PendingPermission ?? null;
@@ -120,7 +123,7 @@ export function ProjectView({ serverId, projectId }: Props) {
   }, [replyAndResume, serverId, projectId, markInputSent]);
 
   const handleSendInput = async () => {
-    if (!inputText.trim()) return;
+    if (notFound || !inputText.trim()) return;
     const text = inputText;
     setInputText('');
     await sendText(text);
@@ -149,7 +152,11 @@ export function ProjectView({ serverId, projectId }: Props) {
 
   const handleDelete = async () => {
     if (!hub || !await confirmAction(`Delete "${projectName}" permanently?`, 'Delete', { message: 'This cannot be undone.', tone: 'danger' })) return;
-    try { await hub.deleteProject(projectId, state === 'Running'); } catch (err) { console.error(err); }
+    try {
+      await hub.deleteProject(projectId, state === 'Running');
+      // Who deleted it is done with it; a view it was deleted under says it is not found
+      clearSelection();
+    } catch (err) { console.error(err); }
   };
 
   return (
@@ -180,11 +187,11 @@ export function ProjectView({ serverId, projectId }: Props) {
             title={canStop ? 'Click to stop' : canResume ? 'Click to resume' : state}
           >
             <span className="project-status-dot" />
-            <span className="project-status-label">{state}</span>
+            <span className="project-status-label">{notFound ? 'Not found' : state}</span>
             {canStop && <span className="project-status-action">Stop</span>}
             {canResume && <span className="project-status-action">Resume</span>}
           </button>
-          <button className="delete-btn" onClick={handleDelete} title="Delete permanently">
+          <button className="delete-btn" onClick={handleDelete} disabled={notFound} title="Delete permanently">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
             </svg>
@@ -192,12 +199,13 @@ export function ProjectView({ serverId, projectId }: Props) {
         </div>
       </div>
 
-      {phase === 'ready' && visibleItems.length > 0 ? (
+      {!notFound && phase === 'ready' && visibleItems.length > 0 ? (
         <TranscriptList ref={transcriptRef} key={transcriptKey(serverId, projectId)} items={visibleItems} />
       ) : (
         <div className="project-messages">
           <div className="project-messages-empty">
-            {phase === 'loading' ? 'Loading...' : conn?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
+            {notFound ? 'Project not found'
+              : phase === 'loading' ? 'Loading...' : conn?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
           </div>
         </div>
       )}
@@ -232,8 +240,9 @@ export function ProjectView({ serverId, projectId }: Props) {
           // Every state takes a reply: ReplyAndResume resumes a claude that is not running, one that failed
           // too, as the inbox answers an Error item (#240)
           placeholder={canResume || state === 'Error' ? 'Type to resume...' : 'Type your response...'}
+          disabled={notFound}
         />
-        <button className="btn btn-primary" onClick={handleSendInput} disabled={!inputText.trim()}>
+        <button className="btn btn-primary" onClick={handleSendInput} disabled={notFound || !inputText.trim()}>
           Send
         </button>
       </div>

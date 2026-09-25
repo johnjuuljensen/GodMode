@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 /**
  * An Error project is answered where the inbox's "open the project" lands (#240): its input takes a
- * reply, through ReplyAndResume, as the inbox's Error item does. Renders ProjectView on the real store.
+ * reply, through ReplyAndResume, as the inbox's Error item does. A project the server does not have
+ * says so (#239). Renders ProjectView on the real store.
  */
+import { act } from 'react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { FakeHub, project, root, connectServers } from '../../test/fakeHub';
 import { render, typeInto, keyDown, type Rendered } from '../../test/render';
@@ -31,6 +33,24 @@ beforeEach(async () => {
 });
 
 afterEach(() => view.unmount());
+
+// A deep link, a reload or a forward to a project the server does not have once showed "Loading..." for good, with live controls (#239)
+it('a project its server does not have says so, and offers nothing to act on', async () => {
+  const gone = await render(<ProjectView serverId="A" projectId="p9" />);
+  try {
+    const el = gone.container;
+    expect(el.querySelector('.project-messages-empty')?.textContent).toBe('Project not found');
+    expect(el.querySelector<HTMLTextAreaElement>('textarea.project-input')!.disabled).toBe(true);
+    expect(el.querySelector<HTMLButtonElement>('.delete-btn')!.disabled).toBe(true);
+    expect(el.querySelector<HTMLButtonElement>('.project-status-btn')!.disabled).toBe(true);
+
+    // Not before the server has listed its projects on this connection: it may be among them
+    await act(async () => useAppStore.setState({ projectsListed: {} }));
+    expect(el.querySelector('.project-messages-empty')?.textContent).toBe('Loading...');
+  } finally {
+    gone.unmount();
+  }
+});
 
 it("an Error project's input is enabled and sends through ReplyAndResume", async () => {
   const input = view.container.querySelector<HTMLTextAreaElement>('textarea.project-input')!;

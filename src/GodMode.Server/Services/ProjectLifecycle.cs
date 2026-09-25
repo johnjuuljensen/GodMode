@@ -319,32 +319,39 @@ public sealed class ProjectLifecycle
     /// <see cref="OutputLog.StartAsync"/>), then adds it to the project's live group. The
     /// connection is out of the group while the file is read; the last read happens on the
     /// consumer, between two lines, and the join with it, so every line is either in the replay or
-    /// broadcast to the connection afterwards, never both and never neither.
+    /// broadcast to the connection afterwards, never both and never neither. Each batch and the
+    /// complete carry <paramref name="subscriptionId"/> and the file's generation; a positive offset
+    /// in a generation other than <paramref name="generation"/> is not in this file, and all of it is replayed.
     /// </summary>
-    public async Task SubscribeAsync(ProjectInfo project, long fromOffset, string connectionId)
+    public async Task SubscribeAsync(ProjectInfo project, long fromOffset, string subscriptionId, string? generation, string connectionId)
     {
         var id = project.Status.Id;
-        var client = _hubContext.Clients.Client(connectionId);
+        var replay = new Replay(_hubContext.Clients.Client(connectionId), id, subscriptionId,
+            await OutputLog.GenerationAsync(project.ProjectPath));
         await _hubContext.Groups.RemoveFromGroupAsync(connectionId, OutputGroup(id));
 
-        var offset = await ReplayAsync(project, client, await OutputLog.StartAsync(project.ProjectPath, fromOffset));
+        var from = fromOffset > 0 && generation != replay.Generation ? 0 : fromOffset;
+        var offset = await ReplayAsync(project, replay, await OutputLog.StartAsync(project.ProjectPath, from));
         await InOrderAsync(project, async () =>
         {
-            offset = await ReplayAsync(project, client, offset);
+            offset = await ReplayAsync(project, replay, offset);
             await _hubContext.Groups.AddToGroupAsync(connectionId, OutputGroup(id));
-            await client.OutputReplayComplete(id, offset);
+            await replay.Client.OutputReplayComplete(id, subscriptionId, replay.Generation, offset);
         }, underStateLock: false);
 
-        _logger.LogInformation("Replayed output of project {ProjectId} to {ConnectionId} from {FromOffset} to {Offset}",
-            id, connectionId, fromOffset, offset);
+        _logger.LogInformation("Replayed output of project {ProjectId} to {ConnectionId} for {SubscriptionId} from {FromOffset} to {Offset}",
+            id, connectionId, subscriptionId, from, offset);
     }
 
+    /// <summary>A subscription's replay: who it goes to, and what its batches and complete carry.</summary>
+    private sealed record Replay(IProjectHubClient Client, string ProjectId, string SubscriptionId, string Generation);
+
     /// <summary>Sends the complete lines from <paramref name="offset"/> in batches; returns the offset after the last.</summary>
-    private static async Task<long> ReplayAsync(ProjectInfo project, IProjectHubClient client, long offset)
+    private static async Task<long> ReplayAsync(ProjectInfo project, Replay replay, long offset)
     {
         await foreach (var batch in OutputLog.ReadBatchesAsync(project.ProjectPath, offset))
         {
-            await client.OutputBatch(project.Status.Id, offset, batch);
+            await replay.Client.OutputBatch(replay.ProjectId, replay.SubscriptionId, replay.Generation, offset, batch);
             offset = batch[^1].Offset;
         }
         return offset;

@@ -8,7 +8,7 @@ import { act } from 'react';
 import type { AttentionItem } from '../../signalr/types';
 import { FakeHub, connectServers } from '../../test/fakeHub';
 import { render, typeInto, click, type Rendered } from '../../test/render';
-import { useAppStore } from '../../store';
+import { useAppStore, projectKey } from '../../store';
 import { Inbox } from './Inbox';
 
 vi.mock('../../signalr/hub', () => ({ GodModeHub: class {} }));
@@ -120,6 +120,20 @@ describe('the inbox', () => {
     } finally {
       delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
     }
+  });
+
+  // The store once resolved a call to a missing hub as done, and the item cleared what was typed (#239)
+  it('keeps a reply, and says why, when its server has left the list', async () => {
+    const el = itemEl('p1', 'Server B');
+    await act(async () => useAppStore.setState(s => ({ serverConnections: s.serverConnections.filter(c => c.serverInfo.Id !== 'B') })));
+    expect(el.isConnected).toBe(true);
+    await typeInto(el.querySelector('textarea')!, 'Ship it');
+    await click(button(el, 'Send'));
+
+    expect(el.querySelector('.inbox-item-error')?.textContent).toBe("This project's server is no longer in the server list");
+    expect(el.querySelector('textarea')!.value).toBe('Ship it');
+    expect(useAppStore.getState().inboxDrafts[projectKey('B', 'p1')]).toEqual({ reply: 'Ship it', denyMessage: '' });
+    expect(hubB.replies).toEqual([]);
   });
 
   it('says so when nothing needs the user', async () => {

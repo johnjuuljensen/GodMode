@@ -424,7 +424,7 @@ export interface IProjectHub {
    * lines, so each line arrives once and in order. fromOffset is the offset of the last line the client has
    * (0 for everything; an offset inside a line snaps forward to the next line), or -N for the last N turns.
    */
-  SubscribeProject(projectId: string, fromOffset: number): Promise<void>;
+  SubscribeProject(projectId: string, fromOffset: number, subscriptionId: string, generation: string | null): Promise<void>;
   /** Unsubscribes from output events from a project. */
   UnsubscribeProject(projectId: string): Promise<void>;
   /** Deletes a project, running teardown scripts and removing all files. */
@@ -450,16 +450,17 @@ export interface IProjectHubClient {
   /**
    * Replayed output, in order, to the connection that subscribed. The batch covers output.jsonl from
    * fromOffset to its last line's offset. The first batch's fromOffset is where the replay starts: the offset
-   * asked for, except for the last turns, or 0 when that offset is not from this file. Each later batch
-   * starts where the previous one ended.
+   * asked for, except for the last turns, or 0 when that offset is not from this file (another generation, or
+   * past its end). Each later batch starts where the previous one ended.
    */
-  OutputBatch(projectId: string, fromOffset: number, lines: OutputLine[]): void;
+  OutputBatch(projectId: string, subscriptionId: string, generation: string, fromOffset: number, lines: OutputLine[]): void;
   /**
    * The replay for a subscription is done, at offset; live IProjectHubClient.OutputReceived lines follow from
-   * there, with none missed or repeated. An offset lower than the one asked for means output.jsonl is shorter
-   * than the client thought: what it holds is not from this file.
+   * there, with none missed or repeated. A generation other than the one the client holds, or an offset lower
+   * than the one asked for (output.jsonl is shorter than the client thought), means what it holds is not from
+   * this file.
    */
-  OutputReplayComplete(projectId: string, offset: number): void;
+  OutputReplayComplete(projectId: string, subscriptionId: string, generation: string, offset: number): void;
   /** Called when a project's status changes. */
   StatusChanged(projectId: string, status: ProjectStatus): void;
   /**
