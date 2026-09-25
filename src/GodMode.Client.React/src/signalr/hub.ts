@@ -6,7 +6,10 @@
  * The caller provides the hub URL and connection options via IHostApi.
  */
 import * as signalR from '@microsoft/signalr';
-import type { ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, OutputLine, PermissionDecision, AttentionItem } from './types';
+import type {
+  ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, AttentionItem,
+  IProjectHub, IProjectHubClient,
+} from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
 
@@ -84,37 +87,37 @@ export class GodModeHub {
       .build();
     this.connection = connection;
 
-    // Register server→client callbacks (IProjectHubClient)
-    this.connection.on('OutputReceived', (projectId: string, offset: number, rawJson: string) => {
+    // Register server→client callbacks, each typed by its IProjectHubClient method
+    this.on(connection, 'OutputReceived', (projectId, offset, rawJson) => {
       this.callbacks.onOutputReceived?.(projectId, { offset, message: parseClaudeMessage(rawJson) });
     });
 
-    this.connection.on('OutputBatch', (projectId: string, subscriptionId: string, generation: string, fromOffset: number, lines: OutputLine[]) => {
+    this.on(connection, 'OutputBatch', (projectId, subscriptionId, generation, fromOffset, lines) => {
       this.callbacks.onOutputBatch?.(projectId, subscriptionId, generation, fromOffset,
         lines.map(l => ({ offset: l.Offset, message: parseClaudeMessage(l.RawJson) })));
     });
 
-    this.connection.on('OutputReplayComplete', (projectId: string, subscriptionId: string, generation: string, offset: number) => {
+    this.on(connection, 'OutputReplayComplete', (projectId, subscriptionId, generation, offset) => {
       this.callbacks.onOutputReplayComplete?.(projectId, subscriptionId, generation, offset);
     });
 
-    this.connection.on('StatusChanged', (projectId: string, status: ProjectStatus) => {
+    this.on(connection, 'StatusChanged', (projectId, status) => {
       this.callbacks.onStatusChanged?.(projectId, status);
     });
 
-    this.connection.on('AttentionChanged', (items: AttentionItem[]) => {
+    this.on(connection, 'AttentionChanged', (items) => {
       this.callbacks.onAttentionChanged?.(items);
     });
 
-    this.connection.on('ProjectCreated', (status: ProjectStatus) => {
+    this.on(connection, 'ProjectCreated', (status) => {
       this.callbacks.onProjectCreated?.(status);
     });
 
-    this.connection.on('CreationProgress', (projectId: string, message: string) => {
+    this.on(connection, 'CreationProgress', (projectId, message) => {
       this.callbacks.onCreationProgress?.(projectId, message);
     });
 
-    this.connection.on('ProjectDeleted', (projectId: string) => {
+    this.on(connection, 'ProjectDeleted', (projectId) => {
       this.callbacks.onProjectDeleted?.(projectId);
     });
 
@@ -178,22 +181,34 @@ export class GodModeHub {
     }
   }
 
+  // --- The generated contract: each call is checked against IProjectHub or IProjectHubClient ---
+
+  /** Invokes the hub method named, with its parameters and result as IProjectHub declares them. */
+  private invoke<M extends keyof IProjectHub>(method: M, ...args: Parameters<IProjectHub[M]>): ReturnType<IProjectHub[M]> {
+    return this.connection!.invoke(method, ...args) as ReturnType<IProjectHub[M]>;
+  }
+
+  /** Handles the server's call of the IProjectHubClient method named; the handler's parameters take its types. */
+  private on<M extends keyof IProjectHubClient>(connection: signalR.HubConnection, method: M, handler: IProjectHubClient[M]) {
+    connection.on(method, handler);
+  }
+
   // --- Client→Server methods (IProjectHub) ---
 
   async listProfiles(): Promise<ProfileInfo[]> {
-    return await this.connection!.invoke('ListProfiles');
+    return await this.invoke('ListProfiles');
   }
 
   async listProjectRoots(): Promise<ProjectRootInfo[]> {
-    return await this.connection!.invoke('ListProjectRoots');
+    return await this.invoke('ListProjectRoots');
   }
 
   async listProjects(): Promise<ProjectSummary[]> {
-    return await this.connection!.invoke('ListProjects');
+    return await this.invoke('ListProjects');
   }
 
   async getStatus(projectId: string): Promise<ProjectStatus> {
-    return await this.connection!.invoke('GetStatus', projectId);
+    return await this.invoke('GetStatus', projectId);
   }
 
   async createProject(
@@ -202,31 +217,31 @@ export class GodModeHub {
     actionName: string | null,
     inputs: Record<string, unknown>,
   ): Promise<ProjectStatus> {
-    return await this.connection!.invoke('CreateProject', profileName, projectRootName, actionName, inputs);
+    return await this.invoke('CreateProject', profileName, projectRootName, actionName, inputs);
   }
 
   async sendInput(projectId: string, input: string): Promise<void> {
-    await this.connection!.invoke('SendInput', projectId, input);
+    await this.invoke('SendInput', projectId, input);
   }
 
   /** Answers the project's PendingPermission: the tool call runs, or claude is told it was denied. */
   async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision): Promise<void> {
-    await this.connection!.invoke('RespondToPermission', projectId, requestId, decision);
+    await this.invoke('RespondToPermission', projectId, requestId, decision);
   }
 
   /** Answers the project's PendingQuestion: each question's text to the chosen label or the user's own text. */
   async answerQuestion(projectId: string, requestId: string, answers: Record<string, string>): Promise<void> {
-    await this.connection!.invoke('AnswerQuestion', projectId, requestId, answers);
+    await this.invoke('AnswerQuestion', projectId, requestId, answers);
   }
 
   /** Every project on this server that needs the user, oldest first. */
   async getAttention(): Promise<AttentionItem[]> {
-    return await this.connection!.invoke('GetAttention');
+    return await this.invoke('GetAttention');
   }
 
   /** The user has seen the project's last result: it is no longer 'Finished', nor 'Review' until its pull request changes. */
   async markSeen(projectId: string): Promise<void> {
-    await this.connection!.invoke('MarkSeen', projectId);
+    await this.invoke('MarkSeen', projectId);
   }
 
   /**
@@ -235,15 +250,15 @@ export class GodModeHub {
    * Resolves once a resumed claude has started its session; rejects if it fails to.
    */
   async replyAndResume(projectId: string, text: string): Promise<void> {
-    await this.connection!.invoke('ReplyAndResume', projectId, text);
+    await this.invoke('ReplyAndResume', projectId, text);
   }
 
   async stopProject(projectId: string): Promise<void> {
-    await this.connection!.invoke('StopProject', projectId);
+    await this.invoke('StopProject', projectId);
   }
 
   async resumeProject(projectId: string): Promise<void> {
-    await this.connection!.invoke('ResumeProject', projectId);
+    await this.invoke('ResumeProject', projectId);
   }
 
   /**
@@ -253,20 +268,20 @@ export class GodModeHub {
    * in (null when nothing is held), and in any other the server replays from 0.
    */
   async subscribeProject(projectId: string, fromOffset: number, subscriptionId: string, generation: string | null): Promise<void> {
-    await this.connection!.invoke('SubscribeProject', projectId, fromOffset, subscriptionId, generation);
+    await this.invoke('SubscribeProject', projectId, fromOffset, subscriptionId, generation);
   }
 
   async unsubscribeProject(projectId: string): Promise<void> {
-    await this.connection!.invoke('UnsubscribeProject', projectId);
+    await this.invoke('UnsubscribeProject', projectId);
   }
 
   async deleteProject(projectId: string, force: boolean = false): Promise<void> {
-    await this.connection!.invoke('DeleteProject', projectId, force);
+    await this.invoke('DeleteProject', projectId, force);
   }
 
   // ── Utility ──
 
   async checkCommand(command: string): Promise<string | null> {
-    return await this.connection!.invoke('CheckCommand', command);
+    return await this.invoke('CheckCommand', command);
   }
 }
