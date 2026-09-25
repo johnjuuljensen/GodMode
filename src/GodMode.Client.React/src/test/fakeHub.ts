@@ -4,11 +4,45 @@
  * failConnect. Each test file still mocks '../signalr/hub' and '../services/hostApi' itself (vi.mock
  * is hoisted per file).
  */
-import type { ConnectionState, HubCallbacks } from '../signalr/hub';
+import type { ConnectionState, HubCallbacks, OutputMessage } from '../signalr/hub';
 import type {
   PermissionDecision, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
 } from '../signalr/types';
+import { parseClaudeMessage } from '../signalr/parseMessage';
 import { useAppStore, type ServerConnection } from '../store';
+
+/** An assistant line whose text is `at <offset>`, with the byte offset after it. */
+export const line = (offset: number): OutputMessage => ({
+  offset,
+  message: parseClaudeMessage(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: `at ${offset}` }] } })),
+});
+
+/** The text of each message, as `line` wrote it: `at <offset>`. */
+export const texts = (messages: { contentItems: { text?: string }[] }[] | undefined) =>
+  (messages ?? []).map(m => m.contentItems[0]?.text);
+
+/**
+ * One SubscribeProject the server received. Nothing is answered until the test says: its batches and
+ * its complete land when, and in the order, the test calls them, after newer subscriptions if it likes.
+ */
+export class Replay {
+  constructor(private readonly hub: FakeHub, readonly projectId: string, readonly fromOffset: number) {}
+
+  /** Replayed lines, covering output.jsonl from fromOffset to the last line's offset. */
+  batch(fromOffset: number, offsets: number[]) {
+    this.hub.callbacks.onOutputBatch?.(this.projectId, fromOffset, offsets.map(line));
+  }
+
+  complete(offset: number) {
+    this.hub.callbacks.onOutputReplayComplete?.(this.projectId, offset);
+  }
+
+  /** The whole answer: the lines in one batch from fromOffset (none if there are none), then complete at the last. */
+  answer(fromOffset: number, offsets: number[]) {
+    if (offsets.length > 0) this.batch(fromOffset, offsets);
+    this.complete(offsets[offsets.length - 1] ?? fromOffset);
+  }
+}
 
 export class FakeHub {
   callbacks: HubCallbacks = {};
@@ -26,6 +60,8 @@ export class FakeHub {
   created: { rootName: string; actionName: string | null; inputs: Record<string, unknown> }[] = [];
   /** Every SubscribeProject and UnsubscribeProject that reached the server, in order. */
   subscriptions: { projectId: string; fromOffset: number }[] = [];
+  /** The same subscriptions, each to be answered when the test says. Kept by resetCalls. */
+  replays: Replay[] = [];
   unsubscriptions: string[] = [];
   /** How often each call reached the server. */
   calls = { connect: 0, listProjects: 0, getAttention: 0, retryNow: 0 };
@@ -71,7 +107,11 @@ export class FakeHub {
   async subscribeProject(projectId: string, fromOffset: number) {
     this.invoke();
     this.subscriptions.push({ projectId, fromOffset });
+    this.replays.push(new Replay(this, projectId, fromOffset));
   }
+
+  /** The replays of one project's subscriptions, oldest first. */
+  replaysOf(projectId: string) { return this.replays.filter(r => r.projectId === projectId); }
   async unsubscribeProject(projectId: string) { this.invoke(); this.unsubscriptions.push(projectId); }
   async replyAndResume(projectId: string, text: string) { this.replies.push({ projectId, text }); }
   async answerQuestion(projectId: string, requestId: string, answers: Record<string, string>) {
