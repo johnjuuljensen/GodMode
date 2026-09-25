@@ -379,6 +379,13 @@ function loadGroupBy(): SidebarGroupBy {
   return SIDEBAR_GROUP_ORDER.includes(v as SidebarGroupBy) ? v as SidebarGroupBy : 'profile';
 }
 
+/** What a call to a server that is not connected says: a server offline, reconnecting or not. */
+export function offlineMessage(conn: ServerConnection): string {
+  return conn.connectionState === 'disconnected'
+    ? `Server offline: ${conn.serverInfo.Name} is not connected`
+    : `Server offline: ${conn.serverInfo.Name} is reconnecting. Try again once it is back`;
+}
+
 // Retry each server that is not connected when the page is shown again, or the network is back
 let watchingWake = false;
 function watchWake(retry: () => void) {
@@ -413,11 +420,15 @@ export const useAppStore = create<AppState>((set, get) => {
     await conn.hub.subscribeProject(projectId, fromOffset, tile.subscription, tile.generation);
   };
 
-  /** The server's hub for a call the user makes. Rejects, saying why, when the server has left the list. */
+  /**
+   * The server's hub for a call the user makes. Rejects, saying why, when the server has left the
+   * list, or is not connected: SignalR's own message says only that the connection is not Connected.
+   */
   const hubFor = (serverId: string): GodModeHub => {
-    const hub = get().getHub(serverId);
-    if (!hub) throw new Error("This project's server is no longer in the server list");
-    return hub;
+    const conn = get().getConnection(serverId);
+    if (!conn) throw new Error("This project's server is no longer in the server list");
+    if (conn.connectionState !== 'connected') throw new Error(offlineMessage(conn));
+    return conn.hub;
   };
 
   /** Ends a subscription on the server. A lost connection has none to end: its server dropped them. */
@@ -482,6 +493,12 @@ export const useAppStore = create<AppState>((set, get) => {
           profiles: [],
         };
       });
+
+      // A server that left the list (removed here, or in another client) stops retrying: its hub goes with it
+      for (const gone of existing.filter(c => !connections.some(n => n.serverInfo.Id === c.serverInfo.Id))) {
+        console.info(`[store] loadServers: ${gone.serverInfo.Name} left the list, disconnecting`);
+        gone.hub.disconnect().catch(err => console.warn('[store] disconnect failed:', gone.serverInfo.Id, err));
+      }
 
       const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, get().profileFilter, get().sidebarGroupBy);
       console.info(`[store] loadServers: ${profileGroups.length} profiles, ${inactiveServers.length} inactive`);
@@ -807,7 +824,8 @@ export const useAppStore = create<AppState>((set, get) => {
       console.info(`[store] connectServer: ${serverId} ready`);
     } catch (err) {
       console.error(`[store] connectServer ${serverId} failed:`, err);
-      updateConn({ connectionState: 'disconnected' });
+      // The hub retries a server that is down (reconnecting), until disconnected
+      updateConn({ connectionState: conn.hub.state });
     }
   },
 
@@ -830,7 +848,8 @@ export const useAppStore = create<AppState>((set, get) => {
 
   retryServers: () => {
     for (const conn of get().serverConnections) {
-      if (conn.connectionState === 'reconnecting') conn.hub.retryNow();
+      // A connection being retried, or a first connect in flight: the hub restarts an attempt that hangs
+      if (conn.connectionState === 'reconnecting' || conn.connectionState === 'connecting') conn.hub.retryNow();
       // As loadServers' auto-connect: a stopped codespace needs starting first
       else if (conn.connectionState === 'disconnected' && !(conn.serverInfo.Type === 'github' && conn.serverInfo.State === 'Stopped')) {
         get().connectServer(conn.serverInfo.Id).catch(err => console.warn('[store] retry failed:', conn.serverInfo.Id, err));

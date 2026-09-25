@@ -207,3 +207,29 @@ describe("the phone's layouts (#218)", () => {
     expect(location.hash).toBe('#/');
   });
 });
+
+describe("the phone's project view (#221)", () => {
+  const indicator = () => view.container.querySelector<HTMLButtonElement>('.page-back-bar .project-connection');
+
+  it("shows its server's connection while it is lost, retries on a tap, and goes when it is back", async () => {
+    await setPhone(true);
+    await click([...view.container.querySelectorAll<HTMLElement>('.home-tab')].find(b => b.textContent === 'Projects')!);
+    await open('alpha');
+    expect(view.container.querySelector('.page-back-bar')).not.toBeNull();
+    expect(indicator()).toBeNull();
+
+    await act(() => hub.drop());
+    expect(indicator()?.textContent).toBe('Reconnecting…');
+    await click(indicator()!);
+    expect(hub.calls.retryNow).toBe(1);
+
+    await act(() => hub.reconnect());
+    expect(indicator()).toBeNull();
+  });
+
+  it('is not on a wide screen, where the sidebar has its own', async () => {
+    await open('alpha');
+    await act(() => hub.drop());
+    expect(view.container.querySelector('.project-connection')).toBeNull();
+  });
+});

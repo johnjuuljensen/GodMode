@@ -234,6 +234,10 @@ body::after {
 /* A project on a phone: the back bar over the project, in the content slot */
 .shell-content.shell-mobile-project > .page-back-bar {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding-top: calc(8px + env(safe-area-inset-top));
 }
 
