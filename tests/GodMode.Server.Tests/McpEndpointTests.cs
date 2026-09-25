@@ -134,12 +134,21 @@ public class McpEndpointTests
             if (keepAliveSeconds is { } seconds)
                 environment[PermissionPromptTool.KeepAliveSetting] = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
             run.BaseUrl = $"http://127.0.0.1:{ServerProcess.GetFreePort()}";
-            run.Server = ServerProcess.Start(run._workDir, run.BaseUrl, environment: environment);
-            run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TimeSpan.FromSeconds(10) };
-            await run.Server.WaitForHealthyAsync(run.Http);
-            run.Client = new ServerHubClient(run.BaseUrl);
-            await run.Client.StartAsync();
-            return run;
+            try
+            {
+                run.Server = ServerProcess.Start(run._workDir, run.BaseUrl, environment: environment);
+                run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TimeSpan.FromSeconds(10) };
+                await run.Server.WaitForHealthyAsync(run.Http);
+                run.Client = new ServerHubClient(run.BaseUrl);
+                await run.Client.StartAsync();
+                return run;
+            }
+            catch
+            {
+                // The test never gets the run to dispose: a server left running outlives the test host
+                await run.DisposeAsync();
+                throw;
+            }
         }
 
         public async Task<string> CreateAsync(string name)
