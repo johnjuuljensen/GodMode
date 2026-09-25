@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GodMode.ProjectFiles;
@@ -155,8 +156,7 @@ public class RootConfigReader : IRootConfigReader
 
     private RawConfig ReadRawConfig(string path)
     {
-        var json = File.ReadAllText(path);
-        var raw = JsonSerializer.Deserialize<RawConfig>(json, JsonOptions) ?? new RawConfig();
+        var raw = ReadSettled(path, json => JsonSerializer.Deserialize<RawConfig>(json, JsonOptions)) ?? new RawConfig();
         // A mode claude does not have, or bypassPermissions, is an error in the file that names it
         if (raw.PermissionMode is { } mode)
             raw = raw with { PermissionMode = PermissionModes.Canonical(mode) ?? throw new InvalidDataException($"{Path.GetFileName(path)}: {PermissionModes.Refusal(mode)}") };
@@ -165,6 +165,56 @@ public class RootConfigReader : IRootConfigReader
             && _ignoredMcpLogged.TryAdd(Path.GetFullPath(path), 0))
             _logger.LogWarning("{ConfigPath} has " + IgnoredMcpServersKey + ", which GodMode ignores: {Hint}", path, McpServersHint);
         return raw;
+    }
+
+    /// <summary>
+    /// Parses a root file the host may be saving as it is read, by hand in an editor or by a script.
+    /// It is opened so that the save is not refused (a plain read shares no writing, and on Windows a
+    /// save during one fails), and a read that does not parse is read again while the file is still
+    /// changing, so a file half saved is not taken for a broken one. One that does not parse and has
+    /// not changed for <see cref="SettleTime"/> is broken, as is one still changing after <see cref="MaxSettleTime"/>.
+    /// </summary>
+    private static T ReadSettled<T>(string path, Func<string, T> parse)
+    {
+        var reading = Stopwatch.StartNew();
+        var unchanged = Stopwatch.StartNew();
+        string? previous = null;
+        while (true)
+        {
+            var text = ReadShared(path);
+            if (text != previous) { previous = text; unchanged.Restart(); }
+            try { return parse(text); }
+            catch (JsonException) when (unchanged.Elapsed < SettleTime && reading.Elapsed < MaxSettleTime)
+            {
+                Thread.Sleep(RetryDelay);
+            }
+        }
+    }
+
+    private static readonly TimeSpan SettleTime = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan MaxSettleTime = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(25);
+    private const int OpenAttempts = 20;
+
+    /// <summary>
+    /// Reads the file sharing everything, so a write, a delete or a replace is not refused while it
+    /// is open. A save that shares nothing while it writes is waited for.
+    /// </summary>
+    private static string ReadShared(string path)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                return reader.ReadToEnd();
+            }
+            catch (IOException) when (attempt < OpenAttempts && File.Exists(path))
+            {
+                Thread.Sleep(RetryDelay);
+            }
+        }
     }
 
     /// <summary>
@@ -237,8 +287,7 @@ public class RootConfigReader : IRootConfigReader
 
         try
         {
-            var json = File.ReadAllText(schemaPath);
-            return JsonSerializer.Deserialize<JsonElement>(json, JsonOptions);
+            return ReadSettled(schemaPath, json => JsonSerializer.Deserialize<JsonElement>(json, JsonOptions));
         }
         catch (Exception ex)
         {
