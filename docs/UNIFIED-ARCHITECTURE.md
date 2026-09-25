@@ -253,6 +253,8 @@ Key services:
 
 A project is a folder directly inside its root with a `.godmode/status.json`. The server does not archive or move project folders.
 
+**A root's own folders are no project's.** `.godmode-root`, `logs` and `.archived` (a leftover) are refused as a project's folder (`ProjectFolder.ReservedFolderNames`), from the create dialog, a reuse, or a create script's `project_path`. **A project folder's files are untrusted:** its session can write them, so what reaches the `claude` command line or a link is checked when read back: `session-id` must be a GUID (anything else is no session, and the resume starts a fresh one), and a recovered pull request URL must be http(s).
+
 **One project, one claude.** A project has at most one claude process. A create is refused while a tracked project has its ID or folder, before anything is written; create, resume, stop and delete of one project take its lock, so launches and stops come one at a time. Each session runs in a process tree of its own, off the server's console (a Job Object and a hidden console on Windows, a process group started through `setsid` on Linux). A stop interrupts claude (Ctrl+Break in its console on Windows, SIGINT to its group elsewhere), gives it `StopGracePeriodSeconds` (10) to exit, then kills the whole tree; the server's shutdown does the same for every session at once. The server README (*Sessions*) has the details and what claude was measured to honour.
 
 **Failures keep the true state.** A project's state follows claude, whatever else fails:
