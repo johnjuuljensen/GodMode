@@ -34,7 +34,9 @@
 		<PackageReference Include="Microsoft.Maui.Controls" VersionOverride="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" />
 
-		<MauiAsset Include="Resources\Raw\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
+		<!-- wwwroot/ is the React client, added from its dist/ below. Builds before #219 copied it here and never
+		     removed an old bundle, so a checkout can still hold copies that must not ship -->
+		<MauiAsset Include="Resources\Raw\**" Exclude="Resources\Raw\wwwroot\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -43,41 +45,24 @@
 		<ProjectReference Include="..\SignalR.Proxy\SignalR.Proxy.csproj" />
 	</ItemGroup>
 
-	<!-- Track React sources for incremental build -->
+	<!-- The React client: GodMode.Client.React.csproj builds it into dist/, once per build for every target
+	     framework here and GodMode.Server alike -->
 	<ItemGroup>
-		<_ReactSource Include="$(_ReactDir)\src\**\*" />
-		<_ReactSource Include="$(_ReactDir)\index.html" />
-		<_ReactSource Include="$(_ReactDir)\package.json" />
-		<_ReactSource Include="$(_ReactDir)\vite.config.ts" />
-		<_ReactSource Include="$(_ReactDir)\tsconfig*.json" />
+		<ProjectReference Include="..\GodMode.Client.React\GodMode.Client.React.csproj"
+		                  ReferenceOutputAssembly="false" Private="false" />
 	</ItemGroup>
 
-	<!-- Build React and copy dist to wwwroot (incremental: skipped when sources unchanged) -->
-	<Target Name="BuildReact"
-	        BeforeTargets="PrepareForBuild"
-	        Inputs="@(_ReactSource)"
-	        Outputs="$(_ReactDir)\dist\index.html">
-		<Message Importance="high" Text="Building React client..." />
-		<Exec Command="npm run build" WorkingDirectory="$(_ReactDir)" />
-	</Target>
-
-	<!-- Copy React dist to Resources/Raw/wwwroot so the static MauiAsset glob picks them up -->
-	<Target Name="CopyReactToWwwroot"
-	        DependsOnTargets="BuildReact"
-	        BeforeTargets="PrepareForBuild"
-	        Inputs="$(_ReactDir)\dist\index.html"
-	        Outputs="Resources\Raw\wwwroot\index.html">
+	<!-- The app serves dist/ itself as wwwroot/, not a copy of it: the target frameworks here build in parallel,
+	     and their copies into one folder would collide. ResolveProjectReferences builds the client (incremental:
+	     skipped when sources unchanged). A static glob would run before that, so a new bundle (a new hashed file
+	     name) would reach the app only on the next build, and this one would ship an index.html naming a missing script.
+	     Before ProcessMauiAssets too, which turns MauiAsset items into the app's content: the Apple SDKs collect bundle
+	     resources, and so run it, before PrepareForBuild -->
+	<Target Name="AddReactAssets"
+	        DependsOnTargets="ResolveProjectReferences"
+	        BeforeTargets="ProcessMauiAssets;PrepareForBuild">
 		<ItemGroup>
-			<_ReactDist Include="$(_ReactDir)\dist\**" />
-		</ItemGroup>
-		<Copy SourceFiles="@(_ReactDist)"
-		      DestinationFiles="@(_ReactDist->'Resources\Raw\wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
-		      SkipUnchangedFiles="true" />
-		<!-- The static glob above ran before this copy: without this, a new bundle (a new hashed file name)
-		     would reach the app only on the next build, and this one would ship an index.html naming a missing script -->
-		<ItemGroup>
-			<_ReactAsset Include="Resources\Raw\wwwroot\**" />
-			<MauiAsset Remove="Resources\Raw\wwwroot\**" />
+			<_ReactAsset Include="$(_ReactDir)\dist\**" />
 			<MauiAsset Include="@(_ReactAsset)" LogicalName="wwwroot\%(_ReactAsset.RecursiveDir)%(_ReactAsset.Filename)%(_ReactAsset.Extension)" />
 		</ItemGroup>
 	</Target>
