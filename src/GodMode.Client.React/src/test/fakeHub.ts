@@ -136,14 +136,16 @@ export class FakeHub {
   generations: Record<string, string> = {};
   generationOf(projectId: string) { return this.generations[projectId] ?? 'g1'; }
   async unsubscribeProject(projectId: string) { this.invoke(); this.unsubscriptions.push(projectId); }
-  async replyAndResume(projectId: string, text: string) { this.replies.push({ projectId, text }); }
+  async replyAndResume(projectId: string, text: string) { this.invoke(); this.replies.push({ projectId, text }); }
   async answerQuestion(projectId: string, requestId: string, answers: Record<string, string>) {
+    this.invoke();
     this.answers.push({ projectId, requestId, answers });
   }
   async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision) {
+    this.invoke();
     this.decisions.push({ projectId, requestId, decision });
   }
-  async markSeen(projectId: string) { this.seen.push(projectId); }
+  async markSeen(projectId: string) { this.invoke(); this.seen.push(projectId); }
   async createProject(_profileName: string, rootName: string, actionName: string | null, inputs: Record<string, unknown>) {
     this.invoke();
     this.created.push({ rootName, actionName, inputs });
