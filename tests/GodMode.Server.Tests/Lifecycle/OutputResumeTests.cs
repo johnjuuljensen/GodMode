@@ -212,6 +212,32 @@ public class OutputResumeTests
         Assert.DoesNotContain(Lines(second, created.Id), l => l.Contains("first conversation"));
     }
 
+    /// <summary>
+    /// A create that failed before its script made the folder (godmode-dev's) leaves an Error project
+    /// with no .godmode, so no output. Subscribing replays nothing and completes, from 0 or from an
+    /// offset held, and writes nothing where the project has no folder.
+    /// </summary>
+    [Fact]
+    public async Task ProjectWithoutAGodModeFolder_ReplaysNothing_AndCompletes_WritingNothing()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin(),
+            rootConfig: new Dictionary<string, object> { ["scriptsCreateFolder"] = true, ["create"] = "make.ps1" });
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "make.ps1"), "exit 1");
+        var projectId = $"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p1";
+        await Assert.ThrowsAnyAsync<Exception>(() => harness.CreateProjectAsync());
+        Assert.Equal(ProjectState.Error, (await harness.Projects.GetStatusAsync(projectId)).State);
+
+        var connection = harness.Connect("c1");
+        await connection.SubscribeAsync(projectId, 0, "s1").WaitAsync(TimeSpan.FromSeconds(5));
+        await connection.SubscribeAsync(projectId, 40, "s2", "a-generation-it-never-had").WaitAsync(TimeSpan.FromSeconds(5));
+
+        var replays = Replays(connection, projectId);
+        Assert.Equal([(nameof(IProjectHubClient.OutputReplayComplete), "s1", 0L), (nameof(IProjectHubClient.OutputReplayComplete), "s2", 0L)],
+            replays.Select(p => (p.Method, p.SubscriptionId, p.Offset!.Value)));
+        Assert.All(replays, p => Assert.False(string.IsNullOrEmpty(p.Generation)));
+        Assert.False(Directory.Exists(harness.ProjectPath(projectId)), "subscribing made a folder the project does not have");
+    }
+
     // ── What a client sees ──
 
     /// <summary>The replay pushes (batches and completes) the connection received for the project, in order.</summary>

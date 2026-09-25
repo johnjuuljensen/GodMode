@@ -136,6 +136,17 @@ public sealed class OutputLogTests : IDisposable
     }
 
     [Fact]
+    public async Task Generation_OfAProjectWithoutAGodModeFolder_IsOneForNoOutput_AndNothingIsWritten()
+    {
+        var folderless = Path.Combine(_projectPath, "never-made");
+
+        var generation = await OutputLog.GenerationAsync(folderless).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(string.IsNullOrEmpty(generation));
+        Assert.False(Directory.Exists(folderless));
+    }
+
+    [Fact]
     public async Task StartGeneration_ReplacesTheGeneration()
     {
         var before = await OutputLog.GenerationAsync(_projectPath);

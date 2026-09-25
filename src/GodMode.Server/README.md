@@ -334,6 +334,7 @@ Each project is stored in a folder under its root:
 │   ├── settings.json    # Per-project settings (e.g. skip-permissions)
 │   ├── input.jsonl      # User input log
 │   ├── output.jsonl     # Claude output log
+│   ├── output-generation # A GUID, new on each create: which output.jsonl a client's offset is in
 │   ├── session-id       # Claude session ID for resumption
 │   └── .gitignore       # Excludes all .godmode state from git
 └── (project files)      # Working directory for Claude
@@ -378,7 +379,7 @@ Projects:
 - `Task AnswerQuestion(projectId, requestId, answers)` — Answer the project's `PendingQuestion` (question text → chosen label or free text)
 - `Task StopProject(projectId)` — Stop running project: interrupt claude, then kill its process tree after `StopGracePeriodSeconds` (see [Stopping a Session](#stopping-a-session))
 - `Task ResumeProject(projectId)` — Resume stopped project; it is `Idle` until the user writes
-- `Task SubscribeProject(projectId, fromOffset)` — Replay `output.jsonl` from `fromOffset` (the byte offset after the last line the client has; 0 for all, `-N` for the last N turns) in `OutputBatch` messages, then `OutputReplayComplete`, then live `OutputReceived` lines, each line once and in order
+- `Task SubscribeProject(projectId, fromOffset, subscriptionId, generation)` — Replay `output.jsonl` from `fromOffset` (the byte offset after the last line the client has; 0 for all, `-N` for the last N turns) in `OutputBatch` messages, then `OutputReplayComplete`, then live `OutputReceived` lines, each line once and in order. `subscriptionId` is the client's own, echoed by this subscription's batches and complete; `generation` is the output generation `fromOffset` is in (null when the client holds none), and a positive offset in any other replays from 0
 - `Task UnsubscribeProject(projectId)` — Unsubscribe from output
 - `Task DeleteProject(projectId, force)` — Stop the project, run delete scripts and remove it; a refused delete leaves it `Stopped`
 
@@ -397,8 +398,8 @@ Utility:
 ### Server → Client Events
 
 - `OutputReceived(projectId, offset, rawJson)` — A live raw Claude JSON output line; `offset` is the byte offset in `output.jsonl` just after it
-- `OutputBatch(projectId, fromOffset, lines)` — Replayed `OutputLine`s (`Offset`, `RawJson`) covering `output.jsonl` from `fromOffset`; a replay from 0 when more was asked for means the client's transcript is not from this file
-- `OutputReplayComplete(projectId, offset)` — The subscription's replay is done at `offset`; live lines follow
+- `OutputBatch(projectId, subscriptionId, generation, fromOffset, lines)` — Replayed `OutputLine`s (`Offset`, `RawJson`) covering `output.jsonl` from `fromOffset`, for the subscription `subscriptionId`, in the file's `generation`; a replay from 0 when more was asked for, or in another generation, means the client's transcript is not from this file
+- `OutputReplayComplete(projectId, subscriptionId, generation, offset)` — The subscription's replay is done at `offset`, in `generation`; live lines follow
 - `StatusChanged(projectId, status)` — Project status changed
 - `AttentionChanged(items)` — The whole `GetAttention` list, pushed only when it differs from the last one pushed
 - `ProjectCreated(status)` — New project created

@@ -112,10 +112,32 @@ describe('the selected project and a tile, open over a reconnect', () => {
   });
 });
 
+/** The sidebar badge of p1 ('first'): WAIT when it asks, else its state's first four letters. */
+const badge = () => [...view!.container.querySelectorAll('.project-item')]
+  .find(el => el.querySelector('.project-name')?.textContent === 'first')?.querySelector('.project-state-badge')?.textContent;
+
+describe('a question the user dismissed (#239)', () => {
+  it('stays dismissed over a reconnect, though its project still asks', async () => {
+    hub.projects = [{ ...project('p1', 'first', 'Idle', '2026-09-24T12:00:00Z'), CurrentQuestion: 'Shall I go on?' }, hub.projects[1]];
+    await hub.drop();
+    await hub.reconnect();
+    view = await render(<Sidebar />);
+    expect(badge()).toBe('WAIT');
+
+    useAppStore.getState().selectProject('A', 'p1');
+    await act(async () => useAppStore.getState().dismissQuestion());
+    expect(badge()).toBe('IDLE');
+
+    await act(() => hub.drop());
+    await act(() => hub.reconnect());
+    await act(flush);
+    expect(badge()).toBe('IDLE');
+    expect(useAppStore.getState().totalWaitingCount).toBe(0);
+  });
+});
+
 describe('after a sleep in which a question was answered elsewhere and a project was deleted (#239)', () => {
   const asking = parseClaudeMessage(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Shall I go on?' }] } }));
-  const badge = () => [...view!.container.querySelectorAll('.project-item')]
-    .find(el => el.querySelector('.project-name')?.textContent === 'first')?.querySelector('.project-state-badge')?.textContent;
 
   it("the WAIT badge is gone, and the deleted project's open view says it is not found, with nothing to act on", async () => {
     useAppStore.getState().selectProject('A', 'p2');

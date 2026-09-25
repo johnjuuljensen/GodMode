@@ -857,13 +857,13 @@ export const useAppStore = create<AppState>((set, get) => {
         // What is held for a project this server no longer has goes with it, as when it was deleted
         const updates = forgotten(state, goneKeys(state, serverId, projects));
         // What each listed project asks, as its status says now: a question answered elsewhere while
-        // this client slept has left no event behind to clear it
+        // this client slept has left no event behind to clear it. One the user dismissed stays dismissed
+        const dp = updates.dismissedProjects ?? state.dismissedProjects;
         const pq = { ...(updates.projectQuestions ?? state.projectQuestions) };
         for (const p of projects) {
           const key = projectKey(serverId, p.Id);
-          if (asksQuestion(p)) pq[key] = true; else delete pq[key];
+          if (asksQuestion(p) && !dp[key]) pq[key] = true; else delete pq[key];
         }
-        const dp = updates.dismissedProjects ?? state.dismissedProjects;
         const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
         return {
           serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
@@ -908,7 +908,16 @@ export const useAppStore = create<AppState>((set, get) => {
     const subscription = conn.connectionState === 'connected' ? newSubscription() : null;
     set(state => ({ transcripts: { ...state.transcripts, [key]: { ...held, phase: 'replaying', subscription } } }));
     if (!subscription) return;
-    await conn.hub.subscribeProject(projectId, held.offset, subscription, held.generation);
+    try {
+      await conn.hub.subscribeProject(projectId, held.offset, subscription, held.generation);
+    } catch (err) {
+      // Refused (the server has no such project yet, say): open and unsubscribed again, so it is
+      // subscribed afresh when the project is created or the server next connects
+      set(state => state.transcripts[key]?.subscription === subscription
+        ? { transcripts: { ...state.transcripts, [key]: { ...state.transcripts[key], subscription: null } } }
+        : {});
+      throw err;
+    }
   },
   unsubscribeOutput: async (serverId, projectId) => {
     const key = projectKey(serverId, projectId);

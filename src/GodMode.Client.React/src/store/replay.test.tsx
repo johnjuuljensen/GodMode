@@ -144,6 +144,19 @@ describe('a project created again with its ID', () => {
     expect(store().transcripts[key]).toMatchObject({ offset: 15, generation: 'g2', phase: 'live' });
   });
 
+  // The server refused the subscription; the id it was sent with once kept the created project from subscribing
+  it('opened before it exists, is subscribed once it is created', async () => {
+    store().selectProject('A', 'p9');
+    await expect(store().subscribeOutput('A', 'p9')).rejects.toThrow('Project p9 not found');
+
+    hub.projects = [...hub.projects, project('p9', 'ninth', 'Running', '2026-09-24T12:00:00Z')];
+    hub.callbacks.onProjectCreated?.(status('p9', 'Running'));
+    const subscribed = hub.replaysOf('p9');
+    expect(subscribed.map(r => r.fromOffset)).toEqual([0]);
+    subscribed[0].answer(0, [10]);
+    expect(texts(store().outputMessages)).toEqual(at(10));
+  });
+
   it('while this client slept, resumes from the old offset in the old generation, and shows only the new output', async () => {
     store().selectProject('A', 'p1');
     await store().subscribeOutput('A', 'p1');

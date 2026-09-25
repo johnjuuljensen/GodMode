@@ -121,6 +121,8 @@ export class FakeHub {
   async getAttention() { this.invoke(); this.calls.getAttention++; return []; }
   async subscribeProject(projectId: string, fromOffset: number, subscriptionId: string, generation: string | null) {
     this.invoke();
+    // As the server does: a project it does not have cannot be subscribed to
+    if (!this.projects.some(p => p.Id === projectId)) throw new Error(`Project ${projectId} not found`);
     this.subscriptions.push({ projectId, fromOffset });
     this.replays.push(new Replay(this, projectId, fromOffset, subscriptionId, generation));
   }

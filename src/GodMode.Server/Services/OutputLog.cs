@@ -49,24 +49,33 @@ public static class OutputLog
     /// <summary>
     /// The generation of the project's output. A project folder from before generations has none:
     /// its output is a new generation, written now, so every later read agrees on it. When two
-    /// first reads race, the one whose file lands first is the generation.
+    /// first reads race, the one whose file lands first is the generation. A project with no
+    /// <c>.godmode</c> (a create that failed before its script made the folder) has no output: any
+    /// generation is right for that, and none is written where the project has no folder.
     /// </summary>
     public static async Task<string> GenerationAsync(string projectPath, CancellationToken ct = default)
     {
         var path = GenerationPathOf(projectPath);
-        if (await ReadGenerationAsync(path, ct) is { } generation) return generation;
-
-        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
         try
         {
-            await File.WriteAllTextAsync(temp, NewGenerationId(), Utf8, ct);
-            File.Move(temp, path, overwrite: false);
-        }
-        catch (IOException) when (File.Exists(path)) { /* another read wrote it first */ }
-        finally { File.Delete(temp); }
+            if (await ReadGenerationAsync(path, ct) is { } generation) return generation;
 
-        // A file there but blank (edited by hand) names no generation: this one starts one
-        return await ReadGenerationAsync(path, ct) ?? StartGeneration(projectPath);
+            var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                await File.WriteAllTextAsync(temp, NewGenerationId(), Utf8, ct);
+                File.Move(temp, path, overwrite: false);
+            }
+            catch (IOException) when (File.Exists(path)) { /* another read wrote it first */ }
+            finally { File.Delete(temp); }
+
+            // A file there but blank (edited by hand) names no generation: this one starts one
+            return await ReadGenerationAsync(path, ct) ?? StartGeneration(projectPath);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return NewGenerationId();
+        }
     }
 
     private static string NewGenerationId() => Guid.NewGuid().ToString("N");
@@ -93,7 +102,8 @@ public static class OutputLog
                 return text.Length > 0 ? text : null;
             }
             catch (FileNotFoundException) { return null; }
-            catch (IOException) when (attempt < ReadAttempts) { await Task.Delay(ReadRetryDelay, ct); }
+            // A missing .godmode is not something holding the file: the caller has no output to name
+            catch (IOException ex) when (ex is not DirectoryNotFoundException && attempt < ReadAttempts) { await Task.Delay(ReadRetryDelay, ct); }
         }
     }
 
