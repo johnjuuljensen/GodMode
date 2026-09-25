@@ -132,7 +132,7 @@ describe('the inbox', () => {
 
     expect(el.querySelector('.inbox-item-error')?.textContent).toBe("This project's server is no longer in the server list");
     expect(el.querySelector('textarea')!.value).toBe('Ship it');
-    expect(useAppStore.getState().inboxDrafts[projectKey('B', 'p1')]).toEqual({ reply: 'Ship it', denyMessage: '' });
+    expect(useAppStore.getState().inboxDrafts[projectKey('B', 'p1')]).toEqual({ reply: 'Ship it', deny: null });
     expect(hubB.replies).toEqual([]);
   });
 

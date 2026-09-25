@@ -39,11 +39,23 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // The project needs the user anew (another kind, or the same kind again): nothing of the last one carries over (#218)
+  const need = `${kind} ${item.Since}`;
+  const [needSeen, setNeedSeen] = useState(need);
+  if (need !== needSeen) {
+    setNeedSeen(need);
+    setBusy(false);
+    setError(null);
+  }
+
+  const permission = kind === 'Permission' ? item.Permission ?? null : null;
   const reply = draft?.reply ?? '';
   const setReply = (text: string) => setInboxDraft(serverId, projectId, { reply: text });
-  const denyMessage = draft?.denyMessage ?? '';
-  const setDenyMessage = (text: string) => setInboxDraft(serverId, projectId, { denyMessage: text });
-  const permission = kind === 'Permission' ? item.Permission ?? null : null;
+  // A reason typed for a request answered elsewhere is not the next request's (#218)
+  const denyMessage = permission && draft?.deny?.requestId === permission.RequestId ? draft.deny.message : '';
+  const setDenyMessage = (text: string) => {
+    if (permission) setInboxDraft(serverId, projectId, { deny: text ? { requestId: permission.RequestId, message: text } : null });
+  };
   // A single AskUserQuestion is answered by a reply with the chosen label
   const question = kind === 'Question' && item.Question?.Questions.length === 1 ? item.Question.Questions[0] : null;
   const canReply = REPLY_KINDS.has(kind) || (kind === 'Permission' && !permission);
@@ -73,19 +85,27 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
     if (await run(() => respondToPermission(serverId, projectId, permission.RequestId, { Allow: allow, Message: message ?? null }))) setDenyMessage('');
   };
 
+  const open = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // A clicked button keeps the focus (Chromium on Windows, WebView2), and beside the open project this one
+    // stays: let go of it, so its question's keys, which are the prompt's or the page's (#240), reach it (#218)
+    e.currentTarget.blur();
+    selectProject(serverId, projectId);
+  };
+
   const meta = [item.Profile && item.Profile !== 'Default' ? item.Profile : null, serverName, `waiting ${waitingFor(item.Since, now)}`]
     .filter(Boolean).join(' · ');
 
   return (
     <article className={`inbox-item inbox-kind-${kind}${focused ? ' inbox-item-focused' : ''}`}>
-      <button className="inbox-item-header" onClick={() => selectProject(serverId, projectId)} title="Open the project">
+      <button className="inbox-item-header" onClick={open} title="Open the project">
         <span className="inbox-item-kind">{KIND_LABELS[kind]}</span>
         <span className="inbox-item-name">{item.ProjectName}</span>
         <span className="inbox-item-meta">{meta}</span>
       </button>
 
       {permission ? (
-        <PermissionCard permission={permission} onAnswer={answerPermission} denyMessage={{ value: denyMessage, onChange: setDenyMessage }} />
+        // One card per request: the next one does not start out sending, as the last one was (#218)
+        <PermissionCard key={permission.RequestId} permission={permission} onAnswer={answerPermission} denyMessage={{ value: denyMessage, onChange: setDenyMessage }} />
       ) : (
         <div className="inbox-item-text">{item.Text}</div>
       )}
