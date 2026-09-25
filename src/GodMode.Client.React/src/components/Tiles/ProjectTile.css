@@ -1,4 +1,16 @@
-/* ── A tile's rows: a tool call and a status line are one line each, as folded in the transcript ── */
+/* ── A tile's rows: text is clamped, a tool call and a status line are one line each, as folded in the transcript ── */
+/* The clamp is on the text, inside the bubble's padding: on the bubble, its padding showed the top of the next line */
+.tile-msg-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.tile-msg-user .tile-msg-text {
+  -webkit-line-clamp: 2;
+}
+
 .tile-tool,
 .tile-status {
   margin: 2px 0;

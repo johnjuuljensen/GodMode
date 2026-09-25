@@ -80,13 +80,13 @@ function TileItem({ item }: { item: TranscriptItem }) {
     case 'userText':
       return (
         <div className="tile-msg tile-msg-user">
-          <span>{preview(item.text)}</span>
+          <span className="tile-msg-text">{preview(item.text)}</span>
         </div>
       );
     case 'assistantText':
       return (
         <div className="tile-msg tile-msg-other">
-          <span>{preview(item.text)}</span>
+          <span className="tile-msg-text">{preview(item.text)}</span>
         </div>
       );
     case 'thinking':
