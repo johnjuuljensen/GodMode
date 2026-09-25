@@ -115,6 +115,82 @@ public class ProjectIdentityTests
     }
 
     /// <summary>
+    /// A folder the root keeps for itself is no project's: a delete of the project would delete the
+    /// root's config and scripts, or every script log. Each is there already (<c>logs</c> after the
+    /// first create, <c>.archived</c> left over from archiving), so a reuse would take it over. The
+    /// create is refused before anything is written.
+    /// </summary>
+    [Theory]
+    [InlineData(".godmode-root", false)]
+    [InlineData(".godmode-root", true)]
+    [InlineData("logs", false)]
+    [InlineData("logs", true)]
+    [InlineData(".archived", false)]
+    [InlineData(".archived", true)]
+    public async Task NameOfAFolderTheRootUses_IsRefused_AndNothingIsCreatedOrDeleted(string name, bool reuseExisting)
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+        WriteRootsOwnFolders(harness);
+        var before = Tree(harness.WorkDir);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => harness.CreateProjectAsync(name,
+            inputs: new Dictionary<string, object> { ["__reuseExisting"] = reuseExisting }));
+
+        Assert.Equal(before, Tree(harness.WorkDir));
+        Assert.Empty(await harness.Projects.ListProjectsAsync());
+    }
+
+    /// <summary>
+    /// A create script's <c>project_path</c> naming one of the root's own folders is refused too:
+    /// the project keeps the folder it was given, and deleting it leaves the root's folders be.
+    /// </summary>
+    [Theory]
+    [InlineData(".godmode-root")]
+    [InlineData("logs")]
+    [InlineData(".archived")]
+    public async Task ScriptProjectPathOfAFolderTheRootUses_IsRefused_AndDeleteLeavesTheRootsFolders(string folder)
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin(),
+            rootConfig: new Dictionary<string, object> { ["create"] = "create.ps1" });
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "create.ps1"),
+            $"Set-Content -Path $env:GODMODE_RESULT_FILE -Value \"project_path=$(Join-Path $env:GODMODE_ROOT_PATH '{folder}')\"");
+        var markers = WriteRootsOwnFolders(harness);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => harness.CreateProjectAsync("p1"));
+        var project = Assert.Single(await harness.Projects.ListProjectsAsync());
+        Assert.Equal(ProjectState.Error, project.State);
+        Assert.Equal($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p1", project.Id);
+
+        await harness.Projects.DeleteProjectAsync(project.Id);
+
+        Assert.All(markers, marker => Assert.True(File.Exists(marker), $"{marker} was deleted with the project"));
+        Assert.True(File.Exists(Path.Combine(harness.RootPath, ".godmode-root", "config.json")), "the root's config was deleted with the project");
+    }
+
+    /// <summary>The root's folders are matched as Windows matches folder names: ignoring case, and trailing dots and spaces.</summary>
+    [Theory]
+    [InlineData("LOGS")]
+    [InlineData("Logs.")]
+    [InlineData("logs ")]
+    [InlineData(".GodMode-Root")]
+    [InlineData(".Archived..")]
+    public void NameOfAFolderTheRootUses_IsRefused_InAnyCase(string name) =>
+        Assert.Throws<ArgumentException>(() => GodMode.ProjectFiles.ProjectFolder.ValidateFolderName(name));
+
+    /// <summary>The root's own folders as a root in use has them, each with a file in it; returns those files.</summary>
+    private static string[] WriteRootsOwnFolders(LifecycleHarness harness)
+    {
+        var markers = new[] { ".godmode-root", "logs", ".archived" }
+            .Select(folder => Path.Combine(harness.RootPath, folder, "marker.txt")).ToArray();
+        foreach (var marker in markers)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(marker)!);
+            File.WriteAllText(marker, "the root's own");
+        }
+        return markers;
+    }
+
+    /// <summary>
     /// A folder written before the ID changed (status.json <c>Id</c> the bare folder name) recovers
     /// under the new ID, which is written back to status.json. Its settings and session are kept:
     /// they never held the ID. The old bare ID no longer finds it. Its root allows skip-permissions, so
