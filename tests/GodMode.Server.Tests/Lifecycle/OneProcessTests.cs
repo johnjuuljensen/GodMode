@@ -219,11 +219,12 @@ public class OneProcessTests
     }
 
     /// <summary>
-    /// A resume whose claim cannot be saved (status.json cannot be replaced) launches nothing, and
-    /// leaves no launch in flight behind it: a Stop and the next Resume still return.
+    /// A resume whose claim cannot be saved (status.json cannot be replaced) launches all the same
+    /// (#238: a save that fails does not fail the change), leaves no launch in flight behind it, and
+    /// what it claimed is saved with the next change once status.json can be written again.
     /// </summary>
     [Fact]
-    public async Task ResumeWhoseClaimCannotBeSaved_LeavesNoLaunchInFlight()
+    public async Task ResumeWhoseClaimCannotBeSaved_StillLaunches_AndIsSavedWithTheNextChange()
     {
         await using var harness = new LifecycleHarness(Waiting());
         var created = await harness.CreateProjectAsync();
@@ -233,15 +234,19 @@ public class OneProcessTests
         File.Delete(statusPath);
         Directory.CreateDirectory(statusPath);
 
-        await Assert.ThrowsAnyAsync<Exception>(() => harness.Projects.ResumeProjectAsync(created.Id).WaitAsync(LifecycleHarness.DefaultTimeout));
-        Assert.Single(harness.Launches(created.Id));
-        Directory.Delete(statusPath);
-
-        await harness.Projects.StopProjectAsync(created.Id).WaitAsync(LifecycleHarness.DefaultTimeout);
         await harness.Projects.ResumeProjectAsync(created.Id).WaitAsync(LifecycleHarness.DefaultTimeout);
 
         var resumed = await harness.WaitForLaunchAsync(created.Id, _ => true, index: 1);
         Assert.Equal(resumed.Pid, harness.Tracked(created.Id).Process.ProcessId);
+        Assert.False(harness.Tracked(created.Id).Process.Launching);
+        Assert.Contains(harness.Warnings, w => w.Contains("Could not save the status"));
+        Directory.Delete(statusPath);
+
+        await harness.Projects.MarkSeenAsync(created.Id);
+
+        var saved = harness.ReadStatusFile(created.Id).State;
+        Assert.NotEqual(ProjectState.Stopped, saved);
+        Assert.Equal((await harness.Projects.GetStatusAsync(created.Id)).State, saved);
     }
 
     [Fact]

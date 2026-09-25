@@ -17,10 +17,11 @@ internal sealed record HubPush(string Method, string? ProjectId, ProjectStatus? 
 
 /// <summary>
 /// Stands in for the server's hub context: every push to any client is recorded, in order, as a
-/// connected client would receive it. <see cref="HoldOutput"/> makes output broadcasts wait, which
-/// holds the project's consumer on the line it is broadcasting while later lines queue behind it.
-/// Connections made with <see cref="Connect"/> also keep their own inbox: what SignalR would deliver
-/// to that connection, by its address and the groups it is in when the push is made.
+/// connected client would receive it. Connections made with <see cref="Connect"/> also keep their own
+/// inbox: what SignalR would deliver to that connection, by its address and the groups it is in when
+/// the push is made. A push is delivered as SignalR delivers it: to each connection in the order the
+/// pushes were started, and complete once every connection it went to has taken it. A connection
+/// <see cref="Pause"/>d takes nothing until it is resumed, as a client that stops reading does.
 /// </summary>
 internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubClient>
 {
@@ -29,7 +30,9 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
     private readonly ConcurrentDictionary<string, byte> _open = new();
     private readonly ConcurrentDictionary<string, ConcurrentQueue<HubPush>> _received = new();
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _groups = new();
-    private volatile TaskCompletionSource? _outputGate;
+    // Paused connections: what waits for each, in order, and the gate its pushes complete on
+    private readonly ConcurrentDictionary<string, (ConcurrentQueue<HubPush> Backlog, TaskCompletionSource Resumed)> _paused = new();
+    private readonly object _deliver = new();
 
     public RecordingHubContext()
     {
@@ -51,17 +54,23 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
     public IReadOnlyList<IReadOnlyList<AttentionItem>> AttentionPushes =>
         Pushes.Where(p => p.Method == nameof(IProjectHubClient.AttentionChanged)).Select(p => p.Attention!).ToArray();
 
-    /// <summary>Output broadcasts wait from now until the returned gate is released.</summary>
-    public TaskCompletionSource HoldOutput() =>
-        _outputGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>The connection stops reading: pushes to it wait, and so does whoever waits for them, until <see cref="Resume"/>.</summary>
+    public void Pause(string connectionId) =>
+        _paused.TryAdd(connectionId, (new ConcurrentQueue<HubPush>(), new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)));
 
-    /// <summary>Releases held output broadcasts; later ones go through at once.</summary>
-    public void ReleaseOutput()
+    /// <summary>The connection reads again: it takes what waited for it, in order, and the pushes complete.</summary>
+    public void Resume(string connectionId)
     {
-        var gate = _outputGate;
-        _outputGate = null;
-        gate?.TrySetResult();
+        lock (_deliver)
+        {
+            if (!_paused.TryRemove(connectionId, out var paused)) return;
+            foreach (var push in paused.Backlog) Inbox(connectionId).Enqueue(push);
+            paused.Resumed.TrySetResult();
+        }
     }
+
+    /// <summary>How many pushes wait for the paused connection.</summary>
+    public int Waiting(string connectionId) => _paused.TryGetValue(connectionId, out var paused) ? paused.Backlog.Count : 0;
 
     // ── Connections ──
 
@@ -82,22 +91,34 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
     private IEnumerable<string> Members(string group) =>
         _groups.TryGetValue(group, out var members) ? members.Keys : [];
 
-    private void Record(HubPush push, IEnumerable<string> recipients)
+    private ConcurrentQueue<HubPush> Inbox(string connectionId) => _received.GetOrAdd(connectionId, _ => new ConcurrentQueue<HubPush>());
+
+    /// <summary>Delivers the push; complete once every connection it went to has taken it.</summary>
+    private Task Record(HubPush push, IEnumerable<string> recipients)
     {
-        _pushes.Enqueue(push);
-        foreach (var connectionId in recipients.Distinct())
-            if (_open.ContainsKey(connectionId))
-                _received.GetOrAdd(connectionId, _ => new ConcurrentQueue<HubPush>()).Enqueue(push);
+        var waits = new List<Task>();
+        lock (_deliver)
+        {
+            _pushes.Enqueue(push);
+            foreach (var connectionId in recipients.Distinct())
+            {
+                if (!_open.ContainsKey(connectionId)) continue;
+                if (_paused.TryGetValue(connectionId, out var paused))
+                {
+                    paused.Backlog.Enqueue(push);
+                    waits.Add(paused.Resumed.Task);
+                }
+                else Inbox(connectionId).Enqueue(push);
+            }
+        }
+        return waits.Count == 0 ? Task.CompletedTask : Task.WhenAll(waits);
     }
 
     /// <summary>The client proxy for one address; it records each push to whoever the address reaches at the time.</summary>
     private sealed class RecordingClient(RecordingHubContext hub, Func<IEnumerable<string>> recipients) : IProjectHubClient
     {
-        public async Task OutputReceived(string projectId, long offset, string rawJson)
-        {
-            if (hub._outputGate is { } gate) await gate.Task;
-            await Done(new HubPush(nameof(OutputReceived), projectId, RawJson: rawJson, Offset: offset));
-        }
+        public Task OutputReceived(string projectId, long offset, string rawJson) =>
+            Done(new HubPush(nameof(OutputReceived), projectId, RawJson: rawJson, Offset: offset));
 
         public Task OutputBatch(string projectId, string subscriptionId, string generation, long fromOffset, IReadOnlyList<OutputLine> lines) =>
             Done(new HubPush(nameof(OutputBatch), projectId, Offset: fromOffset, Lines: lines, SubscriptionId: subscriptionId, Generation: generation));
@@ -115,11 +136,7 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
         public Task CreationProgress(string projectId, string message) => Done(new HubPush(nameof(CreationProgress), projectId));
         public Task ProjectDeleted(string projectId) => Done(new HubPush(nameof(ProjectDeleted), projectId));
 
-        private Task Done(HubPush push)
-        {
-            hub.Record(push, recipients());
-            return Task.CompletedTask;
-        }
+        private Task Done(HubPush push) => hub.Record(push, recipients());
     }
 
     private sealed class Addresses(RecordingHubContext hub) : IHubClients<IProjectHubClient>

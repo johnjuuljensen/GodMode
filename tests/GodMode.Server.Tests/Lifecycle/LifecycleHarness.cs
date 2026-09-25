@@ -41,6 +41,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private readonly List<ServiceProvider> _stopped = [];
     private readonly List<string> _projectIds = [];
     private readonly CapturingLoggerProvider _logs = new();
+    private readonly McpHost? _mcp;
 
     /// <summary>The temp dir everything the harness and the server write lives under.</summary>
     public string WorkDir => _workDir;
@@ -67,12 +68,14 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <param name="settings">Extra server configuration, applied over the harness defaults.</param>
     /// <param name="extraRoots">More roots beside <see cref="RootName"/>, each in the profile given, configured as it is.</param>
     /// <param name="profileEnvironment">The environment of <see cref="ProfileName"/>, in its <c>.profiles/</c> env.json.</param>
+    /// <param name="mcpEndpoint">Serve the MCP endpoint (<see cref="McpHost"/>), so a fake's <c>permission</c> step reaches the server.</param>
     public LifecycleHarness(
         FakeScript script,
         IReadOnlyDictionary<string, object>? rootConfig = null,
         IReadOnlyDictionary<string, string?>? settings = null,
         IReadOnlyList<(string Root, string Profile)>? extraRoots = null,
-        IReadOnlyDictionary<string, string>? profileEnvironment = null)
+        IReadOnlyDictionary<string, string>? profileEnvironment = null,
+        bool mcpEndpoint = false)
     {
         _workDir = ServerProcess.CreateWorkDir("lifecycle");
         RootsDir = Path.Combine(_workDir, "roots");
@@ -94,6 +97,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             ["ProjectRootsDir"] = RootsDir,
             [ClaudeProcessManager.ExecutableSetting] = FakeClaudePath,
         };
+        if (mcpEndpoint)
+        {
+            _mcp = new McpHost(() => Projects!, _logs);
+            configuration["Urls"] = _mcp.Url;
+        }
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
             configuration[key] = value;
 
@@ -151,7 +159,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         services.AddSingleton<ClaudeProcessManager>();
         services.AddSingleton<HoldingProcessManager>();
         services.AddSingleton<IClaudeProcessManager>(provider => provider.GetRequiredService<HoldingProcessManager>());
-        services.AddSingleton<IStatusUpdater, StatusUpdater>();
+        services.AddSingleton<StatusUpdater>();
+        services.AddSingleton<FailingSaves>();
+        services.AddSingleton<IStatusUpdater>(provider => provider.GetRequiredService<FailingSaves>());
         services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
@@ -190,6 +200,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         projectId.Split('/') is [.., var root, var folder] ? Path.Combine(RootsDir, root, folder) : Path.Combine(RootPath, projectId);
 
     public IClaudeProcessManager ProcessManager => _services.GetRequiredService<IClaudeProcessManager>();
+
+    public ProjectLifecycle Lifecycle => _services.GetRequiredService<ProjectLifecycle>();
+
+    /// <summary>The server's status saves, which a test can make fail (since the last <see cref="RestartAsync"/>).</summary>
+    public FailingSaves StatusSaves => _services.GetRequiredService<FailingSaves>();
 
     /// <summary>
     /// Holds the next launch (a create's or a resume's) after its claim, before its process is
@@ -335,7 +350,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             errs.txt:
             {Read("errs.txt")}
             fake launches: {launches.Count}
-            {string.Join("\n", launches.Select(l => $"  pid {l.Pid}, stdin lines {l.Stdin.Count}, exit {l.ExitCode?.ToString() ?? "(none)"}"))}
+            {string.Join("\n", launches.Select(l => $"  pid {l.Pid}, stdin lines {l.Stdin.Count}, exit {l.ExitCode?.ToString() ?? "(none)"}" +
+                string.Concat(l.Permissions.Select(p => $"\n    permission answer: {p}"))))}
             server warnings and errors (all projects):
             {string.Join("\n", _logs.Lines)}
             """;
@@ -384,6 +400,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         }
         await _services.DisposeAsync();
         foreach (var stopped in _stopped) await stopped.DisposeAsync();
+        if (_mcp != null) await _mcp.DisposeAsync();
         ServerProcess.DeleteWorkDir(_workDir);
     }
 }

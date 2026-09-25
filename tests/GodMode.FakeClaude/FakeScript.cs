@@ -154,9 +154,14 @@ public sealed class FakeScript
     public FakeScript EmitInit() =>
         Emit($$"""{"type":"system","subtype":"init","session_id":"{{SessionIdPlaceholder}}"}""");
 
-    /// <summary>The user message echoed back by <c>--replay-user-messages</c>.</summary>
-    public FakeScript EmitUser(string text) =>
-        Emit(Json(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder }));
+    /// <summary>
+    /// A user line. With <paramref name="echo"/>, a message the user sent, echoed back by
+    /// <c>--replay-user-messages</c> as claude takes it (<c>isReplay</c>): at once between turns, at
+    /// its next step when it came in the middle of one (claude 2.1.282 folds it into that turn).
+    /// </summary>
+    public FakeScript EmitUser(string text, bool echo = false) => echo
+        ? Emit(Json(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder, isReplay = true }))
+        : Emit(Json(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder }));
 
     public FakeScript EmitAssistant(string text) =>
         Emit(Json(new { type = "assistant", message = new { role = "assistant", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder }));
