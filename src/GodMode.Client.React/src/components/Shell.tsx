@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAppStore, type ActivePage } from '../store';
+import { useAppStore, projectKey, type ActivePage } from '../store';
 import { Sidebar, SidebarHeader, SidebarFooter } from './Sidebar/Sidebar';
 import { ProjectView } from './Project/ProjectView';
 import { TileGrid } from './Tiles/TileGrid';
@@ -10,7 +10,7 @@ import { AppSettings } from './AppSettings';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Inbox, HomeTabBar } from './Inbox/Inbox';
 import { useAttentionTitle } from './Inbox/useAttentionTitle';
-import { goBack, useHashRoute } from '../routing';
+import { formatRoute, goBack, useHashRoute } from '../routing';
 import { subscribeAttentionLinks } from '../services/hostApi';
 import './Shell.css';
 
@@ -31,7 +31,8 @@ function PageContent({ page }: { page: ActivePage }) {
         {page.type === 'appSettings' && <AppSettings />}
         {page.type === 'addServer' && <AddServer />}
         {page.type === 'editServer' && <EditServer serverId={page.serverId} />}
-        {page.type === 'createProject' && <CreateProject />}
+        {/* One form per route: another root's "+" while the page is open shows that root's form */}
+        {page.type === 'createProject' && <CreateProject key={formatRoute({ screen: 'page', page })} context={page.context} />}
       </div>
     </div>
   );
@@ -78,13 +79,13 @@ export function Shell() {
   // On a phone home is the inbox, or the project list, with nothing beside it
   const phoneHome = isMobile && !showsPage && !project && !isTileView;
 
+  // The inbox is inside the sidebar in both layouts: beside the list on a wide screen, the phone's home in place of it
   const sidebarSlot = isTileView
     ? (!isMobile || showsTiles) && <SidebarHeader />
-    : !isMobile ? <div className="shell-sidebar"><Sidebar withInbox /></div>
-    : phoneHome && (
-      <div className="shell-sidebar shell-mobile-home">
-        {homeView === 'inbox' ? <><SidebarHeader /><Inbox variant="screen" /></> : <Sidebar />}
-        <HomeTabBar tab={homeView} onChange={setHomeView} />
+    : (!isMobile || phoneHome) && (
+      <div className={isMobile ? 'shell-sidebar shell-mobile-home' : 'shell-sidebar'}>
+        <Sidebar inbox={!isMobile ? 'pane' : homeView === 'inbox' ? 'screen' : undefined} />
+        {isMobile && <HomeTabBar tab={homeView} onChange={setHomeView} />}
       </div>
     );
   const footerSlot = isTileView && (!isMobile || showsTiles) && <SidebarFooter />;
@@ -104,7 +105,8 @@ export function Shell() {
         <div className={contentClass}>
           {backBar}
           {activePage && <PageContent page={activePage} />}
-          {project && <ProjectView serverId={project.serverId} projectId={project.projectId} />}
+          {/* A project's own: what is typed for one project is never sent to the next (#240) */}
+          {project && <ProjectView key={projectKey(project.serverId, project.projectId)} serverId={project.serverId} projectId={project.projectId} />}
           {showsTiles && !isMobile && <Inbox variant="pane" />}
           {showsTiles && <TileGrid />}
           {!isMobile && !isTileView && !showsPage && !project && (

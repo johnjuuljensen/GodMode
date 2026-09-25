@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { QuestionOption } from '../../signalr/types';
+import { getOpenConfirm } from '../../confirmDialog';
 import './QuestionPrompt.css';
 
 interface Props {
@@ -10,15 +11,22 @@ interface Props {
   onDismiss: () => void;
 }
 
-/** Where a key is typing: a key pressed there is text, not a shortcut. */
-function isTextField(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement
-    && (target.isContentEditable || target instanceof HTMLTextAreaElement
-      || (target instanceof HTMLInputElement && !['button', 'checkbox', 'radio', 'submit', 'reset'].includes(target.type)));
+/**
+ * Whether a key is the prompt's: pressed inside it, or with nothing focused, and no dialog open. On any
+ * other control it is that control's: a dialog's Cancel, the inbox's Send, a text field (#170, #240).
+ */
+function isForPrompt(prompt: HTMLElement | null, target: EventTarget | null): boolean {
+  if (getOpenConfirm() || !prompt || !(target instanceof Node)) return false;
+  return target === document.body || prompt.contains(target);
 }
+
+/** A button of the prompt's own other than an option (the dismiss button): Enter there is its click. */
+const isOtherButton = (target: EventTarget | null) =>
+  target instanceof HTMLButtonElement && !target.classList.contains('question-option');
 
 export function QuestionPrompt({ text, header, options, onSelectOption, onDismiss }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const promptRef = useRef<HTMLDivElement>(null);
 
   // Reset active index when options change
   useEffect(() => {
@@ -26,8 +34,8 @@ export function QuestionPrompt({ text, header, options, onSelectOption, onDismis
   }, [options]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    // One key press is one action: not one another handler took, and not one typed into a text field (#170)
-    if (options.length === 0 || e.defaultPrevented || isTextField(e.target)) return;
+    // One key press is one action: not one another handler took, and not one meant for another control
+    if (options.length === 0 || e.defaultPrevented || !isForPrompt(promptRef.current, e.target)) return;
 
     switch (e.key) {
       case 'ArrowUp':
@@ -39,6 +47,7 @@ export function QuestionPrompt({ text, header, options, onSelectOption, onDismis
         setActiveIndex(i => (i + 1) % options.length);
         break;
       case 'Enter':
+        if (isOtherButton(e.target)) return;
         e.preventDefault();
         onSelectOption(options[activeIndex].Label);
         break;
@@ -65,7 +74,7 @@ export function QuestionPrompt({ text, header, options, onSelectOption, onDismis
   }, [handleKeyDown]);
 
   return (
-    <div className="question-prompt">
+    <div className="question-prompt" ref={promptRef}>
       {/* Pulsing banner */}
       <div className="question-banner">
         <span className="question-pulse">?</span>
@@ -86,6 +95,7 @@ export function QuestionPrompt({ text, header, options, onSelectOption, onDismis
               className={`question-option ${i === activeIndex ? 'question-option-active' : ''}`}
               onClick={() => onSelectOption(opt.Label)}
               onMouseEnter={() => setActiveIndex(i)}
+              onFocus={() => setActiveIndex(i)}
             >
               <span className="question-option-bar" />
               <span className="question-option-num">{i + 1}</span>
