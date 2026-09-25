@@ -275,10 +275,10 @@ public class ProjectIdentityTests
         var marker = WriteMarker(outside);
         harness.Tracked(project.Id).ProjectPath = outside;
 
-        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Projects.DeleteProjectAsync(project.Id));
+        var refused = await Record.ExceptionAsync(() => harness.Projects.DeleteProjectAsync(project.Id));
 
-        Assert.Contains("not inside a project root", refused.Message);
         Assert.True(File.Exists(marker), $"{outside} was deleted with the project");
+        Assert.Contains("not inside a project root", Assert.IsType<InvalidOperationException>(refused).Message);
         Assert.Empty(await harness.Projects.ListProjectsAsync());
     }
 
