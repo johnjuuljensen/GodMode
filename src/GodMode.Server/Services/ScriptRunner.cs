@@ -4,7 +4,9 @@ using System.Text;
 namespace GodMode.Server.Services;
 
 /// <summary>
-/// Runs scripts as part of project creation workflow.
+/// Runs a root's scripts (prepare, create, delete, status). A script's environment is the OS essentials
+/// (<see cref="ChildEnvironment.Script"/>), then the configured environment the caller passes: never the
+/// server's own, which holds its secrets.
 ///
 /// Scripts can be specified with or without extension:
 /// - With extension ("scripts/init.ps1") — used as-is.
@@ -129,10 +131,11 @@ public class ScriptRunner : IScriptRunner
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        foreach (var (key, value) in environment)
-        {
+        // Start from the allowlist, not the server's environment, which holds its secrets (the API key
+        // among them), then the configured variables and the GODMODE_* ones
+        startInfo.Environment.Clear();
+        foreach (var (key, value) in ChildEnvironment.Script.Build(ChildEnvironment.Current(), environment))
             startInfo.Environment[key] = value;
-        }
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var exitTcs = new TaskCompletionSource<int>();

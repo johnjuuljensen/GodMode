@@ -27,7 +27,27 @@ public sealed class PermissionPromptTool(IProjectManager projects, IConfiguratio
     /// <summary>How often a waiting call reports progress, in seconds.</summary>
     public const string KeepAliveSetting = "PermissionPromptKeepAliveSeconds";
 
-    private readonly TimeSpan _keepAlive = TimeSpan.FromSeconds(configuration.GetValue(KeepAliveSetting, 30.0));
+    /// <summary>What claude waits for a tool call that reports nothing before it gives up on it.</summary>
+    private const double ClaudeToolCallTimeoutSeconds = 300;
+
+    private readonly TimeSpan _keepAlive = KeepAliveFrom(configuration);
+
+    /// <summary>
+    /// The configured keep-alive (default 30 seconds). It must be more than 0, or the wait would spin,
+    /// and less than claude's 300 seconds, or claude would give up first. Anything else throws
+    /// <see cref="StartupConfigurationException"/>: the server checks it at startup.
+    /// </summary>
+    public static TimeSpan KeepAliveFrom(IConfiguration configuration)
+    {
+        double seconds;
+        try { seconds = configuration.GetValue(KeepAliveSetting, 30.0); }
+        catch (InvalidOperationException) { seconds = double.NaN; } // not a number
+        return seconds is > 0 and < ClaudeToolCallTimeoutSeconds
+            ? TimeSpan.FromSeconds(seconds)
+            : throw new StartupConfigurationException(
+                $"GodMode.Server will not start: {KeepAliveSetting} is '{configuration[KeepAliveSetting]}'. It must be more than 0 " +
+                $"and less than {ClaudeToolCallTimeoutSeconds} seconds: claude gives up on a tool call that reports nothing for {ClaudeToolCallTimeoutSeconds}.");
+    }
 
     [McpServerTool(Name = Name)]
     [Description("GodMode's permission prompt: asks the user whether a tool call may run, and answers AskUserQuestion. " +
