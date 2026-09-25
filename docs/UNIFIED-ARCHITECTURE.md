@@ -251,6 +251,8 @@ Key services:
 
 A project is a folder directly inside its root with a `.godmode/status.json`. The server does not archive or move project folders.
 
+**One project, one claude.** A project has at most one claude process. A create is refused while a tracked project has its ID or folder, before anything is written; create, resume, stop and delete of one project take its lock, so launches and stops come one at a time. Each session runs in a process tree of its own, off the server's console (a Job Object and a hidden console on Windows, a process group started through `setsid` on Linux). A stop interrupts claude (Ctrl+Break in its console on Windows, SIGINT to its group elsewhere), gives it `StopGracePeriodSeconds` (10) to exit, then kills the whole tree; the server's shutdown does the same for every session at once. The server README (*Sessions*) has the details and what claude was measured to honour.
+
 ### 4.4 Authentication
 
 Every request needs a credential, whatever the server is bound to, loopback included. The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
@@ -339,7 +341,7 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 | Service | Responsibility |
 |---|---|
 | `ProjectManager` | Central orchestrator — project lifecycle, profile/root snapshot, environment and launch config building |
-| `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process`, writes their output to `output.jsonl` |
+| `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process`, each in a process tree of its own (`SessionProcessTree`: a Job Object on Windows, a process group on Linux), writes their output to `output.jsonl`, and stops them: interrupt, grace period, then the tree |
 | `RootConfigReader` | Discovers and merges `.godmode-root/` configs |
 | `ScriptRunner` | Executes cross-platform scripts (`.ps1` via `pwsh`, `.sh` via `bash`, `.cmd`/`.bat` on Windows) |
 | `ProfileFileManager` | Reads the `.profiles/` directory structure |
