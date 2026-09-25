@@ -16,7 +16,7 @@ COPY src/Directory.Build.props src/
 COPY src/GodMode.Server/GodMode.Server.csproj src/GodMode.Server/
 COPY src/GodMode.Shared/GodMode.Shared.csproj src/GodMode.Shared/
 COPY src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj src/GodMode.ProjectFiles/
-RUN dotnet restore src/GodMode.Server/GodMode.Server.csproj
+RUN dotnet restore src/GodMode.Server/GodMode.Server.csproj -p:PublishReactClient=false
 
 # Copy source and publish
 COPY src/GodMode.Server/ src/GodMode.Server/

@@ -33,6 +33,10 @@
 
   <PropertyGroup>
     <_HubTypesFile>$(MSBuildProjectDirectory)\src\signalr\generated\hub-types.ts</_HubTypesFile>
+    <!-- The dotnet running this build, which the CLI puts in DOTNET_HOST_PATH, rather than whichever
+         is first on PATH. A build without it (Visual Studio's MSBuild) falls back to PATH. -->
+    <_DotnetHost>$(DOTNET_HOST_PATH)</_DotnetHost>
+    <_DotnetHost Condition="'$(_DotnetHost)' == ''">dotnet</_DotnetHost>
   </PropertyGroup>
 
   <ItemGroup>
@@ -54,7 +58,7 @@
       <Output TaskParameter="TargetOutputs" ItemName="_TypeGenAssembly" />
     </MSBuild>
     <Error Condition="'@(_TypeGenAssembly)' == ''" Text="GodMode.TypeGen was not built; cannot generate the client's hub types." />
-    <Exec Command="dotnet &quot;@(_TypeGenAssembly)&quot; &quot;$(_HubTypesFile)&quot;" />
+    <Exec Command="&quot;$(_DotnetHost)&quot; &quot;@(_TypeGenAssembly)&quot; &quot;$(_HubTypesFile)&quot;" />
   </Target>
 
   <!-- Build the client (incremental: skipped when sources unchanged). Its packages are installed

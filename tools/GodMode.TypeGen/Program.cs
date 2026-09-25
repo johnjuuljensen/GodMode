@@ -18,10 +18,20 @@ if (args is not [var outputPath])
     return 2;
 }
 
-var text = TypeScriptWriter.Write(
-    hubs: [typeof(IProjectHub), typeof(IProjectHubClient)],
-    // Not the hub's: the server list (/servers), and the server to add (services/hostApi.ts addServer)
-    extraTypes: [typeof(ServerInfo), typeof(AddServerRequest)]);
+string text;
+try
+{
+    text = TypeScriptWriter.Write(
+        hubs: [typeof(IProjectHub), typeof(IProjectHubClient)],
+        // Not the hub's: the server list (/servers), and the server to add (services/hostApi.ts addServer)
+        extraTypes: [typeof(ServerInfo), typeof(AddServerRequest)]);
+}
+catch (NotSupportedException ex)
+{
+    // In MSBuild's error format, so the build lists it as an error rather than an exit code
+    Console.Error.WriteLine($"GodMode.TypeGen : error : {ex.Message}");
+    return 1;
+}
 
 outputPath = Path.GetFullPath(outputPath);
 // A checkout may have given the file CRLF line endings (.gitattributes: text=auto); that is no change
@@ -42,6 +52,15 @@ static class TypeScriptWriter
         var assembly = hubs[0].Assembly;
         var docs = XmlDocs.Load(assembly);
         var types = CollectTypes(hubs, extraTypes, assembly);
+
+        // A TypeScript type is named by the C# type's name alone, so a nested type, or one in another
+        // namespace, could share it; two interfaces of one name would merge into one without a word
+        if (types.Concat(hubs).GroupBy(t => t.Name).FirstOrDefault(g => g.Count() > 1) is { } collision)
+            throw new NotSupportedException(
+                $"{string.Join(" and ", collision.Select(t => t.FullName))} would both be the TypeScript type {collision.Key}; rename one.");
+
+        foreach (var type in types.Where(t => t.IsEnum))
+            RequireStringEnum(type);
 
         var sb = new StringBuilder();
         sb.Append("""
@@ -76,8 +95,8 @@ static class TypeScriptWriter
             if (type.HasElementType) { pending.Push(type.GetElementType()!); continue; }
             if (type.IsGenericType) { foreach (var arg in type.GetGenericArguments()) pending.Push(arg); continue; }
             if (type.Assembly != assembly || !found.Add(type) || type.IsEnum) continue;
-            foreach (var property in SerializedProperties(type))
-                pending.Push(property.PropertyType);
+            foreach (var member in SerializedMembers(type))
+                pending.Push(MemberNullability(member).Type);
         }
         return found;
     }
@@ -85,19 +104,54 @@ static class TypeScriptWriter
     private static IEnumerable<MethodInfo> HubMethods(Type hub) =>
         hub.GetMethods().OrderBy(m => m.MetadataToken);
 
-    private static IEnumerable<PropertyInfo> SerializedProperties(Type type) =>
-        type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.GetMethod is not null && p.GetIndexParameters().Length == 0
-                && p.GetCustomAttribute<JsonIgnoreAttribute>() is not { Condition: JsonIgnoreCondition.Always })
+    /// <summary>
+    /// The members System.Text.Json writes, as the server's options have it (no IncludeFields): public
+    /// properties with a public getter, and any property or field opted in with [JsonInclude], less those
+    /// [JsonIgnore] always leaves out. Properties come first, as the serializer writes them.
+    /// </summary>
+    private static IEnumerable<MemberInfo> SerializedMembers(Type type)
+    {
+        const BindingFlags instance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        var properties = type.GetProperties(instance)
+            .Where(p => p.GetIndexParameters().Length == 0 && p.GetMethod is not null
+                && (p.GetMethod.IsPublic || p.IsDefined(typeof(JsonIncludeAttribute))))
             .OrderBy(p => p.MetadataToken);
+        var fields = type.GetFields(instance)
+            .Where(f => f.IsDefined(typeof(JsonIncludeAttribute)))
+            .OrderBy(f => f.MetadataToken);
+        return properties.Concat<MemberInfo>(fields)
+            .Where(m => m.GetCustomAttribute<JsonIgnoreAttribute>() is not { Condition: JsonIgnoreCondition.Always });
+    }
+
+    /// <summary>A serialized member's type, and whether it may be null.</summary>
+    private static NullabilityInfo MemberNullability(MemberInfo member) => member switch
+    {
+        PropertyInfo p => Nullability.Create(p),
+        FieldInfo f => Nullability.Create(f),
+        _ => throw new NotSupportedException($"{member} is neither a property nor a field."),
+    };
+
+    /// <summary>
+    /// The TypeScript union is of the enum's names, which is what it is on the wire only when the enum
+    /// carries its own string converter: the server's options are not the only serializer of it.
+    /// </summary>
+    private static void RequireStringEnum(Type type)
+    {
+        if (type.GetCustomAttribute<JsonConverterAttribute>()?.ConverterType != typeof(JsonStringEnumConverter<>).MakeGenericType(type))
+            throw new NotSupportedException(
+                $"{type.FullName} has no [JsonConverter(typeof(JsonStringEnumConverter<{type.Name}>))], so it may be a number on the wire, not one of its names.");
+    }
+
+    /// <summary>A type's name in the XML documentation, where a nested type's is dotted.</summary>
+    private static string DocName(Type type) => type.FullName!.Replace('+', '.');
 
     private static void WriteEnum(StringBuilder sb, Type type, XmlDocs docs)
     {
         sb.Append('\n');
-        WriteDoc(sb, docs.Summary($"T:{type.FullName}"), "");
+        WriteDoc(sb, docs.Summary($"T:{DocName(type)}"), "");
         var members = type.GetFields(BindingFlags.Public | BindingFlags.Static)
             .Select(f => (Value: f.GetCustomAttribute<JsonStringEnumMemberNameAttribute>()?.Name ?? f.Name,
-                          Doc: docs.Summary($"F:{type.FullName}.{f.Name}")))
+                          Doc: docs.Summary($"F:{DocName(type)}.{f.Name}")))
             .ToList();
 
         if (members.All(m => m.Doc is null))
@@ -119,16 +173,19 @@ static class TypeScriptWriter
     private static void WriteModel(StringBuilder sb, Type type, XmlDocs docs)
     {
         sb.Append('\n');
-        WriteDoc(sb, docs.Summary($"T:{type.FullName}"), "");
+        WriteDoc(sb, docs.Summary($"T:{DocName(type)}"), "");
         sb.Append($"export interface {type.Name} {{\n");
-        foreach (var property in SerializedProperties(type))
+        foreach (var member in SerializedMembers(type))
         {
-            var name = property.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? property.Name;
-            var (tsType, nullable) = Map(Nullability.Create(property));
-            WriteDoc(sb, docs.Summary($"P:{type.FullName}.{property.Name}")
-                         ?? docs.Param($"T:{type.FullName}", property.Name), "  ");
-            // Nulls are left out of the JSON (JsonIgnoreCondition.WhenWritingNull), so a nullable member may be absent
-            sb.Append(nullable ? $"  {name}?: {Nullable(tsType)};\n" : $"  {name}: {tsType};\n");
+            var name = member.GetCustomAttribute<JsonPropertyNameAttribute>()?.Name ?? member.Name;
+            var (tsType, nullable) = Map(MemberNullability(member));
+            WriteDoc(sb, docs.Summary($"{(member is FieldInfo ? "F" : "P")}:{DocName(type)}.{member.Name}")
+                         ?? docs.Param($"T:{DocName(type)}", member.Name), "  ");
+            // Nulls are left out of the JSON (JsonIgnoreCondition.WhenWritingNull), so a nullable member may be
+            // absent, and so may one its own [JsonIgnore] leaves out at its default (0, false)
+            var optional = nullable
+                || member.GetCustomAttribute<JsonIgnoreAttribute>() is { Condition: JsonIgnoreCondition.WhenWritingDefault };
+            sb.Append($"  {name}{(optional ? "?" : "")}: {(nullable ? Nullable(tsType) : tsType)};\n");
         }
         sb.Append("}\n");
     }
