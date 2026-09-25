@@ -122,11 +122,17 @@ public sealed class OutputLogTests : IDisposable
     [Fact]
     public async Task Generation_FirstReadsAtOnce_AllAgree()
     {
-        var generations = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => OutputLog.GenerationAsync(_projectPath))));
+        // On Windows a read racing the first read's rename used to meet a sharing violation
+        for (var round = 0; round < 50; round++)
+        {
+            File.Delete(OutputLog.GenerationPathOf(_projectPath));
 
-        Assert.Single(generations.Distinct());
-        Assert.Equal(generations[0], File.ReadAllText(OutputLog.GenerationPathOf(_projectPath)));
-        Assert.Equal([OutputLog.GenerationPathOf(_projectPath)], Directory.GetFiles(Path.GetDirectoryName(FilePath)!, "output-generation*"));
+            var generations = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => OutputLog.GenerationAsync(_projectPath))));
+
+            Assert.Single(generations.Distinct());
+            Assert.Equal(generations[0], File.ReadAllText(OutputLog.GenerationPathOf(_projectPath)));
+            Assert.Equal([OutputLog.GenerationPathOf(_projectPath)], Directory.GetFiles(Path.GetDirectoryName(FilePath)!, "output-generation*"));
+        }
     }
 
     [Fact]

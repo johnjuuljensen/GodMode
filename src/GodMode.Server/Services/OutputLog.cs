@@ -71,14 +71,30 @@ public static class OutputLog
 
     private static string NewGenerationId() => Guid.NewGuid().ToString("N");
 
+    /// <summary>How often a read of the generation is tried while something else holds the file.</summary>
+    private const int ReadAttempts = 20;
+    private static readonly TimeSpan ReadRetryDelay = TimeSpan.FromMilliseconds(10);
+
+    /// <summary>
+    /// The generation in the file, or null when there is none. Shared for delete, so a rename onto
+    /// the file (a first read's, or <see cref="StartGeneration"/>'s) is never refused for it, and
+    /// retried for a moment while one is under way: on Windows the renamed file is held with delete
+    /// access until the rename is done, as it can be by a virus scanner.
+    /// </summary>
     private static async Task<string?> ReadGenerationAsync(string path, CancellationToken ct)
     {
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            var text = (await File.ReadAllTextAsync(path, ct)).Trim();
-            return text.Length > 0 ? text : null;
+            try
+            {
+                await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream, Utf8);
+                var text = (await reader.ReadToEndAsync(ct)).Trim();
+                return text.Length > 0 ? text : null;
+            }
+            catch (FileNotFoundException) { return null; }
+            catch (IOException) when (attempt < ReadAttempts) { await Task.Delay(ReadRetryDelay, ct); }
         }
-        catch (FileNotFoundException) { return null; }
     }
 
     /// <summary>
