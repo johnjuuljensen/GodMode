@@ -68,6 +68,15 @@ export type ServerState =
   /** Host state is unknown. */
   | 'Unknown';
 
+/** Request to add or update a GodMode server registration. */
+export interface AddServerRequest {
+  DisplayName: string;
+  Url: string;
+  AccessToken?: string | null;
+  Type: string;
+  Username?: string | null;
+}
+
 /**
  * One project that needs the user, from IProjectHub.GetAttention and IProjectHubClient.AttentionChanged.
  * Answer any kind with IProjectHub.ReplyAndResume; a permission or question also with

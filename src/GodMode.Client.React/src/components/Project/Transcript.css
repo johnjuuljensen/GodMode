@@ -239,6 +239,7 @@
 .ti-diff-add { background: var(--success-soft); }
 .ti-diff-del { background: var(--error-soft); }
 .ti-diff-ctx { color: var(--text-secondary); }
+.ti-diff-more { color: var(--text-tertiary); }
 
 .ti-children {
   display: flex;

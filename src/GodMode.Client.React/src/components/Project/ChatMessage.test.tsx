@@ -34,7 +34,7 @@ describe('markdown in a reply', () => {
     const alert = vi.fn();
     (window as unknown as { alert: typeof alert }).alert = alert;
     const el = await show(assistant(
-      'Hi <script>alert(1)</script>\n\n<img src="x" onerror="alert(2)">\n\n[click](javascript:alert(3)) <a href="javascript:alert(4)">raw</a>\n\n<iframe src="https://example.invalid"></iframe>',
+      'Hi <script>alert(1)</script>\n\n<img src="data:image/png;base64,iVBORw0KGgo=" onerror="alert(2)">\n\n[click](javascript:alert(3)) <a href="javascript:alert(4)">raw</a>\n\n<iframe src="https://example.invalid"></iframe>',
     ));
     expect(el.querySelector('script')).toBeNull();
     expect(el.querySelector('iframe')).toBeNull();
@@ -80,6 +80,31 @@ describe('a tool call', () => {
     const el = await show(edit, true);
     const diff = [...el.querySelectorAll('.ti-diff > div')].map(d => d.textContent);
     expect(diff).toEqual([' const a = 1;', '-const b = 2;', '+const b = 3;', '+const c = 4;']);
+  });
+
+  const write = (content: string) => buildTranscript([
+    line({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'w1', name: 'Write', input: { file_path: '/project/big.txt', content } }] } }),
+  ])[0];
+  const shownDiff = (el: HTMLElement) => [...el.querySelectorAll('.ti-diff > div:not(.ti-diff-more)')].map(d => d.textContent!.slice(1));
+
+  it('opens to a big Write cut at 20k characters, as tool output is, saying how much is left out', async () => {
+    // 3000 lines of 9 characters and a newline: the first 2000 are 20k characters
+    const lines = Array.from({ length: 3000 }, (_, i) => `line ${String(i).padStart(4, '0')}`);
+    const el = await show(write(lines.join('\n')), true);
+    expect(el.querySelector('.ti-diffstat')?.textContent).toBe('+3000');
+    expect(shownDiff(el)).toEqual(lines.slice(0, 2000));
+    expect(el.querySelector('.ti-diff-more')?.textContent).toBe('… 10000 more characters');
+  });
+
+  it('cuts a diff inside a line longer than the rest of its room', async () => {
+    const el = await show(write('x'.repeat(50_000)), true);
+    expect(shownDiff(el)).toEqual(['x'.repeat(20_000)]);
+    expect(el.querySelector('.ti-diff-more')?.textContent).toBe('… 30000 more characters');
+  });
+
+  it('shows a small diff whole', async () => {
+    const el = await show(edit, true);
+    expect(el.querySelector('.ti-diff-more')).toBeNull();
   });
 
   it('shows a failed call\'s error without opening', async () => {

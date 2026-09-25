@@ -174,7 +174,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
         // Start from the allowlist, not the server's environment, then the configured variables
         startInfo.Environment.Clear();
-        foreach (var (key, value) in ChildEnvironment.Build(ChildEnvironment.Current(), extraEnvironment))
+        foreach (var (key, value) in ChildEnvironment.Claude.Build(ChildEnvironment.Current(), extraEnvironment))
             startInfo.Environment[key] = value;
 
         foreach (var arg in args)
