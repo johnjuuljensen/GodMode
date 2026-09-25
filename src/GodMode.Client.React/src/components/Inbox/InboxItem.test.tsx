@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
  * Answering from the inbox (#172): each kind's controls call the hub for the item's own server and
- * project. Renders the Inbox on the real store with two servers whose project IDs overlap.
+ * project, and what an item held for one need is not the next one's (#218). Renders the Inbox on the
+ * real store with two servers whose project IDs overlap.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
@@ -132,12 +133,43 @@ describe('the inbox', () => {
 
     expect(el.querySelector('.inbox-item-error')?.textContent).toBe("This project's server is no longer in the server list");
     expect(el.querySelector('textarea')!.value).toBe('Ship it');
-    expect(useAppStore.getState().inboxDrafts[projectKey('B', 'p1')]).toEqual({ reply: 'Ship it', denyMessage: '' });
+    expect(useAppStore.getState().inboxDrafts[projectKey('B', 'p1')]).toEqual({ reply: 'Ship it', deny: null });
     expect(hubB.replies).toEqual([]);
   });
 
   it('says so when nothing needs the user', async () => {
     await act(async () => { hubA.callbacks.onAttentionChanged?.([]); hubB.callbacks.onAttentionChanged?.([]); });
     expect(view.container.textContent).toContain('Nothing needs you.');
+  });
+});
+
+describe('the next need of a project (#218)', () => {
+  const permission = (requestId: string, since: string) => item('p2', 'Permission', since, {
+    Permission: { RequestId: requestId, ToolName: 'Bash', Input: {}, Summary: `Bash: ${requestId}`, RequestedAt: since },
+  });
+  /** Server A's list again, with p2 as given: p1's question stays. */
+  const listA = (p2: AttentionItem) => act(async () => hubA.callbacks.onAttentionChanged?.([item('p1', 'Question', '2026-09-24T10:00:00Z'), p2]));
+  const p2 = () => itemEl('p2', 'Server A');
+
+  it("is answerable at once: a new request's card is not the last one's, still sending", async () => {
+    // r1's answer is on its way when claude moves on to r2
+    vi.spyOn(hubA, 'respondToPermission').mockImplementationOnce(() => new Promise(() => {}));
+    await click(button(p2(), 'Allow'));
+    expect(button(p2(), 'Allow').disabled).toBe(true);
+
+    await listA(permission('r2', '2026-09-24T11:05:00Z'));
+    expect(button(p2(), 'Allow').disabled).toBe(false);
+    await click(button(p2(), 'Allow'));
+    expect(hubA.decisions).toEqual([{ projectId: 'p2', requestId: 'r2', decision: { Allow: true, Message: null } }]);
+  });
+
+  it("shows no error of the last one's", async () => {
+    vi.spyOn(hubA, 'respondToPermission').mockRejectedValueOnce(new Error('No request r1 is pending'));
+    await click(button(p2(), 'Deny'));
+    expect(p2().querySelector('.inbox-item-error')?.textContent).toBe('No request r1 is pending');
+
+    await listA(item('p2', 'Finished', '2026-09-24T11:05:00Z'));
+    expect(p2().querySelector('.inbox-item-kind')?.textContent).toBe('Finished');
+    expect(p2().querySelector('.inbox-item-error')).toBeNull();
   });
 });

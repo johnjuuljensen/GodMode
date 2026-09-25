@@ -40,7 +40,8 @@ function PageContent({ page }: { page: ActivePage }) {
 
 export function Shell() {
   const selectedProject = useAppStore(s => s.selectedProject);
-  const isTileView = useAppStore(s => s.isTileView);
+  // Tiles are a wide screen's: a phone shows its own home, the inbox, whatever the toggle last said (#218)
+  const isTileView = useAppStore(s => s.isTileView && !s.isMobile);
   const clearSelection = useAppStore(s => s.clearSelection);
   const activePage = useAppStore(s => s.activePage);
   const isMobile = useAppStore(s => s.isMobile);
@@ -61,14 +62,18 @@ export function Shell() {
     localStorage.setItem('godmode-theme', theme);
   }, [theme]);
 
-  // Mobile detection
+  // Mobile detection. A wide screen shows the list beside the inbox, so it has no list screen for the URL to name (#218)
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    const apply = (mobile: boolean) => {
+      setIsMobile(mobile);
+      if (!mobile) setHomeView('inbox');
+    };
+    apply(mq.matches);
+    const handler = (e: MediaQueryListEvent) => apply(e.matches);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
-  }, [setIsMobile]);
+  }, [setIsMobile, setHomeView]);
 
   // One tree for every layout: the slots below keep their positions whichever layout shows,
   // so crossing the phone breakpoint re-renders a page or a project instead of remounting it
