@@ -81,8 +81,10 @@ RUN mkdir -p /app/projects /data && \
 EXPOSE 31337
 
 # Unprefixed URLS, not ASPNETCORE_URLS: ASPNETCORE_* is read before appsettings.json, whose
-# loopback "Urls" would win. The server refuses to start on this binding without an API key:
-# run with -e Authentication__ApiKey=<key>.
+# loopback "Urls" would win. Every request needs the API key. With none configured, the server
+# generates one into /home/godmode/.local/share/GodMode.Server/api-key, which is lost when the
+# container is replaced unless that directory is a volume: run with -e Authentication__ApiKey=<key>,
+# or mount that directory.
 ENV URLS=http://+:31337
 
 USER godmode
