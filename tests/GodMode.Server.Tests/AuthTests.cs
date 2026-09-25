@@ -81,18 +81,11 @@ public class AuthTests
     /// <summary>
     /// A page in the user's browser from anywhere but the server itself, a dev server on another
     /// localhost port included, is refused before authentication: with the key, without it, and on
-    /// an anonymous endpoint. The WebSocket upgrade, which CORS does not cover, is refused the same.
+    /// an anonymous endpoint.
     /// </summary>
     [Theory]
-    [InlineData("http://localhost:5173")] // the Vite dev server, outside Development
-    [InlineData("http://localhost:{other}")]
-    [InlineData("http://127.0.0.1:{other}")]
-    [InlineData("https://127.0.0.1:{port}")]
-    [InlineData("http://rebind.evil.example:{port}")]
-    [InlineData("https://evil.example")]
-    [InlineData("null")]
-    [InlineData("http://127.0.0.1:{port}/path")]
-    public async Task ForeignOrigin_Is403_OverHttpAndTheWebSocketUpgrade(string origin)
+    [MemberData(nameof(ForeignOrigins))]
+    public async Task ForeignOrigin_Is403_OverHttp(string origin)
     {
         await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
         origin = WithPorts(origin, run);
@@ -103,13 +96,33 @@ public class AuthTests
         Assert.Equal(HttpStatusCode.Forbidden, withoutKey.StatusCode);
         using var health = await SendAsync(run.Http, HttpMethod.Get, "/health", token: null, origin);
         Assert.Equal(HttpStatusCode.Forbidden, health.StatusCode);
+    }
 
-        // A raw WebSocket upgrade straight to the hub, with the key, as a cross-site page would open it
+    /// <summary>The hub's WebSocket upgrade, which CORS does not cover, opened with the key as a cross-site page would open it.</summary>
+    [Theory]
+    [MemberData(nameof(ForeignOrigins))]
+    public async Task ForeignOrigin_Is403_OnTheWebSocketUpgrade(string origin)
+    {
+        await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
+        origin = WithPorts(origin, run);
+
         using var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("Origin", origin);
         var ex = await Assert.ThrowsAsync<WebSocketException>(() => socket.ConnectAsync(HubSocketUrl(run, ApiKey), CancellationToken.None));
         Assert.Contains("403", ex.Message);
     }
+
+    public static TheoryData<string> ForeignOrigins =>
+    [
+        "http://localhost:5173", // the Vite dev server, outside Development
+        "http://localhost:{other}",
+        "http://127.0.0.1:{other}",
+        "https://127.0.0.1:{port}",
+        "http://rebind.evil.example:{port}",
+        "https://evil.example",
+        "null",
+        "http://127.0.0.1:{port}/path",
+    ];
 
     [Theory]
     [InlineData("http://127.0.0.1:{port}")]
