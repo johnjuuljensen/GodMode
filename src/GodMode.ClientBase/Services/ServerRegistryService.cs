@@ -40,6 +40,12 @@ public class ServerRegistryService : IServerRegistryService
 
     public async Task<ServerRegistration> AddServerAsync(ServerRegistration server, string? accessToken)
     {
+        // Every GodMode server requires its key, a local one included; a GitHub account, its token
+        if (string.IsNullOrWhiteSpace(accessToken))
+            throw new ArgumentException(server.Type == ServerTypes.GitHub
+                ? "A GitHub account needs a token."
+                : "A server needs its API key: every GodMode server requires one.", nameof(accessToken));
+
         var added = server with
         {
             Id = NewId(),
@@ -50,8 +56,7 @@ public class ServerRegistryService : IServerRegistryService
         try
         {
             var servers = await LoadAsync();
-            if (!string.IsNullOrEmpty(accessToken))
-                await StoreTokenAsync(added.Id, accessToken);
+            await StoreTokenAsync(added.Id, accessToken);
             await SaveAsync([.. servers, added]);
             return added;
         }
