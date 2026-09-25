@@ -72,7 +72,8 @@ public interface IProjectManager
     Task SubscribeProjectAsync(string projectId, long outputOffset, string subscriptionId, string? generation, string connectionId);
 
     /// <summary>
-    /// Unsubscribes a client connection from project output.
+    /// Unsubscribes a client connection from project output: it leaves the live group, after any
+    /// subscribe the connection made before.
     /// </summary>
     Task UnsubscribeProjectAsync(string projectId, string connectionId);
 

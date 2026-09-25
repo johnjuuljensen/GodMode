@@ -25,6 +25,9 @@ public sealed class PendingRequest
     /// <summary>The order requests arrived in; the oldest is the one the status shows.</summary>
     public long Sequence { get; } = Interlocked.Increment(ref _nextSequence);
 
+    /// <summary>The <see cref="Sequence"/> of the latest request made so far; 0 before the first.</summary>
+    public static long LastIssued => Interlocked.Read(ref _nextSequence);
+
     public PendingPermission? Permission { get; }
     public PendingQuestion? Question { get; }
 

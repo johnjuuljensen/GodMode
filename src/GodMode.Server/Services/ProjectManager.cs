@@ -66,6 +66,13 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>The attention list last pushed, and the lock that orders computing and pushing it.</summary>
     private AttentionItem[] _attention = [];
     private readonly SemaphoreSlim _attentionLock = new(1, 1);
+    private readonly ClientSends _attentionSends = new();
+
+    /// <summary>
+    /// One subscribe at a time per connection, in the order they came: a connection's calls may run
+    /// side by side (<c>MaximumParallelInvocationsPerClient</c>), and its replays would interleave.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _subscribeLocks = new();
 
     /// <summary>How often an open pull request is checked, and how long its root's status script may take.</summary>
     public const string PullRequestPollSetting = "PullRequestPollSeconds";
@@ -153,11 +160,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// tree killed if it has not exited within the grace period, shortened to leave time for that),
     /// and persists Stopped, so recovery on the next start does not launch a second process on a
     /// session an orphan still runs. A project that was working or waiting on the user keeps that in
-    /// <see cref="ProjectStatus.StateAtShutdown"/>, and the next start resumes it
-    /// (<see cref="ResumeInterruptedProjectsAsync"/>). A process that exits on its own now counts as
-    /// stopped, one handled just before is taken back (a server whose sessions share its console once
-    /// lost them to its terminal's Ctrl+C), and its project is stopped like the rest, so the exit is
-    /// persisted before the server goes. Blocks shutdown until done or <see cref="ShutdownTimeout"/> passes.
+    /// <see cref="ProjectStatus.StateAtShutdown"/>, persisted before it is stopped, and the next
+    /// start resumes it (<see cref="ResumeInterruptedProjectsAsync"/>); one a stop by the user was
+    /// stopping is not marked. A process that exits on its own now counts as stopped, one handled
+    /// just before is taken back (a server whose sessions share its console once lost them to its
+    /// terminal's Ctrl+C), and its project is stopped like the rest, so the exit is persisted before
+    /// the server goes. Blocks shutdown until done or <see cref="ShutdownTimeout"/> passes.
     /// </summary>
     private void StopProjectsOnShutdown()
     {
@@ -168,7 +176,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var running = _projects.Values
             .Where(project => project.Process.ProcessId != 0
                 || project.Status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission or ProjectState.Idle)
-            .Select(project => (Project: project, StateAtShutdown: ProjectLifecycle.ActiveState(project.Status.State)))
+            .Select(project => (Project: project, Marker: ProjectLifecycle.MarkerOf(project)))
             .ToArray();
         var exited = _projects.Values.Except(running.Select(r => r.Project)).ToArray();
         if (running.Length == 0 && exited.Length == 0) return;
@@ -178,7 +186,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var stops = Task.WhenAll(
             running.Select(r => StopOnShutdownAsync(r.Project, async () =>
             {
-                await _lifecycle.StopAsync(r.Project, r.StateAtShutdown, grace);
+                await _lifecycle.MarkForShutdownAsync(r.Project, r.Marker);
+                await _lifecycle.StopAsync(r.Project, r.Marker, grace);
                 return true;
             })).Concat(exited.Select(project => StopOnShutdownAsync(project, async () =>
             {
@@ -989,25 +998,29 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     public void Dispose() => _pullRequests.Dispose();
 
-    /// <summary>Pushes the attention list to every client when it differs from the one last pushed.</summary>
+    /// <summary>
+    /// Pushes the attention list to every client when it differs from the one last pushed. The list
+    /// is computed and its push started under the lock, so lists go out in the order they were
+    /// computed; the push is not waited for (<see cref="ClientSends"/>), so a client that does not
+    /// read holds up neither the lock nor the project whose status push got here.
+    /// </summary>
     private async Task PushAttentionIfChangedAsync()
     {
+        Task window;
         await _attentionLock.WaitAsync();
         try
         {
             var attention = GetAttention();
             if (Attention.Same(attention, _attention)) return;
             _attention = attention;
-            await _hubContext.Clients.All.AttentionChanged(attention);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error pushing the attention list");
+            window = _attentionSends.SendAsync(() => _hubContext.Clients.All.AttentionChanged(attention),
+                ex => _logger.LogError(ex, "Error pushing the attention list"));
         }
         finally
         {
             _attentionLock.Release();
         }
+        await window;
     }
 
     public async Task RespondToPermissionAsync(string projectId, string requestId, PermissionDecision decision)
@@ -1045,11 +1058,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Tool name only: the input and its summary can carry secrets (a command with a token in it)
         _logger.LogInformation("Project {ProjectId} asks permission for {ToolName} (request {RequestId})",
             projectId, request.ToolName, pending.Id);
-        project.Process.AddPending(pending);
-        await _lifecycle.ShowPendingAsync(project);
 
         try
         {
+            project.Process.AddPending(pending);
+            await _lifecycle.ShowPendingAsync(project);
             return await pending.Completion.Task.WaitAsync(aborted);
         }
         catch (OperationCanceledException)
@@ -1057,6 +1070,13 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             // claude cancelled the call, or its connection dropped (it exited or was killed): nobody is waiting for the answer
             _logger.LogInformation("Project {ProjectId}: permission request {RequestId} was abandoned", projectId, pending.Id);
             await CompletePendingAsync(project, pending, PermissionPromptResult.Deny("The request was abandoned."));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Not shown: claude's call fails, and no reply is taken for its answer
+            _logger.LogError(ex, "Project {ProjectId}: permission request {RequestId} could not be shown; it is withdrawn", projectId, pending.Id);
+            await CompletePendingAsync(project, pending, PermissionPromptResult.Deny("The request could not be shown to the user."));
             throw;
         }
     }
@@ -1215,8 +1235,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
         catch
         {
-            // The claim was not saved (status.json could not be replaced): nothing is launched, and
-            // no launch is left in flight for the next claim, stop or reply to wait on
+            // The claim failed after it was made: nothing is launched, and no launch is left in
+            // flight for the next claim, stop or reply to wait on. A save that fails is not this:
+            // the claim stands, and is saved with the next change
             if (claimed) project.Process.EndLaunching();
             throw;
         }
@@ -1292,11 +1313,23 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         project.SubscribedConnections.Add(connectionId);
-        await _lifecycle.SubscribeAsync(project, fromOffset, subscriptionId, generation, connectionId);
+        var subscribeLock = _subscribeLocks.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
+        await subscribeLock.WaitAsync();
+        try { await _lifecycle.SubscribeAsync(project, fromOffset, subscriptionId, generation, connectionId); }
+        finally { subscribeLock.Release(); }
     }
 
+    /// <summary>
+    /// Takes the connection out of the project's live group, after any subscribe it made before:
+    /// a subscribe still replaying would otherwise put it back in the group once it is done.
+    /// </summary>
     public async Task UnsubscribeProjectAsync(string projectId, string connectionId)
     {
+        var subscribeLock = _subscribeLocks.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
+        await subscribeLock.WaitAsync();
+        try { await _hubContext.Groups.RemoveFromGroupAsync(connectionId, ProjectLifecycle.OutputGroup(projectId)); }
+        finally { subscribeLock.Release(); }
+
         if (!_projects.TryGetValue(projectId, out var project))
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
@@ -1311,6 +1344,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         {
             project.SubscribedConnections.Remove(connectionId);
         }
+        // A subscribe still running holds its own reference; the connection makes no more
+        _subscribeLocks.TryRemove(connectionId, out _);
         await Task.CompletedTask;
     }
 

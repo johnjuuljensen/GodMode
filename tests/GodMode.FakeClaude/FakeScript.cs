@@ -83,7 +83,8 @@ public abstract record ScriptStep
     /// <summary>
     /// From here on an interrupt is recorded and otherwise ignored. Until this step the fake does
     /// what claude does with one (Ctrl+C or Ctrl+Break on Windows, SIGINT or SIGQUIT elsewhere): in
-    /// a turn, it writes the interrupted turn's end, then it exits 0, whatever step it is on.
+    /// a turn, it abandons the permission prompt it is waiting on (cancels its call), writes the
+    /// interrupted turn's end, then it exits 0, whatever step it is on.
     /// </summary>
     public sealed record IgnoreInterrupt : ScriptStep;
 
@@ -154,9 +155,14 @@ public sealed class FakeScript
     public FakeScript EmitInit() =>
         Emit($$"""{"type":"system","subtype":"init","session_id":"{{SessionIdPlaceholder}}"}""");
 
-    /// <summary>The user message echoed back by <c>--replay-user-messages</c>.</summary>
-    public FakeScript EmitUser(string text) =>
-        Emit(Json(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder }));
+    /// <summary>
+    /// A user line. With <paramref name="echo"/>, a message the user sent, echoed back by
+    /// <c>--replay-user-messages</c> as claude takes it (<c>isReplay</c>): at once between turns, at
+    /// its next step when it came in the middle of one (claude 2.1.282 folds it into that turn).
+    /// </summary>
+    public FakeScript EmitUser(string text, bool echo = false) => echo
+        ? Emit(Json(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder, isReplay = true }))
+        : Emit(Json(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder }));
 
     public FakeScript EmitAssistant(string text) =>
         Emit(Json(new { type = "assistant", message = new { role = "assistant", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder }));

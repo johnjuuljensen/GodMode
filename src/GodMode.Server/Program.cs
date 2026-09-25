@@ -45,8 +45,11 @@ catch (StartupConfigurationException ex)
     return 1;
 }
 
-// Add services to the container
-builder.Services.AddSignalR()
+// Add services to the container. A connection's calls run side by side, a few at a time: a reply
+// that waits for a resumed claude to start its session (up to SessionStartTimeoutSeconds) leaves the
+// tab its Stop and its subscribes. Subscribes still run one at a time per connection, in order
+// (ProjectManager.SubscribeProjectAsync)
+builder.Services.AddSignalR(options => options.MaximumParallelInvocationsPerClient = ProjectHub.ParallelInvocationsPerClient)
     .AddJsonProtocol(options =>
     {
         var defaults = JsonDefaults.Options;

@@ -73,6 +73,9 @@ var stderr = new StreamWriter(Console.OpenStandardError(), new UTF8Encoding(fals
 var ignoringInterrupts = 0;
 var inTurn = 0;
 var interrupted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+// The permission prompt call in flight, and how to cancel it, for an interrupt to abandon
+CancellationTokenSource? asking = null;
+Task<string>? askInFlight = null;
 void OnInterrupt(PosixSignalContext context)
 {
     context.Cancel = true;
@@ -98,7 +101,13 @@ _ = Task.Run(async () =>
 var played = PlayAsync();
 if (await Task.WhenAny(played, interrupted.Task) == played) return await played;
 
-// What claude does with an interrupt in a turn: the turn ends as interrupted. Then it exits 0
+// What claude does with an interrupt in a turn: it abandons the permission prompt it waits on (its
+// call is cancelled), the turn ends as interrupted. Then it exits 0
+if (Volatile.Read(ref asking) is { } call)
+{
+    try { call.Cancel(); } catch (ObjectDisposedException) { /* answered meanwhile */ }
+    if (Volatile.Read(ref askInFlight) is { } ask) await Task.WhenAny(ask, Task.Delay(TimeSpan.FromSeconds(5)));
+}
 await stdoutLock.WaitAsync();
 if (Volatile.Read(ref inTurn) == 1)
     foreach (var step in new FakeScript().EmitUser("[Request interrupted by user]").EmitResult("", isError: true).Steps.OfType<ScriptStep.Emit>())
@@ -137,7 +146,9 @@ async Task<int> PlayAsync()
             case ScriptStep.Exit exit:
                 return Exit(exit.Code);
             case ScriptStep.AskPermission ask:
-                FakeRecording.Append(recordPath, new RecordLine(RecordLine.Permission, pid, Line: await AskPermissionAsync(ask)));
+                var answer = AskPermissionAsync(ask);
+                Volatile.Write(ref askInFlight, answer);
+                FakeRecording.Append(recordPath, new RecordLine(RecordLine.Permission, pid, Line: await answer));
                 break;
             case ScriptStep.RejectResume when ArgValue("--resume") is { } resumed:
                 await stderr.WriteLineAsync(FakeScript.NoConversationError + resumed);
@@ -194,6 +205,7 @@ static int StartChild(bool ownSession = false)
 async Task<string> AskPermissionAsync(ScriptStep.AskPermission ask)
 {
     using var cancel = new CancellationTokenSource();
+    Volatile.Write(ref asking, cancel);
     var progress = new RecordingProgress(value =>
     {
         FakeRecording.Append(recordPath, new RecordLine(RecordLine.Progress, pid, Line: value.Message));
@@ -216,6 +228,10 @@ async Task<string> AskPermissionAsync(ScriptStep.AskPermission ask)
     catch (Exception ex)
     {
         return $"error: {ex.GetType().Name}: {ex.Message}";
+    }
+    finally
+    {
+        Interlocked.CompareExchange(ref asking, null, cancel);
     }
 }
 
