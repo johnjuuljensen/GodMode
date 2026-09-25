@@ -200,8 +200,9 @@ export interface PermissionDetail {
   RequestId: string;
   /**
    * The server's display text of the tool's input: the whole command for `Bash` and `PowerShell`, the path
-   * and the whole new text for `Edit`, `MultiEdit`, `Write` and `NotebookEdit`, and the input as indented
-   * JSON for any other tool.
+   * and the whole new text for `Write` and `NotebookEdit`, the path and each replacement for `Edit` and
+   * `MultiEdit` (what it replaces, with what, and whether every occurrence), and the input as indented JSON
+   * for any other tool.
    */
   Detail: string;
   /**

@@ -55,7 +55,8 @@ public static partial class PermissionPrompts
 
     /// <summary>
     /// Everything the call would run, to show before it is allowed: the whole command, the path and the
-    /// whole new text of an edit, or else the input as indented JSON; cut at <see cref="MaxDetailLength"/>.
+    /// whole new text of a write, the path and each replacement of an edit (what it replaces, with what,
+    /// and whether every occurrence), or else the input as indented JSON; cut at <see cref="MaxDetailLength"/>.
     /// </summary>
     public static PermissionDetail Describe(string requestId, string toolName, JsonElement input, string projectPath)
     {
@@ -64,16 +65,28 @@ public static partial class PermissionPrompts
         {
             "Bash" or "PowerShell" => String(input, "command"),
             "Write" => Joined(path, String(input, "content")),
-            "Edit" => Joined(path, String(input, "new_string")),
+            "Edit" => Joined(path, Replacement(input)),
             "MultiEdit" when input.ValueKind == JsonValueKind.Object
                 && input.TryGetProperty("edits", out var edits) && edits.ValueKind == JsonValueKind.Array =>
-                Joined([path, .. edits.EnumerateArray().Select(edit => String(edit, "new_string"))]),
+                Joined([path, .. edits.EnumerateArray().Select(Replacement)]),
             "NotebookEdit" => Joined(RelativePath(String(input, "notebook_path"), projectPath), String(input, "new_source")),
             _ => null,
         } ?? JsonSerializer.Serialize(input, Indented);
         var truncated = detail.Length > MaxDetailLength;
         return new PermissionDetail(requestId, truncated ? TextCut.Cut(detail, MaxDetailLength) : detail, truncated);
     }
+
+    /// <summary>
+    /// One replacement of an edit: <c>Replace:</c> (<c>Replace every occurrence of:</c> with <c>replace_all</c>)
+    /// and its <c>old_string</c>, then <c>With:</c> and its <c>new_string</c>; null when it has neither.
+    /// </summary>
+    private static string? Replacement(JsonElement edit) =>
+        (String(edit, "old_string"), String(edit, "new_string")) switch
+        {
+            (null, null) => null,
+            var (old, @new) => (edit.TryGetProperty("replace_all", out var all) && all.ValueKind == JsonValueKind.True
+                ? "Replace every occurrence of:" : "Replace:") + $"\n{old}\nWith:\n{@new}",
+        };
 
     /// <summary>The parts there are, a blank line between each; null when there is none.</summary>
     private static string? Joined(params string?[] parts) =>

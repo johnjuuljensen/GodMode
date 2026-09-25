@@ -31,7 +31,8 @@ public record PendingPermission(
 /// <param name="RequestId">The request it describes.</param>
 /// <param name="Detail">
 /// The server's display text of the tool's input: the whole command for <c>Bash</c> and <c>PowerShell</c>,
-/// the path and the whole new text for <c>Edit</c>, <c>MultiEdit</c>, <c>Write</c> and <c>NotebookEdit</c>,
+/// the path and the whole new text for <c>Write</c> and <c>NotebookEdit</c>, the path and each replacement for
+/// <c>Edit</c> and <c>MultiEdit</c> (what it replaces, with what, and whether every occurrence),
 /// and the input as indented JSON for any other tool.
 /// </param>
 /// <param name="DetailTruncated">

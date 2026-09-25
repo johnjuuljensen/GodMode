@@ -49,16 +49,34 @@ public class PermissionSummaryTests
     }
 
     [Fact]
-    public void Describe_AnEdit_IsItsPathAndItsWholeNewText()
+    public void Describe_AWrite_IsItsPathAndItsWholeNewText()
     {
         var path = Path.Combine(ProjectPath, "src", "Foo.cs");
 
         Assert.Equal("src/Foo.cs\n\nline one\nline two", PermissionPrompts.Describe("r1", "Write",
             Input(new { file_path = path, content = "line one\nline two" }), ProjectPath).Detail);
-        Assert.Equal("src/Foo.cs\n\nnew", PermissionPrompts.Describe("r1", "Edit",
-            Input(new { file_path = path, old_string = "old", new_string = "new" }), ProjectPath).Detail);
-        Assert.Equal("src/Foo.cs\n\nfirst\n\nsecond", PermissionPrompts.Describe("r1", "MultiEdit",
-            Input(new { file_path = path, edits = new[] { new { new_string = "first" }, new { new_string = "second" } } }), ProjectPath).Detail);
+    }
+
+    /// <summary>What an edit replaces, with what, and whether every occurrence: the new text alone says none of that.</summary>
+    [Fact]
+    public void Describe_AnEdit_IsItsPath_WhatItReplaces_WithWhat_AndWhetherEveryOccurrence()
+    {
+        var path = Path.Combine(ProjectPath, "src", "Foo.cs");
+
+        Assert.Equal("src/Foo.cs\n\nReplace:\nvar x = 1;\nWith:\nvar x = 2;", PermissionPrompts.Describe("r1", "Edit",
+            Input(new { file_path = path, old_string = "var x = 1;", new_string = "var x = 2;" }), ProjectPath).Detail);
+        Assert.Equal("src/Foo.cs\n\nReplace every occurrence of:\nfoo\nWith:\nbar", PermissionPrompts.Describe("r1", "Edit",
+            Input(new { file_path = path, old_string = "foo", new_string = "bar", replace_all = true }), ProjectPath).Detail);
+        Assert.Equal("src/Foo.cs\n\nReplace:\na\nWith:\nb\n\nReplace every occurrence of:\nc\nWith:\n", PermissionPrompts.Describe("r1", "MultiEdit",
+            Input(new
+            {
+                file_path = path,
+                edits = new object[]
+                {
+                    new { old_string = "a", new_string = "b" },
+                    new { old_string = "c", new_string = "", replace_all = true },
+                },
+            }), ProjectPath).Detail);
     }
 
     [Fact]
