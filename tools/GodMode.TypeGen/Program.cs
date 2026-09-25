@@ -20,8 +20,8 @@ if (args is not [var outputPath])
 
 var text = TypeScriptWriter.Write(
     hubs: [typeof(IProjectHub), typeof(IProjectHubClient)],
-    // Served over HTTP (/servers) rather than the hub
-    extraTypes: [typeof(ServerInfo)]);
+    // Not the hub's: the server list (/servers), and the server to add (services/hostApi.ts addServer)
+    extraTypes: [typeof(ServerInfo), typeof(AddServerRequest)]);
 
 outputPath = Path.GetFullPath(outputPath);
 // A checkout may have given the file CRLF line endings (.gitattributes: text=auto); that is no change
