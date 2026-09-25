@@ -83,7 +83,8 @@ public abstract record ScriptStep
     /// <summary>
     /// From here on an interrupt is recorded and otherwise ignored. Until this step the fake does
     /// what claude does with one (Ctrl+C or Ctrl+Break on Windows, SIGINT or SIGQUIT elsewhere): in
-    /// a turn, it writes the interrupted turn's end, then it exits 0, whatever step it is on.
+    /// a turn, it abandons the permission prompt it is waiting on (cancels its call), writes the
+    /// interrupted turn's end, then it exits 0, whatever step it is on.
     /// </summary>
     public sealed record IgnoreInterrupt : ScriptStep;
 
