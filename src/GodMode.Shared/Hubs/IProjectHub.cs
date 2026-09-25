@@ -98,7 +98,11 @@ public interface IProjectHub
     /// arrives once and in order. fromOffset is the offset of the last line the client has (0 for
     /// everything; an offset inside a line snaps forward to the next line), or -N for the last N turns.
     /// </summary>
-    Task SubscribeProject(string projectId, long fromOffset);
+    /// <param name="subscriptionId">Made up by the client, and echoed by this subscription's batches
+    /// and complete, so a client that has subscribed again since can tell an older one's answer.</param>
+    /// <param name="generation">The output generation the client's offset is in (null when it holds
+    /// none). A positive offset in any other generation is not in this file: all of it is replayed, from 0.</param>
+    Task SubscribeProject(string projectId, long fromOffset, string subscriptionId, string? generation);
 
     /// <summary>
     /// Unsubscribes from output events from a project.

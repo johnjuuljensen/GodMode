@@ -1,7 +1,12 @@
-import { useEffect } from 'react';
-import { useAppStore, TILE_TAIL_TURNS, projectKey, isListed } from '../../store';
+import { useEffect, useRef } from 'react';
+import { useAppStore, TILE_TAIL_TURNS, projectKey, isListed, type ProjectKey } from '../../store';
 import { ProjectTile } from './ProjectTile';
 import './TileGrid.css';
+
+interface OpenTile {
+  serverId: string;
+  projectId: string;
+}
 
 export function TileGrid() {
   const serverConnections = useAppStore(s => s.serverConnections);
@@ -11,19 +16,29 @@ export function TileGrid() {
   const tileLoading = useAppStore(s => s.tileLoading);
   const subscribeTail = useAppStore(s => s.subscribeTail);
   const unsubscribeTail = useAppStore(s => s.unsubscribeTail);
-  const clearTileMessages = useAppStore(s => s.clearTileMessages);
 
+  // Tail mode: only the last turns; loading ends with the server's replay-complete. A tile is open
+  // while shown, and the store subscribes it again, from its offset, whenever its server reconnects.
+  // When the list changes, only a tile added is opened and only a tile gone is closed: the others keep
+  // their lines and their subscription (#239)
+  const open = useRef(new Map<ProjectKey, OpenTile>());
+  const shown = serverConnections.flatMap(conn => conn.projects.map(p => ({ serverId: conn.serverInfo.Id, projectId: p.Id })));
+  const shownKeys = shown.map(t => projectKey(t.serverId, t.projectId)).join('|');
   useEffect(() => {
-    clearTileMessages();
-    const tiles = serverConnections.flatMap(conn => conn.projects.map(p => ({ serverId: conn.serverInfo.Id, projectId: p.Id })));
-    // Tail mode: only the last turns; loading ends with the server's replay-complete. A tile is open
-    // while shown, and the store subscribes it again, from its offset, whenever its server reconnects
-    for (const { serverId, projectId } of tiles) subscribeTail(serverId, projectId, TILE_TAIL_TURNS).catch(console.error);
-    return () => {
-      for (const { serverId, projectId } of tiles) unsubscribeTail(serverId, projectId).catch(() => {});
-    };
+    const next = new Map(shown.map(t => [projectKey(t.serverId, t.projectId), t]));
+    for (const [key, { serverId, projectId }] of open.current) {
+      if (!next.has(key)) unsubscribeTail(serverId, projectId).catch(() => {});
+    }
+    for (const [key, { serverId, projectId }] of next) {
+      if (!open.current.has(key)) subscribeTail(serverId, projectId, TILE_TAIL_TURNS).catch(console.error);
+    }
+    open.current = next;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverConnections.map(s => `${s.serverInfo.Id}:${s.projects.map(p => p.Id).join(',')}`).join('|')]);
+  }, [shownKeys]);
+  useEffect(() => () => {
+    for (const { serverId, projectId } of open.current.values()) unsubscribeTail(serverId, projectId).catch(() => {});
+    open.current = new Map();
+  }, [unsubscribeTail]);
 
   // A reconnecting server's tiles stay, as they were until it is back
   const listed = serverConnections.filter(isListed);

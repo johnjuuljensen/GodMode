@@ -21,10 +21,13 @@ export interface OutputMessage {
 export interface HubCallbacks {
   /** A live line, after the subscription's replay is complete. */
   onOutputReceived?: (projectId: string, line: OutputMessage) => void;
-  /** Replayed lines, covering output.jsonl from fromOffset to the last line's offset. */
-  onOutputBatch?: (projectId: string, fromOffset: number, lines: OutputMessage[]) => void;
-  /** The replay is done at offset; live lines follow. */
-  onOutputReplayComplete?: (projectId: string, offset: number) => void;
+  /**
+   * Replayed lines, covering output.jsonl from fromOffset to the last line's offset, for the subscription
+   * subscriptionId, in the file's generation.
+   */
+  onOutputBatch?: (projectId: string, subscriptionId: string, generation: string, fromOffset: number, lines: OutputMessage[]) => void;
+  /** The replay for subscriptionId is done at offset, in generation; live lines follow. */
+  onOutputReplayComplete?: (projectId: string, subscriptionId: string, generation: string, offset: number) => void;
   onStatusChanged?: (projectId: string, status: ProjectStatus) => void;
   /** The projects needing the user changed; items is the server's whole list, oldest first. */
   onAttentionChanged?: (items: AttentionItem[]) => void;
@@ -86,13 +89,13 @@ export class GodModeHub {
       this.callbacks.onOutputReceived?.(projectId, { offset, message: parseClaudeMessage(rawJson) });
     });
 
-    this.connection.on('OutputBatch', (projectId: string, fromOffset: number, lines: OutputLine[]) => {
-      this.callbacks.onOutputBatch?.(projectId, fromOffset,
+    this.connection.on('OutputBatch', (projectId: string, subscriptionId: string, generation: string, fromOffset: number, lines: OutputLine[]) => {
+      this.callbacks.onOutputBatch?.(projectId, subscriptionId, generation, fromOffset,
         lines.map(l => ({ offset: l.Offset, message: parseClaudeMessage(l.RawJson) })));
     });
 
-    this.connection.on('OutputReplayComplete', (projectId: string, offset: number) => {
-      this.callbacks.onOutputReplayComplete?.(projectId, offset);
+    this.connection.on('OutputReplayComplete', (projectId: string, subscriptionId: string, generation: string, offset: number) => {
+      this.callbacks.onOutputReplayComplete?.(projectId, subscriptionId, generation, offset);
     });
 
     this.connection.on('StatusChanged', (projectId: string, status: ProjectStatus) => {
@@ -245,10 +248,12 @@ export class GodModeHub {
 
   /**
    * Replays the project's output from fromOffset (the offset of the last line held, 0 for all, or
-   * -N for the last N turns), then streams it live. Resolves once the replay is complete.
+   * -N for the last N turns), then streams it live. Resolves once the replay is complete. The
+   * replay's batches and complete carry subscriptionId back; generation is the one fromOffset is
+   * in (null when nothing is held), and in any other the server replays from 0.
    */
-  async subscribeProject(projectId: string, fromOffset: number): Promise<void> {
-    await this.connection!.invoke('SubscribeProject', projectId, fromOffset);
+  async subscribeProject(projectId: string, fromOffset: number, subscriptionId: string, generation: string | null): Promise<void> {
+    await this.connection!.invoke('SubscribeProject', projectId, fromOffset, subscriptionId, generation);
   }
 
   async unsubscribeProject(projectId: string): Promise<void> {

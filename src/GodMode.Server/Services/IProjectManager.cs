@@ -67,9 +67,9 @@ public interface IProjectManager
     Task ResumeProjectAsync(string projectId);
 
     /// <summary>
-    /// Subscribes a client connection to project output.
+    /// Subscribes a client connection to project output, as <see cref="GodMode.Shared.Hubs.IProjectHub.SubscribeProject"/>.
     /// </summary>
-    Task SubscribeProjectAsync(string projectId, long outputOffset, string connectionId);
+    Task SubscribeProjectAsync(string projectId, long outputOffset, string subscriptionId, string? generation, string connectionId);
 
     /// <summary>
     /// Unsubscribes a client connection from project output.

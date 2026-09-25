@@ -1284,7 +1284,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         });
     }
 
-    public async Task SubscribeProjectAsync(string projectId, long fromOffset, string connectionId)
+    public async Task SubscribeProjectAsync(string projectId, long fromOffset, string subscriptionId, string? generation, string connectionId)
     {
         if (!_projects.TryGetValue(projectId, out var project))
         {
@@ -1292,7 +1292,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         project.SubscribedConnections.Add(connectionId);
-        await _lifecycle.SubscribeAsync(project, fromOffset, connectionId);
+        await _lifecycle.SubscribeAsync(project, fromOffset, subscriptionId, generation, connectionId);
     }
 
     public async Task UnsubscribeProjectAsync(string projectId, string connectionId)
@@ -1533,19 +1533,23 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Ensures the .godmode directory exists in a project folder.
+    /// Ensures the .godmode directory exists in a project folder, and starts its output's generation.
     /// Called after scripts run (which may have created the project dir without .godmode).
     /// </summary>
     private static void EnsureGodModeDirectory(string projectPath)
     {
         var godModePath = Path.Combine(projectPath, ".godmode");
-        if (Directory.Exists(godModePath)) return;
+        if (!Directory.Exists(godModePath))
+        {
+            Directory.CreateDirectory(godModePath);
+            File.WriteAllText(
+                Path.Combine(godModePath, ".gitignore"),
+                "# Exclude all GodMode state files\n*\n",
+                System.Text.Encoding.UTF8);
+        }
 
-        Directory.CreateDirectory(godModePath);
-        File.WriteAllText(
-            Path.Combine(godModePath, ".gitignore"),
-            "# Exclude all GodMode state files\n*\n",
-            System.Text.Encoding.UTF8);
+        // A new one each time: an ID created again starts a new generation, so no client resumes into it from an old offset
+        OutputLog.StartGeneration(projectPath);
     }
 
     /// <summary>
