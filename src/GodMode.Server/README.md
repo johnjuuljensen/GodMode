@@ -114,6 +114,8 @@ Defines shared settings (prepare + delete scripts, environment, claude args) inh
   "profileName": "Default",
   "environment": { "KEY": "value", "CLAUDE_CONFIG_DIR": "/path/to/.claude" },
   "claudeArgs": ["--append-system-prompt", "Extra instructions"],
+  "permissionMode": "auto",
+  "allowSkipPermissions": false,
   "prepare": "scripts/prepare",
   "delete": "scripts/delete",
   "status": "scripts/status",
@@ -142,7 +144,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 
 | Field | Merge Rule |
 |-------|-----------|
-| Scalars (description, nameTemplate, model, resumeOnRestart, resumePrompt, etc.) | Overlay replaces if present |
+| Scalars (description, nameTemplate, model, permissionMode, allowSkipPermissions, resumeOnRestart, resumePrompt, etc.) | Overlay replaces if present |
 | `environment` | Dictionary merge, overlay keys override |
 | `claudeArgs` | Concatenated (base + overlay) |
 | Script fields (prepare, create, delete, status) | Overlay replaces entirely |
@@ -168,6 +170,8 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `status` | One script that reports the project's pull request (working dir = project): see [Pull request status](#pull-request-status) |
 | `claudeArgs` | Extra CLI arguments appended when starting Claude |
 | `model` | Default `--model` for the action. A `model` form input overrides it |
+| `permissionMode` | claude's `--permission-mode` for the action's projects: `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`. Kept with each project at create. Default: none (claude's own settings decide). See [Permissions](#permissions) |
+| `allowSkipPermissions` | Whether the action's projects may run with `--dangerously-skip-permissions`. Default `false`. See [Permissions](#permissions) |
 | `nameTemplate` | Derive project name from inputs, e.g. `"issue_{issueNumber}"` |
 | `promptTemplate` | Derive initial prompt from inputs |
 | `scriptsCreateFolder` | If true, create scripts are responsible for creating the project directory |
@@ -186,7 +190,30 @@ GodMode gives a session one MCP server, its own: `godmode`, this server's `/mcp`
 
 A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: the server logs a warning once for each, and ignores it.
 
-GodMode pre-approves no tool: it passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (`WaitingPermission`), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`) or the project runs with `skipPermissions`.
+GodMode pre-approves no tool: it passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (`WaitingPermission`), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's `permissionMode` lets it through, or the project runs with skip-permissions (see [Permissions](#permissions)).
+
+### Permissions
+
+A root decides how its sessions are permitted, with two keys in `config.json` or an action's overlay (the overlay wins).
+
+**`permissionMode`** is the normal way to let a session work unattended. It is passed as `--permission-mode <mode>`, beside the permission prompt, which stays: what the mode does not decide still reaches the user.
+
+- **Values:** `acceptEdits`, `auto`, `manual`, `dontAsk` and `plan`, in any case (passed as claude spells them). `bypassPermissions` is refused: skipping is `allowSkipPermissions`' to allow. Any other value is a config error in the file that has it: a create fails, naming the file and the value, before anything is written; the roots listing leaves that action out (or, in `config.json`, lists the root as the default config); a resume fails as it does for any config it cannot read.
+- **Kept with the project.** A create stores the action's mode in the project's `.godmode/settings.json` (`permissionMode`), and every launch of it uses that one, even after the root's config has changed. A project with none stored, such as one created before the root had a mode, takes the root's current one. The stored one is checked again at each launch, since the session can write that file: an unknown one, or `bypassPermissions`, is left out, with a warning.
+- **Skip-permissions overrides it:** a project that runs with skip is launched without `--permission-mode`, with a warning.
+- **Measured with claude 2.1.282 on Windows**, for six requests (Bash `echo hello > probe.txt`, a Write, an Edit, a WebFetch, Bash `curl -s -o page.html …`, Bash `rm -f …` in the project), each answered Allow where it was asked:
+  - `manual` (or no mode): all six reached the permission prompt.
+  - `acceptEdits`: the WebFetch and the `curl` did; the rest ran.
+  - `auto`: none did. Its classifier let all six run.
+  - `dontAsk`: none did. All but the Edit were denied, and the Edit failed on the file the denied Write had not made.
+  - `auto` with `--model haiku`: claude ran in its default mode (its `system/init` said `permissionMode: default`), and all six reached the prompt. Nothing says so but that line.
+
+**`allowSkipPermissions`** (default `false`) is the only way a session runs with `--dangerously-skip-permissions`, which nothing then asks about.
+
+- **Where it is false,** the create form does not offer the schema's `skipPermissions`, and a create that asks for it (`true` or `"true"`) is refused before anything is written.
+- **Where it is true,** the form offers it, unchecked whatever the schema's `default`, and a create that asks for it stores that in `settings.json`.
+- **Every launch checks it**, as the root's config says at that launch: create, resume, a reply's resume (`ReplyAndResume`) and the resume after a restart. `--dangerously-skip-permissions` is passed only when `settings.json` asks for it and the root allows it. `settings.json` is in the project folder, which the session can write, and a restart relaunches a project from its files unattended, so a planted or copied folder cannot give itself skip.
+- **A project whose `settings.json` asks for skip under a root that does not allow it** launches without it, and the server logs a warning once for that project. That includes every project created with skip before `allowSkipPermissions` existed: its next launch waits on the permission prompt for what needs approval, until its root (or its action's overlay) sets `"allowSkipPermissions": true`.
 
 ### The MCP endpoint
 
@@ -229,7 +256,7 @@ Supported JSON Schema types:
 }
 ```
 
-Some keys have special meaning: `name` and `prompt` are the project name and initial Claude prompt unless `nameTemplate`/`promptTemplate` override them, `skipPermissions` starts Claude with `--dangerously-skip-permissions` (without it, a tool call that needs approval waits for the user: `WaitingPermission`), and `model` overrides the action's model.
+Some keys have special meaning: `name` and `prompt` are the project name and initial Claude prompt unless `nameTemplate`/`promptTemplate` override them, `skipPermissions` starts Claude with `--dangerously-skip-permissions` where the root allows it (see [Permissions](#permissions); without it, a tool call that needs approval waits for the user: `WaitingPermission`), and `model` overrides the action's model.
 
 ### Scripts
 
@@ -331,7 +358,7 @@ Each project is stored in a folder under its root:
 {root}/{folder}/
 ├── .godmode/
 │   ├── status.json      # Current project state
-│   ├── settings.json    # Per-project settings (e.g. skip-permissions)
+│   ├── settings.json    # Per-project settings (action, permission mode, skip-permissions asked for)
 │   ├── input.jsonl      # User input log
 │   ├── output.jsonl     # Claude output log
 │   ├── output-generation # A GUID, new on each create: which output.jsonl a client's offset is in
