@@ -148,7 +148,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         services.AddSignalR();
         services.AddSingleton<IHubContext<ProjectHub, IProjectHubClient>>(hub);
         services.AddSingleton(configuration);
-        services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
+        services.AddSingleton<ClaudeProcessManager>();
+        services.AddSingleton<HoldingProcessManager>();
+        services.AddSingleton<IClaudeProcessManager>(provider => provider.GetRequiredService<HoldingProcessManager>());
         services.AddSingleton<IStatusUpdater, StatusUpdater>();
         services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
@@ -189,6 +191,12 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     public IClaudeProcessManager ProcessManager => _services.GetRequiredService<IClaudeProcessManager>();
 
+    /// <summary>
+    /// Holds the next launch (a create's or a resume's) after its claim, before its process is
+    /// started, until <see cref="LaunchHold.Release"/>.
+    /// </summary>
+    public LaunchHold HoldNextLaunch() => _services.GetRequiredService<HoldingProcessManager>().HoldNext();
+
     /// <summary>Opens a client connection to the hub.</summary>
     public HarnessConnection Connect(string connectionId) =>
         new(connectionId, Hub, Projects, _services.GetRequiredService<ILogger<ProjectHub>>());
@@ -207,6 +215,10 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public ProjectInfo ProjectInfo(string projectId) =>
         Projects.ValidateProjectToken(projectId, GodModeMcpEntry.Of(Launches(projectId)[^1]).Token)
         ?? throw new InvalidOperationException($"project {projectId} does not accept its launch's token");
+
+    /// <summary>The server's own record of a project, whether or not a launch of it has recorded anything.</summary>
+    public ProjectInfo Tracked(string projectId) =>
+        ((ProjectManager)Projects).Tracked(projectId) ?? throw new InvalidOperationException($"project {projectId} is not tracked");
 
     /// <summary>Polls the in-memory status until it reaches <paramref name="state"/>.</summary>
     public async Task<ProjectStatus> WaitForStateAsync(string projectId, ProjectState state, TimeSpan? timeout = null)
@@ -329,6 +341,39 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             """;
     }
 
+    /// <summary>The real <see cref="ClaudeProcessManager"/>, whose next launch a test can hold before it starts its process.</summary>
+    private sealed class HoldingProcessManager(ClaudeProcessManager inner) : IClaudeProcessManager
+    {
+        private LaunchHold? _next;
+
+        public LaunchHold HoldNext() => _next = new LaunchHold();
+
+        private async Task PassAsync()
+        {
+            if (Interlocked.Exchange(ref _next, null) is { } hold) await hold.WaitAsync();
+        }
+
+        public async Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
+            Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null)
+        {
+            await PassAsync();
+            return await inner.StartClaudeProcessAsync(project, initialPrompt, cancellationToken, extraEnvironment, extraArgs);
+        }
+
+        public async Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken,
+            Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null)
+        {
+            await PassAsync();
+            return await inner.ResumeClaudeProcessAsync(project, cancellationToken, extraEnvironment, extraArgs);
+        }
+
+        public Task SendInputAsync(ProjectInfo project, string input) => inner.SendInputAsync(project, input);
+        public Task StopProcessAsync(ProjectInfo project, TimeSpan? grace = null) => inner.StopProcessAsync(project, grace);
+        public Task SettleAsync(ProjectInfo project) => inner.SettleAsync(project);
+        public TimeSpan StopGracePeriod => inner.StopGracePeriod;
+        public bool IsProcessRunning(int processId) => inner.IsProcessRunning(processId);
+    }
+
     public async ValueTask DisposeAsync()
     {
         foreach (var id in _projectIds)
@@ -339,5 +384,23 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         await _services.DisposeAsync();
         foreach (var stopped in _stopped) await stopped.DisposeAsync();
         ServerProcess.DeleteWorkDir(_workDir);
+    }
+}
+
+/// <summary>A launch held before its process starts: see <see cref="LifecycleHarness.HoldNextLaunch"/>.</summary>
+internal sealed class LaunchHold
+{
+    private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Completes when the launch has come to the hold.</summary>
+    public Task Reached => _reached.Task;
+
+    public void Release() => _released.TrySetResult();
+
+    internal Task WaitAsync()
+    {
+        _reached.TrySetResult();
+        return _released.Task;
     }
 }

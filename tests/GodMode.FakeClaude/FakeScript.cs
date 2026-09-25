@@ -32,6 +32,13 @@ public static class FakeClaudeEnvironment
     /// parent is gone. Followed by the sidecar's path and the launch's pid.
     /// </summary>
     public const string DetachFlag = "--fake-detach";
+
+    /// <summary>
+    /// Windows: raises Ctrl+C (<c>ctrl-c</c>) or Ctrl+Break (<c>ctrl-break</c>) in the console of the
+    /// process whose id follows, as that key pressed in its terminal would, and exits 0 if it did.
+    /// A process can only raise console events in its own console, so a test borrows this one's.
+    /// </summary>
+    public const string RaiseFlag = "--fake-raise";
 }
 
 /// <summary>One step of a fake claude script.</summary>

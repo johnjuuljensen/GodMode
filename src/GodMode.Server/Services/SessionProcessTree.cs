@@ -230,6 +230,9 @@ internal abstract class SessionProcessTree : IDisposable
         SetConsoleCtrlHandler(IgnoreConsoleEvent, true);
         var raised = GenerateConsoleCtrlEvent(CtrlBreakEvent, 0);
         var error = raised ? null : new Win32Exception().Message;
+        // The console runs the handlers on a thread of its own: leaving before it has run here would
+        // end this process as the event's casualty
+        if (raised) ConsoleEventPassed.Wait(TimeSpan.FromSeconds(5));
         FreeConsole();
         if (error != null) Console.Error.WriteLine($"Cannot raise Ctrl+Break in the console of process {pid}: {error}");
         return raised ? 0 : 1;
@@ -239,8 +242,15 @@ internal abstract class SessionProcessTree : IDisposable
 
     private delegate bool ConsoleEventHandler(uint eventType);
 
+    /// <summary>Set once the event has reached the helper too, so it has reached every process on the console.</summary>
+    private static readonly ManualResetEventSlim ConsoleEventPassed = new();
+
     /// <summary>Kept in a field: the console calls it after the call that registered it returns.</summary>
-    private static readonly ConsoleEventHandler IgnoreConsoleEvent = _ => true;
+    private static readonly ConsoleEventHandler IgnoreConsoleEvent = _ =>
+    {
+        ConsoleEventPassed.Set();
+        return true;
+    };
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(uint processId);

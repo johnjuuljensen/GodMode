@@ -308,7 +308,8 @@ public class ProjectLifecycleTests
 
     /// <summary>
     /// A delete that its script refuses (godmode-dev's refuses with uncommitted changes) leaves the
-    /// project as it was: resumed, its output is still persisted and still moves its state on.
+    /// project Stopped, and still a project: resumed, its output is still persisted and still moves
+    /// its state on.
     /// </summary>
     [Fact]
     public async Task DeleteRefusedByItsScript_ThenResume_StillHandlesOutput()

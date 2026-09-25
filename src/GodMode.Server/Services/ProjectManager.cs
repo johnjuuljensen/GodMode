@@ -457,6 +457,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return summaries.ToArray();
     }
 
+    /// <summary>The server's record of a tracked project, for the tests; null when it is not tracked.</summary>
+    internal ProjectInfo? Tracked(string projectId) => _projects.GetValueOrDefault(projectId);
+
     public async Task<ProjectStatus> GetStatusAsync(string projectId)
     {
         if (!_projects.TryGetValue(projectId, out var project))

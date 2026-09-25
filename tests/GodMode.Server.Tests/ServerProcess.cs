@@ -33,6 +33,7 @@ internal sealed class ServerProcess : IDisposable
     public string Output { get { lock (_output) return _output.ToString(); } }
     public bool HasExited => _process.HasExited;
     public int ExitCode => _process.ExitCode;
+    public int ProcessId => _process.Id;
 
     /// <summary>Creates a fresh work directory (with a roots dir) for one server run.</summary>
     public static string CreateWorkDir(string prefix)
@@ -52,24 +53,31 @@ internal sealed class ServerProcess : IDisposable
     /// Starts the server with <see cref="ApiKey"/>, another key, or (null) none configured, when it
     /// generates one into <see cref="KeyFilePath"/>. Auth-related settings are always passed explicitly
     /// and <c>CODESPACES</c> is cleared unless overridden, so a developer's environment cannot leak in.
+    /// With <paramref name="ownTerminal"/> the server has a console of its own (Windows) or a session
+    /// and process group of its own (<c>setsid</c>, Linux), as a server run in a terminal does: what
+    /// a keypress there reaches, a test can reach without reaching itself.
     /// </summary>
     public static ServerProcess Start(
         string workDir,
         string urls,
         string? apiKey = ApiKey,
-        IReadOnlyDictionary<string, string>? environment = null)
+        IReadOnlyDictionary<string, string>? environment = null,
+        bool ownTerminal = false)
     {
         var rootsDir = Path.Combine(workDir, "roots");
         var serverDll = Path.Combine(AppContext.BaseDirectory, "GodMode.Server.dll");
         var dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } hostPath ? hostPath : "dotnet";
+        var setsid = ownTerminal && !OperatingSystem.IsWindows();
 
-        var psi = new ProcessStartInfo(dotnet)
+        var psi = new ProcessStartInfo(setsid ? "setsid" : dotnet)
         {
             WorkingDirectory = workDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
+            CreateNoWindow = ownTerminal,
         };
+        if (setsid) psi.ArgumentList.Add(dotnet);
         psi.ArgumentList.Add(serverDll);
         psi.ArgumentList.Add($"--ProjectRootsDir={rootsDir}");
         psi.ArgumentList.Add($"--Urls={urls}");

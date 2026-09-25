@@ -32,6 +32,10 @@ if (args is [FakeClaudeEnvironment.DetachFlag, var detachRecord, var launchPid])
     return 0;
 }
 
+// A key pressed in another process's terminal, for a test (Windows)
+if (args is [FakeClaudeEnvironment.RaiseFlag, var raisePid, var consoleEvent])
+    return ConsoleEvents.Raise(uint.Parse(raisePid), consoleEvent == "ctrl-break" ? ConsoleEvents.CtrlBreak : ConsoleEvents.CtrlC);
+
 var scriptPath = ArgValue(FakeClaudeEnvironment.ScriptFlag) ?? Environment.GetEnvironmentVariable(FakeClaudeEnvironment.Script);
 var recordPath = ArgValue(FakeClaudeEnvironment.RecordFlag) ?? Environment.GetEnvironmentVariable(FakeClaudeEnvironment.Record);
 if (string.IsNullOrEmpty(scriptPath) || string.IsNullOrEmpty(recordPath))
@@ -247,4 +251,53 @@ string? ArgValue(string flag)
 internal sealed class RecordingProgress(Action<ProgressNotificationValue> report) : IProgress<ProgressNotificationValue>
 {
     public void Report(ProgressNotificationValue value) => report(value);
+}
+
+/// <summary>Raises a console event in another process's console: see <see cref="FakeClaudeEnvironment.RaiseFlag"/>.</summary>
+internal static class ConsoleEvents
+{
+    public const uint CtrlC = 0;
+    public const uint CtrlBreak = 1;
+
+    private delegate bool Handler(uint eventType);
+
+    /// <summary>Set once the event has reached this process too, so it has reached every process on the console.</summary>
+    private static readonly ManualResetEventSlim Passed = new();
+
+    /// <summary>This process is on that console too while it raises the event, and lets it pass.</summary>
+    private static readonly Handler Ignore = _ =>
+    {
+        Passed.Set();
+        return true;
+    };
+
+    public static int Raise(uint pid, uint consoleEvent)
+    {
+        FreeConsole();
+        if (!AttachConsole(pid))
+        {
+            Console.Error.WriteLine($"Cannot attach to the console of process {pid}: error {Marshal.GetLastPInvokeError()}");
+            return 1;
+        }
+        SetConsoleCtrlHandler(Ignore, true);
+        var raised = GenerateConsoleCtrlEvent(consoleEvent, 0);
+        var error = Marshal.GetLastPInvokeError();
+        // The console runs the handlers on a thread of its own: leaving first would make this process its casualty
+        if (raised) Passed.Wait(TimeSpan.FromSeconds(5));
+        FreeConsole();
+        if (!raised) Console.Error.WriteLine($"Cannot raise event {consoleEvent} in the console of process {pid}: error {error}");
+        return raised ? 0 : 1;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AttachConsole(uint processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool FreeConsole();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetConsoleCtrlHandler(Handler handler, bool add);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GenerateConsoleCtrlEvent(uint consoleEvent, uint processGroupId);
 }
