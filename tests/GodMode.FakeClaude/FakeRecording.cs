@@ -8,7 +8,9 @@ namespace GodMode.FakeClaude;
 /// launched with, as it was then), then a <c>stdin</c> line per line received, a <c>tools</c> line
 /// with what <c>tools/list</c> returned on its first permission prompt, a <c>progress</c> line per
 /// progress notification a prompt got, a <c>permission</c> line per permission prompt answered
-/// (the answer's JSON, <c>cancelled</c>, or <c>error: …</c> when the call failed), then an
+/// (the answer's JSON, <c>cancelled</c>, or <c>error: …</c> when the call failed), an
+/// <c>interrupt</c> line per interrupt it received (the signal's name: SIGINT for Ctrl+C,
+/// SIGQUIT for Ctrl+Break), a <c>child</c> line per child it started (the child's pid), then an
 /// <c>exit</c> line if it exits on its own (a killed fake writes none).
 /// </summary>
 public sealed record RecordLine(
@@ -25,6 +27,8 @@ public sealed record RecordLine(
     public const string Tools = "tools";
     public const string Progress = "progress";
     public const string Permission = "permission";
+    public const string Interrupt = "interrupt";
+    public const string Child = "child";
     public const string Exited = "exit";
 }
 
@@ -38,7 +42,9 @@ public sealed record FakeLaunch(
     IReadOnlyList<string> Permissions,
     string? McpConfig,
     string? Tools,
-    IReadOnlyList<string> Progress)
+    IReadOnlyList<string> Progress,
+    IReadOnlyList<string> Interrupts,
+    IReadOnlyList<int> Children)
 {
     /// <summary>The value following <paramref name="flag"/> in argv, or null.</summary>
     public string? ArgValue(string flag)
@@ -99,7 +105,9 @@ public static class FakeRecording
                     own.Where(l => l.Kind == RecordLine.Permission).Select(l => l.Line ?? "").ToList(),
                     start.McpConfig,
                     own.FirstOrDefault(l => l.Kind == RecordLine.Tools)?.Line,
-                    own.Where(l => l.Kind == RecordLine.Progress).Select(l => l.Line ?? "").ToList());
+                    own.Where(l => l.Kind == RecordLine.Progress).Select(l => l.Line ?? "").ToList(),
+                    own.Where(l => l.Kind == RecordLine.Interrupt).Select(l => l.Line ?? "").ToList(),
+                    own.Where(l => l.Kind == RecordLine.Child).Select(l => int.Parse(l.Line!)).ToList());
             })
             .ToList();
     }

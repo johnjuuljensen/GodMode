@@ -214,6 +214,26 @@ public class AttentionTests
         Assert.Equal(2, harness.Hub.AttentionPushes.Count);
     }
 
+    /// <summary>Deleting a project that needs the user pushes the list without it.</summary>
+    [Fact]
+    public async Task DeletingAProjectThatNeedsTheUser_PushesTheListWithoutIt()
+    {
+        await using var harness = new LifecycleHarness(Asking());
+        var asking = await harness.CreateProjectAsync("asking");
+        await harness.WaitForStateAsync(asking.Id, ProjectState.WaitingInput);
+        harness.UseScript(Finishing("Done."));
+        var finished = await harness.CreateProjectAsync("finished");
+        await harness.WaitForStateAsync(finished.Id, ProjectState.Idle);
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.Hub.AttentionPushes.Count > 0 && harness.Hub.AttentionPushes[^1].Count == 2), null,
+            () => $"the list with both was never pushed: {string.Join(" | ", harness.Hub.AttentionPushes.Select(Describe))}");
+
+        await harness.Projects.DeleteProjectAsync(asking.Id);
+
+        var pushed = harness.Hub.AttentionPushes[^1];
+        Assert.Equal([finished.Id], pushed.Select(i => i.ProjectId));
+        Assert.Equal([finished.Id], harness.Projects.GetAttention().Select(i => i.ProjectId));
+    }
+
     /// <summary>Texts are plain, for a phone or a voice: code blocks go, and they are cut to about 500 characters.</summary>
     [Fact]
     public void Text_IsPlain_AndShort()

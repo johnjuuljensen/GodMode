@@ -39,7 +39,22 @@ public interface IClaudeProcessManager
 
     Task SendInputAsync(ProjectInfo project, string input);
 
-    /// <summary>Kills the process tree; returns once its exit is on the pipeline, after all its output.</summary>
-    Task StopProcessAsync(ProjectInfo project);
+    /// <summary>
+    /// Stops the process, gracefully first: interrupts it, waits up to <paramref name="grace"/> (the
+    /// configured grace period by default) for it to exit, then kills its whole process tree. Returns
+    /// once its exit is on the pipeline, after all its output.
+    /// </summary>
+    Task StopProcessAsync(ProjectInfo project, TimeSpan? grace = null);
+
+    /// <summary>
+    /// Waits while the project's process has exited but its exit is not handled yet: its output still
+    /// draining, or a fresh session taking its place. After it, <see cref="IsProcessRunning"/> of the
+    /// project's process says whether it has one.
+    /// </summary>
+    Task SettleAsync(ProjectInfo project);
+
+    /// <summary>How long a stop gives claude to exit once interrupted.</summary>
+    TimeSpan StopGracePeriod { get; }
+
     bool IsProcessRunning(int processId);
 }

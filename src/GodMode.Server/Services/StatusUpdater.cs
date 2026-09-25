@@ -23,7 +23,16 @@ public class StatusUpdater : IStatusUpdater
 
     public async Task SaveStatusAsync(ProjectInfo project)
     {
-        var statusPath = Path.Combine(project.ProjectPath, ".godmode", "status.json");
+        // A project without one has nowhere to keep its status: a create that failed before its
+        // script made the folder, or a folder removed outside GodMode. Making it would make the
+        // folder, which a create script expects not to find. Its status is in memory until it is deleted
+        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
+        if (!Directory.Exists(godModePath))
+        {
+            _logger.LogDebug("Project {ProjectId} has no {Path}; its status is not saved", project.Status.Id, godModePath);
+            return;
+        }
+        var statusPath = Path.Combine(godModePath, "status.json");
 
         var json = JsonSerializer.Serialize(project.Status, JsonDefaults.Options);
 
@@ -57,6 +66,11 @@ public class StatusUpdater : IStatusUpdater
 
             // Error events are stderr lines shown in the UI; the process's exit and error results
             // decide whether the session failed
+
+            // claude's answer to the interrupt a stop sends: the stop decides the state
+            case OutputEventType.Result when IsErrorResult(outputEvent) && process.Stopping:
+                process.LastAssistantText = null;
+                break;
 
             case OutputEventType.Result when IsErrorResult(outputEvent):
                 status = status with
