@@ -8,6 +8,11 @@ $projectPath = $env:GODMODE_PROJECT_PATH
 git -C $barePath fetch origin
 if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit code $LASTEXITCODE)" }
 
+# A GodMode project is there already: it is not stale, and removing it would destroy its worktree
+if (Test-Path (Join-Path $projectPath '.godmode')) {
+    throw "Project folder '$projectPath' is in use: it is a GodMode project. Delete that project first, or carry on in it."
+}
+
 # Clean up stale state from previous failed attempts
 if (Test-Path $projectPath) {
     Write-Output "Removing stale directory '$projectPath'..."
