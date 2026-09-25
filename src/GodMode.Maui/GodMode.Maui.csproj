@@ -43,27 +43,17 @@
 		<ProjectReference Include="..\SignalR.Proxy\SignalR.Proxy.csproj" />
 	</ItemGroup>
 
-	<!-- Track React sources for incremental build -->
+	<!-- The React client: GodMode.Client.React.csproj builds it into dist/, once per build for every target
+	     framework here and GodMode.Server alike -->
 	<ItemGroup>
-		<_ReactSource Include="$(_ReactDir)\src\**\*" />
-		<_ReactSource Include="$(_ReactDir)\index.html" />
-		<_ReactSource Include="$(_ReactDir)\package.json" />
-		<_ReactSource Include="$(_ReactDir)\vite.config.ts" />
-		<_ReactSource Include="$(_ReactDir)\tsconfig*.json" />
+		<ProjectReference Include="..\GodMode.Client.React\GodMode.Client.React.csproj"
+		                  ReferenceOutputAssembly="false" Private="false" />
 	</ItemGroup>
 
-	<!-- Build React and copy dist to wwwroot (incremental: skipped when sources unchanged) -->
-	<Target Name="BuildReact"
-	        BeforeTargets="PrepareForBuild"
-	        Inputs="@(_ReactSource)"
-	        Outputs="$(_ReactDir)\dist\index.html">
-		<Message Importance="high" Text="Building React client..." />
-		<Exec Command="npm run build" WorkingDirectory="$(_ReactDir)" />
-	</Target>
-
-	<!-- Copy React dist to Resources/Raw/wwwroot so the static MauiAsset glob picks them up -->
+	<!-- Copy React dist to Resources/Raw/wwwroot so the static MauiAsset glob picks them up.
+	     ResolveProjectReferences builds the client (incremental: skipped when sources unchanged) -->
 	<Target Name="CopyReactToWwwroot"
-	        DependsOnTargets="BuildReact"
+	        DependsOnTargets="ResolveProjectReferences"
 	        BeforeTargets="PrepareForBuild"
 	        Inputs="$(_ReactDir)\dist\index.html"
 	        Outputs="Resources\Raw\wwwroot\index.html">
