@@ -42,6 +42,53 @@ public sealed class ProjectProcess
 
     public CancellationTokenSource? Cancellation { get; set; }
 
+    private TaskCompletionSource? _launching;
+
+    /// <summary>
+    /// A launch is in flight: claimed, and neither its process id nor its failure recorded yet. A
+    /// claim does not take the project's Running for a stale one while this is set.
+    /// </summary>
+    public bool Launching { get { lock (_gate) return _launching != null; } }
+
+    /// <summary>Marks a launch in flight until <see cref="EndLaunching"/>; false when one already is.</summary>
+    public bool BeginLaunching()
+    {
+        lock (_gate)
+        {
+            if (_launching != null) return false;
+            _launching = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            return true;
+        }
+    }
+
+    /// <summary>The launch in flight has its process id, or failed.</summary>
+    public void EndLaunching()
+    {
+        TaskCompletionSource? launching;
+        lock (_gate)
+        {
+            launching = _launching;
+            _launching = null;
+        }
+        launching?.TrySetResult();
+    }
+
+    /// <summary>Completes when no launch is in flight.</summary>
+    public Task WhenLaunched() { lock (_gate) return _launching?.Task ?? Task.CompletedTask; }
+
+    private volatile bool _stopping;
+
+    /// <summary>
+    /// A stop has begun, and claude has been, or is being, interrupted, until the next launch. Its
+    /// answer to the interrupt, a turn ended in error, is not the session failing: the stop decides
+    /// the project's state.
+    /// </summary>
+    public bool Stopping
+    {
+        get => _stopping;
+        set => _stopping = value;
+    }
+
     /// <summary>
     /// The most recent assistant text content block seen on the stream, used by
     /// the deterministic question detector to decide (on <c>result</c>) whether
@@ -112,7 +159,11 @@ public sealed class ProjectProcess
     /// </summary>
     public ExitOnItsOwn? LastExit { get; set; }
 
-    /// <summary>Held while a reply resumes the project, so two replies cannot launch two processes.</summary>
+    /// <summary>
+    /// Held by whatever launches or stops the project's process (create, resume, a reply that
+    /// resumes, stop, delete, the start carrying on after a restart), so one launch happens at a time
+    /// and a stop comes before a launch or after it, never in the middle of one.
+    /// </summary>
     public SemaphoreSlim ResumeLock { get; } = new(1, 1);
 
     private Task? _consumer;
@@ -152,9 +203,12 @@ public abstract record PipelineItem
 
 /// <param name="ProcessId">The process that exited.</param>
 /// <param name="ExitCode">Its exit code.</param>
-/// <param name="Killed">The server killed it (Stop, shutdown, a relaunch), which then decides the project's state.</param>
+/// <param name="Stopped">
+/// The server stopped it (Stop, delete, shutdown), whether it exited when interrupted or was killed
+/// after the grace period; whoever stopped it decides the project's state.
+/// </param>
 /// <param name="Stderr">The last lines it wrote to stderr, oldest first; null if it wrote none.</param>
-public sealed record ProcessExit(int ProcessId, int ExitCode, bool Killed, string? Stderr);
+public sealed record ProcessExit(int ProcessId, int ExitCode, bool Stopped, string? Stderr);
 
 /// <param name="At">When its exit was handled.</param>
 /// <param name="Before">The project's status before the exit changed it.</param>

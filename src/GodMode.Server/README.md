@@ -296,7 +296,32 @@ When the server stops, it stops every project, and one that was `Running`, `Wait
 
 A project the user stopped, or that was `Idle`, `Stopped` or `Error` when the server stopped, is not resumed. A resume that fails is `Error` with `LastError`, as any resume is (a root config the launch cannot use, a claude that exits at once), and is not tried again. Any launch clears `StateAtShutdown`, and so does a stop by the user. A project waiting its turn is decided when it comes: one the user has stopped, resumed or answered meanwhile is left as it is. A shutdown while the start is still resuming launches nothing more, and the projects not resumed yet keep their marker for the next start. The marker is only a field in `status.json`: a `status.json` restored from a backup or copied from another machine carries it, and that project is resumed on the next start.
 
-A Ctrl+C on a server run in a terminal reaches claude too, and claude may exit before the server's shutdown begins. An exit on its own no more than `ExitBeforeShutdownWindowSeconds` (default 5) before the shutdown, with nothing changed since, counts as stopped by it: the project keeps its question and is resumed like the rest. A server that is killed (no shutdown runs) leaves no `StateAtShutdown`, and its projects are recovered `Stopped`.
+Sessions are off the server's console (see [Stopping a Session](#stopping-a-session)), so a Ctrl+C in the server's terminal reaches claude only through the server's shutdown. A claude that exits on its own just before a shutdown still counts as stopped by it: an exit no more than `ExitBeforeShutdownWindowSeconds` (default 5) before the shutdown, with nothing changed since, and the project keeps its question and is resumed like the rest. A server that is killed (no shutdown runs) leaves no `StateAtShutdown`, and its projects are recovered `Stopped`.
+
+## Sessions
+
+### One Project, One Claude
+
+A project has at most one claude process at a time.
+
+- **A create does not make a project that is there.** It is refused ("is in use") when a tracked project has its ID or its folder (on Windows compared as Windows compares paths, so `Fix` is the folder `fix`), before a folder is reused or any script runs, and nothing is written. So is a create script's `project_path` that is a tracked project's folder: the create is then `Error`, under its own ID, saying why, and the project in that folder keeps its claude and its files. "Reuse folder" (`__reuseExisting`) is for a folder no tracked project uses. A create that failed leaves its `Error` project, with its ID: delete it before creating it again.
+- **One launch or stop at a time.** Create, resume, a reply that resumes (`ReplyAndResume`), stop, delete and the start carrying on after a restart take the project's lock, so a stop comes before a launch or after it, never in the middle of one, and two resumes launch one claude. A launch still starting, or a claude whose exit is not handled yet, is waited for, never taken for a stale `Running`.
+- **A resume with nothing to say is `Idle`.** `ResumeProject` on a stopped project starts claude on its session, and claude writes nothing until it has input: the project is `Idle` ("resumed, waiting for you") until the user writes, rather than `Running` with nothing happening.
+- **A launch that does not start says why.** A missing executable, a root config the launch cannot use, or a create script that failed leaves the project `Error` with `LastError`.
+
+### Stopping a Session
+
+Each session runs in a process tree of its own, off the server's console: on Windows claude has a hidden console of its own and is in a Job Object; on Linux it is started through `setsid`, as the leader of a session and process group of its own. A Ctrl+C in the server's terminal reaches the server alone, which then stops its sessions itself. Without `setsid` on the `PATH` (macOS), claude stays in the server's process group, and a stop kills claude and the children it still has.
+
+A stop (`StopProject`, `DeleteProject`, and the server's shutdown) is graceful first:
+
+1. **claude is interrupted, and its input closed.** On Windows the interrupt is Ctrl+Break raised in claude's console; the server starts itself as a helper to raise it (`GodMode.Server.exe --godmode-console-break <pid>`), since a process can raise a console event only in its own console. Elsewhere it is SIGINT to claude's process group.
+2. **claude has `StopGracePeriodSeconds` (default 10) to exit.** Its answer to the interrupt, a turn ended as interrupted, does not make the project `Error`.
+3. **Then its whole tree is killed**, the Job Object or the process group: every process the session started, one whose parent is gone included. What is left of the tree when claude exits, whether it exited on the interrupt or on its own, is killed then too.
+
+The interrupt is the one claude honours whatever the server was started from. Measured with claude 2.1.282 on Windows: Ctrl+Break in its console ends it in about a second, between turns, while it generates, or while a tool runs, with its session's transcript ending on a whole line and the session resumable. A Ctrl+C there does the same, but a claude whose server was started with Ctrl+C ignored (as some launchers start programs, and Windows passes that on to children) ignores it too. Closing its input alone ends it only after its turn, however long that takes.
+
+The server's shutdown stops every session at once, within its 15-second bound: the grace period is shortened to leave the kill 3 seconds. A delete stops claude before its scripts run, denies a permission prompt still waiting, clears the question, and records `Stopped`: a delete a script refuses leaves the project `Stopped`, and a restart does not resume it. Root scripts that run past their timeout are killed at once, without an interrupt.
 
 ## Project Folder Structure
 
@@ -351,11 +376,11 @@ Projects:
 - `Task SendInput(projectId, input)` — Send input to Claude (while a permission prompt or question waits, it answers that instead)
 - `Task RespondToPermission(projectId, requestId, decision)` — Allow or deny the project's `PendingPermission`
 - `Task AnswerQuestion(projectId, requestId, answers)` — Answer the project's `PendingQuestion` (question text → chosen label or free text)
-- `Task StopProject(projectId)` — Stop running project
-- `Task ResumeProject(projectId)` — Resume stopped project
+- `Task StopProject(projectId)` — Stop running project: interrupt claude, then kill its process tree after `StopGracePeriodSeconds` (see [Stopping a Session](#stopping-a-session))
+- `Task ResumeProject(projectId)` — Resume stopped project; it is `Idle` until the user writes
 - `Task SubscribeProject(projectId, fromOffset)` — Replay `output.jsonl` from `fromOffset` (the byte offset after the last line the client has; 0 for all, `-N` for the last N turns) in `OutputBatch` messages, then `OutputReplayComplete`, then live `OutputReceived` lines, each line once and in order
 - `Task UnsubscribeProject(projectId)` — Unsubscribe from output
-- `Task DeleteProject(projectId, force)` — Run delete scripts and remove the project
+- `Task DeleteProject(projectId, force)` — Stop the project, run delete scripts and remove it; a refused delete leaves it `Stopped`
 
 Attention:
 - `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Review`, `Finished`), oldest first, with a short plain `Text`; the same after a restart
@@ -404,6 +429,7 @@ Utility:
 
 ### Claude Process Not Starting
 
+- The project is `Error`, and its `LastError` says why
 - Ensure `claude` command is in PATH
 - Check Claude CLI is installed: `claude --version`
 - Review logs in `.godmode-logs/` under the working directory

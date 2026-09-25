@@ -144,10 +144,11 @@ public class ProjectIdentityTests
         Assert.Contains("--dangerously-skip-permissions", launch.Argv);
         Assert.Equal(id, GodModeMcpEntry.Of(launch).ProjectId);
         Assert.NotNull(harness.ProjectInfo(id));
+        // A bare resume is Idle before the resumed turn too: it is its output that says the turn ran
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadOutputFile(id).Contains("Resumed.")), null,
+            () => $"the resumed turn is not in output.jsonl.\n{harness.Describe(id)}");
         await harness.WaitForStateAsync(id, ProjectState.Idle);
-        var output = harness.ReadOutputFile(id);
-        Assert.Contains("Before the ID changed.", output);
-        Assert.Contains("Resumed.", output);
+        Assert.Contains("Before the ID changed.", harness.ReadOutputFile(id));
     }
 
     /// <summary>A root whose name begins with another root's name keeps its own projects.</summary>
