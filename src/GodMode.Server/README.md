@@ -30,6 +30,17 @@ Profiles live in `{ProjectRootsDir}/.profiles/` (see `docs/UNIFIED-ARCHITECTURE.
 
 Every setting can also come from an environment variable (`ProjectRootsDir`, `Authentication__ApiKey`) or the command line (`--ProjectRootsDir=/srv/roots`).
 
+### Executables
+
+The server starts two executables, each named by a setting: a name looked up on the server's `PATH`, or a full path.
+
+| Setting | Starts | Default | Docker image |
+|---|---|---|---|
+| `Claude:Executable` (`Claude__Executable`) | every session | `claude` | `/usr/bin/claude` |
+| `PowerShell:Executable` (`PowerShell__Executable`) | `.ps1` root scripts | `pwsh` | `/usr/bin/pwsh` |
+
+A lookup takes the first match on the `PATH`, so a directory on it that a session can write (`~/.local/bin`, where Claude Code's installer puts `claude`) can decide what runs. Where that matters, give full paths to files the session cannot write, as the Docker image does. On a PC, a VM or a codespace, the server runs as the same user as its sessions and the defaults are the usual lookup. The server starts no Node itself. `.sh` scripts run under `bash`, found on the `PATH`.
+
 ### Authentication and binding
 
 Every endpoint and the SignalR hub require authentication, whatever the server is bound to, loopback included: nothing on this machine gets in without the key either. Only `/health` and the React client's static files are anonymous, because the page has to load before you can enter the key. The server picks one mode at startup:
@@ -269,7 +280,7 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 - Windows: tries `.ps1`, `.cmd`, `.bat`
 - Linux/Mac: tries `.sh`, then `.ps1`
 
-`.ps1` runs under `pwsh`, `.sh` under `bash`, `.cmd`/`.bat` under `cmd`. A single `.ps1` therefore works everywhere; see the script constraints in `CLAUDE.md`. A script named with an explicit extension in the config (for example `"prepare": "scripts/prepare.ps1"`) is used as-is.
+`.ps1` runs under `pwsh` (`PowerShell:Executable`, see [Executables](#executables)), `.sh` under `bash`, `.cmd`/`.bat` under `cmd`. A single `.ps1` therefore works everywhere; see the script constraints in `CLAUDE.md`. A script named with an explicit extension in the config (for example `"prepare": "scripts/prepare.ps1"`) is used as-is.
 
 **Environment variables** available to all scripts:
 
@@ -383,6 +394,8 @@ Each project is stored in a folder under its root:
 └── (project files)      # Working directory for Claude
 ```
 
+**`.godmode/.gitignore` ignores everything in `.godmode`**, which holds the MCP config with the project's token while claude runs. The server makes sure of it when it sets up the project and on every launch, before it writes that config: it writes the file when missing (a checkout can bring a `.godmode/` without one), and appends the `*` rule to one that lacks it, keeping its lines.
+
 A project is a folder directly inside its root that has a `.godmode/status.json`. Nothing deeper is recovered, and the server moves no project folder anywhere.
 
 **Project ID.** A project is identified by `{profile}/{root}/{folder}`: where its folder is. Two projects with the same name in different roots or profiles are separate projects, with their own process, output and SignalR group. Clients treat the ID as opaque and pass it back as they received it. The server derives it from the folder's location on every start and writes it to `status.json`, so a folder that was moved, or whose root has moved to another profile, is recovered under its current ID. Nothing else in `.godmode` holds the ID.
@@ -411,7 +424,7 @@ cd publish
 ./GodMode.Server
 ```
 
-The machine also needs `claude` on the `PATH` and `pwsh` for root scripts. The server itself needs no Node. A repo whose `.mcp.json` starts MCP servers with `npx` needs it, as does one with a JavaScript toolchain.
+The machine also needs `claude` and, for root scripts, `pwsh`: on the `PATH`, or named by their settings ([Executables](#executables)). The server itself needs no Node. A repo whose `.mcp.json` starts MCP servers with `npx` needs it, as does one with a JavaScript toolchain.
 
 ## SignalR Hub API
 
