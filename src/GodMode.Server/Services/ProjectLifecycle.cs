@@ -89,6 +89,7 @@ public sealed class ProjectLifecycle
             previous.Dispose();
         }
         process.Cancellation = new CancellationTokenSource();
+        process.Stopping = false;
         EnsureConsumer(project);
         return process;
     }
@@ -112,18 +113,32 @@ public sealed class ProjectLifecycle
 
     public bool IsRunning(ProjectInfo project) => _processManager.IsProcessRunning(project.Process.ProcessId);
 
-    /// <summary>Kills the process tree; its output and exit are still handled, but change nothing after it.</summary>
-    public Task KillAsync(ProjectInfo project) => _processManager.StopProcessAsync(project);
+    /// <summary>How long a stop gives claude to exit once interrupted.</summary>
+    public TimeSpan StopGracePeriod => _processManager.StopGracePeriod;
 
     /// <summary>
-    /// Kills the process tree, then marks the project Stopped once every line it wrote has been
-    /// handled, so a result still queued cannot turn Stopped back into Idle. A shutdown passes what
-    /// the project was doing (<see cref="ActiveState"/>), for the next start to carry on with; a
-    /// stop by the user passes nothing, and its project is not resumed.
+    /// Waits until the project's process is either running or gone: a launch claimed has its process
+    /// or has failed, and an exit is handled (a fresh session that takes its place included). Then
+    /// <see cref="IsRunning"/> says whether it has one. Called under the project's resume lock.
     /// </summary>
-    public async Task StopAsync(ProjectInfo project, ProjectState? stateAtShutdown = null)
+    public async Task SettleAsync(ProjectInfo project)
     {
-        await KillAsync(project);
+        await project.Process.WhenLaunched();
+        await _processManager.SettleAsync(project);
+    }
+
+    /// <summary>
+    /// Stops the process, gracefully first (<see cref="IClaudeProcessManager.StopProcessAsync"/>,
+    /// within <paramref name="grace"/> when given), then marks the project Stopped once every line it
+    /// wrote has been handled, so a result still queued cannot turn Stopped back into Idle. Its output
+    /// and exit are still handled, but its answer to the interrupt and its exit change no state. A
+    /// shutdown passes what the project was doing (<see cref="ActiveState"/>), for the next start to
+    /// carry on with; a stop by the user passes nothing, and its project is not resumed.
+    /// </summary>
+    public async Task StopAsync(ProjectInfo project, ProjectState? stateAtShutdown = null, TimeSpan? grace = null)
+    {
+        project.Process.Stopping = true;
+        await _processManager.StopProcessAsync(project, grace);
         project.Process.DenyAllPending(StoppedMessage);
         await InOrderAsync(project, () => SetStatusAsync(project, status => WithoutPending(status) with
         {
@@ -368,17 +383,17 @@ public sealed class ProjectLifecycle
     /// <summary>
     /// The process ended on its own: Stopped if it exited cleanly with its turn over, Error with its
     /// last stderr otherwise. During shutdown it is Stopped, question kept. A process the server
-    /// killed changes nothing: whoever killed it decides.
+    /// stopped changes nothing: whoever stopped it decides.
     /// </summary>
     private async Task HandleExitAsync(ProjectInfo project, ProcessExit exit)
     {
         // A reply waiting for this launch's session to start waits no longer
         if (project.Process.ProcessId == 0)
-            project.Process.SessionEnded(exit.Killed
+            project.Process.SessionEnded(exit.Stopped
                 ? "claude was stopped before it started its session"
                 : $"claude exited before it started its session: {exit.Stderr ?? $"exit code {exit.ExitCode}"}");
 
-        if (exit.Killed) return;
+        if (exit.Stopped) return;
 
         var changed = false;
         try

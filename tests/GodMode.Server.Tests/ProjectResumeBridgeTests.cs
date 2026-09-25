@@ -157,7 +157,9 @@ public class ProjectResumeBridgeTests
         }
 
         public Task SendInputAsync(ProjectInfo project, string input) => Task.CompletedTask;
-        public Task StopProcessAsync(ProjectInfo project) => Task.CompletedTask;
+        public Task StopProcessAsync(ProjectInfo project, TimeSpan? grace = null) => Task.CompletedTask;
+        public Task SettleAsync(ProjectInfo project) => Task.CompletedTask;
+        public TimeSpan StopGracePeriod => TimeSpan.Zero;
         public bool IsProcessRunning(int processId) => Running;
     }
 }

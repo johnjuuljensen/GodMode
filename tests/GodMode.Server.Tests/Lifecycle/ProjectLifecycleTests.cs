@@ -351,7 +351,10 @@ public class ProjectLifecycleTests
         var fresh = await harness.WaitForStdinAsync(created.Id, index: 2);
         Assert.Equal(sessionId, fresh.ArgValue("--session-id"));
         Assert.StartsWith("Continue from where we left off", PromptText(Assert.Single(fresh.Stdin)));
-        await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Idle, skip: pushedBefore);
+        // Idle from the bare resume first; the fresh session's turn then runs, and ends Idle again
+        var running = await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Running, skip: pushedBefore);
+        await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Idle,
+            skip: harness.Hub.StatusPushes(created.Id).ToList().LastIndexOf(running) + 1);
         Assert.True(File.Exists(configPath), $"{configPath} should exist while the fresh session runs.\n{harness.Describe(created.Id)}");
         Assert.Equal(fresh.Pid, harness.ProjectInfo(created.Id).Process.ProcessId);
         Assert.DoesNotContain(harness.Hub.StatusPushes(created.Id), s => s.State == ProjectState.Error);

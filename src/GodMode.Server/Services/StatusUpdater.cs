@@ -58,6 +58,11 @@ public class StatusUpdater : IStatusUpdater
             // Error events are stderr lines shown in the UI; the process's exit and error results
             // decide whether the session failed
 
+            // claude's answer to the interrupt a stop sends: the stop decides the state
+            case OutputEventType.Result when IsErrorResult(outputEvent) && process.Stopping:
+                process.LastAssistantText = null;
+                break;
+
             case OutputEventType.Result when IsErrorResult(outputEvent):
                 status = status with
                 {

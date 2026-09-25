@@ -82,7 +82,8 @@ public class NoProvisioningTests
         Assert.Contains(" Warning RootConfigReader: ", warning);
         Assert.Contains(Path.Combine(harness.RootPath, ".godmode-root", "config.json"), warning);
         Assert.Contains("which GodMode ignores", warning);
-        Assert.Equal(ProjectState.Running, (await harness.Projects.GetStatusAsync(created.Id)).State);
+        // The resumed fake starts its session at once, which a bare resume waits for
+        await harness.WaitForStateAsync(created.Id, ProjectState.Running);
     }
 
     [Fact]

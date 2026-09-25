@@ -9,6 +9,10 @@ using ModelContextProtocol.AspNetCore;
 using Serilog;
 using Serilog.Events;
 
+// Not the server: the helper a stop starts on Windows to interrupt a session in its own console
+if (args is [SessionProcessTree.ConsoleBreakFlag, ..])
+    return SessionProcessTree.RunConsoleBreakHelper(args);
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Host.UseSerilog((context, configuration) =>

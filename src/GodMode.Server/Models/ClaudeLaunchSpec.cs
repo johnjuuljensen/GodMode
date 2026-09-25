@@ -18,3 +18,10 @@ public sealed class LaunchConfigException(string message, Exception? inner = nul
 
 /// <summary>The server is stopping, and launches nothing more: a process started now would outlive it.</summary>
 public sealed class ServerStoppingException() : InvalidOperationException("The server is stopping");
+
+/// <summary>
+/// A create would make a project that is already there: a tracked project has its ID or its folder,
+/// or another create is making it. Nothing is written, and the project there is left as it is.
+/// </summary>
+public sealed class ProjectInUseException(string projectId, string reason)
+    : InvalidOperationException($"Project {projectId} is in use: {reason}");
