@@ -378,7 +378,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     {
         foreach (var id in _projectIds)
         {
-            try { await Projects.StopProjectAsync(id); }
+            // Bounded: a project that cannot be stopped fails its test, not the whole run
+            try { await Projects.StopProjectAsync(id).WaitAsync(DefaultTimeout); }
             catch (Exception) { /* best effort: the test may have stopped or broken it already */ }
         }
         await _services.DisposeAsync();

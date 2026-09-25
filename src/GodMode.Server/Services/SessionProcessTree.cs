@@ -271,6 +271,7 @@ internal abstract class SessionProcessTree : IDisposable
 
     private sealed class ProcessGroupTree(string setsid, ILogger logger) : SessionProcessTree(logger)
     {
+        private Process? _process;
         private int _group;
 
         /// <summary>
@@ -290,7 +291,11 @@ internal abstract class SessionProcessTree : IDisposable
             startInfo.FileName = setsid;
         }
 
-        public override void Attach(Process process) => _group = process.Id;
+        public override void Attach(Process process)
+        {
+            _process = process;
+            _group = process.Id;
+        }
 
         public override Task InterruptAsync()
         {
@@ -298,7 +303,24 @@ internal abstract class SessionProcessTree : IDisposable
             return Task.CompletedTask;
         }
 
-        protected override void KillTree() => Signal(-_group, SigKill);
+        /// <summary>
+        /// A descendant that left the group (setsid, setpgid: a detached spawn, a daemon) escapes the
+        /// group's kill, so while claude runs its descendants are walked and killed first, before the
+        /// group's kill takes the parents they are found through. Then the group, which holds any that
+        /// re-parented.
+        /// </summary>
+        protected override void KillTree()
+        {
+            try
+            {
+                if (_process is { HasExited: false } process) process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            {
+                Logger.LogDebug(ex, "Could not walk the process tree of claude (PID {ProcessId})", _group);
+            }
+            Signal(-_group, SigKill);
+        }
 
         protected override void Release() => Signal(-_group, SigKill);
     }

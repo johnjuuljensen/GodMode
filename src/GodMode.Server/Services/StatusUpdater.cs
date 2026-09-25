@@ -23,7 +23,16 @@ public class StatusUpdater : IStatusUpdater
 
     public async Task SaveStatusAsync(ProjectInfo project)
     {
-        var statusPath = Path.Combine(project.ProjectPath, ".godmode", "status.json");
+        // A project without one has nowhere to keep its status: a create that failed before its
+        // script made the folder, or a folder removed outside GodMode. Making it would make the
+        // folder, which a create script expects not to find. Its status is in memory until it is deleted
+        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
+        if (!Directory.Exists(godModePath))
+        {
+            _logger.LogDebug("Project {ProjectId} has no {Path}; its status is not saved", project.Status.Id, godModePath);
+            return;
+        }
+        var statusPath = Path.Combine(godModePath, "status.json");
 
         var json = JsonSerializer.Serialize(project.Status, JsonDefaults.Options);
 

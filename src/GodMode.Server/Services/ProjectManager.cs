@@ -1192,33 +1192,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var projectId = project.Status.Id;
         ProjectState? interruptedAs = null;
         var claimed = false;
-        await _lifecycle.UpdateStatusAsync(project, status =>
+        try
         {
-            if (_lifecycle.ShuttingDown) throw new ServerStoppingException();
-            if (onlyIfInterrupted && status.StateAtShutdown == null) return status;
-
-            // Another launch is in flight, or has its process: its Running is not stale
-            if (project.Process.Launching || _lifecycle.IsRunning(project))
-            {
-                _logger.LogInformation("Project {ProjectId} is launching or running already; it is not launched again", projectId);
-                return status;
-            }
-
-            // Process is not running - check if state needs correction
-            if (status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission)
-            {
-                _logger.LogInformation("Project {ProjectId} was {State} but its process is not running, resetting state", projectId, status.State);
-                status = status with { State = ProjectState.Stopped, PendingPermission = null, PendingQuestion = null };
-            }
-            if (status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
-                throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {status.State})");
-
-            interruptedAs = status.StateAtShutdown;
-            claimed = project.Process.BeginLaunching();
-            if (!claimed) return status;
-            // A launch settles what a shutdown left: the project is not resumed again on the next start
-            return status with { State = resumedAs, LastError = null, StateAtShutdown = null, UpdatedAt = DateTime.UtcNow };
-        });
+            await ClaimAsync();
+        }
+        catch
+        {
+            // The claim was not saved (status.json could not be replaced): nothing is launched, and
+            // no launch is left in flight for the next claim, stop or reply to wait on
+            if (claimed) project.Process.EndLaunching();
+            throw;
+        }
         if (!claimed) return false;
 
         _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}", projectId, project.SessionId);
@@ -1253,6 +1237,34 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         await NotifyStatusChanged(project);
         return true;
+
+        Task ClaimAsync() => _lifecycle.UpdateStatusAsync(project, status =>
+        {
+            if (_lifecycle.ShuttingDown) throw new ServerStoppingException();
+            if (onlyIfInterrupted && status.StateAtShutdown == null) return status;
+
+            // Another launch is in flight, or has its process: its Running is not stale
+            if (project.Process.Launching || _lifecycle.IsRunning(project))
+            {
+                _logger.LogInformation("Project {ProjectId} is launching or running already; it is not launched again", projectId);
+                return status;
+            }
+
+            // Process is not running - check if state needs correction
+            if (status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission)
+            {
+                _logger.LogInformation("Project {ProjectId} was {State} but its process is not running, resetting state", projectId, status.State);
+                status = status with { State = ProjectState.Stopped, PendingPermission = null, PendingQuestion = null };
+            }
+            if (status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
+                throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {status.State})");
+
+            interruptedAs = status.StateAtShutdown;
+            claimed = project.Process.BeginLaunching();
+            if (!claimed) return status;
+            // A launch settles what a shutdown left: the project is not resumed again on the next start
+            return status with { State = resumedAs, LastError = null, StateAtShutdown = null, UpdatedAt = DateTime.UtcNow };
+        });
     }
 
     public async Task SubscribeProjectAsync(string projectId, long fromOffset, string connectionId)

@@ -17,8 +17,11 @@ using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 
 // A child a launch started (spawn-child): it outlives any interrupt, and only a kill ends it
-if (args is [FakeClaudeEnvironment.ChildFlag, ..])
+if (args is [FakeClaudeEnvironment.ChildFlag, .. var childOptions])
 {
+    // Out of the launch's process group, as a detached spawn or a daemon is
+    if (childOptions.Contains(FakeClaudeEnvironment.OwnSessionFlag) && !OperatingSystem.IsWindows() && ChildSession.setsid() < 0)
+        return 3;
     using var ignoreInt = PosixSignalRegistration.Create(PosixSignal.SIGINT, context => context.Cancel = true);
     using var ignoreQuit = PosixSignalRegistration.Create(PosixSignal.SIGQUIT, context => context.Cancel = true);
     Thread.Sleep(Timeout.Infinite);
@@ -142,8 +145,8 @@ async Task<int> PlayAsync()
             case ScriptStep.IgnoreInterrupt:
                 Volatile.Write(ref ignoringInterrupts, 1);
                 break;
-            case ScriptStep.SpawnChild { Detached: false }:
-                FakeRecording.Append(recordPath, new RecordLine(RecordLine.Child, pid, Line: StartChild().ToString()));
+            case ScriptStep.SpawnChild { Detached: false } spawn:
+                FakeRecording.Append(recordPath, new RecordLine(RecordLine.Child, pid, Line: StartChild(spawn.OwnSession).ToString()));
                 break;
             case ScriptStep.SpawnChild { Detached: true }:
                 using (var detaching = Process.Start(ChildStart(FakeClaudeEnvironment.DetachFlag, recordPath, pid.ToString()))!)
@@ -178,9 +181,11 @@ static ProcessStartInfo ChildStart(params string[] arguments)
     return start;
 }
 
-static int StartChild()
+static int StartChild(bool ownSession = false)
 {
-    using var child = Process.Start(ChildStart(FakeClaudeEnvironment.ChildFlag))!;
+    using var child = Process.Start(ownSession
+        ? ChildStart(FakeClaudeEnvironment.ChildFlag, FakeClaudeEnvironment.OwnSessionFlag)
+        : ChildStart(FakeClaudeEnvironment.ChildFlag))!;
     return child.Id;
 }
 
@@ -300,4 +305,10 @@ internal static class ConsoleEvents
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GenerateConsoleCtrlEvent(uint consoleEvent, uint processGroupId);
+}
+
+internal static class ChildSession
+{
+    [DllImport("libc", SetLastError = true)]
+    public static extern int setsid();
 }

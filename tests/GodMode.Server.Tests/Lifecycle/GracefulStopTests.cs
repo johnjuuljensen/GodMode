@@ -55,7 +55,7 @@ public class GracefulStopTests
     [Fact]
     public async Task Stop_KillsAClaudeThatIgnoresTheInterrupt_AfterTheGracePeriod()
     {
-        await using var harness = new LifecycleHarness(Working(new FakeScript().IgnoreInterrupt()), settings: Grace(1));
+        await using var harness = new LifecycleHarness(Working(new FakeScript().IgnoreInterrupt()), settings: Grace(5));
         var created = await harness.CreateProjectAsync();
         var launch = await harness.WaitForStdinAsync(created.Id);
 
@@ -66,7 +66,7 @@ public class GracefulStopTests
         var stopped = harness.Launches(created.Id)[0];
         Assert.Equal([StopInterrupt], stopped.Interrupts);
         Assert.Null(stopped.ExitCode);
-        Assert.True(elapsed.Elapsed >= TimeSpan.FromSeconds(0.9), $"the stop took {elapsed.Elapsed}, less than the 1 s grace period");
+        Assert.True(elapsed.Elapsed >= TimeSpan.FromSeconds(4.9), $"the stop took {elapsed.Elapsed}, less than the 5 s grace period");
         Assert.False(LifecycleHarness.IsProcessAlive(launch.Pid), $"fake claude (pid {launch.Pid}) is still running after Stop");
         Assert.Equal(ProjectState.Stopped, (await harness.Projects.GetStatusAsync(created.Id)).State);
     }
@@ -84,7 +84,7 @@ public class GracefulStopTests
     {
         var script = claudeIgnoresTheInterrupt ? new FakeScript().IgnoreInterrupt() : new FakeScript();
         await using var harness = new LifecycleHarness(script.EmitInit().AwaitStdin().SpawnChild().SpawnChild(detached: true).Sleep(120_000),
-            settings: Grace(1));
+            settings: Grace(5));
         var created = await harness.CreateProjectAsync();
         var launch = await harness.WaitForLaunchAsync(created.Id, l => l.Children.Count == 2);
         Assert.All(launch.Children, pid => Assert.True(LifecycleHarness.IsProcessAlive(pid), $"child {pid} is not running"));
@@ -100,6 +100,27 @@ public class GracefulStopTests
             return Task.FromResult(alive.Count == 0);
         }, TimeSpan.FromSeconds(5));
         Assert.True(alive.Count == 0, $"children {string.Join(", ", alive)} of fake claude (pid {launch.Pid}; child {launch.Children[0]}, re-parented {launch.Children[1]}) outlived the stop");
+    }
+
+    /// <summary>
+    /// A child that left claude's process group (a session of its own, as a detached spawn or a daemon
+    /// has) escapes the group's kill on Linux: the stop finds it by walking claude's tree while claude
+    /// still runs. On Windows the Job Object holds it all the same.
+    /// </summary>
+    [Fact]
+    public async Task Stop_KillsAChildThatLeftClaudesProcessGroup()
+    {
+        await using var harness = new LifecycleHarness(Working(new FakeScript().IgnoreInterrupt().SpawnChild(ownSession: true)), settings: Grace(5));
+        var created = await harness.CreateProjectAsync();
+        var launch = await harness.WaitForLaunchAsync(created.Id, l => l.Children.Count == 1 && l.Stdin.Count == 1);
+        var child = launch.Children[0];
+        Assert.True(LifecycleHarness.IsProcessAlive(child), $"child {child} is not running");
+
+        await harness.Projects.StopProjectAsync(created.Id);
+
+        Assert.False(LifecycleHarness.IsProcessAlive(launch.Pid), $"fake claude (pid {launch.Pid}) is still running after Stop");
+        Assert.True(await LifecycleHarness.WaitForAsync(() => Task.FromResult(!LifecycleHarness.IsProcessAlive(child)), TimeSpan.FromSeconds(5)),
+            $"child {child} of fake claude (pid {launch.Pid}), in a session of its own, outlived the stop");
     }
 
     /// <summary>
@@ -133,7 +154,7 @@ public class GracefulStopTests
         var server = ServerProcess.Start(workDir, baseUrl, ownTerminal: true, environment: new Dictionary<string, string>
         {
             ["Claude__Executable"] = LifecycleHarness.FakeClaudePath,
-            [ClaudeProcessManager.StopGracePeriodSetting] = "2",
+            [ClaudeProcessManager.StopGracePeriodSetting] = "5",
         });
         using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(10) };
         try

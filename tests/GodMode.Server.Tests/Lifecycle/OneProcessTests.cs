@@ -192,6 +192,58 @@ public class OneProcessTests
         Assert.Single(harness.Launches(created.Id));
     }
 
+    /// <summary>
+    /// A create that failed in a root whose scripts make the folder (godmode-dev's) leaves an Error
+    /// project with no folder, and no .godmode to keep its status in. It can still be deleted, and
+    /// then created again.
+    /// </summary>
+    [Fact]
+    public async Task CreateThatFailedBeforeItsScriptMadeTheFolder_CanBeDeleted_AndCreatedAgain()
+    {
+        await using var harness = new LifecycleHarness(Waiting(),
+            rootConfig: new Dictionary<string, object> { ["scriptsCreateFolder"] = true, ["create"] = "make.ps1" });
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "make.ps1"),
+            "if ($env:GODMODE_INPUT_FAIL) { exit 1 }\nNew-Item -ItemType Directory -Force $env:GODMODE_PROJECT_PATH | Out-Null");
+        var projectId = $"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p1";
+        await Assert.ThrowsAnyAsync<Exception>(() => harness.CreateProjectAsync(inputs: new Dictionary<string, object> { ["fail"] = true }));
+        Assert.Equal(ProjectState.Error, (await harness.Projects.GetStatusAsync(projectId)).State);
+        Assert.False(Directory.Exists(harness.ProjectPath(projectId)));
+
+        await harness.Projects.DeleteProjectAsync(projectId).WaitAsync(LifecycleHarness.DefaultTimeout);
+
+        Assert.DoesNotContain(await harness.Projects.ListProjectsAsync(), p => p.Id == projectId);
+        var created = await harness.CreateProjectAsync();
+        Assert.Equal(projectId, created.Id);
+        await harness.WaitForStdinAsync(created.Id);
+        Assert.Equal(ProjectState.Running, (await harness.Projects.GetStatusAsync(projectId)).State);
+    }
+
+    /// <summary>
+    /// A resume whose claim cannot be saved (status.json cannot be replaced) launches nothing, and
+    /// leaves no launch in flight behind it: a Stop and the next Resume still return.
+    /// </summary>
+    [Fact]
+    public async Task ResumeWhoseClaimCannotBeSaved_LeavesNoLaunchInFlight()
+    {
+        await using var harness = new LifecycleHarness(Waiting());
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStdinAsync(created.Id);
+        await harness.Projects.StopProjectAsync(created.Id);
+        var statusPath = Path.Combine(harness.ProjectPath(created.Id), ".godmode", "status.json");
+        File.Delete(statusPath);
+        Directory.CreateDirectory(statusPath);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => harness.Projects.ResumeProjectAsync(created.Id).WaitAsync(LifecycleHarness.DefaultTimeout));
+        Assert.Single(harness.Launches(created.Id));
+        Directory.Delete(statusPath);
+
+        await harness.Projects.StopProjectAsync(created.Id).WaitAsync(LifecycleHarness.DefaultTimeout);
+        await harness.Projects.ResumeProjectAsync(created.Id).WaitAsync(LifecycleHarness.DefaultTimeout);
+
+        var resumed = await harness.WaitForLaunchAsync(created.Id, _ => true, index: 1);
+        Assert.Equal(resumed.Pid, harness.Tracked(created.Id).Process.ProcessId);
+    }
+
     [Fact]
     public async Task CreateWithoutItsExecutable_IsError_WithWhy()
     {

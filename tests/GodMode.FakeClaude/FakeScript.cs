@@ -33,6 +33,9 @@ public static class FakeClaudeEnvironment
     /// </summary>
     public const string DetachFlag = "--fake-detach";
 
+    /// <summary>After <see cref="ChildFlag"/>: the child leads a session of its own (Linux).</summary>
+    public const string OwnSessionFlag = "--own-session";
+
     /// <summary>
     /// Windows: raises Ctrl+C (<c>ctrl-c</c>) or Ctrl+Break (<c>ctrl-break</c>) in the console of the
     /// process whose id follows, as that key pressed in its terminal would, and exits 0 if it did.
@@ -89,7 +92,10 @@ public abstract record ScriptStep
     /// <paramref name="Detached"/> starts it through a process that exits at once, so the child's
     /// parent is gone: it is re-parented, and only its process group or Job Object still holds it.
     /// </summary>
-    public sealed record SpawnChild(bool Detached = false) : ScriptStep;
+    /// <paramref name="OwnSession"/> starts it as the leader of a session of its own (Linux: setsid), as a
+    /// detached spawn or a daemon does: it is out of the process group, and only a walk of the tree
+    /// finds it while its parent lives. A Job Object holds it on Windows all the same.
+    public sealed record SpawnChild(bool Detached = false, bool OwnSession = false) : ScriptStep;
 }
 
 /// <summary>
@@ -107,6 +113,7 @@ public abstract record ScriptStep
 /// ignore-interrupt
 /// spawn-child
 /// spawn-detached
+/// spawn-own-session
 /// </code>
 /// Blank lines and lines starting with <c>#</c> are ignored. A script that runs off its end keeps
 /// the process alive until stdin closes (then exits 0), like the real CLI between turns.
@@ -136,7 +143,7 @@ public sealed class FakeScript
         Add(new ScriptStep.AskPermission(Json(new { tool_name = toolName, input, tool_use_id = toolUseId }), CancelOnProgress: true));
 
     public FakeScript IgnoreInterrupt() => Add(new ScriptStep.IgnoreInterrupt());
-    public FakeScript SpawnChild(bool detached = false) => Add(new ScriptStep.SpawnChild(detached));
+    public FakeScript SpawnChild(bool detached = false, bool ownSession = false) => Add(new ScriptStep.SpawnChild(detached, ownSession));
 
     /// <summary>What the real CLI writes to stderr when <c>--resume</c> names a session it has no conversation for.</summary>
     public const string NoConversationError = "No conversation found with session ID: ";
@@ -194,6 +201,7 @@ public sealed class FakeScript
                 ScriptStep.AskPermission { CancelOnProgress: true } p => $"permission-cancel {p.Arguments}",
                 ScriptStep.AskPermission p => $"permission {p.Arguments}",
                 ScriptStep.IgnoreInterrupt => "ignore-interrupt",
+                ScriptStep.SpawnChild { OwnSession: true } => "spawn-own-session",
                 ScriptStep.SpawnChild { Detached: true } => "spawn-detached",
                 ScriptStep.SpawnChild => "spawn-child",
                 _ => throw new InvalidOperationException($"Unknown step {step}"),
@@ -228,6 +236,7 @@ public sealed class FakeScript
                 "ignore-interrupt" => new ScriptStep.IgnoreInterrupt(),
                 "spawn-child" => new ScriptStep.SpawnChild(),
                 "spawn-detached" => new ScriptStep.SpawnChild(Detached: true),
+                "spawn-own-session" => new ScriptStep.SpawnChild(OwnSession: true),
                 _ => throw new FormatException($"Unknown fake claude script step: {raw}"),
             });
         }
