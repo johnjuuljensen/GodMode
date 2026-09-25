@@ -13,7 +13,7 @@ namespace GodMode.Maui;
 /// <summary>
 /// Keeps the phone told what needs the user while the app is in the background: a foreground service holding an
 /// <see cref="AttentionWatcher"/>, one hub connection per registered server, straight to the server with its key
-/// from the registry. It runs while any server is registered and notifications are allowed.
+/// from the registry. It runs only while it has something to do: notifications are on and it watches a server.
 /// </summary>
 [Service(Exported = false, ForegroundServiceType = ServiceType)]
 public sealed class AttentionService : Service
@@ -32,15 +32,20 @@ public sealed class AttentionService : Service
     private ILogger _logger = Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
 
     /// <summary>
-    /// Starts the service, or has it pick up a change to the server list. Call it from the foreground app:
-    /// Android does not let a backgrounded app start a foreground service.
+    /// Starts the service, or has it pick up a change to the server list; with notifications off, stops it. Call it
+    /// from the foreground app: Android does not let a backgrounded app start a foreground service.
     /// </summary>
     public static void Refresh()
     {
         var context = Platform.AppContext;
-        // Without POST_NOTIFICATIONS there is nothing to show, so nothing to watch for
-        if (!NotificationManagerCompat.From(context)!.AreNotificationsEnabled()) return;
         var intent = new Intent(context, typeof(AttentionService)).SetAction(ActionRefresh);
+        // Without notifications there is nothing to show, so nothing to watch for. Android 7-12 turns them off
+        // without stopping the app, so a running service is stopped here
+        if (!NotificationsEnabled(context))
+        {
+            context.StopService(intent);
+            return;
+        }
         try
         {
             if (OperatingSystem.IsAndroidVersionAtLeast(26)) context.StartForegroundService(intent);
@@ -53,14 +58,15 @@ public sealed class AttentionService : Service
         }
     }
 
-    /// <summary>Asks for POST_NOTIFICATIONS (Android 13+) and, when it is granted, starts the service.</summary>
+    /// <summary>Asks for POST_NOTIFICATIONS (Android 13+), then starts the service, or stops it when notifications are off.</summary>
     public static async Task StartAsync()
     {
-        if (await Permissions.RequestAsync<Permissions.PostNotifications>() == PermissionStatus.Granted)
-            Refresh();
-        else
+        if (await Permissions.RequestAsync<Permissions.PostNotifications>() != PermissionStatus.Granted)
             MauiProgram.LoggerFactory.CreateLogger<AttentionService>().LogInformation("Notifications are not allowed; not watching for attention");
+        Refresh();
     }
+
+    private static bool NotificationsEnabled(Context context) => NotificationManagerCompat.From(context)!.AreNotificationsEnabled();
 
     public override IBinder? OnBind(Intent? intent) => null;
 
@@ -92,27 +98,35 @@ public sealed class AttentionService : Service
         else
             StartForeground(ServiceNotificationId, notification);
 
-        _ = RefreshAsync();
+        _ = RefreshAsync(startId);
         // Restarted after the system kills it for memory; the watcher then starts afresh from the registry
         return StartCommandResult.Sticky;
     }
 
-    private async Task RefreshAsync()
+    private async Task RefreshAsync(int startId)
     {
         try
         {
-            if ((await MauiProgram.Services.GetRequiredService<IServerRegistryService>().GetServersAsync()).Count == 0)
-            {
-                _logger.LogInformation("No servers registered; stopping the attention service");
-                StopSelf();
-                return;
-            }
-            await _watcher!.RefreshAsync();
+            // Checked here too: a sticky restart, or notifications turned off while it ran
+            if (!NotificationsEnabled(this))
+                Stop(startId, "Notifications are off");
+            // No registration, or none that can be listed (a token secure storage cannot read, say)
+            else if (await _watcher!.RefreshAsync() == 0)
+                Stop(startId, "No server to watch");
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Attention refresh failed");
         }
+    }
+
+    /// <summary>Stops the service unless a later start (a server just added, say) is still to decide.</summary>
+    private void Stop(int startId, string why)
+    {
+        if (StopSelfResult(startId))
+            _logger.LogInformation("{Why}; stopping the attention service", why);
+        else
+            _logger.LogInformation("{Why}, but a later refresh is pending; the attention service keeps running", why);
     }
 
     private void OnNetworkChanged(object? sender, ConnectivityChangedEventArgs e)

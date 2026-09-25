@@ -11,9 +11,15 @@ namespace GodMode.Maui.Bridge;
 /// <summary>
 /// The shell's side of the React ↔ host API (<see cref="ShellMessageTypes"/>): relay info, server management,
 /// and the servers.changed event. Server tokens go into secure storage here and are never sent back.
+/// One is attached at a time: each page gets its own, and the page it replaces (the activity was recreated,
+/// from a notification tap say) lets go of the process-wide events through <see cref="Dispose"/>.
 /// </summary>
-public sealed class ShellBridge
+public sealed class ShellBridge : IDisposable
 {
+    private static ShellBridge? _attached;
+    private static int _created;
+
+    private readonly int _number = Interlocked.Increment(ref _created);
     private readonly HostBridge _bridge;
     private readonly LocalServer _relay;
     private readonly IServerDirectory _directory;
@@ -29,14 +35,26 @@ public sealed class ShellBridge
         _logger = logger;
     }
 
-    /// <summary>Connects the WebView's raw-message channel to the shell API.</summary>
+    /// <summary>Connects the WebView's raw-message channel to the shell API, detaching the bridge attached before.</summary>
     public static ShellBridge Attach(HybridWebView webView, IServiceProvider services)
     {
         var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger<ShellBridge>();
         var shell = new ShellBridge(new HostBridge(webView, logger), services, logger);
+        Interlocked.Exchange(ref _attached, shell)?.Dispose();
         shell.Register();
-        Connectivity.Current.ConnectivityChanged += (_, _) => shell.OnNetworkChanged();
+        PendingAttentionLink.Arrived += shell.OnAttentionArrived;
+        Connectivity.Current.ConnectivityChanged += shell.OnNetworkChanged;
+        logger.LogInformation("Shell bridge #{Number} attached; bridges listening for notification taps: {Listening}",
+            shell._number, PendingAttentionLink.Listening);
         return shell;
+    }
+
+    /// <summary>Lets go of the process-wide events, which would otherwise keep this bridge, its WebView and page alive.</summary>
+    public void Dispose()
+    {
+        PendingAttentionLink.Arrived -= OnAttentionArrived;
+        Connectivity.Current.ConnectivityChanged -= OnNetworkChanged;
+        _logger.LogInformation("Shell bridge #{Number} detached", _number);
     }
 
     private void Register()
@@ -52,7 +70,6 @@ public sealed class ShellBridge
             await _directory.StopServerAsync(p.ServerId) ? Polling(p.ServerId) : throw NotFound(p));
         _bridge.Handle(ShellMessageTypes.AttentionTake, () => Task.FromResult(
             PendingAttentionLink.Take() is { } link ? new AttentionLinkPayload(link.ServerId, link.ProjectId) : null));
-        PendingAttentionLink.Arrived += () => _bridge.Send(ShellMessageTypes.AttentionOpen);
         _bridge.Handle(ShellMessageTypes.OpenDevTools, () =>
         {
             MainPage.OpenDevTools();
@@ -117,10 +134,16 @@ public sealed class ShellBridge
         }
     }
 
-    /// <summary>A server's best URL may have changed: drop the relays so each reconnect picks it afresh.</summary>
-    private void OnNetworkChanged()
+    private void OnAttentionArrived()
     {
-        _logger.LogInformation("Network changed ({Access})", Connectivity.Current.NetworkAccess);
+        _logger.LogInformation("Notification tap: bridge #{Number} tells React", _number);
+        _bridge.Send(ShellMessageTypes.AttentionOpen);
+    }
+
+    /// <summary>A server's best URL may have changed: drop the relays so each reconnect picks it afresh.</summary>
+    private void OnNetworkChanged(object? sender, ConnectivityChangedEventArgs e)
+    {
+        _logger.LogInformation("Network changed ({Access}); bridge #{Number} drops the relays", e.NetworkAccess, _number);
         _relay.DropAllRelays();
         _bridge.Send(ShellMessageTypes.ServersChanged);
     }
