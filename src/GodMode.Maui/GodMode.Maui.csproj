@@ -55,10 +55,12 @@
 	<!-- The app serves dist/ itself as wwwroot/, not a copy of it: the target frameworks here build in parallel,
 	     and their copies into one folder would collide. ResolveProjectReferences builds the client (incremental:
 	     skipped when sources unchanged). A static glob would run before that, so a new bundle (a new hashed file
-	     name) would reach the app only on the next build, and this one would ship an index.html naming a missing script -->
+	     name) would reach the app only on the next build, and this one would ship an index.html naming a missing script.
+	     Before ProcessMauiAssets too, which turns MauiAsset items into the app's content: the Apple SDKs collect bundle
+	     resources, and so run it, before PrepareForBuild -->
 	<Target Name="AddReactAssets"
 	        DependsOnTargets="ResolveProjectReferences"
-	        BeforeTargets="PrepareForBuild">
+	        BeforeTargets="ProcessMauiAssets;PrepareForBuild">
 		<ItemGroup>
 			<_ReactAsset Include="$(_ReactDir)\dist\**" />
 			<MauiAsset Include="@(_ReactAsset)" LogicalName="wwwroot\%(_ReactAsset.RecursiveDir)%(_ReactAsset.Filename)%(_ReactAsset.Extension)" />
