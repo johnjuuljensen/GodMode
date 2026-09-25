@@ -165,9 +165,13 @@ if (authSettings is { KeyFilePath: { } newKeyFile, KeyFileCreated: true })
 
             {authSettings.ApiKey}
 
-        Every client needs it: enter it on the browser's key page, or as the server's access token in the app.
+        Every client needs it: enter it on the browser's key page, or as the server's API key when you add it in the app.
         It is kept in {newKeyFile}, readable by this user only, and used on every start.
         This is the only time it is printed.
+
+        A browser is let in only from this server's own addresses (its log line "Browser requests are accepted from").
+        One that opens it by a host name, a LAN address or another port (a container's published port) needs
+        that origin in {OriginPolicy.AllowedOriginsSetting}.
 
         """));
 }

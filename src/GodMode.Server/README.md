@@ -52,7 +52,7 @@ Every endpoint and the SignalR hub require authentication, whatever the server i
 - **Another place:** `Authentication:ApiKeyFile`. It must not be under `ProjectRootsDir`, where sessions work: the server refuses to start if it is.
 - **Read it again** with `cat ~/.local/share/GodMode.Server/api-key` (Windows: `type %LOCALAPPDATA%\GodMode.Server\api-key`). Write your own key into it, or delete it for a new one on the next start.
 - **A configured key always wins**, and the key file is then neither read nor written. So does a codespace, which uses no key.
-- **Docker:** a replaced container has a new home, so a new key. Run it with `-e Authentication__ApiKey=<key>`, or keep the key file on a volume mounted at `/home/godmode/.local/share/GodMode.Server`.
+- **Docker:** a replaced container has a new home, so a new key. Run it with `-e Authentication__ApiKey=<key>`, or keep the key file on a named volume: `-v godmode-key:/home/godmode/.local/share/GodMode.Server`. The image creates that directory, owned by `godmode` with mode 0700, and a new named volume starts with its owner and mode. A bind mount (`-v /srv/godmode-key:…`) keeps the host directory's owner instead, which must be writable by the container's `godmode` user.
 
 A key of your own can go in `appsettings.json` (`"Authentication": { "ApiKey": "..." }`), in user secrets, in the `Authentication__ApiKey` environment variable, or on the command line as `--Authentication:ApiKey=<key>`. `openssl rand -hex 32` makes one.
 
@@ -74,7 +74,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
   --urls "http://127.0.0.1:31337;http://$(tailscale ip -4):31337"
 ```
 
-**Docker:** the image sets `URLS=http://+:31337` (all interfaces). A browser on the Docker host at `http://localhost:31337` is on the server's own origin; any other address you open it by goes in `Authentication:AllowedOrigins`. To change the binding, use the unprefixed `URLS` variable or `--urls`. `ASPNETCORE_URLS` loses to the `Urls` in `appsettings.json`.
+**Docker:** the image sets `URLS=http://+:31337` (all interfaces). A browser on the Docker host at `http://localhost:31337`, with the port published as the same number, is on the server's own origin. Any other address you open it by (a host name, a LAN address, another published port such as `-p 8080:31337`) goes in `Authentication:AllowedOrigins`, for example `-e Authentication__AllowedOrigins__0=http://nas.local:8080`. To change the binding, use the unprefixed `URLS` variable or `--urls`. `ASPNETCORE_URLS` loses to the `Urls` in `appsettings.json`.
 
 **What the key does not stop.** Sessions run as the server's own OS user. A session that can run arbitrary commands can read the key file, `appsettings.json` or the server's environment, and with the key drive the hub, answering its own permission prompts. The permission prompt is a gate as long as the commands it approves don't do that; it is not a sandbox. The server hands neither a session nor a root script the key (their environment is an allowlist, see [Environment](#environment), and the key file is never under `ProjectRootsDir`), but real isolation, a separate OS user or container per session, is out of scope. The same goes for a codespace's `GITHUB_TOKEN`: the server refuses it, but sessions that are given it hold it.
 

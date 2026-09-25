@@ -84,10 +84,16 @@ EXPOSE 31337
 # loopback "Urls" would win. Every request needs the API key. With none configured, the server
 # generates one into /home/godmode/.local/share/GodMode.Server/api-key, which is lost when the
 # container is replaced unless that directory is a volume: run with -e Authentication__ApiKey=<key>,
-# or mount that directory.
+# or -v godmode-key:/home/godmode/.local/share/GodMode.Server.
+# A browser is let in only from the container's own origin, http://localhost:31337 (published on
+# the same port). Opening it by a host name, a LAN address or another published port needs that
+# origin in -e Authentication__AllowedOrigins=http://<host>:<port>.
 ENV URLS=http://+:31337
 
 USER godmode
+# The key file's directory, owner-only and godmode's: a named volume mounted there starts with
+# this owner and mode, where one Docker creates itself would be root's and unwritable
+RUN mkdir -p -m 700 /home/godmode/.local/share/GodMode.Server
 ENTRYPOINT ["dotnet", "GodMode.Server.dll"]
 
 # ── SDK variant ──
