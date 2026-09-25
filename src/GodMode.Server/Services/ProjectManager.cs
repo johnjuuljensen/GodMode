@@ -538,23 +538,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         using var claims = new CreateClaims(this);
         claims.Claim(projectId, projectPath);
 
-        if (action.ScriptsCreateFolder)
+        // Unless the scripts create the project directory (e.g. git worktree add)
+        if (!action.ScriptsCreateFolder)
         {
-            // Scripts will create the project directory (e.g. git worktree add)
-        }
-        else if (reuseExisting)
-        {
-            // Reuse existing folder — reinitialize .godmode state
-            ProjectFiles.ProjectFolder.Reuse(rootPath, folder, name);
-        }
-        else if (suffixed)
-        {
-            ProjectFiles.ProjectFolder.Create(rootPath, folder, name);
-        }
-        else
-        {
-            // Server creates the project folder via ProjectFiles
-            snap.ProjectFiles.CreateProject(compositeKey, name);
+            if (reuseExisting)
+                // Reuse existing folder — reinitialize .godmode state
+                ProjectFiles.ProjectFolder.Reuse(rootPath, folder, name);
+            else if (suffixed)
+                ProjectFiles.ProjectFolder.Create(rootPath, folder, name);
+            else
+                // Server creates the project folder via ProjectFiles
+                snap.ProjectFiles.CreateProject(compositeKey, name);
         }
 
         var now = DateTime.UtcNow;
@@ -1097,7 +1091,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // was waiting is denied, not shown again. A delete a script refuses leaves it so, and a
         // restart does not resume it. Its output pipeline stays open until the delete is committed
         await _lifecycle.StopAsync(project);
-        await _lifecycle.UpdateStatusAsync(project, status => status with { CurrentQuestion = null, PendingQuestion = null, PendingPermission = null });
+        await _lifecycle.UpdateStatusAsync(project, status => status with { CurrentQuestion = null });
         await NotifyStatusChanged(project);
         // Nor does a status script hold its folder while the delete scripts run
         await _pullRequests.ForgetAsync(projectId);
