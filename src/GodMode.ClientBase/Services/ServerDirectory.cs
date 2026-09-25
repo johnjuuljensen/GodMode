@@ -9,6 +9,7 @@ namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// Builds an <see cref="IServerProvider"/> per registration, fresh on each call, with its token from secure storage.
+/// A registration whose token cannot be read is left out as unavailable; the others stay listed and relayable.
 /// </summary>
 public class ServerDirectory(
     IServerRegistryService registry,
@@ -30,6 +31,8 @@ public class ServerDirectory(
         var providers = await GetProvidersAsync();
         return await Task.WhenAll(providers.Select(async p =>
         {
+            if (p.Provider is null)
+                return new RegistrationListing(p.Registration.Id, null);
             try
             {
                 return new RegistrationListing(p.Registration.Id, await p.Provider.ListServersAsync(ct));
@@ -65,28 +68,45 @@ public class ServerDirectory(
     /// <summary>The registration serving a server. Local registrations are matched by ID before any codespace lookup.</summary>
     private async Task<(ServerRegistration Registration, IServerProvider Provider)?> FindAsync(string serverId)
     {
-        foreach (var candidate in (await GetProvidersAsync()).OrderBy(p => p.Provider.Type != ServerTypes.Local))
+        foreach (var (registration, provider) in (await GetProvidersAsync()).OrderBy(p => p.Registration.Type != ServerTypes.Local))
         {
+            if (provider is null) continue;
             try
             {
-                if (await candidate.Provider.OwnsAsync(serverId))
-                    return candidate;
+                if (await provider.OwnsAsync(serverId))
+                    return (registration, provider);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Could not check registration {Id} for server {ServerId}", candidate.Registration.Id, serverId);
+                _logger.LogWarning(ex, "Could not check registration {Id} for server {ServerId}", registration.Id, serverId);
             }
         }
         _logger.LogWarning("Server {ServerId} is not served by any registration", serverId);
         return null;
     }
 
-    private async Task<IReadOnlyList<(ServerRegistration Registration, IServerProvider Provider)>> GetProvidersAsync()
+    /// <summary>
+    /// A provider per usable registration. One whose token could not be read is kept with a null provider:
+    /// it is unavailable (listed as failed, never resolved), and the other registrations are unaffected.
+    /// </summary>
+    private async Task<IReadOnlyList<(ServerRegistration Registration, IServerProvider? Provider)>> GetProvidersAsync()
     {
-        var result = new List<(ServerRegistration, IServerProvider)>();
+        var result = new List<(ServerRegistration, IServerProvider?)>();
         foreach (var registration in await registry.GetServersAsync())
         {
-            if (await CreateProviderAsync(registration) is { } provider)
+            string? token;
+            try
+            {
+                token = await registry.GetAccessTokenAsync(registration.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not read the access token of registration {Id} ({Type}); it is unavailable", registration.Id, registration.Type);
+                result.Add((registration, null));
+                continue;
+            }
+
+            if (CreateProvider(registration, token) is { } provider)
                 result.Add((registration, provider));
             else
                 _logger.LogWarning("Skipping unusable registration {Id} (type={Type})", registration.Id, registration.Type);
@@ -94,18 +114,14 @@ public class ServerDirectory(
         return result;
     }
 
-    private async Task<IServerProvider?> CreateProviderAsync(ServerRegistration registration)
+    private IServerProvider? CreateProvider(ServerRegistration registration, string? token) => registration.Type switch
     {
-        var token = await registry.GetAccessTokenAsync(registration.Id);
-        return registration.Type switch
-        {
-            ServerTypes.GitHub when !string.IsNullOrEmpty(token) =>
-                new GitHubCodespaceProvider(token, loggerFactory),
-            ServerTypes.Local when registration.Urls.Count > 0 && registration.Urls.All(IsHttpUrl) =>
-                new LocalFolderProvider(registration, token, urlSelector),
-            _ => null,
-        };
-    }
+        ServerTypes.GitHub when !string.IsNullOrEmpty(token) =>
+            new GitHubCodespaceProvider(token, loggerFactory),
+        ServerTypes.Local when registration.Urls.Count > 0 && registration.Urls.All(IsHttpUrl) =>
+            new LocalFolderProvider(registration, token, urlSelector),
+        _ => null,
+    };
 
     private static bool IsHttpUrl(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";

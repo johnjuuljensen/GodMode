@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace GodMode.ClientBase.Services.Models;
 
 /// <summary>Server registration types.</summary>
@@ -35,14 +33,6 @@ public sealed record ServerRegistration
 
     /// <summary>Optional display name for the server.</summary>
     public string? DisplayName { get; init; }
-
-    /// <summary>Legacy single URL. Read once and moved into <see cref="Urls"/>; never written.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Url { get; init; }
-
-    /// <summary>Legacy protected token. Read once and moved into secure storage; never written.</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Token { get; init; }
 }
 
 /// <summary>
