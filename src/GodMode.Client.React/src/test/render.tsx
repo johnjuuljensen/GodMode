@@ -54,3 +54,13 @@ export async function pressKey(button: HTMLButtonElement, key: string): Promise<
 
 /** Clicks an element, with React's act() around the change. */
 export const click = (el: HTMLElement) => act(async () => el.click());
+
+/**
+ * Clicks with a mouse as Chromium on Windows and WebView2 do: the press focuses the element, unless a
+ * handler prevented its default, and the focus stays there after the click. jsdom focuses nothing itself.
+ */
+export const pointerClick = (el: HTMLElement) => act(async () => {
+  if (el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))) el.focus();
+  el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+  el.click();
+});

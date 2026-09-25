@@ -129,7 +129,8 @@ function mergeAttention(all: ServerAttentionItem[], serverId: string, items: Att
 /** What is typed in an inbox item and not sent yet. */
 export interface InboxDraft {
   reply: string;
-  denyMessage: string;
+  /** The reason to deny with, and the permission request it was typed for: it is that request's alone (#218). */
+  deny: { requestId: string; message: string } | null;
 }
 
 /** How many turns a tile asks for (tail mode: subscribe from -N). */
@@ -985,9 +986,9 @@ export const useAppStore = create<AppState>((set, get) => {
   inboxDrafts: {},
   setInboxDraft: (serverId, projectId, patch) => set(state => {
     const key = projectKey(serverId, projectId);
-    const draft: InboxDraft = { ...(state.inboxDrafts[key] ?? { reply: '', denyMessage: '' }), ...patch };
+    const draft: InboxDraft = { ...(state.inboxDrafts[key] ?? { reply: '', deny: null }), ...patch };
     const inboxDrafts = { ...state.inboxDrafts };
-    if (draft.reply || draft.denyMessage) inboxDrafts[key] = draft;
+    if (draft.reply || draft.deny?.message) inboxDrafts[key] = draft;
     else delete inboxDrafts[key];
     return { inboxDrafts };
   }),

@@ -25,6 +25,8 @@ export function SidebarHeader() {
   const featureProfiles = useAppStore(s => s.featureProfiles);
   const isTileView = useAppStore(s => s.isTileView);
   const setTileView = useAppStore(s => s.setTileView);
+  // Tiles are a wide screen's: on a phone the toggle would only leave the inbox (#218)
+  const isMobile = useAppStore(s => s.isMobile);
 
   const showProfileFilter = featureProfiles && profileFilterOptions.length > 1;
   const hasRoots = serverConnections.some(c => c.roots.length > 0);
@@ -43,18 +45,20 @@ export function SidebarHeader() {
             {profileFilterOptions.map(name => <option key={name} value={name}>{name}</option>)}
           </select>
         )}
-        <button className="sidebar-add-btn" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
-          {isTileView ? (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
-              <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
-            </svg>
-          )}
-        </button>
+        {!isMobile && (
+          <button className="sidebar-add-btn" onClick={() => setTileView(!isTileView)} title={isTileView ? 'List view' : 'Tile view'}>
+            {isTileView ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" />
+              </svg>
+            )}
+          </button>
+        )}
         {hasRoots && (
           <button className="sidebar-add-btn" onClick={() => setActivePage({ type: 'createProject' })} title="Create project">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

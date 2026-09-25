@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore, projectKey } from '../../store';
 import { InboxItem } from './InboxItem';
+import { keepFocus } from '../Project/keepFocus';
 import './Inbox.css';
 
 const COLLAPSED_KEY = 'godmode-inbox-collapsed';
@@ -68,7 +69,7 @@ export function Inbox({ variant }: Props) {
     <section className={`inbox inbox-${variant}`} aria-label="Needs you">
       <header className="inbox-header">
         {isPane ? (
-          <button className="inbox-title inbox-toggle" onClick={toggle} aria-expanded={open}>
+          <button className="inbox-title inbox-toggle" onMouseDown={keepFocus} onClick={toggle} aria-expanded={open}>
             <svg className={`inbox-chevron ${open ? 'expanded' : ''}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <polyline points="6 9 12 15 18 9" />
             </svg>
