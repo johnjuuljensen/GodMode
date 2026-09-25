@@ -23,6 +23,8 @@ public class ScriptRunner : IScriptRunner
     /// <summary>The stderr lines a script run for its output keeps for its error.</summary>
     private const int MaxStderrLines = 20;
 
+    public const string PowerShellExecutableSetting = "PowerShell:Executable";
+
     private readonly ILogger<ScriptRunner> _logger;
 
     public ScriptRunner(ILogger<ScriptRunner> logger)
