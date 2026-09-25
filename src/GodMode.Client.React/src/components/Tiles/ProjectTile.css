@@ -1,0 +1,76 @@
+/* ── A tile's rows: a tool call and a status line are one line each, as folded in the transcript ── */
+.tile-tool,
+.tile-status {
+  margin: 2px 0;
+  padding: 2px 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+.tile-tool-line,
+.tile-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tile-tool-name {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.tile-tool-error .tile-tool-name {
+  color: var(--error);
+}
+
+.tile-tool-summary,
+.tile-tool-error-line,
+.tile-status-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+}
+
+.tile-tool-status {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  opacity: 0.8;
+}
+
+.tile-tool-status-pending { background: var(--warning); }
+.tile-tool-status-error { background: var(--error); }
+
+.tile-tool-error-line {
+  color: var(--error);
+}
+
+.tile-badge {
+  flex-shrink: 0;
+  font-size: 8px;
+  font-weight: 600;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  letter-spacing: 0.04em;
+}
+
+.tile-status-error,
+.tile-status-error .tile-badge {
+  color: var(--error);
+}
+
+.tile-status-error .tile-badge {
+  background: var(--error-soft);
+  border-color: transparent;
+}

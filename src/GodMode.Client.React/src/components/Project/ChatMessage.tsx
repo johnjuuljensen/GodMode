@@ -2,8 +2,9 @@ import { memo, useMemo } from 'react';
 import type { TranscriptItem, ToolCallItem } from '../../signalr/parseMessage';
 import { Markdown } from './Markdown';
 import { lineDiff, type DiffLine } from './lineDiff';
+import { callStatus, callStatusTitle, resultLine } from './transcriptRow';
 
-// Tool output past this is cut, so one huge result cannot stall a row
+// Tool output, or a diff, past this many characters is cut, so one huge result or file cannot stall a row
 const MAX_OUTPUT = 20_000;
 
 interface Props {
@@ -47,7 +48,7 @@ export const ChatMessage = memo(function ChatMessage({ item, expanded, onToggle,
       return (
         <div className={`ti ti-status ${item.isError ? 'ti-status-error' : 'ti-status-done'}`}>
           <span className="ti-badge">{item.isError ? 'ERROR' : 'DONE'}</span>
-          <span className="ti-status-text">{(item.summary.split('\n').find(l => l.trim()) ?? '').replace(/^#+\s*/, '')}</span>
+          <span className="ti-status-text">{resultLine(item.summary)}</span>
         </div>
       );
     case 'system':
@@ -83,7 +84,7 @@ function ToolCallRow({ call, expanded, onToggle, expandedKeys }: {
   const diff = useMemo(() => callDiff(call), [call]);
   const added = diff?.filter(l => l.op === '+').length ?? 0;
   const removed = diff?.filter(l => l.op === '-').length ?? 0;
-  const status = !call.result ? 'pending' : call.isError ? 'error' : 'ok';
+  const status = callStatus(call);
 
   return (
     <div className={`ti ti-tool ti-tool-${status}`}>
@@ -98,7 +99,7 @@ function ToolCallRow({ call, expanded, onToggle, expandedKeys }: {
           </span>
         )}
         {call.children.length > 0 && <span className="ti-tool-count">{call.children.length} steps</span>}
-        <span className={`ti-tool-status ti-tool-status-${status}`} title={status === 'pending' ? 'Running' : status === 'error' ? 'Failed' : 'Done'} />
+        <span className={`ti-tool-status ti-tool-status-${status}`} title={callStatusTitle[status]} />
       </button>
       {!expanded && call.isError && call.result && <div className="ti-tool-error-line">{call.result.summary}</div>}
       {expanded && (
@@ -138,19 +139,42 @@ function ToolOutput({ call }: { call: ToolCallItem }) {
   return (
     <pre className={`ti-pre ti-output ${call.isError ? 'ti-output-error' : ''}`}>
       {cut ? text.slice(0, MAX_OUTPUT) : text}
-      {cut && `\n… ${text.length - MAX_OUTPUT} more characters`}
+      {cut && `\n${moreCharacters(text.length - MAX_OUTPUT)}`}
     </pre>
   );
 }
 
+const moreCharacters = (count: number) => `… ${count} more characters`;
+
+/** A diff's lines up to MAX_OUTPUT characters (each line's newline counts), the last cut where they run out, and how many are left out. */
+function capDiff(lines: DiffLine[]): { shown: DiffLine[]; left: number } {
+  const shown: DiffLine[] = [];
+  let room = MAX_OUTPUT;
+  let left = 0;
+  for (const line of lines) {
+    if (room <= 0) {
+      left += line.text.length + 1;
+      continue;
+    }
+    const text = line.text.slice(0, room);
+    shown.push(text === line.text ? line : { ...line, text });
+    left += line.text.length - text.length;
+    room -= line.text.length + 1;
+  }
+  return { shown, left };
+}
+
+// A Write's diff is the whole file: it is cut as tool output is
 function DiffView({ lines }: { lines: DiffLine[] }) {
+  const { shown, left } = useMemo(() => capDiff(lines), [lines]);
   return (
     <pre className="ti-pre ti-diff">
-      {lines.map((line, i) => (
+      {shown.map((line, i) => (
         <div key={i} className={line.op === '+' ? 'ti-diff-add' : line.op === '-' ? 'ti-diff-del' : 'ti-diff-ctx'}>
           <span className="ti-diff-op">{line.op}</span>{line.text}
         </div>
       ))}
+      {left > 0 && <div className="ti-diff-more">{moreCharacters(left)}</div>}
     </pre>
   );
 }

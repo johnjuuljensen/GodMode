@@ -22,7 +22,7 @@ const EVERY_KIND = [
   '[markdown](https://example.invalid/md)',
   '<a href="https://example.invalid/html">html</a>',
   '<svg><a href="https://example.invalid/svg"><text>svg</text></a><a xlink:href="https://example.invalid/xlink"><text>xlink</text></a></svg>',
-  '<map name="m"><area href="https://example.invalid/area" shape="rect" coords="0,0,9,9"></map><img usemap="#m" src="https://example.invalid/i.png">',
+  '<map name="m"><area href="https://example.invalid/area" shape="rect" coords="0,0,9,9"></map><img usemap="#m" src="data:image/png;base64,iVBORw0KGgo=">',
   '<math><mi href="https://example.invalid/math">x</mi></math>',
   '[script](javascript:alert(1))',
 ].join('\n\n');

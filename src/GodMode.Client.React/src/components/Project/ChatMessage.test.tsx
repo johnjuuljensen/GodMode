@@ -34,7 +34,7 @@ describe('markdown in a reply', () => {
     const alert = vi.fn();
     (window as unknown as { alert: typeof alert }).alert = alert;
     const el = await show(assistant(
-      'Hi <script>alert(1)</script>\n\n<img src="x" onerror="alert(2)">\n\n[click](javascript:alert(3)) <a href="javascript:alert(4)">raw</a>\n\n<iframe src="https://example.invalid"></iframe>',
+      'Hi <script>alert(1)</script>\n\n<img src="data:image/png;base64,iVBORw0KGgo=" onerror="alert(2)">\n\n[click](javascript:alert(3)) <a href="javascript:alert(4)">raw</a>\n\n<iframe src="https://example.invalid"></iframe>',
     ));
     expect(el.querySelector('script')).toBeNull();
     expect(el.querySelector('iframe')).toBeNull();
