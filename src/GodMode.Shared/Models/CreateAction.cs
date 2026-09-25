@@ -12,6 +12,14 @@ namespace GodMode.Shared.Models;
 /// </param>
 /// <param name="ResumeOnRestart">Whether a project that was active when the server stopped is resumed when it starts again.</param>
 /// <param name="ResumePrompt">What a project that was working when the server stopped is told when it is resumed.</param>
+/// <param name="AllowSkipPermissions">
+/// Whether a project of this action may run with <c>--dangerously-skip-permissions</c>: a create may
+/// ask for it, and a launch honours what the project's settings ask. Off unless the root turns it on.
+/// </param>
+/// <param name="PermissionMode">
+/// The claude permission mode (<c>--permission-mode</c>) a project of this action is created with,
+/// as claude spells it; null for claude's own default. Never <c>bypassPermissions</c>.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -27,7 +35,9 @@ public record CreateAction(
     string? Model = null,
     string? Status = null,
     bool ResumeOnRestart = true,
-    string ResumePrompt = CreateAction.DefaultResumePrompt
+    string ResumePrompt = CreateAction.DefaultResumePrompt,
+    bool AllowSkipPermissions = false,
+    string? PermissionMode = null
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";

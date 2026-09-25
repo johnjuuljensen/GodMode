@@ -122,6 +122,11 @@ export interface CreateActionInfo {
   Description?: string | null;
   InputSchema?: unknown;
   Model?: string | null;
+  /**
+   * Whether the action's root allows skip-permissions: only then does the create form offer the schema's
+   * `skipPermissions`, and only then does the server accept it.
+   */
+  AllowSkipPermissions: boolean;
 }
 
 /** Git status information for a project. */

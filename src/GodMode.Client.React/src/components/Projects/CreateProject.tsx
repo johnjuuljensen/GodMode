@@ -15,7 +15,10 @@ interface FormField {
   enumOptions?: { value: string; label: string }[];
 }
 
-function parseFormFields(schema: unknown): FormField[] {
+/** The input the server starts claude with --dangerously-skip-permissions for, where the root allows it. */
+const SKIP_PERMISSIONS = 'skipPermissions';
+
+function parseFormFields(schema: unknown, allowSkipPermissions: boolean): FormField[] {
   if (!schema || typeof schema !== 'object') return [];
   const s = schema as Record<string, unknown>;
   const properties = s.properties as Record<string, Record<string, unknown>> | undefined;
@@ -25,10 +28,12 @@ function parseFormFields(schema: unknown): FormField[] {
   const fields: FormField[] = [];
 
   for (const [key, prop] of Object.entries(properties)) {
+    // Offered only where the root allows it, which the server checks too, and never on by default (#233)
+    if (key === SKIP_PERMISSIONS && !allowSkipPermissions) continue;
     const type = prop.type as string;
     const title = (prop.title as string) || key;
     const description = prop.description as string | undefined;
-    const defaultValue = prop.default != null ? String(prop.default) : undefined;
+    const defaultValue = prop.default != null && key !== SKIP_PERMISSIONS ? String(prop.default) : undefined;
 
     if (type === 'boolean') {
       fields.push({ key, title, fieldType: 'boolean', isRequired: false, description, defaultValue: defaultValue ?? 'false' });
@@ -145,7 +150,9 @@ export function CreateProject({ context }: { context?: CreateContext }) {
   // Falls back to the root's first action; kept as picked while the root is unavailable
   const selectedActionName = actions.some(a => a.Name === pickedActionName) ? pickedActionName : actions[0]?.Name ?? pickedActionName;
   const selectedAction = actions.find(a => a.Name === selectedActionName) ?? null;
-  const formFields = useMemo(() => selectedAction?.InputSchema ? parseFormFields(selectedAction.InputSchema) : [], [selectedAction]);
+  const formFields = useMemo(
+    () => selectedAction?.InputSchema ? parseFormFields(selectedAction.InputSchema, selectedAction.AllowSkipPermissions) : [],
+    [selectedAction]);
 
   // A different root or action resets the form to its defaults. Keyed by name, not by object:
   // every roots refresh (a reconnect, say) hands out new objects for the same form
