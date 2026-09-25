@@ -115,6 +115,10 @@ public class GracefulStopTests
         var launch = await harness.WaitForLaunchAsync(created.Id, l => l.Children.Count == 1 && l.Stdin.Count == 1);
         var child = launch.Children[0];
         Assert.True(LifecycleHarness.IsProcessAlive(child), $"child {child} is not running");
+        // It has left claude's group (Linux), else the group's kill takes it and this proves nothing
+        if (!OperatingSystem.IsWindows())
+            Assert.True(await LifecycleHarness.WaitForAsync(() => Task.FromResult(SessionOf(child) is { } session && session != launch.Pid)),
+                $"child {child} is in session {SessionOf(child)?.ToString() ?? "(gone)"}, claude's ({launch.Pid}) or none");
 
         await harness.Projects.StopProjectAsync(created.Id);
 
@@ -186,6 +190,18 @@ public class GracefulStopTests
             server.Dispose();
             ServerProcess.DeleteWorkDir(workDir);
         }
+    }
+
+    /// <summary>The session a Linux process is in (<c>/proc/{pid}/stat</c>); null once it is gone.</summary>
+    private static int? SessionOf(int pid)
+    {
+        try
+        {
+            // "pid (comm) state ppid pgrp session …", and comm can hold spaces and parentheses
+            var stat = File.ReadAllText($"/proc/{pid}/stat");
+            return int.Parse(stat[(stat.LastIndexOf(')') + 2)..].Split(' ')[3]);
+        }
+        catch (IOException) { return null; }
     }
 
     /// <summary>Ctrl+C in the server's terminal: its console on Windows, its foreground process group elsewhere.</summary>
