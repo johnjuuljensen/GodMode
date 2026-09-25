@@ -213,22 +213,6 @@ public class AttentionTests
         Assert.Equal(2, harness.Hub.AttentionPushes.Count);
     }
 
-    /// <summary>Deleting a profile with its contents removes its projects from the list, and says so.</summary>
-    [Fact]
-    public async Task DeletingAProfileWithItsContents_PushesTheListWithoutItsProjects()
-    {
-        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().Stderr("boom").Exit(1));
-        var created = await harness.CreateProjectAsync();
-        await harness.WaitForStateAsync(created.Id, ProjectState.Error);
-        Assert.Single(await WaitForAttentionPushAsync(harness, 1));
-
-        await harness.Projects.DeleteProfileAsync(LifecycleHarness.ProfileName, deleteContents: true);
-
-        Assert.Empty(await WaitForAttentionPushAsync(harness, 2));
-        Assert.Empty(harness.Projects.GetAttention());
-        Assert.Equal(2, harness.Hub.AttentionPushes.Count);
-    }
-
     /// <summary>Texts are plain, for a phone or a voice: code blocks go, and they are cut to about 500 characters.</summary>
     [Fact]
     public void Text_IsPlain_AndShort()

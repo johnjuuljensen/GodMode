@@ -309,24 +309,6 @@ public class RestartResumeTests
             Assert.Equal(CreateAction.DefaultResumePrompt, Prompt(await harness.WaitForStdinAsync(project.Id, index: before[project.Id])));
     }
 
-    /// <summary>Archived and restored by the user: it was not running when restored, and the next start does not resume it.</summary>
-    [Fact]
-    public async Task ArchivedAndRestored_IsNotResumed()
-    {
-        await using var harness = new LifecycleHarness(Working());
-        var created = await CreateWorkingAsync(harness);
-        await harness.RestartAsync(resume: false);
-        Assert.Equal(ProjectState.Running, (await harness.Projects.GetStatusAsync(created.Id)).StateAtShutdown);
-
-        await harness.Projects.ArchiveProjectAsync(created.Id);
-        await harness.Projects.UnarchiveProjectAsync(created.Id);
-        await harness.RestartAsync();
-
-        Assert.Equal(ProjectState.Stopped, (await harness.Projects.GetStatusAsync(created.Id)).State);
-        Assert.Null(harness.ReadStatusFile(created.Id).StateAtShutdown);
-        Assert.Single(harness.Launches(created.Id));
-    }
-
     /// <summary>
     /// The Ctrl+C gap: claude got the Ctrl+C too, and its exit was handled (Error; or Stopped with
     /// its question gone, for a clean exit while waiting) before the server's shutdown began. The

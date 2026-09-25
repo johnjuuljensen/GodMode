@@ -82,21 +82,6 @@ public interface IProjectManager
     Task DeleteProjectAsync(string projectId, bool force = false);
 
     /// <summary>
-    /// Archives a project (stops process, moves folder to .archived/).
-    /// </summary>
-    Task ArchiveProjectAsync(string projectId);
-
-    /// <summary>
-    /// Restores a project from archive.
-    /// </summary>
-    Task<ProjectSummary> UnarchiveProjectAsync(string projectId);
-
-    /// <summary>
-    /// Lists all archived projects.
-    /// </summary>
-    Task<ProjectSummary[]> ListArchivedProjectsAsync();
-
-    /// <summary>
     /// Cleans up resources for a disconnected client.
     /// </summary>
     Task CleanupConnectionAsync(string connectionId);
@@ -112,22 +97,6 @@ public interface IProjectManager
     /// root's <c>resumeOnRestart</c> and <c>resumePrompt</c> say.
     /// </summary>
     Task ResumeInterruptedProjectsAsync();
-
-    /// <summary>
-    /// Creates a new profile and persists it to appsettings.json.
-    /// </summary>
-    Task CreateProfileAsync(string name, string? description);
-
-    /// <summary>
-    /// Deletes a profile. When deleteContents is true, cascade-deletes all root directories
-    /// and their projects; otherwise reassigns roots to the Default profile.
-    /// </summary>
-    Task DeleteProfileAsync(string name, bool deleteContents = false);
-
-    /// <summary>
-    /// Updates a profile's description in appsettings.json.
-    /// </summary>
-    Task UpdateProfileDescriptionAsync(string name, string? description);
 
     // ── Events ──
 
