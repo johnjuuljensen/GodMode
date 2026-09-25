@@ -146,22 +146,20 @@ function ToolOutput({ call }: { call: ToolCallItem }) {
 
 const moreCharacters = (count: number) => `… ${count} more characters`;
 
-/** A diff's lines up to MAX_OUTPUT characters (each line's newline counts), the last cut where they run out, and how many are left out. */
+// The characters of a diff's text, with a newline between lines
+const diffLength = (lines: DiffLine[]) => Math.max(0, lines.reduce((n, l) => n + l.text.length + 1, -1));
+
+/** A diff's lines up to MAX_OUTPUT characters, the last cut where they run out, and how many characters are left out. */
 function capDiff(lines: DiffLine[]): { shown: DiffLine[]; left: number } {
   const shown: DiffLine[] = [];
   let room = MAX_OUTPUT;
-  let left = 0;
   for (const line of lines) {
-    if (room <= 0) {
-      left += line.text.length + 1;
-      continue;
-    }
+    if (room <= 0) break;
     const text = line.text.slice(0, room);
     shown.push(text === line.text ? line : { ...line, text });
-    left += line.text.length - text.length;
-    room -= line.text.length + 1;
+    room -= text.length + 1;
   }
-  return { shown, left };
+  return { shown, left: diffLength(lines) - diffLength(shown) };
 }
 
 // A Write's diff is the whole file: it is cut as tool output is
