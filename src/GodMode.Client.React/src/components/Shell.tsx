@@ -6,7 +6,6 @@ import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
-import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Inbox, HomeTabBar } from './Inbox/Inbox';
@@ -29,7 +28,6 @@ function PageContent({ page }: { page: ActivePage }) {
         <button className="btn btn-secondary btn-sm" onClick={() => goBack(closePage)}>← Back</button>
       </div>
       <div className="page-body">
-        {page.type === 'profileSettings' && <ProfileSettings />}
         {page.type === 'appSettings' && <AppSettings />}
         {page.type === 'addServer' && <AddServer />}
         {page.type === 'editServer' && <EditServer serverId={page.serverId} />}

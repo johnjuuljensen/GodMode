@@ -19,12 +19,11 @@ public sealed class ProjectManager
     /// <summary>
     /// Creates a new ProjectManager with the specified named project roots.
     /// </summary>
-    /// <param name="projectRoots">Dictionary of named project roots (name -> path).</param>
-    /// <exception cref="ArgumentException">Thrown when projectRoots is null or empty.</exception>
+    /// <param name="projectRoots">Dictionary of named project roots (name -> path). Empty when the server has no roots.</param>
+    /// <exception cref="ArgumentException">Thrown when a root's name or path is empty.</exception>
     public ProjectManager(IReadOnlyDictionary<string, string> projectRoots)
     {
-        if (projectRoots == null || projectRoots.Count == 0)
-            throw new ArgumentException("At least one project root must be specified.", nameof(projectRoots));
+        ArgumentNullException.ThrowIfNull(projectRoots);
 
         _projectRoots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -44,16 +43,6 @@ public sealed class ProjectManager
 
             _projectRoots[name] = fullPath;
         }
-    }
-
-    /// <summary>
-    /// Creates a new ProjectManager for a single root path (backward compatibility).
-    /// </summary>
-    /// <param name="rootPath">Root directory where project folders are stored.</param>
-    /// <exception cref="ArgumentException">Thrown when rootPath is invalid.</exception>
-    public ProjectManager(string rootPath)
-        : this(new Dictionary<string, string> { ["default"] = rootPath })
-    {
     }
 
     /// <summary>

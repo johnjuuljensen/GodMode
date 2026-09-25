@@ -218,13 +218,6 @@ public sealed class ProjectLifecycle
         if (changed) await NotifyStatusChangedAsync(project);
     }
 
-    /// <summary>Kills the process and lets the consumer finish, before the project is removed.</summary>
-    public async Task CloseAsync(ProjectInfo project)
-    {
-        await KillAsync(project);
-        await project.Process.CloseAsync();
-    }
-
     /// <summary>
     /// Sends user input and marks the project Running, under the state lock: a reply that lands
     /// before Running is set waits for it, so Running can never overwrite the reply's state. A

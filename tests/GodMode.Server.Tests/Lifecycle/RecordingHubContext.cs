@@ -111,9 +111,6 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
         public Task ProjectCreated(ProjectStatus status) => Done(new HubPush(nameof(ProjectCreated), status.Id, status));
         public Task CreationProgress(string projectId, string message) => Done(new HubPush(nameof(CreationProgress), projectId));
         public Task ProjectDeleted(string projectId) => Done(new HubPush(nameof(ProjectDeleted), projectId));
-        public Task ProjectArchived(string projectId) => Done(new HubPush(nameof(ProjectArchived), projectId));
-        public Task ProjectRestored(ProjectSummary project) => Done(new HubPush(nameof(ProjectRestored), project.Id));
-        public Task ProfilesChanged() => Done(new HubPush(nameof(ProfilesChanged), null));
 
         private Task Done(HubPush push)
         {

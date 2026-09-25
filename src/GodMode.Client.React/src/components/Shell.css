@@ -286,10 +286,7 @@ body::after {
   .sidebar-sort-bar,
   .sidebar-profile-filter,
   .project-detail-btn,
-  .archived-restore-btn,
-  .archived-toggle,
   .project-status-btn,
-  .project-menu-item,
   .delete-btn,
   .settings-add-btn,
   .form-group select,
@@ -303,7 +300,6 @@ body::after {
   .root-action-btn,
   .sidebar-add-btn,
   .project-detail-btn,
-  .archived-restore-btn,
   .delete-btn {
     min-width: 44px;
   }
@@ -323,8 +319,7 @@ body::after {
 @media (hover: none) {
   .server-actions,
   .root-action-btn,
-  .project-detail-btn,
-  .archived-restore-btn {
+  .project-detail-btn {
     opacity: 1;
   }
 }

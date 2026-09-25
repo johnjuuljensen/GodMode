@@ -17,7 +17,6 @@ namespace GodMode.Shared.Models;
 /// <param name="OutputOffset">The byte offset in output.jsonl after its last line: what a client that has all the output resumes from.</param>
 /// <param name="RootName">The name of the project root this project belongs to.</param>
 /// <param name="Model">The Claude model the session was started with. Used on resume so the session keeps running on the same model regardless of the current root config or machine default.</param>
-/// <param name="RepoUrl">Deprecated. Kept for backward compatibility with existing status.json files on disk.</param>
 /// <param name="PendingPermission">The tool call waiting for the user to allow or deny it, while the project is <see cref="ProjectState.WaitingPermission"/>. Null otherwise.</param>
 /// <param name="PendingQuestion">The AskUserQuestion waiting for the user's answer, while the project is <see cref="ProjectState.WaitingInput"/> on it. Null otherwise.</param>
 /// <param name="LastError">Why the project is in <see cref="ProjectState.Error"/>: the last lines claude wrote to stderr before it exited, or an error result's text. Null otherwise.</param>
@@ -41,7 +40,6 @@ public record ProjectStatus(
     long OutputOffset,
     string? RootName = null,
     string? ProfileName = null,
-    string? RepoUrl = null,
     string? Model = null,
     string? LastError = null,
     PendingPermission? PendingPermission = null,

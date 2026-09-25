@@ -110,37 +110,6 @@ public interface IProjectHub
     /// </summary>
     Task DeleteProject(string projectId, bool force = false);
 
-    /// <summary>
-    /// Archives a project (stops it, moves to archive, keeps data).
-    /// </summary>
-    Task ArchiveProject(string projectId);
-
-    /// <summary>
-    /// Restores an archived project.
-    /// </summary>
-    Task UnarchiveProject(string projectId);
-
-    /// <summary>
-    /// Lists all archived projects.
-    /// </summary>
-    Task<ProjectSummary[]> ListArchivedProjects();
-
-    /// <summary>
-    /// Creates a new profile with an optional description.
-    /// </summary>
-    Task CreateProfile(string name, string? description);
-
-    /// <summary>
-    /// Deletes a profile. When deleteContents is true, cascade-deletes all root directories
-    /// and their projects; otherwise reassigns roots to the Default profile.
-    /// </summary>
-    Task DeleteProfile(string name, bool deleteContents = false);
-
-    /// <summary>
-    /// Updates a profile's description.
-    /// </summary>
-    Task UpdateProfileDescription(string name, string? description);
-
     // ── Utility ──
 
     /// <summary>

@@ -84,11 +84,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Legacy profiles loaded from appsettings.json at startup (before .profiles/ migration).
-    /// </summary>
-    private readonly Dictionary<string, ProfileConfig> _legacyProfiles;
-
-    /// <summary>
     /// Optional directory to scan for autodiscovered roots.
     /// Null when autodiscovery is disabled.
     /// </summary>
@@ -146,12 +141,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Read optional autodiscovery directory (normalize empty/whitespace to null)
         var rawDir = configuration["ProjectRootsDir"];
         _projectRootsDir = string.IsNullOrWhiteSpace(rawDir) ? null : rawDir;
-
-        // Migrate legacy profiles from appsettings.json to .profiles/ (one-time)
-        _profileFileManager.MigrateFromAppSettings(configuration);
-
-        // Load legacy profiles from configuration (with backward compat for ProjectRoots)
-        _legacyProfiles = LoadProfiles(configuration, hasAutoDiscovery: _projectRootsDir != null);
 
         if (_projectRootsDir != null)
             _logger.LogInformation("Autodiscovery enabled: scanning {ProjectRootsDir} for .godmode-root/ directories", _projectRootsDir);
@@ -217,79 +206,25 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
     }
 
-    private static Dictionary<string, ProfileConfig> LoadProfiles(IConfiguration configuration, bool hasAutoDiscovery)
-    {
-        var profiles = configuration.GetSection("Profiles").Get<Dictionary<string, ProfileConfig>>();
-
-        if (profiles is { Count: > 0 })
-            return profiles;
-
-        // Backward compat: map old ProjectRoots → "Default" profile
-        var legacyRoots = configuration.GetSection("ProjectRoots").Get<Dictionary<string, string>>();
-        if (legacyRoots is { Count: > 0 })
-        {
-            return new Dictionary<string, ProfileConfig>
-            {
-                ["Default"] = new ProfileConfig { Roots = legacyRoots }
-            };
-        }
-
-        // No explicit config — return empty if autodiscovery will provide roots,
-        // otherwise fall back to a default "projects" root.
-        if (hasAutoDiscovery)
-            return new Dictionary<string, ProfileConfig>();
-
-        return new Dictionary<string, ProfileConfig>
-        {
-            ["Default"] = new ProfileConfig
-            {
-                Roots = new Dictionary<string, string> { ["default"] = "projects" }
-            }
-        };
-    }
-
     /// <summary>
-    /// Builds an immutable snapshot of all profile/root state by merging explicit profiles
-    /// with autodiscovered roots. Thread-safe — can be called from any thread.
+    /// Builds an immutable snapshot of all profile/root state: the profiles in .profiles/, with the
+    /// roots autodiscovered in ProjectRootsDir. Thread-safe — can be called from any thread.
     /// </summary>
     private ProfileSnapshot BuildSnapshot()
     {
-        // Layer 1: Legacy profiles from appsettings.json (only if .profiles/ doesn't exist yet)
-        // Once .profiles/ exists (migration has run), legacy is ignored — .profiles/ is authoritative.
-        var profilesDirExists = Directory.Exists(_profileFileManager.ProfilesDir);
-        var merged = profilesDirExists
-            ? new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, ProfileConfig>(_legacyProfiles, StringComparer.OrdinalIgnoreCase);
-
-        // Layer 2: File-based profiles from .profiles/ directory
-        var fileProfiles = _profileFileManager.ReadAllProfiles();
-        foreach (var (name, data) in fileProfiles)
+        // Layer 1: File-based profiles from .profiles/ directory
+        var merged = new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, data) in _profileFileManager.ReadAllProfiles())
         {
-            if (merged.TryGetValue(name, out var existing))
+            merged[name] = new ProfileConfig
             {
-                // File-based profile fully replaces legacy environment/MCP/description.
-                // No fallback to legacy — once .profiles/{name}/ exists, it is authoritative.
-                merged[name] = new ProfileConfig
-                {
-                    Roots = existing.Roots,
-                    Environment = data.Environment,
-                    Description = data.Description ?? existing.Description,
-                    McpServers = data.McpServers
-                };
-            }
-            else
-            {
-                merged[name] = new ProfileConfig
-                {
-                    Roots = new Dictionary<string, string>(),
-                    Environment = data.Environment,
-                    Description = data.Description,
-                    McpServers = data.McpServers
-                };
-            }
+                Roots = new Dictionary<string, string>(),
+                Environment = data.Environment,
+                Description = data.Description
+            };
         }
 
-        // Layer 3: Autodiscovered roots from ProjectRootsDir
+        // Layer 2: Autodiscovered roots from ProjectRootsDir
         if (_projectRootsDir != null)
         {
             var discovered = DiscoverProfiles(_projectRootsDir);
@@ -307,8 +242,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                     {
                         Roots = mergedRoots,
                         Environment = existing.Environment,
-                        Description = existing.Description ?? profileConfig.Description,
-                        McpServers = existing.McpServers
+                        Description = existing.Description ?? profileConfig.Description
                     };
                 }
                 else
@@ -335,9 +269,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         {
             compositeRoots[$"{profile}/{root}"] = path;
         }
-        var projectFiles = compositeRoots.Count > 0
-            ? new ProjectFiles.ProjectManager(compositeRoots)
-            : new ProjectFiles.ProjectManager("projects");
+        var projectFiles = new ProjectFiles.ProjectManager(compositeRoots);
 
         _logger.LogInformation("Profile snapshot: {ProfileCount} profiles, {RootCount} total roots: {Roots}",
             merged.Count,
@@ -938,7 +870,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return after is { IsOpen: true } ? PullRequestPoller.Outcome.Poll : PullRequestPoller.Outcome.Wait;
     }
 
-    /// <summary>A project that is back without a status push (recovered, restored): its open pull request is checked, then polled.</summary>
+    /// <summary>A project that is back without a status push (recovered): its open pull request is checked, then polled.</summary>
     private void ResumeChecks(ProjectInfo project)
     {
         _pullRequests.Remember(project.Status.Id, project.Status.State);
@@ -1113,136 +1045,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await PushAttentionIfChangedAsync();
     }
 
-    public async Task ArchiveProjectAsync(string projectId)
-    {
-        if (!_projects.TryRemove(projectId, out var project))
-            throw new KeyNotFoundException($"Project {projectId} not found");
-
-        // Stop process if running, and finish its output and its checks
-        await _lifecycle.CloseAsync(project);
-        await _pullRequests.ForgetAsync(projectId);
-        // Archived by the user: nothing to carry on with, if it is ever restored
-        if (project.Status.StateAtShutdown != null)
-            await _lifecycle.UpdateStatusAsync(project, status => status with { StateAtShutdown = null });
-
-        // Move project folder to .archived/ sibling directory
-        var parentDir = Path.GetDirectoryName(project.ProjectPath)!;
-        var archiveDir = Path.Combine(parentDir, ".archived");
-        Directory.CreateDirectory(archiveDir);
-        var destDir = Path.Combine(archiveDir, Path.GetFileName(project.ProjectPath));
-        if (Directory.Exists(destDir))
-            await DeleteDirectoryRobustAsync(destDir);
-        Directory.Move(project.ProjectPath, destDir);
-
-        // Write archive metadata
-        var metaPath = Path.Combine(destDir, ".godmode", "archive.json");
-        var meta = new { ArchivedAt = DateTime.UtcNow, Name = project.Status.Name,
-            RootName = project.Status.RootName, ProfileName = project.ProfileName ?? project.Status.ProfileName };
-        await File.WriteAllTextAsync(metaPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
-
-        _logger.LogInformation("Archived project {ProjectId} ({Name})", projectId, project.Status.Name);
-        await PushAttentionIfChangedAsync();
-    }
-
-    public Task<ProjectSummary[]> ListArchivedProjectsAsync()
-    {
-        var results = new List<ProjectSummary>();
-        var snap = _snapshot;
-
-        // Scan all root directories for .archived/ folders. An archived project's ID is where it
-        // returns to, its root and folder, whatever ID its status.json was archived with
-        foreach (var (profileName, rootName, rootPath) in AllRoots(snap))
-        {
-            var archiveDir = Path.Combine(rootPath, ".archived");
-            if (!Directory.Exists(archiveDir)) continue;
-
-            foreach (var projDir in Directory.GetDirectories(archiveDir))
-            {
-                var statusPath = Path.Combine(projDir, ".godmode", "status.json");
-                if (!File.Exists(statusPath)) continue;
-
-                try
-                {
-                    var statusJson = File.ReadAllText(statusPath);
-                    var status = JsonSerializer.Deserialize<ProjectStatus>(statusJson);
-                    if (status == null) continue;
-
-                    results.Add(new ProjectSummary(
-                        ProjectId(profileName, rootName, Path.GetFileName(projDir)), status.Name, ProjectState.Stopped, status.UpdatedAt,
-                        RootName: rootName, ProfileName: profileName));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to read archived project at {Path}", projDir);
-                }
-            }
-        }
-
-        return Task.FromResult(results.ToArray());
-    }
-
-    public async Task<ProjectSummary> UnarchiveProjectAsync(string projectId)
-    {
-        // Find the archived project folder
-        var snap = _snapshot;
-        foreach (var (profileName, rootName, rootPath) in AllRoots(snap))
-        {
-            var archiveDir = Path.Combine(rootPath, ".archived");
-            if (!Directory.Exists(archiveDir)) continue;
-
-            foreach (var projDir in Directory.GetDirectories(archiveDir))
-            {
-                if (ProjectId(profileName, rootName, Path.GetFileName(projDir)) != projectId) continue;
-                var statusPath = Path.Combine(projDir, ".godmode", "status.json");
-                if (!File.Exists(statusPath)) continue;
-
-                try
-                {
-                    var statusJson = File.ReadAllText(statusPath);
-                    var status = JsonSerializer.Deserialize<ProjectStatus>(statusJson)
-                        ?? throw new InvalidDataException($"{statusPath} is empty");
-
-                    // Move back to root directory
-                    var destDir = Path.Combine(rootPath, Path.GetFileName(projDir));
-                    if (Directory.Exists(destDir))
-                        destDir = Path.Combine(rootPath, $"{Path.GetFileName(projDir)}-{DateTime.UtcNow:yyyyMMddHHmmss}");
-                    Directory.Move(projDir, destDir);
-
-                    // Remove archive metadata
-                    var archiveMeta = Path.Combine(destDir, ".godmode", "archive.json");
-                    if (File.Exists(archiveMeta)) File.Delete(archiveMeta);
-
-                    // Re-register project, under the folder it returned to
-                    var id = ProjectId(profileName, rootName, Path.GetFileName(destDir));
-                    var project = new ProjectInfo
-                    {
-                        // Restored by the user, not interrupted: the next start does not resume it
-                        Status = status with { Id = id, State = ProjectState.Stopped, StateAtShutdown = null, RootName = rootName, ProfileName = profileName, OutputOffset = OutputLog.End(destDir) },
-                        ProjectPath = destDir,
-                        ActionName = null,
-                        ProfileName = profileName,
-                    };
-                    _projects[id] = project;
-                    await _statusUpdater.SaveStatusAsync(project);
-                    ResumeChecks(project);
-
-                    _logger.LogInformation("Unarchived project {ArchivedId} ({Name}) as {ProjectId}", projectId, status.Name, id);
-                    await PushAttentionIfChangedAsync();
-
-                    return new ProjectSummary(id, status.Name, ProjectState.Stopped,
-                        DateTime.UtcNow, RootName: rootName, ProfileName: profileName);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to unarchive project at {Path}", projDir);
-                    throw;
-                }
-            }
-        }
-
-        throw new KeyNotFoundException($"Archived project {projectId} not found");
-    }
-
     public async Task ResumeProjectAsync(string projectId)
     {
         if (!_projects.TryGetValue(projectId, out var project))
@@ -1368,79 +1170,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await Task.CompletedTask;
     }
 
-    public Task CreateProfileAsync(string name, string? description)
-    {
-        _profileFileManager.CreateProfile(name, description);
-        RebuildSnapshot();
-        return Task.CompletedTask;
-    }
-
-    public async Task DeleteProfileAsync(string name, bool deleteContents = false)
-    {
-        _profileFileManager.DeleteProfile(name);
-
-        var snap = _snapshot;
-        var profileRoots = snap.RootLookup
-            .Where(kvp => string.Equals(kvp.Key.Item1, name, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (deleteContents)
-        {
-            // Cascade: stop processes, remove tracking, delete root directories
-            foreach (var ((_, rootName), rootPath) in profileRoots)
-            {
-                // Stop and remove all projects under this root
-                var projectsInRoot = _projects.Values
-                    .Where(p => IsSameOrUnder(p.ProjectPath, rootPath))
-                    .ToList();
-                foreach (var project in projectsInRoot)
-                {
-                    project.Process.Cancellation?.Cancel();
-                    project.Process.Output.TryComplete();
-                    _projects.TryRemove(project.Status.Id, out _);
-                    await _pullRequests.ForgetAsync(project.Status.Id);
-                }
-
-                // Delete the entire root directory (including projects)
-                if (Directory.Exists(rootPath))
-                {
-                    _logger.LogInformation("Cascade deleting root '{RootName}' at {RootPath}", rootName, rootPath);
-                    Directory.Delete(rootPath, recursive: true);
-                }
-            }
-        }
-        else
-        {
-            // Move roots to Default profile by clearing profileName from config
-            foreach (var ((_, _), rootPath) in profileRoots)
-            {
-                var configPath = Path.Combine(rootPath, ".godmode-root", "config.json");
-                if (!File.Exists(configPath)) continue;
-                try
-                {
-                    var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(configPath))?.AsObject();
-                    if (json != null)
-                    {
-                        json.Remove("profileName");
-                        File.WriteAllText(configPath, json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                    }
-                }
-                catch { /* skip unparseable configs */ }
-            }
-        }
-
-        RebuildSnapshot();
-        // A cascade removed projects, which may have needed the user
-        await PushAttentionIfChangedAsync();
-    }
-
-    public Task UpdateProfileDescriptionAsync(string name, string? description)
-    {
-        _profileFileManager.UpdateProfileDescription(name, description);
-        RebuildSnapshot();
-        return Task.CompletedTask;
-    }
-
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
     public async Task RecoverProjectsAsync()
@@ -1484,9 +1213,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 // A permission prompt ended with the process that asked: its bridge's call failed with the server
                 status = status with { PendingPermission = null, PendingQuestion = null };
 
-                // The ID is where the folder is. One written before IDs carried the profile and root
-                // (the bare folder name), or before its root moved profile, is migrated: status.json
-                // is rewritten below. Nothing else in .godmode holds the ID
+                // The ID is where the folder is. A status.json that says otherwise (its root moved
+                // profile, or the folder moved) is rewritten below. Nothing else in .godmode holds the ID
                 var id = ProjectId(profileName, rootName, Path.GetFileName(projectPath));
                 var idChanged = status.Id != id;
                 if (idChanged)
@@ -1870,10 +1598,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// The one place a claude launch is configured, for create and resume alike: everything comes
     /// from the project (its profile, root, action and model) and what is saved in its folder
     /// (settings.json), read fresh, so a resume, or a resume after a restart, launches as the
-    /// create did. The profile's environment and MCP servers, the action's, and the MCP bridge with
-    /// its <c>GODMODE_*</c> variables and a fresh project token are always there. A root config that
-    /// cannot be read, or an action that is gone, throws <see cref="LaunchConfigException"/>: a
-    /// launch with anything but the project's own action would not be the one it was created with.
+    /// create did. The profile's environment, the action's, and the MCP bridge with its
+    /// <c>GODMODE_*</c> variables and a fresh project token are always there. The bridge is the only
+    /// MCP server GodMode gives claude: a repo brings its own in its <c>.mcp.json</c>, and user-scoped
+    /// ones live in the profile's <c>CLAUDE_CONFIG_DIR</c>. A root config that cannot be read, or an
+    /// action that is gone, throws <see cref="LaunchConfigException"/>: a launch with anything but
+    /// the project's own action would not be the one it was created with.
     /// </summary>
     private ClaudeLaunchSpec BuildLaunchSpec(ProjectInfo project)
     {
@@ -1885,11 +1615,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         snap.Profiles.TryGetValue(profileName ?? "", out var profile);
 
         var (action, stripEnvVarProfile) = ResolveLaunchAction(snap, project, profileName);
-        // Never logged: it carries the MCP servers' credentials
-        var mcpConfigJson = InjectMcpBridge(BuildMcpConfigJson(profile?.McpServers, action.McpServers));
-        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, settings, project.Status.Model ?? action.Model,
-            profile?.Environment, profileName, stripEnvVarProfile, mcpConfigJson);
-        return new ClaudeLaunchSpec(AddMcpBridgeEnvironment(project, env), args ?? []);
+        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, settings, McpBridgeConfigJson(),
+            project.Status.Model ?? action.Model, profile?.Environment, profileName, stripEnvVarProfile);
+        return new ClaudeLaunchSpec(AddMcpBridgeEnvironment(project, env), args);
     }
 
     /// <summary>
@@ -1916,14 +1644,15 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Builds claude environment and args from action config + project settings + profile env.
+    /// Nothing is pre-approved: a tool call that needs approval reaches the permission prompt, unless
+    /// Claude Code's own settings, or skip-permissions, allow it.
     /// </summary>
-    private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
-        string projectPath, CreateAction action, ProjectFiles.ProjectSettings settings,
+    private static (Dictionary<string, string>? Env, string[] Args) BuildClaudeConfig(
+        string projectPath, CreateAction action, ProjectFiles.ProjectSettings settings, string mcpConfigJson,
         string? model = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
-        bool stripEnvVarProfile = false,
-        string? mcpConfigJson = null)
+        bool stripEnvVarProfile = false)
     {
         var env = MergeAndExpandEnvironment(profileEnv, action.Environment, profileName, stripEnvVarProfile);
 
@@ -1944,115 +1673,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             args.Add("--model");
             args.Add(model);
         }
-        if (!string.IsNullOrWhiteSpace(mcpConfigJson))
-        {
-            // --mcp-config expects a file path, not inline JSON; the process manager deletes it on exit
-            args.Add("--mcp-config");
-            args.Add(McpConfigFile.Write(projectPath, mcpConfigJson));
-        }
+        // --mcp-config expects a file path, not inline JSON; the process manager deletes it on exit
+        args.Add("--mcp-config");
+        args.Add(McpConfigFile.Write(projectPath, mcpConfigJson));
 
-        // Auto-allow all MCP tools so Claude doesn't block on permissions in --print mode.
-        // --allowedTools requires server-level prefixes (e.g. "mcp__jira"), not just "mcp__".
-        if (!settings.DangerouslySkipPermissions)
-        {
-            var mcpPrefixes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            // From our --mcp-config
-            if (!string.IsNullOrWhiteSpace(mcpConfigJson))
-            {
-                try
-                {
-                    using var doc = JsonDocument.Parse(mcpConfigJson);
-                    if (doc.RootElement.TryGetProperty("mcpServers", out var servers))
-                        foreach (var server in servers.EnumerateObject())
-                            mcpPrefixes.Add($"mcp__{server.Name}");
-                }
-                catch { /* ignore */ }
-            }
-
-            // From user's local ~/.claude/settings.json (covers pencil, grafana, etc.)
-            var userSettingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "settings.json");
-            if (File.Exists(userSettingsPath))
-            {
-                try
-                {
-                    using var doc = JsonDocument.Parse(File.ReadAllText(userSettingsPath));
-                    if (doc.RootElement.TryGetProperty("mcpServers", out var localServers))
-                        foreach (var server in localServers.EnumerateObject())
-                            mcpPrefixes.Add($"mcp__{server.Name}");
-                }
-                catch { /* ignore */ }
-            }
-
-            if (mcpPrefixes.Count > 0)
-            {
-                args.Add("--allowedTools");
-                args.Add(string.Join(",", mcpPrefixes));
-            }
-        }
-
-        return (env, args.Count > 0 ? args.ToArray() : null);
-    }
-
-    /// <summary>
-    /// Merges MCP servers from profile and action levels and returns inline JSON for --mcp-config.
-    /// Returns the JSON string if MCP servers exist, null otherwise.
-    /// Merge order: profile → action (action wins on conflict).
-    /// Expands ${VAR} references in env values.
-    /// </summary>
-    private static string? BuildMcpConfigJson(
-        Dictionary<string, McpServerConfig>? profileMcpServers,
-        Dictionary<string, McpServerConfig>? actionMcpServers)
-    {
-        // Merge: profile is the base, action overrides
-        Dictionary<string, McpServerConfig>? merged = null;
-        if (profileMcpServers != null || actionMcpServers != null)
-        {
-            merged = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase);
-            if (profileMcpServers != null)
-                foreach (var (k, v) in profileMcpServers)
-                    merged[k] = v;
-            if (actionMcpServers != null)
-                foreach (var (k, v) in actionMcpServers)
-                    merged[k] = v;
-        }
-
-        if (merged is not { Count: > 0 })
-            return null;
-
-        // Build Claude MCP config format: { "mcpServers": { ... } }
-        // Stdio servers → { command, args, env }; URL servers → { type, url, headers }
-        var mcpConfig = new Dictionary<string, object>
-        {
-            ["mcpServers"] = merged.ToDictionary(
-                kvp => kvp.Key,
-                kvp =>
-                {
-                    if (!string.IsNullOrEmpty(kvp.Value.Url))
-                    {
-                        // URLs ending in /sse use legacy SSE transport; all others use streamable HTTP
-                        var transport = kvp.Value.Url.EndsWith("/sse", StringComparison.OrdinalIgnoreCase) ? "sse" : "http";
-                        var server = new Dictionary<string, object>
-                        {
-                            ["type"] = transport,
-                            ["url"] = kvp.Value.Url
-                        };
-                        var headers = ExpandEnvVars(kvp.Value.Headers);
-                        if (headers is { Count: > 0 })
-                            server["headers"] = headers;
-                        return (object)server;
-                    }
-                    {
-                        var env = ExpandEnvVars(kvp.Value.Env);
-                        if (env is { Count: > 0 })
-                            return (object)new { command = kvp.Value.Command ?? "", args = kvp.Value.Args ?? [], env };
-                        return (object)new { command = kvp.Value.Command ?? "", args = kvp.Value.Args ?? Array.Empty<string>() };
-                    }
-                })
-        };
-
-        return JsonSerializer.Serialize(mcpConfig);
+        return (env, args.ToArray());
     }
 
     /// <summary>
@@ -2074,46 +1699,16 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Injects the GodMode MCP bridge server into an MCP config JSON string.
-    /// The bridge env vars (GODMODE_PROJECT_ID, etc.) are inherited from the Claude process env.
+    /// The session's MCP config: GodMode's own server, the bridge, and nothing else. The bridge's env
+    /// vars (GODMODE_PROJECT_ID, etc.) are inherited from the Claude process env.
     /// </summary>
-    private string InjectMcpBridge(string? existingJson)
+    private string McpBridgeConfigJson() => JsonSerializer.Serialize(new Dictionary<string, object>
     {
-        var bridgePath = _mcpBridgePath;
-
-        Dictionary<string, object>? mcpConfig;
-        Dictionary<string, object> servers;
-
-        if (!string.IsNullOrEmpty(existingJson))
+        ["mcpServers"] = new Dictionary<string, object>
         {
-            mcpConfig = JsonSerializer.Deserialize<Dictionary<string, object>>(existingJson);
-            if (mcpConfig != null && mcpConfig.TryGetValue("mcpServers", out var serversObj) && serversObj is JsonElement el)
-            {
-                servers = JsonSerializer.Deserialize<Dictionary<string, object>>(el.GetRawText()) ?? new();
-            }
-            else
-            {
-                servers = new();
-                mcpConfig ??= new();
-            }
+            [McpBridgeServerName] = new { command = "node", args = new[] { _mcpBridgePath }, env = new Dictionary<string, string>() }
         }
-        else
-        {
-            mcpConfig = new();
-            servers = new();
-        }
-
-        // Add the bridge as a stdio MCP server — env vars are inherited from the Claude process
-        servers[McpBridgeServerName] = new
-        {
-            command = "node",
-            args = new[] { bridgePath },
-            env = new Dictionary<string, string>()
-        };
-
-        mcpConfig["mcpServers"] = servers;
-        return JsonSerializer.Serialize(mcpConfig);
-    }
+    });
 
     /// <summary>
     /// The bridge bundle every session runs: <see cref="McpBridgePathSetting"/> (or the
@@ -2133,23 +1728,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 : $"The GodMode MCP bridge is not at {path}. The server build puts it there (src/GodMode.McpBridge, " +
                   "built with -p:BuildMcpBridge left on), or set " + McpBridgePathSetting + " to its godmode-mcp-bridge.cjs.", path);
         return path;
-    }
-
-    /// <summary>
-    /// Expands ${VAR} references in dictionary values using the current process environment.
-    /// </summary>
-    private static Dictionary<string, string>? ExpandEnvVars(Dictionary<string, string>? env)
-    {
-        if (env is null or { Count: 0 }) return env;
-
-        var expanded = new Dictionary<string, string>(env.Count);
-        foreach (var (key, value) in env)
-        {
-            expanded[key] = System.Text.RegularExpressions.Regex.Replace(
-                value, @"\$\{(\w+)\}",
-                m => Environment.GetEnvironmentVariable(m.Groups[1].Value) ?? m.Value);
-        }
-        return expanded;
     }
 
     /// <summary>

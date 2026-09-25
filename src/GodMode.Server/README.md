@@ -26,7 +26,7 @@ SignalR server for GodMode. It runs Claude Code sessions in project folders on t
 
 `ProjectRootsDir` is the directory the server scans for roots: every subdirectory that contains a `.godmode-root/` folder is a root, named after the subdirectory. A relative path is resolved against the working directory. The scan runs on each call, so a root you add appears on the next refresh without a restart.
 
-Profiles live in `{ProjectRootsDir}/.profiles/` (see `docs/UNIFIED-ARCHITECTURE.md` Section 6). An old `Profiles` or `ProjectRoots` section in `appsettings.json` is migrated there once, the first time the server starts without a `.profiles/` directory.
+Profiles live in `{ProjectRootsDir}/.profiles/` (see `docs/UNIFIED-ARCHITECTURE.md` Section 6). Profiles and roots are maintained by hand on the host: the server reads their config and never writes it.
 
 Every setting can also come from an environment variable (`ProjectRootsDir`, `Authentication__ApiKey`) or the command line (`--ProjectRootsDir=/srv/roots`).
 
@@ -87,7 +87,7 @@ The key can also go in `appsettings.json` (`"Authentication": { "ApiKey": "..." 
 
 ### config.json — Base/Shared Config
 
-Defines shared settings (prepare + delete scripts, environment, claude args, MCP servers) inherited by all actions:
+Defines shared settings (prepare + delete scripts, environment, claude args) inherited by all actions:
 
 ```json
 {
@@ -99,10 +99,7 @@ Defines shared settings (prepare + delete scripts, environment, claude args, MCP
   "delete": "scripts/delete",
   "status": "scripts/status",
   "resumeOnRestart": true,
-  "resumePrompt": "The GodMode server restarted and interrupted you. Continue where you left off.",
-  "mcpServers": {
-    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
-  }
+  "resumePrompt": "The GodMode server restarted and interrupted you. Continue where you left off."
 }
 ```
 
@@ -128,7 +125,6 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 |-------|-----------|
 | Scalars (description, nameTemplate, model, resumeOnRestart, resumePrompt, etc.) | Overlay replaces if present |
 | `environment` | Dictionary merge, overlay keys override |
-| `mcpServers` | Dictionary merge, overlay servers override by name |
 | `claudeArgs` | Concatenated (base + overlay) |
 | Script fields (prepare, create, delete, status) | Overlay replaces entirely |
 
@@ -153,7 +149,6 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `status` | One script that reports the project's pull request (working dir = project): see [Pull request status](#pull-request-status) |
 | `claudeArgs` | Extra CLI arguments appended when starting Claude |
 | `model` | Default `--model` for the action. A `model` form input overrides it |
-| `mcpServers` | MCP servers for the root or action, merged over the profile's (profile → root → action) |
 | `nameTemplate` | Derive project name from inputs, e.g. `"issue_{issueNumber}"` |
 | `promptTemplate` | Derive initial prompt from inputs |
 | `scriptsCreateFolder` | If true, create scripts are responsible for creating the project directory |
@@ -162,6 +157,17 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `stripEnvVarProfile` | If true (`config.json` only), server env vars prefixed with the profile name reach sessions without the prefix: `MEGA_GITHUB_TOKEN` → `GITHUB_TOKEN` for profile `mega` |
 
 Script fields accept either a single string or a string array in JSON. Paths are relative to `.godmode-root/`.
+
+### MCP Servers
+
+GodMode gives a session one MCP server, its own `godmode-bridge`, in the `--mcp-config` file it launches claude with. It configures no others:
+
+- A repo brings its MCP servers in its own `.mcp.json` (Claude Code's project scope).
+- User-scoped servers live in the profile's Claude config: the `CLAUDE_CONFIG_DIR` its `environment` (or the root's) sets, for example with `claude mcp add --scope user` run with that `CLAUDE_CONFIG_DIR`.
+
+A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: the server logs a warning once for each, and ignores it.
+
+GodMode pre-approves no tool: it passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (`WaitingPermission`), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`) or the project runs with `skipPermissions`.
 
 ### Input Schema (Convention-Based)
 
@@ -224,7 +230,7 @@ A root's `status` script tells the server what became of a project's work, witho
 
 or `{}` when there is no pull request. The result is `ProjectStatus.PullRequest` (in `status.json`), with `ChangedAt`, when the server first saw that state and review.
 
-- **When:** on every transition to Idle or Stopped, and every `PullRequestPollSeconds` (default 600) while the pull request is draft or open; for an open one also when the server starts. One check at a time per project, at most four across the server. Deleting or archiving a project stops its checks.
+- **When:** on every transition to Idle or Stopped, and every `PullRequestPollSeconds` (default 600) while the pull request is draft or open; for an open one also when the server starts. One check at a time per project, at most four across the server. Deleting a project stops its checks.
 - **Failures change nothing:** a non-zero exit, more than `StatusScriptTimeoutSeconds` (default 30, then the script is killed), more than 16 KB of stdout, or output that is not exactly the object above (unknown properties, other values, extra text) leaves the pull request as it was, and is logged as a warning, on every check that fails.
 - **Attention:** an open pull request with `changes_requested`, on a project that is Idle or Stopped, is a `Review` item until `MarkSeen` or a reply, and again when the review changes. `Review` and `Finished` items carry `PullRequestUrl`.
 - A root without `status` runs nothing, and its projects have no `PullRequest`.
@@ -239,7 +245,7 @@ When the server stops, it stops every project, and one that was `Running`, `Wait
 - **Waiting on a question** (`WaitingInput`): no process is launched. The project is `WaitingInput` again with its `CurrentQuestion`, and still a `Question` in `GetAttention`, until a reply (`ReplyAndResume`) resumes it with the answer. An AskUserQuestion's options do not survive: the shutdown denied it, and what is left is its first question's text, answered in the chat.
 - **`resumeOnRestart: false`**: the project stays `Stopped`.
 
-A project the user stopped, or that was `Idle`, `Stopped` or `Error` when the server stopped, is not resumed. A resume that fails is `Error` with `LastError`, as any resume is (a root config the launch cannot use, a claude that exits at once), and is not tried again. Any launch clears `StateAtShutdown`, and so do a stop, an archive and an unarchive by the user. A project waiting its turn is decided when it comes: one the user has stopped, resumed or answered meanwhile is left as it is. A shutdown while the start is still resuming launches nothing more, and the projects not resumed yet keep their marker for the next start. The marker is only a field in `status.json`: a `status.json` restored from a backup or copied from another machine carries it, and that project is resumed on the next start.
+A project the user stopped, or that was `Idle`, `Stopped` or `Error` when the server stopped, is not resumed. A resume that fails is `Error` with `LastError`, as any resume is (a root config the launch cannot use, a claude that exits at once), and is not tried again. Any launch clears `StateAtShutdown`, and so does a stop by the user. A project waiting its turn is decided when it comes: one the user has stopped, resumed or answered meanwhile is left as it is. A shutdown while the start is still resuming launches nothing more, and the projects not resumed yet keep their marker for the next start. The marker is only a field in `status.json`: a `status.json` restored from a backup or copied from another machine carries it, and that project is resumed on the next start.
 
 A Ctrl+C on a server run in a terminal reaches claude too, and claude may exit before the server's shutdown begins. An exit on its own no more than `ExitBeforeShutdownWindowSeconds` (default 5) before the shutdown, with nothing changed since, counts as stopped by it: the project keeps its question and is resumed like the rest. A server that is killed (no shutdown runs) leaves no `StateAtShutdown`, and its projects are recovered `Stopped`.
 
@@ -259,9 +265,9 @@ Each project is stored in a folder under its root:
 └── (project files)      # Working directory for Claude
 ```
 
-Archived projects move to `{root}/.archived/{folder}/`.
+A project is a folder directly inside its root that has a `.godmode/status.json`. Nothing deeper is recovered, and the server moves no project folder anywhere.
 
-**Project ID.** A project is identified by `{profile}/{root}/{folder}`: where its folder is. Two projects with the same name in different roots or profiles are separate projects, with their own process, output and SignalR group. Clients treat the ID as opaque and pass it back as they received it. The server derives it from the folder's location on every start and writes it to `status.json`, so a folder from before this format (its `Id` the bare folder name), or one whose root has moved to another profile, is recovered under its current ID. Nothing else in `.godmode` holds the ID.
+**Project ID.** A project is identified by `{profile}/{root}/{folder}`: where its folder is. Two projects with the same name in different roots or profiles are separate projects, with their own process, output and SignalR group. Clients treat the ID as opaque and pass it back as they received it. The server derives it from the folder's location on every start and writes it to `status.json`, so a folder that was moved, or whose root has moved to another profile, is recovered under its current ID. Nothing else in `.godmode` holds the ID.
 
 The folder name comes from the project's name: spaces become underscores and characters that are invalid in a file name are dropped. A name that leaves no folder of its own (empty, `.`, `..`, or dots only) is refused before anything is created or run. So is a create script's `project_path` at or above the root.
 
@@ -301,8 +307,6 @@ Projects:
 - `Task SubscribeProject(projectId, fromOffset)` — Replay `output.jsonl` from `fromOffset` (the byte offset after the last line the client has; 0 for all, `-N` for the last N turns) in `OutputBatch` messages, then `OutputReplayComplete`, then live `OutputReceived` lines, each line once and in order
 - `Task UnsubscribeProject(projectId)` — Unsubscribe from output
 - `Task DeleteProject(projectId, force)` — Run delete scripts and remove the project
-- `Task ArchiveProject(projectId)` / `Task UnarchiveProject(projectId)` — Move to and from `.archived/`
-- `Task<ProjectSummary[]> ListArchivedProjects()` — Get archived projects
 
 Attention:
 - `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Review`, `Finished`), oldest first, with a short plain `Text`; the same after a restart
@@ -311,8 +315,7 @@ Attention:
 
 Roots and profiles:
 - `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas
-- `Task<ProfileInfo[]> ListProfiles()` — Get profiles
-- `Task CreateProfile(name, description)` / `Task DeleteProfile(name, deleteContents)` / `Task UpdateProfileDescription(name, description)` — Edit `.profiles/`
+- `Task<ProfileInfo[]> ListProfiles()` — Get profiles (read-only: no hub method writes a profile or a root)
 
 Utility:
 - `Task<string?> CheckCommand(command)` — Resolve a command on the server's `PATH`
@@ -326,8 +329,7 @@ Utility:
 - `AttentionChanged(items)` — The whole `GetAttention` list, pushed only when it differs from the last one pushed
 - `ProjectCreated(status)` — New project created
 - `CreationProgress(projectId, message)` — Script progress during project creation
-- `ProjectDeleted(projectId)`, `ProjectArchived(projectId)`, `ProjectRestored(project)` — Project list changes
-- `ProfilesChanged()` — Profiles changed; refresh the list
+- `ProjectDeleted(projectId)` — Project deleted
 
 ### HTTP Endpoints
 

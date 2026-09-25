@@ -18,7 +18,7 @@ namespace GodMode.Server.Tests;
 /// </summary>
 public class ProjectResumeBridgeTests
 {
-    /// <summary>proj1 in the legacy <c>ProjectRoots:work</c> root, which is the Default profile's.</summary>
+    /// <summary>proj1 in the root <c>work</c>, whose config names no profile, so it is the Default profile's.</summary>
     private const string ProjectId = "Default/work/proj1";
 
     [Fact]
@@ -27,12 +27,12 @@ public class ProjectResumeBridgeTests
         var workDir = ServerProcess.CreateWorkDir("resume");
         try
         {
-            var rootPath = Path.Combine(workDir, "work");
+            var rootPath = WriteRoot(workDir);
             var projectPath = Path.Combine(rootPath, "proj1");
             WriteStoppedProject(projectPath, "proj1");
 
             // A fresh ProjectManager is what a restarted server has: nothing in memory.
-            await using var services = BuildServices(workDir, rootPath);
+            await using var services = BuildServices(workDir);
             var projects = services.GetRequiredService<IProjectManager>();
             var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
 
@@ -60,10 +60,10 @@ public class ProjectResumeBridgeTests
         var workDir = ServerProcess.CreateWorkDir("resume");
         try
         {
-            var rootPath = Path.Combine(workDir, "work");
+            var rootPath = WriteRoot(workDir);
             WriteStoppedProject(Path.Combine(rootPath, "proj1"), "proj1");
 
-            await using var services = BuildServices(workDir, rootPath);
+            await using var services = BuildServices(workDir);
             var projects = services.GetRequiredService<IProjectManager>();
             var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
 
@@ -94,6 +94,14 @@ public class ProjectResumeBridgeTests
         return File.ReadAllText(args[index + 1]);
     }
 
+    /// <summary>The root <c>work</c> in the server's ProjectRootsDir: a <c>.godmode-root</c> with no config, so the default action.</summary>
+    private static string WriteRoot(string workDir)
+    {
+        var rootPath = Path.Combine(workDir, "roots", "work");
+        Directory.CreateDirectory(Path.Combine(rootPath, ".godmode-root"));
+        return rootPath;
+    }
+
     private static void WriteStoppedProject(string projectPath, string id)
     {
         var godMode = Path.Combine(projectPath, ".godmode");
@@ -105,12 +113,11 @@ public class ProjectResumeBridgeTests
         File.WriteAllText(Path.Combine(godMode, "session-id"), Guid.NewGuid().ToString());
     }
 
-    private static ServiceProvider BuildServices(string workDir, string rootPath)
+    private static ServiceProvider BuildServices(string workDir)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ProjectRootsDir"] = Path.Combine(workDir, "roots"),
-            ["ProjectRoots:work"] = rootPath,
         }).Build();
 
         var services = new ServiceCollection();
