@@ -84,7 +84,9 @@ cd src/GodMode.Client.React && npm run dev
 
 **Config-Driven Project Roots (Multi-File)**
 - A root is a subdirectory of `ProjectRootsDir` (appsettings, default `roots`) that contains a `.godmode-root/` folder with config files
-- `config.json` defines base/shared config (profileName, prepare, delete, environment, claudeArgs, mcpServers)
+- `config.json` defines base/shared config (profileName, prepare, delete, environment, claudeArgs)
+- Roots and profiles (`{ProjectRootsDir}/.profiles/`) are maintained by hand on the host: no hub method writes config, and the server archives nothing
+- GodMode gives a session one MCP server, its own bridge, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
 - `config.{action}.json` files define per-action overlays (merged with base)
 - `{actionName}/schema.json` provides input schema by convention (falls back to default name+prompt)
 - `RootConfigReader` discovers, merges, and resolves configs fresh on each operation (no restart needed)
