@@ -9,9 +9,9 @@ using GodMode.Shared.Models;
 namespace GodMode.Server.Tests.Lifecycle;
 
 /// <summary>
-/// Permission prompts in the project's lifecycle. The bridge's call is made the way the internal
-/// endpoint makes it, <see cref="IProjectManager.RequestPermissionAsync"/> with the request's abort
-/// token; <see cref="PermissionPromptEndToEndTests"/> runs the same through HTTP and SignalR.
+/// Permission prompts in the project's lifecycle. claude's call is made the way the MCP tool makes
+/// it, <see cref="IProjectManager.RequestPermissionAsync"/> with the call's cancellation token;
+/// <see cref="PermissionPromptEndToEndTests"/> runs the same through the MCP endpoint and SignalR.
 /// </summary>
 public class PermissionPromptTests
 {
@@ -32,13 +32,13 @@ public class PermissionPromptTests
     }
 
     [Fact]
-    public async Task Launch_AsksThroughTheBridge_WithoutTheAskUserQuestionPrompt()
+    public async Task Launch_AsksThroughTheMcpEndpoint_WithoutTheAskUserQuestionPrompt()
     {
         var (harness, created) = await RunningAsync();
         await using var _ = harness;
 
         var launch = harness.Launches(created.Id)[0];
-        Assert.Equal("mcp__godmode-bridge__permission_prompt", launch.ArgValue("--permission-prompt-tool"));
+        Assert.Equal("mcp__godmode__permission_prompt", launch.ArgValue("--permission-prompt-tool"));
         Assert.Equal("host", launch.ArgValue("--permission-prompts"));
         Assert.DoesNotContain("--append-system-prompt", launch.Argv);
         Assert.DoesNotContain("--dangerously-skip-permissions", launch.Argv);

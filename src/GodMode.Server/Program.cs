@@ -1,11 +1,10 @@
-using System.Security.Claims;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
-using GodMode.Server.Models;
 using GodMode.Server.Services;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
+using ModelContextProtocol.AspNetCore;
 using Serilog;
 using Serilog.Events;
 
@@ -85,6 +84,13 @@ builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
 builder.Services.AddSingleton<ProfileFileManager>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
+// GodMode's MCP endpoint, for its sessions' claude: the permission prompt is its only tool. Stateless:
+// claude's calls need no session (Claude Code speaks the sessionless 2026-07-28 revision), and a
+// waiting call keeps its own response stream, which carries its progress and its answer
+builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = ProjectManager.McpServerName, Version = "1.0.0" })
+    .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<PermissionPromptTool>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
@@ -130,52 +136,9 @@ app.MapGet("/events", async (HttpContext ctx) =>
 
 app.MapHub<ProjectHub>(GodModeAuthExtensions.HubPath).RequireAuthorization();
 
-// ── Internal API (MCP bridge → server, project-scoped token auth) ──
+// ── MCP (a project's claude → server, project-token auth): the permission prompt, its one tool ──
 
-var internalApi = app.MapGroup("/api/internal").RequireAuthorization(GodModeAuthExtensions.ProjectPolicy);
-
-static string ProjectId(HttpContext ctx) => ctx.User.FindFirstValue(GodModeAuthExtensions.ProjectIdClaim)!;
-
-internalApi.MapPost("/result", async (HttpContext ctx, IProjectManager pm) =>
-{
-    var request = await ctx.Request.ReadFromJsonAsync<SubmitResultRequest>();
-    if (request == null)
-        return Results.BadRequest(new { error = "Invalid request body" });
-
-    await pm.StoreProjectResultAsync(ProjectId(ctx), request);
-    return Results.Ok(new { success = true });
-});
-
-internalApi.MapPost("/status", async (HttpContext ctx, IProjectManager pm) =>
-{
-    var request = await ctx.Request.ReadFromJsonAsync<UpdateStatusRequest>();
-    if (request == null)
-        return Results.BadRequest(new { error = "Invalid request body" });
-
-    await pm.UpdateCustomStatusAsync(ProjectId(ctx), request.Message);
-    return Results.Ok(new { success = true });
-});
-
-internalApi.MapPost("/review", async (HttpContext ctx, IProjectManager pm) =>
-{
-    var request = await ctx.Request.ReadFromJsonAsync<RequestReviewRequest>();
-    if (request == null)
-        return Results.BadRequest(new { error = "Invalid request body" });
-
-    await pm.RequestHumanReviewAsync(ProjectId(ctx), request);
-    return Results.Ok(new { success = true });
-});
-
-// The bridge's permission_prompt: answered when the user answers, however long that takes. The
-// request is the wait: when it drops (claude exited), the prompt is withdrawn.
-internalApi.MapPost("/permission", async (HttpContext ctx, IProjectManager pm) =>
-{
-    var request = await ctx.Request.ReadFromJsonAsync<PermissionPromptRequest>();
-    if (request is not { ToolName.Length: > 0 })
-        return Results.BadRequest(new { error = "Invalid request body" });
-
-    return Results.Json(await pm.RequestPermissionAsync(ProjectId(ctx), request, ctx.RequestAborted));
-});
+app.MapMcp(McpEndpointUrl.Path).RequireAuthorization(GodModeAuthExtensions.ProjectPolicy);
 
 // SPA fallback: serve index.html for non-API/non-hub routes (React client routing).
 // Anonymous for the same reason as the static files above: it is the client bundle's entry page.
@@ -187,18 +150,8 @@ if (authSettings.Mode == AuthMode.Loopback)
         "Set {Setting} before binding to any other address.", AuthModeSelector.ApiKeySetting);
 
 // Recover existing projects AFTER server starts (non-blocking), then carry on with those the last
-// shutdown interrupted: a resume's bridge URL is an address the server is bound to by now
-IProjectManager projectManager;
-try
-{
-    projectManager = app.Services.GetRequiredService<IProjectManager>();
-}
-catch (FileNotFoundException ex)
-{
-    // The MCP bridge is missing: every session would deny what needs approval without asking
-    Console.Error.WriteLine(ex.Message);
-    return 1;
-}
+// shutdown interrupted: a resume's MCP endpoint URL is an address the server is bound to by now
+var projectManager = app.Services.GetRequiredService<IProjectManager>();
 app.Lifetime.ApplicationStarted.Register(() =>
 {
     _ = Task.Run(async () =>

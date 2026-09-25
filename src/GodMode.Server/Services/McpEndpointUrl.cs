@@ -1,25 +1,28 @@
 namespace GodMode.Server.Services;
 
 /// <summary>
-/// The URL a project's MCP bridge calls this server on (<c>GODMODE_SERVER_URL</c>), picked from the
-/// addresses the server listens on. The bridge runs on this machine, so it takes, in order: a
-/// loopback binding; a wildcard binding (<c>+</c>, <c>*</c>, <c>0.0.0.0</c>, <c>[::]</c>) reached on
-/// 127.0.0.1; else the one address bound (a Tailscale or LAN IP only),
+/// The URL a project's claude calls this server's MCP endpoint on (the <c>url</c> of GodMode's entry
+/// in its MCP config), picked from the addresses the server listens on. claude runs on this machine,
+/// so it takes, in order: a loopback binding; a wildcard binding (<c>+</c>, <c>*</c>, <c>0.0.0.0</c>,
+/// <c>[::]</c>) reached on 127.0.0.1; else the one address bound (a Tailscale or LAN IP only),
 /// which this machine reaches too. Kestrel binds any host name but localhost to every address, so
-/// such a name counts as a wildcard. http before https: the bridge's fetch need not trust the
-/// server's certificate then. A port 0 binding is skipped: only the address it got is reachable.
+/// such a name counts as a wildcard. http before https: claude need not trust the server's
+/// certificate then. A port 0 binding is skipped: only the address it got is reachable.
 /// </summary>
-public static class BridgeUrl
+public static class McpEndpointUrl
 {
-    /// <summary>What the bridge is given when nothing is bound or configured (the server's default binding).</summary>
-    public const string Default = "http://127.0.0.1:31337";
+    /// <summary>Where the endpoint is mapped (Program.cs).</summary>
+    public const string Path = "/mcp";
+
+    /// <summary>What claude is given when nothing is bound or configured (the server's default binding).</summary>
+    public const string Default = "http://127.0.0.1:31337" + Path;
 
     public static string From(IEnumerable<string> addresses) =>
         addresses
             .Select(Reachable)
             .OfType<(Uri Url, int Rank)>()
             .OrderBy(candidate => candidate.Rank)
-            .Select(candidate => candidate.Url.GetLeftPart(UriPartial.Authority))
+            .Select(candidate => candidate.Url.GetLeftPart(UriPartial.Authority) + Path)
             .FirstOrDefault()
         ?? Default;
 

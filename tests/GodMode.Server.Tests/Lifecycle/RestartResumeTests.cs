@@ -61,8 +61,8 @@ public class RestartResumeTests
     }
 
     /// <summary>
-    /// The resume a restart makes is the resume the user makes (#164): the same arguments and
-    /// environment (bridge, <c>GODMODE_*</c>, the profile's), except the token each launch is issued afresh.
+    /// The resume a restart makes is the resume the user makes (#164): the same arguments,
+    /// environment (the profile's) and MCP config, except the token each launch is issued afresh.
     /// </summary>
     [Fact]
     public async Task ResumeAfterARestart_LaunchesAsAResumeByTheUser()
@@ -78,8 +78,8 @@ public class RestartResumeTests
         var byUser = await harness.WaitForLaunchAsync(created.Id, _ => true, index: 2);
 
         Assert.Equal(byUser.Argv, afterRestart.Argv);
-        Assert.Equal(WithoutToken(byUser.Environment), WithoutToken(afterRestart.Environment));
-        Assert.Contains("GODMODE_SERVER_URL", afterRestart.Environment.Keys);
+        Assert.Equal(Sorted(byUser.Environment), Sorted(afterRestart.Environment));
+        Assert.Equal(GodModeMcpEntry.Of(byUser).WithoutToken(), GodModeMcpEntry.Of(afterRestart).WithoutToken());
         Assert.Equal(byUser.Environment["CLAUDE_CONFIG_DIR"], afterRestart.Environment["CLAUDE_CONFIG_DIR"]);
     }
 
@@ -368,6 +368,6 @@ public class RestartResumeTests
             () => Task.FromResult(harness.ReadOutputFile(projectId).Split(text).Length - 1 >= count), null,
             () => $"output.jsonl does not have \"{text}\" {count} times.\n{harness.Describe(projectId)}");
 
-    private static SortedDictionary<string, string> WithoutToken(IReadOnlyDictionary<string, string> environment) =>
-        new(environment.Where(e => e.Key != "GODMODE_PROJECT_TOKEN").ToDictionary(e => e.Key, e => e.Value), StringComparer.Ordinal);
+    private static SortedDictionary<string, string> Sorted(IReadOnlyDictionary<string, string> environment) =>
+        new(environment.ToDictionary(e => e.Key, e => e.Value), StringComparer.Ordinal);
 }

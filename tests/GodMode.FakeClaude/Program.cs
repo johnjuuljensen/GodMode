@@ -1,14 +1,17 @@
 // Stands in for the `claude` CLI in GodMode's lifecycle tests: plays a scripted stream-json
-// conversation on stdout, asks for permission as the GodMode bridge does, and records its argv,
-// environment, stdin, permission answers and exit code to a sidecar.
-// Every CLI flag GodMode passes is accepted and ignored; --session-id / --resume only feed
+// conversation on stdout, asks for permission as claude does (an MCP client on the server its
+// --mcp-config names for its --permission-prompt-tool), and records its argv, environment, MCP
+// config, stdin, permission answers and exit code to a sidecar.
+// Every other CLI flag GodMode passes is accepted and ignored; --session-id / --resume only feed
 // the {{session_id}} placeholder.
 using System.Collections;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using GodMode.FakeClaude;
+using ModelContextProtocol;
+using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 
 var scriptPath = ArgValue(FakeClaudeEnvironment.ScriptFlag) ?? Environment.GetEnvironmentVariable(FakeClaudeEnvironment.Script);
 var recordPath = ArgValue(FakeClaudeEnvironment.RecordFlag) ?? Environment.GetEnvironmentVariable(FakeClaudeEnvironment.Record);
@@ -24,7 +27,10 @@ var pid = Environment.ProcessId;
 var environment = Environment.GetEnvironmentVariables()
     .Cast<DictionaryEntry>()
     .ToDictionary(e => (string)e.Key, e => (string?)e.Value ?? "");
-FakeRecording.Append(recordPath, new RecordLine(RecordLine.Start, pid, Argv: args, Environment: environment));
+// Read at start, as claude reads it: the process manager deletes the file when the process exits
+var mcpConfig = ArgValue("--mcp-config") is { } mcpConfigPath && File.Exists(mcpConfigPath) ? File.ReadAllText(mcpConfigPath) : null;
+FakeRecording.Append(recordPath, new RecordLine(RecordLine.Start, pid, Argv: args, Environment: environment, McpConfig: mcpConfig));
+McpClient? permissionServer = null;
 
 var sessionId = ArgValue("--session-id") ?? ArgValue("--resume") ?? "";
 var script = FakeScript.Load(Path.GetFullPath(scriptPath));
@@ -68,7 +74,7 @@ for (var i = 0; i < script.Steps.Count; i++)
         case ScriptStep.Exit exit:
             return Exit(exit.Code);
         case ScriptStep.AskPermission ask:
-            FakeRecording.Append(recordPath, new RecordLine(RecordLine.Permission, pid, Line: await AskPermissionAsync(ask.Arguments)));
+            FakeRecording.Append(recordPath, new RecordLine(RecordLine.Permission, pid, Line: await AskPermissionAsync(ask)));
             break;
         case ScriptStep.RejectResume when ArgValue("--resume") is { } resumed:
             await stderr.WriteLineAsync(FakeScript.NoConversationError + resumed);
@@ -87,39 +93,71 @@ int Exit(int code)
     return code;
 }
 
-// What the bridge's permission_prompt does (src/GodMode.McpBridge): POST, wait, hand the answer back
-static async Task<string> AskPermissionAsync(string arguments)
+// What claude does with its --permission-prompt-tool (mcp__<server>__<tool>): calls the tool on that
+// server of its --mcp-config, and hands the tool's text back as the answer, however long it takes
+async Task<string> AskPermissionAsync(ScriptStep.AskPermission ask)
 {
-    using var args = JsonDocument.Parse(arguments);
-    var root = args.RootElement;
-    var body = JsonSerializer.Serialize(new
+    using var cancel = new CancellationTokenSource();
+    var progress = new RecordingProgress(value =>
     {
-        toolName = root.GetProperty("tool_name").GetString(),
-        input = root.GetProperty("input"),
-        toolUseId = root.TryGetProperty("tool_use_id", out var id) ? id.GetString() : null,
+        FakeRecording.Append(recordPath, new RecordLine(RecordLine.Progress, pid, Line: value.Message));
+        if (ask.CancelOnProgress) cancel.Cancel();
     });
-    var serverUrl = Environment.GetEnvironmentVariable("GODMODE_SERVER_URL") ?? "http://localhost:31337";
-    using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-    using var request = new HttpRequestMessage(HttpMethod.Post, $"{serverUrl}/api/internal/permission")
-    {
-        Content = new StringContent(body, Encoding.UTF8, "application/json"),
-    };
-    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Environment.GetEnvironmentVariable("GODMODE_PROJECT_TOKEN"));
-    request.Headers.Add("X-GodMode-Project-Id", Environment.GetEnvironmentVariable("GODMODE_PROJECT_ID"));
+    var arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(ask.Arguments)!
+        .ToDictionary(argument => argument.Key, argument => (object?)argument.Value);
     try
     {
-        using var response = await http.SendAsync(request);
-        var text = await response.Content.ReadAsStringAsync();
-        return response.IsSuccessStatusCode ? text : $"error: HTTP {(int)response.StatusCode} {text}";
+        var (server, tool) = PermissionPromptTool();
+        permissionServer ??= await ConnectAsync(server);
+        var result = await permissionServer.CallToolAsync(tool, arguments, progress, cancellationToken: cancel.Token);
+        var text = string.Concat(result.Content.OfType<TextContentBlock>().Select(block => block.Text));
+        return result.IsError == true ? $"error: {text}" : text;
     }
-    catch (HttpRequestException ex)
+    catch (OperationCanceledException) when (cancel.IsCancellationRequested)
     {
-        return $"error: {ex.Message}";
+        return "cancelled";
     }
+    catch (Exception ex)
+    {
+        return $"error: {ex.GetType().Name}: {ex.Message}";
+    }
+}
+
+// The MCP server and tool --permission-prompt-tool names: mcp__godmode__permission_prompt
+(string Server, string Tool) PermissionPromptTool() =>
+    ArgValue("--permission-prompt-tool")?.Split("__") is ["mcp", var server, var tool]
+        ? (server, tool)
+        : throw new InvalidOperationException("no --permission-prompt-tool mcp__<server>__<tool>");
+
+// A streamable HTTP client on the server's entry in the MCP config (its url and headers), listing
+// its tools first as claude does when it connects
+async Task<McpClient> ConnectAsync(string server)
+{
+    using var config = JsonDocument.Parse(mcpConfig ?? throw new InvalidOperationException("no --mcp-config"));
+    var entry = config.RootElement.GetProperty("mcpServers").GetProperty(server);
+    var transport = new HttpClientTransport(new HttpClientTransportOptions
+    {
+        Name = server,
+        Endpoint = new Uri(entry.GetProperty("url").GetString()!),
+        TransportMode = HttpTransportMode.StreamableHttp,
+        AdditionalHeaders = entry.TryGetProperty("headers", out var headers)
+            ? headers.EnumerateObject().ToDictionary(header => header.Name, header => header.Value.GetString() ?? "")
+            : null,
+    }, new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, ownsHttpClient: true);
+    var client = await McpClient.CreateAsync(transport);
+    var tools = await client.ListToolsAsync();
+    FakeRecording.Append(recordPath, new RecordLine(RecordLine.Tools, pid, Line: JsonSerializer.Serialize(tools.Select(t => t.ProtocolTool))));
+    return client;
 }
 
 string? ArgValue(string flag)
 {
     var index = Array.IndexOf(args, flag);
     return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+}
+
+/// <summary>Reports progress as it arrives, on the thread that received it (<see cref="Progress{T}"/> posts it elsewhere, later).</summary>
+internal sealed class RecordingProgress(Action<ProgressNotificationValue> report) : IProgress<ProgressNotificationValue>
+{
+    public void Report(ProgressNotificationValue value) => report(value);
 }

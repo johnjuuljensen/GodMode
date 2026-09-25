@@ -235,26 +235,34 @@ public class AuthTests
         }
     }
 
-    // ── The MCP bridge's internal API authenticates projects, not users ──
+    // ── The MCP endpoint authenticates projects, not users ──
 
+    /// <summary>
+    /// Only a project token opens /mcp: not a keyless loopback caller, not the user's API key, with
+    /// or without a project named. <see cref="McpEndpointTests"/> has a project's own token let in,
+    /// and another project's refused.
+    /// </summary>
     [Theory]
     [InlineData(null)]
     [InlineData(ApiKey)]
-    public async Task InternalApi_RequiresProjectToken(string? apiKey)
+    public async Task McpEndpoint_RequiresAProjectToken(string? apiKey)
     {
         await using var run = await StartHealthyAsync("127.0.0.1", apiKey);
 
-        using var anonymous = await PostInternalStatusAsync(run.Http, projectId: null, token: null);
+        using var anonymous = await PostMcpAsync(run.Http, projectId: null, token: null);
         Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
 
-        using var bogus = await PostInternalStatusAsync(run.Http, projectId: "no-such-project", token: "not-a-project-token");
+        using var bogus = await PostMcpAsync(run.Http, projectId: "no-such-project", token: "not-a-project-token");
         Assert.Equal(HttpStatusCode.Unauthorized, bogus.StatusCode);
 
         // The user's API key is not a project token.
         if (apiKey != null)
         {
-            using var userKey = await PostInternalStatusAsync(run.Http, projectId: null, token: apiKey);
+            using var userKey = await PostMcpAsync(run.Http, projectId: null, token: apiKey);
             Assert.Equal(HttpStatusCode.Unauthorized, userKey.StatusCode);
+
+            using var userKeyForAProject = await PostMcpAsync(run.Http, projectId: "Default/work/p1", token: apiKey);
+            Assert.Equal(HttpStatusCode.Unauthorized, userKeyForAProject.StatusCode);
         }
     }
 
@@ -305,16 +313,8 @@ public class AuthTests
     private static Task<HttpResponseMessage> NegotiateAsync(HttpClient http, string? token, string? origin = null) =>
         SendAsync(http, HttpMethod.Post, $"{HubPath}/negotiate?negotiateVersion=1", token, origin);
 
-    private static Task<HttpResponseMessage> PostInternalStatusAsync(HttpClient http, string? projectId, string? token)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/internal/status")
-        {
-            Content = new StringContent("""{"message":"hello"}""", Encoding.UTF8, "application/json")
-        };
-        if (token != null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        if (projectId != null) request.Headers.Add("X-GodMode-Project-Id", projectId);
-        return http.SendAsync(request);
-    }
+    private static Task<HttpResponseMessage> PostMcpAsync(HttpClient http, string? projectId, string? token) =>
+        http.SendAsync(McpEndpointTests.Initialize(projectId, token));
 
     private static Task<HttpResponseMessage> SendAsync(HttpClient http, HttpMethod method, string path, string? token, string? origin = null)
     {

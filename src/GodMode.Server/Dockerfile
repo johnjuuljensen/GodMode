@@ -6,14 +6,6 @@ RUN npm ci
 COPY src/GodMode.Client.React/ .
 RUN npm run build
 
-# ── Build the MCP bridge (every claude session runs it; one bundled file, no node_modules) ──
-FROM node:22-slim AS bridge-build
-WORKDIR /app
-COPY src/GodMode.McpBridge/package.json src/GodMode.McpBridge/package-lock.json ./
-RUN npm ci
-COPY src/GodMode.McpBridge/ .
-RUN npm run build
-
 # ── Build .NET server ──
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
 WORKDIR /src
@@ -30,13 +22,10 @@ RUN dotnet restore src/GodMode.Server/GodMode.Server.csproj
 COPY src/GodMode.Server/ src/GodMode.Server/
 COPY src/GodMode.Shared/ src/GodMode.Shared/
 COPY src/GodMode.ProjectFiles/ src/GodMode.ProjectFiles/
-RUN dotnet publish src/GodMode.Server/GodMode.Server.csproj -c Release -o /app/publish -p:PublishReactClient=false -p:BuildMcpBridge=false
+RUN dotnet publish src/GodMode.Server/GodMode.Server.csproj -c Release -o /app/publish -p:PublishReactClient=false
 
 # Copy React build output into wwwroot
 COPY --from=react-build /app/dist /app/publish/wwwroot/
-
-# The bridge where the server looks for it (ProjectManager.ResolveMcpBridgePath); it will not start without it
-COPY --from=bridge-build /app/dist/godmode-mcp-bridge.cjs /app/publish/mcp-bridge/
 
 # ── Runtime ──
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
@@ -47,7 +36,7 @@ RUN groupadd -r godmode && useradd -r -g godmode -m -d /home/godmode godmode
 ENV HOME=/home/godmode
 ENV PATH="/home/godmode/.local/bin:/home/godmode/.claude/local/bin:${PATH}"
 
-# Install system deps + Node.js (runs the GodMode MCP bridge, and npx MCP servers)
+# Install system deps + Node.js (for the npx MCP servers a repo's .mcp.json names, and JS toolchains)
 RUN apt-get update && \
     apt-get install -y git curl bash && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \

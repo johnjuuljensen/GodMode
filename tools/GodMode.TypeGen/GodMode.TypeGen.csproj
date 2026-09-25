@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Writes the React client's hub types (src/GodMode.Client.React/src/signalr/generated/hub-types.ts)
-       from GodMode.Shared. GodMode.Server runs it on every build, before it builds the client. -->
+       from GodMode.Shared. GodMode.Client.React.csproj runs it on every build, before `npm run build`. -->
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>

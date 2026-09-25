@@ -12,10 +12,10 @@ using Microsoft.Extensions.DependencyInjection;
 namespace GodMode.Server.Tests;
 
 /// <summary>
-/// A permission prompt from end to end, against the real server process: the fake claude POSTs to
-/// /api/internal/permission with its project token exactly as the bridge's permission_prompt tool
-/// does, a SignalR client sees the request in the status and answers it with RespondToPermission
-/// or AnswerQuestion, and the fake receives what claude would.
+/// A permission prompt from end to end, against the real server process: the fake claude calls
+/// the permission_prompt tool on GodMode's MCP endpoint as claude does, an MCP client with the url
+/// and headers of its --mcp-config, a SignalR client sees the request in the status and answers it
+/// with RespondToPermission or AnswerQuestion, and the fake receives what claude would.
 /// </summary>
 public class PermissionPromptEndToEndTests
 {
@@ -24,7 +24,7 @@ public class PermissionPromptEndToEndTests
     private const string Question = "Which color do you prefer?";
 
     [Fact]
-    public async Task FakeAsksThroughTheBridgeEndpoint_ClientAnswers_FakeReceivesTheDecision()
+    public async Task FakeAsksThroughTheMcpEndpoint_ClientAnswers_FakeReceivesTheDecision()
     {
         var workDir = ServerProcess.CreateWorkDir("permission");
         var scriptPath = Path.Combine(workDir, "fake-claude.script");
@@ -111,10 +111,21 @@ public class PermissionPromptEndToEndTests
             Assert.Null(idle.PendingPermission);
             Assert.Null(idle.PendingQuestion);
 
-            // What the fake got back is what the bridge hands claude
+            // What the fake got back is what the tool hands claude
             var folder = created.Id.Split('/')[^1];
             var launch = Assert.Single(FakeRecording.Read(Path.Combine(workDir, "roots", Root, folder, "fake-claude.jsonl")));
             Assert.Equal(3, launch.Permissions.Count);
+
+            // The one tool, with the flat arguments claude calls it with
+            using var tools = JsonDocument.Parse(launch.Tools ?? throw new InvalidOperationException("the fake listed no tools"));
+            var tool = Assert.Single(tools.RootElement.EnumerateArray());
+            Assert.Equal("permission_prompt", tool.GetProperty("name").GetString());
+            var schema = tool.GetProperty("inputSchema");
+            Assert.Equal("object", schema.GetProperty("type").GetString());
+            Assert.Equal("string", schema.GetProperty("properties").GetProperty("tool_name").GetProperty("type").GetString());
+            Assert.Equal("object", schema.GetProperty("properties").GetProperty("input").GetProperty("type").GetString());
+            Assert.True(schema.GetProperty("properties").TryGetProperty("tool_use_id", out _));
+            Assert.Equal(["tool_name", "input"], schema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
 
             using var allowed = JsonDocument.Parse(launch.Permissions[0]);
             Assert.Equal("allow", allowed.RootElement.GetProperty("behavior").GetString());
@@ -131,7 +142,7 @@ public class PermissionPromptEndToEndTests
             Assert.Equal("Blue", input.GetProperty("answers").GetProperty(Question).GetString());
             Assert.Equal(Question, input.GetProperty("questions")[0].GetProperty("question").GetString());
 
-            // claude is launched to ask through the bridge
+            // claude is launched to ask through the MCP endpoint
             Assert.Equal(ProjectManager.PermissionPromptTool, launch.ArgValue("--permission-prompt-tool"));
         }
         finally
