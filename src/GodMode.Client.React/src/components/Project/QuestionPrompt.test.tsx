@@ -47,6 +47,7 @@ beforeEach(async () => {
   useAppStore.setState(initialState, true);
   hub = new FakeHub([{ ...project('p1', 'asking', 'WaitingInput', '2026-09-24T12:00:00Z'), PendingQuestion: pending }], [root]);
   await connectServers({ A: hub });
+  hub.details = { r2: { RequestId: 'r2', Detail: 'git push', DetailTruncated: false } };
   useAppStore.getState().selectProject('A', 'p1');
   view = await render(<><Inbox variant="pane" /><ProjectView serverId="A" projectId="p1" /><ConfirmDialog /></>);
   input = view.container.querySelector('textarea.project-input')!;
@@ -137,7 +138,7 @@ describe('beside a dialog and the inbox (#240)', () => {
     beforeEach(async () => {
       await act(async () => hub.callbacks.onAttentionChanged?.([
         item('p2', 'Permission', {
-          Permission: { RequestId: 'r2', ToolName: 'Bash', Input: {}, Summary: 'Bash: git push', RequestedAt: '2026-09-24T11:00:00Z' },
+          Permission: { RequestId: 'r2', ToolName: 'Bash', Summary: 'Bash: git push', RequestedAt: '2026-09-24T11:00:00Z' },
         }),
         item('p3', 'Finished'),
         item('p4', 'Error'),

@@ -53,6 +53,9 @@ public interface IProjectManager
     /// <summary>Answers the project's pending permission prompt <paramref name="requestId"/> (hub RespondToPermission).</summary>
     Task RespondToPermissionAsync(string projectId, string requestId, PermissionDecision decision);
 
+    /// <summary>What the project's pending permission prompt <paramref name="requestId"/> would run (hub GetPermissionDetail).</summary>
+    Task<PermissionDetail> GetPermissionDetailAsync(string projectId, string requestId);
+
     /// <summary>Answers the project's pending question <paramref name="requestId"/> (hub AnswerQuestion).</summary>
     Task AnswerQuestionAsync(string projectId, string requestId, IReadOnlyDictionary<string, string> answers);
 

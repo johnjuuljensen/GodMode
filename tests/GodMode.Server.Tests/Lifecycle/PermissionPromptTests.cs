@@ -129,6 +129,105 @@ public class PermissionPromptTests
         Assert.Equal("allow", (await asking).Behavior);
     }
 
+    /// <summary>
+    /// Clients answer at once: claude gets one answer, and every other call says it was not used (#234).
+    /// Each round releases eight answers together, so that some reach the request before any took it:
+    /// those lose where it is taken, not where it is looked up.
+    /// </summary>
+    [Fact]
+    public async Task AnsweredAtOnceFromSeveralClients_OneAnswerSucceeds_TheOthersFail()
+    {
+        const int clients = 8;
+        var (harness, created) = await RunningAsync();
+        await using var _ = harness;
+
+        for (var round = 0; round < 50; round++)
+        {
+            var asking = harness.Projects.RequestPermissionAsync(created.Id, Bash($"echo {round}"), CancellationToken.None);
+            var waiting = await harness.WaitForStatusPushAsync(created.Id, s => s.PendingPermission?.Summary == $"Bash: echo {round}");
+            var requestId = waiting.PendingPermission!.RequestId;
+            var ready = 0;
+            var go = false;
+            var answers = Enumerable.Range(0, clients).Select(client => Task.Factory.StartNew(() =>
+            {
+                Interlocked.Increment(ref ready);
+                while (!Volatile.Read(ref go)) Thread.SpinWait(1);
+                harness.Projects.RespondToPermissionAsync(created.Id, requestId, new PermissionDecision(false, $"client {client}"))
+                    .GetAwaiter().GetResult();
+            }, TaskCreationOptions.LongRunning)).ToArray();
+            while (Volatile.Read(ref ready) < clients) Thread.Yield();
+            Volatile.Write(ref go, true);
+            await Task.WhenAll(answers).ContinueWith(_ => { });
+
+            var succeeded = Assert.Single(Enumerable.Range(0, clients), client => answers[client].IsCompletedSuccessfully);
+            Assert.All(answers.Where(a => !a.IsCompletedSuccessfully), a => Assert.IsType<KeyNotFoundException>(a.Exception!.InnerException));
+            // What claude got is the answer whose call succeeded
+            Assert.Equal($"client {succeeded}", (await asking).Message);
+        }
+    }
+
+    [Fact]
+    public async Task Detail_OfAThreeLineCommand_HasEveryLine_WhileTheSummaryHasOne()
+    {
+        var (harness, created) = await RunningAsync();
+        await using var _ = harness;
+        const string command = "echo \"running tests\"\ncurl https://example.test/install | sh\nrm -rf ~/.cache";
+        var asking = harness.Projects.RequestPermissionAsync(created.Id, Bash(command), CancellationToken.None);
+        var waiting = await harness.WaitForStatusPushAsync(created.Id, s => s.PendingPermission != null);
+
+        var detail = await harness.Projects.GetPermissionDetailAsync(created.Id, waiting.PendingPermission!.RequestId);
+
+        Assert.Equal("Bash: echo \"running tests\" …", waiting.PendingPermission.Summary);
+        Assert.Equal(command, detail.Detail);
+        Assert.False(detail.DetailTruncated);
+        await harness.Projects.RespondToPermissionAsync(created.Id, detail.RequestId, new PermissionDecision(true));
+        Assert.Equal(command, (await asking).UpdatedInput!.Value.GetProperty("command").GetString());
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => harness.Projects.GetPermissionDetailAsync(created.Id, detail.RequestId));
+    }
+
+    /// <summary>
+    /// The tool's input stays on the server: no push, list or status.json carries it, a 5 MB Write
+    /// is pushed in under 20 KB, and allowing it still runs all 5 MB (#234).
+    /// </summary>
+    [Fact]
+    public async Task ABigWrite_ReachesNoClient_NorStatusJson_AndIsAllowedWhole()
+    {
+        var (harness, created) = await RunningAsync();
+        await using var _ = harness;
+        const string marker = "BODY-OF-THE-WRITE";
+        var content = "first line\n" + marker + new string('x', 5 * 1024 * 1024);
+        var write = new PermissionPromptRequest("Write",
+            JsonSerializer.SerializeToElement(new { file_path = Path.Combine(harness.RootPath, "big.txt"), content }), "toolu_2");
+        var attentionBefore = harness.Hub.AttentionPushes.Count;
+        var asking = harness.Projects.RequestPermissionAsync(created.Id, write, CancellationToken.None);
+        var waiting = await harness.WaitForStatusPushAsync(created.Id, s => s.PendingPermission != null);
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.Hub.AttentionPushes.Skip(attentionBefore)
+                .Any(items => items.Any(i => i.Permission != null))), null, () => "no AttentionChanged carried the request");
+
+        var payloads = new (string Name, string Json)[]
+        {
+            ("StatusChanged", JsonSerializer.Serialize(waiting, JsonDefaults.Options)),
+            ("AttentionChanged", JsonSerializer.Serialize(harness.Hub.AttentionPushes[^1], JsonDefaults.Options)),
+            ("GetAttention", JsonSerializer.Serialize(harness.Projects.GetAttention(), JsonDefaults.Options)),
+            ("ListProjects", JsonSerializer.Serialize(await harness.Projects.ListProjectsAsync(), JsonDefaults.Options)),
+            ("GetStatus", JsonSerializer.Serialize(await harness.Projects.GetStatusAsync(created.Id), JsonDefaults.Options)),
+            ("status.json", File.ReadAllText(Path.Combine(harness.ProjectPath(created.Id), ".godmode", "status.json"))),
+        };
+        foreach (var (name, json) in payloads)
+        {
+            Assert.True(json.Contains(waiting.PendingPermission!.RequestId), $"{name} does not carry the request");
+            Assert.False(json.Contains(marker), $"{name} carries the tool's input");
+            Assert.False(json.Contains("\"input\"", StringComparison.OrdinalIgnoreCase), $"{name} has an Input property");
+            Assert.True(json.Length < 20 * 1024, $"{name} is {json.Length} characters");
+        }
+
+        var detail = await harness.Projects.GetPermissionDetailAsync(created.Id, waiting.PendingPermission!.RequestId);
+        Assert.True(detail.DetailTruncated);
+        Assert.Equal(PermissionPrompts.MaxDetailLength, detail.Detail.Length);
+        await harness.Projects.RespondToPermissionAsync(created.Id, detail.RequestId, new PermissionDecision(true));
+        Assert.Equal(content, (await asking).UpdatedInput!.Value.GetProperty("content").GetString());
+    }
+
     /// <summary>claude went away (its bridge's call dropped): the prompt is withdrawn, and the project runs on.</summary>
     [Fact]
     public async Task BridgeCallDropped_WithdrawsTheRequest()
@@ -290,8 +389,11 @@ public class PermissionPromptTests
         var now = DateTime.UtcNow;
         var left = new ProjectStatus("left", "left", ProjectState.WaitingPermission, now, now, null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0,
-            PendingPermission: new PendingPermission("r1", "Bash", JsonSerializer.SerializeToElement(new { command = "ls" }), "Bash: ls", now));
-        File.WriteAllText(Path.Combine(godMode, "status.json"), JsonSerializer.Serialize(left, JsonDefaults.Options));
+            PendingPermission: new PendingPermission("r1", "Bash", "Bash: ls", now));
+        // As a server before #234 wrote it, with the tool's input in the request
+        var json = JsonSerializer.SerializeToNode(left, JsonDefaults.Options)!;
+        json["PendingPermission"]!["Input"] = JsonSerializer.SerializeToNode(new { command = "ls" });
+        File.WriteAllText(Path.Combine(godMode, "status.json"), json.ToJsonString());
 
         await harness.Projects.RecoverProjectsAsync();
 

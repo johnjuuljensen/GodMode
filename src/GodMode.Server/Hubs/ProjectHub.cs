@@ -121,6 +121,18 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         }
     }
 
+    public async Task<PermissionDetail> GetPermissionDetail(string projectId, string requestId)
+    {
+        try
+        {
+            return await _projectManager.GetPermissionDetailAsync(projectId, requestId);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
     public async Task AnswerQuestion(string projectId, string requestId, Dictionary<string, string> answers)
     {
         _logger.LogInformation("Client {ConnectionId} answering question {RequestId} of project {ProjectId}",

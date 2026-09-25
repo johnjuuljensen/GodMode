@@ -55,9 +55,17 @@ public interface IProjectHub
     /// <summary>
     /// Answers the project's <see cref="ProjectStatus.PendingPermission"/>: the tool call runs, or
     /// claude is told it was denied. Fails when the project has no pending request with that id
-    /// (it was answered already, or claude stopped waiting).
+    /// (it was answered already, or claude stopped waiting), and when another answer to it, from
+    /// another client, came first: only one answer succeeds.
     /// </summary>
     Task RespondToPermission(string projectId, string requestId, PermissionDecision decision);
+
+    /// <summary>
+    /// Everything the project's pending permission request <paramref name="requestId"/> would run, to
+    /// show before it is allowed. Fails as <see cref="RespondToPermission"/> does when the request is
+    /// not pending, or is a question.
+    /// </summary>
+    Task<PermissionDetail> GetPermissionDetail(string projectId, string requestId);
 
     /// <summary>
     /// Answers the project's <see cref="ProjectStatus.PendingQuestion"/>. <paramref name="answers"/>

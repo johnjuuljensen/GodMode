@@ -233,6 +233,9 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 - **The tool** takes claude's flat arguments, `tool_name`, `input` (an object) and `tool_use_id` (optional). It waits until the user answers, however long that takes, and returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}` as text.
 - **While it waits,** it sends a progress notification every `PermissionPromptKeepAliveSeconds` (default 30). claude gives up on a tool call that sends no response or progress for 300 seconds.
 - **When claude cancels the call**, or its connection drops, the request is withdrawn (denied).
+- **What clients see** is `ProjectStatus.PendingPermission`: the tool's name and a one-line `Summary` (`Bash: git push origin x`, ending with ` …` when it leaves something out), which a notification shows and speech reads. It carries no tool input, and neither does `status.json`: a `Write` can be megabytes, and the request is pushed in every `StatusChanged`, `ListProjects` and `AttentionChanged`. The input stays in the server's memory for as long as the call waits, which is as long as it can be answered: a restart ends the call, and claude asks again with its input.
+- **Before Allow**, a client fetches `GetPermissionDetail`: the whole command for `Bash` and `PowerShell`, the path and the whole new text for `Write` and `NotebookEdit`, the path and each replacement for `Edit` and `MultiEdit` (`Replace:`, or `Replace every occurrence of:` with `replace_all`, the old text, `With:`, the new text), and the input as indented JSON for any other tool, cut at 16384 characters with `DetailTruncated` set. The call runs with all of it.
+- **One answer counts.** When two clients answer at once, the one that came second fails, as does any answer to a request that was answered already or withdrawn: claude got the other.
 
 ### Input Schema (Convention-Based)
 
@@ -421,7 +424,8 @@ Projects:
 - `Task<ProjectStatus> GetStatus(projectId)` — Get project status
 - `Task<ProjectStatus> CreateProject(profileName, projectRootName, actionName, inputs)` — Create a project with form inputs (`actionName` null = default action)
 - `Task SendInput(projectId, input)` — Send input to Claude (while a permission prompt or question waits, it answers that instead)
-- `Task RespondToPermission(projectId, requestId, decision)` — Allow or deny the project's `PendingPermission`
+- `Task RespondToPermission(projectId, requestId, decision)` — Allow or deny the project's `PendingPermission`; fails when the request is not pending, another answer to it came first included
+- `Task<PermissionDetail> GetPermissionDetail(projectId, requestId)` — Everything the pending permission request would run, to show before Allow (see [The MCP endpoint](#the-mcp-endpoint))
 - `Task AnswerQuestion(projectId, requestId, answers)` — Answer the project's `PendingQuestion` (question text → chosen label or free text)
 - `Task StopProject(projectId)` — Stop running project: interrupt claude, then kill its process tree after `StopGracePeriodSeconds` (see [Stopping a Session](#stopping-a-session))
 - `Task ResumeProject(projectId)` — Resume stopped project; it is `Idle` until the user writes

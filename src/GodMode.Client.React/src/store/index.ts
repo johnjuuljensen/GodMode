@@ -5,7 +5,7 @@
 import { create } from 'zustand';
 import { GodModeHub, type ConnectionState, type OutputMessage } from '../signalr/hub';
 import type {
-  ProjectSummary, ProjectStatus, ClaudeMessage, PermissionDecision, AttentionItem,
+  ProjectSummary, ProjectStatus, ClaudeMessage, PermissionDecision, PermissionDetail, AttentionItem,
 } from '../signalr/types';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../signalr/types';
@@ -262,6 +262,8 @@ interface AppState {
   // Permission prompts and AskUserQuestion (ProjectSummary.PendingPermission / PendingQuestion). These, markSeen
   // and replyAndResume reject, saying so, when the server has left the list: the caller keeps what was typed
   respondToPermission: (serverId: string, projectId: string, requestId: string, decision: PermissionDecision) => Promise<void>;
+  /** What a pending permission request would run, fetched when its card shows: pushes carry only its summary (#234). */
+  getPermissionDetail: (serverId: string, projectId: string, requestId: string) => Promise<PermissionDetail>;
   answerQuestion: (serverId: string, projectId: string, requestId: string, answers: Record<string, string>) => Promise<void>;
 
   // What needs the user, across every connected server, oldest first. Key an item by projectKey(serverId, ProjectId)
@@ -965,6 +967,7 @@ export const useAppStore = create<AppState>((set, get) => {
   respondToPermission: async (serverId, projectId, requestId, decision) => {
     await hubFor(serverId).respondToPermission(projectId, requestId, decision);
   },
+  getPermissionDetail: async (serverId, projectId, requestId) => await hubFor(serverId).getPermissionDetail(projectId, requestId),
   answerQuestion: async (serverId, projectId, requestId, answers) => {
     await hubFor(serverId).answerQuestion(projectId, requestId, answers);
   },

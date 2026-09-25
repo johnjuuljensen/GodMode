@@ -7,7 +7,7 @@
  */
 import * as signalR from '@microsoft/signalr';
 import type {
-  ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, AttentionItem,
+  ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, PermissionDetail, AttentionItem,
   IProjectHub, IProjectHubClient,
 } from './types';
 import { parseClaudeMessage } from './parseMessage';
@@ -275,6 +275,11 @@ export class GodModeHub {
   /** Answers the project's PendingPermission: the tool call runs, or claude is told it was denied. */
   async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision): Promise<void> {
     await this.invoke('RespondToPermission', projectId, requestId, decision);
+  }
+
+  /** Everything the project's pending permission request would run, to show before it is allowed. */
+  async getPermissionDetail(projectId: string, requestId: string): Promise<PermissionDetail> {
+    return await this.invoke('GetPermissionDetail', projectId, requestId);
   }
 
   /** Answers the project's PendingQuestion: each question's text to the chosen label or the user's own text. */

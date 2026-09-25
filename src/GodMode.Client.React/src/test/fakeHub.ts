@@ -7,7 +7,7 @@
  */
 import type { ConnectionState, HubCallbacks, OutputMessage } from '../signalr/hub';
 import type {
-  PermissionDecision, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
+  PermissionDecision, PermissionDetail, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
 } from '../signalr/types';
 import { parseClaudeMessage } from '../signalr/parseMessage';
 import { useAppStore, type ServerConnection } from '../store';
@@ -140,6 +140,14 @@ export class FakeHub {
   async answerQuestion(projectId: string, requestId: string, answers: Record<string, string>) {
     this.invoke();
     this.answers.push({ projectId, requestId, answers });
+  }
+  /** What getPermissionDetail answers, by request id; a request not in it is not pending. */
+  details: Record<string, PermissionDetail> = {};
+  async getPermissionDetail(projectId: string, requestId: string) {
+    this.invoke();
+    const detail = this.details[requestId];
+    if (!detail) throw new Error(`Project ${projectId} has no pending request ${requestId}`);
+    return detail;
   }
   async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision) {
     this.invoke();

@@ -17,15 +17,20 @@ public static partial class PermissionPrompts
 
     private const int MaxSummaryLength = 200;
 
+    /// <summary>How long a <see cref="PermissionDetail.Detail"/> may be, in characters.</summary>
+    public const int MaxDetailLength = 16 * 1024;
+
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
+
     public static PendingRequest Create(PermissionPromptRequest request, string projectPath, DateTime now)
     {
         var id = Guid.NewGuid().ToString("N");
         if (request.ToolName == AskUserQuestionTool && ParseQuestions(request.Input) is { Count: > 0 } questions)
             return new PendingRequest(null, new PendingQuestion(id, questions, now), request.Input);
 
-        var permission = new PendingPermission(id, request.ToolName, request.Input.Clone(),
-            Summarize(request.ToolName, request.Input, projectPath), now);
-        return new PendingRequest(permission, null, request.Input);
+        var input = request.Input.Clone();
+        var permission = new PendingPermission(id, request.ToolName, Summarize(request.ToolName, input, projectPath), now);
+        return new PendingRequest(permission, null, input, Describe(id, request.ToolName, input, projectPath));
     }
 
     /// <summary>
@@ -47,6 +52,45 @@ public static partial class PermissionPrompts
         };
         return detail is { Length: > 0 } ? $"{toolName}: {OneLine(detail)}" : toolName;
     }
+
+    /// <summary>
+    /// Everything the call would run, to show before it is allowed: the whole command, the path and the
+    /// whole new text of a write, the path and each replacement of an edit (what it replaces, with what,
+    /// and whether every occurrence), or else the input as indented JSON; cut at <see cref="MaxDetailLength"/>.
+    /// </summary>
+    public static PermissionDetail Describe(string requestId, string toolName, JsonElement input, string projectPath)
+    {
+        var path = RelativePath(String(input, "file_path"), projectPath);
+        var detail = toolName switch
+        {
+            "Bash" or "PowerShell" => String(input, "command"),
+            "Write" => Joined(path, String(input, "content")),
+            "Edit" => Joined(path, Replacement(input)),
+            "MultiEdit" when input.ValueKind == JsonValueKind.Object
+                && input.TryGetProperty("edits", out var edits) && edits.ValueKind == JsonValueKind.Array =>
+                Joined([path, .. edits.EnumerateArray().Select(Replacement)]),
+            "NotebookEdit" => Joined(RelativePath(String(input, "notebook_path"), projectPath), String(input, "new_source")),
+            _ => null,
+        } ?? JsonSerializer.Serialize(input, Indented);
+        var truncated = detail.Length > MaxDetailLength;
+        return new PermissionDetail(requestId, truncated ? TextCut.Cut(detail, MaxDetailLength) : detail, truncated);
+    }
+
+    /// <summary>
+    /// One replacement of an edit: <c>Replace:</c> (<c>Replace every occurrence of:</c> with <c>replace_all</c>)
+    /// and its <c>old_string</c>, then <c>With:</c> and its <c>new_string</c>; null when it has neither.
+    /// </summary>
+    private static string? Replacement(JsonElement edit) =>
+        (String(edit, "old_string"), String(edit, "new_string")) switch
+        {
+            (null, null) => null,
+            var (old, @new) => (edit.TryGetProperty("replace_all", out var all) && all.ValueKind == JsonValueKind.True
+                ? "Replace every occurrence of:" : "Replace:") + $"\n{old}\nWith:\n{@new}",
+        };
+
+    /// <summary>The parts there are, a blank line between each; null when there is none.</summary>
+    private static string? Joined(params string?[] parts) =>
+        parts.OfType<string>().ToList() is { Count: > 0 } present ? string.Join("\n\n", present) : null;
 
     /// <summary>What claude runs AskUserQuestion with: its input plus <c>answers</c>, question text to answer.</summary>
     public static JsonElement WithAnswers(JsonElement input, IReadOnlyDictionary<string, string> answers)
@@ -106,7 +150,7 @@ public static partial class PermissionPrompts
         var lines = text.Trim().Split('\n');
         var line = Whitespace().Replace(lines[0], " ").Trim();
         var cut = lines.Length > 1 || line.Length > MaxSummaryLength;
-        if (line.Length > MaxSummaryLength) line = line[..MaxSummaryLength].TrimEnd();
+        if (line.Length > MaxSummaryLength) line = TextCut.Cut(line, MaxSummaryLength).TrimEnd();
         return cut ? line + " …" : line;
     }
 
