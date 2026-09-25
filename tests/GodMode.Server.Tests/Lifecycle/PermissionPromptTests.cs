@@ -129,32 +129,40 @@ public class PermissionPromptTests
         Assert.Equal("allow", (await asking).Behavior);
     }
 
-    /// <summary>Two clients answer at once: claude gets one answer, and the other's call says it was not used (#234).</summary>
+    /// <summary>
+    /// Clients answer at once: claude gets one answer, and every other call says it was not used (#234).
+    /// Each round releases eight answers together, so that some reach the request before any took it:
+    /// those lose where it is taken, not where it is looked up.
+    /// </summary>
     [Fact]
-    public async Task AnsweredAtOnceFromTwoClients_OneAnswerSucceeds_TheOtherFails()
+    public async Task AnsweredAtOnceFromSeveralClients_OneAnswerSucceeds_TheOthersFail()
     {
+        const int clients = 8;
         var (harness, created) = await RunningAsync();
         await using var _ = harness;
 
-        for (var round = 0; round < 20; round++)
+        for (var round = 0; round < 50; round++)
         {
             var asking = harness.Projects.RequestPermissionAsync(created.Id, Bash($"echo {round}"), CancellationToken.None);
             var waiting = await harness.WaitForStatusPushAsync(created.Id, s => s.PendingPermission?.Summary == $"Bash: echo {round}");
             var requestId = waiting.PendingPermission!.RequestId;
-            using var start = new ManualResetEventSlim();
-            var answers = new[] { true, false }.Select(allow => Task.Run(async () =>
+            var ready = 0;
+            var go = false;
+            var answers = Enumerable.Range(0, clients).Select(client => Task.Factory.StartNew(() =>
             {
-                start.Wait();
-                await harness.Projects.RespondToPermissionAsync(created.Id, requestId, new PermissionDecision(allow));
-            })).ToArray();
-            start.Set();
+                Interlocked.Increment(ref ready);
+                while (!Volatile.Read(ref go)) Thread.SpinWait(1);
+                harness.Projects.RespondToPermissionAsync(created.Id, requestId, new PermissionDecision(false, $"client {client}"))
+                    .GetAwaiter().GetResult();
+            }, TaskCreationOptions.LongRunning)).ToArray();
+            while (Volatile.Read(ref ready) < clients) Thread.Yield();
+            Volatile.Write(ref go, true);
             await Task.WhenAll(answers).ContinueWith(_ => { });
 
-            var failed = Assert.Single(answers, a => a.IsFaulted);
-            Assert.IsType<KeyNotFoundException>(failed.Exception!.InnerException);
-            Assert.Single(answers, a => a.IsCompletedSuccessfully);
+            var succeeded = Assert.Single(Enumerable.Range(0, clients), client => answers[client].IsCompletedSuccessfully);
+            Assert.All(answers.Where(a => !a.IsCompletedSuccessfully), a => Assert.IsType<KeyNotFoundException>(a.Exception!.InnerException));
             // What claude got is the answer whose call succeeded
-            Assert.Equal(answers[0].IsCompletedSuccessfully ? "allow" : "deny", (await asking).Behavior);
+            Assert.Equal($"client {succeeded}", (await asking).Message);
         }
     }
 
