@@ -1,3 +1,4 @@
+using GodMode.Server;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
@@ -23,13 +24,18 @@ builder.Host.UseSerilog((context, configuration) =>
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 31));
 
-// Select the auth mode (codespace > API key > loopback-only); refuse to start exposed without auth.
+// Select the auth mode (codespace, else the API key: configured, else generated into the key file) and
+// the browser origins; every mode needs a credential. Refuse to start on configuration that cannot work
 AuthSettings authSettings;
+OriginPolicy originPolicy;
 try
 {
     authSettings = AuthModeSelector.Resolve(builder.Configuration);
+    originPolicy = OriginPolicy.From(builder.Configuration, builder.Environment.IsDevelopment(),
+        isCodespace: authSettings.Mode == AuthMode.Codespace);
+    PermissionPromptTool.KeepAliveFrom(builder.Configuration);
 }
-catch (AuthConfigurationException ex)
+catch (StartupConfigurationException ex)
 {
     Console.Error.WriteLine(ex.Message);
     return 1;
@@ -93,7 +99,10 @@ builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = Pro
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
+// Configure the HTTP request pipeline. A browser's request from an origin other than the server's own
+// is refused first, before static files, CORS and authentication
+app.UseOriginPolicy(originPolicy);
+
 if (app.Environment.IsDevelopment())
     app.UseCors();
 
@@ -145,9 +154,27 @@ app.MapMcp(McpEndpointUrl.Path).RequireAuthorization(GodModeAuthExtensions.Proje
 app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authSettings.Mode);
-if (authSettings.Mode == AuthMode.Loopback)
-    app.Logger.LogWarning("No API key configured: unauthenticated access is allowed from loopback only. " +
-        "Set {Setting} before binding to any other address.", AuthModeSelector.ApiKeySetting);
+if (authSettings is { KeyFilePath: { } keyFile, KeyFileCreated: false })
+    app.Logger.LogInformation("No API key is configured: using the one in {KeyFile}", keyFile);
+if (authSettings is { KeyFilePath: { } newKeyFile, KeyFileCreated: true })
+{
+    // Printed this once, to the console alone: never to the log file
+    app.Lifetime.ApplicationStarted.Register(() => Console.WriteLine($"""
+
+        GodMode.Server generated its API key, since none is configured ({AuthModeSelector.ApiKeySetting}):
+
+            {authSettings.ApiKey}
+
+        Every client needs it: enter it on the browser's key page, or as the server's API key when you add it in the app.
+        It is kept in {newKeyFile}, readable by this user only, and used on every start.
+        This is the only time it is printed.
+
+        A browser is let in only from this server's own addresses (its log line "Browser requests are accepted from").
+        One that opens it by a host name, a LAN address or another port (a container's published port) needs
+        that origin in {OriginPolicy.AllowedOriginsSetting}.
+
+        """));
+}
 
 // Recover existing projects AFTER server starts (non-blocking), then carry on with those the last
 // shutdown interrupted: a resume's MCP endpoint URL is an address the server is bound to by now

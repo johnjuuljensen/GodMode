@@ -32,32 +32,51 @@ Every setting can also come from an environment variable (`ProjectRootsDir`, `Au
 
 ### Authentication and binding
 
-Every endpoint and the SignalR hub require authentication. Only `/health` and the React client's static files are anonymous, because the page has to load before you can enter the key. The server picks one mode at startup:
+Every endpoint and the SignalR hub require authentication, whatever the server is bound to, loopback included: nothing on this machine gets in without the key either. Only `/health` and the React client's static files are anonymous, because the page has to load before you can enter the key. The server picks one mode at startup:
 
 | Mode | When | Callers authenticate with |
 |---|---|---|
-| `codespace` | `CODESPACES=true` (set by GitHub Codespaces) | a GitHub token owned by `GITHUB_USER`. This mode wins whatever the binding and whether or not an API key is set. |
-| `apikey` | `Authentication:ApiKey` is set | `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on WebSocket upgrade) |
-| loopback | no key, and every binding is `127.0.0.1`, `[::1]` or `localhost` | nothing, but only from a loopback address, with a loopback `Host`, and with a loopback `Origin` when there is one (so other web pages open in your browser can't reach it) |
+| `codespace` | `CODESPACES=true` (set by GitHub Codespaces) | a GitHub token owned by `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`: its sessions are given that one, so the server refuses it. This mode wins whatever the binding and whether or not an API key is set. |
+| `apikey` | anywhere else | `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade) |
 
-With no key and any other binding (`0.0.0.0`, `+`, `*`, a LAN or Tailscale address, a hostname), the server **refuses to start**. It prints why and exits with code 1.
+**The key** is `Authentication:ApiKey` when that is set. Otherwise the server generates a 256-bit key on its first start, prints it once to the console with how to use it, and keeps it in its key file, which it reads on every later start. A restart keeps the key.
 
-A same-host reverse proxy or tunnel (`tailscale serve`, cloudflared, `ssh -L`, ngrok) makes remote callers look like loopback: **set a key before putting one in front of the server.**
+| The server runs on | Its key file |
+|---|---|
+| Windows | `%LOCALAPPDATA%\GodMode.Server\api-key` |
+| Linux | `$XDG_DATA_HOME/GodMode.Server/api-key`, by default `~/.local/share/GodMode.Server/api-key` |
+| macOS | `~/Library/Application Support/GodMode.Server/api-key` |
+| The Docker image | `/home/godmode/.local/share/GodMode.Server/api-key`, in the home of the image's non-root `godmode` user, who owns it |
 
-**Docker:** the image sets `URLS=http://+:31337` (all interfaces), so a container without a key exits at startup; run it with `-e Authentication__ApiKey=<key>`. To change the binding, use the unprefixed `URLS` variable or `--urls`. `ASPNETCORE_URLS` loses to the `Urls` in `appsettings.json`.
+- **Owner-only.** The file is created readable by the server's user alone: mode 0600 in a 0700 directory on Linux and macOS, an ACL of that user alone on Windows. It is created with those permissions rather than changed afterwards, so a file system that refuses permission changes (Azure Files, other network mounts) does not stop the server; there it is a plain file.
+- **Another place:** `Authentication:ApiKeyFile`. It must not be under `ProjectRootsDir`, where sessions work: the server refuses to start if it is.
+- **Read it again** with `cat ~/.local/share/GodMode.Server/api-key` (Windows: `type %LOCALAPPDATA%\GodMode.Server\api-key`). Write your own key into it, or delete it for a new one on the next start.
+- **A configured key always wins**, and the key file is then neither read nor written. So does a codespace, which uses no key.
+- **Docker:** a replaced container has a new home, so a new key. Run it with `-e Authentication__ApiKey=<key>`, or keep the key file on a named volume: `-v godmode-key:/home/godmode/.local/share/GodMode.Server`. The image creates that directory, owned by `godmode` with mode 0700, and a new named volume starts with its owner and mode. A bind mount (`-v /srv/godmode-key:…`) keeps the host directory's owner instead, which must be writable by the container's `godmode` user.
 
-The shipped config binds `http://127.0.0.1:31337`, so a fresh `dotnet run` is reachable only from the same machine. The browser client asks for the key once and keeps it in that browser. The MAUI app stores the key per server (the access token you enter when adding it) and adds it when relaying.
+A key of your own can go in `appsettings.json` (`"Authentication": { "ApiKey": "..." }`), in user secrets, in the `Authentication__ApiKey` environment variable, or on the command line as `--Authentication:ApiKey=<key>`. `openssl rand -hex 32` makes one.
 
-**Reaching the server from other devices.** Bind to a private-network address, such as the machine's Tailscale IP, rather than `0.0.0.0`, and set a key. Keep the loopback binding as well: projects' claude calls the server's MCP endpoint on it.
+**Browser origins.** A browser sends an `Origin` header on every WebSocket upgrade, which CORS does not cover, and on any request but a same-origin GET. A request with an `Origin` is let through only from one of the server's own origins, and is refused with 403, before authentication, from anywhere else, `Origin: null` included. The server's own origins are:
+
+- the scheme, host and port of each address it listens on. A loopback address, or a wildcard (`0.0.0.0`, `+`, `*`, `[::]`, which listens on loopback too), also stands for `localhost`, `127.0.0.1` and `[::1]` on its port;
+- the origins listed in `Authentication:AllowedOrigins`: addresses you reach the server by that it cannot tell are its own, such as a reverse proxy's (`https://machine.tailnet.ts.net`) or a host name on a wildcard binding (`http://nas.local:31337`). It is a list (`Authentication__AllowedOrigins__0=https://…`) or one `;`-separated string, and an entry that is not an origin stops the server at startup;
+- in a codespace, its forwarded port's: `https://<codespace-name>-31337.app.github.dev`;
+- in Development, the Vite dev server's, `http://localhost:5173`.
+
+So a page served from another port on this machine, such as a dev server a session starts, cannot use the server, with the key or without. A request with no `Origin` (the MAUI app's relay and attention service, `curl`) needs the key alone. The server logs the origins it accepts when it starts, and a warning for each request it refuses, naming the origin.
+
+**Bindings.** The shipped config binds `http://127.0.0.1:31337`, so a fresh `dotnet run` is reachable only from the same machine, and still needs the key. The browser client asks for the key once and keeps it in that browser. The MAUI app stores the key per server (the API key you enter when adding it) and adds it when relaying.
+
+**Reaching the server from other devices.** Bind to a private-network address, such as the machine's Tailscale IP, rather than `0.0.0.0`. Keep the loopback binding as well: projects' claude calls the server's MCP endpoint on it. A phone's browser that opens `http://<tailscale-ip>:31337` is on one of the server's own origins; one that opens it by a name (MagicDNS, `tailscale serve`) needs that origin in `Authentication:AllowedOrigins`.
 
 ```bash
-# Generate a key once, e.g. with: openssl rand -hex 32
-export Authentication__ApiKey=<your-key>
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
   --urls "http://127.0.0.1:31337;http://$(tailscale ip -4):31337"
 ```
 
-The key can also go in `appsettings.json` (`"Authentication": { "ApiKey": "..." }`), in user secrets, or on the command line as `--Authentication:ApiKey=<key>`.
+**Docker:** the image sets `URLS=http://+:31337` (all interfaces). A browser on the Docker host at `http://localhost:31337`, with the port published as the same number, is on the server's own origin. Any other address you open it by (a host name, a LAN address, another published port such as `-p 8080:31337`) goes in `Authentication:AllowedOrigins`, for example `-e Authentication__AllowedOrigins__0=http://nas.local:8080`. To change the binding, use the unprefixed `URLS` variable or `--urls`. `ASPNETCORE_URLS` loses to the `Urls` in `appsettings.json`.
+
+**What the key does not stop.** Sessions run as the server's own OS user. A session that can run arbitrary commands can read the key file, `appsettings.json` or the server's environment, and with the key drive the hub, answering its own permission prompts. The permission prompt is a gate as long as the commands it approves don't do that; it is not a sandbox. The server hands neither a session nor a root script the key (their environment is an allowlist, see [Environment](#environment), and the key file is never under `ProjectRootsDir`), but real isolation, a separate OS user or container per session, is out of scope. The same goes for a codespace's `GITHUB_TOKEN`: the server refuses it, but sessions that are given it hold it.
 
 ## Project Roots
 
@@ -142,7 +161,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 |-------|-------------|
 | `description` | Shown in the UI when selecting an action |
 | `profileName` | Profile the root belongs to (`config.json` only). Default: `Default` |
-| `environment` | Env vars set for scripts and passed to Claude processes. Values support `${VAR}` expansion from the server's environment |
+| `environment` | Env vars set for scripts and passed to Claude processes, on top of the few they inherit (see [Environment](#environment)). Values support `${VAR}` expansion from the server's environment |
 | `prepare` | Scripts run before project folder is created (working dir = root) |
 | `create` | Scripts run to create the project (working dir = project, or root if `scriptsCreateFolder`) |
 | `delete` | Scripts run when a project is deleted (working dir = root) |
@@ -183,7 +202,7 @@ GodMode pre-approves no tool: it passes no `--allowedTools`. A tool call that ne
 
 - **The URL** is an address this machine reaches the server on, from the addresses it is bound to: a loopback binding first, a wildcard's `127.0.0.1` next, else the one IP bound.
 - **The token** is issued afresh for each launch and lives only in memory and in this file. The file is `.godmode/mcp-config.json` in the project, owner-only where the OS allows, and is deleted when the process exits. No environment variable carries it.
-- **Only a project token opens `/mcp`**, and only for the project it was issued to. Neither the user's API key nor a keyless loopback caller gets in, and a project token opens nothing else.
+- **Only a project token opens `/mcp`**, and only for the project it was issued to. The user's API key does not, and a project token opens nothing else: not the hub, not `/api/*`.
 - **The tool** takes claude's flat arguments, `tool_name`, `input` (an object) and `tool_use_id` (optional). It waits until the user answers, however long that takes, and returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}` as text.
 - **While it waits,** it sends a progress notification every `PermissionPromptKeepAliveSeconds` (default 30). claude gives up on a tool call that sends no response or progress for 300 seconds.
 - **When claude cancels the call**, or its connection drops, the request is withdrawn (denied).
@@ -235,9 +254,20 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 | `GODMODE_FORCE` | Delete scripts only: `true` when the user forced the delete |
 | *(from `environment`)* | All vars from the profile's `env.json` and the config's `environment` block |
 
+See [Environment](#environment) for everything else a script gets.
+
 A create script can override the project's `project_path`, `project_name` or `project_prompt` by writing them to `GODMODE_RESULT_FILE`, one `key=value` per line. The last key may span several lines, which suits a multiline prompt.
 
 Script stdout is streamed to the client as creation progress. Non-zero exit code aborts creation.
+
+### Environment
+
+Neither a Claude process nor a root script (`prepare`, `create`, `delete`, `status`) inherits the server's environment, which holds its secrets: an `Authentication__ApiKey`, a codespace's `GITHUB_TOKEN`. Each starts from an allowlist, then the profile's and root's `environment`, then the `GODMODE_*` variables above:
+
+- **Both** get the OS essentials: `PATH`, `HOME`, `TEMP`/`TMP`/`TMPDIR`, `LANG`, `LC_*`, `TZ`, `TERM`, `USER`, `SHELL`, the `XDG_*` directories; on Windows also `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `SystemRoot`, `ComSpec`, `PATHEXT`, `PSModulePath`, the `ProgramFiles` family and their like; the proxy and certificate variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`); and `DOTNET_ROOT`. That is what `pwsh`, `git` and `gh` need to run and to find their own configuration.
+- **Claude** also gets Claude Code's own: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_GIT_BASH_PATH`.
+
+A credential a script or a session needs that is not a file in the user's home goes in the root's (or profile's) `environment`, and then reaches both: `GH_TOKEN` or `GITHUB_TOKEN` for `gh` and its git credential helper, `SSH_AUTH_SOCK` for an SSH agent, `GIT_SSH_COMMAND`, a desktop keyring's `DBUS_SESSION_BUS_ADDRESS`. `godmode-dev` passes the codespace's token this way, `"environment": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }`; on a machine where `gh` is logged in with its own stored credentials (`gh auth login`, the Windows credential manager), the entry expands to nothing and is dropped, and `gh` reads its login from the home directory.
 
 ### Pull Request Status
 
@@ -368,7 +398,9 @@ Utility:
 
 ### Server Exits at Startup
 
-- "will not start: no API key is configured": you bound a non-loopback address without a key. See *Authentication and binding* above.
+- "will not start: … API key file": the key file cannot be written, or is under `ProjectRootsDir`. Set `Authentication:ApiKeyFile`, or a key. See *Authentication and binding* above.
+- "will not start: Authentication:AllowedOrigins lists …": an entry is not an origin (`scheme://host[:port]`, no path).
+- "will not start: PermissionPromptKeepAliveSeconds …": it must be more than 0 and less than 300.
 
 ### Claude Process Not Starting
 
@@ -391,5 +423,6 @@ Utility:
 
 ### SignalR Connection Failures
 
-- The browser client asks for the API key when the server requires one; a rejected key shows the key page again
+- The browser client asks for the API key, which every server requires; a rejected key shows the key page again
+- A browser that has the key but cannot connect may be on an origin the server does not know as its own: its log names the origin it refused. Add it to `Authentication:AllowedOrigins`
 - Check firewall rules for port 31337

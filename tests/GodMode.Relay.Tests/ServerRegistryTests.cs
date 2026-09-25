@@ -65,15 +65,34 @@ public sealed class ServerRegistryTests : IDisposable
     [Fact]
     public async Task Server_whose_token_secure_storage_refuses_is_not_added_and_its_token_never_reaches_the_file()
     {
+        var kept = await new ServerRegistryService(_dataDir, _secrets).AddServerAsync(new ServerRegistration { Urls = ["http://kept"] }, "key");
         var registry = new ServerRegistryService(_dataDir, new FailingSecretStore());
-        var keyless = await registry.AddServerAsync(new ServerRegistration { Urls = ["http://keyless"] }, null);
 
         var error = await Record.ExceptionAsync(() =>
             registry.AddServerAsync(new ServerRegistration { Type = ServerTypes.GitHub, Username = "octo" }, "ghp_refused"));
 
         Assert.DoesNotContain("ghp_refused", await File.ReadAllTextAsync(ServersFile));
         Assert.Contains("secure storage", Assert.IsType<InvalidOperationException>(error).Message);
-        Assert.Equal([keyless.Id], (await new ServerRegistryService(_dataDir, _secrets).GetServersAsync()).Select(s => s.Id));
+        Assert.Equal([kept.Id], (await new ServerRegistryService(_dataDir, _secrets).GetServersAsync()).Select(s => s.Id));
+    }
+
+    /// <summary>Every GodMode server requires its API key, a local one included: a server without one is not added.</summary>
+    [Theory]
+    [InlineData(ServerTypes.Local, null)]
+    [InlineData(ServerTypes.Local, "")]
+    [InlineData(ServerTypes.Local, "  ")]
+    [InlineData(ServerTypes.GitHub, null)]
+    public async Task Server_without_a_key_is_not_added(string type, string? accessToken)
+    {
+        var registry = new ServerRegistryService(_dataDir, _secrets);
+
+        var error = await Record.ExceptionAsync(() => registry.AddServerAsync(
+            new ServerRegistration { Type = type, Urls = ["http://127.0.0.1:31337"], Username = "octo" }, accessToken));
+
+        Assert.IsType<ArgumentException>(error);
+        Assert.Empty(await registry.GetServersAsync());
+        Assert.False(File.Exists(ServersFile));
+        Assert.Empty(_secrets.Values);
     }
 
     private sealed class FailingSecretStore : ISecretStore

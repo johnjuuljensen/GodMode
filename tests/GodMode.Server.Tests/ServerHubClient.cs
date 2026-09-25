@@ -8,13 +8,13 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace GodMode.Server.Tests;
 
-/// <summary>A hub connection that keeps every StatusChanged it is pushed.</summary>
-internal sealed class ServerHubClient(string baseUrl) : IAsyncDisposable
+/// <summary>A hub connection, with the server's key, that keeps every StatusChanged it is pushed.</summary>
+internal sealed class ServerHubClient(string baseUrl, string apiKey = ServerProcess.ApiKey) : IAsyncDisposable
 {
     private readonly ConcurrentQueue<ProjectStatus> _pushes = new();
 
     public HubConnection Hub { get; } = new HubConnectionBuilder()
-        .WithUrl($"{baseUrl}/hubs/projects")
+        .WithUrl($"{baseUrl}/hubs/projects", options => options.AccessTokenProvider = () => Task.FromResult<string?>(apiKey))
         .AddJsonProtocol(options =>
         {
             options.PayloadSerializerOptions.PropertyNamingPolicy = JsonDefaults.Options.PropertyNamingPolicy;

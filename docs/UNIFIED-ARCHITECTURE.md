@@ -253,15 +253,14 @@ A project is a folder directly inside its root with a `.godmode/status.json`. Th
 
 ### 4.4 Authentication
 
-The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
+Every request needs a credential, whatever the server is bound to, loopback included. The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
 
-1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`.
-2. **API key** — `Authentication:ApiKey` is set. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade).
-3. **Loopback** — no key, and every binding is loopback. Callers need no key, but only from a loopback address, with a loopback `Host` and, when present, a loopback `Origin`.
+1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`, which its sessions are given.
+2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade). The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under `ProjectRootsDir`.
 
-With no key and any non-loopback binding, the server **refuses to start**. The shipped binding is `http://127.0.0.1:31337`. Binding to another address, such as the machine's Tailscale IP, needs a key. The Docker image sets `URLS=http://+:31337`, so it needs a key too.
+**Browser origins** (`Auth/OriginPolicy.cs`). A request with an `Origin`, as a browser sends on every WebSocket upgrade and any request but a same-origin GET, is refused with 403 before authentication unless it is one of the server's own origins: each address it listens on (a loopback or wildcard address also stands for `localhost`, `127.0.0.1` and `[::1]` on its port), those in `Authentication:AllowedOrigins` (a reverse proxy's, a host name's), a codespace's forwarded port, and the Vite dev server in Development. A request with no `Origin` (the MAUI relay, the attention service) needs the key alone.
 
-Only `/health` and the SPA's static files are anonymous. The MCP endpoint, `/mcp`, takes a per-project token instead, and nothing else (Section 8.2). `src/GodMode.Server/README.md` has the full binding guide.
+Only `/health` and the SPA's static files are anonymous. The MCP endpoint, `/mcp`, takes a per-project token instead, and nothing else (Section 8.2). A Claude process and a root script start from an environment allowlist (`ChildEnvironment`), so the key reaches neither. Sessions still run as the server's OS user, so one that can run arbitrary commands can read the key file: the permission prompt is a gate, not a sandbox. `src/GodMode.Server/README.md` has the full binding guide.
 
 ### 4.5 React Client Architecture
 
@@ -351,7 +350,7 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 | `PullRequestPoller` / `PullRequestScript` | When a root's status script runs for each project, and the strict reading of its output (owned by `ProjectManager`, not registered) |
 | `PermissionPromptTool` | The MCP endpoint's one tool, claude's permission prompt (Section 8.2); registered with `AddMcpServer`, made per call |
 
-All services are registered as **singletons** in `Program.cs`, except the MCP tool. Authentication lives in `Auth/` (`AuthModeSelector`, `GodModeAuthenticationHandler`).
+All services are registered as **singletons** in `Program.cs`, except the MCP tool. Authentication lives in `Auth/` (`AuthModeSelector`, `ApiKeyFile`, `OriginPolicy`, `GodModeAuthenticationHandler`).
 
 ---
 
@@ -374,7 +373,7 @@ The server writes the session's MCP config, its own entry alone, to `.godmode/mc
 
 The server hosts one MCP endpoint, `/mcp` (`ModelContextProtocol.AspNetCore`, streamable HTTP, stateless), in-process. It has one tool, `permission_prompt`, which exists for claude's `--permission-prompt-tool` alone. It offers no other tools, for sessions or for operators.
 
-Each session's MCP config has one entry for it, `godmode`: `"type": "http"`, the endpoint's URL, and headers carrying `Authorization: Bearer <project token>` and `X-GodMode-Project-Id`. The URL is an address this machine reaches the server on, picked from the addresses it is bound to (a loopback binding first, a wildcard's loopback next, else the one IP bound). The token is issued afresh for each launch and lives only in memory and in that file; claude's environment carries no `GODMODE_*` variable. `/mcp` takes only a project token, for the project it was issued to: not the user's API key, not a keyless loopback caller. A project token opens nothing else.
+Each session's MCP config has one entry for it, `godmode`: `"type": "http"`, the endpoint's URL, and headers carrying `Authorization: Bearer <project token>` and `X-GodMode-Project-Id`. The URL is an address this machine reaches the server on, picked from the addresses it is bound to (a loopback binding first, a wildcard's loopback next, else the one IP bound). The token is issued afresh for each launch and lives only in memory and in that file; claude's environment carries no `GODMODE_*` variable. `/mcp` takes only a project token, for the project it was issued to: not the user's API key. A project token opens nothing else: not the hub, not `/api/*`.
 
 **Permission prompts.** claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode__permission_prompt`, so a tool call that needs approval waits for the user instead of being denied. claude calls `permission_prompt` with `{tool_name, input, tool_use_id}`. The call waits until the user answers, however long that takes, and returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}` as its text. While it waits, it sends a progress notification every `PermissionPromptKeepAliveSeconds` (30): claude gives up on a tool call that sends no response or progress for 300 seconds. When claude cancels the call, or its connection drops, the request is withdrawn. The project is `WaitingPermission` with `ProjectStatus.PendingPermission` (a server-built one-line `Summary` such as `Bash: git push origin x`), answered with the hub's `RespondToPermission`. The same flag makes claude offer `AskUserQuestion` in `--print` mode, and ask it through the same tool: that is `WaitingInput` with `PendingQuestion`, answered with `AnswerQuestion`. A request survives a client disconnect, not a server restart: claude's call fails and it sees a deny. A chat message sent while one waits answers it (a single question takes it as its answer; otherwise it is a deny carrying the text).
 
@@ -390,18 +389,17 @@ GodMode.Server runs on a machine you own, where Claude Code sessions can use the
 
 | Target | How | Auth Mode | Use Case |
 |---|---|---|---|
-| **A PC or VM** | `dotnet run`, or a published build | Loopback (same machine) or API key (reached over Tailscale or a LAN) | The main setup: sessions run on your hardware |
+| **A PC or VM** | `dotnet run`, or a published build | API key (generated on the first start, or configured) | The main setup: sessions run on your hardware |
 | **GitHub Codespaces** | `.devcontainer/godmode-server/` | Codespace token | A disposable server per developer |
-| **Docker** | Image from `src/GodMode.Server/Dockerfile` | API key (required) | A containerized server on your own host |
+| **Docker** | Image from `src/GodMode.Server/Dockerfile` | API key (set it, so a replaced container keeps it) | A containerized server on your own host |
 
 ### 9.2 On a PC or VM
 
 ```bash
-# Same machine only (keyless)
+# Same machine only. With no Authentication__ApiKey, the first start generates a key and prints it
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
-# Reachable from your phone over Tailscale: set a key and keep the loopback binding
-export Authentication__ApiKey=<key>
+# Reachable from your phone over Tailscale: keep the loopback binding (the same key works on both)
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
   --urls "http://127.0.0.1:31337;http://$(tailscale ip -4):31337"
 ```
@@ -435,7 +433,7 @@ Stage 3: .NET ASP.NET 10.0 runtime — final image (`runtime` target)
 Stage 4: runtime + .NET SDK — the `:sdk` tag, for sessions that build .NET code
 ```
 
-The runtime image includes the published server and SPA, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`, so run it with `-e Authentication__ApiKey=<key>`. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
+The runtime image includes the published server and SPA, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`. Run it with `-e Authentication__ApiKey=<key>`: without one it generates a key into the `godmode` user's home, which a replaced container does not keep. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
 
 GitHub Actions (`.github/workflows/build-and-push.yml`) builds and pushes both targets to GHCR (`ghcr.io/johnjuuljensen/godmode`) on pushes to `master` that touch `src/`, `tests/` or the slnx (`latest`, `sdk`), and on a published release (plus the release tag).
 
@@ -481,7 +479,7 @@ Contains only infrastructure config — not domain data:
 }
 ```
 
-Every key can also be set as an environment variable (`Authentication__ApiKey`) or a command-line argument (`--ProjectRootsDir=...`). Domain data (profiles, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
+An empty `Authentication:ApiKey` means the key file's (Section 4.4). Every key can also be set as an environment variable (`Authentication__ApiKey`) or a command-line argument (`--ProjectRootsDir=...`). Domain data (profiles, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
 
 ---
 

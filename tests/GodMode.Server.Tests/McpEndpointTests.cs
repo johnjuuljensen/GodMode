@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using GodMode.FakeClaude;
@@ -10,6 +11,7 @@ using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
+using Microsoft.Extensions.Configuration;
 
 namespace GodMode.Server.Tests;
 
@@ -17,7 +19,7 @@ namespace GodMode.Server.Tests;
 /// GodMode's MCP endpoint against the real server process, called by the fake claude as claude
 /// calls it (an MCP client, from the entry the server wrote into its <c>--mcp-config</c>): whose
 /// token opens it, what it reports while a prompt waits, and what a cancelled call leaves behind.
-/// <see cref="AuthTests"/> has it refuse the user's API key.
+/// <see cref="AuthTests"/> has it refuse the user's API key; here a project token opens nothing else.
 /// </summary>
 public class McpEndpointTests
 {
@@ -43,6 +45,91 @@ public class McpEndpointTests
         Assert.Equal(HttpStatusCode.Unauthorized, othersToken.StatusCode);
         using var othersProject = await run.Http.SendAsync(Initialize(second, firstEntry.Token));
         Assert.Equal(HttpStatusCode.Unauthorized, othersProject.StatusCode);
+    }
+
+    /// <summary>
+    /// A project token is for its claude's permission prompt, and opens /mcp alone: not the hub, over
+    /// HTTP or on the WebSocket upgrade, and not the API, with its project named or not.
+    /// </summary>
+    [Fact]
+    public async Task AProjectToken_OpensOnlyTheMcpEndpoint_NotTheHubOrTheApi()
+    {
+        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin());
+        var id = await run.CreateAsync("p1");
+        var token = GodModeMcpEntry.Of(await run.WaitForLaunchAsync(id, launch => launch.Stdin.Count > 0)).Token;
+
+        using var mcp = await run.Http.SendAsync(Initialize(id, token));
+        Assert.Equal(HttpStatusCode.OK, mcp.StatusCode);
+
+        foreach (var (method, path) in new[]
+        {
+            (HttpMethod.Post, "/hubs/projects/negotiate?negotiateVersion=1"),
+            (HttpMethod.Get, "/hubs/projects"),
+            (HttpMethod.Get, "/api/status"),
+            (HttpMethod.Get, "/servers"),
+        })
+        foreach (var projectId in new[] { id, null })
+        {
+            using var request = new HttpRequestMessage(method, path);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            if (projectId != null) request.Headers.Add(ProjectTokenAuthenticationHandler.ProjectIdHeader, projectId);
+            using var response = await run.Http.SendAsync(request);
+            Assert.True(response.StatusCode == HttpStatusCode.Unauthorized,
+                $"{method} {path}{(projectId != null ? " naming its project" : "")} with a project token → {(int)response.StatusCode}, expected 401");
+        }
+
+        // The hub's WebSocket upgrade: the token as a browser sends it, and as claude sends it to /mcp
+        var hubSocket = new Uri($"{run.BaseUrl.Replace("http", "ws")}/hubs/projects");
+        using (var queryToken = new ClientWebSocket())
+        {
+            var ex = await Assert.ThrowsAsync<WebSocketException>(() =>
+                queryToken.ConnectAsync(new Uri($"{hubSocket}?access_token={Uri.EscapeDataString(token)}"), CancellationToken.None));
+            Assert.Contains("401", ex.Message);
+        }
+        using (var headers = new ClientWebSocket())
+        {
+            headers.Options.SetRequestHeader("Authorization", $"Bearer {token}");
+            headers.Options.SetRequestHeader(ProjectTokenAuthenticationHandler.ProjectIdHeader, id);
+            var ex = await Assert.ThrowsAsync<WebSocketException>(() => headers.ConnectAsync(hubSocket, CancellationToken.None));
+            Assert.Contains("401", ex.Message);
+        }
+
+        // And the SignalR client, as the React client connects
+        await using var hub = new ServerHubClient(run.BaseUrl, apiKey: token);
+        var refused = await Assert.ThrowsAsync<HttpRequestException>(() => hub.StartAsync());
+        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+    }
+
+    /// <summary>0 would spin the keep-alive, a negative value throws once a prompt waits, and 300 or more lets claude give up first.</summary>
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("300")]
+    [InlineData("soon")]
+    public async Task AKeepAliveOutOfRange_FailsAtStartupWithMessage(string seconds)
+    {
+        var workDir = ServerProcess.CreateWorkDir("mcp");
+        using (var server = ServerProcess.Start(workDir, $"http://127.0.0.1:{ServerProcess.GetFreePort()}",
+            environment: new Dictionary<string, string> { [PermissionPromptTool.KeepAliveSetting] = seconds }))
+        {
+            Assert.True(await server.WaitForExitAsync(TimeSpan.FromSeconds(30)), $"Server kept running.\n{server.Output}");
+            Assert.Equal(1, server.ExitCode);
+            Assert.Contains(PermissionPromptTool.KeepAliveSetting, server.Output);
+            Assert.Contains($"'{seconds}'", server.Output);
+        }
+        ServerProcess.DeleteWorkDir(workDir);
+    }
+
+    [Theory]
+    [InlineData(null, 30.0)]
+    [InlineData("0.05", 0.05)]
+    [InlineData("299", 299.0)]
+    public void AKeepAliveInRange_IsUsed(string? seconds, double expected)
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [PermissionPromptTool.KeepAliveSetting] = seconds }).Build();
+
+        Assert.Equal(TimeSpan.FromSeconds(expected), PermissionPromptTool.KeepAliveFrom(config));
     }
 
     /// <summary>claude gives up on a tool call that sends nothing for 300 seconds: a waiting prompt reports progress.</summary>

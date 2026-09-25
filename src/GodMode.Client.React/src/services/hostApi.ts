@@ -238,6 +238,6 @@ export function getHubOptions(_serverId: string): import('@microsoft/signalr').I
       accessTokenFactory: () => relayInfo?.Secret ?? '',
     };
   }
-  // No key (loopback server) → empty token, which SignalR does not send.
+  // No key entered yet → empty token, which SignalR does not send; the key page asks for one first.
   return { accessTokenFactory: () => getApiKey() ?? '' };
 }
