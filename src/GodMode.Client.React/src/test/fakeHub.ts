@@ -6,7 +6,7 @@
  */
 import type { ConnectionState, HubCallbacks } from '../signalr/hub';
 import type {
-  ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
+  PermissionDecision, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
 } from '../signalr/types';
 import { useAppStore, type ServerConnection } from '../store';
 
@@ -20,6 +20,10 @@ export class FakeHub {
   /** Every text sent through ReplyAndResume, and every AnswerQuestion's answers, in order. */
   replies: { projectId: string; text: string }[] = [];
   answers: { projectId: string; requestId: string; answers: Record<string, string> }[] = [];
+  /** Every RespondToPermission's decision, MarkSeen and CreateProject, in order. */
+  decisions: { projectId: string; requestId: string; decision: PermissionDecision }[] = [];
+  seen: string[] = [];
+  created: { rootName: string; actionName: string | null; inputs: Record<string, unknown> }[] = [];
   /** Every SubscribeProject and UnsubscribeProject that reached the server, in order. */
   subscriptions: { projectId: string; fromOffset: number }[] = [];
   unsubscriptions: string[] = [];
@@ -72,6 +76,15 @@ export class FakeHub {
   async replyAndResume(projectId: string, text: string) { this.replies.push({ projectId, text }); }
   async answerQuestion(projectId: string, requestId: string, answers: Record<string, string>) {
     this.answers.push({ projectId, requestId, answers });
+  }
+  async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision) {
+    this.decisions.push({ projectId, requestId, decision });
+  }
+  async markSeen(projectId: string) { this.seen.push(projectId); }
+  async createProject(_profileName: string, rootName: string, actionName: string | null, inputs: Record<string, unknown>) {
+    this.invoke();
+    this.created.push({ rootName, actionName, inputs });
+    return status(`new${this.created.length}`, 'Running');
   }
 }
 
