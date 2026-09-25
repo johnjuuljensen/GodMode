@@ -2,14 +2,15 @@
 /**
  * The question shortcuts (Enter, 1-9, arrows, Escape) against the controls beside them: typing in a
  * text field is typing, and one key press sends one answer (#170). A key on a dialog's or the inbox's
- * button is that button's (#240). Renders ProjectView beside the inbox pane and the confirm dialog, as
- * the Shell does, on the real store.
+ * button is that button's (#240). A fold clicked keeps no focus, so the keys stay the prompt's (#218).
+ * Renders ProjectView beside the inbox pane and the confirm dialog, as the Shell does, on the real store.
  */
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem, PendingQuestion } from '../../signalr/types';
+import { parseClaudeMessage } from '../../signalr/parseMessage';
 import { FakeHub, project, root, connectServers } from '../../test/fakeHub';
-import { render, typeInto, keyDown, pressKey, click, type Rendered } from '../../test/render';
+import { render, typeInto, keyDown, pressKey, click, pointerClick, type Rendered } from '../../test/render';
 import { useAppStore } from '../../store';
 import { getOpenConfirm } from '../../confirmDialog';
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -23,6 +24,12 @@ vi.mock('../../services/hostApi', () => ({
   subscribeEvents: () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,
   getHubOptions: () => ({}),
+}));
+// jsdom lays nothing out, so Virtuoso would render no rows: this one renders them all
+vi.mock('react-virtuoso', () => ({
+  Virtuoso: ({ data, itemContent, className }: { data: unknown[]; itemContent: (i: number, item: unknown) => ReactNode; className?: string }) => (
+    <div className={className}>{data.map((row, i) => <div key={i}>{itemContent(i, row)}</div>)}</div>
+  ),
 }));
 
 const pending: PendingQuestion = {
@@ -159,5 +166,44 @@ describe('beside a dialog and the inbox (#240)', () => {
       expect(hub.replies).toEqual([{ projectId: 'p4', text: 'Try again' }]);
       expect(hub.answers).toEqual([]);
     });
+  });
+});
+
+describe('after a click (#218)', () => {
+  const bashCall = {
+    offset: 10,
+    message: parseClaudeMessage(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } })),
+  };
+  const right = [{ projectId: 'p1', requestId: 'r1', answers: { 'Which way?': 'Right' } }];
+  let fold: HTMLButtonElement;
+
+  beforeEach(async () => {
+    await act(async () => {
+      hub.lastReplay('p1').batch(0, [bashCall]);
+      hub.lastReplay('p1').complete(10);
+    });
+    fold = view.container.querySelector<HTMLButtonElement>('.project-view .ti-fold')!;
+  });
+
+  it('a fold clicked with the question open leaves it its keys: a digit answers', async () => {
+    await pointerClick(fold);
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    await keyDown(document.activeElement, '2');
+    expect(hub.answers).toEqual(right);
+  });
+
+  it("and so does the inbox pane's toggle", async () => {
+    const toggle = view.container.querySelector<HTMLButtonElement>('.inbox-toggle')!;
+    await pointerClick(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    await keyDown(document.activeElement, '2');
+    expect(hub.answers).toEqual(right);
+  });
+
+  it('a fold reached by the keyboard is as before: Enter there opens it, and answers nothing', async () => {
+    await pressKey(fold, 'Enter');
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(fold);
+    expect(hub.answers).toEqual([]);
   });
 });

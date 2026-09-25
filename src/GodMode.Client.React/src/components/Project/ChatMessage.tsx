@@ -3,6 +3,7 @@ import type { TranscriptItem, ToolCallItem } from '../../signalr/parseMessage';
 import { Markdown } from './Markdown';
 import { lineDiff, type DiffLine } from './lineDiff';
 import { callStatus, callStatusTitle, resultLine } from './transcriptRow';
+import { keepFocus } from './keepFocus';
 
 // Tool output, or a diff, past this many characters is cut, so one huge result or file cannot stall a row
 const MAX_OUTPUT = 20_000;
@@ -34,7 +35,7 @@ export const ChatMessage = memo(function ChatMessage({ item, expanded, onToggle,
     case 'thinking':
       return (
         <div className="ti ti-thinking">
-          <button type="button" className="ti-fold" aria-expanded={expanded} onClick={() => onToggle(item.key)}>
+          <button type="button" className="ti-fold" aria-expanded={expanded} onMouseDown={keepFocus} onClick={() => onToggle(item.key)}>
             <Chevron open={expanded} />
             <span className="ti-fold-label">Thinking</span>
             {!expanded && <span className="ti-fold-summary">{item.text.split('\n')[0]}</span>}
@@ -88,7 +89,7 @@ function ToolCallRow({ call, expanded, onToggle, expandedKeys }: {
 
   return (
     <div className={`ti ti-tool ti-tool-${status}`}>
-      <button type="button" className="ti-fold" aria-expanded={expanded} onClick={() => onToggle(call.key)}>
+      <button type="button" className="ti-fold" aria-expanded={expanded} onMouseDown={keepFocus} onClick={() => onToggle(call.key)}>
         <Chevron open={expanded} />
         <span className="ti-tool-name">{call.name}</span>
         <span className="ti-fold-summary">{call.summary}</span>
