@@ -185,25 +185,42 @@ public static class OutputLog
         if (batch.Count > 0) yield return batch;
     }
 
-    /// <summary>Opens the file to append lines, as the project's consumer does for each burst of output.</summary>
-    public static Writer OpenWriter(string projectPath) => new(PathOf(projectPath));
+    /// <summary>
+    /// Opens the file to append lines, as the project's consumer does for each burst of output.
+    /// With <paramref name="end"/>, what a failed write left past it is cut off first, so the next
+    /// line starts where the last whole one ended. <paramref name="wrap"/> puts a stream of its own
+    /// between the writer and the file (a test's, to make a write fail).
+    /// </summary>
+    public static Writer OpenWriter(string projectPath, long? end = null, Func<Stream, Stream>? wrap = null) =>
+        new(PathOf(projectPath), end, wrap);
 
     /// <summary>Appends lines and knows the offset after the last one.</summary>
     public sealed class Writer : IAsyncDisposable
     {
-        private readonly FileStream _stream;
+        private readonly Stream _stream;
 
-        internal Writer(string path)
+        internal Writer(string path, long? end = null, Func<Stream, Stream>? wrap = null)
         {
-            _stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
-            if (_stream.Length == 0) return;
-
-            // A write cut short left a line without its \n: end it, so the next line starts on a boundary
-            _stream.Position = _stream.Length - 1;
-            if (_stream.ReadByte() != NewLine)
+            Stream file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+            _stream = wrap?.Invoke(file) ?? file;
+            try
             {
-                _stream.WriteByte(NewLine);
-                _stream.Flush();
+                if (end is { } whole && whole < _stream.Length) _stream.SetLength(whole);
+                _stream.Position = _stream.Length;
+                if (_stream.Length == 0) return;
+
+                // A write cut short left a line without its \n: end it, so the next line starts on a boundary
+                _stream.Position = _stream.Length - 1;
+                if (_stream.ReadByte() != NewLine)
+                {
+                    _stream.WriteByte(NewLine);
+                    _stream.Flush();
+                }
+            }
+            catch
+            {
+                _stream.Dispose();
+                throw;
             }
         }
 

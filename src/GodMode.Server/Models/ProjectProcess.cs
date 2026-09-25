@@ -21,6 +21,12 @@ public sealed class ProjectProcess
     /// </summary>
     public ChannelWriter<PipelineItem> Output => _output.Writer;
 
+    /// <summary>
+    /// The project's pushes to hub clients (its output and status), which its consumer does not wait
+    /// on: a client that stops reading holds up no project.
+    /// </summary>
+    public ClientSends Sends { get; } = new();
+
     /// <summary>Serialises writes to claude's stdin, so two sends cannot mix their JSON lines.</summary>
     public SemaphoreSlim StdinLock { get; } = new(1, 1);
 
@@ -119,11 +125,15 @@ public sealed class ProjectProcess
     }
 
     /// <summary>Denies every waiting request: the process they came from is gone or going.</summary>
-    public void DenyAllPending(string message)
-    {
-        foreach (var request in _pending.Values)
-            CompletePending(request, PermissionPromptResult.Deny(message));
-    }
+    public void DenyAllPending(string message) => DenyPendingUpTo(long.MaxValue, message);
+
+    /// <summary>
+    /// Denies the waiting requests that arrived no later than <paramref name="sequence"/> (see
+    /// <see cref="PendingRequest.Sequence"/>); how many this call took off the list.
+    /// </summary>
+    public int DenyPendingUpTo(long sequence, string message) =>
+        _pending.Values.Where(request => request.Sequence <= sequence)
+            .Count(request => CompletePending(request, PermissionPromptResult.Deny(message)));
 
     private TaskCompletionSource<int>? _sessionStart;
 
@@ -168,11 +178,42 @@ public sealed class ProjectProcess
 
     private Task? _consumer;
 
-    /// <summary>Starts the one consumer of <see cref="Output"/>, unless it is already running.</summary>
-    public void EnsureConsumer(Func<ChannelReader<PipelineItem>, Task> consume)
+    /// <summary>
+    /// Starts the one consumer of <see cref="Output"/>, unless one is running or has finished the
+    /// closed pipeline: one that faulted is replaced. Returns the consumer.
+    /// </summary>
+    public Task EnsureConsumer(Func<ChannelReader<PipelineItem>, Task> consume)
     {
         lock (_gate)
-            _consumer ??= Task.Run(() => consume(_output.Reader));
+        {
+            if (_consumer is null or { IsFaulted: true }) _consumer = Task.Run(() => consume(_output.Reader));
+            return _consumer;
+        }
+    }
+
+    /// <summary>
+    /// Queues <paramref name="item"/> for the consumer and waits until it has run. A consumer that
+    /// faults first is replaced once; when that one faults too, the item fails, and is not run
+    /// later. False, with nothing queued, when the pipeline is closed.
+    /// </summary>
+    public async Task<bool> RunInOrderAsync(PipelineItem.InOrder item, Func<ChannelReader<PipelineItem>, Task> consume)
+    {
+        var consumer = EnsureConsumer(consume);
+        if (!_output.Writer.TryWrite(item)) return false;
+        for (var replaced = false; ; replaced = true)
+        {
+            // A consumer that ends leaves the item unrun only by faulting: a closed pipeline is drained first
+            if (item.Done.Task.IsCompleted || await Task.WhenAny(item.Done.Task, consumer) == item.Done.Task) break;
+            if (replaced)
+            {
+                item.Done.TrySetException(new InvalidOperationException(
+                    "The project's output pipeline has no consumer to run this: it faulted twice", consumer.Exception));
+                break;
+            }
+            consumer = EnsureConsumer(consume);
+        }
+        await item.Done.Task;
+        return true;
     }
 
     /// <summary>Closes the pipeline and waits for the consumer to finish the items already in it.</summary>
@@ -189,14 +230,22 @@ public sealed class ProjectProcess
 public abstract record PipelineItem
 {
     /// <summary>A line claude wrote to stdout, or a stderr error line surfaced to the UI.</summary>
-    public sealed record Line(string Json) : PipelineItem;
+    public sealed record Line(string Json) : PipelineItem
+    {
+        /// <summary>
+        /// The last permission prompt that had arrived when the line was read: a <c>result</c> ends
+        /// the turn those came from, and claude waits on none of them any more.
+        /// </summary>
+        public long PendingIssued { get; init; } = PendingRequest.LastIssued;
+    }
 
     /// <summary>The process ended. Written after both of its pipes closed, so after every line it wrote.</summary>
     public sealed record Exited(ProcessExit Exit) : PipelineItem;
 
     /// <summary>
     /// A change that must come after everything queued before it, under the state lock when
-    /// <paramref name="UnderStateLock"/>; <paramref name="Done"/> completes once it has run.
+    /// <paramref name="UnderStateLock"/>; <paramref name="Done"/> completes once it has run, or with
+    /// why it never will (<see cref="ProjectProcess.RunInOrderAsync"/>), and then it is not run.
     /// </summary>
     public sealed record InOrder(Func<Task> Change, TaskCompletionSource Done, bool UnderStateLock = true) : PipelineItem;
 }
@@ -214,3 +263,7 @@ public sealed record ProcessExit(int ProcessId, int ExitCode, bool Stopped, stri
 /// <param name="Before">The project's status before the exit changed it.</param>
 /// <param name="After">The status the exit left, the very instance: nothing has changed it since while it is still the project's.</param>
 public sealed record ExitOnItsOwn(DateTime At, Shared.Models.ProjectStatus Before, Shared.Models.ProjectStatus After);
+
+/// <param name="State">What the project was doing as the shutdown began, when it is one a restart carries on with; null otherwise.</param>
+/// <param name="Question">The question it was waiting on, when <paramref name="State"/> is WaitingInput.</param>
+public sealed record ShutdownMarker(Shared.Enums.ProjectState? State, string? Question);

@@ -53,6 +53,15 @@ public class StatusUpdater : IStatusUpdater
                 // A new turn is starting — clear any memo of the previous turn's
                 // trailing assistant text so stale questions don't leak forward.
                 process.LastAssistantText = null;
+                // claude has taken a message the user sent: it is working on it, whatever a result
+                // of an earlier turn, handled after the send, said. It echoes it at once between
+                // turns, and at its next step in one
+                if (IsEcho(outputEvent) && status is { PendingPermission: null, PendingQuestion: null }
+                    && (status.State != ProjectState.Running || status.CurrentQuestion != null))
+                {
+                    status = status with { State = ProjectState.Running, CurrentQuestion = null };
+                    stateChanged = true;
+                }
                 break;
 
             case OutputEventType.Assistant:
@@ -105,7 +114,9 @@ public class StatusUpdater : IStatusUpdater
                     _logger.LogInformation("Project {ProjectId} runs session {SessionId} (asked for {Requested})",
                         project.Status.Id, sessionId, project.SessionId);
                     project.SessionId = sessionId;
-                    await SessionIdFile.WriteAsync(project.ProjectPath, sessionId);
+                    // A write that fails is not the session failing: it is written again on the next init
+                    try { await SessionIdFile.WriteAsync(project.ProjectPath, sessionId); }
+                    catch (Exception ex) { _logger.LogError(ex, "Could not save the session id of project {ProjectId}", project.Status.Id); }
                 }
                 // The session (re)started - project is running
                 stateChanged = status.State != ProjectState.Running || status.LastError != null;
@@ -126,12 +137,18 @@ public class StatusUpdater : IStatusUpdater
         status = status with { Metrics = status.Metrics with { CostEstimate = inputCost + outputCost } };
 
         project.Status = status with { UpdatedAt = DateTime.UtcNow };
-        await SaveStatusAsync(project);
         return true;
     }
 
     /// <summary>The metadata key a <c>system</c> event carries claude's session ID under.</summary>
     public const string SessionIdKey = "session_id";
+
+    /// <summary>The metadata key a <c>user</c> event that claude echoed (<c>isReplay</c>) carries.</summary>
+    public const string IsReplayKey = "is_replay";
+
+    /// <summary>A user message the user sent, echoed by claude as it takes it (<c>--replay-user-messages</c>).</summary>
+    private static bool IsEcho(OutputEvent outputEvent) =>
+        outputEvent.Metadata?.GetValueOrDefault(IsReplayKey) is true;
 
     /// <summary><c>system/init</c>: claude (re)started its session. It writes it once it has read its first input.</summary>
     public static bool IsSessionStart(OutputEvent outputEvent) =>

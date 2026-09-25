@@ -12,6 +12,9 @@ namespace GodMode.Server.Hubs;
 /// </summary>
 public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
 {
+    /// <summary>How many of one connection's calls run at once (SignalR's MaximumParallelInvocationsPerClient).</summary>
+    public const int ParallelInvocationsPerClient = 4;
+
     private readonly IProjectManager _projectManager;
     private readonly ILogger<ProjectHub> _logger;
 
