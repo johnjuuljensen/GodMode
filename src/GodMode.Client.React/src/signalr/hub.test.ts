@@ -211,7 +211,7 @@ describe('a lost connection', () => {
 });
 
 describe('retries belong to their connection (#221)', () => {
-  it('an old attempt that fails late leaves the new connection\'s attempt alone: a retryNow starts none beside it', async () => {
+  it('an old attempt that fails late leaves the new connection\'s attempt its own: a wake stops it when hung, and starts none beside it', async () => {
     conn.drop();
     await vi.advanceTimersByTimeAsync(60_000);
     // An attempt of the old connection hangs, and stopping it does not end it
@@ -226,16 +226,16 @@ describe('retries belong to their connection (#221)', () => {
     fresh.drop();
     await vi.advanceTimersByTimeAsync(0);
     expect(fresh.starts.length).toBe(2);
-    // The old attempt fails now, then the page wakes
+    // Long enough to be hung; then the old attempt fails, and the page wakes with the network back
+    await vi.advanceTimersByTimeAsync(HUNG_ATTEMPT_MS + 1000);
     conn.hung();
     await vi.advanceTimersByTimeAsync(0);
-    hub.retryNow();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(fresh.overlapping).toBe(0);
     fresh.hang = false;
     fresh.offline = false;
-    fresh.hung();
+    hub.retryNow();
     await vi.advanceTimersByTimeAsync(0);
+    // The new connection's hung attempt was still its own to stop: stopped, and started again at once
+    expect(fresh.starts.length).toBe(3);
     expect(hub.state).toBe('connected');
     expect(fresh.overlapping).toBe(0);
     expect(conn.starts.length).toBe(oldAttempts);
