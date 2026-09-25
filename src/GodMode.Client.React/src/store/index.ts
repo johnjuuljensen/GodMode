@@ -106,6 +106,9 @@ const emptyTranscript: Transcript = { messages: [], offset: 0, generation: null,
 let subscriptions = 0;
 const newSubscription = () => `s${++subscriptions}`;
 
+/** Whether a batch or complete answers the subscription a transcript or tile holds now, and so is for it. */
+const answers = (p: OutputPosition, subscription: string) => p.subscription === subscription;
+
 /** An attention item and the server it is from: attention is per server, merged here. */
 export interface ServerAttentionItem extends AttentionItem {
   serverId: string;
@@ -576,7 +579,7 @@ export const useAppStore = create<AppState>((set, get) => {
         }
 
         const held = state.transcripts[key];
-        if (held && (batch ? held.subscription === batch.subscription : held.phase === 'live')) {
+        if (held && (batch ? answers(held, batch.subscription) : held.phase === 'live')) {
           const { transcript, added } = appendLines(held, lines, batch);
           updates.transcripts = { ...state.transcripts, [key]: transcript };
           const sel = state.selectedProject;
@@ -594,7 +597,7 @@ export const useAppStore = create<AppState>((set, get) => {
         // offset. A batch in another generation than the tile's lines replaces them: the server replayed from 0
         const tile = state.tiles[key];
         const loading = !!state.tileLoading[key];
-        if (state.isTileView && tile && (batch ? loading && tile.subscription === batch.subscription : !loading)) {
+        if (state.isTileView && tile && (batch ? loading && answers(tile, batch.subscription) : !loading)) {
           const restart = batch !== undefined && batch.generation !== tile.generation;
           const offset = restart ? 0 : tile.offset;
           const fresh = lines.filter(l => l.offset > offset);
@@ -769,7 +772,7 @@ export const useAppStore = create<AppState>((set, get) => {
         set(state => {
           const updates: Partial<AppState> = {};
           const held = state.transcripts[key];
-          if (held && held.subscription === subscription) {
+          if (held && answers(held, subscription)) {
             // Another generation, or output.jsonl shorter than what is held: the transcript is not from this file
             const transcript: Transcript = generation !== held.generation || offset < held.offset
               ? { ...emptyTranscript, offset, generation, subscription, phase: 'live' }
@@ -779,7 +782,7 @@ export const useAppStore = create<AppState>((set, get) => {
             if (sel?.serverId === serverId && sel.projectId === projectId) updates.outputMessages = transcript.messages;
           }
           const tile = state.tiles[key];
-          if (state.isTileView && tile && tile.subscription === subscription) {
+          if (state.isTileView && tile && answers(tile, subscription)) {
             updates.tileLoading = { ...state.tileLoading, [key]: false };
             // No batch came in this generation: the tile's lines, if any, are not from this file. A tail
             // that replayed nothing resumes from the end of the file
