@@ -13,6 +13,7 @@ namespace GodMode.Relay.Tests;
 /// <summary>
 /// A stand-in GodMode server on a random loopback port: /health and a SignalR hub at /hubs/projects
 /// whose Echo method answers with this server's name. Records what each hub connection presented.
+/// Given a key, it refuses any hub request that does not present it with 401, as GodMode.Server does.
 /// </summary>
 internal sealed class FakeUpstream : IAsyncDisposable
 {
@@ -31,7 +32,7 @@ internal sealed class FakeUpstream : IAsyncDisposable
         Url = url;
     }
 
-    public static async Task<FakeUpstream> StartAsync(string name)
+    public static async Task<FakeUpstream> StartAsync(string name, string? requiredKey = null)
     {
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -44,7 +45,15 @@ internal sealed class FakeUpstream : IAsyncDisposable
         app.Use(async (ctx, next) =>
         {
             if (ctx.Request.Path.StartsWithSegments("/hubs/projects"))
-                self!.HubRequests.Enqueue((ctx.Request.Headers.Authorization.FirstOrDefault(), ctx.Request.QueryString.Value ?? ""));
+            {
+                var authorization = ctx.Request.Headers.Authorization.FirstOrDefault();
+                self!.HubRequests.Enqueue((authorization, ctx.Request.QueryString.Value ?? ""));
+                if (requiredKey != null && authorization != $"Bearer {requiredKey}")
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
+                }
+            }
             await next();
         });
         app.MapGet("/health", () => Results.Ok());
