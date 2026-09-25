@@ -27,7 +27,23 @@ vi.mock('../../services/hostApi', () => ({
 
 const rootNamed = (name: string): ProjectRootInfo => ({
   Name: name, ProfileName: 'Default',
-  Actions: [{ Name: 'issue', InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
+  Actions: [{ Name: 'issue', AllowSkipPermissions: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
+});
+
+/** A root whose schema has the Skip Permissions toggle, defaulting on as the dev root's once did; allowed or not by the root. */
+const rootWithSkip = (allowSkipPermissions: boolean): ProjectRootInfo => ({
+  Name: 'work', ProfileName: 'Default',
+  Actions: [{
+    Name: 'issue', AllowSkipPermissions: allowSkipPermissions,
+    InputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', title: 'Title' },
+        skipPermissions: { type: 'boolean', title: 'Skip Permissions', default: 'true' },
+      },
+      required: ['title'],
+    },
+  }],
 });
 
 const initialState = useAppStore.getState();
@@ -36,6 +52,8 @@ let view: Rendered | undefined;
 const button = (label: string) => [...view!.container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === label)!;
 const titleField = () => [...view!.container.querySelectorAll('.form-group')]
   .find(g => g.querySelector('label')?.textContent?.startsWith('Title'))!.querySelector('input')!;
+const skipToggle = () => [...view!.container.querySelectorAll('.form-group')]
+  .find(g => g.querySelector('label')?.textContent === 'Skip Permissions')?.querySelector<HTMLInputElement>('input[type="checkbox"]') ?? null;
 const shownRoot = () => view!.container.querySelector('.selected-root-name')?.textContent;
 const shownServer = () => view!.container.querySelector('.selected-root-server')?.textContent;
 const rootCard = (name: string) => [...view!.container.querySelectorAll<HTMLElement>('.root-picker-card')]
@@ -121,6 +139,42 @@ describe('on one server with two roots', () => {
     await openFor('A', 'work');
     expect(shownRoot()).toBe('work');
     expect(titleField().value).toBe('Work draft');
+  });
+});
+
+describe('the Skip Permissions toggle (#233)', () => {
+  async function openFormOf(root: ProjectRootInfo) {
+    const hub = new FakeHub([], [root]);
+    await connectServers({ A: hub });
+    view = await render(<Shell />);
+    await openFor('A', root.Name);
+    await typeInto(titleField(), 'Fix the login');
+    return hub;
+  }
+
+  it('is not shown, and not sent, where the root does not allow it', async () => {
+    const hub = await openFormOf(rootWithSkip(false));
+
+    expect(skipToggle()).toBeNull();
+    await click(button('Create'));
+    expect(hub.created).toEqual([{ rootName: 'work', actionName: 'issue', inputs: { model: 'opus', title: 'Fix the login' } }]);
+  });
+
+  it('is shown unchecked where the root allows it, whatever the schema defaults it to', async () => {
+    const hub = await openFormOf(rootWithSkip(true));
+
+    expect(skipToggle()?.checked).toBe(false);
+    await click(button('Create'));
+    expect(hub.created.map(c => c.inputs.skipPermissions)).toEqual([false]);
+  });
+
+  it('is sent checked where the root allows it and the user checks it', async () => {
+    const hub = await openFormOf(rootWithSkip(true));
+
+    await click(skipToggle()!);
+    expect(skipToggle()?.checked).toBe(true);
+    await click(button('Create'));
+    expect(hub.created.map(c => c.inputs.skipPermissions)).toEqual([true]);
   });
 });
 

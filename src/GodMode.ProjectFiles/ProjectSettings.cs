@@ -7,9 +7,15 @@ namespace GodMode.ProjectFiles;
 /// Per-project settings persisted to .godmode/settings.json.
 /// Survives process restarts and server recovery.
 /// </summary>
+/// <param name="DangerouslySkipPermissions">
+/// What the create asked for. A launch honours it only while the project's root allows it: the
+/// session can write this file, so it cannot be what decides.
+/// </param>
+/// <param name="PermissionMode">The root's permission mode when the project was created, kept for its resumes.</param>
 public record ProjectSettings(
     bool DangerouslySkipPermissions = false,
-    string? ActionName = null
+    string? ActionName = null,
+    string? PermissionMode = null
 )
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

@@ -425,7 +425,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             var resolvedPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
             var config = _rootConfigReader.ReadConfig(resolvedPath);
             var actions = config.GetEffectiveActions()
-                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Model))
+                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Model, a.AllowSkipPermissions))
                 .ToArray();
             return new ProjectRootInfo(rootName, config.Description, actions, ProfileName: profileName);
         }).ToArray();
@@ -488,9 +488,25 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Resolve root path via profile lookup
         var compositeKey = CompositeKey(request.ProfileName, request.ProjectRootName);
         var rootPath = snap.ProjectFiles.GetProjectRootPath(compositeKey);
-        var config = _rootConfigReader.ReadConfig(rootPath);
+        // Read as the launch reads it: a config file that cannot be read fails the create here, before
+        // anything is written, rather than at its launch
+        RootConfig config;
+        try
+        {
+            config = _rootConfigReader.ReadConfigStrict(rootPath);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException($"Root '{request.ProjectRootName}' has a config that cannot be read: {ex.Message}", ex);
+        }
         var action = config.ResolveAction(request.ActionName)
             ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
+
+        // Skipping permissions is the root's to allow: a create cannot ask for what its root forbids
+        var skipPermissions = GetBool(request.Inputs, "skipPermissions");
+        if (skipPermissions && !action.AllowSkipPermissions)
+            throw new ArgumentException(
+                $"Root '{request.ProjectRootName}' does not allow Skip Permissions for action '{action.Name}': its config would need \"allowSkipPermissions\": true.");
 
         // Get profile environment for merging
         snap.Profiles.TryGetValue(request.ProfileName, out var profileConfig);
@@ -668,11 +684,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Ensure .godmode directory exists (scripts may have created the project dir without it)
         EnsureGodModeDirectory(projectPath);
 
-        // Save project settings (persists across restarts, includes action name for delete/resume)
-        var skipPermissions = GetBool(request.Inputs, "skipPermissions");
+        // Save project settings (persists across restarts, includes action name for delete/resume).
+        // The permission mode is kept with the project, as its model is, so its resumes keep it
         var settings = new ProjectFiles.ProjectSettings(
             DangerouslySkipPermissions: skipPermissions,
-            ActionName: action.Name);
+            ActionName: action.Name,
+            PermissionMode: action.PermissionMode);
         settings.Save(projectPath);
 
         // Save initial status
@@ -1743,19 +1760,62 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var profileName = project.ProfileName ?? project.Status.ProfileName;
         snap.Profiles.TryGetValue(profileName ?? "", out var profile);
 
-        var (action, stripEnvVarProfile) = ResolveLaunchAction(snap, project, profileName);
-        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, settings, McpConfigJson(project, IssueProjectToken(project)),
+        var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(snap, project, profileName);
+        var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
+        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project)),
             project.Status.Model ?? action.Model, profile?.Environment, profileName, stripEnvVarProfile);
         return new ClaudeLaunchSpec(env ?? new Dictionary<string, string>(), args);
     }
 
     /// <summary>
-    /// The project's action in its root's config (the default action for a project with no root).
+    /// How a launch is permitted, for create, resume, a reply's resume and a restart's alike. Skipping
+    /// permissions needs both the project's settings to ask for it and its root's config, as it is now,
+    /// to allow it: settings.json is in the project folder, which the session can write, and a planted
+    /// or copied folder is relaunched from it unattended. The action name is in that file too, so a launch
+    /// needs every action of the root to allow skipping (<paramref name="rootAllowsSkip"/>): a session that
+    /// names another action gains nothing. The permission mode is the one the project was
+    /// created with (its root's current one, for a project created without), and is checked again for
+    /// the same reason; skipping overrides it. Whatever is ignored is logged once per project.
+    /// </summary>
+    private (bool SkipPermissions, string? PermissionMode) LaunchPermissions(
+        ProjectInfo project, ProjectFiles.ProjectSettings settings, CreateAction action, bool rootAllowsSkip)
+    {
+        var skip = settings.DangerouslySkipPermissions;
+        if (skip && !rootAllowsSkip)
+        {
+            if (FirstLaunchWarning(project, "skip"))
+                _logger.LogWarning("Project {ProjectId} asks to skip permissions, which its root does not allow (allowSkipPermissions): it launches without --dangerously-skip-permissions",
+                    project.Status.Id);
+            skip = false;
+        }
+
+        var kept = settings.PermissionMode ?? action.PermissionMode;
+        var mode = kept == null ? null : PermissionModes.Canonical(kept);
+        if (kept != null && mode == null && FirstLaunchWarning(project, "mode"))
+            _logger.LogWarning("Project {ProjectId}: {Reason}; it launches without --permission-mode", project.Status.Id, PermissionModes.Refusal(kept));
+        if (skip && mode != null)
+        {
+            if (FirstLaunchWarning(project, "mode-with-skip"))
+                _logger.LogWarning("Project {ProjectId} skips permissions, so its permission mode {PermissionMode} is ignored", project.Status.Id, mode);
+            mode = null;
+        }
+        return (skip, mode);
+    }
+
+    /// <summary>The launch warnings said so far, by project folder and what they are about: each is said once.</summary>
+    private readonly ConcurrentDictionary<string, byte> _launchWarnings = new(PathComparer);
+
+    private bool FirstLaunchWarning(ProjectInfo project, string about) =>
+        _launchWarnings.TryAdd($"{FullPath(project.ProjectPath)}\n{about}", 0);
+
+    /// <summary>
+    /// The project's action in its root's config (the default action for a project with no root), and
+    /// whether every action of the root allows skip-permissions.
     /// Throws <see cref="LaunchConfigException"/> when the config cannot be read or lacks the action.
     /// </summary>
-    private (CreateAction Action, bool StripEnvVarProfile) ResolveLaunchAction(ProfileSnapshot snap, ProjectInfo project, string? profileName)
+    private (CreateAction Action, bool StripEnvVarProfile, bool RootAllowsSkip) ResolveLaunchAction(ProfileSnapshot snap, ProjectInfo project, string? profileName)
     {
-        if (project.Status.RootName == null || profileName == null) return (new CreateAction("Create"), false);
+        if (project.Status.RootName == null || profileName == null) return (new CreateAction("Create"), false, false);
 
         RootConfig config;
         try
@@ -1767,17 +1827,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             throw new LaunchConfigException($"root config unreadable: {ex.Message}", ex);
         }
         return config.ResolveAction(project.ActionName) is { } action
-            ? (action, config.StripEnvVarProfile)
+            ? (action, config.StripEnvVarProfile, config.GetEffectiveActions().All(a => a.AllowSkipPermissions))
             : throw new LaunchConfigException($"root config has no action '{project.ActionName}'");
     }
 
     /// <summary>
-    /// Builds claude environment and args from action config + project settings + profile env.
+    /// Builds claude environment and args from action config + the launch's permissions + profile env.
     /// Nothing is pre-approved: a tool call that needs approval reaches the permission prompt, unless
-    /// Claude Code's own settings, or skip-permissions, allow it.
+    /// Claude Code's own settings, the permission mode, or skip-permissions, allow it.
     /// </summary>
     private static (Dictionary<string, string>? Env, string[] Args) BuildClaudeConfig(
-        string projectPath, CreateAction action, ProjectFiles.ProjectSettings settings, string mcpConfigJson,
+        string projectPath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
         string? model = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
@@ -1788,8 +1848,13 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var args = new List<string>();
         if (action.ClaudeArgs != null)
             args.AddRange(action.ClaudeArgs);
-        if (settings.DangerouslySkipPermissions)
+        if (skipPermissions)
             args.Add("--dangerously-skip-permissions");
+        if (permissionMode != null)
+        {
+            args.Add("--permission-mode");
+            args.Add(permissionMode);
+        }
 
         // Tool calls that need approval wait for the user's answer through GodMode's MCP endpoint. It
         // also makes claude offer AskUserQuestion in --print mode, skip-permissions or not, and ask it the same way
