@@ -151,33 +151,35 @@ public class ScriptRunner : IScriptRunner
 
         process.Exited += (_, _) => exitTcs.TrySetResult(process.ExitCode);
 
-        process.OutputDataReceived += async (_, e) =>
+        async void OnStdout(string? line)
         {
-            if (e.Data != null)
+            if (line != null)
             {
-                await LogLineAsync(logWriter, $"[stdout] {e.Data}");
-                try { await onProgress(e.Data); }
+                await LogLineAsync(logWriter, $"[stdout] {line}");
+                try { await onProgress(line); }
                 catch { /* swallow callback errors */ }
             }
-        };
+        }
 
         var stderrLines = new List<string>();
-        process.ErrorDataReceived += async (_, e) =>
+        async void OnStderr(string? line)
         {
-            if (e.Data != null)
+            if (line != null)
             {
                 lock (stderrLines)
                 {
-                    stderrLines.Add(e.Data);
+                    stderrLines.Add(line);
                     if (forOutput && stderrLines.Count > MaxStderrLines) stderrLines.RemoveAt(0);
                 }
-                await LogLineAsync(logWriter, $"[stderr] {e.Data}");
+                await LogLineAsync(logWriter, $"[stderr] {line}");
             }
-        };
+        }
 
         process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        // On threads of their own, not the thread pool's (ChildOutput)
+        var read = Task.WhenAll(
+            ChildOutput.ReadLinesAsync(process.StandardOutput, OnStdout, $"script {process.Id} stdout"),
+            ChildOutput.ReadLinesAsync(process.StandardError, OnStderr, $"script {process.Id} stderr"));
 
         using var reg = cancellationToken.Register(() =>
         {
@@ -188,7 +190,7 @@ public class ScriptRunner : IScriptRunner
         var exitCode = await exitTcs.Task;
         // Killed: the exit code says only that
         cancellationToken.ThrowIfCancellationRequested();
-        if (forOutput) await process.WaitForExitAsync(cancellationToken);
+        if (forOutput) await read.WaitAsync(cancellationToken);
 
         await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Exit code: {exitCode}");
 

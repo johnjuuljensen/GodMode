@@ -235,17 +235,17 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
         // stdout: only hand the line on. The project's one consumer writes it to output.jsonl, updates
         // state and broadcasts it, in order; doing that here raced the lines of one burst.
-        process.OutputDataReceived += (_, e) =>
+        void OnStdout(string? line)
         {
-            if (e.Data == null)
+            if (line == null)
                 stdoutClosed.TrySetResult();
-            else if (!output.TryWrite(new PipelineItem.Line(e.Data)))
+            else if (!output.TryWrite(new PipelineItem.Line(line)))
                 _logger.LogDebug("Dropped output for project {ProjectId}: its pipeline is closed", project.Status.Id);
-        };
+        }
 
-        process.ErrorDataReceived += (_, e) =>
+        void OnStderr(string? line)
         {
-            if (e.Data == null)
+            if (line == null)
             {
                 stderrWriter.Dispose();
                 stderrClosed.TrySetResult();
@@ -254,23 +254,23 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
             try
             {
-                stderrWriter.WriteLine($"[{DateTime.UtcNow:O}] {e.Data}");
-                _logger.LogWarning("Claude stderr [{ProjectId}]: {Error}", project.Status.Id, e.Data);
+                stderrWriter.WriteLine($"[{DateTime.UtcNow:O}] {line}");
+                _logger.LogWarning("Claude stderr [{ProjectId}]: {Error}", project.Status.Id, line);
 
-                stderrTail.Enqueue(e.Data);
+                stderrTail.Enqueue(line);
                 while (stderrTail.Count > StderrTailLines) stderrTail.TryDequeue(out string? _);
 
                 // Show error lines in the UI as synthetic error output events, through the same
                 // pipeline so they persist to output.jsonl for backfill on refresh. They do not
                 // change the project's state: the exit and error results do.
-                if (e.Data.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
-                    output.TryWrite(new PipelineItem.Line(JsonSerializer.Serialize(new { type = "error", error = e.Data })));
+                if (line.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+                    output.TryWrite(new PipelineItem.Line(JsonSerializer.Serialize(new { type = "error", error = line })));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error writing stderr for project {ProjectId}", project.Status.Id);
             }
-        };
+        }
 
         _logger.LogInformation("Starting Claude process for project {ProjectId} with args: {Args}",
             project.Status.Id, string.Join(" ", args));
@@ -304,8 +304,9 @@ public class ClaudeProcessManager : IClaudeProcessManager
         launch.Id = process.Id;
         _processes[project.Status.Id] = launch;
         project.Process.ProcessId = launch.Id;
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        // On threads of their own: a session holds no thread-pool thread for its lifetime
+        _ = ChildOutput.ReadLinesAsync(process.StandardOutput, OnStdout, $"claude {launch.Id} stdout");
+        _ = ChildOutput.ReadLinesAsync(process.StandardError, OnStderr, $"claude {launch.Id} stderr");
 
         _logger.LogInformation("Claude process started for project {ProjectId} with PID {ProcessId}",
             project.Status.Id, launch.Id);
