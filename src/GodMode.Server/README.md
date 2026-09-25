@@ -315,10 +315,10 @@ or `{}` when there is no pull request. The result is `ProjectStatus.PullRequest`
 
 ### Resuming After a Restart
 
-When the server stops, it stops every project, and one that was `Running`, `WaitingInput` or `WaitingPermission` keeps that in `ProjectStatus.StateAtShutdown` (in `status.json`) beside `Stopped`. When it starts again, once it is listening and has recovered the projects, it carries on with them as the project's action says:
+When the server stops, it stops every project, and one that was `Running`, `WaitingInput` or `WaitingPermission` keeps that in `ProjectStatus.StateAtShutdown` (in `status.json`) beside `Stopped`. The marker is saved before the project is stopped, from what it was doing as the shutdown began, and nothing that happens during the stop changes it: not claude's answer to the interrupt (an `error_during_execution` result), not its exit, and not a server killed before the stop is done. A project whose stop by the user is still under way (in its grace period) when the shutdown begins is not marked. When it starts again, once it is listening and has recovered the projects, it carries on with them as the project's action says:
 
 - **Working** (`Running`, or `WaitingPermission`, whose prompt the shutdown denied): resumed with `--resume <session-id>`, launched as any resume is, and sent `resumePrompt` as its first input. Three are resumed at a time, each until claude reports `system/init`.
-- **Waiting on a question** (`WaitingInput`): no process is launched. The project is `WaitingInput` again with its `CurrentQuestion`, and still a `Question` in `GetAttention`, until a reply (`ReplyAndResume`) resumes it with the answer. An AskUserQuestion's options do not survive: the shutdown denied it, and what is left is its first question's text, answered in the chat.
+- **Waiting on a question** (`WaitingInput`): no process is launched. The project is `WaitingInput` again with its `CurrentQuestion`, and still a `Question` in `GetAttention`, until a reply (`ReplyAndResume`) resumes it with the answer. An AskUserQuestion's options do not survive: the shutdown denies it before it interrupts claude, and what is left is its first question's text, answered in the chat.
 - **`resumeOnRestart: false`**: the project stays `Stopped`.
 
 A project the user stopped, or that was `Idle`, `Stopped` or `Error` when the server stopped, is not resumed. A resume that fails is `Error` with `LastError`, as any resume is (a root config the launch cannot use, a claude that exits at once), and is not tried again. Any launch clears `StateAtShutdown`, and so does a stop by the user. A project waiting its turn is decided when it comes: one the user has stopped, resumed or answered meanwhile is left as it is. A shutdown while the start is still resuming launches nothing more, and the projects not resumed yet keep their marker for the next start. The marker is only a field in `status.json`: a `status.json` restored from a backup or copied from another machine carries it, and that project is resumed on the next start.
@@ -349,6 +349,18 @@ A stop (`StopProject`, `DeleteProject`, and the server's shutdown) is graceful f
 The interrupt is the one claude honours whatever the server was started from. Measured with claude 2.1.282 on Windows: Ctrl+Break in its console ends it in about a second, between turns, while it generates, or while a tool runs, with its session's transcript ending on a whole line and the session resumable. A Ctrl+C there does the same, but a claude whose server was started with Ctrl+C ignored (as some launchers start programs, and Windows passes that on to children) ignores it too. Closing its input alone ends it only after its turn, however long that takes.
 
 The server's shutdown stops every session at once, within its 15-second bound: the grace period is shortened to leave the kill 3 seconds. A delete stops claude before its scripts run, denies a permission prompt still waiting, clears the question, and records `Stopped`: a delete a script refuses leaves the project `Stopped`, and a restart does not resume it. Root scripts that run past their timeout are killed at once, without an interrupt.
+
+A stop denies the permission prompts claude waits on before it interrupts it: killing claude would drop their calls, and the cleanup of a dropped call would show the project `Running` again, its question gone.
+
+### When Something Fails
+
+A project's state follows claude, whatever else fails:
+
+- **A `status.json` that cannot be saved** (on Windows, a file another process holds for longer than the save retries) does not fail the change: it is pushed to every client, its events are raised (a reply waiting on `system/init` gets it), the failure is logged at Error, and the status is saved with the next change.
+- **An append to `output.jsonl` that fails** is tried once more on the file opened again, cut back to where the last whole line ended, so every offset stays the file's. A line that still cannot be persisted is not broadcast: its offset would be the previous line's. A failing item does not stop the project's consumer, and a consumer that faults all the same is started again; a subscribe or stop waiting on it fails rather than hangs.
+- **A permission prompt left listed** when claude ends its turn is withdrawn by the turn's `result`, so the next reply reaches claude rather than being taken for its answer.
+- **A client that stops reading** holds up only its own messages. Pushes (output, status, attention) are started in order and not waited for, so no project waits on a slow connection until 256 of its pushes are unfinished at once.
+- **A message sent while claude works** is echoed by claude (`--replay-user-messages`, `"isReplay": true`) as it takes it, and the echo sets `Running`: a result of an earlier turn handled after the send does not leave the project `Idle` through the next turn. claude 2.1.282 folds a message sent in the middle of a turn into that turn: it echoes it at its next step, and one `result` ends both.
 
 ## Project Folder Structure
 
@@ -396,6 +408,8 @@ The machine also needs `claude` on the `PATH` and `pwsh` for root scripts. The s
 ## SignalR Hub API
 
 ### Client → Server Methods
+
+A connection's calls run up to four at a time (`MaximumParallelInvocationsPerClient`), so a `ReplyAndResume` waiting for a resumed claude's session leaves the tab its `StopProject` and its subscribes. One connection's `SubscribeProject` calls still run one at a time, in the order they came.
 
 Projects:
 - `Task<ProjectSummary[]> ListProjects()` — Get all projects

@@ -244,9 +244,10 @@ public class OneProcessTests
 
         await harness.Projects.MarkSeenAsync(created.Id);
 
-        var saved = harness.ReadStatusFile(created.Id).State;
-        Assert.NotEqual(ProjectState.Stopped, saved);
-        Assert.Equal((await harness.Projects.GetStatusAsync(created.Id)).State, saved);
+        // Saved with the seen mark; the resumed claude's own output may have moved it on since
+        var saved = harness.ReadStatusFile(created.Id);
+        Assert.NotNull(saved.SeenAt);
+        Assert.NotEqual(ProjectState.Stopped, saved.State);
     }
 
     [Fact]
