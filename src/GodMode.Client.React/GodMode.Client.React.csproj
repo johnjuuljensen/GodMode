@@ -1,10 +1,11 @@
 <Project Sdk="Microsoft.Build.NoTargets/3.7.134">
 
   <!-- ── The React client's build ───────────────────────────────
-       Builds the client into dist/, for GodMode.Server and GodMode.Maui to copy. They reference this project
-       rather than each running `npm run build`: MSBuild builds a project once per build however many projects
-       and target frameworks reference it, so a solution build no longer runs several builds whose Vite empties
-       dist/ under the others (#219). -->
+       Builds the client into dist/, which GodMode.Server copies into its wwwroot and GodMode.Maui
+       packages. They reference this project instead of each running `npm run build`. MSBuild builds a
+       project once per set of global properties, and a reference asks with the same set from every
+       project and target framework, so a solution build runs one `npm run build`, not several whose
+       Vite empties dist/ under the others (#219). -->
 
   <PropertyGroup>
     <!-- Nothing here is compiled, and a default glob would walk node_modules on every evaluation -->
@@ -57,8 +58,8 @@
   </Target>
 
   <!-- Build the client (incremental: skipped when sources unchanged). Its packages are installed
-       first when they are missing, as in a fresh clone (the codespace's publish). A target after
-       Build still belongs to the Build that a referencing project asks for, so it waits for this -->
+       first when they are missing, as in a fresh clone (the codespace's publish). It runs after
+       Build but within it: a referencing project's request for Build returns once this is done -->
   <Target Name="BuildReact"
           AfterTargets="Build"
           Condition="'$(_BuildReactClient)' == 'true'"
