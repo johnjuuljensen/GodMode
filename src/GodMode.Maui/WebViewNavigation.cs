@@ -44,11 +44,12 @@ internal static class WebViewNavigation
     }
 
     /// <summary>
-    /// What a log line says about an address: an http or https one's origin, any other's scheme. A link in Claude's
-    /// output can carry a token (a presigned URL) in its path, query or user info, so none of those is logged.
+    /// What a log line says about an address: an http or https one's origin, any other's scheme, and … for the rest.
+    /// A link in Claude's output can carry a token (a presigned URL) in its path, query or user info, so none of those
+    /// is logged.
     /// </summary>
     private static string ForLog(string? address) =>
         !Uri.TryCreate(address, UriKind.Absolute, out var uri) ? address is null ? "no address" : "an address that is not absolute"
-        : uri.Scheme is "http" or "https" ? uri.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped)
-        : $"a {uri.Scheme}: address";
+        : uri.Scheme is "http" or "https" ? $"{uri.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped)}/…"
+        : $"{uri.Scheme}:…";
 }
