@@ -21,22 +21,9 @@
  * Server-hosted, the user enters the key once; it is kept in this browser's
  * localStorage and sent as a bearer token (HTTP header, hub accessTokenFactory).
  */
-import type { ServerInfo } from '../signalr/types';
+import type { AddServerRequest, ServerInfo } from '../signalr/types';
 import * as bridge from './hostBridge';
 import type { RelayInfo } from './hostBridge';
-
-// ── Public types ───────────────────────────────────────────────
-
-export interface AddServerRequest {
-  DisplayName: string;
-  /** In MAUI, several URLs may be given separated by commas or spaces, in order of preference. */
-  Url: string;
-  /** Local server URLs in order of preference (MAUI); overrides Url. */
-  Urls?: string[] | null;
-  AccessToken?: string | null;
-  Type?: string;
-  Username?: string | null;
-}
 
 // ── Mode detection ─────────────────────────────────────────────
 
@@ -139,12 +126,13 @@ export async function fetchServers(): Promise<ServerInfo[]> {
   return res.json();
 }
 
+/** In MAUI, `req.Url` may hold several URLs separated by commas or spaces, in order of preference. */
 export async function addServer(req: AddServerRequest): Promise<void> {
   if (isMaui) {
     await bridge.request('servers.add', {
-      Type: req.Type ?? 'local',
+      Type: req.Type,
       DisplayName: req.DisplayName,
-      Urls: req.Urls ?? splitUrls(req.Url),
+      Urls: splitUrls(req.Url),
       Username: req.Username ?? null,
       AccessToken: req.AccessToken ?? null,
     });

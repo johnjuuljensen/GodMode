@@ -8,7 +8,7 @@ import type {
   ProjectSummary, ProjectStatus, ClaudeMessage, PermissionDecision, AttentionItem,
 } from '../signalr/types';
 import * as api from '../services/hostApi';
-import type { AddServerRequest } from '../services/hostApi';
+import type { AddServerRequest } from '../signalr/types';
 import {
   type QuestionState, emptyQuestion, detectQuestionFromMessage,
   detectQuestionFromStatus, isQuestionMessage,
