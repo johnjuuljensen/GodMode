@@ -9,6 +9,9 @@ x86/
 [Ll]og/
 [Ll]ogs/
 
+# Copies of the React client that MAUI builds made before #219; nothing writes here now
+src/GodMode.Maui/Resources/Raw/wwwroot/
+
 # Visual Studio
 .vs/
 *.user

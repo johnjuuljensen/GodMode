@@ -65,18 +65,19 @@ var (events, newOffset) = project.ReadOutputFrom(0);
 
 ### 2. ProjectManager
 
-Manages multiple projects within a root directory.
+Manages project folders across named project roots.
 
 **Usage:**
 
 ```csharp
-var manager = new ProjectManager("/projects");
+var manager = new ProjectManager(new Dictionary<string, string> { ["work"] = "/projects" });
 
 // List all projects
 var projects = await manager.ListProjectsAsync();
 
-// Create a project
-using var project = manager.CreateProject("project-1", "My Project");
+// Create a project in the "work" root
+var (project, projectId) = manager.CreateProject("work", "My Project");
+project.Dispose();
 
 // Open existing project
 using var existing = manager.OpenProject("project-1");
@@ -355,7 +356,5 @@ Directory.Delete(testRoot, true);
 
 Potential additions:
 - Transaction support for atomic status updates
-- Compression for archived projects
 - Project validation and repair utilities
-- Migration tools for version upgrades
 - Performance metrics and diagnostics

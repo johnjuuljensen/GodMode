@@ -31,9 +31,6 @@ export interface HubCallbacks {
   onProjectCreated?: (status: ProjectStatus) => void;
   onCreationProgress?: (projectId: string, message: string) => void;
   onProjectDeleted?: (projectId: string) => void;
-  onProjectArchived?: (projectId: string) => void;
-  onProjectRestored?: (project: ProjectSummary) => void;
-  onProfilesChanged?: () => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -116,18 +113,6 @@ export class GodModeHub {
 
     this.connection.on('ProjectDeleted', (projectId: string) => {
       this.callbacks.onProjectDeleted?.(projectId);
-    });
-
-    this.connection.on('ProjectArchived', (projectId: string) => {
-      this.callbacks.onProjectArchived?.(projectId);
-    });
-
-    this.connection.on('ProjectRestored', (project: ProjectSummary) => {
-      this.callbacks.onProjectRestored?.(project);
-    });
-
-    this.connection.on('ProfilesChanged', () => {
-      this.callbacks.onProfilesChanged?.();
     });
 
     // Closed by disconnect(), the connection is no longer this.connection; else it was lost
@@ -272,32 +257,6 @@ export class GodModeHub {
 
   async deleteProject(projectId: string, force: boolean = false): Promise<void> {
     await this.connection!.invoke('DeleteProject', projectId, force);
-  }
-
-  async archiveProject(projectId: string): Promise<void> {
-    await this.connection!.invoke('ArchiveProject', projectId);
-  }
-
-  async unarchiveProject(projectId: string): Promise<void> {
-    await this.connection!.invoke('UnarchiveProject', projectId);
-  }
-
-  async listArchivedProjects(): Promise<ProjectSummary[]> {
-    return await this.connection!.invoke('ListArchivedProjects');
-  }
-
-  // --- Profile Management ---
-
-  async createProfile(name: string, description?: string | null): Promise<void> {
-    await this.connection!.invoke('CreateProfile', name, description);
-  }
-
-  async deleteProfile(name: string, deleteContents: boolean = false): Promise<void> {
-    await this.connection!.invoke('DeleteProfile', name, deleteContents);
-  }
-
-  async updateProfileDescription(name: string, description?: string | null): Promise<void> {
-    await this.connection!.invoke('UpdateProfileDescription', name, description);
   }
 
   // ── Utility ──

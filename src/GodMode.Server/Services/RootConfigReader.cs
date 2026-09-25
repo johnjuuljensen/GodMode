@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using GodMode.Shared.Models;
 
 namespace GodMode.Server.Services;
@@ -13,6 +15,12 @@ public class RootConfigReader : IRootConfigReader
 {
     private const string GodModeRootDir = ".godmode-root";
     private const string BaseConfigFileName = "config.json";
+
+    /// <summary>The key a root or action config carried MCP servers under. GodMode ignores it, and says so once.</summary>
+    private const string IgnoredMcpServersKey = "mcpServers";
+
+    /// <summary>Where a session's MCP servers come from, for the warning about MCP config GodMode ignores.</summary>
+    internal const string McpServersHint = "a repo brings its MCP servers in its own .mcp.json, and user-scoped ones live in the profile's CLAUDE_CONFIG_DIR";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -38,6 +46,9 @@ public class RootConfigReader : IRootConfigReader
         """);
 
     private readonly ILogger<RootConfigReader> _logger;
+
+    /// <summary>The config files whose MCP servers have been logged as ignored: it is said once, not on every read.</summary>
+    private readonly ConcurrentDictionary<string, byte> _ignoredMcpLogged = new(StringComparer.OrdinalIgnoreCase);
 
     public RootConfigReader(ILogger<RootConfigReader> logger)
     {
@@ -141,10 +152,15 @@ public class RootConfigReader : IRootConfigReader
         return result;
     }
 
-    private static RawConfig ReadRawConfig(string path)
+    private RawConfig ReadRawConfig(string path)
     {
         var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<RawConfig>(json, JsonOptions) ?? new RawConfig();
+        var raw = JsonSerializer.Deserialize<RawConfig>(json, JsonOptions) ?? new RawConfig();
+        // GodMode gives a session no MCP server but its own: a leftover mcpServers is not an error
+        if (raw.Unrecognized?.Keys.Any(key => key.Equals(IgnoredMcpServersKey, StringComparison.OrdinalIgnoreCase)) == true
+            && _ignoredMcpLogged.TryAdd(Path.GetFullPath(path), 0))
+            _logger.LogWarning("{ConfigPath} has " + IgnoredMcpServersKey + ", which GodMode ignores: {Hint}", path, McpServersHint);
+        return raw;
     }
 
     /// <summary>
@@ -165,8 +181,7 @@ public class RootConfigReader : IRootConfigReader
         NameTemplate = overlay.NameTemplate ?? baseConfig.NameTemplate,
         PromptTemplate = overlay.PromptTemplate ?? baseConfig.PromptTemplate,
         ScriptsCreateFolder = overlay.ScriptsCreateFolder ?? baseConfig.ScriptsCreateFolder,
-        Model = overlay.Model ?? baseConfig.Model,
-        McpServers = MergeMcpServers(baseConfig.McpServers, overlay.McpServers)
+        Model = overlay.Model ?? baseConfig.Model
     };
 
     /// <summary>
@@ -188,7 +203,6 @@ public class RootConfigReader : IRootConfigReader
             PromptTemplate: raw.PromptTemplate,
             ScriptsCreateFolder: raw.ScriptsCreateFolder ?? false,
             Model: raw.Model,
-            McpServers: raw.McpServers,
             // One script: its output is the answer, and two would give two
             Status: NormalizeScriptPaths(raw.Status, godModeRootPath) is [var status] ? status : null,
             ResumeOnRestart: raw.ResumeOnRestart ?? true,
@@ -261,22 +275,6 @@ public class RootConfigReader : IRootConfigReader
         return merged;
     }
 
-    /// <summary>
-    /// Merges MCP server dictionaries. Overlay wins on conflict.
-    /// A null value in the overlay removes the server (convention: explicit removal).
-    /// </summary>
-    private static Dictionary<string, McpServerConfig>? MergeMcpServers(
-        Dictionary<string, McpServerConfig>? baseServers, Dictionary<string, McpServerConfig>? overlayServers)
-    {
-        if (baseServers == null) return overlayServers;
-        if (overlayServers == null) return baseServers;
-
-        var merged = new Dictionary<string, McpServerConfig>(baseServers, StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, value) in overlayServers)
-            merged[key] = value;
-        return merged;
-    }
-
     private static string[]? ConcatArrays(string[]? baseArr, string[]? additionalArr)
     {
         if (baseArr == null) return additionalArr;
@@ -305,6 +303,9 @@ public class RootConfigReader : IRootConfigReader
         public bool? ScriptsCreateFolder { get; init; }
         public bool? StripEnvVarProfile { get; init; }
         public string? Model { get; init; }
-        public Dictionary<string, McpServerConfig>? McpServers { get; init; }
+
+        /// <summary>Keys this reader does not know, such as a leftover MCP server config.</summary>
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? Unrecognized { get; init; }
     }
 }

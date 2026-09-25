@@ -144,7 +144,6 @@ function heldQuestion(
 
 // ── Active page (replaces modal booleans) ─────────────────────
 export type ActivePage =
-  | { type: 'profileSettings' }
   | { type: 'appSettings' }
   | { type: 'addServer' }
   | { type: 'editServer'; serverId: string }
@@ -256,13 +255,6 @@ interface AppState {
   activePage: ActivePage | null;
   setActivePage: (page: ActivePage | null) => void;
   closePage: () => void;
-
-  // Backward-compat setters (delegate to activePage)
-  setShowAddServer: (show: boolean) => void;
-  setShowCreateProject: (show: boolean, context?: { serverId: string; rootName: string }) => void;
-  setEditServerId: (id: string | null) => void;
-  setShowProfileSettings: (show: boolean) => void;
-  setShowAppSettings: (show: boolean) => void;
 
   // Feature visibility
   featureProfiles: boolean;
@@ -502,7 +494,7 @@ export const useAppStore = create<AppState>((set, get) => {
       });
     };
 
-    /** A project deleted or archived on this server: drop it and what is held for it. */
+    /** A project deleted on this server: drop it and what is held for it. */
     const removeProject = (projectId: string) => {
       const key = projectKey(serverId, projectId);
       set(state => {
@@ -577,9 +569,6 @@ export const useAppStore = create<AppState>((set, get) => {
       // Every client hears of every created project: list it, and leave the view alone (#170)
       onProjectCreated: (status) => addProject(summaryOf(status)),
       onProjectDeleted: removeProject,
-      // Same as delete: remove from the active list
-      onProjectArchived: removeProject,
-      onProjectRestored: addProject,
       onStatusChanged: (_projectId, status) => {
         set(state => {
           const connections = state.serverConnections.map(c =>
@@ -662,9 +651,6 @@ export const useAppStore = create<AppState>((set, get) => {
         });
       },
       onCreationProgress: () => {},
-      onProfilesChanged: () => {
-        get().refreshProjects(serverId);
-      },
     });
 
     try {
@@ -842,13 +828,6 @@ export const useAppStore = create<AppState>((set, get) => {
   activePage: null,
   setActivePage: (page) => set({ activePage: page }),
   closePage: () => set({ activePage: null }),
-
-  // Backward-compat setters (delegate to activePage)
-  setShowAddServer: (show) => set({ activePage: show ? { type: 'addServer' } : null }),
-  setShowCreateProject: (show, context) => set({ activePage: show ? { type: 'createProject', context } : null }),
-  setEditServerId: (id) => set({ activePage: id ? { type: 'editServer', serverId: id } : null }),
-  setShowProfileSettings: (show) => set({ activePage: show ? { type: 'profileSettings' } : null }),
-  setShowAppSettings: (show) => set({ activePage: show ? { type: 'appSettings' } : null }),
 
   // Feature visibility (persisted to localStorage)
   featureProfiles: localStorage.getItem('godmode-feature-profiles') !== 'false',

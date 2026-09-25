@@ -11,7 +11,7 @@ GodMode runs Claude Code sessions that ship issues, and lets you follow and stee
 1. **React SPA** — served directly by GodMode.Server, accessed via browser
 2. **MAUI app** — hosts the same React SPA in a HybridWebView, with a local proxy for multi-server connectivity
 
-A server runs on a machine you own: a PC, a VM or a GitHub Codespace. Its **project roots** are directories on that machine, each with scripts, input schemas and MCP config in `.godmode-root/`. **Profiles** group roots and carry shared environment variables and MCP servers. You create **projects** from a root's actions. Each project is a folder with a Claude Code process working in it.
+A server runs on a machine you own: a PC, a VM or a GitHub Codespace. Its **project roots** are directories on that machine, each with scripts and input schemas in `.godmode-root/`. **Profiles** group roots and carry shared environment variables. Both are maintained by hand on the host. You create **projects** from a root's actions. Each project is a folder with a Claude Code process working in it.
 
 ---
 
@@ -51,7 +51,7 @@ GodMode.ClientBase  ← (host providers, server registry, URL selection)  ← Go
 GodMode.Maui
 ```
 
-The server's and the MAUI app's builds run `npm run build` in `GodMode.Client.React` and copy its `dist/` into their `wwwroot`.
+`GodMode.Client.React/GodMode.Client.React.csproj`, a NoTargets project in the slnx, generates the hub types and runs `npm run build`. The server and the MAUI app reference it, so one build of either or both runs it once. The server copies its `dist/` into `wwwroot`; the MAUI app packages `dist/` as its `wwwroot`.
 
 ### Where to Put New Code
 
@@ -111,7 +111,7 @@ When building UI features:
     └─────────────────────┘
 ```
 
-**Build integration**: The MAUI csproj has MSBuild targets that run `npm run build` and copy the React `dist/` to `Resources/Raw/wwwroot/`. HybridWebView serves these embedded files.
+**Build integration**: The MAUI csproj references `GodMode.Client.React.csproj`, which runs `npm run build`, and adds the React `dist/` as `MauiAsset` items under `wwwroot/`. HybridWebView serves these embedded files.
 
 **Host bridge**: React talks to the shell over HybridWebView's raw-message channel (`services/hostBridge.ts` ↔ `Bridge/HostBridge.cs` + `Bridge/ShellBridge.cs`), a typed request/response API. `relay.info` returns the relay's base URL and a per-launch secret; `servers.list`, `servers.add`, `servers.remove`, `servers.start` and `servers.stop` manage servers; the `servers.changed` event says the list or a server's state changed. No bridge message carries a server's access token back to React.
 
@@ -182,20 +182,20 @@ All real-time communication uses strongly-typed SignalR on one hub, `/hubs/proje
 - **`HubConnectionFactory`** (ClientBase) — .NET client side: `IServerProvider.ConnectAsync` returns a raw `HubConnection`, and consumers call `CreateHubProxy<IProjectHub>()` (`TypedSignalR.Client`) for typed calls
 - **`signalr/hub.ts`** (React) — the TypeScript mirror, kept in step with the interfaces by hand
 
-The hub is the session loop plus profiles and roots:
+The hub is the session loop plus reading profiles and roots:
 
-| `IProjectHub` (23 methods) | |
+| `IProjectHub` (17 methods) | |
 |---|---|
-| Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `ArchiveProject`, `UnarchiveProject`, `ListArchivedProjects` |
+| Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject` |
 | Prompts | `RespondToPermission`, `AnswerQuestion` |
 | Attention | `GetAttention`, `MarkSeen`, `ReplyAndResume` |
 | Roots | `ListProjectRoots` |
-| Profiles | `ListProfiles`, `CreateProfile`, `DeleteProfile`, `UpdateProfileDescription` |
+| Profiles | `ListProfiles` |
 | Utility | `CheckCommand` |
 
-| `IProjectHubClient` (11 callbacks) |
+| `IProjectHubClient` (8 callbacks) |
 |---|
-| `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted`, `ProjectArchived`, `ProjectRestored`, `ProfilesChanged` |
+| `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted` |
 
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
@@ -211,7 +211,7 @@ A root is a subdirectory of `ProjectRootsDir` that contains `.godmode-root/`. Th
 ```
 root-name/
 ├── .godmode-root/
-│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, mcpServers, resumeOnRestart, resumePrompt)
+│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, resumeOnRestart, resumePrompt)
 │   ├── config.{action}.json       # Per-action overlays (merged with base)
 │   ├── {action}/
 │   │   ├── schema.json            # Input form schema (JSON Schema)
@@ -227,7 +227,7 @@ root-name/
 
 **Profile assignment**: `profileName` in `config.json` puts the root in that profile. Roots without it go to `Default`.
 
-**MCP server merge order**: Profile → Root → Action (three layers, later wins on conflict).
+**MCP servers** are not root config: a repo brings its own, and GodMode adds only its bridge (Section 8).
 
 **Pull request status**: a root's optional `status` script prints the project's pull request as JSON (`{"pullRequest": {url, number, state, review}}`, or `{}`), and the server keeps it in `ProjectStatus.PullRequest` in `status.json`. It runs on each transition to Idle or Stopped and, while the pull request is open, every 10 minutes. Only that schedule is in memory. The server parses the output strictly and knows nothing of the VCS.
 
@@ -254,7 +254,7 @@ Key services:
 └── (project files)      # Working directory for Claude
 ```
 
-Archiving moves the folder to `{root}/.archived/{project-id}/`.
+A project is a folder directly inside its root with a `.godmode/status.json`. The server does not archive or move project folders.
 
 ### 4.4 Authentication
 
@@ -276,7 +276,7 @@ Only `/health` and the SPA's static files are anonymous. `/api/internal/*` uses 
 - **Styling**: CSS files per component + shared `settings-common.css`
 - **No router** — navigation via `activePage` state and `selectedProject`
 
-Active page is a union: `profileSettings | appSettings | addServer | editServer | createProject`. Setting `activePage` shows the page; selecting a project clears it.
+Active page is a union: `appSettings | addServer | editServer | createProject`. Setting `activePage` shows the page; selecting a project clears it.
 
 ---
 
@@ -299,7 +299,7 @@ The files on disk are the whole interface to configuration. There is no translat
 
 ### 5.3 The Server Consumes Config; It Does Not Author It
 
-The server reads roots, actions, schemas and MCP config. It does not edit, package, import or export them. There is no in-app editor, file browser, connector catalog or manifest. The only config writes the hub makes are the profile methods (`CreateProfile`, `DeleteProfile`, `UpdateProfileDescription`), which write the same `.profiles/` files you would write by hand.
+The server reads roots, actions, schemas and profiles. It does not edit, package, import or export them, and no hub method writes config. There is no in-app editor, file browser, connector catalog or manifest. Nor does it provision MCP servers or archive projects: a client that wants to hide projects does so on its own side.
 
 ### 5.4 Roots Are External
 
@@ -318,15 +318,10 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 ├── .profiles/
 │   ├── default/
 │   │   ├── profile.json           # { "description": "..." }
-│   │   ├── env.json               # { "KEY": "value", ... }
-│   │   └── mcp/
-│   │       ├── github.json        # McpServerConfig JSON
-│   │       └── filesystem.json
+│   │   └── env.json               # { "KEY": "value", ... }
 │   └── production/
 │       ├── profile.json
-│       ├── env.json
-│       └── mcp/
-│           └── monitoring.json
+│       └── env.json               # "CLAUDE_CONFIG_DIR": "..." pins its sessions to one Claude account
 ├── feature-root/
 │   └── .godmode-root/
 │       └── config.json            # "profileName": "production" puts this root in that profile
@@ -337,14 +332,11 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 
 ### Key Properties
 
-- **Adding a profile** = `mkdir .profiles/{name}` + write `profile.json` (or `CreateProfile` from the UI)
+- **Adding a profile** = `mkdir .profiles/{name}` + write `profile.json`, on the host. No hub method creates, edits or deletes one
 - **Deleting a profile** = `rm -rf .profiles/{name}`
-- **Adding an MCP server** = write a JSON file to `.profiles/{name}/mcp/`
-- **Removing an MCP server** = delete the file
+- **MCP servers** are not profile config: user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR` (Section 8.1)
 - **Git works** — the entire `{ProjectRootsDir}` can be a git repo
 - **Profile env from the server's environment** — with `stripEnvVarProfile` in a root's config (or `{PROFILE}_STRIP_ENV_VAR_PROFILE=true` in the server's environment), server variables prefixed with the profile name (`MEGA_GITHUB_TOKEN`) reach that profile's sessions without the prefix (`GITHUB_TOKEN`)
-
-**Legacy config:** `Profiles` and `ProjectRoots` sections in `appsettings.json` are migrated into `.profiles/` once, the first time the server starts without a `.profiles/` directory. After that `.profiles/` is authoritative.
 
 ---
 
@@ -352,11 +344,11 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 
 | Service | Responsibility |
 |---|---|
-| `ProjectManager` | Central orchestrator — project lifecycle, profile/root snapshot, environment and MCP config building |
+| `ProjectManager` | Central orchestrator — project lifecycle, profile/root snapshot, environment and launch config building |
 | `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process`, writes their output to `output.jsonl` |
 | `RootConfigReader` | Discovers and merges `.godmode-root/` configs |
 | `ScriptRunner` | Executes cross-platform scripts (`.ps1` via `pwsh`, `.sh` via `bash`, `.cmd`/`.bat` on Windows) |
-| `ProfileFileManager` | CRUD on the `.profiles/` directory structure (in `ConfigFileWriter.cs`) |
+| `ProfileFileManager` | Reads the `.profiles/` directory structure |
 | `StatusUpdater` | Updates `status.json` during execution |
 | `TemplateResolver` | Resolves `{field}` placeholders |
 | `EnvironmentExpander` | Expands `${VAR}` in config values and strips profile prefixes from server env vars |
@@ -369,30 +361,18 @@ All services are registered as **singletons** in `Program.cs`. Authentication li
 
 ## 8. MCP Servers
 
-### 8.1 Configuration
+### 8.1 Where a Session's MCP Servers Come From
 
-MCP servers are configured at three levels (merge order: profile → root → action):
+GodMode gives a session one MCP server, its own bridge (8.2). It configures no others:
 
-| Level | Where |
+| Source | Where |
 |---|---|
-| Profile | `.profiles/{name}/mcp/{server}.json` |
-| Root | `mcpServers` in `.godmode-root/config.json` |
-| Action | `mcpServers` in `.godmode-root/config.{action}.json` |
+| The repo | its `.mcp.json` (Claude Code's project scope) |
+| The profile's Claude account | user scope in the `CLAUDE_CONFIG_DIR` the profile's or root's `environment` sets |
 
-```csharp
-// GodMode.Shared/Models/McpServerConfig.cs
-public record McpServerConfig(
-    string? Command = null,      // stdio transport
-    string[]? Args = null,
-    Dictionary<string, string>? Env = null,
-    string? Url = null,          // SSE transport
-    Dictionary<string, string>? Headers = null);
-```
+The server writes the session's MCP config, the bridge alone, to `.godmode/mcp-config.json` in the project and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
 
-**Stdio transport**: `Command` + `Args` + `Env`
-**SSE transport**: `Url` + `Headers` (requires `"type": "sse"` when passed to Claude CLI)
-
-The server writes the merged MCP config to a temp file and passes it via `--mcp-config {path}` to Claude Code. Environment variables in MCP config support `${VAR}` expansion from the server process environment.
+**Nothing is pre-approved.** GodMode passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (8.2), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`) or the project runs with skip-permissions.
 
 ### 8.2 The GodMode MCP Bridge
 
@@ -484,8 +464,7 @@ Every target separates the **server binary** from the **workspace data**:
 ├── .profiles/                # Profile definitions
 │   └── default/
 │       ├── profile.json
-│       ├── env.json
-│       └── mcp/
+│       └── env.json
 └── my-root/                  # Project roots
     ├── .godmode-root/
     └── {project-id}/         # Projects
@@ -513,7 +492,7 @@ Contains only infrastructure config — not domain data:
 }
 ```
 
-Every key can also be set as an environment variable (`Authentication__ApiKey`) or a command-line argument (`--ProjectRootsDir=...`). Domain data (profiles, MCP servers, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
+Every key can also be set as an environment variable (`Authentication__ApiKey`) or a command-line argument (`--ProjectRootsDir=...`). Domain data (profiles, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
 
 ---
 

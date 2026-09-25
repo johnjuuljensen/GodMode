@@ -20,7 +20,7 @@ public sealed class PullRequestPoller : IAsyncDisposable, IDisposable
         /// <summary>Its pull request is open: check it again after the interval, or sooner on a transition.</summary>
         Poll,
 
-        /// <summary>The project is gone (deleted, archived): forget it.</summary>
+        /// <summary>The project is gone (deleted): forget it.</summary>
         Gone,
     }
 
@@ -63,7 +63,7 @@ public sealed class PullRequestPoller : IAsyncDisposable, IDisposable
             CheckNow(projectId);
     }
 
-    /// <summary>The state a project is in without a push (recovered, restored), so its next push is judged from it.</summary>
+    /// <summary>The state a project is in without a push (recovered), so its next push is judged from it.</summary>
     public void Remember(string projectId, ProjectState state) => _lastState[projectId] = state;
 
     /// <summary>Checks the project as soon as a check may run, unless one is already due.</summary>

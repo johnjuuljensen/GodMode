@@ -1,9 +1,9 @@
 namespace GodMode.Server.Services;
 
 /// <summary>
-/// The MCP config a Claude process is launched with (<c>--mcp-config</c> takes a file path).
-/// It holds the MCP servers' credentials, so it lives in the project's <c>.godmode/</c> folder,
-/// owner-only where the OS supports it, and only for as long as the process runs.
+/// The MCP config a Claude process is launched with (<c>--mcp-config</c> takes a file path):
+/// GodMode's own server only. It lives in the project's <c>.godmode/</c> folder, owner-only where
+/// the OS supports it, and only for as long as the process runs.
 /// </summary>
 public static class McpConfigFile
 {
