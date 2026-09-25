@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore, transcriptKey } from '../../store';
 import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
-import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
+import { createTranscriptBuilder } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
 import { ReplyInput } from './ReplyInput';
+import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
-
-/** Simple view: the conversation, without session bookkeeping (errors still show) */
-const isConversation = (item: TranscriptItem) => (item.kind !== 'system' && item.kind !== 'result') || item.isError;
 
 interface Props {
   serverId: string;
