@@ -1032,9 +1032,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var result = decision.Allow
             ? PermissionPromptResult.Allow(decision.UpdatedInput ?? pending.Input)
             : PermissionPromptResult.Deny(decision.Message is { Length: > 0 } message ? message : "The user denied this.");
+        await AnswerPendingAsync(project, pending, result);
         _logger.LogInformation("Project {ProjectId}: permission request {RequestId} {Decision}",
             projectId, requestId, decision.Allow ? "allowed" : "denied");
-        await CompletePendingAsync(project, pending, result);
+    }
+
+    public Task<PermissionDetail> GetPermissionDetailAsync(string projectId, string requestId)
+    {
+        var (_, pending) = FindPending(projectId, requestId);
+        return pending.Detail is { } detail
+            ? Task.FromResult(detail)
+            : throw new InvalidOperationException($"Request {requestId} is a question: it has no permission detail");
     }
 
     public async Task AnswerQuestionAsync(string projectId, string requestId, IReadOnlyDictionary<string, string> answers)
@@ -1045,8 +1053,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (answers.Count == 0)
             throw new ArgumentException("An answer needs at least one question answered", nameof(answers));
 
+        await AnswerPendingAsync(project, pending, PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, answers)));
         _logger.LogInformation("Project {ProjectId}: question {RequestId} answered", projectId, requestId);
-        await CompletePendingAsync(project, pending, PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, answers)));
     }
 
     public async Task<PermissionPromptResult> RequestPermissionAsync(string projectId, PermissionPromptRequest request, CancellationToken aborted)
@@ -1090,11 +1098,23 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             : throw new KeyNotFoundException($"Project {projectId} has no pending request {requestId}: it was answered, or claude stopped waiting");
     }
 
-    /// <summary>Answers the request, if nothing else did first, and shows the next one or none.</summary>
-    private async Task CompletePendingAsync(ProjectInfo project, PendingRequest pending, PermissionPromptResult result)
+    /// <summary>Answers the request, if nothing else did first, and shows the next one or none; whether this call answered it.</summary>
+    private async Task<bool> CompletePendingAsync(ProjectInfo project, PendingRequest pending, PermissionPromptResult result)
     {
-        if (project.Process.CompletePending(pending, result))
-            await _lifecycle.ShowPendingAsync(project);
+        if (!project.Process.CompletePending(pending, result)) return false;
+        await _lifecycle.ShowPendingAsync(project);
+        return true;
+    }
+
+    /// <summary>
+    /// The user's answer: it fails when another answer (another client's, a chat reply) or claude's
+    /// giving up came first, since that is what claude got, not this.
+    /// </summary>
+    private async Task AnswerPendingAsync(ProjectInfo project, PendingRequest pending, PermissionPromptResult result)
+    {
+        if (!await CompletePendingAsync(project, pending, result))
+            throw new KeyNotFoundException(
+                $"Request {pending.Id} was answered already, by another client or a reply, or claude stopped waiting: this answer was not used");
     }
 
     public async Task StopProjectAsync(string projectId)

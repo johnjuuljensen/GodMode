@@ -6,6 +6,7 @@ using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -77,7 +78,9 @@ public class PermissionPromptEndToEndTests
             Assert.Equal(ProjectState.WaitingPermission, push.State);
             Assert.Equal("Bash", push.PendingPermission!.ToolName);
             Assert.Equal("Bash: git push origin feature/12-x", push.PendingPermission.Summary);
-            Assert.Equal("git push origin feature/12-x", push.PendingPermission.Input.GetProperty("command").GetString());
+            // The push carries the summary; the whole of what runs is fetched (#234)
+            var detail = await first.Hub.InvokeAsync<PermissionDetail>(nameof(IProjectHub.GetPermissionDetail), created.Id, push.PendingPermission.RequestId);
+            Assert.Equal(new PermissionDetail(push.PendingPermission.RequestId, "git push origin feature/12-x", false), detail);
             await first.DisposeAsync();
 
             await using var second = new ServerHubClient(baseUrl);
@@ -88,6 +91,10 @@ public class PermissionPromptEndToEndTests
             var edited = JsonSerializer.SerializeToElement(new { command = "git push --dry-run origin feature/12-x", description = "Push the branch" });
             await second.Hub.InvokeAsync(nameof(IProjectHub.RespondToPermission), created.Id, push.PendingPermission.RequestId,
                 new PermissionDecision(true, UpdatedInput: edited));
+            // Only one answer counts: a second, as from another client, is an error (#234)
+            var late = await Assert.ThrowsAsync<HubException>(() => second.Hub.InvokeAsync(nameof(IProjectHub.RespondToPermission),
+                created.Id, push.PendingPermission.RequestId, new PermissionDecision(false)));
+            Assert.Contains(push.PendingPermission.RequestId, late.Message);
 
             // ── Denied with a message ──
             var remove = await second.WaitForAsync(created.Id, s => s.PendingPermission is { } p && p.RequestId != push.PendingPermission.RequestId, server);

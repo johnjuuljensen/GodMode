@@ -13,11 +13,12 @@ public sealed class PendingRequest
 {
     private static long _nextSequence;
 
-    public PendingRequest(PendingPermission? permission, PendingQuestion? question, JsonElement input)
+    public PendingRequest(PendingPermission? permission, PendingQuestion? question, JsonElement input, PermissionDetail? detail = null)
     {
         Permission = permission;
         Question = question;
         Input = input;
+        Detail = detail;
     }
 
     public string Id => Permission?.RequestId ?? Question!.RequestId;
@@ -31,8 +32,14 @@ public sealed class PendingRequest
     public PendingPermission? Permission { get; }
     public PendingQuestion? Question { get; }
 
-    /// <summary>The tool's input as claude sent it.</summary>
+    /// <summary>
+    /// The tool's input as claude sent it, which an allow without an updated input runs with. It is
+    /// the server's alone: <see cref="PendingPermission"/> does not carry it to clients or status.json.
+    /// </summary>
     public JsonElement Input { get; }
+
+    /// <summary>What a <see cref="Permission"/> would run, for the hub's GetPermissionDetail; null for a question.</summary>
+    public PermissionDetail? Detail { get; }
 
     /// <summary>Completed with what the tool returns to claude.</summary>
     public TaskCompletionSource<PermissionPromptResult> Completion { get; } =
