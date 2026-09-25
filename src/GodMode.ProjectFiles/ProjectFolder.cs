@@ -37,6 +37,25 @@ public sealed class ProjectFolder : IDisposable
     public static readonly IReadOnlySet<string> ReservedFolderNames =
         new HashSet<string>([RootConfigFolderName, ScriptLogsFolderName, ArchivedFolderName], StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// The names Windows keeps for devices: a folder of one (with any extension, <c>nul.txt</c>) is
+    /// the device, not a folder. Refused on every OS, as the root's own folders are, so a root moves
+    /// between hosts with its projects. Compared ignoring case.
+    /// </summary>
+    private static readonly IReadOnlySet<string> WindowsDeviceNames = new HashSet<string>(
+        ["CON", "PRN", "AUX", "NUL",
+            .. Enumerable.Range(0, 10).SelectMany(n => new[] { $"COM{n}", $"LPT{n}" }),
+            // With a superscript digit too
+            "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"],
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether <paramref name="folderName"/> is one of the <see cref="ReservedFolderNames"/>, compared
+    /// as Windows compares folder names: ignoring case, and trailing dots and spaces.
+    /// </summary>
+    public static bool IsReservedFolderName(string folderName) =>
+        ReservedFolderNames.Contains(folderName.TrimEnd('.', ' '));
+
     private readonly string _projectPath;
     private readonly JsonlWriter _inputWriter;
     private readonly JsonlWriter _outputWriter;
@@ -49,7 +68,7 @@ public sealed class ProjectFolder : IDisposable
     public string ProjectPath => _projectPath;
 
     /// <summary>
-    /// Gets the project ID (folder name).
+    /// Gets the project's folder name. The server's project ID is <c>{profile}/{root}/{folder}</c>.
     /// </summary>
     public string ProjectId => Path.GetFileName(_projectPath);
 
@@ -132,7 +151,10 @@ public sealed class ProjectFolder : IDisposable
     /// empty, no path separators or other invalid characters, and not made of dots and spaces only.
     /// <c>.</c> and <c>..</c> are the root and its parent, and Windows strips trailing dots and
     /// spaces, so <c>...</c> is the root too; a delete of such a project deletes that recursively.
-    /// Nor may it be one of the <see cref="ReservedFolderNames"/>.
+    /// Nor may it be one of the <see cref="ReservedFolderNames"/>. Nor may it end in a dot or a space,
+    /// which Windows drops: <c>foo.</c> would be the folder <c>foo</c>, another project's, and its ID
+    /// would change at the next recovery. Nor a Windows device name (<c>CON</c>, <c>NUL</c>,
+    /// <c>COM1</c>), which is no folder there. Both are refused on every OS.
     /// </summary>
     public static void ValidateFolderName(string? folderName, string paramName = "folderName")
     {
@@ -145,8 +167,14 @@ public sealed class ProjectFolder : IDisposable
         if (folderName.All(c => c is '.' or ' '))
             throw new ArgumentException($"'{folderName}' is not a valid project folder name.", paramName);
 
-        if (ReservedFolderNames.Contains(folderName.TrimEnd('.', ' ')))
+        if (IsReservedFolderName(folderName))
             throw new ArgumentException($"'{folderName}' is a folder the project root uses for itself.", paramName);
+
+        if (folderName[^1] is '.' or ' ')
+            throw new ArgumentException($"Project folder name '{folderName}' ends in a dot or a space, which Windows drops from a folder name.", paramName);
+
+        if (WindowsDeviceNames.Contains(folderName.Split('.')[0].TrimEnd(' ')))
+            throw new ArgumentException($"'{folderName}' is a Windows device name, not a folder name.", paramName);
     }
 
     /// <summary>

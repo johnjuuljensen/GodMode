@@ -37,7 +37,7 @@ if ($inputBranch) {
         git -C $barePath worktree add $projectPath -b $inputBranch "origin/$inputBranch"
     }
 } else {
-    $branch = "project/$env:GODMODE_PROJECT_ID"
+    $branch = "project/$env:GODMODE_PROJECT_FOLDER"
     # Remove stale branch if it exists
     $existingBranch = git -C $barePath branch --list $branch
     if ($existingBranch) {

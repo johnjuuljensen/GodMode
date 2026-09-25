@@ -67,7 +67,7 @@ public class ChildEnvironmentTests
         var configured = new Dictionary<string, string>
         {
             ["GH_TOKEN"] = "ghp-configured",
-            ["GODMODE_PROJECT_ID"] = "proj1",
+            ["GODMODE_PROJECT_FOLDER"] = "proj1",
         };
 
         var env = Of(child).Build(ServerEnvironment, configured);
@@ -95,8 +95,8 @@ public class ChildEnvironmentTests
     public void ServerGodModeVariables_AreNotInherited_OnlyTheOnesConfigured()
     {
         var env = ChildEnvironment.Script.Build(
-            [new("GODMODE_PROJECT_ID", "stale"), new("GODMODE_ROOT_PATH", "/srv/roots")],
-            new Dictionary<string, string> { ["GODMODE_PROJECT_ID"] = "proj1" });
+            [new("GODMODE_PROJECT_FOLDER", "stale"), new("GODMODE_ROOT_PATH", "/srv/roots")],
+            new Dictionary<string, string> { ["GODMODE_PROJECT_FOLDER"] = "proj1" });
 
         Assert.Equal("proj1", Assert.Single(env).Value);
     }
@@ -120,7 +120,7 @@ public class ChildEnvironmentTests
         Environment.SetEnvironmentVariable(name, "canary-" + Guid.NewGuid().ToString("N"));
         try
         {
-            var env = Of(child).Build(ChildEnvironment.Current(), new Dictionary<string, string> { ["GODMODE_PROJECT_ID"] = "p" });
+            var env = Of(child).Build(ChildEnvironment.Current(), new Dictionary<string, string> { ["GODMODE_PROJECT_FOLDER"] = "p" });
 
             Assert.DoesNotContain(name, env.Keys, StringComparer.OrdinalIgnoreCase);
             Assert.Contains("PATH", env.Keys, StringComparer.OrdinalIgnoreCase);

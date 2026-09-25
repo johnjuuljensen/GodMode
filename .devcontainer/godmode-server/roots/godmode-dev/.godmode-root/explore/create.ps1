@@ -12,7 +12,7 @@ if (Test-Path (Join-Path $projectPath '.godmode')) {
 # Fetch latest
 git -C $barePath fetch origin
 
-$branch = "explore/$env:GODMODE_PROJECT_ID"
+$branch = "explore/$env:GODMODE_PROJECT_FOLDER"
 Write-Host "Creating branch '$branch' from origin/master..."
 git -C $barePath worktree add $projectPath -b $branch origin/master
 
