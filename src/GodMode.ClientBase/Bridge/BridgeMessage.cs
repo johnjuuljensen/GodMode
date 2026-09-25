@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace GodMode.Maui.Bridge;
+namespace GodMode.ClientBase.Bridge;
 
 /// <summary>
 /// Envelope for all messages between the MAUI host and the React app.
