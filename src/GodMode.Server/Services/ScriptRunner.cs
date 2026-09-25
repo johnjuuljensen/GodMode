@@ -23,13 +23,20 @@ public class ScriptRunner : IScriptRunner
     /// <summary>The stderr lines a script run for its output keeps for its error.</summary>
     private const int MaxStderrLines = 20;
 
+    /// <summary>
+    /// Configuration key for the PowerShell 7 executable that runs <c>.ps1</c> scripts (a name on PATH
+    /// or a full path). The Docker image names its own, so a <c>pwsh</c> the session writes into a
+    /// directory on PATH is never the one run.
+    /// </summary>
     public const string PowerShellExecutableSetting = "PowerShell:Executable";
 
     private readonly ILogger<ScriptRunner> _logger;
+    private readonly string _powerShell;
 
-    public ScriptRunner(ILogger<ScriptRunner> logger)
+    public ScriptRunner(ILogger<ScriptRunner> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _powerShell = configuration[PowerShellExecutableSetting] is { Length: > 0 } powerShell ? powerShell : "pwsh";
     }
 
     public async Task RunAsync(
@@ -244,12 +251,12 @@ public class ScriptRunner : IScriptRunner
             string.Join(", ", extensions.Select(e => basePath + e)));
     }
 
-    private static (string FileName, string Args) GetShellCommand(string scriptPath)
+    private (string FileName, string Args) GetShellCommand(string scriptPath)
     {
         var ext = Path.GetExtension(scriptPath).ToLowerInvariant();
         return ext switch
         {
-            ".ps1" => ("pwsh", $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\""),
+            ".ps1" => (_powerShell, $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\""),
             ".bat" or ".cmd" => ("cmd", $"/c \"{scriptPath}\""),
             ".sh" => ("bash", $"\"{scriptPath}\""),
             _ => ("bash", $"\"{scriptPath}\"")

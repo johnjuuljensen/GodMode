@@ -1595,20 +1595,13 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Ensures the .godmode directory exists in a project folder, and starts its output's generation.
-    /// Called after scripts run (which may have created the project dir without .godmode).
+    /// Ensures the .godmode directory and its .gitignore exist in a project folder, and starts its
+    /// output's generation. Called after scripts run, which may have created the project dir without
+    /// .godmode, or checked out one that has a .godmode without its .gitignore.
     /// </summary>
     private static void EnsureGodModeDirectory(string projectPath)
     {
-        var godModePath = Path.Combine(projectPath, ".godmode");
-        if (!Directory.Exists(godModePath))
-        {
-            Directory.CreateDirectory(godModePath);
-            File.WriteAllText(
-                Path.Combine(godModePath, ".gitignore"),
-                "# Exclude all GodMode state files\n*\n",
-                System.Text.Encoding.UTF8);
-        }
+        ProjectFiles.ProjectFolder.EnsureGitIgnore(projectPath);
 
         // A new one each time: an ID created again starts a new generation, so no client resumes into it from an old offset
         OutputLog.StartGeneration(projectPath);
@@ -1929,7 +1922,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             args.Add("--model");
             args.Add(model);
         }
-        // --mcp-config expects a file path, not inline JSON; the process manager deletes it on exit
+        // --mcp-config expects a file path, not inline JSON; the process manager deletes it on exit.
+        // It holds the project token, so every launch first makes sure git ignores it
+        ProjectFiles.ProjectFolder.EnsureGitIgnore(projectPath);
         args.Add("--mcp-config");
         args.Add(McpConfigFile.Write(projectPath, mcpConfigJson));
 
