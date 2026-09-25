@@ -131,6 +131,9 @@
   color: var(--text-tertiary);
 }
 
+/* Its server is reconnecting, or not connected: held from before, answerable once it is back (#221) */
+.inbox-item-offline { opacity: 0.6; border-style: dashed; }
+
 .inbox-item-text {
   padding: 4px 12px 10px;
   font-size: 13px;

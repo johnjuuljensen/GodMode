@@ -38,6 +38,25 @@ function PageContent({ page }: { page: ActivePage }) {
   );
 }
 
+/**
+ * The phone project view's own connection indicator (#221): its server's, while it is not connected,
+ * which the sidebar's (not shown here) would say. A tap retries at once.
+ */
+function ProjectConnection({ serverId }: { serverId: string }) {
+  const conn = useAppStore(s => s.getConnection(serverId));
+  const retryServers = useAppStore(s => s.retryServers);
+  if (!conn || conn.connectionState === 'connected') return null;
+  const { connectionState: state, serverInfo: { Name: name } } = conn;
+  const label = state === 'disconnected' ? 'Offline' : state === 'connecting' ? 'Connecting…' : 'Reconnecting…';
+  return (
+    <button className="connection-indicator-item project-connection" onClick={retryServers}
+      title={`${name}: ${label} Tap to retry now.`}>
+      <span className={`server-dot ${state}`} />
+      <span className="connection-indicator-name">{label}</span>
+    </button>
+  );
+}
+
 export function Shell() {
   const selectedProject = useAppStore(s => s.selectedProject);
   // Tiles are a wide screen's: a phone shows its own home, the inbox, whatever the toggle last said (#218)
@@ -97,6 +116,7 @@ export function Shell() {
   const backBar = project && (isMobile || isTileView) && (
     <div className={isMobile ? 'page-back-bar' : 'shell-back-bar'}>
       <button className="btn btn-secondary btn-sm" onClick={() => goBack(clearSelection)}>{isMobile ? '← Back' : '← Tiles'}</button>
+      {isMobile && <ProjectConnection serverId={project.serverId} />}
     </div>
   );
 

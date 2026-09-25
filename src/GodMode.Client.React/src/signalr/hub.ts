@@ -46,15 +46,29 @@ export interface HubCallbacks {
  */
 export const RETRY_DELAYS_MS = [0, 1000, 2000, 5000, 10000, 20000, 30000];
 
+/**
+ * How long an attempt may be in flight before a wake gives up on it: one made before the page slept
+ * can hang until the network gives up on it, and a wake stops it and starts again.
+ */
+export const HUNG_ATTEMPT_MS = 5000;
+
+/** One connection and its retries: how many since it was lost, the next one's timer, and the attempt in flight. */
+interface Link {
+  readonly connection: signalR.HubConnection;
+  retries: number;
+  timer: ReturnType<typeof setTimeout> | null;
+  /** When the attempt in flight started (Date.now()), null when none is. */
+  attemptSince: number | null;
+  /** A retry was asked for during the attempt in flight: the next one is at once. */
+  wanted: boolean;
+}
+
 export class GodModeHub {
   private connection: signalR.HubConnection | null = null;
+  /** The retry state of this.connection, its own: one left behind by disconnect() cannot touch the next. */
+  private link: Link | null = null;
   private callbacks: HubCallbacks = {};
   private _state: ConnectionState = 'disconnected';
-  /** Retries made since the connection was lost, the next one's timer, and whether one is running. */
-  private retries = 0;
-  private retryTimer: ReturnType<typeof setTimeout> | null = null;
-  private retrying = false;
-  private retryWanted = false;
 
   get state(): ConnectionState {
     return this._state;
@@ -121,63 +135,97 @@ export class GodModeHub {
       this.callbacks.onProjectDeleted?.(projectId);
     });
 
-    // Closed by disconnect(), the connection is no longer this.connection; else it was lost
+    const link: Link = { connection, retries: 0, timer: null, attemptSince: null, wanted: false };
+    this.link = link;
+
+    // Closed by disconnect(), the connection is no longer this.connection. Else it was lost, once
+    // connected: an attempt that fails, or is stopped by retryNow, closes none that was open
     connection.onclose(() => {
-      if (this.connection !== connection) return;
-      this.retries = 0;
-      this.retryWanted = false;
+      if (this.link !== link || this._state !== 'connected') return;
+      link.retries = 0;
+      link.wanted = false;
       this.setState('reconnecting');
-      this.scheduleRetry();
+      this.scheduleRetry(link);
     });
 
     this.setState('connecting');
-    await connection.start();
-    this.setState('connected');
+    try {
+      await this.attempt(link);
+    } catch (err) {
+      // A server down when the page loads is retried as one that was lost; the caller hears it failed
+      if (this.link === link) {
+        this.setState('reconnecting');
+        this.scheduleRetry(link);
+      }
+      throw err;
+    }
+    if (this.link === link) this.setState('connected');
   }
 
   async disconnect(): Promise<void> {
     const connection = this.connection;
+    const link = this.link;
     if (connection) {
       this.connection = null;
-      this.cancelRetry();
+      this.link = null;
+      if (link) this.cancelRetry(link);
       await connection.stop();
       this.setState('disconnected');
     }
   }
 
-  /** Retries a lost connection now rather than when its wait is over: the page woke, or the network is back. */
+  /**
+   * Retries a lost connection now rather than when its wait is over: the page woke, or the network is
+   * back. An attempt in flight longer than HUNG_ATTEMPT_MS is stopped, and the next one made at once.
+   */
   retryNow() {
-    if (this._state !== 'reconnecting') return;
-    // An attempt made before the page slept can hang until the network gives up on it: the next one is at once
-    if (this.retrying) { this.retryWanted = true; return; }
-    this.cancelRetry();
-    void this.retry();
+    const link = this.link;
+    // A first connect in flight is retried too: it can hang as well
+    if (!link || (this._state !== 'reconnecting' && this._state !== 'connecting')) return;
+    if (link.attemptSince !== null) {
+      link.wanted = true;
+      if (Date.now() - link.attemptSince > HUNG_ATTEMPT_MS) {
+        console.warn('[hub] abandoning an attempt in flight since', new Date(link.attemptSince).toISOString());
+        link.connection.stop().catch(err => console.warn('[hub] stopping a hung attempt failed:', err));
+      }
+      return;
+    }
+    this.cancelRetry(link);
+    void this.retry(link);
   }
 
-  private scheduleRetry() {
-    const delay = this.retryWanted ? 0 : RETRY_DELAYS_MS[Math.min(this.retries, RETRY_DELAYS_MS.length - 1)];
-    this.retryWanted = false;
-    this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.retry(); }, delay);
+  private scheduleRetry(link: Link) {
+    this.cancelRetry(link);
+    const delay = link.wanted ? 0 : RETRY_DELAYS_MS[Math.min(link.retries, RETRY_DELAYS_MS.length - 1)];
+    link.wanted = false;
+    link.timer = setTimeout(() => { link.timer = null; void this.retry(link); }, delay);
   }
 
-  private cancelRetry() {
-    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
-    this.retryTimer = null;
+  private cancelRetry(link: Link) {
+    if (link.timer !== null) clearTimeout(link.timer);
+    link.timer = null;
   }
 
-  private async retry() {
-    const connection = this.connection;
-    if (!connection) return;
-    this.retrying = true;
-    this.retries++;
+  /** Starts the connection, noting when, so a wake can tell an attempt that hangs. */
+  private async attempt(link: Link) {
+    link.attemptSince = Date.now();
     try {
-      await connection.start();
-      if (this.connection === connection) this.setState('connected');
-    } catch (err) {
-      console.warn(`[hub] retry ${this.retries} failed:`, err);
-      if (this.connection === connection) this.scheduleRetry();
+      await link.connection.start();
     } finally {
-      this.retrying = false;
+      link.attemptSince = null;
+    }
+  }
+
+  private async retry(link: Link) {
+    // Only this.connection, and only once it is down: start() on one connecting or connected throws
+    if (this.link !== link || link.connection.state !== signalR.HubConnectionState.Disconnected) return;
+    link.retries++;
+    try {
+      await this.attempt(link);
+      if (this.link === link) this.setState('connected');
+    } catch (err) {
+      console.warn(`[hub] retry ${link.retries} failed:`, err);
+      if (this.link === link) this.scheduleRetry(link);
     }
   }
 

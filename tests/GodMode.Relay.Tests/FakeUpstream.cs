@@ -32,10 +32,11 @@ internal sealed class FakeUpstream : IAsyncDisposable
         Url = url;
     }
 
-    public static async Task<FakeUpstream> StartAsync(string name, string? requiredKey = null)
+    /// <param name="url">Where it listens: a random loopback port by default, or the URL of one that died, to restart it.</param>
+    public static async Task<FakeUpstream> StartAsync(string name, string? requiredKey = null, string url = "http://127.0.0.1:0")
     {
         var builder = WebApplication.CreateSlimBuilder();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.WebHost.UseUrls(url);
         builder.Logging.ClearProviders();
         builder.Services.AddSignalR();
         builder.Services.AddSingleton(new UpstreamName(name));
@@ -60,10 +61,17 @@ internal sealed class FakeUpstream : IAsyncDisposable
         app.MapHub<EchoHub>("/hubs/projects");
         await app.StartAsync();
 
-        var url = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!
+        var bound = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!
             .Addresses.Single().TrimEnd('/');
-        self = new FakeUpstream(name, app, url);
+        self = new FakeUpstream(name, app, bound);
         return self;
+    }
+
+    /// <summary>Dies: every connection is aborted at once, with no graceful shutdown (a server killed, or its host gone).</summary>
+    public async Task KillAsync()
+    {
+        await _app.StopAsync(new CancellationToken(canceled: true));
+        await _app.DisposeAsync();
     }
 
     public async ValueTask DisposeAsync()

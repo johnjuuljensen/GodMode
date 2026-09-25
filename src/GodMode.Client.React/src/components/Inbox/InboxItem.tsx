@@ -38,6 +38,8 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const setInboxDraft = useAppStore(s => s.setInboxDraft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Held from before its server was lost: still answerable once it is back, and a reply meanwhile says it is offline (#221)
+  const offline = useAppStore(s => s.getConnection(serverId)?.connectionState !== 'connected');
 
   // The project needs the user anew (another kind, or the same kind again): nothing of the last one carries over (#218)
   const need = `${kind} ${item.Since}`;
@@ -92,11 +94,11 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
     selectProject(serverId, projectId);
   };
 
-  const meta = [item.Profile && item.Profile !== 'Default' ? item.Profile : null, serverName, `waiting ${waitingFor(item.Since, now)}`]
+  const meta = [item.Profile && item.Profile !== 'Default' ? item.Profile : null, serverName, offline ? 'offline' : null, `waiting ${waitingFor(item.Since, now)}`]
     .filter(Boolean).join(' · ');
 
   return (
-    <article className={`inbox-item inbox-kind-${kind}${focused ? ' inbox-item-focused' : ''}`}>
+    <article className={`inbox-item inbox-kind-${kind}${focused ? ' inbox-item-focused' : ''}${offline ? ' inbox-item-offline' : ''}`}>
       <button className="inbox-item-header" onClick={open} title="Open the project">
         <span className="inbox-item-kind">{KIND_LABELS[kind]}</span>
         <span className="inbox-item-name">{item.ProjectName}</span>
