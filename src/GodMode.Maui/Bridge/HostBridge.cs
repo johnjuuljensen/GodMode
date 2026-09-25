@@ -22,8 +22,9 @@ public sealed class HostBridge : BridgeChannel
         };
     }
 
-    // MAUI's handler takes WebView2's WebMessageReceivedEventArgs and passes on only the message. That event is
-    // raised for the top-level document, and the channel reads this on the UI thread while it is being raised
+    // The page the WebView shows now. On Windows it stands in for WebMessageReceivedEventArgs.Source, which MAUI's
+    // handler does not pass on: that event is raised for the top-level document, on the UI thread, and the channel
+    // reads this while it is being raised
     protected override string? PageAddress => _webView.Handler?.PlatformView switch
     {
 #if ANDROID
