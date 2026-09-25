@@ -43,7 +43,7 @@ GodMode runs Claude Code sessions that ship issues, on machines you own (a PC, a
 # Build server (includes React SPA build)
 dotnet build src/GodMode.Server/GodMode.Server.csproj
 
-# Run server (http://127.0.0.1:31337, keyless because it is loopback-only)
+# Run server (http://127.0.0.1:31337; with no Authentication:ApiKey it generates a key on its first start and prints it)
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
 # Build MAUI app (requires MAUI workload)
@@ -106,9 +106,10 @@ cd src/GodMode.Client.React && npm run dev
 - `ClaudeProcessManager` appends each process's stdout to `.godmode/output.jsonl`, which backfills clients that subscribe later
 
 **Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
-- One mode per run: codespace (`CODESPACES=true`), API key (`Authentication:ApiKey`), or keyless loopback
-- Keyless is allowed only when every binding is loopback, and only for loopback callers with a loopback `Host`/`Origin`. Otherwise the server refuses to start without a key
-- Default binding `http://127.0.0.1:31337`. Binding a Tailscale or LAN address needs a key; so does the Docker image (`URLS=http://+:31337`)
+- Every request needs a credential, loopback included. One mode per run: codespace (`CODESPACES=true`: a GitHub token of `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`) or API key
+- The key is `Authentication:ApiKey`, else one the server generates on its first start into an owner-only key file in its own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key`, `~/.local/share/GodMode.Server/api-key`; never under `ProjectRootsDir`), prints once, and reuses on every start
+- A request with an `Origin` gets 403 unless it is one of the server's own origins (its bindings, where loopback and wildcards also stand for `localhost`/`127.0.0.1`/`[::1]`, plus `Authentication:AllowedOrigins`); a request with no `Origin` needs the key alone
+- Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them; a credential they need goes in the root's `environment`
 
 ### Project Folder Structure
 ```
