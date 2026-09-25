@@ -139,7 +139,7 @@ export function CreateProject() {
   const formFields = useMemo(() => selectedAction?.InputSchema ? parseFormFields(selectedAction.InputSchema) : [], [selectedAction]);
 
   // A different root or action resets the form to its defaults. Keyed by name, not by object:
-  // every roots refresh (a ProfilesChanged broadcast, a reconnect) hands out new objects for the same form
+  // every roots refresh (a reconnect, say) hands out new objects for the same form
   const formKey = formKeyOf(selectedServerId, selectedRootName, selectedActionName);
   if (selectedAction && valuesFor !== formKey) {
     const defaults: Record<string, string> = {};

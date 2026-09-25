@@ -3,7 +3,7 @@ import { Toggle } from './settings-shared';
 import './settings-common.css';
 
 const FLAGS: { key: 'featureProfiles'; label: string; desc: string }[] = [
-  { key: 'featureProfiles', label: 'Profiles',      desc: 'Show profile filter and settings' },
+  { key: 'featureProfiles', label: 'Profiles',      desc: 'Show profile filter' },
 ];
 
 export function AppSettings() {
