@@ -10,7 +10,8 @@ import { FakeHub, project, root, connectServers, flush, line } from '../test/fak
 import { render, type Rendered } from '../test/render';
 import { ProjectView } from '../components/Project/ProjectView';
 import { TileGrid } from '../components/Tiles/TileGrid';
-import { SidebarHeader } from '../components/Sidebar/Sidebar';
+import { Sidebar, SidebarHeader } from '../components/Sidebar/Sidebar';
+import { parseClaudeMessage } from '../signalr/parseMessage';
 import { useAppStore } from './index';
 import { projectKey } from './projectKey';
 
@@ -108,6 +109,38 @@ describe('the selected project and a tile, open over a reconnect', () => {
     expect(hub.subscriptions).toEqual([{ projectId: 'p1', fromOffset: 20 }, { projectId: 'p2', fromOffset: 130 }]);
     replay(hub, 'p2', 130, [140]);
     expect(useAppStore.getState().tileMessages[projectKey('A', 'p2')]).toHaveLength(4);
+  });
+});
+
+describe('after a sleep in which a question was answered elsewhere and a project was deleted (#239)', () => {
+  const asking = parseClaudeMessage(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Shall I go on?' }] } }));
+  const badge = () => [...view!.container.querySelectorAll('.project-item')]
+    .find(el => el.querySelector('.project-name')?.textContent === 'first')?.querySelector('.project-state-badge')?.textContent;
+
+  it("the WAIT badge is gone, and the deleted project's open view says it is not found, with nothing to act on", async () => {
+    useAppStore.getState().selectProject('A', 'p2');
+    view = await render(<><Sidebar /><ProjectView serverId="A" projectId="p2" /></>);
+    await act(async () => {
+      hub.lastReplay('p2').answer(0, [10, 20]);
+      hub.callbacks.onOutputReceived?.('p1', { offset: 5, message: asking });
+    });
+    expect(badge()).toBe('WAIT');
+    expect(useAppStore.getState().outputMessages).toHaveLength(2);
+
+    await act(() => hub.drop());
+    hub.projects = [project('p1', 'first', 'Running', '2026-09-24T12:00:00Z')];
+    await act(() => hub.reconnect());
+    await act(flush);
+
+    expect(badge()).toBe('RUNN');
+    expect(useAppStore.getState().totalWaitingCount).toBe(0);
+    const el = view.container;
+    expect(el.querySelector('.project-messages-empty')?.textContent).toBe('Project not found');
+    expect(el.querySelector<HTMLTextAreaElement>('textarea.project-input')!.disabled).toBe(true);
+    expect(el.querySelector<HTMLButtonElement>('.delete-btn')!.disabled).toBe(true);
+    expect(el.querySelector<HTMLButtonElement>('.project-status-btn')!.disabled).toBe(true);
+    expect(useAppStore.getState().outputMessages).toEqual([]);
+    expect(useAppStore.getState().transcripts[projectKey('A', 'p2')]?.messages).toEqual([]);
   });
 });
 

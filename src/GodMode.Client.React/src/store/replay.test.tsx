@@ -7,7 +7,7 @@
  */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakeHub, project, root, connectServers, flush, line, texts } from '../test/fakeHub';
+import { FakeHub, project, root, status, connectServers, flush, line, texts } from '../test/fakeHub';
 import { render, type Rendered } from '../test/render';
 import { TileGrid } from '../components/Tiles/TileGrid';
 import { useAppStore } from './index';
@@ -120,6 +120,61 @@ describe('a transcript', () => {
 
     expect(texts(store().outputMessages)).toEqual(at(10, 20, 30, 40, 50, 60, 70));
     expect(store().transcripts[key]).toMatchObject({ offset: 70, phase: 'live' });
+  });
+});
+
+// A project deleted and created again with the same ID (the godmode-dev retry) starts a new generation of
+// its output.jsonl: what was held from the first is never shown with the second
+describe('a project created again with its ID', () => {
+  it('while open, is not found, then replayed from 0 once it is back', async () => {
+    store().selectProject('A', 'p1');
+    await store().subscribeOutput('A', 'p1');
+    hub.lastReplay('p1').answer(0, [10, 20]);
+
+    hub.callbacks.onProjectDeleted?.('p1');
+    expect(store().selectedProject).toEqual({ serverId: 'A', projectId: 'p1' });
+    expect(store().outputMessages).toEqual([]);
+
+    hub.generations.p1 = 'g2';
+    hub.callbacks.onProjectCreated?.(status('p1', 'Running'));
+    const again = hub.lastReplay('p1');
+    expect([again.fromOffset, again.generation]).toEqual([0, null]);
+    again.answer(0, [15]);
+    expect(texts(store().outputMessages)).toEqual(at(15));
+    expect(store().transcripts[key]).toMatchObject({ offset: 15, generation: 'g2', phase: 'live' });
+  });
+
+  it('while this client slept, resumes from the old offset in the old generation, and shows only the new output', async () => {
+    store().selectProject('A', 'p1');
+    await store().subscribeOutput('A', 'p1');
+    hub.lastReplay('p1').answer(0, [10, 20, 30, 40]);
+
+    await hub.drop();
+    hub.generations.p1 = 'g2';
+    await hub.reconnect();
+    const resumed = hub.lastReplay('p1');
+    expect([resumed.fromOffset, resumed.generation]).toEqual([40, 'g1']);
+    // The server replays another generation's file from 0
+    resumed.answer(0, [12, 25, 48, 70]);
+
+    expect(texts(store().outputMessages)).toEqual(at(12, 25, 48, 70));
+    expect(store().transcripts[key]).toMatchObject({ offset: 70, generation: 'g2', phase: 'live' });
+  });
+
+  it("while this client slept, a tile's lines from the old output are replaced by the new", async () => {
+    store().setTileView(true);
+    await store().subscribeTail('A', 'p1', 2);
+    hub.lastReplay('p1').answer(5, [10, 20]);
+
+    await hub.drop();
+    hub.generations.p1 = 'g2';
+    await hub.reconnect();
+    const resumed = hub.lastReplay('p1');
+    expect([resumed.fromOffset, resumed.generation]).toEqual([20, 'g1']);
+    resumed.answer(0, [12, 25]);
+
+    expect(texts(store().tileMessages[key])).toEqual(at(12, 25));
+    expect(store().tiles[key]).toMatchObject({ offset: 25, generation: 'g2' });
   });
 });
 
