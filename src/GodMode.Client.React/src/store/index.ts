@@ -410,13 +410,9 @@ export const useAppStore = create<AppState>((set, get) => {
   },
 
   addServer: async (req) => {
-    try {
-      await api.addServer(req);
-      await get().loadServers();
-      set({ activePage: null });
-    } catch (err) {
-      console.error('Failed to add server:', err);
-    }
+    await api.addServer(req);
+    await get().loadServers();
+    set({ activePage: null });
   },
 
   removeServer: async (serverId) => {

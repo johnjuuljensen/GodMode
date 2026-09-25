@@ -16,8 +16,8 @@ public interface IServerDirectory
     Task<IReadOnlyList<ServerInfo>> ListAllServersAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// The servers of each usable registration, telling a registration whose listing failed (a GitHub API error, say)
-    /// from one that has no servers.
+    /// The servers of each usable registration, telling a registration whose listing failed (a GitHub API error, say,
+    /// or a token secure storage could not read) from one that has no servers.
     /// </summary>
     Task<IReadOnlyList<RegistrationListing>> ListByRegistrationAsync(CancellationToken ct = default);
 
