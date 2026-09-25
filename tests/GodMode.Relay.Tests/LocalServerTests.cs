@@ -6,12 +6,14 @@ using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging.Abstractions;
 using SignalR.Proxy;
+using static GodMode.Relay.Tests.Attention;
 
 namespace GodMode.Relay.Tests;
 
 /// <summary>
 /// The MAUI relay: only the WebView's origin with the per-launch secret gets through,
 /// it serves nothing but the WebSocket relay, and it adds each server's own key upstream.
+/// A relay that cannot connect lets go of the client's socket.
 /// </summary>
 public sealed class LocalServerTests : IAsyncLifetime
 {
@@ -23,6 +25,7 @@ public sealed class LocalServerTests : IAsyncLifetime
     private FakeUpstream _alpha = null!;
     private FakeUpstream _beta = null!;
     private ServerRegistryService _registry = null!;
+    private ServerDirectory _directory = null!;
     private LocalServer _relay = null!;
 
     public async Task InitializeAsync()
@@ -30,8 +33,8 @@ public sealed class LocalServerTests : IAsyncLifetime
         _alpha = await FakeUpstream.StartAsync("alpha");
         _beta = await FakeUpstream.StartAsync("beta");
         _registry = new ServerRegistryService(_dataDir, _secrets);
-        var directory = new ServerDirectory(_registry, new ServerUrlSelector(ServerUrlSelector.CreateHttpClient()), NullLoggerFactory.Instance);
-        _relay = new LocalServer(directory.ResolveAsync, [WebViewOrigin], NullLoggerFactory.Instance);
+        _directory = new ServerDirectory(_registry, new ServerUrlSelector(ServerUrlSelector.CreateHttpClient()), NullLoggerFactory.Instance);
+        _relay = new LocalServer(_directory.ResolveAsync, [WebViewOrigin], NullLoggerFactory.Instance);
         _relay.Start();
     }
 
@@ -47,8 +50,8 @@ public sealed class LocalServerTests : IAsyncLifetime
     private Task<ServerRegistration> AddServerAsync(string key, params string[] urls) =>
         _registry.AddServerAsync(new ServerRegistration { Type = ServerTypes.Local, Urls = urls }, key);
 
-    private string RelayUrl(string serverId, string? secret) =>
-        $"{_relay.BaseUrl}/?serverId={Uri.EscapeDataString(serverId)}" +
+    private string RelayUrl(string serverId, string? secret, LocalServer? relay = null) =>
+        $"{(relay ?? _relay).BaseUrl}/?serverId={Uri.EscapeDataString(serverId)}" +
         (secret == null ? "" : $"&{LocalServer.SecretQueryKey}={Uri.EscapeDataString(secret)}");
 
     private async Task<HttpStatusCode> GetAsync(string url, string? origin)
@@ -74,6 +77,16 @@ public sealed class LocalServerTests : IAsyncLifetime
         {
             return ws.HttpStatusCode;
         }
+    }
+
+    /// <summary>A WebSocket to the relay as the WebView opens one, before any SignalR handshake.</summary>
+    private async Task<ClientWebSocket> OpenSocketAsync(string serverId, LocalServer? relay = null)
+    {
+        relay ??= _relay;
+        var ws = new ClientWebSocket();
+        ws.Options.SetRequestHeader("Origin", WebViewOrigin);
+        await ws.ConnectAsync(new Uri(RelayUrl(serverId, relay.Secret, relay).Replace("http://", "ws://")), CancellationToken.None);
+        return ws;
     }
 
     private async Task<HubConnection> ConnectThroughRelayAsync(string serverId)
@@ -201,5 +214,57 @@ public sealed class LocalServerTests : IAsyncLifetime
         _relay.DropAllRelays();
 
         await closed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public async Task An_upstream_that_refuses_the_key_gets_the_client_socket_closed_within_a_second()
+    {
+        await using var guarded = await FakeUpstream.StartAsync("guarded", requiredKey: "right-key");
+        var server = await AddServerAsync("wrong-key", guarded.Url);
+        using var ws = await OpenSocketAsync(server.Id);
+
+        await Frames.SendAsync(ws, Frames.Handshake);
+
+        var error = await Frames.ReceiveAsync(ws, TimeSpan.FromSeconds(10));
+        Assert.Equal("{\"error\":\"Failed to connect to upstream server (401 Unauthorized)\"}", error.Text);
+        var close = await Frames.ReceiveAsync(ws, TimeSpan.FromSeconds(1));
+        Assert.Equal(WebSocketMessageType.Close, close.Type);
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, close.CloseStatus);
+        await Frames.AnswerCloseAsync(ws);
+        await UntilAsync(() => _relay.ActiveRelayCount == 0, "the failed relay to let go of the socket");
+        Assert.Contains(guarded.HubRequests, r => r.Authorization == "Bearer wrong-key");
+    }
+
+    [Fact]
+    public async Task A_client_that_never_sends_its_handshake_is_closed_after_the_handshake_timeout()
+    {
+        var server = await AddServerAsync("key-a", _alpha.Url);
+        await using var relay = new LocalServer(_directory.ResolveAsync, [WebViewOrigin], NullLoggerFactory.Instance,
+            handshakeTimeout: TimeSpan.FromMilliseconds(500));
+        relay.Start();
+        using var ws = await OpenSocketAsync(server.Id, relay);
+
+        var close = await Frames.ReceiveAsync(ws, TimeSpan.FromSeconds(5));
+
+        Assert.Equal(WebSocketMessageType.Close, close.Type);
+        Assert.Equal(WebSocketCloseStatus.PolicyViolation, close.CloseStatus);
+        await Frames.AnswerCloseAsync(ws);
+        await UntilAsync(() => relay.ActiveRelayCount == 0, "the relay to let go of the socket");
+        Assert.Empty(_alpha.HubRequests);
+    }
+
+    [Fact]
+    public async Task DropAllRelays_also_ends_a_relay_still_waiting_for_its_handshake()
+    {
+        var server = await AddServerAsync("key-a", _alpha.Url);
+        using var ws = await OpenSocketAsync(server.Id);
+        await UntilAsync(() => _relay.ActiveRelayCount == 1, "the relay to count the connection");
+
+        _relay.DropAllRelays();
+
+        // Well within the 10 s handshake timeout
+        var close = await Frames.ReceiveAsync(ws, TimeSpan.FromSeconds(5));
+        Assert.Equal(WebSocketMessageType.Close, close.Type);
+        Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, close.CloseStatus);
     }
 }

@@ -14,6 +14,9 @@ public static class PendingAttentionLink
     /// <summary>A link is waiting.</summary>
     public static event Action? Arrived;
 
+    /// <summary>How many handlers <see cref="Arrived"/> has: one per attached shell bridge.</summary>
+    public static int Listening => Arrived?.GetInvocationList().Length ?? 0;
+
     public static void Set(AttentionLink link)
     {
         Interlocked.Exchange(ref _pending, link);
