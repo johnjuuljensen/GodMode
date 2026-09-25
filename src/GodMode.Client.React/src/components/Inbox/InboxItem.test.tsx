@@ -40,11 +40,13 @@ beforeEach(async () => {
   hubA = new FakeHub([], []);
   hubB = new FakeHub([], []);
   await connectServers({ A: hubA, B: hubB });
+  // What each request would run: Allow waits for it (#234)
+  hubA.details = Object.fromEntries(['r1', 'r2'].map(id => [id, { RequestId: id, Detail: `echo ${id}`, DetailTruncated: false }]));
   await act(async () => {
     hubA.callbacks.onAttentionChanged?.([
       item('p1', 'Question', '2026-09-24T10:00:00Z'),
       item('p2', 'Permission', '2026-09-24T11:00:00Z', {
-        Permission: { RequestId: 'r1', ToolName: 'Bash', Input: {}, Summary: 'Bash: git push', RequestedAt: '2026-09-24T11:00:00Z' },
+        Permission: { RequestId: 'r1', ToolName: 'Bash', Summary: 'Bash: git push', RequestedAt: '2026-09-24T11:00:00Z' },
       }),
     ]);
     hubB.callbacks.onAttentionChanged?.([item('p1', 'Finished', '2026-09-24T09:00:00Z', { PullRequestUrl: 'https://example.test/pr/1' })]);
@@ -145,7 +147,7 @@ describe('the inbox', () => {
 
 describe('the next need of a project (#218)', () => {
   const permission = (requestId: string, since: string) => item('p2', 'Permission', since, {
-    Permission: { RequestId: requestId, ToolName: 'Bash', Input: {}, Summary: `Bash: ${requestId}`, RequestedAt: since },
+    Permission: { RequestId: requestId, ToolName: 'Bash', Summary: `Bash: ${requestId}`, RequestedAt: since },
   });
   /** Server A's list again, with p2 as given: p1's question stays. */
   const listA = (p2: AttentionItem) => act(async () => hubA.callbacks.onAttentionChanged?.([item('p1', 'Question', '2026-09-24T10:00:00Z'), p2]));

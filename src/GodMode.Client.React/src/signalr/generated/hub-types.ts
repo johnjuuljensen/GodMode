@@ -158,11 +158,10 @@ export interface PendingPermission {
   RequestId: string;
   /** The tool claude wants to run, for example `Bash` or `mcp__github__create_pull_request`. */
   ToolName: string;
-  /** The tool's input, as claude sent it. */
-  Input: unknown;
   /**
-   * What the call does in one line, for example `Bash: git push origin feature/12-x` or `Edit: src/Foo.cs`.
-   * Read this rather than Input.
+   * What the call does in one line, for example `Bash: git push origin feature/12-x` or `Edit: src/Foo.cs`,
+   * for a notification or to read aloud. It ends with " …" when it leaves something out (a second line, or
+   * the rest of a long one): it is never enough to approve by, IProjectHub.GetPermissionDetail is.
    */
   Summary: string;
   /** When claude asked. */
@@ -190,6 +189,26 @@ export interface PermissionDecision {
   Message?: string | null;
   /** The input to run the tool with instead of the one claude asked with. Only read when allowed. */
   UpdatedInput?: unknown;
+}
+
+/**
+ * Everything a PendingPermission would run, to show before it is allowed, from
+ * IProjectHub.GetPermissionDetail.
+ */
+export interface PermissionDetail {
+  /** The request it describes. */
+  RequestId: string;
+  /**
+   * The server's display text of the tool's input: the whole command for `Bash` and `PowerShell`, the path
+   * and the whole new text for `Edit`, `MultiEdit`, `Write` and `NotebookEdit`, and the input as indented
+   * JSON for any other tool.
+   */
+  Detail: string;
+  /**
+   * Whether Detail was cut at `16384` characters. The call runs with all of it: say so, and let the user deny
+   * it or read the rest in the transcript.
+   */
+  DetailTruncated: boolean;
 }
 
 /** Information about a server-defined profile. */
@@ -394,9 +413,15 @@ export interface IProjectHub {
   /**
    * Answers the project's ProjectStatus.PendingPermission: the tool call runs, or claude is told it was
    * denied. Fails when the project has no pending request with that id (it was answered already, or claude
-   * stopped waiting).
+   * stopped waiting), and when another answer to it, from another client, came first: only one answer
+   * succeeds.
    */
   RespondToPermission(projectId: string, requestId: string, decision: PermissionDecision): Promise<void>;
+  /**
+   * Everything the project's pending permission request requestId would run, to show before it is allowed.
+   * Fails as IProjectHub.RespondToPermission does when the request is not pending, or is a question.
+   */
+  GetPermissionDetail(projectId: string, requestId: string): Promise<PermissionDetail>;
   /**
    * Answers the project's ProjectStatus.PendingQuestion. answers maps each QuestionItem.Question to the
    * chosen label (labels joined with ", " for a multi-select) or to the user's own text. Fails as

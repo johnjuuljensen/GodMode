@@ -87,14 +87,14 @@ export function ProjectView({ serverId, projectId }: Props) {
     [answers, pendingQuestion?.RequestId],
   );
   const openQuestion = pendingQuestion?.Questions.find(q => answered[q.Question] === undefined) ?? null;
+  // Why the last answer to a question failed (another client answered first): that question's alone
+  const [answerError, setAnswerError] = useState<{ requestId: string; message: string } | null>(null);
+  const questionError = answerError && answerError.requestId === pendingQuestion?.RequestId ? answerError.message : null;
 
+  // A failure (another client answered first, claude stopped waiting) is the card's to show
   const handlePermission = useCallback(async (allow: boolean) => {
     if (!pendingPermission) return;
-    try {
-      await respondToPermission(serverId, projectId, pendingPermission.RequestId, { Allow: allow });
-    } catch (err) {
-      console.error('Failed to answer the permission request:', err);
-    }
+    await respondToPermission(serverId, projectId, pendingPermission.RequestId, { Allow: allow });
   }, [pendingPermission, respondToPermission, serverId, projectId]);
 
   const handleQuestionAnswer = useCallback(async (label: string) => {
@@ -102,10 +102,13 @@ export function ProjectView({ serverId, projectId }: Props) {
     const byQuestion = { ...answered, [openQuestion.Question]: label };
     setAnswers({ requestId: pendingQuestion.RequestId, byQuestion });
     if (pendingQuestion.Questions.some(q => byQuestion[q.Question] === undefined)) return;
+    setAnswerError(null);
     try {
       await answerQuestion(serverId, projectId, pendingQuestion.RequestId, byQuestion);
     } catch (err) {
-      console.error('Failed to answer the question:', err);
+      // Asked again, if it still waits: the answer did not reach claude
+      setAnswers(null);
+      setAnswerError({ requestId: pendingQuestion.RequestId, message: err instanceof Error ? err.message : String(err) });
     }
   }, [pendingQuestion, openQuestion, answered, answerQuestion, serverId, projectId]);
 
@@ -211,7 +214,9 @@ export function ProjectView({ serverId, projectId }: Props) {
       )}
 
       {pendingPermission ? (
-        <PermissionCard permission={pendingPermission} onAnswer={handlePermission} />
+        // One card per request: each fetches its own detail (#234)
+        <PermissionCard key={pendingPermission.RequestId} serverId={serverId} projectId={projectId}
+          permission={pendingPermission} onAnswer={handlePermission} />
       ) : openQuestion ? (
         <QuestionPrompt
           text={openQuestion.Question}
@@ -229,6 +234,8 @@ export function ProjectView({ serverId, projectId }: Props) {
           onDismiss={handleDismiss}
         />
       )}
+
+      {questionError && <div className="project-answer-error">{questionError}</div>}
 
       <div className="project-input-bar">
         <ReplyInput

@@ -102,7 +102,7 @@ describe('an inbox draft', () => {
   const denyField = (projectId: string) => itemEl(projectId)?.querySelector<HTMLInputElement>('.permission-deny-message') ?? null;
   const permission = (requestId: string, since: string) => item('p3', 'Permission', {
     Since: since,
-    Permission: { RequestId: requestId, ToolName: 'Bash', Input: {}, Summary: 'Bash: git push', RequestedAt: since },
+    Permission: { RequestId: requestId, ToolName: 'Bash', Summary: 'Bash: git push', RequestedAt: since },
   });
 
   beforeEach(async () => {

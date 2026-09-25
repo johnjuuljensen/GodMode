@@ -107,7 +107,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
 
       {permission ? (
         // One card per request: the next one does not start out sending, as the last one was (#218)
-        <PermissionCard key={permission.RequestId} permission={permission} onAnswer={answerPermission} denyMessage={{ value: denyMessage, onChange: setDenyMessage }} />
+        <PermissionCard key={permission.RequestId} serverId={serverId} projectId={projectId} permission={permission} onAnswer={answerPermission} denyMessage={{ value: denyMessage, onChange: setDenyMessage }} />
       ) : (
         <div className="inbox-item-text">{item.Text}</div>
       )}
