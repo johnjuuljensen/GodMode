@@ -37,8 +37,8 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        // A project's MCP bridge is not a user; its token must never be checked as an API key
-        // or sent to GitHub. The project-token scheme handles it.
+        // A project's claude calling the MCP endpoint is not a user; its token must never be checked
+        // as an API key or sent to GitHub. The project-token scheme handles it.
         if (Request.Headers.ContainsKey(ProjectTokenAuthenticationHandler.ProjectIdHeader))
             return AuthenticateResult.NoResult();
 
@@ -167,8 +167,9 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
 }
 
 /// <summary>
-/// Authenticates the GodMode MCP bridge running inside a project: <c>X-GodMode-Project-Id</c>
-/// plus that project's bearer token. A user's API key is not a project token.
+/// Authenticates a project's claude calling GodMode's MCP endpoint: <c>X-GodMode-Project-Id</c>
+/// plus the bearer token that project's latest launch was issued, both from the MCP config the
+/// server launched it with. A user's API key is not a project token, nor is another project's.
 /// </summary>
 public class ProjectTokenAuthenticationHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,

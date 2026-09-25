@@ -91,8 +91,9 @@ public class AttentionTests
         await WaitForAttentionPushAsync(harness, 1);
         var statusPushes = harness.Hub.StatusPushes(asking.Id).Count;
 
+        // Seeing a question pushes the status, and leaves the question as it was
         for (var i = 0; i < 5; i++)
-            await harness.Projects.UpdateCustomStatusAsync(asking.Id, $"step {i}");
+            await harness.Projects.MarkSeenAsync(asking.Id);
 
         Assert.Equal(statusPushes + 5, harness.Hub.StatusPushes(asking.Id).Count);
         Assert.Single(harness.Hub.AttentionPushes);

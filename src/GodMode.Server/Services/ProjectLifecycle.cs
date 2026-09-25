@@ -388,7 +388,7 @@ public sealed class ProjectLifecycle
                 // A later launch is already running; its own exit settles the state
                 if (project.Process.ProcessId != 0) return;
 
-                // Its bridge went with it; nothing can answer claude any more
+                // Its calls to the MCP endpoint went with it; nothing can answer claude any more
                 project.Process.DenyAllPending(StoppedMessage);
 
                 var shuttingDown = _shuttingDown;

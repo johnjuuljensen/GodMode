@@ -9,4 +9,12 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Its permission prompt is an MCP client call, as claude's is -->
+    <PackageReference Include="ModelContextProtocol.Core" />
+    <!-- It runs from the server tests' output, which has no Microsoft.Extensions.* files of its own:
+         there they come from this shared framework, as they do for the server -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>
