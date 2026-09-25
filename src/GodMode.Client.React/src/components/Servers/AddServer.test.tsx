@@ -31,7 +31,7 @@ const errorText = () => view.container.querySelector('.settings-error')?.textCon
 
 beforeEach(async () => {
   useAppStore.setState(initialState, true);
-  useAppStore.getState().setShowAddServer(true);
+  useAppStore.getState().setActivePage({ type: 'addServer' });
   vi.mocked(api.addServer).mockReset();
   view = await render(<AddServer />);
   await typeInto(view.container.querySelector<HTMLInputElement>('input[type="password"]')!, 'secret-key');
