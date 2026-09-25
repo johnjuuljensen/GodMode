@@ -1,20 +1,18 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Internal;
-using System.Collections.Concurrent;
 using System.Text.Json;
 using GodMode.Server.Models;
 using GodMode.Server.Services;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace GodMode.Server.Tests;
 
 /// <summary>
 /// Configuration is edited as files on the host. A root laid out on disk, with a profile under
-/// .profiles/, must still list its custom schema, run its create script, and hand the project the
-/// three-level MCP merge (profile → root → action) — without any in-app editor having touched it.
+/// .profiles/, must still list its custom schema and run its create script, without any in-app
+/// editor having touched it.
 /// </summary>
 public class ProjectCreationFromFilesTests
 {
@@ -43,7 +41,7 @@ public class ProjectCreationFromFilesTests
     }
 
     [Fact]
-    public async Task CreateProject_RunsTheCreateScript_AndLaunchesWithTheMergedMcpConfig()
+    public async Task CreateProject_RunsTheCreateScript_AndLaunchesClaude()
     {
         var workDir = ServerProcess.CreateWorkDir("create");
         try
@@ -65,92 +63,36 @@ public class ProjectCreationFromFilesTests
             var marker = Path.Combine(rootsDir, "shipit", "issue_42", "created-by-script.txt");
             Assert.True(File.Exists(marker), $"create script did not run: no {marker}");
             Assert.Equal("42", File.ReadAllText(marker).Trim());
-
-            var launch = Assert.Single(launcher.Launches);
-            using var mcp = JsonDocument.Parse(McpConfigOf(launch.Args));
-            var servers = mcp.RootElement.GetProperty("mcpServers");
-            Assert.Equal(
-                ["action-over-root", "from-action", "from-profile", "from-root", "godmode-bridge", "root-over-profile"],
-                servers.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal));
-            Assert.Equal("profile-cmd", servers.GetProperty("from-profile").GetProperty("command").GetString());
-            Assert.Equal("root-cmd", servers.GetProperty("from-root").GetProperty("command").GetString());
-            Assert.Equal("https://mcp.example.test/mcp", servers.GetProperty("from-action").GetProperty("url").GetString());
-            Assert.Equal("root-wins", servers.GetProperty("root-over-profile").GetProperty("command").GetString());
-            Assert.Equal("action-wins", servers.GetProperty("action-over-root").GetProperty("command").GetString());
+            Assert.Single(launcher.Launches);
         }
         finally
         {
-            ServerProcess.DeleteWorkDir(workDir);
-        }
-    }
-
-    [Fact]
-    public async Task CreateProject_NeverLogsAnMcpHeaderValue_AndKeepsTheConfigInTheProject()
-    {
-        const string headerVariable = "GODMODE_TEST_MCP_HEADER";
-        var canary = "canary-" + Guid.NewGuid().ToString("N");
-        var workDir = ServerProcess.CreateWorkDir("create");
-        Environment.SetEnvironmentVariable(headerVariable, canary);
-        try
-        {
-            var rootsDir = Path.Combine(workDir, "roots");
-            WriteRootAndProfile(rootsDir);
-            var logs = new CapturingLoggerProvider();
-            await using var services = BuildServices(workDir, logs);
-            var projects = services.GetRequiredService<IProjectManager>();
-            var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
-
-            var inputs = new Dictionary<string, JsonElement> { ["issueNumber"] = JsonSerializer.SerializeToElement("7") };
-            var status = await projects.CreateProjectAsync(new CreateProjectRequest("team", "shipit", inputs, "issue"));
-
-            var args = Assert.Single(launcher.Launches).Args!;
-            var configPath = args[Array.IndexOf(args, "--mcp-config") + 1];
-            Assert.Equal(Path.Combine(rootsDir, "shipit", "issue_7", ".godmode", "mcp-config.json"), configPath);
-            // The header did reach the config, so its absence from the log below means something
-            Assert.Contains($"Bearer {canary}", File.ReadAllText(configPath));
-
-            Assert.NotEmpty(logs.Lines);
-            Assert.DoesNotContain(logs.Lines, l => l.Level >= LogLevel.Information && l.Text.Contains(canary));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(headerVariable, null);
             ServerProcess.DeleteWorkDir(workDir);
         }
     }
 
     /// <summary>
-    /// One root, "shipit", in profile "team", with an "issue" action that has its own schema.json and
-    /// create script. MCP servers are declared at every level, with one name overridden at each step.
+    /// One root, "shipit", in profile "team" (a profile directory with a description), with an
+    /// "issue" action that has its own schema.json and create script.
     /// </summary>
     private static void WriteRootAndProfile(string rootsDir)
     {
-        var profileMcp = Path.Combine(rootsDir, ".profiles", "team", "mcp");
-        Directory.CreateDirectory(profileMcp);
-        File.WriteAllText(Path.Combine(profileMcp, "from-profile.json"), """{ "command": "profile-cmd" }""");
-        File.WriteAllText(Path.Combine(profileMcp, "root-over-profile.json"), """{ "command": "profile-loses" }""");
+        var profileDir = Path.Combine(rootsDir, ".profiles", "team");
+        Directory.CreateDirectory(profileDir);
+        File.WriteAllText(Path.Combine(profileDir, "profile.json"), """{ "description": "The team's roots" }""");
 
         var godModeRoot = Path.Combine(rootsDir, "shipit", ".godmode-root");
         Directory.CreateDirectory(Path.Combine(godModeRoot, "issue"));
         File.WriteAllText(Path.Combine(godModeRoot, "config.json"), """
             {
-              "profileName": "team",
-              "mcpServers": {
-                "from-root": { "command": "root-cmd" },
-                "root-over-profile": { "command": "root-wins" },
-                "action-over-root": { "command": "root-loses" }
-              }
+              "profileName": "team"
             }
             """);
         File.WriteAllText(Path.Combine(godModeRoot, "config.issue.json"), """
             {
               "create": "issue/create",
               "nameTemplate": "issue_{issueNumber}",
-              "promptTemplate": "Work on issue {issueNumber}",
-              "mcpServers": {
-                "from-action": { "url": "https://mcp.example.test/mcp", "headers": { "Authorization": "Bearer ${GODMODE_TEST_MCP_HEADER}" } },
-                "action-over-root": { "command": "action-wins" }
-              }
+              "promptTemplate": "Work on issue {issueNumber}"
             }
             """);
         File.WriteAllText(Path.Combine(godModeRoot, "issue", "schema.json"), """
@@ -168,15 +110,7 @@ public class ProjectCreationFromFilesTests
             """);
     }
 
-    private static string McpConfigOf(string[]? args)
-    {
-        Assert.NotNull(args);
-        var index = Array.IndexOf(args!, "--mcp-config");
-        Assert.True(index >= 0 && index + 1 < args!.Length, $"no --mcp-config in: {string.Join(' ', args!)}");
-        return File.ReadAllText(args[index + 1]);
-    }
-
-    private static ServiceProvider BuildServices(string workDir, ILoggerProvider? logs = null)
+    private static ServiceProvider BuildServices(string workDir)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -184,12 +118,7 @@ public class ProjectCreationFromFilesTests
         }).Build();
 
         var services = new ServiceCollection();
-        services.AddLogging(b =>
-        {
-            if (logs == null) return;
-            b.SetMinimumLevel(LogLevel.Trace);
-            b.AddProvider(logs);
-        });
+        services.AddLogging();
         services.AddSignalR();
         services.AddHttpClient();
         services.AddSingleton<IConfiguration>(configuration);
@@ -202,22 +131,6 @@ public class ProjectCreationFromFilesTests
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();
-    }
-
-    private sealed class CapturingLoggerProvider : ILoggerProvider
-    {
-        public ConcurrentQueue<(LogLevel Level, string Text)> Lines { get; } = new();
-
-        public ILogger CreateLogger(string categoryName) => new Logger(Lines);
-        public void Dispose() { }
-
-        private sealed class Logger(ConcurrentQueue<(LogLevel, string)> lines) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-            public bool IsEnabled(LogLevel logLevel) => true;
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-                Func<TState, Exception?, string> formatter) => lines.Enqueue((logLevel, formatter(state, exception)));
-        }
     }
 
     private sealed class RecordingProcessManager : IClaudeProcessManager

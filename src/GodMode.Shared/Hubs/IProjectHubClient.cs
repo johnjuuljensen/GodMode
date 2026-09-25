@@ -57,19 +57,4 @@ public interface IProjectHubClient
     /// </summary>
     Task ProjectDeleted(string projectId);
 
-    /// <summary>
-    /// Called when a project is archived.
-    /// </summary>
-    Task ProjectArchived(string projectId);
-
-    /// <summary>
-    /// Called when a project is restored from archive.
-    /// </summary>
-    Task ProjectRestored(ProjectSummary project);
-
-    /// <summary>
-    /// Called when profiles change (created, updated, or deleted).
-    /// Clients should refresh their profile list.
-    /// </summary>
-    Task ProfilesChanged();
 }

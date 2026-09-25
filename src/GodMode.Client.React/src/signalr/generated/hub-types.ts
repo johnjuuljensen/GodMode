@@ -238,8 +238,6 @@ export interface ProjectStatus {
   /** The name of the project root this project belongs to. */
   RootName?: string | null;
   ProfileName?: string | null;
-  /** Deprecated. Kept for backward compatibility with existing status.json files on disk. */
-  RepoUrl?: string | null;
   /**
    * The Claude model the session was started with. Used on resume so the session keeps running on the same
    * model regardless of the current root config or machine default.
@@ -422,21 +420,6 @@ export interface IProjectHub {
   UnsubscribeProject(projectId: string): Promise<void>;
   /** Deletes a project, running teardown scripts and removing all files. */
   DeleteProject(projectId: string, force?: boolean): Promise<void>;
-  /** Archives a project (stops it, moves to archive, keeps data). */
-  ArchiveProject(projectId: string): Promise<void>;
-  /** Restores an archived project. */
-  UnarchiveProject(projectId: string): Promise<void>;
-  /** Lists all archived projects. */
-  ListArchivedProjects(): Promise<ProjectSummary[]>;
-  /** Creates a new profile with an optional description. */
-  CreateProfile(name: string, description: string | null): Promise<void>;
-  /**
-   * Deletes a profile. When deleteContents is true, cascade-deletes all root directories and their projects;
-   * otherwise reassigns roots to the Default profile.
-   */
-  DeleteProfile(name: string, deleteContents?: boolean): Promise<void>;
-  /** Updates a profile's description. */
-  UpdateProfileDescription(name: string, description: string | null): Promise<void>;
   /**
    * Checks whether a CLI command is available on the server (in PATH). Returns the resolved path if found,
    * null if not.
@@ -481,12 +464,4 @@ export interface IProjectHubClient {
   CreationProgress(projectId: string, message: string): void;
   /** Called when a project is deleted. */
   ProjectDeleted(projectId: string): void;
-  /** Called when a project is archived. */
-  ProjectArchived(projectId: string): void;
-  /** Called when a project is restored from archive. */
-  ProjectRestored(project: ProjectSummary): void;
-  /**
-   * Called when profiles change (created, updated, or deleted). Clients should refresh their profile list.
-   */
-  ProfilesChanged(): void;
 }

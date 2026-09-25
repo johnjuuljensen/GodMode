@@ -25,7 +25,6 @@ public record CreateAction(
     string? PromptTemplate = null,
     bool ScriptsCreateFolder = false,
     string? Model = null,
-    Dictionary<string, McpServerConfig>? McpServers = null,
     string? Status = null,
     bool ResumeOnRestart = true,
     string ResumePrompt = CreateAction.DefaultResumePrompt

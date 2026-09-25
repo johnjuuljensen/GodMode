@@ -3,9 +3,9 @@ using GodMode.Server.Services;
 namespace GodMode.Server.Tests;
 
 /// <summary>
-/// The MCP config carries the MCP servers' credentials: it is written into the project's
-/// .godmode folder rather than the shared temp directory, owner-only where the OS has modes,
-/// and deleted when the process that used it is gone.
+/// The MCP config a launch gets is written into the project's .godmode folder rather than the
+/// shared temp directory, owner-only where the OS has modes, and deleted when the process that
+/// used it is gone.
 /// </summary>
 public class McpConfigFileTests
 {

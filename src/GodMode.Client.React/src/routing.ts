@@ -27,7 +27,6 @@ const routeTable: readonly RouteDef[] = [
   { pattern: '', toRoute: () => ({ screen: 'home' }) },
   { pattern: 'projects', toRoute: () => ({ screen: 'projects' }) },
   { pattern: 'project/:serverId/:projectId', toRoute: p => ({ screen: 'project', serverId: p.serverId, projectId: p.projectId }) },
-  { pattern: 'settings/profiles', toRoute: () => ({ screen: 'page', page: { type: 'profileSettings' } }) },
   { pattern: 'settings/app', toRoute: () => ({ screen: 'page', page: { type: 'appSettings' } }) },
   { pattern: 'servers/add', toRoute: () => ({ screen: 'page', page: { type: 'addServer' } }) },
   { pattern: 'servers/:serverId', toRoute: p => ({ screen: 'page', page: { type: 'editServer', serverId: p.serverId } }) },
@@ -45,7 +44,6 @@ export function formatRoute(route: Route): string {
     case 'page': {
       const page = route.page;
       switch (page.type) {
-        case 'profileSettings': return hashOf('settings', 'profiles');
         case 'appSettings': return hashOf('settings', 'app');
         case 'addServer': return hashOf('servers', 'add');
         case 'editServer': return hashOf('servers', page.serverId);
