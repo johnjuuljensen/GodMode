@@ -192,6 +192,8 @@ The hub is the session loop plus reading profiles and roots:
 |---|
 | `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted` |
 
+**A project's ID is `{profile}/{root}/{project-folder}`**, where its folder is, so one folder name in two roots is two projects. Every hub method and callback that names a project takes or gives this ID (`ProjectStatus.Id`, `ProjectSummary.Id`). Clients treat it as opaque and pass it back as they received it; the server derives it from the folder's location on every recovery. Root scripts get the folder name alone, as `GODMODE_PROJECT_FOLDER`.
+
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
 2. Implement in `ProjectHub`
@@ -215,7 +217,7 @@ root-name/
 │       ├── prepare.ps1            # Shared prepare script
 │       ├── delete.ps1             # Shared delete script
 │       └── status.ps1             # Reports the project's pull request (optional)
-└── {project-id}/                  # Projects created from this root
+└── {project-folder}/              # Projects created from this root
 ```
 
 **Merge order**: `config.json` (base) → `config.{action}.json` (overlay). Action overlay wins on conflict.
@@ -240,7 +242,7 @@ Key services:
 ### 4.3 Project Folder Structure
 
 ```
-{root}/{project-id}/
+{root}/{project-folder}/
 ├── .godmode/
 │   ├── status.json      # Current state, metrics
 │   ├── settings.json    # Per-project settings (action, permission mode, skip-permissions asked for)
@@ -251,11 +253,11 @@ Key services:
 └── (project files)      # Working directory for Claude
 ```
 
-A project is a folder directly inside its root with a `.godmode/status.json`. The server does not archive or move project folders.
+A project is a folder directly inside its root with a `.godmode/status.json`, unless it is one of the root's own folders (below), which recovery skips. `{project-folder}` is its folder name, not its ID (4.1). The server does not archive or move project folders.
 
 **`.godmode/.gitignore` is ensured on every launch** (`ProjectFolder.EnsureGitIgnore`), before the MCP config with the project token is written: created when missing, since a create script's checkout can bring a `.godmode/` without one, and given the `*` rule when it lacks it.
 
-**A root's own folders are no project's.** `.godmode-root`, `logs` and `.archived` (a leftover) are refused as a project's folder (`ProjectFolder.ReservedFolderNames`), from the create dialog, a reuse, or a create script's `project_path`. **A project folder's files are untrusted:** its session can write them, so what reaches the `claude` command line or a link is checked when read back: `session-id` must be a GUID (anything else is no session, and the resume starts a fresh one), and a recovered pull request URL must be http(s).
+**A root's own folders are no project's.** `.godmode-root`, `logs` and `.archived` (a leftover) are refused as a project's folder (`ProjectFolder.ReservedFolderNames`), from the create dialog, a reuse, or a create script's `project_path`, and one found on disk with a `status.json` is not recovered. So are folder names Windows would change or not make a folder of, on every OS: a trailing dot or space (a name's trailing dots are dropped instead), and device names like `CON`, `NUL`, `COM1`. **A project's folder is strictly inside its root.** A create script's `project_path` must be inside that script's root, links followed, and not inside one of the root's own folders; the server deletes a project's folder only if it is inside a configured root by the same test, and otherwise leaves it on disk. **A project folder's files are untrusted:** its session can write them, so what reaches the `claude` command line or a link is checked when read back: `session-id` must be a GUID (anything else is no session, and the resume starts a fresh one), and a recovered pull request URL must be http(s).
 
 **One project, one claude.** A project has at most one claude process. A create is refused while a tracked project has its ID or folder, before anything is written; create, resume, stop and delete of one project take its lock, so launches and stops come one at a time. Each session runs in a process tree of its own, off the server's console (a Job Object and a hidden console on Windows, a process group started through `setsid` on Linux). A stop interrupts claude (Ctrl+Break in its console on Windows, SIGINT to its group elsewhere), gives it `StopGracePeriodSeconds` (10) to exit, then kills the whole tree; the server's shutdown does the same for every session at once. The server README (*Sessions*) has the details and what claude was measured to honour.
 
@@ -471,7 +473,7 @@ Every target separates the **server binary** from the **workspace data**:
 │       └── env.json
 └── my-root/                  # Project roots
     ├── .godmode-root/
-    └── {project-id}/         # Projects
+    └── {project-folder}/     # Projects
 
 ~/.godmode-logs/              # Server logs (relative to the working directory)
 ```

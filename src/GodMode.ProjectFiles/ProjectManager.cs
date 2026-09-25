@@ -194,7 +194,8 @@ public sealed class ProjectManager
 
     /// <summary>
     /// Converts a display name to a path-safe project folder name.
-    /// Spaces become underscores; invalid filename characters are removed.
+    /// Spaces become underscores; invalid filename characters are removed, and so are trailing dots,
+    /// which Windows drops from a folder name (<c>foo.</c> is the folder <c>foo</c>, so its ID is too).
     /// </summary>
     /// <exception cref="ArgumentException">
     /// The name leaves no folder of its own: empty once cleaned, or dots only (<c>.</c>, <c>..</c>).
@@ -205,6 +206,9 @@ public sealed class ProjectManager
         var cleaned = new string(name.Select(c => c == ' ' ? '_' : c)
             .Where(c => !invalidChars.Contains(c) && c is not ('/' or '\\'))
             .ToArray());
+        // Dots only ("..") is left as it is, to be refused as no folder of its own
+        if (cleaned.Any(c => c != '.'))
+            cleaned = cleaned.TrimEnd('.');
         ProjectFolder.ValidateFolderName(cleaned, nameof(name));
         return cleaned;
     }
@@ -375,6 +379,11 @@ public sealed class ProjectManager
     private static bool IsValidProjectFolder(string path)
     {
         if (!Directory.Exists(path))
+            return false;
+
+        // A folder the root keeps for itself is never a project's, even one with a status.json from
+        // before such names were refused: a delete of it would delete the root's config or its logs
+        if (ProjectFolder.IsReservedFolderName(Path.GetFileName(path)))
             return false;
 
         // Check for required files in .godmode subfolder

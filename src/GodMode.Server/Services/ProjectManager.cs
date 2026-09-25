@@ -398,12 +398,44 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private static (string Profile, string Root) ConfiguredNames(ProfileSnapshot snap, string profile, string root) =>
         snap.RootLookup.Keys.FirstOrDefault(key => TupleComparer.Instance.Equals(key, (profile, root))) is ({ } p, { } r) ? (p, r) : (profile, root);
 
-    /// <summary>Whether <paramref name="path"/> is <paramref name="dir"/> or inside it, by whole path segments.</summary>
-    private static bool IsSameOrUnder(string path, string dir)
+    /// <summary>
+    /// Why <paramref name="path"/> cannot be a project folder of the root at <paramref name="rootPath"/>,
+    /// or null when it can. It must be strictly under the root, links followed on both where the OS
+    /// allows (a link in the root to a folder elsewhere is that folder), and its first folder under the
+    /// root must be no folder the root keeps for itself (<c>{root}/.godmode-root/scripts</c> is the root's).
+    /// A delete of the project deletes its folder recursively.
+    /// </summary>
+    private static string? WhyNotAProjectFolderOf(string rootPath, string path)
     {
-        var relative = Path.GetRelativePath(Path.GetFullPath(dir), Path.GetFullPath(path));
-        return relative == "."
-            || !Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar);
+        var relative = Path.GetRelativePath(ResolveLinks(rootPath), ResolveLinks(path));
+        if (relative == "." || Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar))
+            return "is not inside its project root";
+        return ProjectFiles.ProjectFolder.IsReservedFolderName(relative.Split(Path.DirectorySeparatorChar)[0])
+            ? "is inside a folder the project root uses for itself"
+            : null;
+    }
+
+    /// <summary>
+    /// The full path of <paramref name="path"/> with every link along it followed, as far as it exists
+    /// and the OS lets it be read; the rest as it is.
+    /// </summary>
+    private static string ResolveLinks(string path, int depth = 0)
+    {
+        var full = FullPath(path);
+        var resolved = Path.GetPathRoot(full)!;
+        foreach (var segment in full[resolved.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            resolved = Path.Combine(resolved, segment);
+            try
+            {
+                // The target's own folders may be links too; a cycle ends at the depth, as the OS's does
+                if (depth < 32 && new DirectoryInfo(resolved) is { Exists: true, LinkTarget: not null } link
+                    && link.ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                    resolved = ResolveLinks(target.FullName, depth + 1);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        return resolved;
     }
 
     public Task<ProfileInfo[]> ListProfilesAsync()
@@ -1565,10 +1597,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>
     /// Robustly deletes a directory, handling read-only files and retrying on lock conflicts.
     /// Git directories on Windows often have read-only or temporarily locked files.
+    /// Refused, and nothing deleted, unless the path is a project folder of a known root
+    /// (<see cref="WhyNotAProjectFolderOf"/>): a project whose folder is elsewhere is forgotten, its folder left be.
     /// </summary>
     private async Task DeleteDirectoryRobustAsync(string path)
     {
         if (!Directory.Exists(path)) return;
+        if (!AllRoots(_snapshot).Any(root => WhyNotAProjectFolderOf(root.Path, path) is null))
+            throw new InvalidOperationException($"The project folder '{path}' is not inside a project root, so it is not deleted.");
 
         for (int attempt = 0; attempt < 3; attempt++)
         {
@@ -1630,15 +1666,15 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// The full path and folder name of a create script's <c>project_path</c>. Refused when it is
-    /// the root or above it, or its folder name is not one of its own (<c>x/..</c>): a delete of the
-    /// project would delete that recursively.
+    /// The full path and folder name of a create script's <c>project_path</c>. Refused unless it is a
+    /// project folder of its own root (<see cref="WhyNotAProjectFolderOf"/>), and its folder name is a
+    /// folder of its own (<c>x/..</c> is not): a delete of the project would delete that recursively.
     /// </summary>
     private static (string Path, string Folder) ValidateScriptProjectPath(string projectPath, string rootPath)
     {
-        var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
-        if (IsSameOrUnder(rootPath, fullPath))
-            throw new ArgumentException($"The create script's project_path '{projectPath}' is the project root or above it.");
+        var fullPath = FullPath(projectPath);
+        if (WhyNotAProjectFolderOf(rootPath, fullPath) is { } reason)
+            throw new ArgumentException($"The create script's project_path '{projectPath}' {reason}.");
         var folder = Path.GetFileName(fullPath);
         ProjectFiles.ProjectFolder.ValidateFolderName(folder, "project_path");
         return (fullPath, folder);
@@ -1982,9 +2018,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // GODMODE_* vars always win
         env["GODMODE_ROOT_PATH"] = rootPath;
         env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
-        // Scripts name branches and folders after it: the folder name, as before project IDs carried
-        // the profile and root
-        env["GODMODE_PROJECT_ID"] = Path.GetFileName(project.ProjectPath);
+        // Scripts name branches and folders after it. It is not the project's ID, {profile}/{root}/{folder}
+        env["GODMODE_PROJECT_FOLDER"] = Path.GetFileName(project.ProjectPath);
         env["GODMODE_PROJECT_NAME"] = project.Status.Name;
 
         if (resultFilePath != null)

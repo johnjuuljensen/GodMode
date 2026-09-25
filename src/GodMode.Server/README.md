@@ -110,7 +110,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
     │       ├── prepare.ps1           # Shared prepare script
     │       ├── delete.ps1            # Shared delete script
     │       └── status.ps1            # Reports the project's pull request (optional)
-    └── {project-id}/                 # Projects created from this root
+    └── {project-folder}/             # Projects created from this root (ID {profile}/{root}/{project-folder})
 ```
 
 `.devcontainer/godmode-server/roots/godmode-dev/` in this repository is a complete example.
@@ -288,7 +288,7 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 |----------|-------------|
 | `GODMODE_ROOT_PATH` | Root directory path |
 | `GODMODE_PROJECT_PATH` | Project directory path |
-| `GODMODE_PROJECT_ID` | The project's folder name (not the project ID below) |
+| `GODMODE_PROJECT_FOLDER` | The project's folder name, the last segment of `GODMODE_PROJECT_PATH`. Not the project's ID, which is `{profile}/{root}/{folder}` (see below); no script is given that |
 | `GODMODE_PROJECT_NAME` | Display name |
 | `GODMODE_INPUT_*` | All form inputs (key in upper snake case, e.g. `GODMODE_INPUT_ISSUE_NUMBER`) |
 | `GODMODE_RESULT_FILE` | Create scripts only: a file the script can write `key=value` lines to (see below) |
@@ -396,13 +396,17 @@ Each project is stored in a folder under its root:
 
 **`.godmode/.gitignore` ignores everything in `.godmode`**, which holds the MCP config with the project's token while claude runs. The server makes sure of it when it sets up the project and on every launch, before it writes that config: it writes the file when missing (a checkout can bring a `.godmode/` without one), and appends the `*` rule to one that lacks it, keeping its lines.
 
-A project is a folder directly inside its root that has a `.godmode/status.json`. Nothing deeper is recovered, and the server moves no project folder anywhere.
+A project is a folder directly inside its root that has a `.godmode/status.json`, other than a folder the root keeps for itself (below): a `logs/.godmode/status.json` from before those names were refused is not recovered, so it is never listed, resumed or deleted. Nothing deeper is recovered, and the server moves no project folder anywhere.
 
 **Project ID.** A project is identified by `{profile}/{root}/{folder}`: where its folder is. Two projects with the same name in different roots or profiles are separate projects, with their own process, output and SignalR group. Clients treat the ID as opaque and pass it back as they received it. The server derives it from the folder's location on every start and writes it to `status.json`, so a folder that was moved, or whose root has moved to another profile, is recovered under its current ID. Nothing else in `.godmode` holds the ID.
 
-The folder name comes from the project's name: spaces become underscores and characters that are invalid in a file name are dropped. A name that leaves no folder of its own (empty, `.`, `..`, or dots only) is refused before anything is created or run. So is a create script's `project_path` at or above the root.
+The folder name comes from the project's name: spaces become underscores, characters that are invalid in a file name are dropped, and so are trailing dots, which Windows drops from a folder name (`foo.` is the folder `foo`, and its ID ends in `foo`). A name that leaves no folder of its own (empty, `.`, `..`, or dots only) is refused before anything is created or run. So is a folder name, reused or returned by a script, that ends in a dot or a space, and a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, with or without an extension: `nul.txt`), on every OS, so a root's projects are the same on every host.
 
-A root keeps some folders for itself at its top level, and no project may be one of them, whether named in the create dialog, reused (`__reuseExisting`), or returned as a create script's `project_path`: `.godmode-root` (the root's config and scripts), `logs` (its script logs and result files) and `.archived` (left over from archiving, which is gone). A delete of such a project would delete that folder. They are compared ignoring case and trailing dots and spaces, as Windows compares folder names, on every OS. A refused name creates nothing; a refused `project_path` leaves the create `Error` in the folder it was given, as a `project_path` at or above the root does.
+A create script's `project_path` must be strictly inside the script's own root: not the root, not above it, not in a sibling root or anywhere else. Links are followed where the OS allows, so a link in the root to a folder elsewhere is that folder, and refused.
+
+A root keeps some folders for itself at its top level, and no project may be one of them or inside one, whether named in the create dialog, reused (`__reuseExisting`), or returned as a create script's `project_path` (`{root}/.godmode-root/scripts` is refused): `.godmode-root` (the root's config and scripts), `logs` (its script logs and result files) and `.archived` (left over from archiving, which is gone). A delete of such a project would delete that folder. They are compared ignoring case and trailing dots and spaces, as Windows compares folder names, on every OS. A refused name creates nothing; a refused `project_path` leaves the create `Error` in the folder it was given.
+
+**A delete removes only a project folder inside a root.** Before it deletes a project's folder, the server checks it as it checks a `project_path`: strictly inside a configured root, links followed, not in a folder the root keeps for itself. A folder that is not (its root was removed from the config while the project was tracked, or the folder was replaced by a link) is left on disk; the delete fails saying so, after the delete scripts ran and the project was forgotten.
 
 **`session-id` is only ever a GUID**, which is what the server asks for (`--session-id`) and what claude reports in `system/init`. The session can write the file itself, and the value is the argument after `--resume`, so a saved value that is not a GUID (`--settings=x` would be read as a flag) is logged and treated as no session: the resume starts a fresh session on a new GUID, told to carry on from the work in the folder, as it does when claude has no conversation for the session. A `system/init` reporting a session that is not a GUID is logged and ignored.
 

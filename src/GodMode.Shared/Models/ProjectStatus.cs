@@ -5,7 +5,7 @@ namespace GodMode.Shared.Models;
 /// <summary>
 /// Detailed status information about a project.
 /// </summary>
-/// <param name="Id">The project identifier.</param>
+/// <param name="Id">The project identifier, <c>{profile}/{root}/{folder}</c>: where its folder is. Opaque to clients, which pass it back as received; not the folder name.</param>
 /// <param name="Name">The project name.</param>
 /// <param name="State">The current state of the project.</param>
 /// <param name="CreatedAt">The timestamp when the project was created.</param>

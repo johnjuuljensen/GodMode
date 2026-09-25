@@ -247,7 +247,10 @@ export interface ProjectRootInfo {
 
 /** Detailed status information about a project. */
 export interface ProjectStatus {
-  /** The project identifier. */
+  /**
+   * The project identifier, `{profile}/{root}/{folder}`: where its folder is. Opaque to clients, which pass
+   * it back as received; not the folder name.
+   */
   Id: string;
   /** The project name. */
   Name: string;
@@ -311,7 +314,10 @@ export interface ProjectStatus {
 
 /** Summary information about a project. */
 export interface ProjectSummary {
-  /** The project identifier. */
+  /**
+   * The project identifier, `{profile}/{root}/{folder}`: where its folder is. Opaque to clients, which pass
+   * it back as received; not the folder name.
+   */
   Id: string;
   /** The project name. */
   Name: string;
