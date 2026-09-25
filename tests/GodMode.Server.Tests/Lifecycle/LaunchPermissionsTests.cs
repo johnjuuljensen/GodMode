@@ -30,7 +30,21 @@ public class LaunchPermissionsTests
     private static void EditRootConfig(LifecycleHarness harness, Action<JsonObject> edit)
     {
         var path = Path.Combine(GodModeRoot(harness), "config.json");
-        File.WriteAllText(path, Edited(File.ReadAllText(path), edit));
+        WriteRootFile(path, Edited(File.ReadAllText(path), edit));
+    }
+
+    /// <summary>
+    /// Writes a root's config file once a project is there. The server reads the root's config in the
+    /// background too (a pull request check on each move to Idle or Stopped), and on Windows a write
+    /// while it reads is refused: the write is tried again.
+    /// </summary>
+    private static void WriteRootFile(string path, string content)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try { File.WriteAllText(path, content); return; }
+            catch (IOException) when (attempt < 50) { Thread.Sleep(20); }
+        }
     }
 
     private static string Edited(string json, Action<JsonObject> edit)
@@ -184,7 +198,7 @@ public class LaunchPermissionsTests
         var created = await harness.CreateProjectAsync();
         var create = await harness.WaitForStdinAsync(created.Id);
         await StopAsync(harness, created.Id);
-        File.WriteAllText(overlay, """{ "permissionMode": "plan" }""");
+        WriteRootFile(overlay, """{ "permissionMode": "plan" }""");
         await harness.Projects.ResumeProjectAsync(created.Id);
         var resume = await harness.WaitForLaunchAsync(created.Id, _ => true, index: 1);
 
