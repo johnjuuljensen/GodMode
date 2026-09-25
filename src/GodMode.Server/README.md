@@ -310,6 +310,7 @@ or `{}` when there is no pull request. The result is `ProjectStatus.PullRequest`
 - **Failures change nothing:** a non-zero exit, more than `StatusScriptTimeoutSeconds` (default 30, then the script is killed), more than 16 KB of stdout, or output that is not exactly the object above (unknown properties, other values, extra text) leaves the pull request as it was, and is logged as a warning, on every check that fails.
 - **Attention:** an open pull request with `changes_requested`, on a project that is Idle or Stopped, is a `Review` item until `MarkSeen` or a reply, and again when the review changes. `Review` and `Finished` items carry `PullRequestUrl`.
 - A root without `status` runs nothing, and its projects have no `PullRequest`.
+- **A recovered one is checked again.** `status.json` is in the project folder, which its session can write, so on recovery a `PullRequest` whose `url` is not an http(s) URL of at most 2048 characters is dropped (and logged), as the script's output would have been.
 
 `godmode-dev`'s `scripts/status.ps1` is an example using `gh pr view`. It prints `{}` only when there is no pull request (none for the branch, not a repository, a detached HEAD, `git` or `gh` not installed); any other `gh` failure, such as a network error, a rate limit or an expired login, exits non-zero, so the server keeps what it knew and keeps polling.
 
@@ -384,6 +385,10 @@ A project is a folder directly inside its root that has a `.godmode/status.json`
 **Project ID.** A project is identified by `{profile}/{root}/{folder}`: where its folder is. Two projects with the same name in different roots or profiles are separate projects, with their own process, output and SignalR group. Clients treat the ID as opaque and pass it back as they received it. The server derives it from the folder's location on every start and writes it to `status.json`, so a folder that was moved, or whose root has moved to another profile, is recovered under its current ID. Nothing else in `.godmode` holds the ID.
 
 The folder name comes from the project's name: spaces become underscores and characters that are invalid in a file name are dropped. A name that leaves no folder of its own (empty, `.`, `..`, or dots only) is refused before anything is created or run. So is a create script's `project_path` at or above the root.
+
+A root keeps some folders for itself at its top level, and no project may be one of them, whether named in the create dialog, reused (`__reuseExisting`), or returned as a create script's `project_path`: `.godmode-root` (the root's config and scripts), `logs` (its script logs and result files) and `.archived` (left over from archiving, which is gone). A delete of such a project would delete that folder. They are compared ignoring case and trailing dots and spaces, as Windows compares folder names, on every OS. A refused name creates nothing; a refused `project_path` leaves the create `Error` in the folder it was given, as a `project_path` at or above the root does.
+
+**`session-id` is only ever a GUID**, which is what the server asks for (`--session-id`) and what claude reports in `system/init`. The session can write the file itself, and the value is the argument after `--resume`, so a saved value that is not a GUID (`--settings=x` would be read as a flag) is logged and treated as no session: the resume starts a fresh session on a new GUID, told to carry on from the work in the folder, as it does when claude has no conversation for the session. A `system/init` reporting a session that is not a GUID is logged and ignored.
 
 ## Running the Server
 

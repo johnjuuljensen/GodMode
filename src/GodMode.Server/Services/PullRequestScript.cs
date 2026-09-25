@@ -97,8 +97,15 @@ public static class PullRequestScript
         : value.ValueKind != kind ? throw new FormatException($"pullRequest.{name} is a JSON {value.ValueKind}, not a {kind}")
         : value;
 
+    /// <summary>
+    /// Whether <paramref name="url"/> is a pull request link the server keeps: an absolute http(s)
+    /// URL of at most <see cref="MaxUrlLength"/> characters. Also what a recovered status.json must hold.
+    /// </summary>
+    public static bool IsValidUrl(string? url) =>
+        url is { Length: <= MaxUrlLength } && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http";
+
     private static string Url(string url) =>
-        url.Length <= MaxUrlLength && Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"
+        IsValidUrl(url)
             ? url
             : throw new FormatException($"pullRequest.url '{Cut(url)}' is not an http(s) URL of at most {MaxUrlLength} characters");
 

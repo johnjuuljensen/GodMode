@@ -109,7 +109,10 @@ public class StatusUpdater : IStatusUpdater
 
             case OutputEventType.System when IsSessionStart(outputEvent):
                 // The session claude keeps is the one it reports, which a resume must name
-                if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string sessionId && sessionId != project.SessionId)
+                if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string reported && !SessionIdFile.IsValid(reported))
+                    _logger.LogWarning("Project {ProjectId} reported a session id that is not a GUID; it keeps {SessionId}",
+                        project.Status.Id, project.SessionId);
+                else if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string sessionId && sessionId != project.SessionId)
                 {
                     _logger.LogInformation("Project {ProjectId} runs session {SessionId} (asked for {Requested})",
                         project.Status.Id, sessionId, project.SessionId);

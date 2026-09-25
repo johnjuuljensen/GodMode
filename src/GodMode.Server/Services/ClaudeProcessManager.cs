@@ -113,15 +113,19 @@ public class ClaudeProcessManager : IClaudeProcessManager
         Dictionary<string, string>? extraEnvironment = null,
         string[]? extraArgs = null)
     {
-        _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
-            project.Status.Id, project.SessionId);
-
-        if (string.IsNullOrEmpty(project.SessionId))
+        // No session to resume (none saved, or one that was no GUID): a fresh one takes its place,
+        // as it does when claude has no conversation for the session
+        if (project.SessionId is not { } sessionId)
         {
-            throw new InvalidOperationException($"Cannot resume project {project.Status.Id}: no session ID found");
+            _logger.LogWarning("Project {ProjectId} has no session to resume. Starting fresh session.", project.Status.Id);
+            project.SessionId = Guid.NewGuid().ToString();
+            return await StartFreshSessionAsync(project, cancellationToken, extraEnvironment, extraArgs);
         }
 
-        var args = BuildArgs(["--resume", project.SessionId], extraArgs);
+        _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
+            project.Status.Id, sessionId);
+
+        var args = BuildArgs(["--resume", sessionId], extraArgs);
 
         // claude has no conversation for the session: it exits at once, and a fresh session on the
         // same id takes its place. That launch uses the MCP config the resume was given, which is
@@ -135,10 +139,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
                     project.Status.Id, project.SessionId);
                 try
                 {
-                    await SessionIdFile.WriteAsync(project.ProjectPath, project.SessionId, cancellationToken);
-                    var freshArgs = BuildArgs(["--session-id", project.SessionId], extraArgs);
-                    await RunClaudeProcessAsync(project, freshArgs, "Continue from where we left off. Review the codebase and previous work.",
-                        cancellationToken, extraEnvironment);
+                    await StartFreshSessionAsync(project, cancellationToken, extraEnvironment, extraArgs);
                     return true;
                 }
                 catch (Exception ex)
@@ -147,6 +148,15 @@ public class ClaudeProcessManager : IClaudeProcessManager
                     return false;
                 }
             });
+    }
+
+    /// <summary>A new session on the project's session ID, told to carry on from the work in its folder.</summary>
+    private async Task<int> StartFreshSessionAsync(ProjectInfo project, CancellationToken cancellationToken,
+        Dictionary<string, string>? extraEnvironment, string[]? extraArgs)
+    {
+        await SessionIdFile.WriteAsync(project.ProjectPath, project.SessionId!, cancellationToken);
+        return await RunClaudeProcessAsync(project, BuildArgs(["--session-id", project.SessionId!], extraArgs),
+            "Continue from where we left off. Review the codebase and previous work.", cancellationToken, extraEnvironment);
     }
 
     private static string[] BuildArgs(string[] additionalArgs, string[]? extraArgs = null)
