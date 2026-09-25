@@ -267,4 +267,48 @@ public sealed class LocalServerTests : IAsyncLifetime
         Assert.Equal(WebSocketMessageType.Close, close.Type);
         Assert.Equal(WebSocketCloseStatus.EndpointUnavailable, close.CloseStatus);
     }
+
+    // ── The client's reconnect loop over the relay (#221): it needs a lost upstream to close the client's
+    // socket (else its onclose never fires), and each retry to reach the server afresh ──
+
+    [Fact]
+    public async Task An_upstream_that_dies_gets_the_client_connection_closed()
+    {
+        await using var doomed = await FakeUpstream.StartAsync("doomed");
+        var server = await AddServerAsync("key-a", doomed.Url);
+        await using var connection = await ConnectThroughRelayAsync(server.Id);
+        var closed = new TaskCompletionSource<Exception?>();
+        connection.Closed += err => { closed.TrySetResult(err); return Task.CompletedTask; };
+
+        await doomed.KillAsync();
+
+        // Well within SignalR's 30 s server timeout: the relay closed the socket, the client did not time out
+        await closed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await UntilAsync(() => _relay.ActiveRelayCount == 0, "the relay to let go of the socket");
+    }
+
+    [Fact]
+    public async Task A_restarted_upstream_gets_a_fresh_negotiate_from_each_new_connection()
+    {
+        var first = await FakeUpstream.StartAsync("first", url: Net.UnreachableUrl());
+        var server = await AddServerAsync("key-a", first.Url);
+        await using (var before = await ConnectThroughRelayAsync(server.Id))
+        {
+            Assert.Equal("first:x", await before.InvokeAsync<string>("Echo", "x"));
+            var closed = new TaskCompletionSource();
+            before.Closed += _ => { closed.TrySetResult(); return Task.CompletedTask; };
+            await first.KillAsync();
+            await closed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        // The retry while it is down is refused, and closed, as the client's next start() is
+        await Assert.ThrowsAnyAsync<Exception>(() => ConnectThroughRelayAsync(server.Id));
+
+        await using var restarted = await FakeUpstream.StartAsync("restarted", url: first.Url);
+        await using var after = await ConnectThroughRelayAsync(server.Id);
+
+        Assert.Equal("restarted:x", await after.InvokeAsync<string>("Echo", "x"));
+        Assert.Contains(restarted.HubRequests, r => r.Query.Contains("negotiateVersion"));
+        await UntilAsync(() => _relay.ActiveRelayCount == 1, "only the new connection's relay to be left");
+    }
 }
