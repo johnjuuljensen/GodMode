@@ -74,20 +74,25 @@ public class GracefulStopTests
     /// <summary>
     /// The stop takes claude's whole tree: a child it started, and a child whose parent is gone
     /// (re-parented), which a walk of claude's children cannot find. Both ignore the interrupt, so
-    /// only the kill of the process group or Job Object can end them.
+    /// only the kill of the process group or Job Object can end them: after claude exits on the
+    /// interrupt, or with claude, when it ignores it and outlives the grace period.
     /// </summary>
-    [Fact]
-    public async Task Stop_KillsClaudesWholeTree_AChildThatReparentedIncluded()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Stop_KillsClaudesWholeTree_AChildThatReparentedIncluded(bool claudeIgnoresTheInterrupt)
     {
-        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().SpawnChild().SpawnChild(detached: true).Sleep(120_000),
-            settings: Grace(5));
+        var script = claudeIgnoresTheInterrupt ? new FakeScript().IgnoreInterrupt() : new FakeScript();
+        await using var harness = new LifecycleHarness(script.EmitInit().AwaitStdin().SpawnChild().SpawnChild(detached: true).Sleep(120_000),
+            settings: Grace(1));
         var created = await harness.CreateProjectAsync();
         var launch = await harness.WaitForLaunchAsync(created.Id, l => l.Children.Count == 2);
         Assert.All(launch.Children, pid => Assert.True(LifecycleHarness.IsProcessAlive(pid), $"child {pid} is not running"));
 
         await harness.Projects.StopProjectAsync(created.Id);
 
-        Assert.Equal(0, harness.Launches(created.Id)[0].ExitCode);
+        Assert.Equal(claudeIgnoresTheInterrupt ? null : 0, harness.Launches(created.Id)[0].ExitCode);
+        Assert.False(LifecycleHarness.IsProcessAlive(launch.Pid), $"fake claude (pid {launch.Pid}) is still running after Stop");
         var alive = new List<int>();
         await LifecycleHarness.WaitForAsync(() =>
         {
