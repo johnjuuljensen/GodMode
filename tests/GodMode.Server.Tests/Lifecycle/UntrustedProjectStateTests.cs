@@ -40,7 +40,7 @@ public class UntrustedProjectStateTests
         var fresh = resume.ArgValue("--session-id");
         Assert.True(Guid.TryParseExact(fresh, "D", out _), $"the fresh session is '{fresh}', not a GUID");
         Assert.NotEqual(harness.Launches(created.Id)[0].ArgValue("--session-id"), fresh);
-        Assert.Equal(fresh, File.ReadAllText(sessionFile));
+        Assert.Equal(fresh, harness.ReadSessionIdFile(created.Id));
     }
 
     /// <summary>

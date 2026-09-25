@@ -220,6 +220,10 @@ public class TrueStateTests
         Assert.All(lines, l => JsonDocument.Parse(l.Json).Dispose());
         string[] written = ["\"text\":\"one\"", "\"text\":\"two\"", "\"text\":\"three\"", "\"result\":\"done\""];
         Assert.All(written, text => Assert.Single(lines, l => l.Json.Contains(text)));
+        // Idle is the result handled; its broadcast to the subscriber follows
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(live.Received.Any(p =>
+                p.Method == nameof(IProjectHubClient.OutputReceived) && p.RawJson!.Contains(written[^1]))), null,
+            () => "the result was not broadcast");
         var broadcast = live.Received.Where(p => p.Method == nameof(IProjectHubClient.OutputReceived)).ToArray();
         foreach (var text in written[1..])
             Assert.Equal(lines.Single(l => l.Json.Contains(text)).Offset, broadcast.Single(p => p.RawJson!.Contains(text)).Offset);

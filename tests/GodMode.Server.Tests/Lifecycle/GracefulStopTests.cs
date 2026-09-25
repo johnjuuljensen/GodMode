@@ -20,8 +20,18 @@ public class GracefulStopTests
     /// <summary>What the fake records for the interrupt a stop sends.</summary>
     private static string StopInterrupt => OperatingSystem.IsWindows() ? "SIGQUIT" : "SIGINT";
 
+    private const string WorkingText = "Working on it";
+
     /// <summary>A claude in the middle of a turn: its input closing would not end it, only an interrupt or a kill.</summary>
-    private static FakeScript Working(FakeScript? before = null) => (before ?? new FakeScript()).EmitInit().AwaitStdin().Sleep(120_000);
+    private static FakeScript Working(FakeScript? before = null) => (before ?? new FakeScript()).EmitInit().AwaitStdin().EmitAssistant(WorkingText).Sleep(120_000);
+
+    /// <summary>
+    /// Waits until claude has said it is working: its turn has begun. The prompt reaching its stdin is
+    /// not enough, as an interrupt before it starts the turn has no turn to end.
+    /// </summary>
+    private static Task InTurnAsync(LifecycleHarness harness, string projectId) =>
+        LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadOutputFile(projectId).Contains(WorkingText)), null,
+            () => $"claude did not start its turn.\n{harness.Describe(projectId)}");
 
     private static Dictionary<string, string?> Grace(int seconds) => new() { [ClaudeProcessManager.StopGracePeriodSetting] = seconds.ToString() };
 
@@ -35,6 +45,7 @@ public class GracefulStopTests
         await using var harness = new LifecycleHarness(Working(), settings: Grace(30));
         var created = await harness.CreateProjectAsync();
         var launch = await harness.WaitForStdinAsync(created.Id);
+        await InTurnAsync(harness, created.Id);
         var pushedBefore = harness.Hub.StatusPushes(created.Id).Count;
 
         var elapsed = Stopwatch.StartNew();
