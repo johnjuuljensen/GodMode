@@ -23,22 +23,33 @@ internal static class WebViewNavigation
         if (destination == WebViewDestination.Browser)
             _ = OpenOutsideAsync(new Uri(address!));
         else
-            Logger.LogWarning("Dropped a navigation to {Address} (new window: {NewWindow})", address ?? "no address", newWindow);
+            Logger.LogWarning("Dropped a navigation to {Address} (new window: {NewWindow})", ForLog(address), newWindow);
         return true;
     }
 
     private static async Task OpenOutsideAsync(Uri address)
     {
+        var logged = ForLog(address.OriginalString);
         try
         {
             if (await Launcher.Default.OpenAsync(address))
-                Logger.LogInformation("Opened {Address} in the system browser", address);
+                Logger.LogInformation("Opened {Address} in the system browser", logged);
             else
-                Logger.LogWarning("Nothing opened {Address}", address);
+                Logger.LogWarning("Nothing opened {Address}", logged);
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Could not open {Address} outside the app", address);
+            Logger.LogWarning(ex, "Could not open {Address} outside the app", logged);
         }
     }
+
+    /// <summary>
+    /// What a log line says about an address: an http or https one's origin, any other's scheme, and … for the rest.
+    /// A link in Claude's output can carry a token (a presigned URL) in its path, query or user info, so none of those
+    /// is logged.
+    /// </summary>
+    private static string ForLog(string? address) =>
+        !Uri.TryCreate(address, UriKind.Absolute, out var uri) ? address is null ? "no address" : "an address that is not absolute"
+        : uri.Scheme is "http" or "https" ? $"{uri.GetComponents(UriComponents.SchemeAndServer, UriFormat.UriEscaped)}/…"
+        : $"{uri.Scheme}:…";
 }

@@ -61,8 +61,11 @@ internal static class KeepOnApp
             if (_taken || url is null or "about:blank") return;
             _taken = true;
             WebViewNavigation.Intercept(url, newWindow: true);
-            view?.StopLoading();
-            view?.Post(() => view.Destroy());
+            if (view is null) return;
+            view.StopLoading();
+            // After this callback returns, not inside it. The stand-in is never attached, and a detached view's own
+            // Post waits for an attach (Android 7+), so it would never run
+            new Handler(Looper.MainLooper!).Post(view.Destroy);
         }
     }
 }

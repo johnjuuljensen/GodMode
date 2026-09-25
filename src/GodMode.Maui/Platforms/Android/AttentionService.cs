@@ -18,9 +18,12 @@ namespace GodMode.Maui;
 [Service(Exported = false, ForegroundServiceType = ServiceType)]
 public sealed class AttentionService : Service
 {
-    /// <summary>The issue's choice. Android 15 limits it to 6 hours a day, after which <see cref="OnTimeout(int, ForegroundService)"/> stops the service.</summary>
-#pragma warning disable CA1416 // Android below 10 has no service types and ignores it
-    private const ForegroundService ServiceType = ForegroundService.TypeDataSync;
+    /// <summary>
+    /// What the service does: it receives messages from the user's own servers. Android sets this type no time limit,
+    /// where dataSync gets 6 hours a day from Android 15 on.
+    /// </summary>
+#pragma warning disable CA1416 // Android 14 named the type; 10 to 13 check only that it is the manifest's, and below 10 there are none
+    private const ForegroundService ServiceType = ForegroundService.TypeRemoteMessaging;
 #pragma warning restore CA1416
 
     private const string ServiceChannel = "attention-service";
@@ -133,13 +136,6 @@ public sealed class AttentionService : Service
     {
         _logger.LogInformation("Network changed ({Access}); reconnecting attention", e.NetworkAccess);
         _watcher?.Reconnect();
-    }
-
-    /// <summary>Android 15's daily limit for a dataSync service is spent: stop now, or the app is killed. Opening the app starts it again.</summary>
-    public override void OnTimeout(int startId, ForegroundService fgsType)
-    {
-        _logger.LogWarning("Attention service reached Android's time limit; stopping");
-        StopSelf();
     }
 
     public override void OnDestroy()
