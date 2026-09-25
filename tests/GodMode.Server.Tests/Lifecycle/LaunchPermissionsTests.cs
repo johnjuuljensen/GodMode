@@ -185,6 +185,35 @@ public class LaunchPermissionsTests
         Assert.Equal(1, WarningsAbout(harness, "asks to skip permissions"));
     }
 
+    /// <summary>
+    /// settings.json names the project's action as well, so a session could name one whose overlay
+    /// allows skip: a launch skips only where every action of the root allows it, and gains it no other way.
+    /// </summary>
+    [Fact]
+    public async Task ProjectWhoseSettingsNameAnActionThatAllowsSkip_IsResumedAfterARestartWithoutIt()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+        File.WriteAllText(Path.Combine(GodModeRoot(harness), "config.plain.json"), "{}");
+        File.WriteAllText(Path.Combine(GodModeRoot(harness), "config.open.json"), """{ "allowSkipPermissions": true }""");
+        var created = await harness.Projects.CreateProjectAsync(new GodMode.Shared.Models.CreateProjectRequest(
+            LifecycleHarness.ProfileName, LifecycleHarness.RootName,
+            new Dictionary<string, JsonElement>
+            {
+                ["name"] = JsonSerializer.SerializeToElement("p1"),
+                ["prompt"] = JsonSerializer.SerializeToElement("Say hello"),
+            }, "plain"));
+        await harness.WaitForStdinAsync(created.Id);
+        await StopAsync(harness, created.Id);
+        EditSettings(harness, created.Id, settings => settings with { ActionName = "open", DangerouslySkipPermissions = true });
+
+        await harness.RestartAsync();
+        await harness.Projects.ResumeProjectAsync(created.Id);
+        var resume = await harness.WaitForLaunchAsync(created.Id, _ => true, index: 1);
+
+        Assert.DoesNotContain(Skip, resume.Argv);
+        Assert.Equal(1, WarningsAbout(harness, "asks to skip permissions"));
+    }
+
     // ── Permission mode ──
 
     /// <summary>An overlay's mode, kept with the project: its resume keeps it after the root has changed its own.</summary>
