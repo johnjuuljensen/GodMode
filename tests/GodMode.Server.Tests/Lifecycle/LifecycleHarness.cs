@@ -266,9 +266,21 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public ProjectStatus ReadStatusFile(string projectId)
     {
         var path = Path.Combine(ProjectPath(projectId), ".godmode", "status.json");
+        return Retried(() => JsonSerializer.Deserialize<ProjectStatus>(ReadShared(path), JsonDefaults.Options)!);
+    }
+
+    /// <summary>
+    /// session-id as it is on disk. The server replaces it whole (a new file moved over it), and on
+    /// Windows the file cannot be opened while it is being replaced; that is retried.
+    /// </summary>
+    public string ReadSessionIdFile(string projectId) =>
+        Retried(() => ReadShared(Path.Combine(ProjectPath(projectId), ".godmode", "session-id")));
+
+    private static T Retried<T>(Func<T> read)
+    {
         for (var attempt = 1; ; attempt++)
         {
-            try { return JsonSerializer.Deserialize<ProjectStatus>(ReadShared(path), JsonDefaults.Options)!; }
+            try { return read(); }
             catch (Exception ex) when (ex is IOException or JsonException && attempt < 50) { Thread.Sleep(20); }
         }
     }
@@ -277,7 +289,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         ReadShared(Path.Combine(ProjectPath(projectId), ".godmode", "output.jsonl"));
 
     /// <summary>Reads a file the server may still hold open for writing (output.jsonl, errs.txt, status.json).</summary>
-    private static string ReadShared(string path)
+    internal static string ReadShared(string path)
     {
         using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
         return reader.ReadToEnd();

@@ -238,13 +238,21 @@ public class RestartResumeTests
             Assert.Equal(CreateAction.DefaultResumePrompt, Prompt(await harness.WaitForStdinAsync(project.Id, index: 1)));
     }
 
-    /// <summary>A resumed claude that holds its slot a while: it starts its session 3 s after its first input.</summary>
-    private static FakeScript SlowToStart() => new FakeScript().AwaitStdin().Sleep(3000).EmitInit().AwaitStdin();
+    /// <summary>
+    /// A resumed claude that holds its slot until the test lets it go (<see cref="LetResumesStart"/>):
+    /// it starts its session then, after its first input.
+    /// </summary>
+    private static FakeScript HeldAtStart(LifecycleHarness harness) =>
+        new FakeScript().AwaitStdin().AwaitFile(ResumesMayStart(harness)).EmitInit().AwaitStdin();
+
+    private static string ResumesMayStart(LifecycleHarness harness) => Path.Combine(harness.RootPath, "resumes-may-start");
+
+    private static void LetResumesStart(LifecycleHarness harness) => File.WriteAllText(ResumesMayStart(harness), "");
 
     /// <summary>Restarts without carrying on, then starts carrying on and waits until 3 projects have their resume launched.</summary>
     private static async Task<Task> RestartResumingAsync(LifecycleHarness harness, IReadOnlyList<ProjectStatus> projects)
     {
-        harness.UseScript(SlowToStart());
+        harness.UseScript(HeldAtStart(harness));
         await harness.RestartAsync(resume: false);
         var resuming = harness.Projects.ResumeInterruptedProjectsAsync();
         await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Resumed(harness, projects).Count() == 3), null,
@@ -271,6 +279,7 @@ public class RestartResumeTests
         Assert.Equal(3, Resumed(harness, created).Count());
         var queued = Assert.Single(created.Except(Resumed(harness, created)));
         await harness.Projects.StopProjectAsync(queued.Id);
+        LetResumesStart(harness);
         await resuming.WaitAsync(LifecycleHarness.DefaultTimeout);
 
         Assert.Single(harness.Launches(queued.Id));

@@ -53,9 +53,8 @@ public class ResumeLaunchTests
             .AwaitStdin());
         var created = await harness.CreateProjectAsync();
         await harness.WaitForStdinAsync(created.Id);
-        var sessionFile = Path.Combine(harness.ProjectPath(created.Id), ".godmode", "session-id");
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(File.ReadAllText(sessionFile) == reported), null,
-            () => $"session-id is {File.ReadAllText(sessionFile)}, not the {reported} claude reported.\n{harness.Describe(created.Id)}");
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadSessionIdFile(created.Id) == reported), null,
+            () => $"session-id is {harness.ReadSessionIdFile(created.Id)}, not the {reported} claude reported.\n{harness.Describe(created.Id)}");
 
         await harness.Projects.StopProjectAsync(created.Id);
         await harness.WaitForStateAsync(created.Id, ProjectState.Stopped);

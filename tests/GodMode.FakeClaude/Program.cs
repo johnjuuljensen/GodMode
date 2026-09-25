@@ -140,6 +140,9 @@ async Task<int> PlayAsync()
             case ScriptStep.Sleep sleep:
                 await Task.Delay(sleep.Milliseconds);
                 break;
+            case ScriptStep.AwaitFile file:
+                while (!File.Exists(file.Path)) await Task.Delay(20);
+                break;
             case ScriptStep.Stderr text:
                 await stderr.WriteLineAsync(text.Text);
                 break;

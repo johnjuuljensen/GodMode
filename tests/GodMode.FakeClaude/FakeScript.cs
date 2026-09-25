@@ -58,6 +58,9 @@ public abstract record ScriptStep
 
     public sealed record Sleep(int Milliseconds) : ScriptStep;
 
+    /// <summary>Waits until the file at <paramref name="Path"/> exists: a test holds the fake here until it lets it go.</summary>
+    public sealed record AwaitFile(string Path) : ScriptStep;
+
     /// <summary>Writes one line to stderr.</summary>
     public sealed record Stderr(string Text) : ScriptStep;
 
@@ -106,6 +109,7 @@ public abstract record ScriptStep
 /// emit {"type":"system","subtype":"init","session_id":"{{session_id}}"}
 /// await-stdin
 /// sleep 100
+/// await-file C:\tmp\go
 /// stderr some text
 /// exit 1
 /// reject-resume
@@ -133,6 +137,7 @@ public sealed class FakeScript
     public FakeScript Emit(string jsonLine) => Add(new ScriptStep.Emit(jsonLine));
     public FakeScript AwaitStdin() => Add(new ScriptStep.AwaitStdin());
     public FakeScript Sleep(int milliseconds) => Add(new ScriptStep.Sleep(milliseconds));
+    public FakeScript AwaitFile(string path) => Add(new ScriptStep.AwaitFile(path));
     public FakeScript Stderr(string text) => Add(new ScriptStep.Stderr(text));
     public FakeScript Exit(int code) => Add(new ScriptStep.Exit(code));
     public FakeScript RejectResume() => Add(new ScriptStep.RejectResume());
@@ -201,6 +206,7 @@ public sealed class FakeScript
                 ScriptStep.Emit e => $"emit {e.Line}",
                 ScriptStep.AwaitStdin => "await-stdin",
                 ScriptStep.Sleep s => $"sleep {s.Milliseconds}",
+                ScriptStep.AwaitFile a => $"await-file {a.Path}",
                 ScriptStep.Stderr s => $"stderr {s.Text}",
                 ScriptStep.Exit e => $"exit {e.Code}",
                 ScriptStep.RejectResume => "reject-resume",
@@ -234,6 +240,7 @@ public sealed class FakeScript
                 "emit" => new ScriptStep.Emit(argument),
                 "await-stdin" => new ScriptStep.AwaitStdin(),
                 "sleep" => new ScriptStep.Sleep(int.Parse(argument)),
+                "await-file" => new ScriptStep.AwaitFile(argument),
                 "stderr" => new ScriptStep.Stderr(argument),
                 "exit" => new ScriptStep.Exit(int.Parse(argument)),
                 "reject-resume" => new ScriptStep.RejectResume(),
