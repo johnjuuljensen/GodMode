@@ -41,8 +41,7 @@ The main class for managing project folders. Provides methods for:
 using var project = ProjectFolder.Create(
     rootPath: "/projects",
     projectId: "my-project",
-    name: "My Project",
-    repoUrl: "https://github.com/user/repo"
+    name: "My Project"
 );
 
 // Write initial status
@@ -218,7 +217,6 @@ public record ProjectStatus(
     ProjectState State,        // Idle, Running, WaitingInput, Error, Stopped
     DateTime CreatedAt,
     DateTime UpdatedAt,
-    string? RepoUrl,
     string? CurrentQuestion,
     ProjectMetrics Metrics,
     GitStatus? Git,
