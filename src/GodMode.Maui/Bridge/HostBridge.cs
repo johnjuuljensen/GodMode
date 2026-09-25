@@ -1,137 +1,42 @@
-using System.Collections.Concurrent;
-using System.Text.Json;
-using GodMode.Shared;
+using GodMode.ClientBase.Bridge;
 using Microsoft.Extensions.Logging;
 
 namespace GodMode.Maui.Bridge;
 
 /// <summary>
-/// Manages bidirectional communication between the MAUI host and the React app
-/// via HybridWebView's raw message channel.
-///
-/// Supports four patterns:
-/// - Fire-and-forget: Send(type, payload) — one-way notification
-/// - Host request/response: RequestAsync — send with correlation ID, await React's response
-/// - React request/response: Handle(type, handler) — React sends with a correlation ID, the handler's result
-///   (or its exception message, as Error) goes back under the same ID and type
-/// - Events: MessageReceived — any other message from React
+/// The bridge (<see cref="BridgeChannel"/>) over HybridWebView's raw message channel. It answers only the app's
+/// own page, and the address it goes by is the page the platform's WebView shows.
 /// </summary>
-public class HostBridge
+public sealed class HostBridge : BridgeChannel
 {
     private readonly HybridWebView _webView;
-    private readonly ILogger _logger;
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonElement?>> _pending = new();
-    private readonly ConcurrentDictionary<string, Func<JsonElement?, Task<object?>>> _handlers = new();
 
-    /// <summary>
-    /// Raised when a message is received from the React app that is neither a response nor a handled request.
-    /// </summary>
-    public event Action<BridgeMessage>? MessageReceived;
-
-    public HostBridge(HybridWebView webView, ILogger logger)
+    public HostBridge(HybridWebView webView, ILogger logger) : base(logger)
     {
         _webView = webView;
-        _logger = logger;
+        // Android raises it on its JavaBridge thread; Windows on the UI thread, inside WebView2's WebMessageReceived
         _webView.RawMessageReceived += (_, e) =>
         {
             if (e.Message is { } message)
-                HandleMessageFromJs(message);
+                Receive(message);
         };
     }
 
-    /// <summary>Answers React's requests of one type with the handler's result.</summary>
-    public void Handle<TRequest, TResponse>(string type, Func<TRequest, Task<TResponse>> handler) =>
-        _handlers[type] = async payload =>
-        {
-            var request = payload.HasValue ? payload.Value.Deserialize<TRequest>(JsonDefaults.Options) : default;
-            return await handler(request ?? throw new ArgumentException($"{type} needs a payload"));
-        };
-
-    /// <summary>Answers React's requests of one type, which carry no payload, with the handler's result.</summary>
-    public void Handle<TResponse>(string type, Func<Task<TResponse>> handler) =>
-        _handlers[type] = async _ => await handler();
-
-    /// <summary>
-    /// Send a fire-and-forget message to the React app.
-    /// </summary>
-    public void Send(string type, object? payload = null) =>
-        SendRaw(new BridgeMessage(type, Payload: Serialize(payload)));
-
-    /// <summary>
-    /// Send a request to the React app and await a response.
-    /// </summary>
-    public async Task<T?> RequestAsync<T>(string type, object? payload = null, TimeSpan? timeout = null, CancellationToken ct = default)
+    // MAUI's handler takes WebView2's WebMessageReceivedEventArgs and passes on only the message. That event is
+    // raised for the top-level document, and the channel reads this on the UI thread while it is being raised
+    protected override string? PageAddress => _webView.Handler?.PlatformView switch
     {
-        var id = Guid.NewGuid().ToString("N");
-        var tcs = new TaskCompletionSource<JsonElement?>();
-        _pending[id] = tcs;
+#if ANDROID
+        Android.Webkit.WebView view => view.Url,
+#elif WINDOWS
+        Microsoft.UI.Xaml.Controls.WebView2 view => view.CoreWebView2?.Source,
+#elif IOS || MACCATALYST
+        WebKit.WKWebView view => view.Url?.AbsoluteString,
+#endif
+        _ => null,
+    };
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(timeout ?? TimeSpan.FromSeconds(30));
+    protected override void PostToPage(string message) => _webView.SendRawMessage(message);
 
-        await using var reg = cts.Token.Register(() =>
-        {
-            _pending.TryRemove(id, out _);
-            tcs.TrySetCanceled(ct);
-        });
-
-        SendRaw(new BridgeMessage(type, id, Serialize(payload)));
-
-        var result = await tcs.Task;
-        return result.HasValue
-            ? result.Value.Deserialize<T>(JsonDefaults.Options)
-            : default;
-    }
-
-    /// <summary>
-    /// Routes responses to pending requests and requests to their handlers, and raises MessageReceived for everything else.
-    /// </summary>
-    private void HandleMessageFromJs(string rawJson)
-    {
-        BridgeMessage? message;
-        try
-        {
-            message = JsonSerializer.Deserialize<BridgeMessage>(rawJson, JsonDefaults.Options);
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning("Failed to deserialize bridge message: {Error}", ex.Message);
-            return;
-        }
-
-        if (message is null) return;
-
-        if (message.Id is not null && _pending.TryRemove(message.Id, out var tcs))
-            tcs.TrySetResult(message.Payload);
-        else if (message.Id is not null && _handlers.TryGetValue(message.Type, out var handler))
-            _ = AnswerAsync(message, handler);
-        else
-            MessageReceived?.Invoke(message);
-    }
-
-    private async Task AnswerAsync(BridgeMessage request, Func<JsonElement?, Task<object?>> handler)
-    {
-        BridgeMessage response;
-        try
-        {
-            response = new BridgeMessage(request.Type, request.Id, Serialize(await handler(request.Payload)));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Bridge request {Type} failed", request.Type);
-            response = new BridgeMessage(request.Type, request.Id, Error: ex.Message);
-        }
-        SendRaw(response);
-    }
-
-    private void SendRaw(BridgeMessage message)
-    {
-        var json = JsonSerializer.Serialize(message, JsonDefaults.Compact);
-        MainThread.BeginInvokeOnMainThread(() => _webView.SendRawMessage(json));
-    }
-
-    private static JsonElement? Serialize(object? value) =>
-        value is null
-            ? null
-            : JsonSerializer.SerializeToElement(value, JsonDefaults.Options);
+    protected override void OnUiThread(Action action) => MainThread.BeginInvokeOnMainThread(action);
 }

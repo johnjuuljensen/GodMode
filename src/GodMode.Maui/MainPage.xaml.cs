@@ -15,6 +15,15 @@ public partial class MainPage : ContentPage
         // React asks the shell for the relay's URL and secret over the bridge (relay.info).
         ShellBridge.Attach(WebView, MauiProgram.Services);
 
+        // The WebView shows only the app: a link opens outside it (WebViewNavigation)
+#if ANDROID
+        WebView.HandlerChanged += (_, _) =>
+        {
+            if (WebView.Handler is Microsoft.Maui.Handlers.HybridWebViewHandler handler)
+                KeepOnApp.Attach(handler);
+        };
+#endif
+
 #if WINDOWS
         WebView.HandlerChanged += (_, _) =>
         {
@@ -22,6 +31,7 @@ public partial class MainPage : ContentPage
             {
                 wv2.CoreWebView2Initialized += async (_, _) =>
                 {
+                    KeepOnApp.Attach(wv2.CoreWebView2);
                     wv2.CoreWebView2.Settings.AreDevToolsEnabled = true;
 
                     var logger = MauiProgram.LoggerFactory.CreateLogger("WebView");
