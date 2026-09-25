@@ -117,12 +117,14 @@ public class ProjectIdentityTests
     /// <summary>
     /// A folder written before the ID changed (status.json <c>Id</c> the bare folder name) recovers
     /// under the new ID, which is written back to status.json. Its settings and session are kept:
-    /// they never held the ID. The old bare ID no longer finds it.
+    /// they never held the ID. The old bare ID no longer finds it. Its root allows skip-permissions, so
+    /// the setting it kept is honoured.
     /// </summary>
     [Fact]
     public async Task FolderFromBeforeTheIdChanged_IsRecoveredUnderTheNewId_WithItsSettingsAndSession()
     {
-        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().EmitAssistant("Resumed.").EmitResult());
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().EmitAssistant("Resumed.").EmitResult(),
+            rootConfig: new Dictionary<string, object> { ["allowSkipPermissions"] = true });
         const string sessionId = "0f8fad5b-d9cb-469f-a165-70867728950e";
         WriteOldShapeProject(Path.Combine(harness.RootPath, "old-one"), "old-one", sessionId, skipPermissions: true);
         var id = $"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/old-one";

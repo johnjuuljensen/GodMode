@@ -206,7 +206,7 @@ A root is a subdirectory of `ProjectRootsDir` that contains `.godmode-root/`. Th
 ```
 root-name/
 ├── .godmode-root/
-│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, resumeOnRestart, resumePrompt)
+│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, permissionMode, allowSkipPermissions, resumeOnRestart, resumePrompt)
 │   ├── config.{action}.json       # Per-action overlays (merged with base)
 │   ├── {action}/
 │   │   ├── schema.json            # Input form schema (JSON Schema)
@@ -223,6 +223,8 @@ root-name/
 **Profile assignment**: `profileName` in `config.json` puts the root in that profile. Roots without it go to `Default`.
 
 **MCP servers** are not root config: a repo brings its own, and GodMode adds only its own MCP endpoint (Section 8).
+
+**Permissions** are the root's, not the project's. `permissionMode` (`acceptEdits`, `auto`, `manual`, `dontAsk`, `plan`; `bypassPermissions` is refused, and any other value is a config error) is passed as `--permission-mode`, beside the permission prompt (8.2). A create keeps it in the project's `settings.json`, and its launches reuse it after the root's config changes, as they reuse its model. `allowSkipPermissions` (default `false`) is the only way a session runs with `--dangerously-skip-permissions`: where it is false the create form does not offer Skip Permissions and the server refuses a create that asks. Every launch (create, resume, a reply's resume, a restart's) passes the flag only when the project's `settings.json` asks for it and the root's config, read then, allows it for every action (that file names the project's action too). That file is in the project folder, which the session can write, so it only asks: a project whose `settings.json` asks under a root that does not allow it launches without the flag, and the server logs a warning once. With skip, the permission mode is left out. The server README (*Permissions*) has what each mode was measured to send to the prompt.
 
 **Pull request status**: a root's optional `status` script prints the project's pull request as JSON (`{"pullRequest": {url, number, state, review}}`, or `{}`), and the server keeps it in `ProjectStatus.PullRequest` in `status.json`. It runs on each transition to Idle or Stopped and, while the pull request is open, every 10 minutes. Only that schedule is in memory. The server parses the output strictly and knows nothing of the VCS.
 
@@ -241,7 +243,7 @@ Key services:
 {root}/{project-id}/
 ├── .godmode/
 │   ├── status.json      # Current state, metrics
-│   ├── settings.json    # Per-project settings (skip-permissions, etc.)
+│   ├── settings.json    # Per-project settings (action, permission mode, skip-permissions asked for)
 │   ├── input.jsonl      # User input log
 │   ├── output.jsonl     # Claude output stream
 │   ├── session-id       # Claude session ID for resumption
@@ -369,7 +371,7 @@ GodMode gives a session one MCP server, its own MCP endpoint (8.2). It configure
 
 The server writes the session's MCP config, its own entry alone, to `.godmode/mcp-config.json` in the project (owner-only where the OS allows) and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
 
-**Nothing is pre-approved.** GodMode passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (8.2), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`) or the project runs with skip-permissions.
+**Nothing is pre-approved.** GodMode passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (8.2), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's permission mode lets it through, or the project runs with skip-permissions, which only a root with `allowSkipPermissions` allows (4.2).
 
 ### 8.2 The GodMode MCP Endpoint
 

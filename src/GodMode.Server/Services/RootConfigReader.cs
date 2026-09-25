@@ -156,6 +156,9 @@ public class RootConfigReader : IRootConfigReader
     {
         var json = File.ReadAllText(path);
         var raw = JsonSerializer.Deserialize<RawConfig>(json, JsonOptions) ?? new RawConfig();
+        // A mode claude does not have, or bypassPermissions, is an error in the file that names it
+        if (raw.PermissionMode is { } mode)
+            raw = raw with { PermissionMode = PermissionModes.Canonical(mode) ?? throw new InvalidDataException($"{Path.GetFileName(path)}: {PermissionModes.Refusal(mode)}") };
         // GodMode gives a session no MCP server but its own: a leftover mcpServers is not an error
         if (raw.Unrecognized?.Keys.Any(key => key.Equals(IgnoredMcpServersKey, StringComparison.OrdinalIgnoreCase)) == true
             && _ignoredMcpLogged.TryAdd(Path.GetFullPath(path), 0))
@@ -181,7 +184,9 @@ public class RootConfigReader : IRootConfigReader
         NameTemplate = overlay.NameTemplate ?? baseConfig.NameTemplate,
         PromptTemplate = overlay.PromptTemplate ?? baseConfig.PromptTemplate,
         ScriptsCreateFolder = overlay.ScriptsCreateFolder ?? baseConfig.ScriptsCreateFolder,
-        Model = overlay.Model ?? baseConfig.Model
+        Model = overlay.Model ?? baseConfig.Model,
+        AllowSkipPermissions = overlay.AllowSkipPermissions ?? baseConfig.AllowSkipPermissions,
+        PermissionMode = overlay.PermissionMode ?? baseConfig.PermissionMode
     };
 
     /// <summary>
@@ -206,7 +211,9 @@ public class RootConfigReader : IRootConfigReader
             // One script: its output is the answer, and two would give two
             Status: NormalizeScriptPaths(raw.Status, godModeRootPath) is [var status] ? status : null,
             ResumeOnRestart: raw.ResumeOnRestart ?? true,
-            ResumePrompt: raw.ResumePrompt is { Length: > 0 } resumePrompt ? resumePrompt : CreateAction.DefaultResumePrompt
+            ResumePrompt: raw.ResumePrompt is { Length: > 0 } resumePrompt ? resumePrompt : CreateAction.DefaultResumePrompt,
+            AllowSkipPermissions: raw.AllowSkipPermissions ?? false,
+            PermissionMode: raw.PermissionMode
         );
     }
 
@@ -303,6 +310,8 @@ public class RootConfigReader : IRootConfigReader
         public bool? ScriptsCreateFolder { get; init; }
         public bool? StripEnvVarProfile { get; init; }
         public string? Model { get; init; }
+        public bool? AllowSkipPermissions { get; init; }
+        public string? PermissionMode { get; init; }
 
         /// <summary>Keys this reader does not know, such as a leftover MCP server config.</summary>
         [JsonExtensionData]
