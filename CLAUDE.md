@@ -64,11 +64,10 @@ cd src/GodMode.Client.React && npm run dev
 
 - **GodMode.Shared** — Shared types, models, enums, and SignalR hub interfaces (`IProjectHub`, `IProjectHubClient`)
 - **GodMode.Server** — ASP.NET SignalR server that spawns/manages Claude Code processes, serves React SPA
-- **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation (npm project, not in the slnx)
+- **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation. An npm project with a NoTargets `GodMode.Client.React.csproj` in the slnx, which runs TypeGen and `npm run build`; GodMode.Server and GodMode.Maui reference it
 - **GodMode.ClientBase** — Shared .NET client abstractions (host providers, server registry, token protection)
 - **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React
 - **GodMode.ProjectFiles** — File system utilities for project folders (status.json, JSONL streams)
-- **GodMode.McpBridge** — stdio MCP server given to every Claude session, for reporting results and status back to the server (npm project, not in the slnx)
 - **SignalR.Proxy** — SignalR WebSocket relay used by MAUI for multi-server connectivity
 - **GodMode.Server.Tests** — xUnit tests for GodMode.Server (`tests/`)
 - **GodMode.TypeGen** — build-time generator of the React client's hub types from GodMode.Shared (`tools/`)
@@ -80,13 +79,13 @@ cd src/GodMode.Client.React && npm run dev
 - `IProjectHubClient` (Shared) — Server→Client callbacks (including `CreationProgress`)
 - `ProjectHub` (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
 - `HubConnectionFactory` (ClientBase) — .NET clients get a raw `HubConnection` and use `TypedSignalR.Client`'s `CreateHubProxy<IProjectHub>()` for typed calls
-- `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of GodMode.Server (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
+- `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of GodMode.Server or GodMode.Maui (via `GodMode.Client.React.csproj`) (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
 
 **Config-Driven Project Roots (Multi-File)**
 - A root is a subdirectory of `ProjectRootsDir` (appsettings, default `roots`) that contains a `.godmode-root/` folder with config files
 - `config.json` defines base/shared config (profileName, prepare, delete, environment, claudeArgs)
 - Roots and profiles (`{ProjectRootsDir}/.profiles/`) are maintained by hand on the host: no hub method writes config, and the server archives nothing
-- GodMode gives a session one MCP server, its own bridge, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
+- GodMode gives a session one MCP server, the server's own `/mcp` endpoint, whose only tool is the permission prompt, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
 - `config.{action}.json` files define per-action overlays (merged with base)
 - `{actionName}/schema.json` provides input schema by convention (falls back to default name+prompt)
 - `RootConfigReader` discovers, merges, and resolves configs fresh on each operation (no restart needed)

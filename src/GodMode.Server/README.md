@@ -10,7 +10,7 @@ SignalR server for GodMode. It runs Claude Code sessions in project folders on t
 - **Script-Based Creation**: VCS-agnostic — all prepare/create/delete logic lives in scripts, not server code
 - **Cross-Platform Scripts**: Write `.ps1` scripts once; they run under `pwsh` on Windows and Linux
 - **State Persistence**: Project state lives in each project's `.godmode/` folder and is recovered on restart
-- **MCP Bridge**: Every session gets the `godmode-bridge` MCP server for reporting results and status back
+- **Permission prompts**: Every session asks the user for permission through the server's own MCP endpoint, `/mcp`, whose one tool is claude's `--permission-prompt-tool`
 
 ## Configuration
 
@@ -48,7 +48,7 @@ A same-host reverse proxy or tunnel (`tailscale serve`, cloudflared, `ssh -L`, n
 
 The shipped config binds `http://127.0.0.1:31337`, so a fresh `dotnet run` is reachable only from the same machine. The browser client asks for the key once and keeps it in that browser. The MAUI app stores the key per server (the access token you enter when adding it) and adds it when relaying.
 
-**Reaching the server from other devices.** Bind to a private-network address, such as the machine's Tailscale IP, rather than `0.0.0.0`, and set a key. Keep the loopback binding as well: projects' MCP bridge calls back to the server on `localhost`.
+**Reaching the server from other devices.** Bind to a private-network address, such as the machine's Tailscale IP, rather than `0.0.0.0`, and set a key. Keep the loopback binding as well: projects' claude calls the server's MCP endpoint on it.
 
 ```bash
 # Generate a key once, e.g. with: openssl rand -hex 32
@@ -160,7 +160,7 @@ Script fields accept either a single string or a string array in JSON. Paths are
 
 ### MCP Servers
 
-GodMode gives a session one MCP server, its own `godmode-bridge`, in the `--mcp-config` file it launches claude with. It configures no others:
+GodMode gives a session one MCP server, its own: `godmode`, this server's `/mcp` endpoint, in the `--mcp-config` file it launches claude with (see [The MCP endpoint](#the-mcp-endpoint)). It configures no others:
 
 - A repo brings its MCP servers in its own `.mcp.json` (Claude Code's project scope).
 - User-scoped servers live in the profile's Claude config: the `CLAUDE_CONFIG_DIR` its `environment` (or the root's) sets, for example with `claude mcp add --scope user` run with that `CLAUDE_CONFIG_DIR`.
@@ -168,6 +168,25 @@ GodMode gives a session one MCP server, its own `godmode-bridge`, in the `--mcp-
 A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: the server logs a warning once for each, and ignores it.
 
 GodMode pre-approves no tool: it passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (`WaitingPermission`), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`) or the project runs with `skipPermissions`.
+
+### The MCP endpoint
+
+`/mcp` serves MCP over streamable HTTP, statelessly, with one tool: `permission_prompt`. claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode__permission_prompt` and an MCP config whose only entry is:
+
+```json
+{ "mcpServers": { "godmode": {
+  "type": "http",
+  "url": "http://127.0.0.1:31337/mcp",
+  "headers": { "Authorization": "Bearer <project token>", "X-GodMode-Project-Id": "<project ID>" }
+} } }
+```
+
+- **The URL** is an address this machine reaches the server on, from the addresses it is bound to: a loopback binding first, a wildcard's `127.0.0.1` next, else the one IP bound.
+- **The token** is issued afresh for each launch and lives only in memory and in this file. The file is `.godmode/mcp-config.json` in the project, owner-only where the OS allows, and is deleted when the process exits. No environment variable carries it.
+- **Only a project token opens `/mcp`**, and only for the project it was issued to. Neither the user's API key nor a keyless loopback caller gets in, and a project token opens nothing else.
+- **The tool** takes claude's flat arguments, `tool_name`, `input` (an object) and `tool_use_id` (optional). It waits until the user answers, however long that takes, and returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}` as text.
+- **While it waits,** it sends a progress notification every `PermissionPromptKeepAliveSeconds` (default 30). claude gives up on a tool call that sends no response or progress for 300 seconds.
+- **When claude cancels the call**, or its connection drops, the request is withdrawn (denied).
 
 ### Input Schema (Convention-Based)
 
@@ -209,7 +228,7 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 |----------|-------------|
 | `GODMODE_ROOT_PATH` | Root directory path |
 | `GODMODE_PROJECT_PATH` | Project directory path |
-| `GODMODE_PROJECT_ID` | The project's folder name (not the project ID below; claude's own `GODMODE_PROJECT_ID`, for the MCP bridge, is the project ID) |
+| `GODMODE_PROJECT_ID` | The project's folder name (not the project ID below) |
 | `GODMODE_PROJECT_NAME` | Display name |
 | `GODMODE_INPUT_*` | All form inputs (key in upper snake case, e.g. `GODMODE_INPUT_ISSUE_NUMBER`) |
 | `GODMODE_RESULT_FILE` | Create scripts only: a file the script can write `key=value` lines to (see below) |
@@ -289,7 +308,7 @@ cd publish
 ./GodMode.Server
 ```
 
-The machine also needs `claude` on the `PATH`, `pwsh` for root scripts, and Node to run the MCP bridge. The build and a publish put the bridge at `mcp-bridge/godmode-mcp-bridge.cjs` next to the server (`npm run build` in `src/GodMode.McpBridge` makes it, in `dist/`); `McpBridgePath` or `GODMODE_MCP_BRIDGE_PATH` points elsewhere. The server does not start without it.
+The machine also needs `claude` on the `PATH` and `pwsh` for root scripts. The server itself needs no Node. A repo whose `.mcp.json` starts MCP servers with `npx` needs it, as does one with a JavaScript toolchain.
 
 ## SignalR Hub API
 
@@ -335,12 +354,13 @@ Utility:
 
 - `GET /health` — Anonymous liveness probe
 - `GET /servers`, `GET /events` — The same shape as the MAUI app's local proxy, so the React client works against either
-- `POST /api/internal/result`, `/status`, `/review`, `/permission` — Called by the MCP bridge with its per-project token (`/permission` answers when the user does)
+- `POST /mcp` — GodMode's MCP endpoint, for its sessions' claude, with the project token of its MCP config: see [The MCP endpoint](#the-mcp-endpoint)
 
 ## Dependencies
 
 - **.NET 10** — Runtime
 - **SignalR** — Real-time communication
+- **ModelContextProtocol.AspNetCore** — The MCP endpoint
 - **GodMode.Shared** — Shared types and models
 - **GodMode.ProjectFiles** — Project folder management
 

@@ -21,18 +21,14 @@ A server runs on a machine you own: a PC, a VM or a GitHub Codespace. Its **proj
 GodMode.slnx
 ├── src/
 │   ├── GodMode.Shared/            # Shared types, models, enums, hub interfaces
-│   ├── GodMode.Server/            # ASP.NET SignalR server, spawns Claude processes, serves the SPA
+│   ├── GodMode.Server/            # ASP.NET SignalR server, spawns Claude processes, serves the SPA and the MCP endpoint
+│   ├── GodMode.Client.React/      # React SPA (Vite + Zustand + SignalR), an npm project; its NoTargets csproj builds it
 │   ├── GodMode.ProjectFiles/      # File system utilities for project folders
 │   ├── GodMode.ClientBase/        # Shared .NET client abstractions (host providers, registry)
 │   ├── GodMode.Maui/              # MAUI app (Android, iOS, macOS, Windows) — hosts React
 │   └── SignalR.Proxy/             # SignalR WebSocket relay for MAUI
 └── tests/
     └── GodMode.Server.Tests/      # xUnit tests for GodMode.Server
-
-Not in the slnx (npm projects):
-src/
-├── GodMode.Client.React/          # React SPA (Vite + Zustand + SignalR); built into the server's wwwroot
-└── GodMode.McpBridge/             # stdio MCP server the server gives every Claude session (Section 8.2)
 ```
 
 ### Project Dependency Graph
@@ -63,7 +59,6 @@ GodMode.Maui
 | New React UI component | `src/GodMode.Client.React/src/components/{Feature}/` |
 | New React store action | `src/GodMode.Client.React/src/store/index.ts` |
 | New TypeScript hub type | Generated: add the C# type to `GodMode.Shared` and build GodMode.Server (`tools/GodMode.TypeGen` writes `signalr/generated/hub-types.ts`). Client-only types go in `signalr/types.ts` |
-| New tool for Claude sessions to call back into GodMode | `src/GodMode.McpBridge/src/index.ts` + an `/api/internal/*` endpoint in `Program.cs` |
 | Client-side .NET abstractions | `GodMode.ClientBase/` |
 | File system project utilities | `GodMode.ProjectFiles/` |
 | **All UI changes** | **React only** — never in .NET projects |
@@ -227,7 +222,7 @@ root-name/
 
 **Profile assignment**: `profileName` in `config.json` puts the root in that profile. Roots without it go to `Default`.
 
-**MCP servers** are not root config: a repo brings its own, and GodMode adds only its bridge (Section 8).
+**MCP servers** are not root config: a repo brings its own, and GodMode adds only its own MCP endpoint (Section 8).
 
 **Pull request status**: a root's optional `status` script prints the project's pull request as JSON (`{"pullRequest": {url, number, state, review}}`, or `{}`), and the server keeps it in `ProjectStatus.PullRequest` in `status.json`. It runs on each transition to Idle or Stopped and, while the pull request is open, every 10 minutes. Only that schedule is in memory. The server parses the output strictly and knows nothing of the VCS.
 
@@ -266,7 +261,7 @@ The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMo
 
 With no key and any non-loopback binding, the server **refuses to start**. The shipped binding is `http://127.0.0.1:31337`. Binding to another address, such as the machine's Tailscale IP, needs a key. The Docker image sets `URLS=http://+:31337`, so it needs a key too.
 
-Only `/health` and the SPA's static files are anonymous. `/api/internal/*` uses a per-project token instead (Section 8.2). `src/GodMode.Server/README.md` has the full binding guide.
+Only `/health` and the SPA's static files are anonymous. The MCP endpoint, `/mcp`, takes a per-project token instead, and nothing else (Section 8.2). `src/GodMode.Server/README.md` has the full binding guide.
 
 ### 4.5 React Client Architecture
 
@@ -354,8 +349,9 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 | `EnvironmentExpander` | Expands `${VAR}` in config values and strips profile prefixes from server env vars |
 | `QuestionDetection` | Detects when Claude's turn ends in a question for the user |
 | `PullRequestPoller` / `PullRequestScript` | When a root's status script runs for each project, and the strict reading of its output (owned by `ProjectManager`, not registered) |
+| `PermissionPromptTool` | The MCP endpoint's one tool, claude's permission prompt (Section 8.2); registered with `AddMcpServer`, made per call |
 
-All services are registered as **singletons** in `Program.cs`. Authentication lives in `Auth/` (`AuthModeSelector`, `GodModeAuthenticationHandler`).
+All services are registered as **singletons** in `Program.cs`, except the MCP tool. Authentication lives in `Auth/` (`AuthModeSelector`, `GodModeAuthenticationHandler`).
 
 ---
 
@@ -363,31 +359,24 @@ All services are registered as **singletons** in `Program.cs`. Authentication li
 
 ### 8.1 Where a Session's MCP Servers Come From
 
-GodMode gives a session one MCP server, its own bridge (8.2). It configures no others:
+GodMode gives a session one MCP server, its own MCP endpoint (8.2). It configures no others:
 
 | Source | Where |
 |---|---|
 | The repo | its `.mcp.json` (Claude Code's project scope) |
 | The profile's Claude account | user scope in the `CLAUDE_CONFIG_DIR` the profile's or root's `environment` sets |
 
-The server writes the session's MCP config, the bridge alone, to `.godmode/mcp-config.json` in the project and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
+The server writes the session's MCP config, its own entry alone, to `.godmode/mcp-config.json` in the project (owner-only where the OS allows) and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
 
 **Nothing is pre-approved.** GodMode passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (8.2), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`) or the project runs with skip-permissions.
 
-### 8.2 The GodMode MCP Bridge
+### 8.2 The GodMode MCP Endpoint
 
-Every session also gets `godmode-bridge`, the stdio MCP server in `src/GodMode.McpBridge` (Node). The server build bundles it into one file with no dependencies, `mcp-bridge/godmode-mcp-bridge.cjs` next to the server's binaries, and a publish ships it there too. It gives Claude these tools:
+The server hosts one MCP endpoint, `/mcp` (`ModelContextProtocol.AspNetCore`, streamable HTTP, stateless), in-process. It has one tool, `permission_prompt`, which exists for claude's `--permission-prompt-tool` alone. It offers no other tools, for sessions or for operators.
 
-| Tool | Calls | Effect |
-|---|---|---|
-| `godmode_submit_result` | `POST /api/internal/result` | Stores the project's structured result |
-| `godmode_update_status` | `POST /api/internal/status` | Sets a custom status message shown in the UI |
-| `godmode_request_human_review` | `POST /api/internal/review` | Flags the project for human attention |
-| `permission_prompt` | `POST /api/internal/permission`, answered when the user answers | claude's `--permission-prompt-tool`: see below |
+Each session's MCP config has one entry for it, `godmode`: `"type": "http"`, the endpoint's URL, and headers carrying `Authorization: Bearer <project token>` and `X-GodMode-Project-Id`. The URL is an address this machine reaches the server on, picked from the addresses it is bound to (a loopback binding first, a wildcard's loopback next, else the one IP bound). The token is issued afresh for each launch and lives only in memory and in that file; claude's environment carries no `GODMODE_*` variable. `/mcp` takes only a project token, for the project it was issued to: not the user's API key, not a keyless loopback caller. A project token opens nothing else.
 
-The server injects `GODMODE_PROJECT_ID`, `GODMODE_PROJECT_TOKEN` (per-project token that authorizes only `/api/internal/*` for that project) and `GODMODE_SERVER_URL`, an address this machine reaches the server on, picked from the addresses it is bound to (a loopback binding first, a wildcard's loopback next, else the one IP bound). It finds the bridge through the `McpBridgePath` setting (or `GODMODE_MCP_BRIDGE_PATH`), or next to its binaries, and refuses to start without it.
-
-**Permission prompts.** claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode-bridge__permission_prompt`, so a tool call that needs approval waits for the user instead of being denied. claude calls `permission_prompt` with `{tool_name, input, tool_use_id}`; the bridge POSTs it and holds the HTTP request open until the user answers (`node:http`, since `fetch` gives up after 5 minutes), then returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}`. The project is `WaitingPermission` with `ProjectStatus.PendingPermission` (a server-built one-line `Summary` such as `Bash: git push origin x`), answered with the hub's `RespondToPermission`. The same flag makes claude offer `AskUserQuestion` in `--print` mode, and ask it through the same tool: that is `WaitingInput` with `PendingQuestion`, answered with `AnswerQuestion`. A request survives a client disconnect, not a server restart: the bridge's call fails and claude sees a deny. A chat message sent while one waits answers it (a single question takes it as its answer; otherwise it is a deny carrying the text).
+**Permission prompts.** claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode__permission_prompt`, so a tool call that needs approval waits for the user instead of being denied. claude calls `permission_prompt` with `{tool_name, input, tool_use_id}`. The call waits until the user answers, however long that takes, and returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}` as its text. While it waits, it sends a progress notification every `PermissionPromptKeepAliveSeconds` (30): claude gives up on a tool call that sends no response or progress for 300 seconds. When claude cancels the call, or its connection drops, the request is withdrawn. The project is `WaitingPermission` with `ProjectStatus.PendingPermission` (a server-built one-line `Summary` such as `Bash: git push origin x`), answered with the hub's `RespondToPermission`. The same flag makes claude offer `AskUserQuestion` in `--print` mode, and ask it through the same tool: that is `WaitingInput` with `PendingQuestion`, answered with `AnswerQuestion`. A request survives a client disconnect, not a server restart: claude's call fails and it sees a deny. A chat message sent while one waits answers it (a single question takes it as its answer; otherwise it is a deny carrying the text).
 
 **Attention.** `GetAttention` answers "what needs me on this server": one `AttentionItem` per project, oldest first, of kind `Permission`, `Question` (an AskUserQuestion, carried whole, or a turn that ended on `?`), `Error`, `Review` (changes requested on the project's open pull request) or `Finished` (a result the user has not seen; it and `Review` carry `PullRequestUrl`). It is derived from the status alone, and every field it reads is in `status.json` (`LastResult`, `LastResultAt`, `QuestionAt`, `SeenAt`, `PullRequest`), so a restart does not change the answer; `MarkSeen` and any reply move `SeenAt`. `AttentionChanged` pushes the whole list after a status push, only when the list differs from the last one pushed. `ReplyAndResume` answers any of it: `SendInput` to a running claude, otherwise a resume, the text, and a wait for `system/init`. claude writes nothing, not even `system/init`, until it has read its first input, so the text is sent first; the wait ends with an error if claude exits first or the `SessionStartTimeoutSeconds` setting (60) passes, and the text is sent again if the resume found no conversation and a fresh session replaced it.
 
@@ -417,7 +406,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
   --urls "http://127.0.0.1:31337;http://$(tailscale ip -4):31337"
 ```
 
-For a long-running server, `dotnet publish -c Release` and run the output. Put roots in `ProjectRootsDir` (default `roots` under the working directory). The machine needs `claude`, `git`, `pwsh`, Node (for the MCP bridge and `npx` MCP servers) and whatever the roots' scripts call, such as `gh`.
+For a long-running server, `dotnet publish -c Release` and run the output. Put roots in `ProjectRootsDir` (default `roots` under the working directory). The machine needs `claude`, `git`, `pwsh` and whatever the roots' scripts call, such as `gh`. GodMode itself needs no Node; a repo whose `.mcp.json` starts `npx` MCP servers does.
 
 ### 9.3 GitHub Codespaces
 
@@ -446,7 +435,7 @@ Stage 3: .NET ASP.NET 10.0 runtime — final image (`runtime` target)
 Stage 4: runtime + .NET SDK — the `:sdk` tag, for sessions that build .NET code
 ```
 
-The runtime image includes the published server and SPA, git, curl, Node 22, PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`, so run it with `-e Authentication__ApiKey=<key>`. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
+The runtime image includes the published server and SPA, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`, so run it with `-e Authentication__ApiKey=<key>`. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
 
 GitHub Actions (`.github/workflows/build-and-push.yml`) builds and pushes both targets to GHCR (`ghcr.io/johnjuuljensen/godmode`) on pushes to `master` that touch `src/`, `tests/` or the slnx (`latest`, `sdk`), and on a published release (plus the release tag).
 

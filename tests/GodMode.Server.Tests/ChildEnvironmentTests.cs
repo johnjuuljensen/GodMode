@@ -63,19 +63,17 @@ public class ChildEnvironmentTests
         {
             ["GITHUB_TOKEN"] = "ghp-named-in-config",
             ["PATH"] = "/opt/tools",
-            ["GODMODE_PROJECT_TOKEN"] = "token",
         });
 
         Assert.Equal("ghp-named-in-config", env["GITHUB_TOKEN"]);
         Assert.Equal("/opt/tools", env["PATH"]);
-        Assert.Equal("token", env["GODMODE_PROJECT_TOKEN"]);
     }
 
     [Fact]
-    public void ServerGodModeVariables_AreNotInherited_OnlyTheOnesSetForTheLaunch()
+    public void ServerGodModeVariables_AreNotInherited_OnlyTheOnesConfigured()
     {
         var env = ChildEnvironment.Build(
-            [new("GODMODE_PROJECT_ID", "stale"), new("GODMODE_MCP_BRIDGE_PATH", "/srv/bridge.js")],
+            [new("GODMODE_PROJECT_ID", "stale"), new("GODMODE_ROOT_PATH", "/srv/roots")],
             new Dictionary<string, string> { ["GODMODE_PROJECT_ID"] = "proj1" });
 
         Assert.Equal("proj1", Assert.Single(env).Value);

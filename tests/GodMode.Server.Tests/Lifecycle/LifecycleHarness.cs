@@ -203,9 +203,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public void OnHostStopping(Action callback) =>
         _services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(callback);
 
-    /// <summary>The server's own record of a project, found as the MCP bridge finds it: by its latest launch's token.</summary>
+    /// <summary>The server's own record of a project, found as the MCP endpoint finds it: by the token in its latest launch's MCP config.</summary>
     public ProjectInfo ProjectInfo(string projectId) =>
-        Projects.ValidateProjectToken(projectId, Launches(projectId)[^1].Environment["GODMODE_PROJECT_TOKEN"])
+        Projects.ValidateProjectToken(projectId, GodModeMcpEntry.Of(Launches(projectId)[^1]).Token)
         ?? throw new InvalidOperationException($"project {projectId} does not accept its launch's token");
 
     /// <summary>Polls the in-memory status until it reaches <paramref name="state"/>.</summary>

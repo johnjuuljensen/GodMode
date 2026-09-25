@@ -106,16 +106,14 @@ public interface IProjectManager
     /// </summary>
     event Func<string, Task>? OnProjectCompleted;
 
-    // ── Internal API (MCP bridge) ──
+    // ── The MCP endpoint (a project's claude) ──
 
+    /// <summary>The project whose latest launch was issued <paramref name="token"/>, or null.</summary>
     ProjectInfo? ValidateProjectToken(string projectId, string token);
-    Task StoreProjectResultAsync(string projectId, SubmitResultRequest resultRequest);
-    Task UpdateCustomStatusAsync(string projectId, string message);
-    Task RequestHumanReviewAsync(string projectId, RequestReviewRequest reviewRequest);
 
     /// <summary>
-    /// The bridge's permission_prompt: waits until the user answers, and returns what claude gets.
-    /// Canceled by <paramref name="aborted"/> when the bridge's call goes away.
+    /// The MCP permission_prompt tool: waits until the user answers, and returns what claude gets.
+    /// Canceled by <paramref name="aborted"/> when claude cancels the call or its connection drops.
     /// </summary>
     Task<PermissionPromptResult> RequestPermissionAsync(string projectId, PermissionPromptRequest request, CancellationToken aborted);
 }

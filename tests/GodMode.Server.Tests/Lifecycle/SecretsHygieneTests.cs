@@ -27,13 +27,15 @@ public class SecretsHygieneTests
 
             Assert.DoesNotContain(launch.Environment, v => v.Key.Equals(canaryName, StringComparison.OrdinalIgnoreCase));
             Assert.DoesNotContain(launch.Environment, v => v.Value == canary);
-            // Everything the process got is on the allowlist, from the root's config, or set by the server for the launch
-            string[] configured = [FakeClaudeEnvironment.Script, FakeClaudeEnvironment.Record,
-                "GODMODE_PROJECT_ID", "GODMODE_PROJECT_TOKEN", "GODMODE_SERVER_URL"];
+            // Everything the process got is on the allowlist or from the root's config: the server sets none
+            string[] configured = [FakeClaudeEnvironment.Script, FakeClaudeEnvironment.Record];
             Assert.All(launch.Environment.Keys, name => Assert.True(
                 ChildEnvironment.IsAllowed(name) || configured.Contains(name, StringComparer.OrdinalIgnoreCase),
                 $"{name} is neither allowlisted nor configured"));
             Assert.Contains(launch.Environment.Keys, name => name.Equals("PATH", StringComparison.OrdinalIgnoreCase));
+            // The project token is only in the MCP config file
+            var token = GodModeMcpEntry.Of(launch).Token;
+            Assert.DoesNotContain(launch.Environment.Values, value => value.Contains(token));
         }
         finally
         {

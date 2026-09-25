@@ -47,12 +47,15 @@ public abstract record ScriptStep
     public sealed record RejectResume : ScriptStep;
 
     /// <summary>
-    /// Asks for permission as claude does through the GodMode bridge's permission_prompt tool: POSTs
-    /// what the bridge POSTs to the server's internal API with the project token, waits for the
-    /// answer however long it takes, and records it. <paramref name="Arguments"/> is the tool call's
-    /// arguments as claude sends them: <c>{"tool_name":…,"input":{…},"tool_use_id":…}</c>.
+    /// Asks for permission as claude does with its <c>--permission-prompt-tool</c>: an MCP client
+    /// on the server its <c>--mcp-config</c> names for that tool (<c>tools/list</c> on its first
+    /// call, then <c>tools/call</c>), with the headers the config gives. Waits for the answer however
+    /// long it takes and records it. <paramref name="Arguments"/> is the tool call's arguments as
+    /// claude sends them: <c>{"tool_name":…,"input":{…},"tool_use_id":…}</c>. With
+    /// <paramref name="CancelOnProgress"/>, cancels the call when the server first reports progress,
+    /// as claude does when the user interrupts the turn, and records <c>cancelled</c>.
     /// </summary>
-    public sealed record AskPermission(string Arguments) : ScriptStep;
+    public sealed record AskPermission(string Arguments, bool CancelOnProgress = false) : ScriptStep;
 }
 
 /// <summary>
@@ -66,6 +69,7 @@ public abstract record ScriptStep
 /// exit 1
 /// reject-resume
 /// permission {"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_1"}
+/// permission-cancel {"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_1"}
 /// </code>
 /// Blank lines and lines starting with <c>#</c> are ignored. A script that runs off its end keeps
 /// the process alive until stdin closes (then exits 0), like the real CLI between turns.
@@ -89,6 +93,10 @@ public sealed class FakeScript
     public FakeScript RejectResume() => Add(new ScriptStep.RejectResume());
     public FakeScript AskPermission(string toolName, object input, string toolUseId = "toolu_fake") =>
         Add(new ScriptStep.AskPermission(Json(new { tool_name = toolName, input, tool_use_id = toolUseId })));
+
+    /// <summary>As <see cref="AskPermission"/>, cancelling the call once the server reports progress on it.</summary>
+    public FakeScript AskPermissionAndCancel(string toolName, object input, string toolUseId = "toolu_fake") =>
+        Add(new ScriptStep.AskPermission(Json(new { tool_name = toolName, input, tool_use_id = toolUseId }), CancelOnProgress: true));
 
     /// <summary>What the real CLI writes to stderr when <c>--resume</c> names a session it has no conversation for.</summary>
     public const string NoConversationError = "No conversation found with session ID: ";
@@ -143,6 +151,7 @@ public sealed class FakeScript
                 ScriptStep.Stderr s => $"stderr {s.Text}",
                 ScriptStep.Exit e => $"exit {e.Code}",
                 ScriptStep.RejectResume => "reject-resume",
+                ScriptStep.AskPermission { CancelOnProgress: true } p => $"permission-cancel {p.Arguments}",
                 ScriptStep.AskPermission p => $"permission {p.Arguments}",
                 _ => throw new InvalidOperationException($"Unknown step {step}"),
             });
@@ -172,6 +181,7 @@ public sealed class FakeScript
                 "exit" => new ScriptStep.Exit(int.Parse(argument)),
                 "reject-resume" => new ScriptStep.RejectResume(),
                 "permission" => new ScriptStep.AskPermission(argument),
+                "permission-cancel" => new ScriptStep.AskPermission(argument, CancelOnProgress: true),
                 _ => throw new FormatException($"Unknown fake claude script step: {raw}"),
             });
         }
