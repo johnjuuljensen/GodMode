@@ -51,7 +51,7 @@ GodMode.ClientBase  ← (host providers, server registry, URL selection)  ← Go
 GodMode.Maui
 ```
 
-The server's and the MAUI app's builds run `npm run build` in `GodMode.Client.React` and copy its `dist/` into their `wwwroot`.
+`GodMode.Client.React/GodMode.Client.React.csproj`, a NoTargets project in the slnx, generates the hub types and runs `npm run build`. The server and the MAUI app reference it, so one build of either or both runs it once. The server copies its `dist/` into `wwwroot`; the MAUI app packages `dist/` as its `wwwroot`.
 
 ### Where to Put New Code
 
@@ -111,7 +111,7 @@ When building UI features:
     └─────────────────────┘
 ```
 
-**Build integration**: The MAUI csproj has MSBuild targets that run `npm run build` and copy the React `dist/` to `Resources/Raw/wwwroot/`. HybridWebView serves these embedded files.
+**Build integration**: The MAUI csproj references `GodMode.Client.React.csproj`, which runs `npm run build`, and adds the React `dist/` as `MauiAsset` items under `wwwroot/`. HybridWebView serves these embedded files.
 
 **Host bridge**: React talks to the shell over HybridWebView's raw-message channel (`services/hostBridge.ts` ↔ `Bridge/HostBridge.cs` + `Bridge/ShellBridge.cs`), a typed request/response API. `relay.info` returns the relay's base URL and a per-launch secret; `servers.list`, `servers.add`, `servers.remove`, `servers.start` and `servers.stop` manage servers; the `servers.changed` event says the list or a server's state changed. No bridge message carries a server's access token back to React.
 
