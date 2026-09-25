@@ -36,7 +36,8 @@
     <_ReactDir>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'GodMode.Client.React'))</_ReactDir>
   </PropertyGroup>
 
-  <!-- Only when the client is built here: the Dockerfile builds it on its own and copies no tools/ -->
+  <!-- Only when the client is built here: the Dockerfile builds it on its own, and copies neither
+       the client's project nor tools/ -->
   <ItemGroup Condition="'$(PublishReactClient)' != 'false'">
     <ProjectReference Include="..\GodMode.Client.React\GodMode.Client.React.csproj"
                       ReferenceOutputAssembly="false" Private="false" />
