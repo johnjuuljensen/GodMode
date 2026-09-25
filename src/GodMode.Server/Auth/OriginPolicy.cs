@@ -108,25 +108,42 @@ public sealed class OriginPolicy
     }
 }
 
+/// <summary>
+/// The origins <see cref="OriginPolicy"/> allows while the server listens where
+/// <c>listeningAddresses</c> says. Kestrel lists each address only once it listens there, and an
+/// address it listens on first can take a request (a client reconnecting through a restart) before
+/// the last is listed. So until the server has started, the set is worked out afresh on each
+/// request; <see cref="Started"/> fixes it once every address is listed.
+/// </summary>
+public sealed class ListeningOrigins(OriginPolicy policy, Func<IEnumerable<string>> listeningAddresses)
+{
+    private volatile IReadOnlySet<string>? _started;
+
+    public IReadOnlySet<string> Allowed => _started ?? policy.AllowedFor(listeningAddresses());
+
+    /// <summary>The server has started and listens on every address: the set is fixed from now on.</summary>
+    public IReadOnlySet<string> Started() => _started = policy.AllowedFor(listeningAddresses());
+}
+
 public static class OriginPolicyExtensions
 {
     /// <summary>
     /// Refuses (403) a request whose <c>Origin</c> the policy does not allow, ahead of everything else
-    /// in the pipeline. The server's own origins are worked out on the first request, once it listens.
+    /// in the pipeline, against the addresses the server listens on (<see cref="ListeningOrigins"/>).
     /// </summary>
     public static WebApplication UseOriginPolicy(this WebApplication app, OriginPolicy policy)
     {
-        var allowed = new Lazy<IReadOnlySet<string>>(() => policy.AllowedFor(ListeningAddresses(app)));
+        var origins = new ListeningOrigins(policy, () => ListeningAddresses(app));
         var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger<OriginPolicy>();
 
         app.Lifetime.ApplicationStarted.Register(() =>
-            logger.LogInformation("Browser requests are accepted from {Origins}", string.Join(", ", allowed.Value.Order())));
+            logger.LogInformation("Browser requests are accepted from {Origins}", string.Join(", ", origins.Started().Order())));
 
         app.Use(async (context, next) =>
         {
             var origin = context.Request.Headers.Origin;
             if (origin.Count == 0
-                || (origin is [{ } value] && OriginPolicy.Normalize(value) is { } normalized && allowed.Value.Contains(normalized)))
+                || (origin is [{ } value] && OriginPolicy.Normalize(value) is { } normalized && origins.Allowed.Contains(normalized)))
             {
                 await next(context);
                 return;
@@ -141,6 +158,14 @@ public static class OriginPolicyExtensions
         return app;
     }
 
-    private static IEnumerable<string> ListeningAddresses(WebApplication app) =>
-        app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses ?? [];
+    private static IEnumerable<string> ListeningAddresses(WebApplication app)
+    {
+        var addresses = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses;
+        // Read while the server starts, when Kestrel may be adding one
+        for (var attempt = 1; ; attempt++)
+        {
+            try { return addresses?.ToArray() ?? []; }
+            catch (InvalidOperationException) when (attempt < 5) { }
+        }
+    }
 }

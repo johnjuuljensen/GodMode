@@ -25,10 +25,31 @@ public class OriginPolicyTests
     [InlineData("http://[::]:31337", "http://127.0.0.1:31337 http://localhost:31337 http://[::1]:31337")]
     // An IP bound alone is only that
     [InlineData("http://100.101.102.103:31337", "http://100.101.102.103:31337")]
-    // Kestrel binds a host name to every address
+    // An address listed by its name (Kestrel itself lists a host-name binding as [::], so the name needs AllowedOrigins)
     [InlineData("http://GodMode-Box:31337", "http://127.0.0.1:31337 http://godmode-box:31337 http://localhost:31337 http://[::1]:31337")]
     public void OwnOrigins_AreEachAddressItListensOn(string address, string expected) =>
         Assert.Equal(expected.Split(' ').Order(StringComparer.Ordinal), Policy().AllowedFor([address]).Order(StringComparer.Ordinal));
+
+    /// <summary>
+    /// Kestrel lists a binding only once it listens there, so on a server with two, a request can reach
+    /// the first before the second is listed (a client reconnecting through a restart). The second's
+    /// origin must not be refused for the rest of the run for that.
+    /// </summary>
+    [Fact]
+    public void TwoBindings_TheSecondListedAfterARequest_IsStillAllowed_AndOnceStartedTheSetIsFixed()
+    {
+        var listening = new List<string> { "http://127.0.0.1:31337" };
+        var origins = new ListeningOrigins(Policy(), () => listening.ToArray());
+
+        Assert.DoesNotContain("http://100.101.102.103:31337", origins.Allowed);
+        listening.Add("http://100.101.102.103:31337");
+        Assert.Contains("http://100.101.102.103:31337", origins.Allowed);
+
+        Assert.Contains("http://100.101.102.103:31337", origins.Started());
+        listening.Clear();
+        Assert.Contains("http://100.101.102.103:31337", origins.Allowed);
+        Assert.Contains("http://127.0.0.1:31337", origins.Allowed);
+    }
 
     [Fact]
     public void OwnOrigins_CoverEveryAddress_AndSkipPipes()

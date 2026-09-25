@@ -150,6 +150,37 @@ public class AuthTests
         Assert.Contains("401", ex.Message);
     }
 
+    /// <summary>A server bound twice (loopback and a Tailscale IP, say): each binding is one of its own origins, on the WebSocket upgrade too.</summary>
+    [Fact]
+    public async Task TwoBindings_EachIsOneOfTheServersOwnOrigins()
+    {
+        var workDir = ServerProcess.CreateWorkDir("auth");
+        var ports = new[] { ServerProcess.GetFreePort(), ServerProcess.GetFreePort() };
+        using var server = ServerProcess.Start(workDir, string.Join(';', ports.Select(port => $"http://127.0.0.1:{port}")), ApiKey);
+        try
+        {
+            foreach (var port in ports)
+            {
+                var baseUrl = $"http://127.0.0.1:{port}";
+                using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(10) };
+                await server.WaitForHealthyAsync(http);
+                var run = new Run(server, http, baseUrl, OwnsWorkDir: false);
+
+                using var negotiate = await NegotiateAsync(http, ApiKey, baseUrl);
+                Assert.Equal(HttpStatusCode.OK, negotiate.StatusCode);
+                using var socket = new ClientWebSocket();
+                socket.Options.SetRequestHeader("Origin", baseUrl);
+                await socket.ConnectAsync(HubSocketUrl(run, ApiKey), CancellationToken.None);
+                Assert.Equal(WebSocketState.Open, socket.State);
+            }
+        }
+        finally
+        {
+            server.Dispose();
+            ServerProcess.DeleteWorkDir(workDir);
+        }
+    }
+
     /// <summary>Not a browser (the MAUI relay, the app's attention service): no Origin, and the key alone.</summary>
     [Fact]
     public async Task NoOrigin_NeedsTheKeyAlone_OverHttpAndTheWebSocketUpgrade()
