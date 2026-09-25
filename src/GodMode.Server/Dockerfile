@@ -34,7 +34,10 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 RUN groupadd -r godmode && useradd -r -g godmode -m -d /home/godmode godmode
 
 ENV HOME=/home/godmode
-ENV PATH="/home/godmode/.local/bin:/home/godmode/.claude/local/bin:${PATH}"
+# The godmode user's own bin directory comes last: user-scope installs land there, and a session can
+# write it, so nothing in it shadows a system binary. The server names its pwsh and claude outright
+# (PowerShell__Executable and Claude__Executable, below) and looks up neither on PATH.
+ENV PATH="${PATH}:/home/godmode/.local/bin"
 
 # Install system deps + Node.js (for the npx MCP servers a repo's .mcp.json names, and JS toolchains)
 RUN apt-get update && \
@@ -64,19 +67,32 @@ RUN mkdir -p -m 755 /etc/apt/keyrings && \
     apt-get install -y gh && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI as the non-root user
-USER godmode
-RUN curl -fsSL https://claude.ai/install.sh | bash && \
-    echo "Claude installed at: $(which claude)" && \
+# Install Claude Code system-wide and root-owned, so no session can replace the claude the server
+# runs. The native installer's ~/.local/bin/claude is the user's to write, and claude updates itself
+# there. npm's global install is root's (/usr/lib/node_modules, linked from /usr/bin/claude), and
+# self-update is off: a claude run as godmode could not write it anyway. The managed settings turn it
+# off in every claude process too, whose environment the server builds from an allowlist without this ENV.
+ENV DISABLE_AUTOUPDATER=1
+RUN npm install -g @anthropic-ai/claude-code && \
+    npm cache clean --force && \
+    mkdir -p /etc/claude-code && \
+    echo '{ "env": { "DISABLE_AUTOUPDATER": "1" } }' > /etc/claude-code/managed-settings.json && \
+    test "$(command -v claude)" = /usr/bin/claude && \
+    test -x /usr/bin/pwsh && \
     claude --version
 
-# Switch back to root for file operations, then drop to godmode
-USER root
+# The executables the server starts, by full path (see PATH above)
+ENV PowerShell__Executable=/usr/bin/pwsh
+ENV Claude__Executable=/usr/bin/claude
+
+# The server and its SPA stay root's, read-only to godmode: a session could otherwise rewrite them.
+# godmode owns only what the server writes: the roots (ProjectRootsDir, /app/roots by default, where
+# a volume goes), the default root's projects when no root is configured, /data, and its home.
 WORKDIR /app
 COPY --from=dotnet-build /app/publish .
 
-RUN mkdir -p /app/projects /data && \
-    chown -R godmode:godmode /app/projects /data /app
+RUN mkdir -p /app/roots /app/projects /data && \
+    chown godmode:godmode /app/roots /app/projects /data
 
 EXPOSE 31337
 

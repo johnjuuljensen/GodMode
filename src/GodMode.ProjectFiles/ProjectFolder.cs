@@ -17,6 +17,8 @@ public sealed class ProjectFolder : IDisposable
     private const string OutputFileName = "output.jsonl";
     private const string MetricsFileName = "metrics.html";
     private const string GitIgnoreFileName = ".gitignore";
+    private const string IgnoreEverything = "*";
+    private const string GitIgnoreContent = $"# Exclude all GodMode state files\n{IgnoreEverything}\n";
 
     /// <summary>A root's own config and scripts: <c>{root}/.godmode-root/</c>.</summary>
     public const string RootConfigFolderName = ".godmode-root";
@@ -147,6 +149,28 @@ public sealed class ProjectFolder : IDisposable
             throw new ArgumentException($"'{folderName}' is a folder the project root uses for itself.", paramName);
     }
 
+    /// <summary>
+    /// Makes sure <c>.godmode/.gitignore</c> keeps everything in <c>.godmode</c> out of git (its MCP
+    /// config holds the project token while claude runs): written if missing, and the rule appended,
+    /// keeping its lines, to one that lacks it (a checkout's own). Creates <c>.godmode</c> if need be.
+    /// </summary>
+    public static void EnsureGitIgnore(string projectPath)
+    {
+        var godModePath = Path.Combine(projectPath, GodModeDirectoryName);
+        Directory.CreateDirectory(godModePath);
+        var gitIgnorePath = Path.Combine(godModePath, GitIgnoreFileName);
+        if (!File.Exists(gitIgnorePath))
+        {
+            File.WriteAllText(gitIgnorePath, GitIgnoreContent, Encoding.UTF8);
+            return;
+        }
+
+        var existing = File.ReadAllText(gitIgnorePath);
+        if (existing.Split('\n').Any(line => line.Trim() == IgnoreEverything)) return;
+        var separator = existing.Length == 0 || existing.EndsWith('\n') ? "" : "\n";
+        File.AppendAllText(gitIgnorePath, separator + GitIgnoreContent);
+    }
+
     private static ProjectFolder InitializeProjectFolder(string projectPath, string projectId, string name)
     {
         // Create .godmode directory for all state files
@@ -159,9 +183,7 @@ public sealed class ProjectFolder : IDisposable
             File.SetAttributes(godModePath, File.GetAttributes(godModePath) | FileAttributes.Hidden);
         }
 
-        // Create .gitignore in .godmode to exclude all state files from git
-        var gitIgnorePath = Path.Combine(godModePath, GitIgnoreFileName);
-        File.WriteAllText(gitIgnorePath, "# Exclude all GodMode state files\n*\n", Encoding.UTF8);
+        EnsureGitIgnore(projectPath);
 
         // Create initial status
         var now = DateTime.UtcNow;

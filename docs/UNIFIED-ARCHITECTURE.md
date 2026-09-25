@@ -253,6 +253,8 @@ Key services:
 
 A project is a folder directly inside its root with a `.godmode/status.json`. The server does not archive or move project folders.
 
+**`.godmode/.gitignore` is ensured on every launch** (`ProjectFolder.EnsureGitIgnore`), before the MCP config with the project token is written: created when missing, since a create script's checkout can bring a `.godmode/` without one, and given the `*` rule when it lacks it.
+
 **A root's own folders are no project's.** `.godmode-root`, `logs` and `.archived` (a leftover) are refused as a project's folder (`ProjectFolder.ReservedFolderNames`), from the create dialog, a reuse, or a create script's `project_path`. **A project folder's files are untrusted:** its session can write them, so what reaches the `claude` command line or a link is checked when read back: `session-id` must be a GUID (anything else is no session, and the resume starts a fresh one), and a recovered pull request URL must be http(s).
 
 **One project, one claude.** A project has at most one claude process. A create is refused while a tracked project has its ID or folder, before anything is written; create, resume, stop and delete of one project take its lock, so launches and stops come one at a time. Each session runs in a process tree of its own, off the server's console (a Job Object and a hidden console on Windows, a process group started through `setsid` on Linux). A stop interrupts claude (Ctrl+Break in its console on Windows, SIGINT to its group elsewhere), gives it `StopGracePeriodSeconds` (10) to exit, then kills the whole tree; the server's shutdown does the same for every session at once. The server README (*Sessions*) has the details and what claude was measured to honour.
@@ -354,7 +356,7 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 | `ProjectManager` | Central orchestrator — project lifecycle, profile/root snapshot, environment and launch config building |
 | `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process`, each in a process tree of its own (`SessionProcessTree`: a Job Object on Windows, a process group on Linux), writes their output to `output.jsonl`, and stops them: interrupt, grace period, then the tree |
 | `RootConfigReader` | Discovers and merges `.godmode-root/` configs |
-| `ScriptRunner` | Executes cross-platform scripts (`.ps1` via `pwsh`, `.sh` via `bash`, `.cmd`/`.bat` on Windows) |
+| `ScriptRunner` | Executes cross-platform scripts (`.ps1` via `pwsh`, or `PowerShell:Executable`; `.sh` via `bash`, `.cmd`/`.bat` on Windows) |
 | `ProfileFileManager` | Reads the `.profiles/` directory structure |
 | `StatusUpdater` | Updates `status.json` during execution |
 | `TemplateResolver` | Resolves `{field}` placeholders |
@@ -447,6 +449,8 @@ Stage 4: runtime + .NET SDK — the `:sdk` tag, for sessions that build .NET cod
 ```
 
 The runtime image includes the published server and SPA, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`. Run it with `-e Authentication__ApiKey=<key>`: without one it generates a key into the `godmode` user's home, which a replaced container does not keep. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
+
+**Nothing a session runs as can change the server.** `/app` (the server and `wwwroot`) is root's and read-only to `godmode`, which owns only what the server writes: `/app/roots`, `/app/projects` (the default root when none is configured), `/data` and its home. Claude Code is installed root-owned with `npm install -g` (`/usr/bin/claude`), with self-update off (`DISABLE_AUTOUPDATER`, also in `/etc/claude-code/managed-settings.json`, since a claude process's environment is an allowlist). The server starts `claude` and `pwsh` by full path (`Claude__Executable=/usr/bin/claude`, `PowerShell__Executable=/usr/bin/pwsh`), and `/home/godmode/.local/bin`, which a session can write, is last on the `PATH`. Off Docker the two settings default to a `PATH` lookup (`claude`, `pwsh`): a codespace's claude is in `~/.local/bin`, installed by `postCreateCommand`, and the server runs as the sessions' user there anyway.
 
 GitHub Actions (`.github/workflows/build-and-push.yml`) builds and pushes both targets to GHCR (`ghcr.io/johnjuuljensen/godmode`) on pushes to `master` that touch `src/`, `tests/` or the slnx (`latest`, `sdk`), and on a published release (plus the release tag).
 
