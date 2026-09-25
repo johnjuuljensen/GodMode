@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GodMode.ProjectFiles;
 using GodMode.Shared.Models;
 
 namespace GodMode.Server.Services;
@@ -13,7 +14,7 @@ namespace GodMode.Server.Services;
 /// </summary>
 public class RootConfigReader : IRootConfigReader
 {
-    private const string GodModeRootDir = ".godmode-root";
+    private const string GodModeRootDir = ProjectFolder.RootConfigFolderName;
     private const string BaseConfigFileName = "config.json";
 
     /// <summary>The key a root or action config carried MCP servers under. GodMode ignores it, and says so once.</summary>

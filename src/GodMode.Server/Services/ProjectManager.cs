@@ -316,7 +316,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         foreach (var subDir in Directory.GetDirectories(fullPath))
         {
-            var godModeRootDir = Path.Combine(subDir, ".godmode-root");
+            var godModeRootDir = Path.Combine(subDir, ProjectFiles.ProjectFolder.RootConfigFolderName);
             if (!Directory.Exists(godModeRootDir))
                 continue;
 
@@ -1391,6 +1391,13 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission;
                 // A permission prompt ended with the process that asked: its call to the MCP endpoint failed with the server
                 status = status with { PendingPermission = null, PendingQuestion = null };
+                // status.json is the project folder's, which its session can write: a pull request
+                // link is kept only if it is one the status script's output could have set
+                if (status.PullRequest is { } pr && !PullRequestScript.IsValidUrl(pr.Url))
+                {
+                    _logger.LogWarning("Project at {Path} had a pull request URL that is not http(s); it is dropped", projectPath);
+                    status = status with { PullRequest = null };
+                }
 
                 // The ID is where the folder is. A status.json that says otherwise (its root moved
                 // profile, or the folder moved) is rewritten below. Nothing else in .godmode holds the ID
@@ -1416,7 +1423,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 var settings = ProjectFiles.ProjectSettings.Load(projectPath);
                 project.ActionName = settings.ActionName;
 
-                project.SessionId = await SessionIdFile.ReadAsync(projectPath, ct);
+                project.SessionId = await SessionIdFile.ReadAsync(projectPath, _logger, ct);
 
                 _projects[project.Status.Id] = project;
 
@@ -1593,7 +1600,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private static string GetScriptLogPath(string rootPath, string folder)
     {
-        var logsDir = Path.Combine(rootPath, "logs");
+        var logsDir = Path.Combine(rootPath, ProjectFiles.ProjectFolder.ScriptLogsFolderName);
         Directory.CreateDirectory(logsDir);
         return Path.Combine(logsDir, $"{folder}.log");
     }
@@ -1604,7 +1611,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private static string GetResultFilePath(string rootPath, string folder)
     {
-        var logsDir = Path.Combine(rootPath, "logs");
+        var logsDir = Path.Combine(rootPath, ProjectFiles.ProjectFolder.ScriptLogsFolderName);
         Directory.CreateDirectory(logsDir);
         return Path.Combine(logsDir, $"{folder}.result");
     }

@@ -15,9 +15,25 @@ public sealed class ProjectFolder : IDisposable
     private const string StatusFileName = "status.json";
     private const string InputFileName = "input.jsonl";
     private const string OutputFileName = "output.jsonl";
-    private const string SessionIdFileName = "session-id";
     private const string MetricsFileName = "metrics.html";
     private const string GitIgnoreFileName = ".gitignore";
+
+    /// <summary>A root's own config and scripts: <c>{root}/.godmode-root/</c>.</summary>
+    public const string RootConfigFolderName = ".godmode-root";
+
+    /// <summary>A root's script logs and result files: <c>{root}/logs/</c>.</summary>
+    public const string ScriptLogsFolderName = "logs";
+
+    /// <summary>Where archived projects went before archiving was removed; a leftover can still be on disk.</summary>
+    public const string ArchivedFolderName = ".archived";
+
+    /// <summary>
+    /// The folders a root keeps for itself at its top level, which no project may be: a delete of
+    /// the project would delete the root's config or every script log. Compared ignoring case, and
+    /// trailing dots and spaces, as Windows compares folder names (refusing <c>LOGS</c> on Linux too).
+    /// </summary>
+    public static readonly IReadOnlySet<string> ReservedFolderNames =
+        new HashSet<string>([RootConfigFolderName, ScriptLogsFolderName, ArchivedFolderName], StringComparer.OrdinalIgnoreCase);
 
     private readonly string _projectPath;
     private readonly JsonlWriter _inputWriter;
@@ -54,11 +70,6 @@ public sealed class ProjectFolder : IDisposable
     /// Gets the path to the output.jsonl file.
     /// </summary>
     public string OutputFilePath => Path.Combine(GodModePath, OutputFileName);
-
-    /// <summary>
-    /// Gets the path to the session-id file.
-    /// </summary>
-    public string SessionIdFilePath => Path.Combine(GodModePath, SessionIdFileName);
 
     /// <summary>
     /// Gets the path to the metrics.html file.
@@ -119,6 +130,7 @@ public sealed class ProjectFolder : IDisposable
     /// empty, no path separators or other invalid characters, and not made of dots and spaces only.
     /// <c>.</c> and <c>..</c> are the root and its parent, and Windows strips trailing dots and
     /// spaces, so <c>...</c> is the root too; a delete of such a project deletes that recursively.
+    /// Nor may it be one of the <see cref="ReservedFolderNames"/>.
     /// </summary>
     public static void ValidateFolderName(string? folderName, string paramName = "folderName")
     {
@@ -130,6 +142,9 @@ public sealed class ProjectFolder : IDisposable
 
         if (folderName.All(c => c is '.' or ' '))
             throw new ArgumentException($"'{folderName}' is not a valid project folder name.", paramName);
+
+        if (ReservedFolderNames.Contains(folderName.TrimEnd('.', ' ')))
+            throw new ArgumentException($"'{folderName}' is a folder the project root uses for itself.", paramName);
     }
 
     private static ProjectFolder InitializeProjectFolder(string projectPath, string projectId, string name)
@@ -382,60 +397,6 @@ public sealed class ProjectFolder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return JsonlReader.ReadFrom(OutputFilePath, offset);
-    }
-
-    /// <summary>
-    /// Gets the Claude session ID from the session-id file.
-    /// </summary>
-    /// <returns>The session ID, or null if file doesn't exist.</returns>
-    public string? GetSessionId()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        if (!File.Exists(SessionIdFilePath))
-            return null;
-
-        return File.ReadAllText(SessionIdFilePath, Encoding.UTF8).Trim();
-    }
-
-    /// <summary>
-    /// Gets the Claude session ID from the session-id file asynchronously.
-    /// </summary>
-    /// <returns>The session ID, or null if file doesn't exist.</returns>
-    public async Task<string?> GetSessionIdAsync(CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        if (!File.Exists(SessionIdFilePath))
-            return null;
-
-        var content = await File.ReadAllTextAsync(SessionIdFilePath, Encoding.UTF8, cancellationToken);
-        return content.Trim();
-    }
-
-    /// <summary>
-    /// Sets the Claude session ID in the session-id file.
-    /// </summary>
-    /// <param name="sessionId">The session ID to save.</param>
-    public void SetSessionId(string sessionId)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(sessionId);
-
-        File.WriteAllText(SessionIdFilePath, sessionId, Encoding.UTF8);
-    }
-
-    /// <summary>
-    /// Sets the Claude session ID in the session-id file asynchronously.
-    /// </summary>
-    /// <param name="sessionId">The session ID to save.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public Task SetSessionIdAsync(string sessionId, CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(sessionId);
-
-        return File.WriteAllTextAsync(SessionIdFilePath, sessionId, Encoding.UTF8, cancellationToken);
     }
 
     /// <summary>
