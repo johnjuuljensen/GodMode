@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GodMode.FakeClaude;
+using GodMode.Server.Services;
 using GodMode.Server.Tests.Lifecycle;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
@@ -9,9 +10,9 @@ using Microsoft.AspNetCore.SignalR.Client;
 namespace GodMode.Server.Tests;
 
 /// <summary>
-/// A project recovered after a server restart can still call the bridge: the real server is killed
-/// with its claude, a new one starts over the same roots, the project is resumed, and the fake's
-/// permission prompt reaches the new server with the resumed launch's token and is answered.
+/// A project recovered after a server restart can still call the MCP endpoint: the real server is
+/// killed with its claude, a new one starts over the same roots, the project is resumed, and the
+/// fake's permission prompt reaches the new server with the resumed launch's token and is answered.
 /// Project tokens are not persisted: a restart leaves no process holding an old one, and every
 /// launch is issued a fresh one.
 /// </summary>
@@ -20,7 +21,7 @@ public class RestartBridgeTests
     private const string Profile = "restart";
     private const string Root = "lifecycle";
 
-    /// <param name="portZero">The restarted server binds port 0, so only its bound address says where the bridge reaches it.</param>
+    /// <param name="portZero">The restarted server binds port 0, so only its bound address says where claude reaches it.</param>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -91,7 +92,7 @@ public class RestartBridgeTests
                     && FakeRecording.Read(record)[1].Permissions.Count == 1)),
                 $"the resumed launch's permission call was not answered.\n{second.Output}");
             var resumed = FakeRecording.Read(record)[1];
-            Assert.Equal(restartedUrl, resumed.Environment["GODMODE_SERVER_URL"]);
+            Assert.Equal(restartedUrl + McpEndpointUrl.Path, GodModeMcpEntry.Of(resumed).Url);
             using var answer = JsonDocument.Parse(resumed.Permissions[0]);
             Assert.Equal("allow", answer.RootElement.GetProperty("behavior").GetString());
             await restarted.WaitForAsync(projectId, s => s.State == ProjectState.Idle, second);

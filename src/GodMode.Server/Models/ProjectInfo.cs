@@ -32,30 +32,13 @@ public class ProjectInfo
     public string? ProfileName { get; set; }
 
     /// <summary>
-    /// Per-project token for the GodMode MCP bridge to authenticate to internal API.
-    /// Generated at creation time, passed as GODMODE_PROJECT_TOKEN env var.
+    /// The token the project's claude calls GodMode's MCP endpoint with. Issued afresh for every
+    /// launch, and handed to claude only in its MCP config file.
     /// </summary>
     public string? ProjectToken { get; set; }
-
-    /// <summary>
-    /// Custom status message set via the MCP bridge (godmode_update_status).
-    /// </summary>
-    public string? CustomStatus { get; set; }
 
     /// <summary>The process, its output pipeline and the locks that order changes to <see cref="Status"/>.</summary>
     public ProjectProcess Process { get; } = new();
 
     public HashSet<string> SubscribedConnections { get; } = new();
 }
-
-/// <summary>MCP bridge request to submit a project result.</summary>
-public record SubmitResultRequest(object? Result, string? Summary);
-
-/// <summary>MCP bridge request to update custom status.</summary>
-public record UpdateStatusRequest(string Message);
-
-/// <summary>MCP bridge request to ask for human review.</summary>
-public record RequestReviewRequest(string Question, string? Context);
-
-/// <summary>Structured result stored per project.</summary>
-public record ProjectResult(object? Result, string? Summary, DateTime StoredAt);

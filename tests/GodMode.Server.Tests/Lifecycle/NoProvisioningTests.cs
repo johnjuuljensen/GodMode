@@ -29,9 +29,8 @@ public class NoProvisioningTests
         var created = await harness.CreateProjectAsync();
         var launch = await harness.WaitForStdinAsync(created.Id);
 
-        using var config = JsonDocument.Parse(McpConfig(launch));
-        var server = Assert.Single(config.RootElement.GetProperty("mcpServers").EnumerateObject());
-        Assert.Equal("godmode-bridge", server.Name);
+        var godMode = GodModeMcpEntry.Parse(McpConfig(launch));
+        Assert.Equal("http", godMode.Type);
     }
 
     /// <summary>

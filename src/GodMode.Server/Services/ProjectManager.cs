@@ -1,3 +1,4 @@
+using GodMode.Server.Auth;
 using GodMode.Server.Models;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
@@ -35,20 +36,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>ApplicationStopping: the start stops carrying on with interrupted projects.</summary>
     private readonly CancellationToken _stopping;
 
-    /// <summary>The name the GodMode MCP bridge has in every session's MCP config.</summary>
-    internal const string McpBridgeServerName = "godmode-bridge";
+    /// <summary>The name GodMode's own MCP server, this server's <c>/mcp</c> endpoint, has in every session's MCP config.</summary>
+    internal const string McpServerName = "godmode";
 
     /// <summary>
-    /// The bridge tool claude asks for permission with (--permission-prompt-tool), and puts its
+    /// The tool claude asks for permission with (--permission-prompt-tool), and puts its
     /// AskUserQuestion calls to: see <see cref="RequestPermissionAsync"/>.
     /// </summary>
-    internal const string PermissionPromptTool = $"mcp__{McpBridgeServerName}__permission_prompt";
-
-    /// <summary>The setting that points at the MCP bridge bundle, overriding where the build puts it.</summary>
-    public const string McpBridgePathSetting = "McpBridgePath";
-
-    /// <summary>Where the build and a publish put the bridge bundle, relative to the server's binaries.</summary>
-    private static readonly string BundledMcpBridge = Path.Combine("mcp-bridge", "godmode-mcp-bridge.cjs");
+    internal const string PermissionPromptTool = $"mcp__{McpServerName}__{Services.PermissionPromptTool.Name}";
 
     private readonly ProjectLifecycle _lifecycle;
     private readonly IStatusUpdater _statusUpdater;
@@ -58,7 +53,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private readonly ProfileFileManager _profileFileManager;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
-    private readonly string _mcpBridgePath;
     private readonly IServer? _server;
     private readonly string[] _configuredUrls;
 
@@ -128,7 +122,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         _hubContext = hubContext;
         _profileFileManager = profileFileManager;
         _logger = logger;
-        _mcpBridgePath = ResolveMcpBridgePath(configuration);
         _server = server;
         _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         _sessionStartTimeout = TimeSpan.FromSeconds(configuration.GetValue(SessionStartTimeoutSetting, 60.0));
@@ -946,7 +939,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
         catch (OperationCanceledException)
         {
-            // The bridge went away (claude exited or was killed): nobody is waiting for the answer
+            // claude cancelled the call, or its connection dropped (it exited or was killed): nobody is waiting for the answer
             _logger.LogInformation("Project {ProjectId}: permission request {RequestId} was abandoned", projectId, pending.Id);
             await CompletePendingAsync(project, pending, PermissionPromptResult.Deny("The request was abandoned."));
             throw;
@@ -1210,7 +1203,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
                 // Check if state needs to be corrected (was running when server stopped)
                 var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission;
-                // A permission prompt ended with the process that asked: its bridge's call failed with the server
+                // A permission prompt ended with the process that asked: its call to the MCP endpoint failed with the server
                 status = status with { PendingPermission = null, PendingQuestion = null };
 
                 // The ID is where the folder is. A status.json that says otherwise (its root moved
@@ -1598,12 +1591,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// The one place a claude launch is configured, for create and resume alike: everything comes
     /// from the project (its profile, root, action and model) and what is saved in its folder
     /// (settings.json), read fresh, so a resume, or a resume after a restart, launches as the
-    /// create did. The profile's environment, the action's, and the MCP bridge with its
-    /// <c>GODMODE_*</c> variables and a fresh project token are always there. The bridge is the only
-    /// MCP server GodMode gives claude: a repo brings its own in its <c>.mcp.json</c>, and user-scoped
-    /// ones live in the profile's <c>CLAUDE_CONFIG_DIR</c>. A root config that cannot be read, or an
-    /// action that is gone, throws <see cref="LaunchConfigException"/>: a launch with anything but
-    /// the project's own action would not be the one it was created with.
+    /// create did. The profile's environment, the action's, and GodMode's MCP endpoint with a fresh
+    /// project token are always there. That endpoint is the only MCP server GodMode gives claude: a
+    /// repo brings its own in its <c>.mcp.json</c>, and user-scoped ones live in the profile's
+    /// <c>CLAUDE_CONFIG_DIR</c>. A root config that cannot be read, or an action that is gone, throws
+    /// <see cref="LaunchConfigException"/>: a launch with anything but the project's own action would
+    /// not be the one it was created with.
     /// </summary>
     private ClaudeLaunchSpec BuildLaunchSpec(ProjectInfo project)
     {
@@ -1615,9 +1608,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         snap.Profiles.TryGetValue(profileName ?? "", out var profile);
 
         var (action, stripEnvVarProfile) = ResolveLaunchAction(snap, project, profileName);
-        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, settings, McpBridgeConfigJson(),
+        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, settings, McpConfigJson(project, IssueProjectToken(project)),
             project.Status.Model ?? action.Model, profile?.Environment, profileName, stripEnvVarProfile);
-        return new ClaudeLaunchSpec(AddMcpBridgeEnvironment(project, env), args);
+        return new ClaudeLaunchSpec(env ?? new Dictionary<string, string>(), args);
     }
 
     /// <summary>
@@ -1662,8 +1655,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (settings.DangerouslySkipPermissions)
             args.Add("--dangerously-skip-permissions");
 
-        // Tool calls that need approval wait for the user's answer through the bridge. It also makes
-        // claude offer AskUserQuestion in --print mode, skip-permissions or not, and ask it the same way
+        // Tool calls that need approval wait for the user's answer through GodMode's MCP endpoint. It
+        // also makes claude offer AskUserQuestion in --print mode, skip-permissions or not, and ask it the same way
         args.Add("--permission-prompts");
         args.Add("host");
         args.Add("--permission-prompt-tool");
@@ -1681,54 +1674,35 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Sets the env vars the GodMode MCP bridge calls back to this server with, issuing a fresh
-    /// project token for this launch. Tokens live only in memory, so a project recovered after a
-    /// restart has none until it is launched again; a new launch also retires the previous token.
-    /// They are not persisted: shutdown kills every claude, and one that outlives a crash has lost
-    /// its pipes (its output reaches no server, its stdin is closed, so it ends with its turn) and
-    /// is not a process the next server tracks, so an old token would authorise nothing useful.
+    /// Issues the project a fresh token for this launch. Tokens live only in memory, so a project
+    /// recovered after a restart has none until it is launched again; a new launch also retires the
+    /// previous token. They are not persisted: shutdown kills every claude, and one that outlives a
+    /// crash has lost its pipes (its output reaches no server, its stdin is closed, so it ends with
+    /// its turn) and is not a process the next server tracks, so an old token would authorise nothing useful.
     /// </summary>
-    private Dictionary<string, string> AddMcpBridgeEnvironment(ProjectInfo project, Dictionary<string, string>? env)
-    {
-        project.ProjectToken = GenerateProjectToken();
-        env ??= new Dictionary<string, string>();
-        env["GODMODE_PROJECT_ID"] = project.Status.Id;
-        env["GODMODE_PROJECT_TOKEN"] = project.ProjectToken;
-        env["GODMODE_SERVER_URL"] = ServerUrl();
-        return env;
-    }
+    private static string IssueProjectToken(ProjectInfo project) => project.ProjectToken = GenerateProjectToken();
 
     /// <summary>
-    /// The session's MCP config: GodMode's own server, the bridge, and nothing else. The bridge's env
-    /// vars (GODMODE_PROJECT_ID, etc.) are inherited from the Claude process env.
+    /// The session's MCP config: GodMode's own server, this server's MCP endpoint, and nothing else.
+    /// Its headers carry the project and its token, which claude sends on every call. The token is in
+    /// no environment variable, only in this file, which lives as long as the process does.
     /// </summary>
-    private string McpBridgeConfigJson() => JsonSerializer.Serialize(new Dictionary<string, object>
+    private string McpConfigJson(ProjectInfo project, string token) => JsonSerializer.Serialize(new Dictionary<string, object>
     {
         ["mcpServers"] = new Dictionary<string, object>
         {
-            [McpBridgeServerName] = new { command = "node", args = new[] { _mcpBridgePath }, env = new Dictionary<string, string>() }
-        }
+            [McpServerName] = new
+            {
+                type = "http",
+                url = McpEndpointUrlOfThisServer(),
+                headers = new Dictionary<string, string>
+                {
+                    ["Authorization"] = $"Bearer {token}",
+                    [ProjectTokenAuthenticationHandler.ProjectIdHeader] = project.Status.Id,
+                },
+            },
+        },
     });
-
-    /// <summary>
-    /// The bridge bundle every session runs: <see cref="McpBridgePathSetting"/> (or the
-    /// GODMODE_MCP_BRIDGE_PATH environment variable), else where the server build puts it. Throws
-    /// when it is not there: a session without it cannot ask for permission, and would deny every
-    /// tool call that needs approval without asking.
-    /// </summary>
-    private static string ResolveMcpBridgePath(IConfiguration configuration)
-    {
-        var configured = configuration[McpBridgePathSetting] is { Length: > 0 } setting ? setting
-            : Environment.GetEnvironmentVariable("GODMODE_MCP_BRIDGE_PATH") is { Length: > 0 } env ? env
-            : null;
-        var path = Path.GetFullPath(configured ?? Path.Combine(AppContext.BaseDirectory, BundledMcpBridge));
-        if (!File.Exists(path))
-            throw new FileNotFoundException(configured != null
-                ? $"The GodMode MCP bridge is not at {path}, where {McpBridgePathSetting} (or GODMODE_MCP_BRIDGE_PATH) points."
-                : $"The GodMode MCP bridge is not at {path}. The server build puts it there (src/GodMode.McpBridge, " +
-                  "built with -p:BuildMcpBridge left on), or set " + McpBridgePathSetting + " to its godmode-mcp-bridge.cjs.", path);
-        return path;
-    }
 
     /// <summary>
     /// Builds the full environment variables dictionary for scripts.
@@ -1751,7 +1725,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         env["GODMODE_ROOT_PATH"] = rootPath;
         env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
         // Scripts name branches and folders after it: the folder name, as before project IDs carried
-        // the profile and root. Claude's own GODMODE_PROJECT_ID, for the MCP bridge, is the project ID
+        // the profile and root
         env["GODMODE_PROJECT_ID"] = Path.GetFileName(project.ProjectPath);
         env["GODMODE_PROJECT_NAME"] = project.Status.Name;
 
@@ -1788,10 +1762,10 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     private Task NotifyStatusChanged(ProjectInfo project) => _lifecycle.NotifyStatusChangedAsync(project);
 
-    // ── Internal API helpers (project tokens, result storage) ──
+    // ── The MCP endpoint's project tokens ──
 
     /// <summary>
-    /// Generates a cryptographically random project-scoped token for MCP bridge auth.
+    /// Generates a cryptographically random project-scoped token for the MCP endpoint.
     /// </summary>
     private static string GenerateProjectToken()
     {
@@ -1800,15 +1774,15 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// The URL the bridge calls this server on, from the addresses it is bound to once started
-    /// (port 0 resolved, --urls and URLS applied), else the configured Urls: see <see cref="BridgeUrl"/>.
+    /// The URL claude calls this server's MCP endpoint on, from the addresses it is bound to once
+    /// started (port 0 resolved, --urls and URLS applied), else the configured Urls: see <see cref="McpEndpointUrl"/>.
     /// </summary>
-    private string ServerUrl() =>
-        BridgeUrl.From(_server?.Features.Get<IServerAddressesFeature>()?.Addresses is { Count: > 0 } bound ? bound : _configuredUrls);
+    private string McpEndpointUrlOfThisServer() =>
+        McpEndpointUrl.From(_server?.Features.Get<IServerAddressesFeature>()?.Addresses is { Count: > 0 } bound ? bound : _configuredUrls);
 
     /// <summary>
     /// Validates a project token and returns the project info if valid.
-    /// Used by internal API endpoints.
+    /// Used by the MCP endpoint's project-token authentication.
     /// </summary>
     public ProjectInfo? ValidateProjectToken(string projectId, string token)
     {
@@ -1824,68 +1798,5 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(storedBytes, providedBytes)
             ? project
             : null;
-    }
-
-    /// <summary>
-    /// Stores a structured result for a project (called by MCP bridge via internal API).
-    /// </summary>
-    public async Task StoreProjectResultAsync(string projectId, SubmitResultRequest resultRequest)
-    {
-        if (!_projects.TryGetValue(projectId, out var project))
-            throw new KeyNotFoundException($"Project {projectId} not found");
-
-        var result = new ProjectResult(resultRequest.Result, resultRequest.Summary, DateTime.UtcNow);
-        var resultPath = Path.Combine(project.ProjectPath, ".godmode", "result.json");
-        var json = JsonSerializer.Serialize(result, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-        await File.WriteAllTextAsync(resultPath, json);
-
-        _logger.LogInformation("Project {ProjectId} submitted result ({Summary})",
-            projectId, resultRequest.Summary ?? "no summary");
-
-        // Notify clients of the result
-        await NotifyStatusChanged(project);
-    }
-
-    /// <summary>
-    /// Updates the custom status message for a project (called by MCP bridge).
-    /// </summary>
-    public async Task UpdateCustomStatusAsync(string projectId, string message)
-    {
-        if (!_projects.TryGetValue(projectId, out var project))
-            throw new KeyNotFoundException($"Project {projectId} not found");
-
-        project.CustomStatus = message;
-        _logger.LogInformation("Project {ProjectId} custom status: {Status}", projectId, message);
-
-        await NotifyStatusChanged(project);
-    }
-
-    /// <summary>
-    /// Requests human review for a project (called by MCP bridge).
-    /// Puts the project into WaitingInput state with the review question.
-    /// </summary>
-    public async Task RequestHumanReviewAsync(string projectId, RequestReviewRequest reviewRequest)
-    {
-        if (!_projects.TryGetValue(projectId, out var project))
-            throw new KeyNotFoundException($"Project {projectId} not found");
-
-        var question = string.IsNullOrEmpty(reviewRequest.Context)
-            ? reviewRequest.Question
-            : $"{reviewRequest.Question}\n\nContext: {reviewRequest.Context}";
-
-        await _lifecycle.UpdateStatusAsync(project, status => status with
-        {
-            State = ProjectState.WaitingInput,
-            CurrentQuestion = question,
-            QuestionAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        });
-        await NotifyStatusChanged(project);
-
-        _logger.LogInformation("Project {ProjectId} requested human review: {Question}", projectId, reviewRequest.Question);
     }
 }

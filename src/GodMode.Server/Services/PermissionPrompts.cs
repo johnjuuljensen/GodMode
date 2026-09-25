@@ -7,7 +7,7 @@ using GodMode.Shared.Models;
 namespace GodMode.Server.Services;
 
 /// <summary>
-/// Turns what claude sends the bridge's <c>permission_prompt</c> tool into a
+/// Turns what claude sends the MCP <c>permission_prompt</c> tool into a
 /// <see cref="PendingRequest"/>, and the user's answer back into what claude expects.
 /// </summary>
 public static partial class PermissionPrompts

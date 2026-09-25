@@ -2,8 +2,8 @@ using GodMode.Server.Services;
 
 namespace GodMode.Server.Tests;
 
-/// <summary>The URL the MCP bridge is given is one this machine reaches the server on.</summary>
-public class BridgeUrlTests
+/// <summary>The MCP endpoint URL claude is given is on an address this machine reaches the server on.</summary>
+public class McpEndpointUrlTests
 {
     [Theory]
     [InlineData(new string[0], "http://127.0.0.1:31337")]
@@ -28,5 +28,5 @@ public class BridgeUrlTests
     [InlineData(new[] { "http://127.0.0.1:0" }, "http://127.0.0.1:31337")]
     [InlineData(new[] { "http://127.0.0.1:0", "http://127.0.0.1:55123" }, "http://127.0.0.1:55123")]
     public void From_IsAnAddressThisMachineReachesTheServerOn(string[] addresses, string expected) =>
-        Assert.Equal(expected, BridgeUrl.From(addresses));
+        Assert.Equal(expected + McpEndpointUrl.Path, McpEndpointUrl.From(addresses));
 }

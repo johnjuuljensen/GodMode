@@ -29,11 +29,6 @@ public class ProfileFileManager
     }
 
     /// <summary>
-    /// Full path to the .profiles/ directory.
-    /// </summary>
-    public string ProfilesDir => _profilesDir;
-
-    /// <summary>
     /// Reads all profiles from .profiles/ directory.
     /// Returns a dictionary of profile name → (description, environment).
     /// </summary>

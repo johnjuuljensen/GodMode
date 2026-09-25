@@ -142,7 +142,7 @@ public class ProjectIdentityTests
         var launch = await harness.WaitForLaunchAsync(id, _ => true);
         Assert.Equal(sessionId, launch.ArgValue("--resume"));
         Assert.Contains("--dangerously-skip-permissions", launch.Argv);
-        Assert.Equal(id, launch.Environment["GODMODE_PROJECT_ID"]);
+        Assert.Equal(id, GodModeMcpEntry.Of(launch).ProjectId);
         Assert.NotNull(harness.ProjectInfo(id));
         await harness.WaitForStateAsync(id, ProjectState.Idle);
         var output = harness.ReadOutputFile(id);
