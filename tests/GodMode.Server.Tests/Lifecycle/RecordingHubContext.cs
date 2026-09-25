@@ -9,8 +9,11 @@ namespace GodMode.Server.Tests.Lifecycle;
 /// <summary>One call the server made to its hub clients, whoever it was addressed to.</summary>
 /// <param name="Offset">An output line's offset (OutputReceived), a batch's fromOffset (OutputBatch), or where a replay completed.</param>
 /// <param name="Attention">The list an AttentionChanged pushed.</param>
+/// <param name="SubscriptionId">The subscription a batch or complete answers.</param>
+/// <param name="Generation">The output generation a batch's or complete's offsets are in.</param>
 internal sealed record HubPush(string Method, string? ProjectId, ProjectStatus? Status = null, string? RawJson = null,
-    long? Offset = null, IReadOnlyList<OutputLine>? Lines = null, IReadOnlyList<AttentionItem>? Attention = null);
+    long? Offset = null, IReadOnlyList<OutputLine>? Lines = null, IReadOnlyList<AttentionItem>? Attention = null,
+    string? SubscriptionId = null, string? Generation = null);
 
 /// <summary>
 /// Stands in for the server's hub context: every push to any client is recorded, in order, as a
@@ -96,11 +99,11 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
             await Done(new HubPush(nameof(OutputReceived), projectId, RawJson: rawJson, Offset: offset));
         }
 
-        public Task OutputBatch(string projectId, long fromOffset, IReadOnlyList<OutputLine> lines) =>
-            Done(new HubPush(nameof(OutputBatch), projectId, Offset: fromOffset, Lines: lines));
+        public Task OutputBatch(string projectId, string subscriptionId, string generation, long fromOffset, IReadOnlyList<OutputLine> lines) =>
+            Done(new HubPush(nameof(OutputBatch), projectId, Offset: fromOffset, Lines: lines, SubscriptionId: subscriptionId, Generation: generation));
 
-        public Task OutputReplayComplete(string projectId, long offset) =>
-            Done(new HubPush(nameof(OutputReplayComplete), projectId, Offset: offset));
+        public Task OutputReplayComplete(string projectId, string subscriptionId, string generation, long offset) =>
+            Done(new HubPush(nameof(OutputReplayComplete), projectId, Offset: offset, SubscriptionId: subscriptionId, Generation: generation));
 
         public Task StatusChanged(string projectId, ProjectStatus status) =>
             Done(new HubPush(nameof(StatusChanged), projectId, status));

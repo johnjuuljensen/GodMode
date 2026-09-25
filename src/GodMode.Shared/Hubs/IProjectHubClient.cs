@@ -19,16 +19,22 @@ public interface IProjectHubClient
     /// Replayed output, in order, to the connection that subscribed. The batch covers output.jsonl
     /// from fromOffset to its last line's offset. The first batch's fromOffset is where the replay
     /// starts: the offset asked for, except for the last turns, or 0 when that offset is not from
-    /// this file. Each later batch starts where the previous one ended.
+    /// this file (another generation, or past its end). Each later batch starts where the previous one ended.
     /// </summary>
-    Task OutputBatch(string projectId, long fromOffset, IReadOnlyList<OutputLine> lines);
+    /// <param name="subscriptionId">The <see cref="IProjectHub.SubscribeProject"/> this answers.</param>
+    /// <param name="generation">The output generation the offsets are in: a new one each time the
+    /// project is created, so an ID deleted and created again starts a new one.</param>
+    Task OutputBatch(string projectId, string subscriptionId, string generation, long fromOffset, IReadOnlyList<OutputLine> lines);
 
     /// <summary>
     /// The replay for a subscription is done, at offset; live <see cref="OutputReceived"/> lines
-    /// follow from there, with none missed or repeated. An offset lower than the one asked for means
-    /// output.jsonl is shorter than the client thought: what it holds is not from this file.
+    /// follow from there, with none missed or repeated. A generation other than the one the client
+    /// holds, or an offset lower than the one asked for (output.jsonl is shorter than the client
+    /// thought), means what it holds is not from this file.
     /// </summary>
-    Task OutputReplayComplete(string projectId, long offset);
+    /// <param name="subscriptionId">The <see cref="IProjectHub.SubscribeProject"/> this answers.</param>
+    /// <param name="generation">The output generation <paramref name="offset"/> is in, as in <see cref="OutputBatch"/>.</param>
+    Task OutputReplayComplete(string projectId, string subscriptionId, string generation, long offset);
 
     /// <summary>
     /// Called when a project's status changes.

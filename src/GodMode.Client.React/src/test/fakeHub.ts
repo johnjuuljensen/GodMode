@@ -26,7 +26,14 @@ export const texts = (messages: { contentItems: { text?: string }[] }[] | undefi
  * its complete land when, and in the order, the test calls them, after newer subscriptions if it likes.
  */
 export class Replay {
-  constructor(private readonly hub: FakeHub, readonly projectId: string, readonly fromOffset: number) {}
+  private readonly hub: FakeHub;
+  readonly projectId: string;
+  readonly fromOffset: number;
+  constructor(hub: FakeHub, projectId: string, fromOffset: number) {
+    this.hub = hub;
+    this.projectId = projectId;
+    this.fromOffset = fromOffset;
+  }
 
   /** Replayed lines, covering output.jsonl from fromOffset to the last line's offset. */
   batch(fromOffset: number, offsets: number[]) {
