@@ -75,8 +75,8 @@ public sealed class OriginPolicy
             if (onLoopback)
                 foreach (var loopback in LoopbackHosts)
                     allowed.Add($"{scheme}://{loopback}:{port}");
-            if (_codespaceName != null)
-                allowed.Add($"https://{_codespaceName}-{port}.{_codespaceDomain}".ToLowerInvariant());
+            if (_codespaceName != null && Normalize($"https://{_codespaceName}-{port}.{_codespaceDomain}") is { } forwarded)
+                allowed.Add(forwarded);
         }
         return allowed;
     }

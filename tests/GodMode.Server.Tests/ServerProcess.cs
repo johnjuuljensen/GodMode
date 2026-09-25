@@ -42,14 +42,21 @@ internal sealed class ServerProcess : IDisposable
         return workDir;
     }
 
+    /// <summary>The key a test server has unless the test says otherwise; <see cref="ServerHubClient"/> sends it.</summary>
+    public const string ApiKey = "test-server-api-key-0123456789abcdef";
+
+    /// <summary>Where a server started in <paramref name="workDir"/> keeps its generated key: never the user's own.</summary>
+    public static string KeyFilePath(string workDir) => Path.Combine(workDir, "data", "api-key");
+
     /// <summary>
-    /// Starts the server. Auth-related settings are always passed explicitly (empty when not given)
+    /// Starts the server with <see cref="ApiKey"/>, another key, or (null) none configured, when it
+    /// generates one into <see cref="KeyFilePath"/>. Auth-related settings are always passed explicitly
     /// and <c>CODESPACES</c> is cleared unless overridden, so a developer's environment cannot leak in.
     /// </summary>
     public static ServerProcess Start(
         string workDir,
         string urls,
-        string? apiKey = null,
+        string? apiKey = ApiKey,
         IReadOnlyDictionary<string, string>? environment = null)
     {
         var rootsDir = Path.Combine(workDir, "roots");
@@ -67,10 +74,12 @@ internal sealed class ServerProcess : IDisposable
         psi.ArgumentList.Add($"--ProjectRootsDir={rootsDir}");
         psi.ArgumentList.Add($"--Urls={urls}");
         psi.ArgumentList.Add($"--Authentication:ApiKey={apiKey ?? ""}");
+        psi.ArgumentList.Add($"--Authentication:ApiKeyFile={KeyFilePath(workDir)}");
         psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
         psi.Environment["ASPNETCORE_URLS"] = "";
         psi.Environment["CODESPACES"] = "";
         psi.Environment["GITHUB_USER"] = "";
+        psi.Environment.Remove("Authentication__ApiKey");
         if (environment != null)
             foreach (var (key, value) in environment)
                 psi.Environment[key] = value;
