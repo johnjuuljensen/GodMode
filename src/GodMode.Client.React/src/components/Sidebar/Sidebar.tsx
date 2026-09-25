@@ -100,8 +100,12 @@ function ConnectionIndicator() {
   );
 }
 
-/** withInbox: the needs-you pane above the project list (wide screens; a phone has it as its home). */
-export function Sidebar({ withInbox = false }: { withInbox?: boolean }) {
+/**
+ * inbox: 'pane' puts the needs-you pane above the project list (wide screens); 'screen' shows the inbox in
+ * place of the list (the phone's home). Either way the inbox has one place in the tree, so crossing the
+ * phone breakpoint re-renders it rather than remounting it (#240).
+ */
+export function Sidebar({ inbox }: { inbox?: 'pane' | 'screen' }) {
   const profileGroups = useAppStore(s => s.profileGroups);
   const inactiveServers = useAppStore(s => s.inactiveServers);
   const setActivePage = useAppStore(s => s.setActivePage);
@@ -109,45 +113,50 @@ export function Sidebar({ withInbox = false }: { withInbox?: boolean }) {
   const cycleSidebarGroupBy = useAppStore(s => s.cycleSidebarGroupBy);
 
   const hasAnything = profileGroups.length > 0 || inactiveServers.length > 0;
+  const showsList = inbox !== 'screen';
 
   return (
     <div className="sidebar">
       <SidebarHeader />
 
-      <button
-        className="sidebar-sort-bar"
-        onClick={cycleSidebarGroupBy}
-        title={`Group by: ${GROUP_LABELS[sidebarGroupBy]} (click to cycle)`}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="3" y1="6" x2="21" y2="6" />
-          <line x1="3" y1="12" x2="15" y2="12" />
-          <line x1="3" y1="18" x2="9" y2="18" />
-        </svg>
-        <span>{GROUP_LABELS[sidebarGroupBy]}</span>
-      </button>
+      {showsList && (
+        <button
+          className="sidebar-sort-bar"
+          onClick={cycleSidebarGroupBy}
+          title={`Group by: ${GROUP_LABELS[sidebarGroupBy]} (click to cycle)`}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="15" y2="12" />
+            <line x1="3" y1="18" x2="9" y2="18" />
+          </svg>
+          <span>{GROUP_LABELS[sidebarGroupBy]}</span>
+        </button>
+      )}
 
-      {withInbox && <Inbox variant="pane" />}
+      {inbox && <Inbox variant={inbox} />}
 
-      <div className="sidebar-content">
-        {!hasAnything ? (
-          <div className="sidebar-empty">
-            <p>No servers configured</p>
-            {isMaui && <button className="btn btn-primary" onClick={() => setActivePage({ type: 'addServer' })}>Add Server</button>}
-          </div>
-        ) : (
-          <>
-            {profileGroups.map(group => (
-              <ProfileSection key={group.key} group={group} />
-            ))}
-            {inactiveServers.length > 0 && (
-              <InactiveSection servers={inactiveServers} />
-            )}
-          </>
-        )}
-      </div>
+      {showsList && (
+        <div className="sidebar-content">
+          {!hasAnything ? (
+            <div className="sidebar-empty">
+              <p>No servers configured</p>
+              {isMaui && <button className="btn btn-primary" onClick={() => setActivePage({ type: 'addServer' })}>Add Server</button>}
+            </div>
+          ) : (
+            <>
+              {profileGroups.map(group => (
+                <ProfileSection key={group.key} group={group} />
+              ))}
+              {inactiveServers.length > 0 && (
+                <InactiveSection servers={inactiveServers} />
+              )}
+            </>
+          )}
+        </div>
+      )}
 
-      <SidebarFooter />
+      {showsList && <SidebarFooter />}
     </div>
   );
 }

@@ -11,7 +11,12 @@ export function ConfirmDialog() {
     if (!open) return;
     // Focus the safe answer, so Enter on a keyboard never confirms by accident
     cancelRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') open.resolve(null); };
+    // Taken, so a window-wide handler behind the dialog (the question prompt's) leaves it: by then the dialog is closed
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      open.resolve(null);
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);

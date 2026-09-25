@@ -107,6 +107,12 @@ function mergeAttention(all: ServerAttentionItem[], serverId: string, items: Att
       || projectKey(a.serverId, a.ProjectId).localeCompare(projectKey(b.serverId, b.ProjectId)));
 }
 
+/** What is typed in an inbox item and not sent yet. */
+export interface InboxDraft {
+  reply: string;
+  denyMessage: string;
+}
+
 /** How many turns a tile asks for (tail mode: subscribe from -N). */
 export const TILE_TAIL_TURNS = 2;
 
@@ -232,6 +238,12 @@ interface AppState {
   markSeen: (serverId: string, projectId: string) => Promise<void>;
   /** Answers a project whether its claude runs or not (resuming it if needed). */
   replyAndResume: (serverId: string, projectId: string, text: string) => Promise<void>;
+  /**
+   * The inbox items' unsent text, by ProjectKey: held here rather than in the item, so it survives the
+   * item remounting (the phone's home left and come back to, the pane collapsed, a rotation) (#240).
+   */
+  inboxDrafts: Record<ProjectKey, InboxDraft>;
+  setInboxDraft: (serverId: string, projectId: string, draft: Partial<InboxDraft>) => void;
 
   // Per-project question tracking, by ProjectKey. dismissedProjects is persisted and holds only dismissed ones
   projectQuestions: Record<ProjectKey, boolean>;
@@ -511,11 +523,13 @@ export const useAppStore = create<AppState>((set, get) => {
         if (dp !== state.dismissedProjects) saveDismissed(dp);
         const transcripts = { ...state.transcripts };
         delete transcripts[key];
+        const inboxDrafts = { ...state.inboxDrafts };
+        delete inboxDrafts[key];
         const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
         const total = computeTotalWaiting(connections, pq, dp);
         return {
           serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
-          projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total, transcripts,
+          projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total, transcripts, inboxDrafts,
           ...(clearSel ? { selectedProject: null, outputMessages: [], question: emptyQuestion } : {}),
         };
       });
@@ -719,6 +733,7 @@ export const useAppStore = create<AppState>((set, get) => {
         return {
           serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
           projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total,
+          inboxDrafts: pruneServer(state.inboxDrafts, serverId, projects),
         };
       });
     } catch (err) {
@@ -808,6 +823,15 @@ export const useAppStore = create<AppState>((set, get) => {
   replyAndResume: async (serverId, projectId, text) => {
     await get().getHub(serverId)?.replyAndResume(projectId, text);
   },
+  inboxDrafts: {},
+  setInboxDraft: (serverId, projectId, patch) => set(state => {
+    const key = projectKey(serverId, projectId);
+    const draft: InboxDraft = { ...(state.inboxDrafts[key] ?? { reply: '', denyMessage: '' }), ...patch };
+    const inboxDrafts = { ...state.inboxDrafts };
+    if (draft.reply || draft.denyMessage) inboxDrafts[key] = draft;
+    else delete inboxDrafts[key];
+    return { inboxDrafts };
+  }),
 
   projectQuestions: {},
   dismissedProjects: loadDismissed(),

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAppStore, type ServerAttentionItem } from '../../store';
+import { useAppStore, projectKey, type ServerAttentionItem } from '../../store';
 import type { AttentionKind } from '../../signalr/types';
 import { PermissionCard } from '../Project/PermissionCard';
 import { ReplyInput } from '../Project/ReplyInput';
@@ -32,11 +32,17 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const replyAndResume = useAppStore(s => s.replyAndResume);
   const respondToPermission = useAppStore(s => s.respondToPermission);
   const markSeen = useAppStore(s => s.markSeen);
-  const [reply, setReply] = useState('');
+  const { serverId, ProjectId: projectId, Kind: kind } = item;
+  // Held in the store, so a remount of this item (a layout change, the pane collapsed) keeps it
+  const draft = useAppStore(s => s.inboxDrafts[projectKey(serverId, projectId)]);
+  const setInboxDraft = useAppStore(s => s.setInboxDraft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { serverId, ProjectId: projectId, Kind: kind } = item;
+  const reply = draft?.reply ?? '';
+  const setReply = (text: string) => setInboxDraft(serverId, projectId, { reply: text });
+  const denyMessage = draft?.denyMessage ?? '';
+  const setDenyMessage = (text: string) => setInboxDraft(serverId, projectId, { denyMessage: text });
   const permission = kind === 'Permission' ? item.Permission ?? null : null;
   // A single AskUserQuestion is answered by a reply with the chosen label
   const question = kind === 'Question' && item.Question?.Questions.length === 1 ? item.Question.Questions[0] : null;
@@ -64,7 +70,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
 
   const answerPermission = async (allow: boolean, message?: string) => {
     if (!permission) return;
-    await run(() => respondToPermission(serverId, projectId, permission.RequestId, { Allow: allow, Message: message ?? null }));
+    if (await run(() => respondToPermission(serverId, projectId, permission.RequestId, { Allow: allow, Message: message ?? null }))) setDenyMessage('');
   };
 
   const meta = [item.Profile && item.Profile !== 'Default' ? item.Profile : null, serverName, `waiting ${waitingFor(item.Since, now)}`]
@@ -79,7 +85,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
       </button>
 
       {permission ? (
-        <PermissionCard permission={permission} onAnswer={answerPermission} withDenyMessage />
+        <PermissionCard permission={permission} onAnswer={answerPermission} denyMessage={{ value: denyMessage, onChange: setDenyMessage }} />
       ) : (
         <div className="inbox-item-text">{item.Text}</div>
       )}

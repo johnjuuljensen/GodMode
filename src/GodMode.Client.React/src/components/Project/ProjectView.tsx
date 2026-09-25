@@ -72,7 +72,6 @@ export function ProjectView({ serverId, projectId }: Props) {
   );
 
   const state = project?.State ?? 'Idle';
-  const canSendInput = state === 'WaitingInput' || state === 'WaitingPermission' || state === 'Running' || state === 'Stopped' || state === 'Idle';
   const canResume = state === 'Stopped' || state === 'Idle';
   const canStop = state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission';
 
@@ -230,10 +229,11 @@ export function ProjectView({ serverId, projectId }: Props) {
           value={inputText}
           onChange={setInputText}
           onSubmit={handleSendInput}
-          placeholder={canResume ? 'Type to resume...' : 'Type your response...'}
-          disabled={!canSendInput}
+          // Every state takes a reply: ReplyAndResume resumes a claude that is not running, one that failed
+          // too, as the inbox answers an Error item (#240)
+          placeholder={canResume || state === 'Error' ? 'Type to resume...' : 'Type your response...'}
         />
-        <button className="btn btn-primary" onClick={handleSendInput} disabled={!canSendInput || !inputText.trim()}>
+        <button className="btn btn-primary" onClick={handleSendInput} disabled={!inputText.trim()}>
           Send
         </button>
       </div>

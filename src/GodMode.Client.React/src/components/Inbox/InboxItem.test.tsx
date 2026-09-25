@@ -5,9 +5,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
-import type { AttentionItem, PermissionDecision } from '../../signalr/types';
+import type { AttentionItem } from '../../signalr/types';
 import { FakeHub, connectServers } from '../../test/fakeHub';
-import { render, typeInto, type Rendered } from '../../test/render';
+import { render, typeInto, click, type Rendered } from '../../test/render';
 import { useAppStore } from '../../store';
 import { Inbox } from './Inbox';
 
@@ -20,34 +20,24 @@ vi.mock('../../services/hostApi', () => ({
   getHubOptions: () => ({}),
 }));
 
-class InboxHub extends FakeHub {
-  decisions: { projectId: string; requestId: string; decision: PermissionDecision }[] = [];
-  seen: string[] = [];
-  async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision) {
-    this.decisions.push({ projectId, requestId, decision });
-  }
-  async markSeen(projectId: string) { this.seen.push(projectId); }
-}
-
 const item = (projectId: string, kind: AttentionItem['Kind'], since: string, extra: Partial<AttentionItem> = {}): AttentionItem => ({
   ProjectId: projectId, ProjectName: projectId, Kind: kind, Since: since, Text: `${projectId} ${kind}`, ...extra,
 });
 
 const initialState = useAppStore.getState();
-let hubA: InboxHub;
-let hubB: InboxHub;
+let hubA: FakeHub;
+let hubB: FakeHub;
 let view: Rendered;
 
 /** The rendered item whose header names `name` and `server`. */
 const itemEl = (name: string, server: string) => [...view.container.querySelectorAll<HTMLElement>('.inbox-item')]
   .find(el => el.querySelector('.inbox-item-name')?.textContent === name && el.querySelector('.inbox-item-meta')?.textContent?.includes(server))!;
 const button = (el: HTMLElement, label: string) => [...el.querySelectorAll('button')].find(b => b.textContent === label)!;
-const click = (el: HTMLElement) => act(async () => { el.click(); });
 
 beforeEach(async () => {
   useAppStore.setState(initialState, true);
-  hubA = new InboxHub([], []);
-  hubB = new InboxHub([], []);
+  hubA = new FakeHub([], []);
+  hubB = new FakeHub([], []);
   await connectServers({ A: hubA, B: hubB });
   await act(async () => {
     hubA.callbacks.onAttentionChanged?.([
