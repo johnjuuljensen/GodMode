@@ -1319,8 +1319,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         finally { subscribeLock.Release(); }
     }
 
+    /// <summary>
+    /// Takes the connection out of the project's live group, after any subscribe it made before:
+    /// a subscribe still replaying would otherwise put it back in the group once it is done.
+    /// </summary>
     public async Task UnsubscribeProjectAsync(string projectId, string connectionId)
     {
+        var subscribeLock = _subscribeLocks.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
+        await subscribeLock.WaitAsync();
+        try { await _hubContext.Groups.RemoveFromGroupAsync(connectionId, ProjectLifecycle.OutputGroup(projectId)); }
+        finally { subscribeLock.Release(); }
+
         if (!_projects.TryGetValue(projectId, out var project))
         {
             throw new KeyNotFoundException($"Project {projectId} not found");

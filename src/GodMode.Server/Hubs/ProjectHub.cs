@@ -163,7 +163,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} unsubscribing from project {ProjectId}",
             Context.ConnectionId, projectId);
 
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, ProjectLifecycle.OutputGroup(projectId));
+        // Leaves the live group there, in turn with the connection's subscribes
         await _projectManager.UnsubscribeProjectAsync(projectId, Context.ConnectionId);
     }
 

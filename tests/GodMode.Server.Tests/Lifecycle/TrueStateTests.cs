@@ -351,4 +351,32 @@ public class TrueStateTests
             Assert.Equal(lines.Select(l => l.Offset).Order(), lines.Select(l => l.Offset));
         }
     }
+
+    /// <summary>
+    /// A tab subscribes (a long replay) and unsubscribes at once. The unsubscribe waits for the
+    /// subscribe, so the subscribe's join of the live group cannot come after it: the connection
+    /// gets none of the project's later output.
+    /// </summary>
+    [Fact]
+    public async Task UnsubscribeRightAfterASubscribe_FromOneConnection_LeavesItOutOfTheLiveOutput()
+    {
+        var script = new FakeScript().EmitInit().AwaitStdin();
+        for (var i = 0; i < 2_500; i++) script.EmitAssistant($"line {i}");
+        await using var harness = new LifecycleHarness(script.EmitResult().AwaitStdin().EmitAssistant("after the unsubscribe").AwaitStdin());
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        var connection = harness.Connect("c1");
+        var watching = harness.Connect("c2");
+        await watching.SubscribeAsync(created.Id, 0);
+
+        var subscribing = connection.SubscribeAsync(created.Id, 0, "s1");
+        var unsubscribing = connection.UnsubscribeAsync(created.Id);
+        await Task.WhenAll(subscribing, unsubscribing).WaitAsync(LifecycleHarness.DefaultTimeout);
+
+        Assert.Contains(connection.Received, p => p.Method == nameof(IProjectHubClient.OutputReplayComplete));
+        await harness.ProcessManager.SendInputAsync(harness.ProjectInfo(created.Id), "go on");
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(watching.Received.Any(p => p.RawJson?.Contains("after the unsubscribe") == true)),
+            null, () => $"the later line was never broadcast.\n{harness.Describe(created.Id)}");
+        Assert.DoesNotContain(connection.Received, p => p.RawJson?.Contains("after the unsubscribe") == true);
+    }
 }
