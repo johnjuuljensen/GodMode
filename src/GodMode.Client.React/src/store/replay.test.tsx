@@ -136,7 +136,8 @@ describe('the tile grid', () => {
     await act(() => hub.reconnect());
     await act(flush);
 
-    expect(hub.subscriptions).toEqual([
+    // The tile added may be subscribed before or after the catch-up resumes the others
+    expect([...hub.subscriptions].sort((a, b) => a.projectId.localeCompare(b.projectId))).toEqual([
       { projectId: 'p1', fromOffset: 20 }, { projectId: 'p2', fromOffset: 60 }, { projectId: 'p3', fromOffset: -2 },
     ]);
     await act(async () => {

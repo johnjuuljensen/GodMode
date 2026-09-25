@@ -6,9 +6,7 @@
  */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseClaudeMessage } from '../signalr/parseMessage';
-import type { OutputMessage } from '../signalr/hub';
-import { FakeHub, project, root, connectServers, flush } from '../test/fakeHub';
+import { FakeHub, project, root, connectServers, flush, line } from '../test/fakeHub';
 import { render, type Rendered } from '../test/render';
 import { ProjectView } from '../components/Project/ProjectView';
 import { TileGrid } from '../components/Tiles/TileGrid';
@@ -27,15 +25,9 @@ vi.mock('../services/hostApi', () => ({
   clearApiKey: () => {},
 }));
 
-const line = (offset: number): OutputMessage => ({
-  offset,
-  message: parseClaudeMessage(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: `at ${offset}` }] } })),
-});
-
-/** The server's answer to a subscription: the lines replayed, then replay complete at the last. */
+/** The server's answer to the project's newest subscription: the lines replayed, then replay complete at the last. */
 function replay(hub: FakeHub, projectId: string, fromOffset: number, offsets: number[]) {
-  hub.callbacks.onOutputBatch?.(projectId, fromOffset, offsets.map(line));
-  hub.callbacks.onOutputReplayComplete?.(projectId, offsets[offsets.length - 1] ?? fromOffset);
+  hub.lastReplay(projectId).answer(fromOffset, offsets);
 }
 
 const initialState = useAppStore.getState();
