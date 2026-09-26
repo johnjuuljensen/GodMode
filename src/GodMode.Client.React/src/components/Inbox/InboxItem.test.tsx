@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 /**
  * Answering from the inbox (#172): each kind's controls call the hub for the item's own server and
- * project. Renders the Inbox on the real store with two servers whose project IDs overlap.
+ * project, and what an item held for one need is not the next one's (#218). Renders the Inbox on the
+ * real store with two servers whose project IDs overlap.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
-import type { AttentionItem, PermissionDecision } from '../../signalr/types';
+import type { AttentionItem } from '../../signalr/types';
 import { FakeHub, connectServers } from '../../test/fakeHub';
-import { render, typeInto, type Rendered } from '../../test/render';
-import { useAppStore } from '../../store';
+import { render, typeInto, click, type Rendered } from '../../test/render';
+import { useAppStore, projectKey } from '../../store';
 import { Inbox } from './Inbox';
 
 vi.mock('../../signalr/hub', () => ({ GodModeHub: class {} }));
@@ -20,40 +21,32 @@ vi.mock('../../services/hostApi', () => ({
   getHubOptions: () => ({}),
 }));
 
-class InboxHub extends FakeHub {
-  decisions: { projectId: string; requestId: string; decision: PermissionDecision }[] = [];
-  seen: string[] = [];
-  async respondToPermission(projectId: string, requestId: string, decision: PermissionDecision) {
-    this.decisions.push({ projectId, requestId, decision });
-  }
-  async markSeen(projectId: string) { this.seen.push(projectId); }
-}
-
 const item = (projectId: string, kind: AttentionItem['Kind'], since: string, extra: Partial<AttentionItem> = {}): AttentionItem => ({
   ProjectId: projectId, ProjectName: projectId, Kind: kind, Since: since, Text: `${projectId} ${kind}`, ...extra,
 });
 
 const initialState = useAppStore.getState();
-let hubA: InboxHub;
-let hubB: InboxHub;
+let hubA: FakeHub;
+let hubB: FakeHub;
 let view: Rendered;
 
 /** The rendered item whose header names `name` and `server`. */
 const itemEl = (name: string, server: string) => [...view.container.querySelectorAll<HTMLElement>('.inbox-item')]
   .find(el => el.querySelector('.inbox-item-name')?.textContent === name && el.querySelector('.inbox-item-meta')?.textContent?.includes(server))!;
 const button = (el: HTMLElement, label: string) => [...el.querySelectorAll('button')].find(b => b.textContent === label)!;
-const click = (el: HTMLElement) => act(async () => { el.click(); });
 
 beforeEach(async () => {
   useAppStore.setState(initialState, true);
-  hubA = new InboxHub([], []);
-  hubB = new InboxHub([], []);
+  hubA = new FakeHub([], []);
+  hubB = new FakeHub([], []);
   await connectServers({ A: hubA, B: hubB });
+  // What each request would run: Allow waits for it (#234)
+  hubA.details = Object.fromEntries(['r1', 'r2'].map(id => [id, { RequestId: id, Detail: `echo ${id}`, DetailTruncated: false }]));
   await act(async () => {
     hubA.callbacks.onAttentionChanged?.([
       item('p1', 'Question', '2026-09-24T10:00:00Z'),
       item('p2', 'Permission', '2026-09-24T11:00:00Z', {
-        Permission: { RequestId: 'r1', ToolName: 'Bash', Input: {}, Summary: 'Bash: git push', RequestedAt: '2026-09-24T11:00:00Z' },
+        Permission: { RequestId: 'r1', ToolName: 'Bash', Summary: 'Bash: git push', RequestedAt: '2026-09-24T11:00:00Z' },
       }),
     ]);
     hubB.callbacks.onAttentionChanged?.([item('p1', 'Finished', '2026-09-24T09:00:00Z', { PullRequestUrl: 'https://example.test/pr/1' })]);
@@ -132,8 +125,53 @@ describe('the inbox', () => {
     }
   });
 
+  // The store once resolved a call to a missing hub as done, and the item cleared what was typed (#239)
+  it('keeps a reply, and says why, when its server has left the list', async () => {
+    const el = itemEl('p1', 'Server B');
+    await act(async () => useAppStore.setState(s => ({ serverConnections: s.serverConnections.filter(c => c.serverInfo.Id !== 'B') })));
+    expect(el.isConnected).toBe(true);
+    await typeInto(el.querySelector('textarea')!, 'Ship it');
+    await click(button(el, 'Send'));
+
+    expect(el.querySelector('.inbox-item-error')?.textContent).toBe("This project's server is no longer in the server list");
+    expect(el.querySelector('textarea')!.value).toBe('Ship it');
+    expect(useAppStore.getState().inboxDrafts[projectKey('B', 'p1')]).toEqual({ reply: 'Ship it', deny: null });
+    expect(hubB.replies).toEqual([]);
+  });
+
   it('says so when nothing needs the user', async () => {
     await act(async () => { hubA.callbacks.onAttentionChanged?.([]); hubB.callbacks.onAttentionChanged?.([]); });
     expect(view.container.textContent).toContain('Nothing needs you.');
+  });
+});
+
+describe('the next need of a project (#218)', () => {
+  const permission = (requestId: string, since: string) => item('p2', 'Permission', since, {
+    Permission: { RequestId: requestId, ToolName: 'Bash', Summary: `Bash: ${requestId}`, RequestedAt: since },
+  });
+  /** Server A's list again, with p2 as given: p1's question stays. */
+  const listA = (p2: AttentionItem) => act(async () => hubA.callbacks.onAttentionChanged?.([item('p1', 'Question', '2026-09-24T10:00:00Z'), p2]));
+  const p2 = () => itemEl('p2', 'Server A');
+
+  it("is answerable at once: a new request's card is not the last one's, still sending", async () => {
+    // r1's answer is on its way when claude moves on to r2
+    vi.spyOn(hubA, 'respondToPermission').mockImplementationOnce(() => new Promise(() => {}));
+    await click(button(p2(), 'Allow'));
+    expect(button(p2(), 'Allow').disabled).toBe(true);
+
+    await listA(permission('r2', '2026-09-24T11:05:00Z'));
+    expect(button(p2(), 'Allow').disabled).toBe(false);
+    await click(button(p2(), 'Allow'));
+    expect(hubA.decisions).toEqual([{ projectId: 'p2', requestId: 'r2', decision: { Allow: true, Message: null } }]);
+  });
+
+  it("shows no error of the last one's", async () => {
+    vi.spyOn(hubA, 'respondToPermission').mockRejectedValueOnce(new Error('No request r1 is pending'));
+    await click(button(p2(), 'Deny'));
+    expect(p2().querySelector('.inbox-item-error')?.textContent).toBe('No request r1 is pending');
+
+    await listA(item('p2', 'Finished', '2026-09-24T11:05:00Z'));
+    expect(p2().querySelector('.inbox-item-kind')?.textContent).toBe('Finished');
+    expect(p2().querySelector('.inbox-item-error')).toBeNull();
   });
 });

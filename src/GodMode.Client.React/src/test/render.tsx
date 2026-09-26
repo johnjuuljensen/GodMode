@@ -40,3 +40,27 @@ export async function keyDown(target: Element | null, key: string, init: Keyboar
   await act(async () => { (target ?? document.body).dispatchEvent(event); });
   return event;
 }
+
+/**
+ * Focuses a button and presses a key on it as a browser does: the keydown, then, unless a handler
+ * prevented it, Enter's default action, a click. jsdom runs no default actions of its own.
+ */
+export async function pressKey(button: HTMLButtonElement, key: string): Promise<KeyboardEvent> {
+  await act(async () => button.focus());
+  const event = await keyDown(button, key);
+  if (key === 'Enter' && !event.defaultPrevented) await act(async () => button.click());
+  return event;
+}
+
+/** Clicks an element, with React's act() around the change. */
+export const click = (el: HTMLElement) => act(async () => el.click());
+
+/**
+ * Clicks with a mouse as Chromium on Windows and WebView2 do: the press focuses the element, unless a
+ * handler prevented its default, and the focus stays there after the click. jsdom focuses nothing itself.
+ */
+export const pointerClick = (el: HTMLElement) => act(async () => {
+  if (el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))) el.focus();
+  el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+  el.click();
+});

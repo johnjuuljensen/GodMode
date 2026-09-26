@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useAppStore } from '../../store';
+import { useAppStore, type ActivePage } from '../../store';
 import type { ProjectRootInfo } from '../../signalr/types';
 import { askConfirm } from '../../confirmDialog';
 import '../settings-common.css';
@@ -15,7 +15,10 @@ interface FormField {
   enumOptions?: { value: string; label: string }[];
 }
 
-function parseFormFields(schema: unknown): FormField[] {
+/** The input the server starts claude with --dangerously-skip-permissions for, where the root allows it. */
+const SKIP_PERMISSIONS = 'skipPermissions';
+
+function parseFormFields(schema: unknown, allowSkipPermissions: boolean): FormField[] {
   if (!schema || typeof schema !== 'object') return [];
   const s = schema as Record<string, unknown>;
   const properties = s.properties as Record<string, Record<string, unknown>> | undefined;
@@ -25,10 +28,12 @@ function parseFormFields(schema: unknown): FormField[] {
   const fields: FormField[] = [];
 
   for (const [key, prop] of Object.entries(properties)) {
+    // Offered only where the root allows it, which the server checks too, and never on by default (#233)
+    if (key === SKIP_PERMISSIONS && !allowSkipPermissions) continue;
     const type = prop.type as string;
     const title = (prop.title as string) || key;
     const description = prop.description as string | undefined;
-    const defaultValue = prop.default != null ? String(prop.default) : undefined;
+    const defaultValue = prop.default != null && key !== SKIP_PERMISSIONS ? String(prop.default) : undefined;
 
     if (type === 'boolean') {
       fields.push({ key, title, fieldType: 'boolean', isRequired: false, description, defaultValue: defaultValue ?? 'false' });
@@ -47,32 +52,39 @@ function parseFormFields(schema: unknown): FormField[] {
 
 const MODEL_OPTIONS = ['opus', 'sonnet', 'haiku'];
 
-/** What the user has entered, kept in sessionStorage so a remount or a reload of a discarded tab restores it. */
+/** What the user has entered in one root's form, kept in sessionStorage so a remount or a reload of a discarded tab restores it. */
 interface CreateDraft {
-  serverId: string;
-  rootName: string;
   actionName: string;
   model: string;
   values: Record<string, string>;
 }
 
-const DRAFT_STORAGE = 'godmode-create-draft';
+/** The drafts by server and root: each root's form keeps its own while the page is open (#240). */
+const DRAFTS_STORAGE = 'godmode-create-drafts';
+const draftKeyOf = (serverId: string, rootName: string) => `${serverId}
+${rootName}`;
 
-function readDraft(): CreateDraft | null {
+function readDrafts(): Record<string, CreateDraft> {
   try {
-    const raw = sessionStorage.getItem(DRAFT_STORAGE);
-    return raw ? JSON.parse(raw) as CreateDraft : null;
+    return JSON.parse(sessionStorage.getItem(DRAFTS_STORAGE) ?? '{}') as Record<string, CreateDraft>;
   } catch {
-    return null;
+    return {};
   }
 }
 
-function writeDraft(draft: CreateDraft | null) {
+function writeDraft(key: string, draft: CreateDraft) {
   try {
-    if (draft) sessionStorage.setItem(DRAFT_STORAGE, JSON.stringify(draft));
-    else sessionStorage.removeItem(DRAFT_STORAGE);
+    sessionStorage.setItem(DRAFTS_STORAGE, JSON.stringify({ ...readDrafts(), [key]: draft }));
   } catch {
     // Storage unavailable (private window, blocked site data): the draft only lives in component state
+  }
+}
+
+function discardDrafts() {
+  try {
+    sessionStorage.removeItem(DRAFTS_STORAGE);
+  } catch {
+    // Nothing was kept
   }
 }
 
@@ -81,37 +93,39 @@ const formKeyOf = (serverId: string, rootName: string, actionName: string) => `$
 ${rootName}
 ${actionName}`;
 
-export function CreateProject() {
+type CreateContext = Extract<ActivePage, { type: 'createProject' }>['context'];
+
+/**
+ * The form for the root the route names (context), or the root picker when it names none. The Shell
+ * mounts one per route, so each root's form starts from its own draft.
+ */
+export function CreateProject({ context }: { context?: CreateContext }) {
   const serverConnections = useAppStore(s => s.serverConnections);
   const openCreatedProject = useAppStore(s => s.openCreatedProject);
-  const activePage = useAppStore(s => s.activePage);
-  const createProjectContext = activePage?.type === 'createProject' ? activePage.context ?? null : null;
+  const setActivePage = useAppStore(s => s.setActivePage);
   const profileFilter = useAppStore(s => s.profileFilter);
 
-  // A draft is restored unless the page was opened for a different root
-  const [draft] = useState(() => {
-    const d = readDraft();
-    return d && (!createProjectContext || (d.serverId === createProjectContext.serverId && d.rootName === createProjectContext.rootName)) ? d : null;
-  });
+  const [draft] = useState(() => (context && readDrafts()[draftKeyOf(context.serverId, context.rootName)]) ?? null);
 
   // Servers keep their roots while reconnecting, so the form stays up (and filled) through a dropped socket
   const servers = useMemo(() => serverConnections.filter(c => c.roots.length > 0), [serverConnections]);
 
-  const [pickedServerId, setSelectedServerId] = useState(createProjectContext?.serverId ?? draft?.serverId ?? '');
-  const selectedServerId = pickedServerId || servers[0]?.serverInfo.Id || '';
+  // Pinned once known: a server that finishes connecting later must not take the form over (#240)
+  const [selectedServerId, setSelectedServerId] = useState(context?.serverId ?? '');
+  if (!selectedServerId && servers.length > 0) setSelectedServerId(servers[0].serverInfo.Id);
   // Step 1: root picker, Step 2: project form
-  const initialRootName = createProjectContext?.rootName ?? draft?.rootName ?? '';
-  const [step, setStep] = useState<1 | 2>(initialRootName ? 2 : 1);
-  const [selectedRootName, setSelectedRootName] = useState(initialRootName);
+  const [step, setStep] = useState<1 | 2>(context ? 2 : 1);
+  const [selectedRootName, setSelectedRootName] = useState(context?.rootName ?? '');
   const [pickedActionName, setSelectedActionName] = useState(draft?.actionName ?? '');
   const [selectedModel, setSelectedModel] = useState(draft?.model ?? 'opus');
   const [formValues, setFormValues] = useState<Record<string, string>>(draft?.values ?? {});
   // The form formValues were filled for; defaults are applied only when this changes
-  const [valuesFor, setValuesFor] = useState(draft ? formKeyOf(draft.serverId, draft.rootName, draft.actionName) : '');
+  const [valuesFor, setValuesFor] = useState(context && draft ? formKeyOf(context.serverId, context.rootName, draft.actionName) : '');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const server = servers.find(c => c.serverInfo.Id === selectedServerId);
+  // The pinned server, also while it lists no roots (a disconnect), so the form says where it creates
+  const server = serverConnections.find(c => c.serverInfo.Id === selectedServerId);
   const isConnected = server?.connectionState === 'connected';
 
   // Filter roots by active profile filter
@@ -136,10 +150,12 @@ export function CreateProject() {
   // Falls back to the root's first action; kept as picked while the root is unavailable
   const selectedActionName = actions.some(a => a.Name === pickedActionName) ? pickedActionName : actions[0]?.Name ?? pickedActionName;
   const selectedAction = actions.find(a => a.Name === selectedActionName) ?? null;
-  const formFields = useMemo(() => selectedAction?.InputSchema ? parseFormFields(selectedAction.InputSchema) : [], [selectedAction]);
+  const formFields = useMemo(
+    () => selectedAction?.InputSchema ? parseFormFields(selectedAction.InputSchema, selectedAction.AllowSkipPermissions) : [],
+    [selectedAction]);
 
   // A different root or action resets the form to its defaults. Keyed by name, not by object:
-  // every roots refresh (a ProfilesChanged broadcast, a reconnect) hands out new objects for the same form
+  // every roots refresh (a reconnect, say) hands out new objects for the same form
   const formKey = formKeyOf(selectedServerId, selectedRootName, selectedActionName);
   if (selectedAction && valuesFor !== formKey) {
     const defaults: Record<string, string> = {};
@@ -151,22 +167,24 @@ export function CreateProject() {
 
   useEffect(() => {
     if (!selectedRootName || valuesFor !== formKey) return;
-    writeDraft({ serverId: selectedServerId, rootName: selectedRootName, actionName: selectedActionName, model: selectedModel, values: formValues });
+    writeDraft(draftKeyOf(selectedServerId, selectedRootName), { actionName: selectedActionName, model: selectedModel, values: formValues });
   }, [selectedServerId, selectedRootName, selectedActionName, selectedModel, formValues, valuesFor, formKey]);
 
-  // Leaving the page (Back) discards the draft; a remount with the page still open keeps it
+  // Leaving the page (Back) discards the drafts; a remount with the page still open (another root's form) keeps them
   useEffect(() => () => {
-    if (useAppStore.getState().activePage?.type !== 'createProject') writeDraft(null);
+    if (useAppStore.getState().activePage?.type !== 'createProject') discardDrafts();
   }, []);
 
   const setFieldValue = useCallback((key: string, value: string) => {
     setFormValues(prev => ({ ...prev, [key]: value }));
   }, []);
 
+  // The route names the root picked, so a reload restores its form; a root other than the route's is another form
   const selectRoot = useCallback((rootName: string) => {
     setSelectedRootName(rootName);
     setStep(2);
-  }, []);
+    setActivePage({ type: 'createProject', context: { serverId: selectedServerId, rootName } });
+  }, [selectedServerId, setActivePage]);
 
   const handleCreate = async () => {
     if (!server || !selectedRoot) return;
@@ -189,7 +207,7 @@ export function CreateProject() {
     try {
       // Only this client opens what it created; other clients just list it (#170)
       const created = await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs);
-      writeDraft(null);
+      discardDrafts();
       openCreatedProject(server.serverInfo.Id, created);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create project';
@@ -211,7 +229,7 @@ export function CreateProject() {
             inputs.__autoSuffix = true;
           }
           const created = await server.hub.createProject(profileName, selectedRoot.Name, selectedActionName || null, inputs);
-          writeDraft(null);
+          discardDrafts();
           openCreatedProject(server.serverInfo.Id, created);
         } catch (retryErr) {
           setError(retryErr instanceof Error ? retryErr.message : 'Failed to create project');
@@ -281,7 +299,8 @@ export function CreateProject() {
             <div className="form-group">
               <label>Root</label>
               <div className="selected-root-header">
-                <span className="selected-root-name">{selectedRoot?.Name}</span>
+                <span className="selected-root-name">{selectedRoot?.Name ?? selectedRootName}</span>
+                <span className="selected-root-server">on {server?.serverInfo.Name || server?.serverInfo.Url || selectedServerId}</span>
                 {roots.length > 1 && (
                   <button className="btn btn-secondary btn-sm" onClick={() => setStep(1)}>Change</button>
                 )}

@@ -12,6 +12,9 @@ namespace GodMode.Server.Hubs;
 /// </summary>
 public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
 {
+    /// <summary>How many of one connection's calls run at once (SignalR's MaximumParallelInvocationsPerClient).</summary>
+    public const int ParallelInvocationsPerClient = 4;
+
     private readonly IProjectManager _projectManager;
     private readonly ILogger<ProjectHub> _logger;
 
@@ -118,6 +121,18 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         }
     }
 
+    public async Task<PermissionDetail> GetPermissionDetail(string projectId, string requestId)
+    {
+        try
+        {
+            return await _projectManager.GetPermissionDetailAsync(projectId, requestId);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
     public async Task AnswerQuestion(string projectId, string requestId, Dictionary<string, string> answers)
     {
         _logger.LogInformation("Client {ConnectionId} answering question {RequestId} of project {ProjectId}",
@@ -146,13 +161,13 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.ResumeProjectAsync(projectId);
     }
 
-    public async Task SubscribeProject(string projectId, long fromOffset)
+    public async Task SubscribeProject(string projectId, long fromOffset, string subscriptionId, string? generation)
     {
-        _logger.LogInformation("Client {ConnectionId} subscribing to project {ProjectId} from offset {Offset}",
-            Context.ConnectionId, projectId, fromOffset);
+        _logger.LogInformation("Client {ConnectionId} subscribing ({SubscriptionId}) to project {ProjectId} from offset {Offset} of generation {Generation}",
+            Context.ConnectionId, subscriptionId, projectId, fromOffset, generation ?? "(none)");
 
         // Replays, then joins the project's group, in the order that loses and repeats nothing
-        await _projectManager.SubscribeProjectAsync(projectId, fromOffset, Context.ConnectionId);
+        await _projectManager.SubscribeProjectAsync(projectId, fromOffset, subscriptionId, generation, Context.ConnectionId);
     }
 
     public async Task UnsubscribeProject(string projectId)
@@ -160,7 +175,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         _logger.LogInformation("Client {ConnectionId} unsubscribing from project {ProjectId}",
             Context.ConnectionId, projectId);
 
-        await Groups.RemoveFromGroupAsync(Context.ConnectionId, ProjectLifecycle.OutputGroup(projectId));
+        // Leaves the live group there, in turn with the connection's subscribes
         await _projectManager.UnsubscribeProjectAsync(projectId, Context.ConnectionId);
     }
 
@@ -182,75 +197,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         }
 
         await Clients.All.ProjectDeleted(projectId);
-    }
-
-    public async Task ArchiveProject(string projectId)
-    {
-        _logger.LogInformation("Client {ConnectionId} archiving project {ProjectId}",
-            Context.ConnectionId, projectId);
-        try
-        {
-            await _projectManager.ArchiveProjectAsync(projectId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to archive project {ProjectId}", projectId);
-            throw new HubException(ex.Message);
-        }
-        await Clients.All.ProjectArchived(projectId);
-    }
-
-    public async Task UnarchiveProject(string projectId)
-    {
-        _logger.LogInformation("Client {ConnectionId} unarchiving project {ProjectId}",
-            Context.ConnectionId, projectId);
-        try
-        {
-            var summary = await _projectManager.UnarchiveProjectAsync(projectId);
-            await Clients.All.ProjectRestored(summary);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to unarchive project {ProjectId}", projectId);
-            throw new HubException(ex.Message);
-        }
-    }
-
-    public async Task<ProjectSummary[]> ListArchivedProjects()
-    {
-        return await _projectManager.ListArchivedProjectsAsync();
-    }
-
-    public async Task CreateProfile(string name, string? description)
-    {
-        _logger.LogInformation("Client {ConnectionId} creating profile '{ProfileName}'",
-            Context.ConnectionId, name);
-        await _projectManager.CreateProfileAsync(name, description);
-        await Clients.All.ProfilesChanged();
-    }
-
-    public async Task DeleteProfile(string name, bool deleteContents = false)
-    {
-        _logger.LogInformation("Client {ConnectionId} deleting profile '{ProfileName}' (deleteContents={DeleteContents})",
-            Context.ConnectionId, name, deleteContents);
-        try
-        {
-            await _projectManager.DeleteProfileAsync(name, deleteContents);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete profile '{ProfileName}'", name);
-            throw new HubException(ex.Message);
-        }
-        await Clients.All.ProfilesChanged();
-    }
-
-    public async Task UpdateProfileDescription(string name, string? description)
-    {
-        _logger.LogInformation("Client {ConnectionId} updating profile description '{ProfileName}'",
-            Context.ConnectionId, name);
-        await _projectManager.UpdateProfileDescriptionAsync(name, description);
-        await Clients.All.ProfilesChanged();
     }
 
     public async Task<string?> CheckCommand(string command)

@@ -13,26 +13,26 @@ namespace GodMode.Server.Tests;
 
 /// <summary>
 /// Project tokens live only in memory. A project recovered after a server restart and then
-/// resumed must still get a working MCP bridge: the bridge in its MCP config, and a token
+/// resumed must still reach GodMode's MCP endpoint: the endpoint in its MCP config, with a token
 /// the server accepts.
 /// </summary>
 public class ProjectResumeBridgeTests
 {
-    /// <summary>proj1 in the legacy <c>ProjectRoots:work</c> root, which is the Default profile's.</summary>
+    /// <summary>proj1 in the root <c>work</c>, whose config names no profile, so it is the Default profile's.</summary>
     private const string ProjectId = "Default/work/proj1";
 
     [Fact]
-    public async Task ResumeAfterRestart_LaunchesTheBridgeWithATokenTheServerAccepts()
+    public async Task ResumeAfterRestart_LaunchesWithTheMcpEndpointAndATokenTheServerAccepts()
     {
         var workDir = ServerProcess.CreateWorkDir("resume");
         try
         {
-            var rootPath = Path.Combine(workDir, "work");
+            var rootPath = WriteRoot(workDir);
             var projectPath = Path.Combine(rootPath, "proj1");
             WriteStoppedProject(projectPath, "proj1");
 
             // A fresh ProjectManager is what a restarted server has: nothing in memory.
-            await using var services = BuildServices(workDir, rootPath);
+            await using var services = BuildServices(workDir);
             var projects = services.GetRequiredService<IProjectManager>();
             var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
 
@@ -40,13 +40,14 @@ public class ProjectResumeBridgeTests
             await projects.ResumeProjectAsync(ProjectId);
 
             var launch = Assert.Single(launcher.Launches);
-            Assert.NotNull(launch.Env);
-            Assert.Equal(ProjectId, launch.Env!["GODMODE_PROJECT_ID"]);
-            Assert.Equal(BridgeUrl.Default, launch.Env["GODMODE_SERVER_URL"]);
-            var token = launch.Env["GODMODE_PROJECT_TOKEN"];
-            Assert.NotNull(projects.ValidateProjectToken(ProjectId, token));
-
-            Assert.Contains("godmode-bridge", McpConfigOf(launch.Args));
+            var godMode = GodModeMcpEntry.Parse(McpConfigOf(launch.Args));
+            Assert.Equal("http", godMode.Type);
+            Assert.Equal(McpEndpointUrl.Default, godMode.Url);
+            Assert.Equal(ProjectId, godMode.ProjectId);
+            Assert.Equal(godMode.Token, launch.Token);
+            Assert.NotNull(projects.ValidateProjectToken(ProjectId, godMode.Token));
+            // claude is given no GODMODE_* variables: its MCP config carries the project and token
+            Assert.DoesNotContain(launch.Env ?? [], e => e.Key.StartsWith("GODMODE_"));
         }
         finally
         {
@@ -60,10 +61,10 @@ public class ProjectResumeBridgeTests
         var workDir = ServerProcess.CreateWorkDir("resume");
         try
         {
-            var rootPath = Path.Combine(workDir, "work");
+            var rootPath = WriteRoot(workDir);
             WriteStoppedProject(Path.Combine(rootPath, "proj1"), "proj1");
 
-            await using var services = BuildServices(workDir, rootPath);
+            await using var services = BuildServices(workDir);
             var projects = services.GetRequiredService<IProjectManager>();
             var launcher = (RecordingProcessManager)services.GetRequiredService<IClaudeProcessManager>();
 
@@ -73,8 +74,8 @@ public class ProjectResumeBridgeTests
             await projects.ResumeProjectAsync(ProjectId);
 
             Assert.Equal(2, launcher.Launches.Count);
-            var first = launcher.Launches[0].Env!["GODMODE_PROJECT_TOKEN"];
-            var second = launcher.Launches[1].Env!["GODMODE_PROJECT_TOKEN"];
+            var first = launcher.Launches[0].Token;
+            var second = launcher.Launches[1].Token;
             Assert.NotEqual(first, second);
             Assert.Null(projects.ValidateProjectToken(ProjectId, first));
             Assert.NotNull(projects.ValidateProjectToken(ProjectId, second));
@@ -94,6 +95,14 @@ public class ProjectResumeBridgeTests
         return File.ReadAllText(args[index + 1]);
     }
 
+    /// <summary>The root <c>work</c> in the server's ProjectRootsDir: a <c>.godmode-root</c> with no config, so the default action.</summary>
+    private static string WriteRoot(string workDir)
+    {
+        var rootPath = Path.Combine(workDir, "roots", "work");
+        Directory.CreateDirectory(Path.Combine(rootPath, ".godmode-root"));
+        return rootPath;
+    }
+
     private static void WriteStoppedProject(string projectPath, string id)
     {
         var godMode = Path.Combine(projectPath, ".godmode");
@@ -105,12 +114,11 @@ public class ProjectResumeBridgeTests
         File.WriteAllText(Path.Combine(godMode, "session-id"), Guid.NewGuid().ToString());
     }
 
-    private static ServiceProvider BuildServices(string workDir, string rootPath)
+    private static ServiceProvider BuildServices(string workDir)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["ProjectRootsDir"] = Path.Combine(workDir, "roots"),
-            ["ProjectRoots:work"] = rootPath,
         }).Build();
 
         var services = new ServiceCollection();
@@ -131,7 +139,7 @@ public class ProjectResumeBridgeTests
 
     private sealed class RecordingProcessManager : IClaudeProcessManager
     {
-        public List<(Dictionary<string, string>? Env, string[]? Args)> Launches { get; } = [];
+        public List<(Dictionary<string, string>? Env, string[]? Args, string Token)> Launches { get; } = [];
         public bool Running { get; set; }
 
         public Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
@@ -142,13 +150,16 @@ public class ProjectResumeBridgeTests
 
         private Task<int> Record(Dictionary<string, string>? env, string[]? args)
         {
-            Launches.Add((env == null ? null : new Dictionary<string, string>(env), args));
+            // The next launch rewrites the MCP config file, so the token is kept as launched
+            Launches.Add((env == null ? null : new Dictionary<string, string>(env), args, GodModeMcpEntry.Parse(McpConfigOf(args)).Token));
             Running = true;
             return Task.FromResult(4242 + Launches.Count);
         }
 
         public Task SendInputAsync(ProjectInfo project, string input) => Task.CompletedTask;
-        public Task StopProcessAsync(ProjectInfo project) => Task.CompletedTask;
+        public Task StopProcessAsync(ProjectInfo project, TimeSpan? grace = null) => Task.CompletedTask;
+        public Task SettleAsync(ProjectInfo project) => Task.CompletedTask;
+        public TimeSpan StopGracePeriod => TimeSpan.Zero;
         public bool IsProcessRunning(int processId) => Running;
     }
 }

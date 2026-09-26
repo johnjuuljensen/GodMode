@@ -68,6 +68,15 @@ export type ServerState =
   /** Host state is unknown. */
   | 'Unknown';
 
+/** Request to add or update a GodMode server registration. */
+export interface AddServerRequest {
+  DisplayName: string;
+  Url: string;
+  AccessToken?: string | null;
+  Type: string;
+  Username?: string | null;
+}
+
 /**
  * One project that needs the user, from IProjectHub.GetAttention and IProjectHubClient.AttentionChanged.
  * Answer any kind with IProjectHub.ReplyAndResume; a permission or question also with
@@ -113,6 +122,11 @@ export interface CreateActionInfo {
   Description?: string | null;
   InputSchema?: unknown;
   Model?: string | null;
+  /**
+   * Whether the action's root allows skip-permissions: only then does the create form offer the schema's
+   * `skipPermissions`, and only then does the server accept it.
+   */
+  AllowSkipPermissions: boolean;
 }
 
 /** Git status information for a project. */
@@ -144,11 +158,10 @@ export interface PendingPermission {
   RequestId: string;
   /** The tool claude wants to run, for example `Bash` or `mcp__github__create_pull_request`. */
   ToolName: string;
-  /** The tool's input, as claude sent it. */
-  Input: unknown;
   /**
-   * What the call does in one line, for example `Bash: git push origin feature/12-x` or `Edit: src/Foo.cs`.
-   * Read this rather than Input.
+   * What the call does in one line, for example `Bash: git push origin feature/12-x` or `Edit: src/Foo.cs`,
+   * for a notification or to read aloud. It ends with " …" when it leaves something out (a second line, or
+   * the rest of a long one): it is never enough to approve by, IProjectHub.GetPermissionDetail is.
    */
   Summary: string;
   /** When claude asked. */
@@ -176,6 +189,27 @@ export interface PermissionDecision {
   Message?: string | null;
   /** The input to run the tool with instead of the one claude asked with. Only read when allowed. */
   UpdatedInput?: unknown;
+}
+
+/**
+ * Everything a PendingPermission would run, to show before it is allowed, from
+ * IProjectHub.GetPermissionDetail.
+ */
+export interface PermissionDetail {
+  /** The request it describes. */
+  RequestId: string;
+  /**
+   * The server's display text of the tool's input: the whole command for `Bash` and `PowerShell`, the path
+   * and the whole new text for `Write` and `NotebookEdit`, the path and each replacement for `Edit` and
+   * `MultiEdit` (what it replaces, with what, and whether every occurrence), and the input as indented JSON
+   * for any other tool.
+   */
+  Detail: string;
+  /**
+   * Whether Detail was cut at `16384` characters. The call runs with all of it: say so, and let the user deny
+   * it or read the rest in the transcript.
+   */
+  DetailTruncated: boolean;
 }
 
 /** Information about a server-defined profile. */
@@ -213,7 +247,10 @@ export interface ProjectRootInfo {
 
 /** Detailed status information about a project. */
 export interface ProjectStatus {
-  /** The project identifier. */
+  /**
+   * The project identifier, `{profile}/{root}/{folder}`: where its folder is. Opaque to clients, which pass
+   * it back as received; not the folder name.
+   */
   Id: string;
   /** The project name. */
   Name: string;
@@ -238,8 +275,6 @@ export interface ProjectStatus {
   /** The name of the project root this project belongs to. */
   RootName?: string | null;
   ProfileName?: string | null;
-  /** Deprecated. Kept for backward compatibility with existing status.json files on disk. */
-  RepoUrl?: string | null;
   /**
    * The Claude model the session was started with. Used on resume so the session keeps running on the same
    * model regardless of the current root config or machine default.
@@ -279,7 +314,10 @@ export interface ProjectStatus {
 
 /** Summary information about a project. */
 export interface ProjectSummary {
-  /** The project identifier. */
+  /**
+   * The project identifier, `{profile}/{root}/{folder}`: where its folder is. Opaque to clients, which pass
+   * it back as received; not the folder name.
+   */
   Id: string;
   /** The project name. */
   Name: string;
@@ -382,9 +420,15 @@ export interface IProjectHub {
   /**
    * Answers the project's ProjectStatus.PendingPermission: the tool call runs, or claude is told it was
    * denied. Fails when the project has no pending request with that id (it was answered already, or claude
-   * stopped waiting).
+   * stopped waiting), and when another answer to it, from another client, came first: only one answer
+   * succeeds.
    */
   RespondToPermission(projectId: string, requestId: string, decision: PermissionDecision): Promise<void>;
+  /**
+   * Everything the project's pending permission request requestId would run, to show before it is allowed.
+   * Fails as IProjectHub.RespondToPermission does when the request is not pending, or is a question.
+   */
+  GetPermissionDetail(projectId: string, requestId: string): Promise<PermissionDetail>;
   /**
    * Answers the project's ProjectStatus.PendingQuestion. answers maps each QuestionItem.Question to the
    * chosen label (labels joined with ", " for a multi-select) or to the user's own text. Fails as
@@ -417,26 +461,11 @@ export interface IProjectHub {
    * lines, so each line arrives once and in order. fromOffset is the offset of the last line the client has
    * (0 for everything; an offset inside a line snaps forward to the next line), or -N for the last N turns.
    */
-  SubscribeProject(projectId: string, fromOffset: number): Promise<void>;
+  SubscribeProject(projectId: string, fromOffset: number, subscriptionId: string, generation: string | null): Promise<void>;
   /** Unsubscribes from output events from a project. */
   UnsubscribeProject(projectId: string): Promise<void>;
   /** Deletes a project, running teardown scripts and removing all files. */
   DeleteProject(projectId: string, force?: boolean): Promise<void>;
-  /** Archives a project (stops it, moves to archive, keeps data). */
-  ArchiveProject(projectId: string): Promise<void>;
-  /** Restores an archived project. */
-  UnarchiveProject(projectId: string): Promise<void>;
-  /** Lists all archived projects. */
-  ListArchivedProjects(): Promise<ProjectSummary[]>;
-  /** Creates a new profile with an optional description. */
-  CreateProfile(name: string, description: string | null): Promise<void>;
-  /**
-   * Deletes a profile. When deleteContents is true, cascade-deletes all root directories and their projects;
-   * otherwise reassigns roots to the Default profile.
-   */
-  DeleteProfile(name: string, deleteContents?: boolean): Promise<void>;
-  /** Updates a profile's description. */
-  UpdateProfileDescription(name: string, description: string | null): Promise<void>;
   /**
    * Checks whether a CLI command is available on the server (in PATH). Returns the resolved path if found,
    * null if not.
@@ -458,16 +487,17 @@ export interface IProjectHubClient {
   /**
    * Replayed output, in order, to the connection that subscribed. The batch covers output.jsonl from
    * fromOffset to its last line's offset. The first batch's fromOffset is where the replay starts: the offset
-   * asked for, except for the last turns, or 0 when that offset is not from this file. Each later batch
-   * starts where the previous one ended.
+   * asked for, except for the last turns, or 0 when that offset is not from this file (another generation, or
+   * past its end). Each later batch starts where the previous one ended.
    */
-  OutputBatch(projectId: string, fromOffset: number, lines: OutputLine[]): void;
+  OutputBatch(projectId: string, subscriptionId: string, generation: string, fromOffset: number, lines: OutputLine[]): void;
   /**
    * The replay for a subscription is done, at offset; live IProjectHubClient.OutputReceived lines follow from
-   * there, with none missed or repeated. An offset lower than the one asked for means output.jsonl is shorter
-   * than the client thought: what it holds is not from this file.
+   * there, with none missed or repeated. A generation other than the one the client holds, or an offset lower
+   * than the one asked for (output.jsonl is shorter than the client thought), means what it holds is not from
+   * this file.
    */
-  OutputReplayComplete(projectId: string, offset: number): void;
+  OutputReplayComplete(projectId: string, subscriptionId: string, generation: string, offset: number): void;
   /** Called when a project's status changes. */
   StatusChanged(projectId: string, status: ProjectStatus): void;
   /**
@@ -481,12 +511,4 @@ export interface IProjectHubClient {
   CreationProgress(projectId: string, message: string): void;
   /** Called when a project is deleted. */
   ProjectDeleted(projectId: string): void;
-  /** Called when a project is archived. */
-  ProjectArchived(projectId: string): void;
-  /** Called when a project is restored from archive. */
-  ProjectRestored(project: ProjectSummary): void;
-  /**
-   * Called when profiles change (created, updated, or deleted). Clients should refresh their profile list.
-   */
-  ProfilesChanged(): void;
 }

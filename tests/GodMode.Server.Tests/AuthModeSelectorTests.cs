@@ -1,116 +1,161 @@
-using System.Net;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using GodMode.Server.Auth;
 using Microsoft.Extensions.Configuration;
 
 namespace GodMode.Server.Tests;
 
-public class AuthModeSelectorTests
+/// <summary>
+/// The auth mode and where its key comes from: a codespace authenticates GitHub tokens; anywhere else
+/// it is the configured API key, else the one generated into the key file, owner-only, on the first start.
+/// </summary>
+public sealed class AuthModeSelectorTests : IDisposable
 {
-    private static readonly string[] Loopback = ["http://127.0.0.1:31337"];
-    private static readonly string[] AllInterfaces = ["http://0.0.0.0:31337"];
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"godmode-authmode-{Guid.NewGuid():N}");
 
-    [Theory]
-    // key × loopback / non-loopback
-    [InlineData("key", false, "http://127.0.0.1:31337", AuthMode.ApiKey)]
-    [InlineData("key", false, "http://0.0.0.0:31337", AuthMode.ApiKey)]
-    // no key × loopback
-    [InlineData(null, false, "http://127.0.0.1:31337", AuthMode.Loopback)]
-    [InlineData("", false, "http://localhost:31337", AuthMode.Loopback)]
-    [InlineData(null, false, "http://[::1]:31337", AuthMode.Loopback)]
-    [InlineData(null, false, "http://127.0.0.1:31337;http://localhost:31338", AuthMode.Loopback)]
-    // codespace wins over both
-    [InlineData(null, true, "http://0.0.0.0:31337", AuthMode.Codespace)]
-    [InlineData("key", true, "http://127.0.0.1:31337", AuthMode.Codespace)]
-    public void Select_ChoosesMode(string? apiKey, bool isCodespace, string urls, AuthMode expected) =>
-        Assert.Equal(expected, AuthModeSelector.Select(apiKey, isCodespace, urls.Split(';')));
+    private string KeyFile => Path.Combine(_dir, "data", "api-key");
 
-    [Theory]
-    [InlineData("http://0.0.0.0:31337")]
-    [InlineData("http://+:31337")]
-    [InlineData("http://*:31337")]
-    [InlineData("http://[::]:31337")]
-    [InlineData("http://100.101.102.103:31337")]
-    [InlineData("http://my-machine.tailnet.ts.net:31337")]
-    [InlineData("http://127.0.0.1:31337;http://100.101.102.103:31337")]
-    public void Select_NoKeyOnNonLoopback_Throws(string urls)
+    public void Dispose()
     {
-        var ex = Assert.Throws<AuthConfigurationException>(() => AuthModeSelector.Select(null, false, urls.Split(';')));
+        try { Directory.Delete(_dir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+    }
+
+    private IConfiguration Config(params (string Key, string? Value)[] settings) =>
+        new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?>
+            {
+                ["ProjectRootsDir"] = Path.Combine(_dir, "roots"),
+                [ApiKeyFile.PathSetting] = KeyFile,
+            }.Concat(settings.Select(s => KeyValuePair.Create(s.Key, s.Value)))
+            .GroupBy(s => s.Key).ToDictionary(g => g.Key, g => g.Last().Value)).Build();
+
+    [Fact]
+    public void Codespace_WinsOverAKey_AndCarriesTheUserAndTheCodespacesOwnToken()
+    {
+        var settings = AuthModeSelector.Resolve(Config(
+            ("CODESPACES", "true"), ("GITHUB_USER", "octocat"), ("GITHUB_TOKEN", "ghu_codespace"),
+            (AuthModeSelector.ApiKeySetting, "ignored-in-codespace")));
+
+        Assert.Equal(new AuthSettings(AuthMode.Codespace, GitHubUser: "octocat", CodespaceToken: "ghu_codespace"), settings);
+        Assert.False(File.Exists(KeyFile));
+    }
+
+    [Fact]
+    public void ConfiguredKey_Wins_AndNoKeyFileIsWritten()
+    {
+        var settings = AuthModeSelector.Resolve(Config((AuthModeSelector.ApiKeySetting, "secret")));
+
+        Assert.Equal(new AuthSettings(AuthMode.ApiKey, "secret"), settings);
+        Assert.False(File.Exists(KeyFile));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void NoKey_GeneratesOneIntoTheKeyFile_AndTheNextStartReusesIt(string? configured)
+    {
+        var first = AuthModeSelector.Resolve(Config((AuthModeSelector.ApiKeySetting, configured)));
+
+        Assert.Equal(AuthMode.ApiKey, first.Mode);
+        Assert.Matches("^[0-9a-f]{64}$", first.ApiKey); // 256 bits
+        Assert.Equal((KeyFile, true), (first.KeyFilePath, first.KeyFileCreated));
+        Assert.Equal(first.ApiKey, File.ReadAllText(KeyFile));
+
+        var second = AuthModeSelector.Resolve(Config((AuthModeSelector.ApiKeySetting, configured)));
+        Assert.Equal((first.ApiKey, KeyFile, false), (second.ApiKey, second.KeyFilePath, second.KeyFileCreated));
+    }
+
+    [Fact]
+    public void KeyFile_IsReadableByTheServersUserAlone()
+    {
+        ApiKeyFile.LoadOrCreate(KeyFile);
+
+        if (OperatingSystem.IsWindows())
+        {
+            var acl = new FileInfo(KeyFile).GetAccessControl();
+            Assert.True(acl.AreAccessRulesProtected, "the key file inherits its directory's ACL");
+            var rule = Assert.Single(acl.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>());
+            Assert.Equal(WindowsIdentity.GetCurrent().User, rule.IdentityReference);
+            Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+        }
+        else
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(KeyFile));
+        }
+    }
+
+    [Fact]
+    public void KeyFileWithoutAKey_IsReplaced()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(KeyFile)!);
+        File.WriteAllText(KeyFile, "  \n");
+
+        var (key, created) = ApiKeyFile.LoadOrCreate(KeyFile);
+
+        Assert.True(created);
+        Assert.Equal(key, File.ReadAllText(KeyFile));
+    }
+
+    [Fact]
+    public void KeyFile_KeyWrittenByHand_IsUsedTrimmed()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(KeyFile)!);
+        File.WriteAllText(KeyFile, "my-own-key\n");
+
+        Assert.Equal(("my-own-key", false), ApiKeyFile.LoadOrCreate(KeyFile));
+    }
+
+    /// <summary>Sessions work under ProjectRootsDir: the key file is never there.</summary>
+    [Theory]
+    [InlineData("roots/api-key")]
+    [InlineData("roots/.profiles/api-key")]
+    [InlineData("roots/some-root/project/.godmode/api-key")]
+    public void KeyFileUnderProjectRootsDir_IsRefused(string relative)
+    {
+        var path = Path.Combine(_dir, relative);
+
+        var ex = Assert.Throws<StartupConfigurationException>(() => AuthModeSelector.Resolve(Config((ApiKeyFile.PathSetting, path))));
+
+        Assert.Contains("ProjectRootsDir", ex.Message);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void KeyFileBesideProjectRootsDir_IsNotUnderIt()
+    {
+        // "roots-data" starts with "roots" but is not inside it
+        var path = Path.Combine(_dir, "roots-data", "api-key");
+
+        Assert.Equal(path, AuthModeSelector.Resolve(Config((ApiKeyFile.PathSetting, path))).KeyFilePath);
+    }
+
+    [Fact]
+    public void KeyFileThatCannotBeWritten_FailsWithWhatToSet()
+    {
+        // A directory where the file should be
+        Directory.CreateDirectory(KeyFile);
+
+        var ex = Assert.Throws<StartupConfigurationException>(() => AuthModeSelector.Resolve(Config()));
+
+        Assert.Contains(KeyFile, ex.Message);
         Assert.Contains(AuthModeSelector.ApiKeySetting, ex.Message);
-        // The message names the binding that is not loopback.
-        Assert.Contains(urls.Split(';')[^1], ex.Message);
     }
 
     [Fact]
-    public void GetConfiguredUrls_ReadsEverySourceKestrelBinds()
+    public void DefaultKeyFile_IsInTheUsersLocalApplicationData()
     {
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Urls"] = "http://127.0.0.1:1; http://localhost:2",
-            ["HTTP_PORTS"] = "8080", // ignored by Kestrel while Urls is set, as in the Docker image
-            ["Kestrel:Endpoints:Public:Url"] = "http://0.0.0.0:3",
-        }).Build();
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
 
-        Assert.Equal(
-            ["http://127.0.0.1:1", "http://localhost:2", "http://0.0.0.0:3"],
-            AuthModeSelector.GetConfiguredUrls(config));
+        Assert.Equal(Path.Combine(localAppData, "GodMode.Server", "api-key"), ApiKeyFile.DefaultPath());
     }
 
     [Fact]
-    public void GetConfiguredUrls_WithoutUrls_UsesHttpPortsOnAllInterfaces()
+    public void Settings_NameNoSecretWhenLogged()
     {
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["HTTP_PORTS"] = "8080",
-            ["HTTPS_PORTS"] = "8443",
-        }).Build();
+        var settings = new AuthSettings(AuthMode.ApiKey, "the-api-key", CodespaceToken: "ghu_token", KeyFilePath: "/data/api-key");
 
-        Assert.Equal(["http://*:8080", "https://*:8443"], AuthModeSelector.GetConfiguredUrls(config));
+        Assert.DoesNotContain("the-api-key", settings.ToString());
+        Assert.DoesNotContain("ghu_token", settings.ToString());
     }
-
-    [Fact]
-    public void GetConfiguredUrls_NothingConfigured_IsKestrelDefaultOnLocalhost()
-    {
-        var urls = AuthModeSelector.GetConfiguredUrls(new ConfigurationBuilder().Build());
-        Assert.Equal(AuthMode.Loopback, AuthModeSelector.Select(null, false, urls));
-    }
-
-    [Fact]
-    public void Resolve_ReadsKeyCodespaceAndGitHubUserFromConfiguration()
-    {
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Urls"] = AllInterfaces[0],
-            ["CODESPACES"] = "true",
-            ["GITHUB_USER"] = "octocat",
-            [AuthModeSelector.ApiKeySetting] = "ignored-in-codespace",
-        }).Build();
-
-        Assert.Equal(new AuthSettings(AuthMode.Codespace, null, "octocat"), AuthModeSelector.Resolve(config));
-    }
-
-    [Fact]
-    public void Resolve_ApiKeyMode_CarriesTheKey()
-    {
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Urls"] = Loopback[0],
-            [AuthModeSelector.ApiKeySetting] = "secret",
-        }).Build();
-
-        Assert.Equal(new AuthSettings(AuthMode.ApiKey, "secret", null), AuthModeSelector.Resolve(config));
-    }
-
-    [Theory]
-    [InlineData("127.0.0.1", true)]
-    [InlineData("127.8.9.10", true)]
-    [InlineData("::1", true)]
-    [InlineData("::ffff:127.0.0.1", true)]
-    [InlineData("10.0.0.5", false)]
-    [InlineData("::ffff:10.0.0.5", false)]
-    [InlineData("100.101.102.103", false)]
-    public void IsLoopback_ChecksTheCallerAddress(string address, bool expected) =>
-        Assert.Equal(expected, AuthModeSelector.IsLoopback(IPAddress.Parse(address)));
-
-    [Fact]
-    public void IsLoopback_NoAddress_IsNotLoopback() => Assert.False(AuthModeSelector.IsLoopback(null));
 }

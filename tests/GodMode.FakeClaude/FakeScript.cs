@@ -19,6 +19,29 @@ public static class FakeClaudeEnvironment
 
     public const string ScriptFlag = "--fake-script";
     public const string RecordFlag = "--fake-record";
+
+    /// <summary>
+    /// The fake started as a child of a launch (<see cref="ScriptStep.SpawnChild"/>): it ignores
+    /// interrupts and sleeps until it is killed. Followed by the sidecar's path and the launch's pid.
+    /// </summary>
+    public const string ChildFlag = "--fake-child";
+
+    /// <summary>
+    /// The fake started to leave a child behind (<see cref="ScriptStep.SpawnChild"/> with
+    /// <c>Detached</c>): it starts a <see cref="ChildFlag"/> child and exits at once, so the child's
+    /// parent is gone. Followed by the sidecar's path and the launch's pid.
+    /// </summary>
+    public const string DetachFlag = "--fake-detach";
+
+    /// <summary>After <see cref="ChildFlag"/>: the child leads a session of its own (Linux).</summary>
+    public const string OwnSessionFlag = "--own-session";
+
+    /// <summary>
+    /// Windows: raises Ctrl+C (<c>ctrl-c</c>) or Ctrl+Break (<c>ctrl-break</c>) in the console of the
+    /// process whose id follows, as that key pressed in its terminal would, and exits 0 if it did.
+    /// A process can only raise console events in its own console, so a test borrows this one's.
+    /// </summary>
+    public const string RaiseFlag = "--fake-raise";
 }
 
 /// <summary>One step of a fake claude script.</summary>
@@ -35,6 +58,9 @@ public abstract record ScriptStep
 
     public sealed record Sleep(int Milliseconds) : ScriptStep;
 
+    /// <summary>Waits until the file at <paramref name="Path"/> exists: a test holds the fake here until it lets it go.</summary>
+    public sealed record AwaitFile(string Path) : ScriptStep;
+
     /// <summary>Writes one line to stderr.</summary>
     public sealed record Stderr(string Text) : ScriptStep;
 
@@ -47,12 +73,33 @@ public abstract record ScriptStep
     public sealed record RejectResume : ScriptStep;
 
     /// <summary>
-    /// Asks for permission as claude does through the GodMode bridge's permission_prompt tool: POSTs
-    /// what the bridge POSTs to the server's internal API with the project token, waits for the
-    /// answer however long it takes, and records it. <paramref name="Arguments"/> is the tool call's
-    /// arguments as claude sends them: <c>{"tool_name":…,"input":{…},"tool_use_id":…}</c>.
+    /// Asks for permission as claude does with its <c>--permission-prompt-tool</c>: an MCP client
+    /// on the server its <c>--mcp-config</c> names for that tool (<c>tools/list</c> on its first
+    /// call, then <c>tools/call</c>), with the headers the config gives. Waits for the answer however
+    /// long it takes and records it. <paramref name="Arguments"/> is the tool call's arguments as
+    /// claude sends them: <c>{"tool_name":…,"input":{…},"tool_use_id":…}</c>. With
+    /// <paramref name="CancelOnProgress"/>, cancels the call when the server first reports progress,
+    /// as claude does when the user interrupts the turn, and records <c>cancelled</c>.
     /// </summary>
-    public sealed record AskPermission(string Arguments) : ScriptStep;
+    public sealed record AskPermission(string Arguments, bool CancelOnProgress = false) : ScriptStep;
+
+    /// <summary>
+    /// From here on an interrupt is recorded and otherwise ignored. Until this step the fake does
+    /// what claude does with one (Ctrl+C or Ctrl+Break on Windows, SIGINT or SIGQUIT elsewhere): in
+    /// a turn, it abandons the permission prompt it is waiting on (cancels its call), writes the
+    /// interrupted turn's end, then it exits 0, whatever step it is on.
+    /// </summary>
+    public sealed record IgnoreInterrupt : ScriptStep;
+
+    /// <summary>
+    /// Starts a child process that ignores interrupts and sleeps until killed, and records its pid.
+    /// <paramref name="Detached"/> starts it through a process that exits at once, so the child's
+    /// parent is gone: it is re-parented, and only its process group or Job Object still holds it.
+    /// </summary>
+    /// <paramref name="OwnSession"/> starts it as the leader of a session of its own (Linux: setsid), as a
+    /// detached spawn or a daemon does: it is out of the process group, and only a walk of the tree
+    /// finds it while its parent lives. A Job Object holds it on Windows all the same.
+    public sealed record SpawnChild(bool Detached = false, bool OwnSession = false) : ScriptStep;
 }
 
 /// <summary>
@@ -62,10 +109,16 @@ public abstract record ScriptStep
 /// emit {"type":"system","subtype":"init","session_id":"{{session_id}}"}
 /// await-stdin
 /// sleep 100
+/// await-file C:\tmp\go
 /// stderr some text
 /// exit 1
 /// reject-resume
 /// permission {"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_1"}
+/// permission-cancel {"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_1"}
+/// ignore-interrupt
+/// spawn-child
+/// spawn-detached
+/// spawn-own-session
 /// </code>
 /// Blank lines and lines starting with <c>#</c> are ignored. A script that runs off its end keeps
 /// the process alive until stdin closes (then exits 0), like the real CLI between turns.
@@ -84,11 +137,19 @@ public sealed class FakeScript
     public FakeScript Emit(string jsonLine) => Add(new ScriptStep.Emit(jsonLine));
     public FakeScript AwaitStdin() => Add(new ScriptStep.AwaitStdin());
     public FakeScript Sleep(int milliseconds) => Add(new ScriptStep.Sleep(milliseconds));
+    public FakeScript AwaitFile(string path) => Add(new ScriptStep.AwaitFile(path));
     public FakeScript Stderr(string text) => Add(new ScriptStep.Stderr(text));
     public FakeScript Exit(int code) => Add(new ScriptStep.Exit(code));
     public FakeScript RejectResume() => Add(new ScriptStep.RejectResume());
     public FakeScript AskPermission(string toolName, object input, string toolUseId = "toolu_fake") =>
         Add(new ScriptStep.AskPermission(Json(new { tool_name = toolName, input, tool_use_id = toolUseId })));
+
+    /// <summary>As <see cref="AskPermission"/>, cancelling the call once the server reports progress on it.</summary>
+    public FakeScript AskPermissionAndCancel(string toolName, object input, string toolUseId = "toolu_fake") =>
+        Add(new ScriptStep.AskPermission(Json(new { tool_name = toolName, input, tool_use_id = toolUseId }), CancelOnProgress: true));
+
+    public FakeScript IgnoreInterrupt() => Add(new ScriptStep.IgnoreInterrupt());
+    public FakeScript SpawnChild(bool detached = false, bool ownSession = false) => Add(new ScriptStep.SpawnChild(detached, ownSession));
 
     /// <summary>What the real CLI writes to stderr when <c>--resume</c> names a session it has no conversation for.</summary>
     public const string NoConversationError = "No conversation found with session ID: ";
@@ -99,9 +160,14 @@ public sealed class FakeScript
     public FakeScript EmitInit() =>
         Emit($$"""{"type":"system","subtype":"init","session_id":"{{SessionIdPlaceholder}}"}""");
 
-    /// <summary>The user message echoed back by <c>--replay-user-messages</c>.</summary>
-    public FakeScript EmitUser(string text) =>
-        Emit(Json(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder }));
+    /// <summary>
+    /// A user line. With <paramref name="echo"/>, a message the user sent, echoed back by
+    /// <c>--replay-user-messages</c> as claude takes it (<c>isReplay</c>): at once between turns, at
+    /// its next step when it came in the middle of one (claude 2.1.282 folds it into that turn).
+    /// </summary>
+    public FakeScript EmitUser(string text, bool echo = false) => echo
+        ? Emit(Json(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder, isReplay = true }))
+        : Emit(Json(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder }));
 
     public FakeScript EmitAssistant(string text) =>
         Emit(Json(new { type = "assistant", message = new { role = "assistant", content = new[] { new { type = "text", text } } }, session_id = SessionIdPlaceholder }));
@@ -140,10 +206,16 @@ public sealed class FakeScript
                 ScriptStep.Emit e => $"emit {e.Line}",
                 ScriptStep.AwaitStdin => "await-stdin",
                 ScriptStep.Sleep s => $"sleep {s.Milliseconds}",
+                ScriptStep.AwaitFile a => $"await-file {a.Path}",
                 ScriptStep.Stderr s => $"stderr {s.Text}",
                 ScriptStep.Exit e => $"exit {e.Code}",
                 ScriptStep.RejectResume => "reject-resume",
+                ScriptStep.AskPermission { CancelOnProgress: true } p => $"permission-cancel {p.Arguments}",
                 ScriptStep.AskPermission p => $"permission {p.Arguments}",
+                ScriptStep.IgnoreInterrupt => "ignore-interrupt",
+                ScriptStep.SpawnChild { OwnSession: true } => "spawn-own-session",
+                ScriptStep.SpawnChild { Detached: true } => "spawn-detached",
+                ScriptStep.SpawnChild => "spawn-child",
                 _ => throw new InvalidOperationException($"Unknown step {step}"),
             });
         return text.ToString();
@@ -168,10 +240,16 @@ public sealed class FakeScript
                 "emit" => new ScriptStep.Emit(argument),
                 "await-stdin" => new ScriptStep.AwaitStdin(),
                 "sleep" => new ScriptStep.Sleep(int.Parse(argument)),
+                "await-file" => new ScriptStep.AwaitFile(argument),
                 "stderr" => new ScriptStep.Stderr(argument),
                 "exit" => new ScriptStep.Exit(int.Parse(argument)),
                 "reject-resume" => new ScriptStep.RejectResume(),
                 "permission" => new ScriptStep.AskPermission(argument),
+                "permission-cancel" => new ScriptStep.AskPermission(argument, CancelOnProgress: true),
+                "ignore-interrupt" => new ScriptStep.IgnoreInterrupt(),
+                "spawn-child" => new ScriptStep.SpawnChild(),
+                "spawn-detached" => new ScriptStep.SpawnChild(Detached: true),
+                "spawn-own-session" => new ScriptStep.SpawnChild(OwnSession: true),
                 _ => throw new FormatException($"Unknown fake claude script step: {raw}"),
             });
         }

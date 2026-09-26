@@ -44,7 +44,9 @@ public sealed class AttentionWatcher : IAsyncDisposable
     /// gone: its registration was removed, or listed without it. A registration whose listing failed keeps its
     /// watches as they are. Call it on start and whenever the server list changes.
     /// </summary>
-    public async Task RefreshAsync(CancellationToken ct = default)
+    /// <returns>How many servers it watches now. None means it has nothing to do: no registration, or only ones that
+    /// cannot be listed (a token secure storage cannot read, say).</returns>
+    public async Task<int> RefreshAsync(CancellationToken ct = default)
     {
         await _refreshing.WaitAsync(ct);
         try
@@ -71,6 +73,7 @@ public sealed class AttentionWatcher : IAsyncDisposable
             // What an earlier run showed is known by server alone: with a listing missing, it may be that registration's
             if (failed.Count == 0)
                 _tracker.RemoveAllExcept(kept);
+            return _watches.Count;
         }
         finally
         {

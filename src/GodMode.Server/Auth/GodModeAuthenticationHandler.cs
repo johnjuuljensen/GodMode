@@ -14,6 +14,7 @@ namespace GodMode.Server.Auth;
 
 /// <summary>
 /// Authenticates users of the server (React client, MAUI relay) according to the startup <see cref="AuthMode"/>.
+/// Every mode needs a credential: there is no keyless access, from loopback or anywhere else.
 /// </summary>
 public class GodModeAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
@@ -37,15 +38,10 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        // A project's MCP bridge is not a user; its token must never be checked as an API key
-        // or sent to GitHub. The project-token scheme handles it.
+        // A project's claude calling the MCP endpoint is not a user; its token must never be checked
+        // as an API key or sent to GitHub. The project-token scheme handles it.
         if (Request.Headers.ContainsKey(ProjectTokenAuthenticationHandler.ProjectIdHeader))
             return AuthenticateResult.NoResult();
-
-        if (_settings.Mode == AuthMode.Loopback)
-            return IsLocalRequest()
-                ? SuccessResult(Scheme.Name, "local-user")
-                : AuthenticateResult.Fail("Unauthenticated access is only allowed locally: loopback caller, Host and Origin");
 
         // Authorization header; for the hub only, also the query string, because browsers cannot set
         // headers on a WebSocket upgrade. Nowhere else: a key in a URL ends up in logs and history.
@@ -63,24 +59,17 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
         };
     }
 
-    /// <summary>
-    /// Keyless loopback mode trusts this machine, and a browser on this machine is a loopback
-    /// caller too. So besides the caller's address (which keeps it closed if the server is
-    /// reachable some other way), the Host it asked for must be loopback, against DNS rebinding,
-    /// and so must the Origin of the page that sent it, when there is one, against cross-site
-    /// requests including WebSocket upgrades.
-    /// </summary>
-    private bool IsLocalRequest() =>
-        AuthModeSelector.IsLoopback(Context.Connection.RemoteIpAddress)
-        && AuthModeSelector.IsLoopbackHost(Request.Host.Host)
-        && Request.Headers.Origin.ToString() is var origin
-        && (origin.Length == 0 || AuthModeSelector.IsLoopbackOrigin(origin));
-
     private async Task<AuthenticateResult> ValidateGitHubTokenAsync(string token)
     {
         var expectedUser = _settings.GitHubUser;
         if (string.IsNullOrEmpty(expectedUser))
             return AuthenticateResult.Fail("GITHUB_USER environment variable not set");
+
+        // The codespace hands its own token to its sessions (a root's environment passes GITHUB_TOKEN),
+        // so a session, or a token it leaked, must not open the server with it. Checked before the
+        // cache and GitHub, which would say it is GITHUB_USER's
+        if (_settings.CodespaceToken is { Length: > 0 } codespaceToken && Secret.FixedTimeEquals(token, codespaceToken))
+            return AuthenticateResult.Fail("The codespace's own GITHUB_TOKEN is not accepted: its sessions are given it");
 
         var cacheKey = HashToken(token);
 
@@ -126,17 +115,10 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
         }
     }
 
-    private AuthenticateResult ValidateApiKey(string token, string expectedKey)
-    {
-        // Constant-time comparison
-        var tokenBytes = Encoding.UTF8.GetBytes(token);
-        var keyBytes = Encoding.UTF8.GetBytes(expectedKey);
-
-        if (!CryptographicOperations.FixedTimeEquals(tokenBytes, keyBytes))
-            return AuthenticateResult.Fail("Invalid API key");
-
-        return SuccessResult(Scheme.Name, "api-key-user");
-    }
+    private AuthenticateResult ValidateApiKey(string token, string expectedKey) =>
+        Secret.FixedTimeEquals(token, expectedKey)
+            ? SuccessResult(Scheme.Name, "api-key-user")
+            : AuthenticateResult.Fail("Invalid API key");
 
     internal static AuthenticateResult SuccessResult(string scheme, string username, params Claim[] extraClaims)
     {
@@ -167,8 +149,9 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
 }
 
 /// <summary>
-/// Authenticates the GodMode MCP bridge running inside a project: <c>X-GodMode-Project-Id</c>
-/// plus that project's bearer token. A user's API key is not a project token.
+/// Authenticates a project's claude calling GodMode's MCP endpoint: <c>X-GodMode-Project-Id</c>
+/// plus the bearer token that project's latest launch was issued, both from the MCP config the
+/// server launched it with. A user's API key is not a project token, nor is another project's.
 /// </summary>
 public class ProjectTokenAuthenticationHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -190,6 +173,18 @@ public class ProjectTokenAuthenticationHandler(
             : GodModeAuthenticationHandler.SuccessResult(Scheme.Name, $"project:{projectId}",
                 new Claim(GodModeAuthExtensions.ProjectIdClaim, projectId)));
     }
+}
+
+internal static class Secret
+{
+    /// <summary>
+    /// Whether a presented secret is the expected one, in time that depends on neither's content or
+    /// length: both are hashed, and the hashes compared in fixed time.
+    /// </summary>
+    public static bool FixedTimeEquals(string presented, string expected) =>
+        CryptographicOperations.FixedTimeEquals(
+            SHA256.HashData(Encoding.UTF8.GetBytes(presented)),
+            SHA256.HashData(Encoding.UTF8.GetBytes(expected)));
 }
 
 internal static class BearerToken

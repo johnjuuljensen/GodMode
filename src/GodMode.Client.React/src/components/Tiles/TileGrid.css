@@ -229,19 +229,6 @@
   -webkit-line-clamp: 2;
 }
 
-.tile-msg-type {
-  font-size: 8px;
-  font-weight: 600;
-  display: block;
-  margin-bottom: 1px;
-  letter-spacing: 0.04em;
-  font-family: var(--font-mono);
-}
-
-.tile-msg-other .tile-msg-type {
-  color: var(--accent);
-}
-
 /* Question overlay at bottom */
 .tile-question {
   position: absolute;

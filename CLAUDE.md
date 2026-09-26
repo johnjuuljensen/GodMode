@@ -43,7 +43,7 @@ GodMode runs Claude Code sessions that ship issues, on machines you own (a PC, a
 # Build server (includes React SPA build)
 dotnet build src/GodMode.Server/GodMode.Server.csproj
 
-# Run server (http://127.0.0.1:31337, keyless because it is loopback-only)
+# Run server (http://127.0.0.1:31337; with no Authentication:ApiKey it generates a key on its first start and prints it)
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
 # Build MAUI app (requires MAUI workload)
@@ -64,11 +64,10 @@ cd src/GodMode.Client.React && npm run dev
 
 - **GodMode.Shared** — Shared types, models, enums, and SignalR hub interfaces (`IProjectHub`, `IProjectHubClient`)
 - **GodMode.Server** — ASP.NET SignalR server that spawns/manages Claude Code processes, serves React SPA
-- **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation (npm project, not in the slnx)
+- **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation. An npm project with a NoTargets `GodMode.Client.React.csproj` in the slnx, which runs TypeGen and `npm run build`; GodMode.Server and GodMode.Maui reference it
 - **GodMode.ClientBase** — Shared .NET client abstractions (host providers, server registry, token protection)
 - **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React
 - **GodMode.ProjectFiles** — File system utilities for project folders (status.json, JSONL streams)
-- **GodMode.McpBridge** — stdio MCP server given to every Claude session, for reporting results and status back to the server (npm project, not in the slnx)
 - **SignalR.Proxy** — SignalR WebSocket relay used by MAUI for multi-server connectivity
 - **GodMode.Server.Tests** — xUnit tests for GodMode.Server (`tests/`)
 - **GodMode.TypeGen** — build-time generator of the React client's hub types from GodMode.Shared (`tools/`)
@@ -80,11 +79,13 @@ cd src/GodMode.Client.React && npm run dev
 - `IProjectHubClient` (Shared) — Server→Client callbacks (including `CreationProgress`)
 - `ProjectHub` (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
 - `HubConnectionFactory` (ClientBase) — .NET clients get a raw `HubConnection` and use `TypedSignalR.Client`'s `CreateHubProxy<IProjectHub>()` for typed calls
-- `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of GodMode.Server (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
+- `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of GodMode.Server or GodMode.Maui (via `GodMode.Client.React.csproj`) (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
 
 **Config-Driven Project Roots (Multi-File)**
 - A root is a subdirectory of `ProjectRootsDir` (appsettings, default `roots`) that contains a `.godmode-root/` folder with config files
-- `config.json` defines base/shared config (profileName, prepare, delete, environment, claudeArgs, mcpServers)
+- `config.json` defines base/shared config (profileName, prepare, delete, environment, claudeArgs)
+- Roots and profiles (`{ProjectRootsDir}/.profiles/`) are maintained by hand on the host: no hub method writes config, and the server archives nothing
+- GodMode gives a session one MCP server, the server's own `/mcp` endpoint, whose only tool is the permission prompt, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
 - `config.{action}.json` files define per-action overlays (merged with base)
 - `{actionName}/schema.json` provides input schema by convention (falls back to default name+prompt)
 - `RootConfigReader` discovers, merges, and resolves configs fresh on each operation (no restart needed)
@@ -105,9 +106,10 @@ cd src/GodMode.Client.React && npm run dev
 - `ClaudeProcessManager` appends each process's stdout to `.godmode/output.jsonl`, which backfills clients that subscribe later
 
 **Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
-- One mode per run: codespace (`CODESPACES=true`), API key (`Authentication:ApiKey`), or keyless loopback
-- Keyless is allowed only when every binding is loopback, and only for loopback callers with a loopback `Host`/`Origin`. Otherwise the server refuses to start without a key
-- Default binding `http://127.0.0.1:31337`. Binding a Tailscale or LAN address needs a key; so does the Docker image (`URLS=http://+:31337`)
+- Every request needs a credential, loopback included. One mode per run: codespace (`CODESPACES=true`: a GitHub token of `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`) or API key
+- The key is `Authentication:ApiKey`, else one the server generates on its first start into an owner-only key file in its own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key`, `~/.local/share/GodMode.Server/api-key`; never under `ProjectRootsDir`), prints once, and reuses on every start
+- A request with an `Origin` gets 403 unless it is one of the server's own origins (its bindings, where loopback and wildcards also stand for `localhost`/`127.0.0.1`/`[::1]`, plus `Authentication:AllowedOrigins`); a request with no `Origin` needs the key alone
+- Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them; a credential they need goes in the root's `environment`
 
 ### Project Folder Structure
 ```

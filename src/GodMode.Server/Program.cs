@@ -1,13 +1,17 @@
-using System.Security.Claims;
+using GodMode.Server;
 using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
-using GodMode.Server.Models;
 using GodMode.Server.Services;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
+using ModelContextProtocol.AspNetCore;
 using Serilog;
 using Serilog.Events;
+
+// Not the server: the helper a stop starts on Windows to interrupt a session in its own console
+if (args is [SessionProcessTree.ConsoleBreakFlag, ..])
+    return SessionProcessTree.RunConsoleBreakHelper(args);
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,20 +28,28 @@ builder.Host.UseSerilog((context, configuration) =>
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 31));
 
-// Select the auth mode (codespace > API key > loopback-only); refuse to start exposed without auth.
+// Select the auth mode (codespace, else the API key: configured, else generated into the key file) and
+// the browser origins; every mode needs a credential. Refuse to start on configuration that cannot work
 AuthSettings authSettings;
+OriginPolicy originPolicy;
 try
 {
     authSettings = AuthModeSelector.Resolve(builder.Configuration);
+    originPolicy = OriginPolicy.From(builder.Configuration, builder.Environment.IsDevelopment(),
+        isCodespace: authSettings.Mode == AuthMode.Codespace);
+    PermissionPromptTool.KeepAliveFrom(builder.Configuration);
 }
-catch (AuthConfigurationException ex)
+catch (StartupConfigurationException ex)
 {
     Console.Error.WriteLine(ex.Message);
     return 1;
 }
 
-// Add services to the container
-builder.Services.AddSignalR()
+// Add services to the container. A connection's calls run side by side, a few at a time: a reply
+// that waits for a resumed claude to start its session (up to SessionStartTimeoutSeconds) leaves the
+// tab its Stop and its subscribes. Subscribes still run one at a time per connection, in order
+// (ProjectManager.SubscribeProjectAsync)
+builder.Services.AddSignalR(options => options.MaximumParallelInvocationsPerClient = ProjectHub.ParallelInvocationsPerClient)
     .AddJsonProtocol(options =>
     {
         var defaults = JsonDefaults.Options;
@@ -85,9 +97,19 @@ builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
 builder.Services.AddSingleton<ProfileFileManager>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
+// GodMode's MCP endpoint, for its sessions' claude: the permission prompt is its only tool. Stateless:
+// claude's calls need no session (Claude Code speaks the sessionless 2026-07-28 revision), and a
+// waiting call keeps its own response stream, which carries its progress and its answer
+builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = ProjectManager.McpServerName, Version = "1.0.0" })
+    .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
+    .WithTools<PermissionPromptTool>();
+
 var app = builder.Build();
 
-// Configure the HTTP request pipeline
+// Configure the HTTP request pipeline. A browser's request from an origin other than the server's own
+// is refused first, before static files, CORS and authentication
+app.UseOriginPolicy(originPolicy);
+
 if (app.Environment.IsDevelopment())
     app.UseCors();
 
@@ -130,75 +152,40 @@ app.MapGet("/events", async (HttpContext ctx) =>
 
 app.MapHub<ProjectHub>(GodModeAuthExtensions.HubPath).RequireAuthorization();
 
-// ── Internal API (MCP bridge → server, project-scoped token auth) ──
+// ── MCP (a project's claude → server, project-token auth): the permission prompt, its one tool ──
 
-var internalApi = app.MapGroup("/api/internal").RequireAuthorization(GodModeAuthExtensions.ProjectPolicy);
-
-static string ProjectId(HttpContext ctx) => ctx.User.FindFirstValue(GodModeAuthExtensions.ProjectIdClaim)!;
-
-internalApi.MapPost("/result", async (HttpContext ctx, IProjectManager pm) =>
-{
-    var request = await ctx.Request.ReadFromJsonAsync<SubmitResultRequest>();
-    if (request == null)
-        return Results.BadRequest(new { error = "Invalid request body" });
-
-    await pm.StoreProjectResultAsync(ProjectId(ctx), request);
-    return Results.Ok(new { success = true });
-});
-
-internalApi.MapPost("/status", async (HttpContext ctx, IProjectManager pm) =>
-{
-    var request = await ctx.Request.ReadFromJsonAsync<UpdateStatusRequest>();
-    if (request == null)
-        return Results.BadRequest(new { error = "Invalid request body" });
-
-    await pm.UpdateCustomStatusAsync(ProjectId(ctx), request.Message);
-    return Results.Ok(new { success = true });
-});
-
-internalApi.MapPost("/review", async (HttpContext ctx, IProjectManager pm) =>
-{
-    var request = await ctx.Request.ReadFromJsonAsync<RequestReviewRequest>();
-    if (request == null)
-        return Results.BadRequest(new { error = "Invalid request body" });
-
-    await pm.RequestHumanReviewAsync(ProjectId(ctx), request);
-    return Results.Ok(new { success = true });
-});
-
-// The bridge's permission_prompt: answered when the user answers, however long that takes. The
-// request is the wait: when it drops (claude exited), the prompt is withdrawn.
-internalApi.MapPost("/permission", async (HttpContext ctx, IProjectManager pm) =>
-{
-    var request = await ctx.Request.ReadFromJsonAsync<PermissionPromptRequest>();
-    if (request is not { ToolName.Length: > 0 })
-        return Results.BadRequest(new { error = "Invalid request body" });
-
-    return Results.Json(await pm.RequestPermissionAsync(ProjectId(ctx), request, ctx.RequestAborted));
-});
+app.MapMcp(McpEndpointUrl.Path).RequireAuthorization(GodModeAuthExtensions.ProjectPolicy);
 
 // SPA fallback: serve index.html for non-API/non-hub routes (React client routing).
 // Anonymous for the same reason as the static files above: it is the client bundle's entry page.
 app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authSettings.Mode);
-if (authSettings.Mode == AuthMode.Loopback)
-    app.Logger.LogWarning("No API key configured: unauthenticated access is allowed from loopback only. " +
-        "Set {Setting} before binding to any other address.", AuthModeSelector.ApiKeySetting);
+if (authSettings is { KeyFilePath: { } keyFile, KeyFileCreated: false })
+    app.Logger.LogInformation("No API key is configured: using the one in {KeyFile}", keyFile);
+if (authSettings is { KeyFilePath: { } newKeyFile, KeyFileCreated: true })
+{
+    // Printed this once, to the console alone: never to the log file
+    app.Lifetime.ApplicationStarted.Register(() => Console.WriteLine($"""
+
+        GodMode.Server generated its API key, since none is configured ({AuthModeSelector.ApiKeySetting}):
+
+            {authSettings.ApiKey}
+
+        Every client needs it: enter it on the browser's key page, or as the server's API key when you add it in the app.
+        It is kept in {newKeyFile}, readable by this user only, and used on every start.
+        This is the only time it is printed.
+
+        A browser is let in only from this server's own addresses (its log line "Browser requests are accepted from").
+        One that opens it by a host name, a LAN address or another port (a container's published port) needs
+        that origin in {OriginPolicy.AllowedOriginsSetting}.
+
+        """));
+}
 
 // Recover existing projects AFTER server starts (non-blocking), then carry on with those the last
-// shutdown interrupted: a resume's bridge URL is an address the server is bound to by now
-IProjectManager projectManager;
-try
-{
-    projectManager = app.Services.GetRequiredService<IProjectManager>();
-}
-catch (FileNotFoundException ex)
-{
-    // The MCP bridge is missing: every session would deny what needs approval without asking
-    Console.Error.WriteLine(ex.Message);
-    return 1;
-}
+// shutdown interrupted: a resume's MCP endpoint URL is an address the server is bound to by now
+var projectManager = app.Services.GetRequiredService<IProjectManager>();
 app.Lifetime.ApplicationStarted.Register(() =>
 {
     _ = Task.Run(async () =>

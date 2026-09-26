@@ -32,7 +32,9 @@ internal sealed class HarnessConnection
     /// <summary>Everything the server pushed to this connection, in the order it was delivered.</summary>
     public IReadOnlyList<HubPush> Received => _hub.Received(ConnectionId);
 
-    public Task SubscribeAsync(string projectId, long outputOffset) => Hub().SubscribeProject(projectId, outputOffset);
+    /// <summary>Subscribes as the client does, with a subscription ID of its own and the generation it holds (none by default).</summary>
+    public Task SubscribeAsync(string projectId, long outputOffset, string subscriptionId = "s1", string? generation = null) =>
+        Hub().SubscribeProject(projectId, outputOffset, subscriptionId, generation);
 
     public Task UnsubscribeAsync(string projectId) => Hub().UnsubscribeProject(projectId);
 

@@ -45,21 +45,29 @@ public class PullRequestTests
     {
         var scripts = Path.Combine(harness.RootPath, ".godmode-root", "scripts");
         Directory.CreateDirectory(scripts);
-        File.WriteAllText(Path.Combine(scripts, "status.ps1"), script);
+        GodMode.ProjectFiles.AtomicFile.WriteAllText(Path.Combine(scripts, "status.ps1"), script);
     }
 
     private static void Report(LifecycleHarness harness, string state, string review) =>
         WriteReport(harness, $$$"""{"pullRequest": {"url": "{{{Url}}}", "number": 7, "state": "{{{state}}}", "review": "{{{review}}}"}}""");
 
+    /// <summary>
+    /// Replaces the report whole: the script may be reading it as it changes, and a report written in
+    /// place can be read empty or half written.
+    /// </summary>
     private static void WriteReport(LifecycleHarness harness, string output) =>
-        File.WriteAllText(Path.Combine(harness.RootPath, "pr.json"), output);
+        GodMode.ProjectFiles.AtomicFile.WriteAllText(Path.Combine(harness.RootPath, "pr.json"), output);
 
+    /// <summary>
+    /// The folders the script ran in, read so that a script appending to the file is not refused
+    /// (it would fail, and its failure is a warning). A read while one appends is tried again.
+    /// </summary>
     private static string[] Runs(LifecycleHarness harness)
     {
         var path = Path.Combine(harness.RootPath, "status-runs.txt");
         for (var attempt = 1; ; attempt++)
         {
-            try { return File.Exists(path) ? File.ReadAllLines(path) : []; }
+            try { return File.Exists(path) ? LifecycleHarness.ReadShared(path).Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries) : []; }
             catch (IOException) when (attempt < 50) { Thread.Sleep(20); }
         }
     }
@@ -90,7 +98,9 @@ public class PullRequestTests
         var draft = await WaitForPullRequestAsync(harness, created.Id, PullRequestState.Draft, PullRequestReview.None);
         Assert.Equal(new PullRequestStatus(Url, 7, PullRequestState.Draft, PullRequestReview.None, draft.ChangedAt), draft);
         Assert.Equal(Path.GetFileName(harness.ProjectPath(created.Id)), Runs(harness)[0]);
-        Assert.Equal(draft, harness.ReadStatusFile(created.Id).PullRequest);
+        // Saved just after it changed in memory, which is what the wait saw
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadStatusFile(created.Id).PullRequest == draft), null,
+            () => $"status.json has pull request {harness.ReadStatusFile(created.Id).PullRequest}, not {draft}");
         var finished = Assert.Single(harness.Projects.GetAttention());
         Assert.Equal((AttentionKind.Finished, Result, Url), (finished.Kind, finished.Text, finished.PullRequestUrl));
 

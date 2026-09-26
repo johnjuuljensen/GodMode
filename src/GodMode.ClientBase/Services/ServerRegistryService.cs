@@ -7,13 +7,10 @@ namespace GodMode.ClientBase.Services;
 
 /// <summary>
 /// Manages server registrations stored in servers.json, with access tokens in an <see cref="ISecretStore"/>.
-/// On load, older files are upgraded in place: entries get an ID, a single Url becomes Urls,
-/// and a token found in the file moves to secure storage. profiles.json is migrated when servers.json doesn't exist.
 /// </summary>
 public class ServerRegistryService : IServerRegistryService
 {
     private const string ServersFileName = "servers.json";
-    private const string ProfilesFileName = "profiles.json";
     private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
 
     private readonly string _serversPath;
@@ -43,20 +40,23 @@ public class ServerRegistryService : IServerRegistryService
 
     public async Task<ServerRegistration> AddServerAsync(ServerRegistration server, string? accessToken)
     {
+        // Every GodMode server requires its key, a local one included; a GitHub account, its token
+        if (string.IsNullOrWhiteSpace(accessToken))
+            throw new ArgumentException(server.Type == ServerTypes.GitHub
+                ? "A GitHub account needs a token."
+                : "A server needs its API key: every GodMode server requires one.", nameof(accessToken));
+
         var added = server with
         {
             Id = NewId(),
             Urls = server.Urls.Select(u => u.Trim().TrimEnd('/')).Where(u => u.Length > 0).ToList(),
-            Url = null,
-            Token = null,
         };
 
         await _lock.WaitAsync();
         try
         {
             var servers = await LoadAsync();
-            if (!string.IsNullOrEmpty(accessToken))
-                await _secrets.SetAsync(TokenKey(added.Id), accessToken);
+            await StoreTokenAsync(added.Id, accessToken);
             await SaveAsync([.. servers, added]);
             return added;
         }
@@ -77,32 +77,27 @@ public class ServerRegistryService : IServerRegistryService
         finally { _lock.Release(); }
     }
 
-    public async Task<string?> GetAccessTokenAsync(string id)
-    {
-        if (await _secrets.GetAsync(TokenKey(id)) is { } token)
-            return token;
-        // An entry whose token could not be moved to secure storage yet still carries it.
-        var legacy = (await GetServersAsync()).FirstOrDefault(s => s.Id == id)?.Token;
-        return legacy == null ? null : LegacyToken.Unprotect(legacy);
-    }
+    public Task<string?> GetAccessTokenAsync(string id) => _secrets.GetAsync(TokenKey(id));
 
     private static string NewId() => Guid.NewGuid().ToString("N");
 
-    private async Task<IReadOnlyList<ServerRegistration>> LoadAsync()
+    /// <summary>Puts a token in secure storage. It has nowhere else to go, so a store that refuses it fails the add.</summary>
+    private async Task StoreTokenAsync(string id, string token)
     {
-        if (_cached != null) return _cached;
-
-        var stored = File.Exists(_serversPath) ? await ReadServersFileAsync() : await MigrateFromProfilesAsync();
-        var upgraded = new List<ServerRegistration>(stored.Count);
-        foreach (var server in stored)
-            upgraded.Add(await UpgradeAsync(server));
-
-        if (!upgraded.SequenceEqual(stored))
-            await SaveAsync(upgraded);
-        else
-            _cached = upgraded;
-        return _cached!;
+        try
+        {
+            await _secrets.SetAsync(TokenKey(id), token);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Secure storage refused the access token of server {Id}", id);
+            throw new InvalidOperationException(
+                $"The server was not added: this device's secure storage would not keep its access token ({ex.Message}).", ex);
+        }
     }
+
+    private async Task<IReadOnlyList<ServerRegistration>> LoadAsync() =>
+        _cached ??= File.Exists(_serversPath) ? await ReadServersFileAsync() : [];
 
     private async Task<IReadOnlyList<ServerRegistration>> ReadServersFileAsync()
     {
@@ -114,83 +109,6 @@ public class ServerRegistryService : IServerRegistryService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Could not read {Path}", _serversPath);
-            return [];
-        }
-    }
-
-    /// <summary>Gives a registration written by an older build an ID and Urls, and moves its token to secure storage.</summary>
-    private async Task<ServerRegistration> UpgradeAsync(ServerRegistration server)
-    {
-        if (server.Id.Length > 0 && server.Url == null && server.Token == null)
-            return server;
-
-        var upgraded = server with
-        {
-            Id = server.Id.Length > 0 ? server.Id : NewId(),
-            Urls = server.Urls.Count > 0 || string.IsNullOrWhiteSpace(server.Url) ? server.Urls : [server.Url.TrimEnd('/')],
-            Url = null,
-            Token = null,
-        };
-
-        if (string.IsNullOrEmpty(server.Token))
-            return upgraded;
-
-        string token;
-        try
-        {
-            token = LegacyToken.Unprotect(server.Token);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Dropped the unreadable stored token of server {Id}; add the server again", upgraded.Id);
-            return upgraded;
-        }
-
-        try
-        {
-            await _secrets.SetAsync(TokenKey(upgraded.Id), token);
-            return upgraded;
-        }
-        catch (Exception ex)
-        {
-            // Keep the entry as it was, token included, so the next load tries again.
-            _logger.LogError(ex, "Could not move the token of server {Id} to secure storage", upgraded.Id);
-            return server with { Id = upgraded.Id };
-        }
-    }
-
-    private async Task<IReadOnlyList<ServerRegistration>> MigrateFromProfilesAsync()
-    {
-        var profilesPath = Path.Combine(_appDataPath, ProfilesFileName);
-        if (!File.Exists(profilesPath))
-            return [];
-
-        try
-        {
-            var json = await File.ReadAllTextAsync(profilesPath);
-            var profilesConfig = JsonSerializer.Deserialize<ProfilesConfig>(json);
-            if (profilesConfig == null)
-                return [];
-
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            return profilesConfig.Profiles
-                .SelectMany(p => p.Accounts)
-                .Where(a => seen.Add(a.Type == ServerTypes.GitHub
-                    ? $"github:{a.Username}"
-                    : $"local:{a.Path?.TrimEnd('/').ToLowerInvariant()}"))
-                .Select(a => new ServerRegistration
-                {
-                    Type = a.Type,
-                    Url = a.Type == ServerTypes.Local ? a.Path : null,
-                    Username = a.Username,
-                    Token = a.Token,
-                    DisplayName = a.Metadata?.GetValueOrDefault("name"),
-                })
-                .ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Could not migrate {Path}", profilesPath);
             return [];
         }
     }

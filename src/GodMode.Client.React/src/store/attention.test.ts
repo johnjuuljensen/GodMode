@@ -7,10 +7,13 @@ import type { HubCallbacks } from '../signalr/hub';
 import type { AttentionItem, AttentionKind, ServerInfo } from '../signalr/types';
 import { useAppStore, type ServerConnection } from './index';
 
+/** The server list the host gives loadServers. */
+const host = vi.hoisted(() => ({ servers: [] as ServerInfo[] }));
+
 vi.mock('../signalr/hub', () => ({ GodModeHub: class {} }));
 vi.mock('../services/hostApi', () => ({
   waitUntilReady: async () => {},
-  fetchServers: async () => [],
+  fetchServers: async () => host.servers,
   subscribeEvents: () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,
   getHubOptions: () => ({}),
@@ -92,6 +95,23 @@ describe('attention', () => {
   it('keeps one item per ProjectKey when a server lists a project twice', async () => {
     await connect([item('p1', '2026-09-24T10:00:00Z'), item('p1', '2026-09-24T11:00:00Z', 'Finished')], []);
     expect(listed()).toEqual(['A:p1@11:00']);
+  });
+
+  // The server writes no trailing zeros in fractional seconds: as text, .5Z sorts after .52Z (#239)
+  it('sorts by time, not by text, within one second', async () => {
+    await connect([item('p1', '2026-09-24T10:00:00.52Z'), item('p2', '2026-09-24T10:00:00.5Z')], [item('p3', '2026-09-24T10:00:00.519Z')]);
+    expect(useAppStore.getState().attention.map(i => i.ProjectId)).toEqual(['p2', 'p3', 'p1']);
+  });
+
+  it('drops the items of a server that left the server list', async () => {
+    await connect([item('p1', '2026-09-24T10:00:00Z')], [item('p2', '2026-09-24T09:00:00Z')]);
+    host.servers = [useAppStore.getState().getConnection('A')!.serverInfo];
+    try {
+      await useAppStore.getState().loadServers();
+    } finally {
+      host.servers = [];
+    }
+    expect(listed()).toEqual(['A:p1@10:00']);
   });
 
 });

@@ -35,6 +35,7 @@ public sealed class LocalServer : IAsyncDisposable
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger _logger;
     private readonly byte[] _secretBytes;
+    private readonly TimeSpan _handshakeTimeout;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _relays = new();
     private readonly CancellationTokenSource _stopping = new();
     private HttpListener? _listener;
@@ -44,14 +45,19 @@ public sealed class LocalServer : IAsyncDisposable
     /// <summary>Random per launch. Only the WebView learns it, over the host bridge.</summary>
     public string Secret { get; }
 
+    /// <summary>Relays connecting or running: each holds a client socket.</summary>
     public int ActiveRelayCount => _relays.Count;
 
     /// <param name="resolve">Resolves a server ID to its relay target, or null for an unknown or unreachable server.</param>
     /// <param name="allowedOrigins">Origins allowed to use the relay, e.g. <c>https://0.0.0.1</c>.</param>
+    /// <param name="loggerFactory">Logs for the relay and each connection.</param>
+    /// <param name="handshakeTimeout">How long a client may take to send its SignalR handshake, and a server to answer it
+    /// (<see cref="SignalRRelay.DefaultHandshakeTimeout"/> when null).</param>
     public LocalServer(
         Func<string, CancellationToken, Task<RelayTarget?>> resolve,
         IEnumerable<string> allowedOrigins,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        TimeSpan? handshakeTimeout = null)
     {
         _resolve = resolve;
         _allowedOrigins = new HashSet<string>(allowedOrigins.Select(o => o.TrimEnd('/')), StringComparer.OrdinalIgnoreCase);
@@ -59,6 +65,7 @@ public sealed class LocalServer : IAsyncDisposable
         _logger = loggerFactory.CreateLogger<LocalServer>();
         Secret = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
         _secretBytes = Encoding.UTF8.GetBytes(Secret);
+        _handshakeTimeout = handshakeTimeout ?? SignalRRelay.DefaultHandshakeTimeout;
     }
 
     public void Start()
@@ -81,7 +88,10 @@ public sealed class LocalServer : IAsyncDisposable
     {
         _logger.LogInformation("Dropping {Count} active relays", _relays.Count);
         foreach (var cts in _relays.Values)
-            cts.Cancel();
+        {
+            try { cts.Cancel(); }
+            catch (ObjectDisposedException) { /* that relay ended meanwhile */ }
+        }
     }
 
     private static int FindFreePort()
@@ -178,27 +188,27 @@ public sealed class LocalServer : IAsyncDisposable
             });
 
         var wsContext = await context.AcceptWebSocketAsync(null);
-        var relay = await SignalRRelay.ConnectAsync(wsContext.WebSocket, serverBuilder,
-            _loggerFactory.CreateLogger<SignalRRelay>());
-        if (relay == null)
-        {
-            _logger.LogWarning("Relay failed to connect for serverId={ServerId}", serverId);
-            return;
-        }
 
+        // Counted from here, so DropAllRelays and DisposeAsync also end a relay that is still connecting
         var relayId = Guid.NewGuid().ToString("N");
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
         _relays[relayId] = cts;
-        _logger.LogInformation("Relay active for serverId={ServerId} (total active: {Count})", serverId, _relays.Count);
-
         try
         {
+            await using var relay = await SignalRRelay.ConnectAsync(wsContext.WebSocket, serverBuilder,
+                _loggerFactory.CreateLogger<SignalRRelay>(), _handshakeTimeout, cts.Token);
+            if (relay == null)
+            {
+                _logger.LogWarning("Relay failed to connect for serverId={ServerId}", serverId);
+                return;
+            }
+
+            _logger.LogInformation("Relay active for serverId={ServerId} (total active: {Count})", serverId, _relays.Count);
             await relay.RunAsync(cts.Token);
         }
         finally
         {
             _relays.TryRemove(relayId, out _);
-            await relay.DisposeAsync();
             _logger.LogInformation("Relay closed for serverId={ServerId} (total active: {Count})", serverId, _relays.Count);
         }
     }

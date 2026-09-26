@@ -24,21 +24,20 @@ public class ResumeLaunchTests
             profileEnvironment: new Dictionary<string, string> { [ConfigDir] = configDir });
         var created = await harness.CreateProjectAsync();
         var create = await harness.WaitForStdinAsync(created.Id);
-        var createMcp = McpConfig(create);
+        var createMcp = GodModeMcpEntry.Of(create);
 
         await harness.Projects.StopProjectAsync(created.Id);
         await harness.WaitForStateAsync(created.Id, ProjectState.Stopped);
         await harness.Projects.ResumeProjectAsync(created.Id);
         var resume = await harness.WaitForLaunchAsync(created.Id, _ => true, index: 1);
-        var resumeMcp = McpConfig(resume);
+        var resumeMcp = GodModeMcpEntry.Of(resume);
 
         Assert.Equal(configDir, create.Environment[ConfigDir]);
         Assert.Equal(create.ArgValue("--session-id"), resume.ArgValue("--resume"));
         Assert.Equal(WithoutSessionFlag(create.Argv), WithoutSessionFlag(resume.Argv));
-        Assert.Equal(WithoutToken(create.Environment), WithoutToken(resume.Environment));
-        Assert.NotEqual(create.Environment["GODMODE_PROJECT_TOKEN"], resume.Environment["GODMODE_PROJECT_TOKEN"]);
-        Assert.Equal(createMcp, resumeMcp);
-        Assert.Contains("godmode-bridge", resumeMcp);
+        Assert.Equal(Sorted(create.Environment), Sorted(resume.Environment));
+        Assert.NotEqual(createMcp.Token, resumeMcp.Token);
+        Assert.Equal(createMcp.WithoutToken(), resumeMcp.WithoutToken());
     }
 
     /// <summary>
@@ -54,9 +53,8 @@ public class ResumeLaunchTests
             .AwaitStdin());
         var created = await harness.CreateProjectAsync();
         await harness.WaitForStdinAsync(created.Id);
-        var sessionFile = Path.Combine(harness.ProjectPath(created.Id), ".godmode", "session-id");
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(File.ReadAllText(sessionFile) == reported), null,
-            () => $"session-id is {File.ReadAllText(sessionFile)}, not the {reported} claude reported.\n{harness.Describe(created.Id)}");
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadSessionIdFile(created.Id) == reported), null,
+            () => $"session-id is {harness.ReadSessionIdFile(created.Id)}, not the {reported} claude reported.\n{harness.Describe(created.Id)}");
 
         await harness.Projects.StopProjectAsync(created.Id);
         await harness.WaitForStateAsync(created.Id, ProjectState.Stopped);
@@ -97,10 +95,6 @@ public class ResumeLaunchTests
     private static IReadOnlyList<string> WithoutSessionFlag(IReadOnlyList<string> argv) =>
         argv.Where((_, i) => !SessionFlags.Contains(argv[i]) && (i == 0 || !SessionFlags.Contains(argv[i - 1]))).ToList();
 
-    private static SortedDictionary<string, string> WithoutToken(IReadOnlyDictionary<string, string> environment) =>
-        new(environment.Where(e => e.Key != "GODMODE_PROJECT_TOKEN").ToDictionary(e => e.Key, e => e.Value), StringComparer.Ordinal);
-
-    /// <summary>The MCP config the launch was given; read while it runs, since its exit deletes it.</summary>
-    private static string McpConfig(FakeLaunch launch) =>
-        File.ReadAllText(launch.ArgValue("--mcp-config") ?? throw new InvalidOperationException("no --mcp-config"));
+    private static SortedDictionary<string, string> Sorted(IReadOnlyDictionary<string, string> environment) =>
+        new(environment.ToDictionary(e => e.Key, e => e.Value), StringComparer.Ordinal);
 }

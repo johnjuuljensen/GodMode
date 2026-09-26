@@ -89,12 +89,13 @@ public sealed class ProjectLifecycle
             previous.Dispose();
         }
         process.Cancellation = new CancellationTokenSource();
+        process.Stopping = false;
         EnsureConsumer(project);
         return process;
     }
 
     private void EnsureConsumer(ProjectInfo project) =>
-        project.Process.EnsureConsumer(items => ConsumeAsync(project, items));
+        _ = project.Process.EnsureConsumer(items => ConsumeAsync(project, items));
 
     /// <summary>
     /// The server is stopping: from now on a process that exits on its own went with it (a Ctrl+C
@@ -112,23 +113,46 @@ public sealed class ProjectLifecycle
 
     public bool IsRunning(ProjectInfo project) => _processManager.IsProcessRunning(project.Process.ProcessId);
 
-    /// <summary>Kills the process tree; its output and exit are still handled, but change nothing after it.</summary>
-    public Task KillAsync(ProjectInfo project) => _processManager.StopProcessAsync(project);
+    /// <summary>How long a stop gives claude to exit once interrupted.</summary>
+    public TimeSpan StopGracePeriod => _processManager.StopGracePeriod;
 
     /// <summary>
-    /// Kills the process tree, then marks the project Stopped once every line it wrote has been
-    /// handled, so a result still queued cannot turn Stopped back into Idle. A shutdown passes what
-    /// the project was doing (<see cref="ActiveState"/>), for the next start to carry on with; a
-    /// stop by the user passes nothing, and its project is not resumed.
+    /// Waits until the project's process is either running or gone: a launch claimed has its process
+    /// or has failed, and an exit is handled (a fresh session that takes its place included). Then
+    /// <see cref="IsRunning"/> says whether it has one. Called under the project's resume lock.
     /// </summary>
-    public async Task StopAsync(ProjectInfo project, ProjectState? stateAtShutdown = null)
+    public async Task SettleAsync(ProjectInfo project)
     {
-        await KillAsync(project);
+        await project.Process.WhenLaunched();
+        await _processManager.SettleAsync(project);
+    }
+
+    /// <summary>
+    /// Stops the process, gracefully first (<see cref="IClaudeProcessManager.StopProcessAsync"/>,
+    /// within <paramref name="grace"/> when given), then marks the project Stopped once every line it
+    /// wrote has been handled, so a result still queued cannot turn Stopped back into Idle. Its output
+    /// and exit are still handled, but its answer to the interrupt and its exit change no state. The
+    /// permission prompts it waits on are denied first: killing it would drop their calls, whose
+    /// cleanup would show it Running again. A shutdown passes the <paramref name="shutdown"/> it
+    /// persisted first (<see cref="MarkForShutdownAsync"/>), and keeps its marker, unless a stop by
+    /// the user cleared it meanwhile; a stop by the user passes nothing and clears it, so its project
+    /// is not resumed.
+    /// </summary>
+    public async Task StopAsync(ProjectInfo project, ShutdownMarker? shutdown = null, TimeSpan? grace = null)
+    {
+        project.Process.Stopping = true;
+        project.Process.DenyAllPending(StoppedMessage);
+        await _processManager.StopProcessAsync(project, grace);
+        // Any it asked while it was being stopped
         project.Process.DenyAllPending(StoppedMessage);
         await InOrderAsync(project, () => SetStatusAsync(project, status => WithoutPending(status) with
         {
             State = ProjectState.Stopped,
-            StateAtShutdown = stateAtShutdown,
+            StateAtShutdown = shutdown == null ? null : status.StateAtShutdown,
+            // What the user was asked, whatever claude did with the deny before it stopped
+            CurrentQuestion = shutdown is { Question: { } question } && status.StateAtShutdown == ProjectState.WaitingInput
+                ? question
+                : status.CurrentQuestion,
             UpdatedAt = DateTime.UtcNow
         }));
     }
@@ -136,6 +160,32 @@ public sealed class ProjectLifecycle
     /// <summary>The state itself when it is one a restart carries on with (claude was working, or waiting on the user); null otherwise.</summary>
     public static ProjectState? ActiveState(ProjectState state) =>
         state is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission ? state : null;
+
+    /// <summary>
+    /// What the project was doing as the shutdown began, for the next start to carry on with: its
+    /// <see cref="ActiveState"/>, and the question it waited on. Nothing for a project a stop by the
+    /// user is stopping: it is not resumed.
+    /// </summary>
+    public static ShutdownMarker MarkerOf(ProjectInfo project)
+    {
+        var status = project.Status;
+        var active = project.Process.Stopping ? null : ActiveState(status.State);
+        return new ShutdownMarker(active, active == ProjectState.WaitingInput ? status.CurrentQuestion : null);
+    }
+
+    /// <summary>
+    /// Persists <paramref name="marker"/> as the project's <see cref="ProjectStatus.StateAtShutdown"/>,
+    /// before the shutdown stops it: nothing that happens to it from here on (a result, its exit, a
+    /// server killed before the stop is done) takes the marker away, except a stop by the user that
+    /// began since, which leaves it unmarked.
+    /// </summary>
+    public Task MarkForShutdownAsync(ProjectInfo project, ShutdownMarker marker) =>
+        WithStateLockAsync(project, async () =>
+        {
+            var state = project.Process.Stopping ? null : marker.State;
+            if (project.Status.StateAtShutdown != state)
+                await SetStatusAsync(project, status => status with { StateAtShutdown = state });
+        });
 
     /// <summary>
     /// A Ctrl+C on a server run in a terminal reaches claude too, and claude can exit, and its exit
@@ -179,7 +229,8 @@ public sealed class ProjectLifecycle
     /// <summary>
     /// Shows the oldest permission prompt claude is waiting on in the status: WaitingPermission for
     /// a tool call, WaitingInput for an AskUserQuestion. With none left, a project that was waiting
-    /// on one is Running again, as claude is. Pushes the status when it changed.
+    /// on one is Running again, as claude is, unless it is being stopped: the stop decides its state
+    /// then, and a question keeps its text for a shutdown's marker. Pushes the status when it changed.
     /// </summary>
     public async Task ShowPendingAsync(ProjectInfo project)
     {
@@ -187,43 +238,40 @@ public sealed class ProjectLifecycle
         await WithStateLockAsync(project, async () =>
         {
             var before = project.Status;
-            var after = project.Process.OldestPending switch
-            {
-                { Permission: { } permission } => before with
-                {
-                    State = ProjectState.WaitingPermission,
-                    PendingPermission = permission,
-                    PendingQuestion = null,
-                    CurrentQuestion = null,
-                },
-                { Question: { } question } => before with
-                {
-                    State = ProjectState.WaitingInput,
-                    PendingPermission = null,
-                    PendingQuestion = question,
-                    CurrentQuestion = question.Questions[0].Question,
-                    QuestionAt = question.RequestedAt,
-                },
-                _ when before.PendingPermission != null || before.PendingQuestion != null => WithoutPending(before) with
-                {
-                    State = before.State is ProjectState.WaitingPermission or ProjectState.WaitingInput ? ProjectState.Running : before.State,
-                    CurrentQuestion = before.PendingQuestion != null ? null : before.CurrentQuestion,
-                },
-                _ => before,
-            };
+            var after = WithPending(before, project.Process.OldestPending, project.Process.Stopping);
             if (after == before) return;
-            await SetStatusAsync(project, status => after with { UpdatedAt = DateTime.UtcNow });
+            await SetStatusAsync(project, _ => after with { UpdatedAt = DateTime.UtcNow });
             changed = true;
         });
         if (changed) await NotifyStatusChangedAsync(project);
     }
 
-    /// <summary>Kills the process and lets the consumer finish, before the project is removed.</summary>
-    public async Task CloseAsync(ProjectInfo project)
+    /// <summary>The status showing <paramref name="oldest"/>, the permission prompt claude waits on: see <see cref="ShowPendingAsync"/>.</summary>
+    private static ProjectStatus WithPending(ProjectStatus before, PendingRequest? oldest, bool stopping) => oldest switch
     {
-        await KillAsync(project);
-        await project.Process.CloseAsync();
-    }
+        { Permission: { } permission } => before with
+        {
+            State = ProjectState.WaitingPermission,
+            PendingPermission = permission,
+            PendingQuestion = null,
+            CurrentQuestion = null,
+        },
+        { Question: { } question } => before with
+        {
+            State = ProjectState.WaitingInput,
+            PendingPermission = null,
+            PendingQuestion = question,
+            CurrentQuestion = question.Questions[0].Question,
+            QuestionAt = question.RequestedAt,
+        },
+        _ when stopping => before,
+        _ when before.PendingPermission != null || before.PendingQuestion != null => WithoutPending(before) with
+        {
+            State = before.State is ProjectState.WaitingPermission or ProjectState.WaitingInput ? ProjectState.Running : before.State,
+            CurrentQuestion = before.PendingQuestion != null ? null : before.CurrentQuestion,
+        },
+        _ => before,
+    };
 
     /// <summary>
     /// Sends user input and marks the project Running, under the state lock: a reply that lands
@@ -258,7 +306,24 @@ public sealed class ProjectLifecycle
     private Task SetStatusAsync(ProjectInfo project, Func<ProjectStatus, ProjectStatus> change)
     {
         project.Status = change(project.Status);
-        return _statusUpdater.SaveStatusAsync(project);
+        return SaveStatusAsync(project);
+    }
+
+    /// <summary>
+    /// Saves the status. A save that fails (status.json cannot be replaced) does not fail the change:
+    /// it is logged, the status stays as changed in memory and is pushed as any other, and it is
+    /// saved with the next change.
+    /// </summary>
+    private async Task SaveStatusAsync(ProjectInfo project)
+    {
+        try
+        {
+            await _statusUpdater.SaveStatusAsync(project);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not save the status of project {ProjectId}; it is saved with its next change", project.Status.Id);
+        }
     }
 
     private static async Task WithStateLockAsync(ProjectInfo project, Func<Task> action)
@@ -272,29 +337,25 @@ public sealed class ProjectLifecycle
     /// <summary>
     /// Runs <paramref name="change"/> on the consumer, under the state lock unless told otherwise,
     /// after everything already on the pipeline. Once the pipeline is closed nothing is queued, and
-    /// it runs at once.
+    /// it runs at once. When no consumer can run it, it fails rather than waits
+    /// (<see cref="ProjectProcess.RunInOrderAsync"/>).
     /// </summary>
     private async Task InOrderAsync(ProjectInfo project, Func<Task> change, bool underStateLock = true)
     {
-        EnsureConsumer(project);
-        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (project.Process.Output.TryWrite(new PipelineItem.InOrder(change, done, underStateLock)))
-            await done.Task;
-        else
+        var item = new PipelineItem.InOrder(change, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), underStateLock);
+        if (!await project.Process.RunInOrderAsync(item, items => ConsumeAsync(project, items)))
             await (underStateLock ? WithStateLockAsync(project, change) : change());
     }
 
-    /// <summary>Pushes the project's current status to every client.</summary>
+    /// <summary>
+    /// Pushes the project's current status to every client, then raises <see cref="StatusNotified"/>.
+    /// The push is started, not waited for (<see cref="ProjectProcess.Sends"/>).
+    /// </summary>
     public async Task NotifyStatusChangedAsync(ProjectInfo project)
     {
-        try
-        {
-            await _hubContext.Clients.All.StatusChanged(project.Status.Id, project.Status);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error broadcasting the status of project {ProjectId}", project.Status.Id);
-        }
+        var (id, status) = (project.Status.Id, project.Status);
+        await project.Process.Sends.SendAsync(() => _hubContext.Clients.All.StatusChanged(id, status),
+            ex => _logger.LogError(ex, "Error broadcasting the status of project {ProjectId}", id));
 
         if (StatusNotified == null) return;
         try { await StatusNotified(project); }
@@ -311,56 +372,168 @@ public sealed class ProjectLifecycle
     /// <see cref="OutputLog.StartAsync"/>), then adds it to the project's live group. The
     /// connection is out of the group while the file is read; the last read happens on the
     /// consumer, between two lines, and the join with it, so every line is either in the replay or
-    /// broadcast to the connection afterwards, never both and never neither.
+    /// broadcast to the connection afterwards, never both and never neither. Each batch and the
+    /// complete carry <paramref name="subscriptionId"/> and the file's generation; a positive offset
+    /// in a generation other than <paramref name="generation"/> is not in this file, and all of it is replayed.
     /// </summary>
-    public async Task SubscribeAsync(ProjectInfo project, long fromOffset, string connectionId)
+    public async Task SubscribeAsync(ProjectInfo project, long fromOffset, string subscriptionId, string? generation, string connectionId)
     {
         var id = project.Status.Id;
-        var client = _hubContext.Clients.Client(connectionId);
+        var replay = new Replay(_hubContext.Clients.Client(connectionId), id, subscriptionId,
+            await OutputLog.GenerationAsync(project.ProjectPath));
         await _hubContext.Groups.RemoveFromGroupAsync(connectionId, OutputGroup(id));
 
-        var offset = await ReplayAsync(project, client, await OutputLog.StartAsync(project.ProjectPath, fromOffset));
+        var from = fromOffset > 0 && generation != replay.Generation ? 0 : fromOffset;
+        var offset = await ReplayAsync(project, replay, await OutputLog.StartAsync(project.ProjectPath, from));
+        // On the consumer, the sends are started in order and not waited for: a subscriber that
+        // reads slowly holds up its own subscribe, not the project's output
+        var sent = new List<Task>();
         await InOrderAsync(project, async () =>
         {
-            offset = await ReplayAsync(project, client, offset);
+            offset = await ReplayAsync(project, replay, offset, sent);
             await _hubContext.Groups.AddToGroupAsync(connectionId, OutputGroup(id));
-            await client.OutputReplayComplete(id, offset);
+            sent.Add(replay.Client.OutputReplayComplete(id, subscriptionId, replay.Generation, offset));
         }, underStateLock: false);
+        await Task.WhenAll(sent);
 
-        _logger.LogInformation("Replayed output of project {ProjectId} to {ConnectionId} from {FromOffset} to {Offset}",
-            id, connectionId, fromOffset, offset);
+        _logger.LogInformation("Replayed output of project {ProjectId} to {ConnectionId} for {SubscriptionId} from {FromOffset} to {Offset}",
+            id, connectionId, subscriptionId, from, offset);
     }
 
-    /// <summary>Sends the complete lines from <paramref name="offset"/> in batches; returns the offset after the last.</summary>
-    private static async Task<long> ReplayAsync(ProjectInfo project, IProjectHubClient client, long offset)
+    /// <summary>A subscription's replay: who it goes to, and what its batches and complete carry.</summary>
+    private sealed record Replay(IProjectHubClient Client, string ProjectId, string SubscriptionId, string Generation);
+
+    /// <summary>
+    /// Sends the complete lines from <paramref name="offset"/> in batches; returns the offset after
+    /// the last. With <paramref name="sent"/>, each batch is started and added to it, not waited for.
+    /// </summary>
+    private static async Task<long> ReplayAsync(ProjectInfo project, Replay replay, long offset, List<Task>? sent = null)
     {
         await foreach (var batch in OutputLog.ReadBatchesAsync(project.ProjectPath, offset))
         {
-            await client.OutputBatch(project.Status.Id, offset, batch);
+            var send = replay.Client.OutputBatch(replay.ProjectId, replay.SubscriptionId, replay.Generation, offset, batch);
+            if (sent != null) sent.Add(send);
+            else await send;
             offset = batch[^1].Offset;
         }
         return offset;
     }
 
+    /// <summary>
+    /// The project's one consumer. Each item's failure is its own: it is logged, and the consumer
+    /// goes on with the next. One that faults all the same is logged, and replaced
+    /// (<see cref="ProjectProcess.EnsureConsumer"/>).
+    /// </summary>
     private async Task ConsumeAsync(ProjectInfo project, ChannelReader<PipelineItem> items)
     {
-        while (await items.WaitToReadAsync())
+        try
         {
-            // Open for each burst, so nothing holds output.jsonl while the project is quiet
-            await using var output = OpenOutput(project);
-            while (items.TryRead(out var item))
-                await (item switch
+            while (await items.WaitToReadAsync())
+            {
+                // Open for each burst, so nothing holds output.jsonl while the project is quiet
+                var output = new BurstOutput(this, project);
+                try
                 {
-                    PipelineItem.Line line => HandleOutputLineAsync(project, output, line.Json),
-                    PipelineItem.Exited exited => HandleExitAsync(project, exited.Exit),
-                    PipelineItem.InOrder inOrder => RunInOrderAsync(project, inOrder),
-                    _ => throw new InvalidOperationException($"Unknown pipeline item {item}"),
-                });
+                    while (items.TryRead(out var item))
+                    {
+                        try
+                        {
+                            await (item switch
+                            {
+                                PipelineItem.Line line => HandleOutputLineAsync(project, output, line),
+                                PipelineItem.Exited exited => HandleExitAsync(project, exited.Exit),
+                                PipelineItem.InOrder inOrder => RunInOrderAsync(project, inOrder),
+                                _ => throw new InvalidOperationException($"Unknown pipeline item {item}"),
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Error handling {Item} for project {ProjectId}", item.GetType().Name, project.Status.Id);
+                        }
+                    }
+                }
+                finally
+                {
+                    await output.CloseAsync();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "The output consumer of project {ProjectId} failed; it is started again", project.Status.Id);
+            throw;
         }
     }
 
+    /// <summary>
+    /// output.jsonl for one burst of output. A line whose append fails is tried once more on the file
+    /// opened again, cut back to where the last whole line ended, so every offset stays the file's.
+    /// A line that still cannot be appended is not persisted, and the next line opens the file again.
+    /// </summary>
+    private sealed class BurstOutput(ProjectLifecycle lifecycle, ProjectInfo project)
+    {
+        private OutputLog.Writer? _writer;
+        private bool _opened;
+        private long? _end;
+
+        /// <summary>Appends the line; the offset after it, or null when it could not be persisted.</summary>
+        public async Task<long?> AppendAsync(string line)
+        {
+            for (var attempt = 1; attempt <= 2; attempt++)
+            {
+                if (Open() is not { } writer) return null;
+                var end = writer.Offset;
+                try
+                {
+                    return await writer.AppendAsync(line);
+                }
+                catch (Exception ex)
+                {
+                    lifecycle._logger.LogError(ex, "Could not append to output.jsonl of project {ProjectId}{Retry}",
+                        project.Status.Id, attempt == 1 ? "; trying again on the file opened again" : "; the line is not persisted");
+                    _end = end;
+                    await CloseAsync();
+                }
+            }
+            return null;
+        }
+
+        private OutputLog.Writer? Open()
+        {
+            if (_opened) return _writer;
+            _opened = true;
+            try
+            {
+                _writer = OutputLog.OpenWriter(project.ProjectPath, _end, lifecycle.WrapOutput);
+                _end = null;
+                return _writer;
+            }
+            catch (Exception ex)
+            {
+                lifecycle._logger.LogError(ex, "Cannot open output.jsonl for project {ProjectId}; its output is not persisted", project.Status.Id);
+                return null;
+            }
+        }
+
+        /// <summary>Closes the file; the next append opens it again. A close that fails (a flush that cannot be written) is logged.</summary>
+        public async Task CloseAsync()
+        {
+            var writer = _writer;
+            _writer = null;
+            _opened = false;
+            if (writer == null) return;
+            try { await writer.DisposeAsync(); }
+            catch (Exception ex) { lifecycle._logger.LogError(ex, "Could not close output.jsonl of project {ProjectId}", project.Status.Id); }
+        }
+    }
+
+    /// <summary>Tests only: a stream put between the consumer's writer and output.jsonl (see <see cref="OutputLog.OpenWriter"/>).</summary>
+    internal Func<Stream, Stream>? WrapOutput { get; set; }
+
     private static async Task RunInOrderAsync(ProjectInfo project, PipelineItem.InOrder item)
     {
+        // Given up on already (see ProjectProcess.RunInOrderAsync): it is not run late
+        if (item.Done.Task.IsCompleted) return;
         try
         {
             await (item.UnderStateLock ? WithStateLockAsync(project, item.Change) : item.Change());
@@ -375,17 +548,17 @@ public sealed class ProjectLifecycle
     /// <summary>
     /// The process ended on its own: Stopped if it exited cleanly with its turn over, Error with its
     /// last stderr otherwise. During shutdown it is Stopped, question kept. A process the server
-    /// killed changes nothing: whoever killed it decides.
+    /// stopped changes nothing: whoever stopped it decides.
     /// </summary>
     private async Task HandleExitAsync(ProjectInfo project, ProcessExit exit)
     {
         // A reply waiting for this launch's session to start waits no longer
         if (project.Process.ProcessId == 0)
-            project.Process.SessionEnded(exit.Killed
+            project.Process.SessionEnded(exit.Stopped
                 ? "claude was stopped before it started its session"
                 : $"claude exited before it started its session: {exit.Stderr ?? $"exit code {exit.ExitCode}"}");
 
-        if (exit.Killed) return;
+        if (exit.Stopped) return;
 
         var changed = false;
         try
@@ -395,7 +568,7 @@ public sealed class ProjectLifecycle
                 // A later launch is already running; its own exit settles the state
                 if (project.Process.ProcessId != 0) return;
 
-                // Its bridge went with it; nothing can answer claude any more
+                // Its calls to the MCP endpoint went with it; nothing can answer claude any more
                 project.Process.DenyAllPending(StoppedMessage);
 
                 var shuttingDown = _shuttingDown;
@@ -421,21 +594,17 @@ public sealed class ProjectLifecycle
         if (changed) await NotifyStatusChangedAsync(project);
     }
 
-    private OutputLog.Writer? OpenOutput(ProjectInfo project)
-    {
-        try
-        {
-            return OutputLog.OpenWriter(project.ProjectPath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Cannot open output.jsonl for project {ProjectId}; its output is not persisted", project.Status.Id);
-            return null;
-        }
-    }
+    /// <summary>What a permission prompt still listed when claude ends its turn is answered with: claude waits on it no more.</summary>
+    private const string TurnEndedMessage = "claude ended its turn before the user answered.";
 
-    private async Task HandleOutputLineAsync(ProjectInfo project, OutputLog.Writer? output, string jsonLine)
+    /// <summary>
+    /// One line of claude's output: persisted, then the state it implies, then broadcast with the
+    /// offset after it. A line that could not be persisted is not broadcast: its offset would be
+    /// the previous line's, and a client drops it. A status that changed is pushed, saved or not.
+    /// </summary>
+    private async Task HandleOutputLineAsync(ProjectInfo project, BurstOutput output, PipelineItem.Line line)
     {
+        var jsonLine = line.Json;
         if (string.IsNullOrWhiteSpace(jsonLine)) return;
         var id = project.Status.Id;
 
@@ -444,20 +613,22 @@ public sealed class ProjectLifecycle
 
         var completed = false;
         var statusChanged = false;
-        var offset = project.Status.OutputOffset;
+        long? offset = null;
         try
         {
             // 1. Persist, so a client subscribing from here on backfills this line
-            if (output != null) offset = await output.AppendAsync(jsonLine);
+            offset = await output.AppendAsync(jsonLine);
 
             // 2. State
             await WithStateLockAsync(project, async () =>
             {
                 // In memory only: status.json carries it when something else changes, and recovery reads it from the file
-                project.Status = project.Status with { OutputOffset = offset };
+                if (offset is { } persisted) project.Status = project.Status with { OutputOffset = persisted };
                 if (ParseClaudeOutput(jsonLine) is not { } outputEvent) return;
                 var previous = project.Status.State;
                 statusChanged = await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
+                if (outputEvent.Type == OutputEventType.Result) statusChanged |= ClearPendingOfEndedTurn(project, line);
+                if (statusChanged) await SaveStatusAsync(project);
                 completed = previous != ProjectState.Idle && project.Status.State == ProjectState.Idle;
                 if (StatusUpdater.IsSessionStart(outputEvent)) project.Process.SessionStarted();
             });
@@ -468,14 +639,9 @@ public sealed class ProjectLifecycle
         }
 
         // 3. Broadcast the raw JSON to subscribed clients; the UI parses and renders it
-        try
-        {
-            await _hubContext.Clients.Group(OutputGroup(id)).OutputReceived(id, offset, jsonLine);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error broadcasting output for project {ProjectId}", id);
-        }
+        if (offset is { } after)
+            await project.Process.Sends.SendAsync(() => _hubContext.Clients.Group(OutputGroup(id)).OutputReceived(id, after, jsonLine),
+                ex => _logger.LogError(ex, "Error broadcasting output for project {ProjectId}", id));
 
         // 4. Every client hears the change, subscribed to this project's output or not
         if (statusChanged) await NotifyStatusChangedAsync(project);
@@ -485,6 +651,20 @@ public sealed class ProjectLifecycle
             try { await OnProjectCompleted(id); }
             catch (Exception ex) { _logger.LogError(ex, "Error in OnProjectCompleted handler for project {ProjectId}", id); }
         }
+    }
+
+    /// <summary>
+    /// A <c>result</c> ends the turn: claude waits on no permission prompt that had arrived before
+    /// it was read, so one still listed (its registration failed half-way) is denied and taken out
+    /// of the status, and the next reply reaches claude. True when the status changed.
+    /// </summary>
+    private bool ClearPendingOfEndedTurn(ProjectInfo project, PipelineItem.Line line)
+    {
+        if (project.Process.DenyPendingUpTo(line.PendingIssued, TurnEndedMessage) > 0)
+            _logger.LogWarning("Project {ProjectId} ended its turn with a permission prompt still listed; it is withdrawn", project.Status.Id);
+        var before = project.Status;
+        project.Status = project.Process.OldestPending is { } later ? WithPending(before, later, stopping: false) : WithoutPending(before);
+        return project.Status != before;
     }
 
     /// <summary>
@@ -611,6 +791,10 @@ public sealed class ProjectLifecycle
 
         if (root.TryGetProperty("is_error", out var isError) && isError.ValueKind is JsonValueKind.True or JsonValueKind.False)
             metadata["is_error"] = isError.GetBoolean();
+
+        // A user message claude echoes (--replay-user-messages) as it takes it; a tool result is a user line without it
+        if (root.TryGetProperty("isReplay", out var isReplay) && isReplay.ValueKind == JsonValueKind.True)
+            metadata[StatusUpdater.IsReplayKey] = true;
 
         // Every line carries it; only system/init's is read, so only system lines keep it
         if (root.TryGetProperty("type", out var type) && type.ValueEquals("system")

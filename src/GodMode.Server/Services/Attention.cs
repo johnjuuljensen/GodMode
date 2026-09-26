@@ -70,7 +70,8 @@ public static partial class Attention
         if (plain.Length <= MaxTextLength) return plain;
 
         var cut = plain.LastIndexOf(' ', MaxTextLength - 1);
-        return new StringBuilder(plain, 0, cut > MaxTextLength / 2 ? cut : MaxTextLength - 1, MaxTextLength).Append('…').ToString();
+        var length = cut > MaxTextLength / 2 ? cut : TextCut.SafeLength(plain, MaxTextLength - 1);
+        return new StringBuilder(plain, 0, length, MaxTextLength).Append('…').ToString();
     }
 
     /// <summary>A fenced code block, or an unclosed fence to the end of the text.</summary>

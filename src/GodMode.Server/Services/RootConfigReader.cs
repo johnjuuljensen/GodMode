@@ -1,4 +1,8 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using GodMode.ProjectFiles;
 using GodMode.Shared.Models;
 
 namespace GodMode.Server.Services;
@@ -11,8 +15,14 @@ namespace GodMode.Server.Services;
 /// </summary>
 public class RootConfigReader : IRootConfigReader
 {
-    private const string GodModeRootDir = ".godmode-root";
+    private const string GodModeRootDir = ProjectFolder.RootConfigFolderName;
     private const string BaseConfigFileName = "config.json";
+
+    /// <summary>The key a root or action config carried MCP servers under. GodMode ignores it, and says so once.</summary>
+    private const string IgnoredMcpServersKey = "mcpServers";
+
+    /// <summary>Where a session's MCP servers come from, for the warning about MCP config GodMode ignores.</summary>
+    internal const string McpServersHint = "a repo brings its MCP servers in its own .mcp.json, and user-scoped ones live in the profile's CLAUDE_CONFIG_DIR";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -38,6 +48,9 @@ public class RootConfigReader : IRootConfigReader
         """);
 
     private readonly ILogger<RootConfigReader> _logger;
+
+    /// <summary>The config files whose MCP servers have been logged as ignored: it is said once, not on every read.</summary>
+    private readonly ConcurrentDictionary<string, byte> _ignoredMcpLogged = new(StringComparer.OrdinalIgnoreCase);
 
     public RootConfigReader(ILogger<RootConfigReader> logger)
     {
@@ -141,10 +154,67 @@ public class RootConfigReader : IRootConfigReader
         return result;
     }
 
-    private static RawConfig ReadRawConfig(string path)
+    private RawConfig ReadRawConfig(string path)
     {
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<RawConfig>(json, JsonOptions) ?? new RawConfig();
+        var raw = ReadSettled(path, json => JsonSerializer.Deserialize<RawConfig>(json, JsonOptions)) ?? new RawConfig();
+        // A mode claude does not have, or bypassPermissions, is an error in the file that names it
+        if (raw.PermissionMode is { } mode)
+            raw = raw with { PermissionMode = PermissionModes.Canonical(mode) ?? throw new InvalidDataException($"{Path.GetFileName(path)}: {PermissionModes.Refusal(mode)}") };
+        // GodMode gives a session no MCP server but its own: a leftover mcpServers is not an error
+        if (raw.Unrecognized?.Keys.Any(key => key.Equals(IgnoredMcpServersKey, StringComparison.OrdinalIgnoreCase)) == true
+            && _ignoredMcpLogged.TryAdd(Path.GetFullPath(path), 0))
+            _logger.LogWarning("{ConfigPath} has " + IgnoredMcpServersKey + ", which GodMode ignores: {Hint}", path, McpServersHint);
+        return raw;
+    }
+
+    /// <summary>
+    /// Parses a root file the host may be saving as it is read, by hand in an editor or by a script.
+    /// It is opened so that the save is not refused (a plain read shares no writing, and on Windows a
+    /// save during one fails), and a read that does not parse is read again while the file is still
+    /// changing, so a file half saved is not taken for a broken one. One that does not parse and has
+    /// not changed for <see cref="SettleTime"/> is broken, as is one still changing after <see cref="MaxSettleTime"/>.
+    /// </summary>
+    private static T ReadSettled<T>(string path, Func<string, T> parse)
+    {
+        var reading = Stopwatch.StartNew();
+        var unchanged = Stopwatch.StartNew();
+        string? previous = null;
+        while (true)
+        {
+            var text = ReadShared(path);
+            if (text != previous) { previous = text; unchanged.Restart(); }
+            try { return parse(text); }
+            catch (JsonException) when (unchanged.Elapsed < SettleTime && reading.Elapsed < MaxSettleTime)
+            {
+                Thread.Sleep(RetryDelay);
+            }
+        }
+    }
+
+    private static readonly TimeSpan SettleTime = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan MaxSettleTime = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(25);
+    private const int OpenAttempts = 20;
+
+    /// <summary>
+    /// Reads the file sharing everything, so a write, a delete or a replace is not refused while it
+    /// is open. A save that shares nothing while it writes is waited for.
+    /// </summary>
+    private static string ReadShared(string path)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream);
+                return reader.ReadToEnd();
+            }
+            catch (IOException) when (attempt < OpenAttempts && File.Exists(path))
+            {
+                Thread.Sleep(RetryDelay);
+            }
+        }
     }
 
     /// <summary>
@@ -166,7 +236,8 @@ public class RootConfigReader : IRootConfigReader
         PromptTemplate = overlay.PromptTemplate ?? baseConfig.PromptTemplate,
         ScriptsCreateFolder = overlay.ScriptsCreateFolder ?? baseConfig.ScriptsCreateFolder,
         Model = overlay.Model ?? baseConfig.Model,
-        McpServers = MergeMcpServers(baseConfig.McpServers, overlay.McpServers)
+        AllowSkipPermissions = overlay.AllowSkipPermissions ?? baseConfig.AllowSkipPermissions,
+        PermissionMode = overlay.PermissionMode ?? baseConfig.PermissionMode
     };
 
     /// <summary>
@@ -188,11 +259,12 @@ public class RootConfigReader : IRootConfigReader
             PromptTemplate: raw.PromptTemplate,
             ScriptsCreateFolder: raw.ScriptsCreateFolder ?? false,
             Model: raw.Model,
-            McpServers: raw.McpServers,
             // One script: its output is the answer, and two would give two
             Status: NormalizeScriptPaths(raw.Status, godModeRootPath) is [var status] ? status : null,
             ResumeOnRestart: raw.ResumeOnRestart ?? true,
-            ResumePrompt: raw.ResumePrompt is { Length: > 0 } resumePrompt ? resumePrompt : CreateAction.DefaultResumePrompt
+            ResumePrompt: raw.ResumePrompt is { Length: > 0 } resumePrompt ? resumePrompt : CreateAction.DefaultResumePrompt,
+            AllowSkipPermissions: raw.AllowSkipPermissions ?? false,
+            PermissionMode: raw.PermissionMode
         );
     }
 
@@ -215,8 +287,7 @@ public class RootConfigReader : IRootConfigReader
 
         try
         {
-            var json = File.ReadAllText(schemaPath);
-            return JsonSerializer.Deserialize<JsonElement>(json, JsonOptions);
+            return ReadSettled(schemaPath, json => JsonSerializer.Deserialize<JsonElement>(json, JsonOptions));
         }
         catch (Exception ex)
         {
@@ -261,22 +332,6 @@ public class RootConfigReader : IRootConfigReader
         return merged;
     }
 
-    /// <summary>
-    /// Merges MCP server dictionaries. Overlay wins on conflict.
-    /// A null value in the overlay removes the server (convention: explicit removal).
-    /// </summary>
-    private static Dictionary<string, McpServerConfig>? MergeMcpServers(
-        Dictionary<string, McpServerConfig>? baseServers, Dictionary<string, McpServerConfig>? overlayServers)
-    {
-        if (baseServers == null) return overlayServers;
-        if (overlayServers == null) return baseServers;
-
-        var merged = new Dictionary<string, McpServerConfig>(baseServers, StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, value) in overlayServers)
-            merged[key] = value;
-        return merged;
-    }
-
     private static string[]? ConcatArrays(string[]? baseArr, string[]? additionalArr)
     {
         if (baseArr == null) return additionalArr;
@@ -305,6 +360,11 @@ public class RootConfigReader : IRootConfigReader
         public bool? ScriptsCreateFolder { get; init; }
         public bool? StripEnvVarProfile { get; init; }
         public string? Model { get; init; }
-        public Dictionary<string, McpServerConfig>? McpServers { get; init; }
+        public bool? AllowSkipPermissions { get; init; }
+        public string? PermissionMode { get; init; }
+
+        /// <summary>Keys this reader does not know, such as a leftover MCP server config.</summary>
+        [JsonExtensionData]
+        public Dictionary<string, JsonElement>? Unrecognized { get; init; }
     }
 }

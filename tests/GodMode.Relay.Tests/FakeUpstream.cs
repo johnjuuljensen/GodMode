@@ -13,6 +13,7 @@ namespace GodMode.Relay.Tests;
 /// <summary>
 /// A stand-in GodMode server on a random loopback port: /health and a SignalR hub at /hubs/projects
 /// whose Echo method answers with this server's name. Records what each hub connection presented.
+/// Given a key, it refuses any hub request that does not present it with 401, as GodMode.Server does.
 /// </summary>
 internal sealed class FakeUpstream : IAsyncDisposable
 {
@@ -31,10 +32,11 @@ internal sealed class FakeUpstream : IAsyncDisposable
         Url = url;
     }
 
-    public static async Task<FakeUpstream> StartAsync(string name)
+    /// <param name="url">Where it listens: a random loopback port by default, or the URL of one that died, to restart it.</param>
+    public static async Task<FakeUpstream> StartAsync(string name, string? requiredKey = null, string url = "http://127.0.0.1:0")
     {
         var builder = WebApplication.CreateSlimBuilder();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.WebHost.UseUrls(url);
         builder.Logging.ClearProviders();
         builder.Services.AddSignalR();
         builder.Services.AddSingleton(new UpstreamName(name));
@@ -44,17 +46,32 @@ internal sealed class FakeUpstream : IAsyncDisposable
         app.Use(async (ctx, next) =>
         {
             if (ctx.Request.Path.StartsWithSegments("/hubs/projects"))
-                self!.HubRequests.Enqueue((ctx.Request.Headers.Authorization.FirstOrDefault(), ctx.Request.QueryString.Value ?? ""));
+            {
+                var authorization = ctx.Request.Headers.Authorization.FirstOrDefault();
+                self!.HubRequests.Enqueue((authorization, ctx.Request.QueryString.Value ?? ""));
+                if (requiredKey != null && authorization != $"Bearer {requiredKey}")
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
+                }
+            }
             await next();
         });
         app.MapGet("/health", () => Results.Ok());
         app.MapHub<EchoHub>("/hubs/projects");
         await app.StartAsync();
 
-        var url = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!
+        var bound = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!
             .Addresses.Single().TrimEnd('/');
-        self = new FakeUpstream(name, app, url);
+        self = new FakeUpstream(name, app, bound);
         return self;
+    }
+
+    /// <summary>Dies: every connection is aborted at once, with no graceful shutdown (a server killed, or its host gone).</summary>
+    public async Task KillAsync()
+    {
+        await _app.StopAsync(new CancellationToken(canceled: true));
+        await _app.DisposeAsync();
     }
 
     public async ValueTask DisposeAsync()

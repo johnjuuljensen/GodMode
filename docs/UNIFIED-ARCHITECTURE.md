@@ -11,7 +11,7 @@ GodMode runs Claude Code sessions that ship issues, and lets you follow and stee
 1. **React SPA** — served directly by GodMode.Server, accessed via browser
 2. **MAUI app** — hosts the same React SPA in a HybridWebView, with a local proxy for multi-server connectivity
 
-A server runs on a machine you own: a PC, a VM or a GitHub Codespace. Its **project roots** are directories on that machine, each with scripts, input schemas and MCP config in `.godmode-root/`. **Profiles** group roots and carry shared environment variables and MCP servers. You create **projects** from a root's actions. Each project is a folder with a Claude Code process working in it.
+A server runs on a machine you own: a PC, a VM or a GitHub Codespace. Its **project roots** are directories on that machine, each with scripts and input schemas in `.godmode-root/`. **Profiles** group roots and carry shared environment variables. Both are maintained by hand on the host. You create **projects** from a root's actions. Each project is a folder with a Claude Code process working in it.
 
 ---
 
@@ -21,18 +21,14 @@ A server runs on a machine you own: a PC, a VM or a GitHub Codespace. Its **proj
 GodMode.slnx
 ├── src/
 │   ├── GodMode.Shared/            # Shared types, models, enums, hub interfaces
-│   ├── GodMode.Server/            # ASP.NET SignalR server, spawns Claude processes, serves the SPA
+│   ├── GodMode.Server/            # ASP.NET SignalR server, spawns Claude processes, serves the SPA and the MCP endpoint
+│   ├── GodMode.Client.React/      # React SPA (Vite + Zustand + SignalR), an npm project; its NoTargets csproj builds it
 │   ├── GodMode.ProjectFiles/      # File system utilities for project folders
 │   ├── GodMode.ClientBase/        # Shared .NET client abstractions (host providers, registry)
 │   ├── GodMode.Maui/              # MAUI app (Android, iOS, macOS, Windows) — hosts React
 │   └── SignalR.Proxy/             # SignalR WebSocket relay for MAUI
 └── tests/
     └── GodMode.Server.Tests/      # xUnit tests for GodMode.Server
-
-Not in the slnx (npm projects):
-src/
-├── GodMode.Client.React/          # React SPA (Vite + Zustand + SignalR); built into the server's wwwroot
-└── GodMode.McpBridge/             # stdio MCP server the server gives every Claude session (Section 8.2)
 ```
 
 ### Project Dependency Graph
@@ -51,7 +47,7 @@ GodMode.ClientBase  ← (host providers, server registry, URL selection)  ← Go
 GodMode.Maui
 ```
 
-The server's and the MAUI app's builds run `npm run build` in `GodMode.Client.React` and copy its `dist/` into their `wwwroot`.
+`GodMode.Client.React/GodMode.Client.React.csproj`, a NoTargets project in the slnx, generates the hub types and runs `npm run build`. The server and the MAUI app reference it, so one build of either or both runs it once. The server copies its `dist/` into `wwwroot`; the MAUI app packages `dist/` as its `wwwroot`.
 
 ### Where to Put New Code
 
@@ -63,7 +59,6 @@ The server's and the MAUI app's builds run `npm run build` in `GodMode.Client.Re
 | New React UI component | `src/GodMode.Client.React/src/components/{Feature}/` |
 | New React store action | `src/GodMode.Client.React/src/store/index.ts` |
 | New TypeScript hub type | Generated: add the C# type to `GodMode.Shared` and build GodMode.Server (`tools/GodMode.TypeGen` writes `signalr/generated/hub-types.ts`). Client-only types go in `signalr/types.ts` |
-| New tool for Claude sessions to call back into GodMode | `src/GodMode.McpBridge/src/index.ts` + an `/api/internal/*` endpoint in `Program.cs` |
 | Client-side .NET abstractions | `GodMode.ClientBase/` |
 | File system project utilities | `GodMode.ProjectFiles/` |
 | **All UI changes** | **React only** — never in .NET projects |
@@ -111,7 +106,7 @@ When building UI features:
     └─────────────────────┘
 ```
 
-**Build integration**: The MAUI csproj has MSBuild targets that run `npm run build` and copy the React `dist/` to `Resources/Raw/wwwroot/`. HybridWebView serves these embedded files.
+**Build integration**: The MAUI csproj references `GodMode.Client.React.csproj`, which runs `npm run build`, and adds the React `dist/` as `MauiAsset` items under `wwwroot/`. HybridWebView serves these embedded files.
 
 **Host bridge**: React talks to the shell over HybridWebView's raw-message channel (`services/hostBridge.ts` ↔ `Bridge/HostBridge.cs` + `Bridge/ShellBridge.cs`), a typed request/response API. `relay.info` returns the relay's base URL and a per-launch secret; `servers.list`, `servers.add`, `servers.remove`, `servers.start` and `servers.stop` manage servers; the `servers.changed` event says the list or a server's state changed. No bridge message carries a server's access token back to React.
 
@@ -182,20 +177,22 @@ All real-time communication uses strongly-typed SignalR on one hub, `/hubs/proje
 - **`HubConnectionFactory`** (ClientBase) — .NET client side: `IServerProvider.ConnectAsync` returns a raw `HubConnection`, and consumers call `CreateHubProxy<IProjectHub>()` (`TypedSignalR.Client`) for typed calls
 - **`signalr/hub.ts`** (React) — the TypeScript mirror, kept in step with the interfaces by hand
 
-The hub is the session loop plus profiles and roots:
+The hub is the session loop plus reading profiles and roots:
 
-| `IProjectHub` (23 methods) | |
+| `IProjectHub` (18 methods) | |
 |---|---|
-| Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `ArchiveProject`, `UnarchiveProject`, `ListArchivedProjects` |
-| Prompts | `RespondToPermission`, `AnswerQuestion` |
+| Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject` |
+| Prompts | `RespondToPermission`, `GetPermissionDetail`, `AnswerQuestion` |
 | Attention | `GetAttention`, `MarkSeen`, `ReplyAndResume` |
 | Roots | `ListProjectRoots` |
-| Profiles | `ListProfiles`, `CreateProfile`, `DeleteProfile`, `UpdateProfileDescription` |
+| Profiles | `ListProfiles` |
 | Utility | `CheckCommand` |
 
-| `IProjectHubClient` (11 callbacks) |
+| `IProjectHubClient` (8 callbacks) |
 |---|
-| `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted`, `ProjectArchived`, `ProjectRestored`, `ProfilesChanged` |
+| `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted` |
+
+**A project's ID is `{profile}/{root}/{project-folder}`**, where its folder is, so one folder name in two roots is two projects. Every hub method and callback that names a project takes or gives this ID (`ProjectStatus.Id`, `ProjectSummary.Id`). Clients treat it as opaque and pass it back as they received it; the server derives it from the folder's location on every recovery. Root scripts get the folder name alone, as `GODMODE_PROJECT_FOLDER`.
 
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
@@ -211,7 +208,7 @@ A root is a subdirectory of `ProjectRootsDir` that contains `.godmode-root/`. Th
 ```
 root-name/
 ├── .godmode-root/
-│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, mcpServers, resumeOnRestart, resumePrompt)
+│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, permissionMode, allowSkipPermissions, resumeOnRestart, resumePrompt)
 │   ├── config.{action}.json       # Per-action overlays (merged with base)
 │   ├── {action}/
 │   │   ├── schema.json            # Input form schema (JSON Schema)
@@ -220,18 +217,20 @@ root-name/
 │       ├── prepare.ps1            # Shared prepare script
 │       ├── delete.ps1             # Shared delete script
 │       └── status.ps1             # Reports the project's pull request (optional)
-└── {project-id}/                  # Projects created from this root
+└── {project-folder}/              # Projects created from this root
 ```
 
 **Merge order**: `config.json` (base) → `config.{action}.json` (overlay). Action overlay wins on conflict.
 
 **Profile assignment**: `profileName` in `config.json` puts the root in that profile. Roots without it go to `Default`.
 
-**MCP server merge order**: Profile → Root → Action (three layers, later wins on conflict).
+**MCP servers** are not root config: a repo brings its own, and GodMode adds only its own MCP endpoint (Section 8).
+
+**Permissions** are the root's, not the project's. `permissionMode` (`acceptEdits`, `auto`, `manual`, `dontAsk`, `plan`; `bypassPermissions` is refused, and any other value is a config error) is passed as `--permission-mode`, beside the permission prompt (8.2). A create keeps it in the project's `settings.json`, and its launches reuse it after the root's config changes, as they reuse its model. `allowSkipPermissions` (default `false`) is the only way a session runs with `--dangerously-skip-permissions`: where it is false the create form does not offer Skip Permissions and the server refuses a create that asks. Every launch (create, resume, a reply's resume, a restart's) passes the flag only when the project's `settings.json` asks for it and the root's config, read then, allows it for every action (that file names the project's action too). That file is in the project folder, which the session can write, so it only asks: a project whose `settings.json` asks under a root that does not allow it launches without the flag, and the server logs a warning once. With skip, the permission mode is left out. The server README (*Permissions*) has what each mode was measured to send to the prompt.
 
 **Pull request status**: a root's optional `status` script prints the project's pull request as JSON (`{"pullRequest": {url, number, state, review}}`, or `{}`), and the server keeps it in `ProjectStatus.PullRequest` in `status.json`. It runs on each transition to Idle or Stopped and, while the pull request is open, every 10 minutes. Only that schedule is in memory. The server parses the output strictly and knows nothing of the VCS.
 
-**Resuming after a restart**: the shutdown records what an active project was doing in `ProjectStatus.StateAtShutdown` (`status.json`). After recovery, once the server listens, a project that was working (`Running`, or `WaitingPermission`, whose prompt the shutdown denied) is resumed and sent the action's `resumePrompt`, three at a time; one waiting on a question is `WaitingInput` again without a process, until a reply resumes it, so nothing answers it for the user. `resumeOnRestart: false` keeps it `Stopped`. A user stop, and any launch, clear the marker. The server README has the details.
+**Resuming after a restart**: the shutdown records what an active project was doing in `ProjectStatus.StateAtShutdown` (`status.json`), before it stops the project, and nothing that happens during the stop (claude's answer to the interrupt, its exit) changes it; a project whose stop by the user is under way is not marked. After recovery, once the server listens, a project that was working (`Running`, or `WaitingPermission`, whose prompt the shutdown denied) is resumed and sent the action's `resumePrompt`, three at a time; one waiting on a question is `WaitingInput` again without a process, until a reply resumes it, so nothing answers it for the user. `resumeOnRestart: false` keeps it `Stopped`. A user stop, and any launch, clear the marker. The server README has the details.
 
 Key services:
 - `RootConfigReader` — discovers and merges configs fresh on each operation (no caching, no restart needed)
@@ -243,10 +242,10 @@ Key services:
 ### 4.3 Project Folder Structure
 
 ```
-{root}/{project-id}/
+{root}/{project-folder}/
 ├── .godmode/
 │   ├── status.json      # Current state, metrics
-│   ├── settings.json    # Per-project settings (skip-permissions, etc.)
+│   ├── settings.json    # Per-project settings (action, permission mode, skip-permissions asked for)
 │   ├── input.jsonl      # User input log
 │   ├── output.jsonl     # Claude output stream
 │   ├── session-id       # Claude session ID for resumption
@@ -254,19 +253,31 @@ Key services:
 └── (project files)      # Working directory for Claude
 ```
 
-Archiving moves the folder to `{root}/.archived/{project-id}/`.
+A project is a folder directly inside its root with a `.godmode/status.json`, unless it is one of the root's own folders (below), which recovery skips. `{project-folder}` is its folder name, not its ID (4.1). The server does not archive or move project folders.
+
+**`.godmode/.gitignore` is ensured on every launch** (`ProjectFolder.EnsureGitIgnore`), before the MCP config with the project token is written: created when missing, since a create script's checkout can bring a `.godmode/` without one, and given the `*` rule when it lacks it.
+
+**A root's own folders are no project's.** `.godmode-root`, `logs` and `.archived` (a leftover) are refused as a project's folder (`ProjectFolder.ReservedFolderNames`), from the create dialog, a reuse, or a create script's `project_path`, and one found on disk with a `status.json` is not recovered. So are folder names Windows would change or not make a folder of, on every OS: a trailing dot or space (a name's trailing dots are dropped instead), and device names like `CON`, `NUL`, `COM1`. **A project's folder is strictly inside its root.** A create script's `project_path` must be inside that script's root, links followed, and not inside one of the root's own folders; the server deletes a project's folder only if it is inside a configured root by the same test, and otherwise leaves it on disk. **A project folder's files are untrusted:** its session can write them, so what reaches the `claude` command line or a link is checked when read back: `session-id` must be a GUID (anything else is no session, and the resume starts a fresh one), and a recovered pull request URL must be http(s).
+
+**One project, one claude.** A project has at most one claude process. A create is refused while a tracked project has its ID or folder, before anything is written; create, resume, stop and delete of one project take its lock, so launches and stops come one at a time. Each session runs in a process tree of its own, off the server's console (a Job Object and a hidden console on Windows, a process group started through `setsid` on Linux). A stop interrupts claude (Ctrl+Break in its console on Windows, SIGINT to its group elsewhere), gives it `StopGracePeriodSeconds` (10) to exit, then kills the whole tree; the server's shutdown does the same for every session at once. The server README (*Sessions*) has the details and what claude was measured to honour.
+
+**Failures keep the true state.** A project's state follows claude, whatever else fails:
+- A `status.json` that cannot be saved does not fail the change: it is pushed, its events are raised, and it is saved with the next change (the failure is logged at Error).
+- A line whose append to `output.jsonl` fails is tried once more on the file opened again, cut back to the last whole line, so offsets stay the file's; a line that cannot be persisted is not broadcast. The project's one consumer survives a failing item, and is started again if it faults; a subscribe or stop waiting on it fails rather than hangs.
+- Pushes to clients (output, status, attention) are started in order and not waited for (`ClientSends`), so a client that stops reading holds up only its own messages, not a project or the attention list.
+- The echoed user line (`--replay-user-messages`, `isReplay`) sets Running, so a result of an earlier turn handled after a send does not stand through the next turn. claude 2.1.282 folds a message sent in the middle of a turn into that turn, echoing it at its next step.
+- A connection's hub calls run four at a time (`MaximumParallelInvocationsPerClient`), so a reply that waits for a resumed claude's session leaves the tab its Stop and subscribes; one connection's subscribes still run one at a time, in order.
 
 ### 4.4 Authentication
 
-The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
+Every request needs a credential, whatever the server is bound to, loopback included. The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
 
-1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`.
-2. **API key** — `Authentication:ApiKey` is set. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade).
-3. **Loopback** — no key, and every binding is loopback. Callers need no key, but only from a loopback address, with a loopback `Host` and, when present, a loopback `Origin`.
+1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`, which its sessions are given.
+2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade). The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under `ProjectRootsDir`.
 
-With no key and any non-loopback binding, the server **refuses to start**. The shipped binding is `http://127.0.0.1:31337`. Binding to another address, such as the machine's Tailscale IP, needs a key. The Docker image sets `URLS=http://+:31337`, so it needs a key too.
+**Browser origins** (`Auth/OriginPolicy.cs`). A request with an `Origin`, as a browser sends on every WebSocket upgrade and any request but a same-origin GET, is refused with 403 before authentication unless it is one of the server's own origins: each address it listens on (a loopback or wildcard address also stands for `localhost`, `127.0.0.1` and `[::1]` on its port), those in `Authentication:AllowedOrigins` (a reverse proxy's, a host name's), a codespace's forwarded port, and the Vite dev server in Development. A request with no `Origin` (the MAUI relay, the attention service) needs the key alone.
 
-Only `/health` and the SPA's static files are anonymous. `/api/internal/*` uses a per-project token instead (Section 8.2). `src/GodMode.Server/README.md` has the full binding guide.
+Only `/health` and the SPA's static files are anonymous. The MCP endpoint, `/mcp`, takes a per-project token instead, and nothing else (Section 8.2). A Claude process and a root script start from an environment allowlist (`ChildEnvironment`), so the key reaches neither. Sessions still run as the server's OS user, so one that can run arbitrary commands can read the key file: the permission prompt is a gate, not a sandbox. `src/GodMode.Server/README.md` has the full binding guide.
 
 ### 4.5 React Client Architecture
 
@@ -276,7 +287,7 @@ Only `/health` and the SPA's static files are anonymous. `/api/internal/*` uses 
 - **Styling**: CSS files per component + shared `settings-common.css`
 - **No router** — navigation via `activePage` state and `selectedProject`
 
-Active page is a union: `profileSettings | appSettings | addServer | editServer | createProject`. Setting `activePage` shows the page; selecting a project clears it.
+Active page is a union: `appSettings | addServer | editServer | createProject`. Setting `activePage` shows the page; selecting a project clears it.
 
 ---
 
@@ -299,7 +310,7 @@ The files on disk are the whole interface to configuration. There is no translat
 
 ### 5.3 The Server Consumes Config; It Does Not Author It
 
-The server reads roots, actions, schemas and MCP config. It does not edit, package, import or export them. There is no in-app editor, file browser, connector catalog or manifest. The only config writes the hub makes are the profile methods (`CreateProfile`, `DeleteProfile`, `UpdateProfileDescription`), which write the same `.profiles/` files you would write by hand.
+The server reads roots, actions, schemas and profiles. It does not edit, package, import or export them, and no hub method writes config. There is no in-app editor, file browser, connector catalog or manifest. Nor does it provision MCP servers or archive projects: a client that wants to hide projects does so on its own side.
 
 ### 5.4 Roots Are External
 
@@ -318,15 +329,10 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 ├── .profiles/
 │   ├── default/
 │   │   ├── profile.json           # { "description": "..." }
-│   │   ├── env.json               # { "KEY": "value", ... }
-│   │   └── mcp/
-│   │       ├── github.json        # McpServerConfig JSON
-│   │       └── filesystem.json
+│   │   └── env.json               # { "KEY": "value", ... }
 │   └── production/
 │       ├── profile.json
-│       ├── env.json
-│       └── mcp/
-│           └── monitoring.json
+│       └── env.json               # "CLAUDE_CONFIG_DIR": "..." pins its sessions to one Claude account
 ├── feature-root/
 │   └── .godmode-root/
 │       └── config.json            # "profileName": "production" puts this root in that profile
@@ -337,14 +343,11 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 
 ### Key Properties
 
-- **Adding a profile** = `mkdir .profiles/{name}` + write `profile.json` (or `CreateProfile` from the UI)
+- **Adding a profile** = `mkdir .profiles/{name}` + write `profile.json`, on the host. No hub method creates, edits or deletes one
 - **Deleting a profile** = `rm -rf .profiles/{name}`
-- **Adding an MCP server** = write a JSON file to `.profiles/{name}/mcp/`
-- **Removing an MCP server** = delete the file
+- **MCP servers** are not profile config: user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR` (Section 8.1)
 - **Git works** — the entire `{ProjectRootsDir}` can be a git repo
 - **Profile env from the server's environment** — with `stripEnvVarProfile` in a root's config (or `{PROFILE}_STRIP_ENV_VAR_PROFILE=true` in the server's environment), server variables prefixed with the profile name (`MEGA_GITHUB_TOKEN`) reach that profile's sessions without the prefix (`GITHUB_TOKEN`)
-
-**Legacy config:** `Profiles` and `ProjectRoots` sections in `appsettings.json` are migrated into `.profiles/` once, the first time the server starts without a `.profiles/` directory. After that `.profiles/` is authoritative.
 
 ---
 
@@ -352,62 +355,44 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 
 | Service | Responsibility |
 |---|---|
-| `ProjectManager` | Central orchestrator — project lifecycle, profile/root snapshot, environment and MCP config building |
-| `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process`, writes their output to `output.jsonl` |
+| `ProjectManager` | Central orchestrator — project lifecycle, profile/root snapshot, environment and launch config building |
+| `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process`, each in a process tree of its own (`SessionProcessTree`: a Job Object on Windows, a process group on Linux), writes their output to `output.jsonl`, and stops them: interrupt, grace period, then the tree |
 | `RootConfigReader` | Discovers and merges `.godmode-root/` configs |
-| `ScriptRunner` | Executes cross-platform scripts (`.ps1` via `pwsh`, `.sh` via `bash`, `.cmd`/`.bat` on Windows) |
-| `ProfileFileManager` | CRUD on the `.profiles/` directory structure (in `ConfigFileWriter.cs`) |
+| `ScriptRunner` | Executes cross-platform scripts (`.ps1` via `pwsh`, or `PowerShell:Executable`; `.sh` via `bash`, `.cmd`/`.bat` on Windows) |
+| `ProfileFileManager` | Reads the `.profiles/` directory structure |
 | `StatusUpdater` | Updates `status.json` during execution |
 | `TemplateResolver` | Resolves `{field}` placeholders |
 | `EnvironmentExpander` | Expands `${VAR}` in config values and strips profile prefixes from server env vars |
 | `QuestionDetection` | Detects when Claude's turn ends in a question for the user |
 | `PullRequestPoller` / `PullRequestScript` | When a root's status script runs for each project, and the strict reading of its output (owned by `ProjectManager`, not registered) |
+| `PermissionPromptTool` | The MCP endpoint's one tool, claude's permission prompt (Section 8.2); registered with `AddMcpServer`, made per call |
 
-All services are registered as **singletons** in `Program.cs`. Authentication lives in `Auth/` (`AuthModeSelector`, `GodModeAuthenticationHandler`).
+All services are registered as **singletons** in `Program.cs`, except the MCP tool. Authentication lives in `Auth/` (`AuthModeSelector`, `ApiKeyFile`, `OriginPolicy`, `GodModeAuthenticationHandler`).
 
 ---
 
 ## 8. MCP Servers
 
-### 8.1 Configuration
+### 8.1 Where a Session's MCP Servers Come From
 
-MCP servers are configured at three levels (merge order: profile → root → action):
+GodMode gives a session one MCP server, its own MCP endpoint (8.2). It configures no others:
 
-| Level | Where |
+| Source | Where |
 |---|---|
-| Profile | `.profiles/{name}/mcp/{server}.json` |
-| Root | `mcpServers` in `.godmode-root/config.json` |
-| Action | `mcpServers` in `.godmode-root/config.{action}.json` |
+| The repo | its `.mcp.json` (Claude Code's project scope) |
+| The profile's Claude account | user scope in the `CLAUDE_CONFIG_DIR` the profile's or root's `environment` sets |
 
-```csharp
-// GodMode.Shared/Models/McpServerConfig.cs
-public record McpServerConfig(
-    string? Command = null,      // stdio transport
-    string[]? Args = null,
-    Dictionary<string, string>? Env = null,
-    string? Url = null,          // SSE transport
-    Dictionary<string, string>? Headers = null);
-```
+The server writes the session's MCP config, its own entry alone, to `.godmode/mcp-config.json` in the project (owner-only where the OS allows) and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
 
-**Stdio transport**: `Command` + `Args` + `Env`
-**SSE transport**: `Url` + `Headers` (requires `"type": "sse"` when passed to Claude CLI)
+**Nothing is pre-approved.** GodMode passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (8.2), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's permission mode lets it through, or the project runs with skip-permissions, which only a root with `allowSkipPermissions` allows (4.2).
 
-The server writes the merged MCP config to a temp file and passes it via `--mcp-config {path}` to Claude Code. Environment variables in MCP config support `${VAR}` expansion from the server process environment.
+### 8.2 The GodMode MCP Endpoint
 
-### 8.2 The GodMode MCP Bridge
+The server hosts one MCP endpoint, `/mcp` (`ModelContextProtocol.AspNetCore`, streamable HTTP, stateless), in-process. It has one tool, `permission_prompt`, which exists for claude's `--permission-prompt-tool` alone. It offers no other tools, for sessions or for operators.
 
-Every session also gets `godmode-bridge`, the stdio MCP server in `src/GodMode.McpBridge` (Node). The server build bundles it into one file with no dependencies, `mcp-bridge/godmode-mcp-bridge.cjs` next to the server's binaries, and a publish ships it there too. It gives Claude these tools:
+Each session's MCP config has one entry for it, `godmode`: `"type": "http"`, the endpoint's URL, and headers carrying `Authorization: Bearer <project token>` and `X-GodMode-Project-Id`. The URL is an address this machine reaches the server on, picked from the addresses it is bound to (a loopback binding first, a wildcard's loopback next, else the one IP bound). The token is issued afresh for each launch and lives only in memory and in that file; claude's environment carries no `GODMODE_*` variable. `/mcp` takes only a project token, for the project it was issued to: not the user's API key. A project token opens nothing else: not the hub, not `/api/*`.
 
-| Tool | Calls | Effect |
-|---|---|---|
-| `godmode_submit_result` | `POST /api/internal/result` | Stores the project's structured result |
-| `godmode_update_status` | `POST /api/internal/status` | Sets a custom status message shown in the UI |
-| `godmode_request_human_review` | `POST /api/internal/review` | Flags the project for human attention |
-| `permission_prompt` | `POST /api/internal/permission`, answered when the user answers | claude's `--permission-prompt-tool`: see below |
-
-The server injects `GODMODE_PROJECT_ID`, `GODMODE_PROJECT_TOKEN` (per-project token that authorizes only `/api/internal/*` for that project) and `GODMODE_SERVER_URL`, an address this machine reaches the server on, picked from the addresses it is bound to (a loopback binding first, a wildcard's loopback next, else the one IP bound). It finds the bridge through the `McpBridgePath` setting (or `GODMODE_MCP_BRIDGE_PATH`), or next to its binaries, and refuses to start without it.
-
-**Permission prompts.** claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode-bridge__permission_prompt`, so a tool call that needs approval waits for the user instead of being denied. claude calls `permission_prompt` with `{tool_name, input, tool_use_id}`; the bridge POSTs it and holds the HTTP request open until the user answers (`node:http`, since `fetch` gives up after 5 minutes), then returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}`. The project is `WaitingPermission` with `ProjectStatus.PendingPermission` (a server-built one-line `Summary` such as `Bash: git push origin x`), answered with the hub's `RespondToPermission`. The same flag makes claude offer `AskUserQuestion` in `--print` mode, and ask it through the same tool: that is `WaitingInput` with `PendingQuestion`, answered with `AnswerQuestion`. A request survives a client disconnect, not a server restart: the bridge's call fails and claude sees a deny. A chat message sent while one waits answers it (a single question takes it as its answer; otherwise it is a deny carrying the text).
+**Permission prompts.** claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode__permission_prompt`, so a tool call that needs approval waits for the user instead of being denied. claude calls `permission_prompt` with `{tool_name, input, tool_use_id}`. The call waits until the user answers, however long that takes, and returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}` as its text. While it waits, it sends a progress notification every `PermissionPromptKeepAliveSeconds` (30): claude gives up on a tool call that sends no response or progress for 300 seconds. When claude cancels the call, or its connection drops, the request is withdrawn. The project is `WaitingPermission` with `ProjectStatus.PendingPermission` (a server-built one-line `Summary` such as `Bash: git push origin x`), answered with the hub's `RespondToPermission`. What is pushed stays slim: `PendingPermission` carries no tool input, to clients or to `status.json`, since a `Write` can be megabytes and the request rides every status and attention push. The server keeps the input in memory for the call's life, which is the request's; a client fetches `GetPermissionDetail` (the whole command, a write's path and new text, or an edit's path and each replacement with its old text, new text and `replace_all`, cut at 16 KB with `DetailTruncated`) when it shows the request, and its Allow waits for that detail to be on screen. Only one answer counts: a second, from another client or after the request was withdrawn, fails. The same flag makes claude offer `AskUserQuestion` in `--print` mode, and ask it through the same tool: that is `WaitingInput` with `PendingQuestion`, answered with `AnswerQuestion`. A request survives a client disconnect, not a stop or a server restart: the stop denies it before it interrupts claude, and an AskUserQuestion's first question stays the project's `CurrentQuestion`, so a restart finds it waiting on the user. A `result` withdraws any request still listed from the turn it ends. A chat message sent while one waits answers it (a single question takes it as its answer; otherwise it is a deny carrying the text).
 
 **Attention.** `GetAttention` answers "what needs me on this server": one `AttentionItem` per project, oldest first, of kind `Permission`, `Question` (an AskUserQuestion, carried whole, or a turn that ended on `?`), `Error`, `Review` (changes requested on the project's open pull request) or `Finished` (a result the user has not seen; it and `Review` carry `PullRequestUrl`). It is derived from the status alone, and every field it reads is in `status.json` (`LastResult`, `LastResultAt`, `QuestionAt`, `SeenAt`, `PullRequest`), so a restart does not change the answer; `MarkSeen` and any reply move `SeenAt`. `AttentionChanged` pushes the whole list after a status push, only when the list differs from the last one pushed. `ReplyAndResume` answers any of it: `SendInput` to a running claude, otherwise a resume, the text, and a wait for `system/init`. claude writes nothing, not even `system/init`, until it has read its first input, so the text is sent first; the wait ends with an error if claude exits first or the `SessionStartTimeoutSeconds` setting (60) passes, and the text is sent again if the resume found no conversation and a fresh session replaced it.
 
@@ -421,23 +406,22 @@ GodMode.Server runs on a machine you own, where Claude Code sessions can use the
 
 | Target | How | Auth Mode | Use Case |
 |---|---|---|---|
-| **A PC or VM** | `dotnet run`, or a published build | Loopback (same machine) or API key (reached over Tailscale or a LAN) | The main setup: sessions run on your hardware |
+| **A PC or VM** | `dotnet run`, or a published build | API key (generated on the first start, or configured) | The main setup: sessions run on your hardware |
 | **GitHub Codespaces** | `.devcontainer/godmode-server/` | Codespace token | A disposable server per developer |
-| **Docker** | Image from `src/GodMode.Server/Dockerfile` | API key (required) | A containerized server on your own host |
+| **Docker** | Image from `src/GodMode.Server/Dockerfile` | API key (set it, so a replaced container keeps it) | A containerized server on your own host |
 
 ### 9.2 On a PC or VM
 
 ```bash
-# Same machine only (keyless)
+# Same machine only. With no Authentication__ApiKey, the first start generates a key and prints it
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
-# Reachable from your phone over Tailscale: set a key and keep the loopback binding
-export Authentication__ApiKey=<key>
+# Reachable from your phone over Tailscale: keep the loopback binding (the same key works on both)
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
   --urls "http://127.0.0.1:31337;http://$(tailscale ip -4):31337"
 ```
 
-For a long-running server, `dotnet publish -c Release` and run the output. Put roots in `ProjectRootsDir` (default `roots` under the working directory). The machine needs `claude`, `git`, `pwsh`, Node (for the MCP bridge and `npx` MCP servers) and whatever the roots' scripts call, such as `gh`.
+For a long-running server, `dotnet publish -c Release` and run the output. Put roots in `ProjectRootsDir` (default `roots` under the working directory). The machine needs `claude`, `git`, `pwsh` and whatever the roots' scripts call, such as `gh`. GodMode itself needs no Node; a repo whose `.mcp.json` starts `npx` MCP servers does.
 
 ### 9.3 GitHub Codespaces
 
@@ -466,7 +450,9 @@ Stage 3: .NET ASP.NET 10.0 runtime — final image (`runtime` target)
 Stage 4: runtime + .NET SDK — the `:sdk` tag, for sessions that build .NET code
 ```
 
-The runtime image includes the published server and SPA, git, curl, Node 22, PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`, so run it with `-e Authentication__ApiKey=<key>`. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
+The runtime image includes the published server and SPA, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`. Run it with `-e Authentication__ApiKey=<key>`: without one it generates a key into the `godmode` user's home, which a replaced container does not keep. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
+
+**Nothing a session runs as can change the server.** `/app` (the server and `wwwroot`) is root's and read-only to `godmode`, which owns only what the server writes: `/app/roots`, `/app/projects` (the default root when none is configured), `/data` and its home. Claude Code is installed root-owned with `npm install -g` (`/usr/bin/claude`), with self-update off (`DISABLE_AUTOUPDATER`, also in `/etc/claude-code/managed-settings.json`, since a claude process's environment is an allowlist). The server starts `claude` and `pwsh` by full path (`Claude__Executable=/usr/bin/claude`, `PowerShell__Executable=/usr/bin/pwsh`), and `/home/godmode/.local/bin`, which a session can write, is last on the `PATH`. Off Docker the two settings default to a `PATH` lookup (`claude`, `pwsh`): a codespace's claude is in `~/.local/bin`, installed by `postCreateCommand`, and the server runs as the sessions' user there anyway.
 
 GitHub Actions (`.github/workflows/build-and-push.yml`) builds and pushes both targets to GHCR (`ghcr.io/johnjuuljensen/godmode`) on pushes to `master` that touch `src/`, `tests/` or the slnx (`latest`, `sdk`), and on a published release (plus the release tag).
 
@@ -484,11 +470,10 @@ Every target separates the **server binary** from the **workspace data**:
 ├── .profiles/                # Profile definitions
 │   └── default/
 │       ├── profile.json
-│       ├── env.json
-│       └── mcp/
+│       └── env.json
 └── my-root/                  # Project roots
     ├── .godmode-root/
-    └── {project-id}/         # Projects
+    └── {project-folder}/     # Projects
 
 ~/.godmode-logs/              # Server logs (relative to the working directory)
 ```
@@ -513,7 +498,7 @@ Contains only infrastructure config — not domain data:
 }
 ```
 
-Every key can also be set as an environment variable (`Authentication__ApiKey`) or a command-line argument (`--ProjectRootsDir=...`). Domain data (profiles, MCP servers, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
+An empty `Authentication:ApiKey` means the key file's (Section 4.4). Every key can also be set as an environment variable (`Authentication__ApiKey`) or a command-line argument (`--ProjectRootsDir=...`). Domain data (profiles, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
 
 ---
 

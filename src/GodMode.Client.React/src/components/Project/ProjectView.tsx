@@ -1,17 +1,15 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore, transcriptKey } from '../../store';
 import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
-import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
+import { createTranscriptBuilder } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
 import { ReplyInput } from './ReplyInput';
+import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
-
-/** Simple view: the conversation, without session bookkeeping (errors still show) */
-const isConversation = (item: TranscriptItem) => (item.kind !== 'system' && item.kind !== 'result') || item.isError;
 
 interface Props {
   serverId: string;
@@ -41,6 +39,11 @@ export function ProjectView({ serverId, projectId }: Props) {
 
   const hub = conn?.hub;
   const project = conn?.projects.find(p => p.Id === projectId);
+  // Connected, the server's list taken on this connection, and the project not in it: deleted (here,
+  // elsewhere, or while this client slept), or a link to one it does not have. Nothing here acts on it (#239)
+  const projectsListed = useAppStore(s => !!s.projectsListed[serverId]);
+  const notFound = conn?.connectionState === 'connected' && projectsListed && !project;
+  const clearSelection = useAppStore(s => s.clearSelection);
 
   useEffect(() => {
     // Resumes from the transcript held, so reopening only adds what is new. Open while it shows: the
@@ -72,9 +75,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   );
 
   const state = project?.State ?? 'Idle';
-  const canSendInput = state === 'WaitingInput' || state === 'WaitingPermission' || state === 'Running' || state === 'Stopped' || state === 'Idle';
-  const canResume = state === 'Stopped' || state === 'Idle';
-  const canStop = state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission';
+  const canResume = !notFound && (state === 'Stopped' || state === 'Idle');
+  const canStop = !notFound && (state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission');
 
   // What claude is blocked on: a tool call to allow or deny, or AskUserQuestion's questions, asked one at a time
   const pendingPermission = project?.PendingPermission ?? null;
@@ -85,14 +87,14 @@ export function ProjectView({ serverId, projectId }: Props) {
     [answers, pendingQuestion?.RequestId],
   );
   const openQuestion = pendingQuestion?.Questions.find(q => answered[q.Question] === undefined) ?? null;
+  // Why the last answer to a question failed (another client answered first): that question's alone
+  const [answerError, setAnswerError] = useState<{ requestId: string; message: string } | null>(null);
+  const questionError = answerError && answerError.requestId === pendingQuestion?.RequestId ? answerError.message : null;
 
+  // A failure (another client answered first, claude stopped waiting) is the card's to show
   const handlePermission = useCallback(async (allow: boolean) => {
     if (!pendingPermission) return;
-    try {
-      await respondToPermission(serverId, projectId, pendingPermission.RequestId, { Allow: allow });
-    } catch (err) {
-      console.error('Failed to answer the permission request:', err);
-    }
+    await respondToPermission(serverId, projectId, pendingPermission.RequestId, { Allow: allow });
   }, [pendingPermission, respondToPermission, serverId, projectId]);
 
   const handleQuestionAnswer = useCallback(async (label: string) => {
@@ -100,10 +102,13 @@ export function ProjectView({ serverId, projectId }: Props) {
     const byQuestion = { ...answered, [openQuestion.Question]: label };
     setAnswers({ requestId: pendingQuestion.RequestId, byQuestion });
     if (pendingQuestion.Questions.some(q => byQuestion[q.Question] === undefined)) return;
+    setAnswerError(null);
     try {
       await answerQuestion(serverId, projectId, pendingQuestion.RequestId, byQuestion);
     } catch (err) {
-      console.error('Failed to answer the question:', err);
+      // Asked again, if it still waits: the answer did not reach claude
+      setAnswers(null);
+      setAnswerError({ requestId: pendingQuestion.RequestId, message: err instanceof Error ? err.message : String(err) });
     }
   }, [pendingQuestion, openQuestion, answered, answerQuestion, serverId, projectId]);
 
@@ -121,7 +126,7 @@ export function ProjectView({ serverId, projectId }: Props) {
   }, [replyAndResume, serverId, projectId, markInputSent]);
 
   const handleSendInput = async () => {
-    if (!inputText.trim()) return;
+    if (notFound || !inputText.trim()) return;
     const text = inputText;
     setInputText('');
     await sendText(text);
@@ -148,28 +153,13 @@ export function ProjectView({ serverId, projectId }: Props) {
     try { await hub.resumeProject(projectId); } catch (err) { console.error(err); }
   };
 
-  const [showProjectMenu, setShowProjectMenu] = useState(false);
-  const projectMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showProjectMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target as Node)) setShowProjectMenu(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showProjectMenu]);
-
-  const handleArchive = async () => {
-    if (!hub) return;
-    setShowProjectMenu(false);
-    try { await hub.archiveProject(projectId); } catch (err) { console.error(err); }
-  };
-
   const handleDelete = async () => {
-    setShowProjectMenu(false);
     if (!hub || !await confirmAction(`Delete "${projectName}" permanently?`, 'Delete', { message: 'This cannot be undone.', tone: 'danger' })) return;
-    try { await hub.deleteProject(projectId, state === 'Running'); } catch (err) { console.error(err); }
+    try {
+      await hub.deleteProject(projectId, state === 'Running');
+      // Who deleted it is done with it; a view it was deleted under says it is not found
+      clearSelection();
+    } catch (err) { console.error(err); }
   };
 
   return (
@@ -200,48 +190,33 @@ export function ProjectView({ serverId, projectId }: Props) {
             title={canStop ? 'Click to stop' : canResume ? 'Click to resume' : state}
           >
             <span className="project-status-dot" />
-            <span className="project-status-label">{state}</span>
+            <span className="project-status-label">{notFound ? 'Not found' : state}</span>
             {canStop && <span className="project-status-action">Stop</span>}
             {canResume && <span className="project-status-action">Resume</span>}
           </button>
-          <div className="project-menu-container" ref={projectMenuRef}>
-            <button className="delete-btn" onClick={() => setShowProjectMenu(!showProjectMenu)} title="Archive or delete">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-              </svg>
-            </button>
-            {showProjectMenu && (
-              <div className="project-menu-dropdown">
-                <button className="project-menu-item" onClick={handleArchive}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="21 8 21 21 3 21 3 8" /><rect x="1" y="3" width="22" height="5" /><line x1="10" y1="12" x2="14" y2="12" />
-                  </svg>
-                  Archive
-                </button>
-                <button className="project-menu-item project-menu-item-danger" onClick={handleDelete}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  </svg>
-                  Delete permanently
-                </button>
-              </div>
-            )}
-          </div>
+          <button className="delete-btn" onClick={handleDelete} disabled={notFound} title="Delete permanently">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            </svg>
+          </button>
         </div>
       </div>
 
-      {phase === 'ready' && visibleItems.length > 0 ? (
+      {!notFound && phase === 'ready' && visibleItems.length > 0 ? (
         <TranscriptList ref={transcriptRef} key={transcriptKey(serverId, projectId)} items={visibleItems} />
       ) : (
         <div className="project-messages">
           <div className="project-messages-empty">
-            {phase === 'loading' ? 'Loading...' : conn?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
+            {notFound ? 'Project not found'
+              : phase === 'loading' ? 'Loading...' : conn?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
           </div>
         </div>
       )}
 
       {pendingPermission ? (
-        <PermissionCard permission={pendingPermission} onAnswer={handlePermission} />
+        // One card per request: each fetches its own detail (#234)
+        <PermissionCard key={pendingPermission.RequestId} serverId={serverId} projectId={projectId}
+          permission={pendingPermission} onAnswer={handlePermission} />
       ) : openQuestion ? (
         <QuestionPrompt
           text={openQuestion.Question}
@@ -260,6 +235,8 @@ export function ProjectView({ serverId, projectId }: Props) {
         />
       )}
 
+      {questionError && <div className="project-answer-error">{questionError}</div>}
+
       <div className="project-input-bar">
         <ReplyInput
           inputRef={inputRef}
@@ -267,10 +244,12 @@ export function ProjectView({ serverId, projectId }: Props) {
           value={inputText}
           onChange={setInputText}
           onSubmit={handleSendInput}
-          placeholder={canResume ? 'Type to resume...' : 'Type your response...'}
-          disabled={!canSendInput}
+          // Every state takes a reply: ReplyAndResume resumes a claude that is not running, one that failed
+          // too, as the inbox answers an Error item (#240)
+          placeholder={canResume || state === 'Error' ? 'Type to resume...' : 'Type your response...'}
+          disabled={notFound}
         />
-        <button className="btn btn-primary" onClick={handleSendInput} disabled={!canSendInput || !inputText.trim()}>
+        <button className="btn btn-primary" onClick={handleSendInput} disabled={notFound || !inputText.trim()}>
           Send
         </button>
       </div>

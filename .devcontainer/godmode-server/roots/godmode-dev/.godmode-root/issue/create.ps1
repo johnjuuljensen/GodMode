@@ -24,6 +24,12 @@ if ($branch.Length -gt 60) { $branch = $branch.Substring(0, 60).TrimEnd('-') }
 # Use the branch name as the folder name (more descriptive than just issue_N)
 $projectPath = Join-Path $env:GODMODE_ROOT_PATH $branch
 
+# A GodMode project is there already (the issue was created before, and its project is still
+# around): it is not stale, and removing it would destroy that project's worktree
+if (Test-Path (Join-Path $projectPath '.godmode')) {
+    throw "Project folder '$projectPath' is in use: it is a GodMode project. Delete that project first, or carry on in it."
+}
+
 # Clean up stale state from previous failed attempts
 if (Test-Path $projectPath) {
     Write-Output "Removing stale directory '$projectPath'..."

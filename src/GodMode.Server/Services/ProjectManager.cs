@@ -1,3 +1,4 @@
+using GodMode.Server.Auth;
 using GodMode.Server.Models;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
@@ -19,8 +20,11 @@ namespace GodMode.Server.Services;
 /// </summary>
 public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 {
-    /// <summary>How long server shutdown waits for the projects' processes to be killed and marked Stopped.</summary>
+    /// <summary>How long server shutdown waits for the projects' processes to be stopped and marked Stopped.</summary>
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
+
+    /// <summary>What a shutdown keeps of <see cref="ShutdownTimeout"/> for killing what its grace period did not stop.</summary>
+    private static readonly TimeSpan ShutdownKillMargin = TimeSpan.FromSeconds(3);
 
     /// <summary>
     /// How long before a shutdown a process may have exited on its own and still count as stopped
@@ -35,20 +39,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>ApplicationStopping: the start stops carrying on with interrupted projects.</summary>
     private readonly CancellationToken _stopping;
 
-    /// <summary>The name the GodMode MCP bridge has in every session's MCP config.</summary>
-    internal const string McpBridgeServerName = "godmode-bridge";
+    /// <summary>The name GodMode's own MCP server, this server's <c>/mcp</c> endpoint, has in every session's MCP config.</summary>
+    internal const string McpServerName = "godmode";
 
     /// <summary>
-    /// The bridge tool claude asks for permission with (--permission-prompt-tool), and puts its
+    /// The tool claude asks for permission with (--permission-prompt-tool), and puts its
     /// AskUserQuestion calls to: see <see cref="RequestPermissionAsync"/>.
     /// </summary>
-    internal const string PermissionPromptTool = $"mcp__{McpBridgeServerName}__permission_prompt";
-
-    /// <summary>The setting that points at the MCP bridge bundle, overriding where the build puts it.</summary>
-    public const string McpBridgePathSetting = "McpBridgePath";
-
-    /// <summary>Where the build and a publish put the bridge bundle, relative to the server's binaries.</summary>
-    private static readonly string BundledMcpBridge = Path.Combine("mcp-bridge", "godmode-mcp-bridge.cjs");
+    internal const string PermissionPromptTool = $"mcp__{McpServerName}__{Services.PermissionPromptTool.Name}";
 
     private readonly ProjectLifecycle _lifecycle;
     private readonly IStatusUpdater _statusUpdater;
@@ -58,7 +56,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private readonly ProfileFileManager _profileFileManager;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
-    private readonly string _mcpBridgePath;
     private readonly IServer? _server;
     private readonly string[] _configuredUrls;
 
@@ -69,6 +66,13 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>The attention list last pushed, and the lock that orders computing and pushing it.</summary>
     private AttentionItem[] _attention = [];
     private readonly SemaphoreSlim _attentionLock = new(1, 1);
+    private readonly ClientSends _attentionSends = new();
+
+    /// <summary>
+    /// One subscribe at a time per connection, in the order they came: a connection's calls may run
+    /// side by side (<c>MaximumParallelInvocationsPerClient</c>), and its replays would interleave.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _subscribeLocks = new();
 
     /// <summary>How often an open pull request is checked, and how long its root's status script may take.</summary>
     public const string PullRequestPollSetting = "PullRequestPollSeconds";
@@ -82,11 +86,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         add => _lifecycle.OnProjectCompleted += value;
         remove => _lifecycle.OnProjectCompleted -= value;
     }
-
-    /// <summary>
-    /// Legacy profiles loaded from appsettings.json at startup (before .profiles/ migration).
-    /// </summary>
-    private readonly Dictionary<string, ProfileConfig> _legacyProfiles;
 
     /// <summary>
     /// Optional directory to scan for autodiscovered roots.
@@ -133,7 +132,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         _hubContext = hubContext;
         _profileFileManager = profileFileManager;
         _logger = logger;
-        _mcpBridgePath = ResolveMcpBridgePath(configuration);
         _server = server;
         _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         _sessionStartTimeout = TimeSpan.FromSeconds(configuration.GetValue(SessionStartTimeoutSetting, 60.0));
@@ -147,12 +145,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var rawDir = configuration["ProjectRootsDir"];
         _projectRootsDir = string.IsNullOrWhiteSpace(rawDir) ? null : rawDir;
 
-        // Migrate legacy profiles from appsettings.json to .profiles/ (one-time)
-        _profileFileManager.MigrateFromAppSettings(configuration);
-
-        // Load legacy profiles from configuration (with backward compat for ProjectRoots)
-        _legacyProfiles = LoadProfiles(configuration, hasAutoDiscovery: _projectRootsDir != null);
-
         if (_projectRootsDir != null)
             _logger.LogInformation("Autodiscovery enabled: scanning {ProjectRootsDir} for .godmode-root/ directories", _projectRootsDir);
 
@@ -164,14 +156,16 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Server shutdown: kills every claude process tree and persists Stopped, so recovery on the
-    /// next start does not launch a second process on a session an orphan still runs. A project
-    /// that was working or waiting on the user keeps that in <see cref="ProjectStatus.StateAtShutdown"/>,
-    /// and the next start resumes it (<see cref="ResumeInterruptedProjectsAsync"/>). A Ctrl+C on a
-    /// server run in a terminal reaches claude too, which may already have exited: from here on its
-    /// exit counts as stopped, one handled just before is taken back, and its project is stopped
-    /// like the rest, so the exit is persisted before the server goes. Blocks shutdown until done or
-    /// <see cref="ShutdownTimeout"/> passes.
+    /// Server shutdown: stops every claude as a Stop does, all at once (interrupted, then its process
+    /// tree killed if it has not exited within the grace period, shortened to leave time for that),
+    /// and persists Stopped, so recovery on the next start does not launch a second process on a
+    /// session an orphan still runs. A project that was working or waiting on the user keeps that in
+    /// <see cref="ProjectStatus.StateAtShutdown"/>, persisted before it is stopped, and the next
+    /// start resumes it (<see cref="ResumeInterruptedProjectsAsync"/>); one a stop by the user was
+    /// stopping is not marked. A process that exits on its own now counts as stopped, one handled
+    /// just before is taken back (a server whose sessions share its console once lost them to its
+    /// terminal's Ctrl+C), and its project is stopped like the rest, so the exit is persisted before
+    /// the server goes. Blocks shutdown until done or <see cref="ShutdownTimeout"/> passes.
     /// </summary>
     private void StopProjectsOnShutdown()
     {
@@ -182,16 +176,18 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var running = _projects.Values
             .Where(project => project.Process.ProcessId != 0
                 || project.Status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission or ProjectState.Idle)
-            .Select(project => (Project: project, StateAtShutdown: ProjectLifecycle.ActiveState(project.Status.State)))
+            .Select(project => (Project: project, Marker: ProjectLifecycle.MarkerOf(project)))
             .ToArray();
         var exited = _projects.Values.Except(running.Select(r => r.Project)).ToArray();
         if (running.Length == 0 && exited.Length == 0) return;
 
         _logger.LogInformation("Server stopping: stopping {Count} running project(s)", running.Length);
+        var grace = TimeSpan.FromTicks(Math.Min(_lifecycle.StopGracePeriod.Ticks, (ShutdownTimeout - ShutdownKillMargin).Ticks));
         var stops = Task.WhenAll(
             running.Select(r => StopOnShutdownAsync(r.Project, async () =>
             {
-                await _lifecycle.StopAsync(r.Project, r.StateAtShutdown);
+                await _lifecycle.MarkForShutdownAsync(r.Project, r.Marker);
+                await _lifecycle.StopAsync(r.Project, r.Marker, grace);
                 return true;
             })).Concat(exited.Select(project => StopOnShutdownAsync(project, async () =>
             {
@@ -217,79 +213,25 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
     }
 
-    private static Dictionary<string, ProfileConfig> LoadProfiles(IConfiguration configuration, bool hasAutoDiscovery)
-    {
-        var profiles = configuration.GetSection("Profiles").Get<Dictionary<string, ProfileConfig>>();
-
-        if (profiles is { Count: > 0 })
-            return profiles;
-
-        // Backward compat: map old ProjectRoots → "Default" profile
-        var legacyRoots = configuration.GetSection("ProjectRoots").Get<Dictionary<string, string>>();
-        if (legacyRoots is { Count: > 0 })
-        {
-            return new Dictionary<string, ProfileConfig>
-            {
-                ["Default"] = new ProfileConfig { Roots = legacyRoots }
-            };
-        }
-
-        // No explicit config — return empty if autodiscovery will provide roots,
-        // otherwise fall back to a default "projects" root.
-        if (hasAutoDiscovery)
-            return new Dictionary<string, ProfileConfig>();
-
-        return new Dictionary<string, ProfileConfig>
-        {
-            ["Default"] = new ProfileConfig
-            {
-                Roots = new Dictionary<string, string> { ["default"] = "projects" }
-            }
-        };
-    }
-
     /// <summary>
-    /// Builds an immutable snapshot of all profile/root state by merging explicit profiles
-    /// with autodiscovered roots. Thread-safe — can be called from any thread.
+    /// Builds an immutable snapshot of all profile/root state: the profiles in .profiles/, with the
+    /// roots autodiscovered in ProjectRootsDir. Thread-safe — can be called from any thread.
     /// </summary>
     private ProfileSnapshot BuildSnapshot()
     {
-        // Layer 1: Legacy profiles from appsettings.json (only if .profiles/ doesn't exist yet)
-        // Once .profiles/ exists (migration has run), legacy is ignored — .profiles/ is authoritative.
-        var profilesDirExists = Directory.Exists(_profileFileManager.ProfilesDir);
-        var merged = profilesDirExists
-            ? new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, ProfileConfig>(_legacyProfiles, StringComparer.OrdinalIgnoreCase);
-
-        // Layer 2: File-based profiles from .profiles/ directory
-        var fileProfiles = _profileFileManager.ReadAllProfiles();
-        foreach (var (name, data) in fileProfiles)
+        // Layer 1: File-based profiles from .profiles/ directory
+        var merged = new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, data) in _profileFileManager.ReadAllProfiles())
         {
-            if (merged.TryGetValue(name, out var existing))
+            merged[name] = new ProfileConfig
             {
-                // File-based profile fully replaces legacy environment/MCP/description.
-                // No fallback to legacy — once .profiles/{name}/ exists, it is authoritative.
-                merged[name] = new ProfileConfig
-                {
-                    Roots = existing.Roots,
-                    Environment = data.Environment,
-                    Description = data.Description ?? existing.Description,
-                    McpServers = data.McpServers
-                };
-            }
-            else
-            {
-                merged[name] = new ProfileConfig
-                {
-                    Roots = new Dictionary<string, string>(),
-                    Environment = data.Environment,
-                    Description = data.Description,
-                    McpServers = data.McpServers
-                };
-            }
+                Roots = new Dictionary<string, string>(),
+                Environment = data.Environment,
+                Description = data.Description
+            };
         }
 
-        // Layer 3: Autodiscovered roots from ProjectRootsDir
+        // Layer 2: Autodiscovered roots from ProjectRootsDir
         if (_projectRootsDir != null)
         {
             var discovered = DiscoverProfiles(_projectRootsDir);
@@ -307,8 +249,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                     {
                         Roots = mergedRoots,
                         Environment = existing.Environment,
-                        Description = existing.Description ?? profileConfig.Description,
-                        McpServers = existing.McpServers
+                        Description = existing.Description ?? profileConfig.Description
                     };
                 }
                 else
@@ -335,9 +276,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         {
             compositeRoots[$"{profile}/{root}"] = path;
         }
-        var projectFiles = compositeRoots.Count > 0
-            ? new ProjectFiles.ProjectManager(compositeRoots)
-            : new ProjectFiles.ProjectManager("projects");
+        var projectFiles = new ProjectFiles.ProjectManager(compositeRoots);
 
         _logger.LogInformation("Profile snapshot: {ProfileCount} profiles, {RootCount} total roots: {Roots}",
             merged.Count,
@@ -377,7 +316,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         foreach (var subDir in Directory.GetDirectories(fullPath))
         {
-            var godModeRootDir = Path.Combine(subDir, ".godmode-root");
+            var godModeRootDir = Path.Combine(subDir, ProjectFiles.ProjectFolder.RootConfigFolderName);
             if (!Directory.Exists(godModeRootDir))
                 continue;
 
@@ -459,12 +398,44 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private static (string Profile, string Root) ConfiguredNames(ProfileSnapshot snap, string profile, string root) =>
         snap.RootLookup.Keys.FirstOrDefault(key => TupleComparer.Instance.Equals(key, (profile, root))) is ({ } p, { } r) ? (p, r) : (profile, root);
 
-    /// <summary>Whether <paramref name="path"/> is <paramref name="dir"/> or inside it, by whole path segments.</summary>
-    private static bool IsSameOrUnder(string path, string dir)
+    /// <summary>
+    /// Why <paramref name="path"/> cannot be a project folder of the root at <paramref name="rootPath"/>,
+    /// or null when it can. It must be strictly under the root, links followed on both where the OS
+    /// allows (a link in the root to a folder elsewhere is that folder), and its first folder under the
+    /// root must be no folder the root keeps for itself (<c>{root}/.godmode-root/scripts</c> is the root's).
+    /// A delete of the project deletes its folder recursively.
+    /// </summary>
+    private static string? WhyNotAProjectFolderOf(string rootPath, string path)
     {
-        var relative = Path.GetRelativePath(Path.GetFullPath(dir), Path.GetFullPath(path));
-        return relative == "."
-            || !Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar);
+        var relative = Path.GetRelativePath(ResolveLinks(rootPath), ResolveLinks(path));
+        if (relative == "." || Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar))
+            return "is not inside its project root";
+        return ProjectFiles.ProjectFolder.IsReservedFolderName(relative.Split(Path.DirectorySeparatorChar)[0])
+            ? "is inside a folder the project root uses for itself"
+            : null;
+    }
+
+    /// <summary>
+    /// The full path of <paramref name="path"/> with every link along it followed, as far as it exists
+    /// and the OS lets it be read; the rest as it is.
+    /// </summary>
+    private static string ResolveLinks(string path, int depth = 0)
+    {
+        var full = FullPath(path);
+        var resolved = Path.GetPathRoot(full)!;
+        foreach (var segment in full[resolved.Length..].Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            resolved = Path.Combine(resolved, segment);
+            try
+            {
+                // The target's own folders may be links too; a cycle ends at the depth, as the OS's does
+                if (depth < 32 && new DirectoryInfo(resolved) is { Exists: true, LinkTarget: not null } link
+                    && link.ResolveLinkTarget(returnFinalTarget: true) is { } target)
+                    resolved = ResolveLinks(target.FullName, depth + 1);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        return resolved;
     }
 
     public Task<ProfileInfo[]> ListProfilesAsync()
@@ -495,7 +466,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             var resolvedPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
             var config = _rootConfigReader.ReadConfig(resolvedPath);
             var actions = config.GetEffectiveActions()
-                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Model))
+                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Model, a.AllowSkipPermissions))
                 .ToArray();
             return new ProjectRootInfo(rootName, config.Description, actions, ProfileName: profileName);
         }).ToArray();
@@ -527,6 +498,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return summaries.ToArray();
     }
 
+    /// <summary>The server's record of a tracked project, for the tests; null when it is not tracked.</summary>
+    internal ProjectInfo? Tracked(string projectId) => _projects.GetValueOrDefault(projectId);
+
     public async Task<ProjectStatus> GetStatusAsync(string projectId)
     {
         if (!_projects.TryGetValue(projectId, out var project))
@@ -555,9 +529,25 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Resolve root path via profile lookup
         var compositeKey = CompositeKey(request.ProfileName, request.ProjectRootName);
         var rootPath = snap.ProjectFiles.GetProjectRootPath(compositeKey);
-        var config = _rootConfigReader.ReadConfig(rootPath);
+        // Read as the launch reads it: a config file that cannot be read fails the create here, before
+        // anything is written, rather than at its launch
+        RootConfig config;
+        try
+        {
+            config = _rootConfigReader.ReadConfigStrict(rootPath);
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException($"Root '{request.ProjectRootName}' has a config that cannot be read: {ex.Message}", ex);
+        }
         var action = config.ResolveAction(request.ActionName)
             ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
+
+        // Skipping permissions is the root's to allow: a create cannot ask for what its root forbids
+        var skipPermissions = GetBool(request.Inputs, "skipPermissions");
+        if (skipPermissions && !action.AllowSkipPermissions)
+            throw new ArgumentException(
+                $"Root '{request.ProjectRootName}' does not allow Skip Permissions for action '{action.Name}': its config would need \"allowSkipPermissions\": true.");
 
         // Get profile environment for merging
         snap.Profiles.TryGetValue(request.ProfileName, out var profileConfig);
@@ -571,28 +561,15 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Resolve prompt from inputs or promptTemplate
         var prompt = ResolvePrompt(action, request.Inputs);
 
-        // Create project folder — either server-managed or script-managed. A name that leaves no
-        // folder of its own ("..", ".") is refused here, before any script runs or file is written
+        // The project's folder, decided before anything is written. A name that leaves no folder of
+        // its own ("..", ".") is refused here, before any script runs or file is written
         var folder = ProjectFiles.ProjectManager.ConvertNameToPath(name);
         var reuseExisting = request.Inputs.TryGetValue("__reuseExisting", out var reuse) &&
                             reuse.ValueKind == System.Text.Json.JsonValueKind.True;
         var autoSuffix = request.Inputs.TryGetValue("__autoSuffix", out var suffix) &&
                          suffix.ValueKind == System.Text.Json.JsonValueKind.True;
-        string projectPath;
-
-        if (action.ScriptsCreateFolder)
-        {
-            // Scripts will create the project directory (e.g. git worktree add)
-            projectPath = Path.Combine(rootPath, folder);
-        }
-        else if (reuseExisting)
-        {
-            // Reuse existing folder — reinitialize .godmode state
-            var projectFolder = ProjectFiles.ProjectFolder.Reuse(rootPath, folder, name);
-            projectPath = projectFolder.ProjectPath;
-            folder = Path.GetFileName(projectPath);
-        }
-        else if (autoSuffix && Directory.Exists(Path.Combine(rootPath, folder)))
+        var suffixed = !action.ScriptsCreateFolder && !reuseExisting && autoSuffix && Directory.Exists(Path.Combine(rootPath, folder));
+        if (suffixed)
         {
             // Auto-suffix: find next available _N
             var baseFolder = folder;
@@ -607,18 +584,29 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                     break;
                 }
             }
-            var suffixedFolder = ProjectFiles.ProjectFolder.Create(rootPath, folder, name);
-            projectPath = suffixedFolder.ProjectPath;
         }
-        else
-        {
-            // Server creates the project folder via ProjectFiles
-            var (projectFolder, _) = snap.ProjectFiles.CreateProject(compositeKey, name);
-            projectPath = projectFolder.ProjectPath;
-        }
+        var projectPath = Path.Combine(rootPath, folder);
 
         var (profileName, rootName) = ConfiguredNames(snap, request.ProfileName, request.ProjectRootName);
         var projectId = ProjectId(profileName, rootName, folder);
+
+        // One project per ID and per folder: a tracked project's claude would be orphaned, and its
+        // files overwritten. Claimed before a folder is reused or any script runs, until registered
+        using var claims = new CreateClaims(this);
+        claims.Claim(projectId, projectPath);
+
+        // Unless the scripts create the project directory (e.g. git worktree add)
+        if (!action.ScriptsCreateFolder)
+        {
+            if (reuseExisting)
+                // Reuse existing folder — reinitialize .godmode state
+                ProjectFiles.ProjectFolder.Reuse(rootPath, folder, name);
+            else if (suffixed)
+                ProjectFiles.ProjectFolder.Create(rootPath, folder, name);
+            else
+                // Server creates the project folder via ProjectFiles
+                snap.ProjectFiles.CreateProject(compositeKey, name);
+        }
 
         var now = DateTime.UtcNow;
         var project = new ProjectInfo
@@ -669,8 +657,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Prepare script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
-                project.Status = project.Status with { State = ProjectState.Error };
-                _projects[projectId] = project;
+                RegisterFailedCreate(project, ex.Message);
                 throw;
             }
         }
@@ -693,8 +680,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Create script failed for project {ProjectId}. See log: {LogPath}", projectId, logFilePath);
-                project.Status = project.Status with { State = ProjectState.Error };
-                _projects[projectId] = project;
+                RegisterFailedCreate(project, ex.Message);
                 throw;
             }
         }
@@ -706,13 +692,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             try
             {
                 (projectPath, folder) = ValidateScriptProjectPath(overridePath, rootPath);
+                // Nor may a script's folder be a tracked project's
+                claims.Claim(ProjectId(profileName, rootName, folder), projectPath);
             }
-            catch (ArgumentException ex)
+            catch (Exception ex) when (ex is ArgumentException or ProjectInUseException)
             {
                 // The project keeps the folder it was given, so a delete removes only that
-                _logger.LogError("Create script for project {ProjectId} returned an invalid project_path: {Message}", projectId, ex.Message);
-                project.Status = project.Status with { State = ProjectState.Error };
-                _projects[projectId] = project;
+                _logger.LogError("Create script for project {ProjectId} returned a project_path it cannot have: {Message}", projectId, ex.Message);
+                RegisterFailedCreate(project, ex.Message);
                 throw;
             }
             projectId = ProjectId(profileName, rootName, folder);
@@ -738,32 +725,110 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Ensure .godmode directory exists (scripts may have created the project dir without it)
         EnsureGodModeDirectory(projectPath);
 
-        // Save project settings (persists across restarts, includes action name for delete/resume)
-        var skipPermissions = GetBool(request.Inputs, "skipPermissions");
+        // Save project settings (persists across restarts, includes action name for delete/resume).
+        // The permission mode is kept with the project, as its model is, so its resumes keep it
         var settings = new ProjectFiles.ProjectSettings(
             DangerouslySkipPermissions: skipPermissions,
-            ActionName: action.Name);
+            ActionName: action.Name,
+            PermissionMode: action.PermissionMode);
         settings.Save(projectPath);
 
         // Save initial status
         await _statusUpdater.SaveStatusAsync(project);
 
-        // Add to tracking
-        _projects[projectId] = project;
-
-        // Start Claude process, configured from what is saved above, exactly as a resume will be
+        // Add to tracking with its launch in flight, under its resume lock (a new project's, so free):
+        // a reply, resume or stop that finds it waits until the launch has its process or has failed
+        var resumeLock = project.Process.ResumeLock;
+        await resumeLock.WaitAsync();
+        project.Process.BeginLaunching();
         try
         {
-            await _lifecycle.StartAsync(project, prompt ?? "Hello", BuildLaunchSpec(project));
+            if (!_projects.TryAdd(projectId, project))
+                throw new ProjectInUseException(projectId, "a project with this ID exists");
+
+            // Start Claude process, configured from what is saved above, exactly as a resume will be
+            try
+            {
+                await _lifecycle.StartAsync(project, prompt ?? "Hello", BuildLaunchSpec(project));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to start Claude process for project {ProjectId}", projectId);
+                await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Error, LastError = ex.Message });
+                throw;
+            }
         }
-        catch (Exception ex)
+        finally
         {
-            _logger.LogError(ex, "Failed to start Claude process for project {ProjectId}", projectId);
-            await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Error });
-            throw;
+            project.Process.EndLaunching();
+            resumeLock.Release();
         }
 
         return project.Status;
+    }
+
+    /// <summary>
+    /// A create that failed before its launch: its project is Error, saying why, for the user to see
+    /// and delete. It has the ID and folder the create claimed, so no tracked project has them.
+    /// </summary>
+    private void RegisterFailedCreate(ProjectInfo project, string reason)
+    {
+        project.Status = project.Status with { State = ProjectState.Error, LastError = reason, UpdatedAt = DateTime.UtcNow };
+        if (!_projects.TryAdd(project.Status.Id, project))
+            _logger.LogWarning("Project {ProjectId} failed to create, and another has its ID", project.Status.Id);
+    }
+
+    /// <summary>The IDs and folders (full paths) that creates in progress have claimed: see <see cref="CreateClaims"/>.</summary>
+    private readonly ConcurrentDictionary<string, byte> _creatingIds = new();
+    private readonly ConcurrentDictionary<string, byte> _creatingPaths = new(PathComparer);
+
+    /// <summary>Paths compared as the OS compares them: on Windows, <c>Fix</c> is the folder <c>fix</c>.</summary>
+    private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    private static string FullPath(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
+    /// <summary>
+    /// What one create has claimed, so no two creates make one project and none makes a tracked one:
+    /// from before anything is written until the project is registered or the create has failed.
+    /// Disposing it gives the claims up.
+    /// </summary>
+    private sealed class CreateClaims(ProjectManager manager) : IDisposable
+    {
+        private readonly List<string> _ids = [];
+        private readonly List<string> _paths = [];
+
+        /// <summary>
+        /// Claims the ID and folder, or throws <see cref="ProjectInUseException"/> when a tracked
+        /// project has either, or another create has claimed it.
+        /// </summary>
+        public void Claim(string projectId, string projectPath)
+        {
+            var path = FullPath(projectPath);
+            if (!_ids.Contains(projectId))
+            {
+                if (!manager._creatingIds.TryAdd(projectId, 0))
+                    throw new ProjectInUseException(projectId, "another create is making it");
+                _ids.Add(projectId);
+            }
+            if (!_paths.Contains(path, PathComparer))
+            {
+                if (!manager._creatingPaths.TryAdd(path, 0))
+                    throw new ProjectInUseException(projectId, $"another create is making {path}");
+                _paths.Add(path);
+            }
+            if (manager._projects.ContainsKey(projectId))
+                throw new ProjectInUseException(projectId, "a project with this ID exists");
+            if (manager._projects.Values.FirstOrDefault(p => PathComparer.Equals(FullPath(p.ProjectPath), path)) is { } tracked)
+                throw new ProjectInUseException(projectId, $"project {tracked.Status.Id} is in {path}");
+        }
+
+        public void Dispose()
+        {
+            foreach (var id in _ids) manager._creatingIds.TryRemove(id, out _);
+            foreach (var path in _paths) manager._creatingPaths.TryRemove(path, out _);
+            _ids.Clear();
+            _paths.Clear();
+        }
     }
 
     public async Task SendInputAsync(string projectId, string input)
@@ -794,42 +859,48 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
 
-        // One reply at a time decides whether to resume: two would launch two processes
-        var resumeLock = project.Process.ResumeLock;
-        await resumeLock.WaitAsync();
-        try
-        {
-            await ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false);
-        }
-        finally
-        {
-            resumeLock.Release();
-        }
+        // One reply at a time decides whether to resume: two would launch two processes. The wait
+        // for the session to start comes after the lock, so a stop is not held behind it
+        var reply = await WithResumeLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false));
+        if (reply.SessionStart is { } sessionStart) await sessionStart;
     }
+
+    /// <summary>What a reply did under the resume lock, and, when it resumed, the wait for the session to start that follows.</summary>
+    private readonly record struct ReplyOutcome(bool Delivered, Task? SessionStart = null);
 
     /// <summary>
     /// <see cref="ReplyAndResumeAsync"/>, under the project's resume lock. With
     /// <paramref name="onlyIfInterrupted"/> (the start carrying on after a shutdown), it sends
     /// nothing to a running claude and resumes only while the project still has its
-    /// <see cref="ProjectStatus.StateAtShutdown"/>; false when it did neither.
+    /// <see cref="ProjectStatus.StateAtShutdown"/>; not delivered when it did neither.
     /// </summary>
-    private async Task<bool> ReplyAndResumeLockedAsync(ProjectInfo project, string text, bool onlyIfInterrupted)
+    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string text, bool onlyIfInterrupted)
     {
         var projectId = project.Status.Id;
+        await _lifecycle.SettleAsync(project);
         if (_lifecycle.IsRunning(project))
         {
-            if (onlyIfInterrupted) return false;
+            if (onlyIfInterrupted) return new(false);
             await SendInputAsync(projectId, text);
-            return true;
+            return new(true);
         }
 
         // claude writes system/init once it has read its first input, so the reply is sent at
         // once and the session start awaited after it
         var sessionStart = project.Process.NextSessionStart();
-        if (!await TryResumeAsync(project, onlyIfInterrupted)) return false;
+        if (!await TryResumeAsync(project, onlyIfInterrupted)) return new(false);
         var sentTo = await TrySendInputAsync(project, text);
         await NotifyStatusChanged(project);
+        return new(true, AwaitSessionStartAsync(project, text, sessionStart, sentTo));
+    }
 
+    /// <summary>
+    /// Waits for the resumed claude to start its session, and sends the reply again when the resume
+    /// found no conversation and a fresh session took its place.
+    /// </summary>
+    private async Task AwaitSessionStartAsync(ProjectInfo project, string text, Task<int> sessionStart, int sentTo)
+    {
+        var projectId = project.Status.Id;
         int startedIn;
         try
         {
@@ -849,8 +920,18 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             await _lifecycle.SendInputAsync(project, text);
             await NotifyStatusChanged(project);
         }
-        return true;
     }
+
+    private static async Task<T> WithResumeLockAsync<T>(ProjectInfo project, Func<Task<T>> action, CancellationToken cancel = default)
+    {
+        var resumeLock = project.Process.ResumeLock;
+        await resumeLock.WaitAsync(cancel);
+        try { return await action(); }
+        finally { resumeLock.Release(); }
+    }
+
+    private static Task WithResumeLockAsync(ProjectInfo project, Func<Task> action) =>
+        WithResumeLockAsync(project, async () => { await action(); return true; });
 
     /// <summary>Sends to the process just launched; 0 when it has exited already (a fresh session may take its place).</summary>
     private async Task<int> TrySendInputAsync(ProjectInfo project, string text)
@@ -938,7 +1019,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return after is { IsOpen: true } ? PullRequestPoller.Outcome.Poll : PullRequestPoller.Outcome.Wait;
     }
 
-    /// <summary>A project that is back without a status push (recovered, restored): its open pull request is checked, then polled.</summary>
+    /// <summary>A project that is back without a status push (recovered): its open pull request is checked, then polled.</summary>
     private void ResumeChecks(ProjectInfo project)
     {
         _pullRequests.Remember(project.Status.Id, project.Status.State);
@@ -949,25 +1030,29 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     public void Dispose() => _pullRequests.Dispose();
 
-    /// <summary>Pushes the attention list to every client when it differs from the one last pushed.</summary>
+    /// <summary>
+    /// Pushes the attention list to every client when it differs from the one last pushed. The list
+    /// is computed and its push started under the lock, so lists go out in the order they were
+    /// computed; the push is not waited for (<see cref="ClientSends"/>), so a client that does not
+    /// read holds up neither the lock nor the project whose status push got here.
+    /// </summary>
     private async Task PushAttentionIfChangedAsync()
     {
+        Task window;
         await _attentionLock.WaitAsync();
         try
         {
             var attention = GetAttention();
             if (Attention.Same(attention, _attention)) return;
             _attention = attention;
-            await _hubContext.Clients.All.AttentionChanged(attention);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error pushing the attention list");
+            window = _attentionSends.SendAsync(() => _hubContext.Clients.All.AttentionChanged(attention),
+                ex => _logger.LogError(ex, "Error pushing the attention list"));
         }
         finally
         {
             _attentionLock.Release();
         }
+        await window;
     }
 
     public async Task RespondToPermissionAsync(string projectId, string requestId, PermissionDecision decision)
@@ -979,9 +1064,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var result = decision.Allow
             ? PermissionPromptResult.Allow(decision.UpdatedInput ?? pending.Input)
             : PermissionPromptResult.Deny(decision.Message is { Length: > 0 } message ? message : "The user denied this.");
+        await AnswerPendingAsync(project, pending, result);
         _logger.LogInformation("Project {ProjectId}: permission request {RequestId} {Decision}",
             projectId, requestId, decision.Allow ? "allowed" : "denied");
-        await CompletePendingAsync(project, pending, result);
+    }
+
+    public Task<PermissionDetail> GetPermissionDetailAsync(string projectId, string requestId)
+    {
+        var (_, pending) = FindPending(projectId, requestId);
+        return pending.Detail is { } detail
+            ? Task.FromResult(detail)
+            : throw new InvalidOperationException($"Request {requestId} is a question: it has no permission detail");
     }
 
     public async Task AnswerQuestionAsync(string projectId, string requestId, IReadOnlyDictionary<string, string> answers)
@@ -992,8 +1085,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (answers.Count == 0)
             throw new ArgumentException("An answer needs at least one question answered", nameof(answers));
 
+        await AnswerPendingAsync(project, pending, PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, answers)));
         _logger.LogInformation("Project {ProjectId}: question {RequestId} answered", projectId, requestId);
-        await CompletePendingAsync(project, pending, PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, answers)));
     }
 
     public async Task<PermissionPromptResult> RequestPermissionAsync(string projectId, PermissionPromptRequest request, CancellationToken aborted)
@@ -1005,18 +1098,25 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Tool name only: the input and its summary can carry secrets (a command with a token in it)
         _logger.LogInformation("Project {ProjectId} asks permission for {ToolName} (request {RequestId})",
             projectId, request.ToolName, pending.Id);
-        project.Process.AddPending(pending);
-        await _lifecycle.ShowPendingAsync(project);
 
         try
         {
+            project.Process.AddPending(pending);
+            await _lifecycle.ShowPendingAsync(project);
             return await pending.Completion.Task.WaitAsync(aborted);
         }
         catch (OperationCanceledException)
         {
-            // The bridge went away (claude exited or was killed): nobody is waiting for the answer
+            // claude cancelled the call, or its connection dropped (it exited or was killed): nobody is waiting for the answer
             _logger.LogInformation("Project {ProjectId}: permission request {RequestId} was abandoned", projectId, pending.Id);
             await CompletePendingAsync(project, pending, PermissionPromptResult.Deny("The request was abandoned."));
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Not shown: claude's call fails, and no reply is taken for its answer
+            _logger.LogError(ex, "Project {ProjectId}: permission request {RequestId} could not be shown; it is withdrawn", projectId, pending.Id);
+            await CompletePendingAsync(project, pending, PermissionPromptResult.Deny("The request could not be shown to the user."));
             throw;
         }
     }
@@ -1030,11 +1130,23 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             : throw new KeyNotFoundException($"Project {projectId} has no pending request {requestId}: it was answered, or claude stopped waiting");
     }
 
-    /// <summary>Answers the request, if nothing else did first, and shows the next one or none.</summary>
-    private async Task CompletePendingAsync(ProjectInfo project, PendingRequest pending, PermissionPromptResult result)
+    /// <summary>Answers the request, if nothing else did first, and shows the next one or none; whether this call answered it.</summary>
+    private async Task<bool> CompletePendingAsync(ProjectInfo project, PendingRequest pending, PermissionPromptResult result)
     {
-        if (project.Process.CompletePending(pending, result))
-            await _lifecycle.ShowPendingAsync(project);
+        if (!project.Process.CompletePending(pending, result)) return false;
+        await _lifecycle.ShowPendingAsync(project);
+        return true;
+    }
+
+    /// <summary>
+    /// The user's answer: it fails when another answer (another client's, a chat reply) or claude's
+    /// giving up came first, since that is what claude got, not this.
+    /// </summary>
+    private async Task AnswerPendingAsync(ProjectInfo project, PendingRequest pending, PermissionPromptResult result)
+    {
+        if (!await CompletePendingAsync(project, pending, result))
+            throw new KeyNotFoundException(
+                $"Request {pending.Id} was answered already, by another client or a reply, or claude stopped waiting: this answer was not used");
     }
 
     public async Task StopProjectAsync(string projectId)
@@ -1044,7 +1156,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        await _lifecycle.StopAsync(project);
+        // Before a launch or after it, never in the middle of one
+        await WithResumeLockAsync(project, () => _lifecycle.StopAsync(project));
         await NotifyStatusChanged(project);
     }
 
@@ -1055,11 +1168,20 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
+        await WithResumeLockAsync(project, () => DeleteLockedAsync(project, force));
+    }
+
+    private async Task DeleteLockedAsync(ProjectInfo project, bool force)
+    {
+        var projectId = project.Status.Id;
         _logger.LogInformation("Deleting project {ProjectId} ({Name}), force={Force}", projectId, project.Status.Name, force);
 
-        // Stop Claude process if running. Its output pipeline stays open until the delete is
-        // committed: a delete script may refuse, and the project is then resumed as before
-        await _lifecycle.KillAsync(project);
+        // Stopped before the delete scripts run, with nothing left waiting on the user: a prompt that
+        // was waiting is denied, not shown again. A delete a script refuses leaves it so, and a
+        // restart does not resume it. Its output pipeline stays open until the delete is committed
+        await _lifecycle.StopAsync(project);
+        await _lifecycle.UpdateStatusAsync(project, status => status with { CurrentQuestion = null });
+        await NotifyStatusChanged(project);
         // Nor does a status script hold its folder while the delete scripts run
         await _pullRequests.ForgetAsync(projectId);
 
@@ -1113,136 +1235,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await PushAttentionIfChangedAsync();
     }
 
-    public async Task ArchiveProjectAsync(string projectId)
-    {
-        if (!_projects.TryRemove(projectId, out var project))
-            throw new KeyNotFoundException($"Project {projectId} not found");
-
-        // Stop process if running, and finish its output and its checks
-        await _lifecycle.CloseAsync(project);
-        await _pullRequests.ForgetAsync(projectId);
-        // Archived by the user: nothing to carry on with, if it is ever restored
-        if (project.Status.StateAtShutdown != null)
-            await _lifecycle.UpdateStatusAsync(project, status => status with { StateAtShutdown = null });
-
-        // Move project folder to .archived/ sibling directory
-        var parentDir = Path.GetDirectoryName(project.ProjectPath)!;
-        var archiveDir = Path.Combine(parentDir, ".archived");
-        Directory.CreateDirectory(archiveDir);
-        var destDir = Path.Combine(archiveDir, Path.GetFileName(project.ProjectPath));
-        if (Directory.Exists(destDir))
-            await DeleteDirectoryRobustAsync(destDir);
-        Directory.Move(project.ProjectPath, destDir);
-
-        // Write archive metadata
-        var metaPath = Path.Combine(destDir, ".godmode", "archive.json");
-        var meta = new { ArchivedAt = DateTime.UtcNow, Name = project.Status.Name,
-            RootName = project.Status.RootName, ProfileName = project.ProfileName ?? project.Status.ProfileName };
-        await File.WriteAllTextAsync(metaPath, JsonSerializer.Serialize(meta, new JsonSerializerOptions { WriteIndented = true }));
-
-        _logger.LogInformation("Archived project {ProjectId} ({Name})", projectId, project.Status.Name);
-        await PushAttentionIfChangedAsync();
-    }
-
-    public Task<ProjectSummary[]> ListArchivedProjectsAsync()
-    {
-        var results = new List<ProjectSummary>();
-        var snap = _snapshot;
-
-        // Scan all root directories for .archived/ folders. An archived project's ID is where it
-        // returns to, its root and folder, whatever ID its status.json was archived with
-        foreach (var (profileName, rootName, rootPath) in AllRoots(snap))
-        {
-            var archiveDir = Path.Combine(rootPath, ".archived");
-            if (!Directory.Exists(archiveDir)) continue;
-
-            foreach (var projDir in Directory.GetDirectories(archiveDir))
-            {
-                var statusPath = Path.Combine(projDir, ".godmode", "status.json");
-                if (!File.Exists(statusPath)) continue;
-
-                try
-                {
-                    var statusJson = File.ReadAllText(statusPath);
-                    var status = JsonSerializer.Deserialize<ProjectStatus>(statusJson);
-                    if (status == null) continue;
-
-                    results.Add(new ProjectSummary(
-                        ProjectId(profileName, rootName, Path.GetFileName(projDir)), status.Name, ProjectState.Stopped, status.UpdatedAt,
-                        RootName: rootName, ProfileName: profileName));
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to read archived project at {Path}", projDir);
-                }
-            }
-        }
-
-        return Task.FromResult(results.ToArray());
-    }
-
-    public async Task<ProjectSummary> UnarchiveProjectAsync(string projectId)
-    {
-        // Find the archived project folder
-        var snap = _snapshot;
-        foreach (var (profileName, rootName, rootPath) in AllRoots(snap))
-        {
-            var archiveDir = Path.Combine(rootPath, ".archived");
-            if (!Directory.Exists(archiveDir)) continue;
-
-            foreach (var projDir in Directory.GetDirectories(archiveDir))
-            {
-                if (ProjectId(profileName, rootName, Path.GetFileName(projDir)) != projectId) continue;
-                var statusPath = Path.Combine(projDir, ".godmode", "status.json");
-                if (!File.Exists(statusPath)) continue;
-
-                try
-                {
-                    var statusJson = File.ReadAllText(statusPath);
-                    var status = JsonSerializer.Deserialize<ProjectStatus>(statusJson)
-                        ?? throw new InvalidDataException($"{statusPath} is empty");
-
-                    // Move back to root directory
-                    var destDir = Path.Combine(rootPath, Path.GetFileName(projDir));
-                    if (Directory.Exists(destDir))
-                        destDir = Path.Combine(rootPath, $"{Path.GetFileName(projDir)}-{DateTime.UtcNow:yyyyMMddHHmmss}");
-                    Directory.Move(projDir, destDir);
-
-                    // Remove archive metadata
-                    var archiveMeta = Path.Combine(destDir, ".godmode", "archive.json");
-                    if (File.Exists(archiveMeta)) File.Delete(archiveMeta);
-
-                    // Re-register project, under the folder it returned to
-                    var id = ProjectId(profileName, rootName, Path.GetFileName(destDir));
-                    var project = new ProjectInfo
-                    {
-                        // Restored by the user, not interrupted: the next start does not resume it
-                        Status = status with { Id = id, State = ProjectState.Stopped, StateAtShutdown = null, RootName = rootName, ProfileName = profileName, OutputOffset = OutputLog.End(destDir) },
-                        ProjectPath = destDir,
-                        ActionName = null,
-                        ProfileName = profileName,
-                    };
-                    _projects[id] = project;
-                    await _statusUpdater.SaveStatusAsync(project);
-                    ResumeChecks(project);
-
-                    _logger.LogInformation("Unarchived project {ArchivedId} ({Name}) as {ProjectId}", projectId, status.Name, id);
-                    await PushAttentionIfChangedAsync();
-
-                    return new ProjectSummary(id, status.Name, ProjectState.Stopped,
-                        DateTime.UtcNow, RootName: rootName, ProfileName: profileName);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to unarchive project at {Path}", projDir);
-                    throw;
-                }
-            }
-        }
-
-        throw new KeyNotFoundException($"Archived project {projectId} not found");
-    }
-
     public async Task ResumeProjectAsync(string projectId)
     {
         if (!_projects.TryGetValue(projectId, out var project))
@@ -1250,58 +1242,57 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        // Check if process is actually still running (regardless of reported state)
-        if (_lifecycle.IsRunning(project))
+        await WithResumeLockAsync(project, async () =>
         {
-            _logger.LogInformation("Project {ProjectId} already has a running process with PID {ProcessId} (state: {State})",
-                projectId, project.Process.ProcessId, project.Status.State);
-
-            if (project.Status.State == ProjectState.Idle)
+            // Check if process is actually still running (regardless of reported state)
+            await _lifecycle.SettleAsync(project);
+            if (_lifecycle.IsRunning(project))
             {
-                _logger.LogInformation("Project {ProjectId} is idle with running process, sending continue prompt", projectId);
-                await _lifecycle.SendInputAsync(project, "Continue");
-                await NotifyStatusChanged(project);
+                _logger.LogInformation("Project {ProjectId} already has a running process with PID {ProcessId} (state: {State})",
+                    projectId, project.Process.ProcessId, project.Status.State);
+
+                if (project.Status.State == ProjectState.Idle)
+                {
+                    _logger.LogInformation("Project {ProjectId} is idle with running process, sending continue prompt", projectId);
+                    await _lifecycle.SendInputAsync(project, "Continue");
+                    await NotifyStatusChanged(project);
+                }
                 return;
             }
 
-            return;
-        }
-
-        await TryResumeAsync(project, onlyIfInterrupted: false);
+            // A resume with nothing to say: claude waits for input, and writes nothing until it has
+            // some, so the project is Idle, resumed and waiting for the user, until then
+            await TryResumeAsync(project, onlyIfInterrupted: false, resumedAs: ProjectState.Idle);
+        });
     }
 
     /// <summary>
     /// Launches claude on the project's session, which has no process. Whether it may, and the claim
-    /// that it is Running, are one step under the state lock, so a Stop or a shutdown either comes
-    /// before it (and it launches nothing) or after it (and stops what it launches). With
-    /// <paramref name="onlyIfInterrupted"/>, only while <see cref="ProjectStatus.StateAtShutdown"/> is
-    /// still set: false when it is not, and nothing is launched. Once the server is stopping it
-    /// throws <see cref="ServerStoppingException"/>, leaving the project Stopped with its marker.
+    /// that it is <paramref name="resumedAs"/>, are one step under the state lock, so a shutdown either
+    /// comes before it (and it launches nothing) or after it (and stops what it launches). A claim
+    /// respects a launch in flight (<see cref="ProjectProcess.Launching"/>) or a running process: it
+    /// launches nothing then, and returns false. With <paramref name="onlyIfInterrupted"/>, only while
+    /// <see cref="ProjectStatus.StateAtShutdown"/> is still set: false when it is not, and nothing is
+    /// launched. Once the server is stopping it throws <see cref="ServerStoppingException"/>, leaving
+    /// the project Stopped with its marker. A launch that fails leaves it Error, saying why.
     /// </summary>
-    private async Task<bool> TryResumeAsync(ProjectInfo project, bool onlyIfInterrupted)
+    private async Task<bool> TryResumeAsync(ProjectInfo project, bool onlyIfInterrupted, ProjectState resumedAs = ProjectState.Running)
     {
         var projectId = project.Status.Id;
         ProjectState? interruptedAs = null;
         var claimed = false;
-        await _lifecycle.UpdateStatusAsync(project, status =>
+        try
         {
-            if (_lifecycle.ShuttingDown) throw new ServerStoppingException();
-            if (onlyIfInterrupted && status.StateAtShutdown == null) return status;
-
-            // Process is not running - check if state needs correction
-            if (status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission)
-            {
-                _logger.LogInformation("Project {ProjectId} was {State} but its process is not running, resetting state", projectId, status.State);
-                status = status with { State = ProjectState.Stopped, PendingPermission = null, PendingQuestion = null };
-            }
-            if (status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
-                throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {status.State})");
-
-            interruptedAs = status.StateAtShutdown;
-            claimed = true;
-            // A launch settles what a shutdown left: the project is not resumed again on the next start
-            return status with { State = ProjectState.Running, LastError = null, StateAtShutdown = null, UpdatedAt = DateTime.UtcNow };
-        });
+            await ClaimAsync();
+        }
+        catch
+        {
+            // The claim failed after it was made: nothing is launched, and no launch is left in
+            // flight for the next claim, stop or reply to wait on. A save that fails is not this:
+            // the claim stands, and is saved with the next change
+            if (claimed) project.Process.EndLaunching();
+            throw;
+        }
         if (!claimed) return false;
 
         _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}", projectId, project.SessionId);
@@ -1325,20 +1316,48 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to resume Claude process for project {ProjectId}", projectId);
-            await _lifecycle.UpdateStatusAsync(project, status => status with
-            {
-                State = ProjectState.Error,
-                LastError = ex is LaunchConfigException ? ex.Message : status.LastError,
-            });
+            await _lifecycle.UpdateStatusAsync(project, status => status with { State = ProjectState.Error, LastError = ex.Message });
             await NotifyStatusChanged(project);
             throw;
+        }
+        finally
+        {
+            project.Process.EndLaunching();
         }
 
         await NotifyStatusChanged(project);
         return true;
+
+        Task ClaimAsync() => _lifecycle.UpdateStatusAsync(project, status =>
+        {
+            if (_lifecycle.ShuttingDown) throw new ServerStoppingException();
+            if (onlyIfInterrupted && status.StateAtShutdown == null) return status;
+
+            // Another launch is in flight, or has its process: its Running is not stale
+            if (project.Process.Launching || _lifecycle.IsRunning(project))
+            {
+                _logger.LogInformation("Project {ProjectId} is launching or running already; it is not launched again", projectId);
+                return status;
+            }
+
+            // Process is not running - check if state needs correction
+            if (status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission)
+            {
+                _logger.LogInformation("Project {ProjectId} was {State} but its process is not running, resetting state", projectId, status.State);
+                status = status with { State = ProjectState.Stopped, PendingPermission = null, PendingQuestion = null };
+            }
+            if (status.State is not (ProjectState.Stopped or ProjectState.Idle or ProjectState.Error))
+                throw new InvalidOperationException($"Project {projectId} cannot be resumed (current state: {status.State})");
+
+            interruptedAs = status.StateAtShutdown;
+            claimed = project.Process.BeginLaunching();
+            if (!claimed) return status;
+            // A launch settles what a shutdown left: the project is not resumed again on the next start
+            return status with { State = resumedAs, LastError = null, StateAtShutdown = null, UpdatedAt = DateTime.UtcNow };
+        });
     }
 
-    public async Task SubscribeProjectAsync(string projectId, long fromOffset, string connectionId)
+    public async Task SubscribeProjectAsync(string projectId, long fromOffset, string subscriptionId, string? generation, string connectionId)
     {
         if (!_projects.TryGetValue(projectId, out var project))
         {
@@ -1346,11 +1365,23 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         project.SubscribedConnections.Add(connectionId);
-        await _lifecycle.SubscribeAsync(project, fromOffset, connectionId);
+        var subscribeLock = _subscribeLocks.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
+        await subscribeLock.WaitAsync();
+        try { await _lifecycle.SubscribeAsync(project, fromOffset, subscriptionId, generation, connectionId); }
+        finally { subscribeLock.Release(); }
     }
 
+    /// <summary>
+    /// Takes the connection out of the project's live group, after any subscribe it made before:
+    /// a subscribe still replaying would otherwise put it back in the group once it is done.
+    /// </summary>
     public async Task UnsubscribeProjectAsync(string projectId, string connectionId)
     {
+        var subscribeLock = _subscribeLocks.GetOrAdd(connectionId, _ => new SemaphoreSlim(1, 1));
+        await subscribeLock.WaitAsync();
+        try { await _hubContext.Groups.RemoveFromGroupAsync(connectionId, ProjectLifecycle.OutputGroup(projectId)); }
+        finally { subscribeLock.Release(); }
+
         if (!_projects.TryGetValue(projectId, out var project))
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
@@ -1365,80 +1396,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         {
             project.SubscribedConnections.Remove(connectionId);
         }
+        // A subscribe still running holds its own reference; the connection makes no more
+        _subscribeLocks.TryRemove(connectionId, out _);
         await Task.CompletedTask;
-    }
-
-    public Task CreateProfileAsync(string name, string? description)
-    {
-        _profileFileManager.CreateProfile(name, description);
-        RebuildSnapshot();
-        return Task.CompletedTask;
-    }
-
-    public async Task DeleteProfileAsync(string name, bool deleteContents = false)
-    {
-        _profileFileManager.DeleteProfile(name);
-
-        var snap = _snapshot;
-        var profileRoots = snap.RootLookup
-            .Where(kvp => string.Equals(kvp.Key.Item1, name, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        if (deleteContents)
-        {
-            // Cascade: stop processes, remove tracking, delete root directories
-            foreach (var ((_, rootName), rootPath) in profileRoots)
-            {
-                // Stop and remove all projects under this root
-                var projectsInRoot = _projects.Values
-                    .Where(p => IsSameOrUnder(p.ProjectPath, rootPath))
-                    .ToList();
-                foreach (var project in projectsInRoot)
-                {
-                    project.Process.Cancellation?.Cancel();
-                    project.Process.Output.TryComplete();
-                    _projects.TryRemove(project.Status.Id, out _);
-                    await _pullRequests.ForgetAsync(project.Status.Id);
-                }
-
-                // Delete the entire root directory (including projects)
-                if (Directory.Exists(rootPath))
-                {
-                    _logger.LogInformation("Cascade deleting root '{RootName}' at {RootPath}", rootName, rootPath);
-                    Directory.Delete(rootPath, recursive: true);
-                }
-            }
-        }
-        else
-        {
-            // Move roots to Default profile by clearing profileName from config
-            foreach (var ((_, _), rootPath) in profileRoots)
-            {
-                var configPath = Path.Combine(rootPath, ".godmode-root", "config.json");
-                if (!File.Exists(configPath)) continue;
-                try
-                {
-                    var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(configPath))?.AsObject();
-                    if (json != null)
-                    {
-                        json.Remove("profileName");
-                        File.WriteAllText(configPath, json.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
-                    }
-                }
-                catch { /* skip unparseable configs */ }
-            }
-        }
-
-        RebuildSnapshot();
-        // A cascade removed projects, which may have needed the user
-        await PushAttentionIfChangedAsync();
-    }
-
-    public Task UpdateProfileDescriptionAsync(string name, string? description)
-    {
-        _profileFileManager.UpdateProfileDescription(name, description);
-        RebuildSnapshot();
-        return Task.CompletedTask;
     }
 
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
@@ -1481,12 +1441,18 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
                 // Check if state needs to be corrected (was running when server stopped)
                 var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission;
-                // A permission prompt ended with the process that asked: its bridge's call failed with the server
+                // A permission prompt ended with the process that asked: its call to the MCP endpoint failed with the server
                 status = status with { PendingPermission = null, PendingQuestion = null };
+                // status.json is the project folder's, which its session can write: a pull request
+                // link is kept only if it is one the status script's output could have set
+                if (status.PullRequest is { } pr && !PullRequestScript.IsValidUrl(pr.Url))
+                {
+                    _logger.LogWarning("Project at {Path} had a pull request URL that is not http(s); it is dropped", projectPath);
+                    status = status with { PullRequest = null };
+                }
 
-                // The ID is where the folder is. One written before IDs carried the profile and root
-                // (the bare folder name), or before its root moved profile, is migrated: status.json
-                // is rewritten below. Nothing else in .godmode holds the ID
+                // The ID is where the folder is. A status.json that says otherwise (its root moved
+                // profile, or the folder moved) is rewritten below. Nothing else in .godmode holds the ID
                 var id = ProjectId(profileName, rootName, Path.GetFileName(projectPath));
                 var idChanged = status.Id != id;
                 if (idChanged)
@@ -1509,7 +1475,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 var settings = ProjectFiles.ProjectSettings.Load(projectPath);
                 project.ActionName = settings.ActionName;
 
-                project.SessionId = await SessionIdFile.ReadAsync(projectPath, ct);
+                project.SessionId = await SessionIdFile.ReadAsync(projectPath, _logger, ct);
 
                 _projects[project.Status.Id] = project;
 
@@ -1565,14 +1531,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private async Task ResumeInterruptedAsync(ProjectInfo project)
     {
         var id = project.Status.Id;
-        var resumeLock = project.Process.ResumeLock;
         try
         {
             var action = ResumeAction(project);
-            await resumeLock.WaitAsync(_stopping);
-            try
+            var resumed = await WithResumeLockAsync<Task?>(project, async () =>
             {
-                if (_stopping.IsCancellationRequested || !_projects.TryGetValue(id, out var current) || current != project) return;
+                if (_stopping.IsCancellationRequested || !_projects.TryGetValue(id, out var current) || current != project) return null;
 
                 if (!action.ResumeOnRestart || project.Status is { StateAtShutdown: ProjectState.WaitingInput, CurrentQuestion: not null })
                 {
@@ -1584,20 +1548,20 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                         changed = true;
                         return status with { State = state, StateAtShutdown = null };
                     });
-                    if (!changed) return;
+                    if (!changed) return null;
                     _logger.LogInformation("Project {ProjectId} was interrupted when the server stopped; it is {State}", id, state);
                     await NotifyStatusChanged(project);
-                    return;
+                    return null;
                 }
 
                 _logger.LogInformation("Project {ProjectId} was {StateAtShutdown} when the server stopped; resuming it", id, project.Status.StateAtShutdown);
-                if (!await ReplyAndResumeLockedAsync(project, action.ResumePrompt, onlyIfInterrupted: true))
+                var reply = await ReplyAndResumeLockedAsync(project, action.ResumePrompt, onlyIfInterrupted: true);
+                if (!reply.Delivered)
                     _logger.LogInformation("Project {ProjectId} was stopped or resumed since; it is left as it is", id);
-            }
-            finally
-            {
-                resumeLock.Release();
-            }
+                return reply.SessionStart;
+            }, _stopping);
+            // Its slot is held until its session has started, but not its lock
+            if (resumed != null) await resumed;
         }
         catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
         {
@@ -1633,10 +1597,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>
     /// Robustly deletes a directory, handling read-only files and retrying on lock conflicts.
     /// Git directories on Windows often have read-only or temporarily locked files.
+    /// Refused, and nothing deleted, unless the path is a project folder of a known root
+    /// (<see cref="WhyNotAProjectFolderOf"/>): a project whose folder is elsewhere is forgotten, its folder left be.
     /// </summary>
     private async Task DeleteDirectoryRobustAsync(string path)
     {
         if (!Directory.Exists(path)) return;
+        if (!AllRoots(_snapshot).Any(root => WhyNotAProjectFolderOf(root.Path, path) is null))
+            throw new InvalidOperationException($"The project folder '{path}' is not inside a project root, so it is not deleted.");
 
         for (int attempt = 0; attempt < 3; attempt++)
         {
@@ -1663,19 +1631,16 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Ensures the .godmode directory exists in a project folder.
-    /// Called after scripts run (which may have created the project dir without .godmode).
+    /// Ensures the .godmode directory and its .gitignore exist in a project folder, and starts its
+    /// output's generation. Called after scripts run, which may have created the project dir without
+    /// .godmode, or checked out one that has a .godmode without its .gitignore.
     /// </summary>
     private static void EnsureGodModeDirectory(string projectPath)
     {
-        var godModePath = Path.Combine(projectPath, ".godmode");
-        if (Directory.Exists(godModePath)) return;
+        ProjectFiles.ProjectFolder.EnsureGitIgnore(projectPath);
 
-        Directory.CreateDirectory(godModePath);
-        File.WriteAllText(
-            Path.Combine(godModePath, ".gitignore"),
-            "# Exclude all GodMode state files\n*\n",
-            System.Text.Encoding.UTF8);
+        // A new one each time: an ID created again starts a new generation, so no client resumes into it from an old offset
+        OutputLog.StartGeneration(projectPath);
     }
 
     /// <summary>
@@ -1684,7 +1649,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private static string GetScriptLogPath(string rootPath, string folder)
     {
-        var logsDir = Path.Combine(rootPath, "logs");
+        var logsDir = Path.Combine(rootPath, ProjectFiles.ProjectFolder.ScriptLogsFolderName);
         Directory.CreateDirectory(logsDir);
         return Path.Combine(logsDir, $"{folder}.log");
     }
@@ -1695,21 +1660,21 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private static string GetResultFilePath(string rootPath, string folder)
     {
-        var logsDir = Path.Combine(rootPath, "logs");
+        var logsDir = Path.Combine(rootPath, ProjectFiles.ProjectFolder.ScriptLogsFolderName);
         Directory.CreateDirectory(logsDir);
         return Path.Combine(logsDir, $"{folder}.result");
     }
 
     /// <summary>
-    /// The full path and folder name of a create script's <c>project_path</c>. Refused when it is
-    /// the root or above it, or its folder name is not one of its own (<c>x/..</c>): a delete of the
-    /// project would delete that recursively.
+    /// The full path and folder name of a create script's <c>project_path</c>. Refused unless it is a
+    /// project folder of its own root (<see cref="WhyNotAProjectFolderOf"/>), and its folder name is a
+    /// folder of its own (<c>x/..</c> is not): a delete of the project would delete that recursively.
     /// </summary>
     private static (string Path, string Folder) ValidateScriptProjectPath(string projectPath, string rootPath)
     {
-        var fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectPath));
-        if (IsSameOrUnder(rootPath, fullPath))
-            throw new ArgumentException($"The create script's project_path '{projectPath}' is the project root or above it.");
+        var fullPath = FullPath(projectPath);
+        if (WhyNotAProjectFolderOf(rootPath, fullPath) is { } reason)
+            throw new ArgumentException($"The create script's project_path '{projectPath}' {reason}.");
         var folder = Path.GetFileName(fullPath);
         ProjectFiles.ProjectFolder.ValidateFolderName(folder, "project_path");
         return (fullPath, folder);
@@ -1870,10 +1835,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// The one place a claude launch is configured, for create and resume alike: everything comes
     /// from the project (its profile, root, action and model) and what is saved in its folder
     /// (settings.json), read fresh, so a resume, or a resume after a restart, launches as the
-    /// create did. The profile's environment and MCP servers, the action's, and the MCP bridge with
-    /// its <c>GODMODE_*</c> variables and a fresh project token are always there. A root config that
-    /// cannot be read, or an action that is gone, throws <see cref="LaunchConfigException"/>: a
-    /// launch with anything but the project's own action would not be the one it was created with.
+    /// create did. The profile's environment, the action's, and GodMode's MCP endpoint with a fresh
+    /// project token are always there. That endpoint is the only MCP server GodMode gives claude: a
+    /// repo brings its own in its <c>.mcp.json</c>, and user-scoped ones live in the profile's
+    /// <c>CLAUDE_CONFIG_DIR</c>. A root config that cannot be read, or an action that is gone, throws
+    /// <see cref="LaunchConfigException"/>: a launch with anything but the project's own action would
+    /// not be the one it was created with.
     /// </summary>
     private ClaudeLaunchSpec BuildLaunchSpec(ProjectInfo project)
     {
@@ -1884,21 +1851,62 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var profileName = project.ProfileName ?? project.Status.ProfileName;
         snap.Profiles.TryGetValue(profileName ?? "", out var profile);
 
-        var (action, stripEnvVarProfile) = ResolveLaunchAction(snap, project, profileName);
-        // Never logged: it carries the MCP servers' credentials
-        var mcpConfigJson = InjectMcpBridge(BuildMcpConfigJson(profile?.McpServers, action.McpServers));
-        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, settings, project.Status.Model ?? action.Model,
-            profile?.Environment, profileName, stripEnvVarProfile, mcpConfigJson);
-        return new ClaudeLaunchSpec(AddMcpBridgeEnvironment(project, env), args ?? []);
+        var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(snap, project, profileName);
+        var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
+        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project)),
+            project.Status.Model ?? action.Model, profile?.Environment, profileName, stripEnvVarProfile);
+        return new ClaudeLaunchSpec(env ?? new Dictionary<string, string>(), args);
     }
 
     /// <summary>
-    /// The project's action in its root's config (the default action for a project with no root).
+    /// How a launch is permitted, for create, resume, a reply's resume and a restart's alike. Skipping
+    /// permissions needs both the project's settings to ask for it and its root's config, as it is now,
+    /// to allow it: settings.json is in the project folder, which the session can write, and a planted
+    /// or copied folder is relaunched from it unattended. The action name is in that file too, so a launch
+    /// needs every action of the root to allow skipping (<paramref name="rootAllowsSkip"/>): a session that
+    /// names another action gains nothing. The permission mode is the one the project was
+    /// created with (its root's current one, for a project created without), and is checked again for
+    /// the same reason; skipping overrides it. Whatever is ignored is logged once per project.
+    /// </summary>
+    private (bool SkipPermissions, string? PermissionMode) LaunchPermissions(
+        ProjectInfo project, ProjectFiles.ProjectSettings settings, CreateAction action, bool rootAllowsSkip)
+    {
+        var skip = settings.DangerouslySkipPermissions;
+        if (skip && !rootAllowsSkip)
+        {
+            if (FirstLaunchWarning(project, "skip"))
+                _logger.LogWarning("Project {ProjectId} asks to skip permissions, which its root does not allow (allowSkipPermissions): it launches without --dangerously-skip-permissions",
+                    project.Status.Id);
+            skip = false;
+        }
+
+        var kept = settings.PermissionMode ?? action.PermissionMode;
+        var mode = kept == null ? null : PermissionModes.Canonical(kept);
+        if (kept != null && mode == null && FirstLaunchWarning(project, "mode"))
+            _logger.LogWarning("Project {ProjectId}: {Reason}; it launches without --permission-mode", project.Status.Id, PermissionModes.Refusal(kept));
+        if (skip && mode != null)
+        {
+            if (FirstLaunchWarning(project, "mode-with-skip"))
+                _logger.LogWarning("Project {ProjectId} skips permissions, so its permission mode {PermissionMode} is ignored", project.Status.Id, mode);
+            mode = null;
+        }
+        return (skip, mode);
+    }
+
+    /// <summary>The launch warnings said so far, by project folder and what they are about: each is said once.</summary>
+    private readonly ConcurrentDictionary<string, byte> _launchWarnings = new(PathComparer);
+
+    private bool FirstLaunchWarning(ProjectInfo project, string about) =>
+        _launchWarnings.TryAdd($"{FullPath(project.ProjectPath)}\n{about}", 0);
+
+    /// <summary>
+    /// The project's action in its root's config (the default action for a project with no root), and
+    /// whether every action of the root allows skip-permissions.
     /// Throws <see cref="LaunchConfigException"/> when the config cannot be read or lacks the action.
     /// </summary>
-    private (CreateAction Action, bool StripEnvVarProfile) ResolveLaunchAction(ProfileSnapshot snap, ProjectInfo project, string? profileName)
+    private (CreateAction Action, bool StripEnvVarProfile, bool RootAllowsSkip) ResolveLaunchAction(ProfileSnapshot snap, ProjectInfo project, string? profileName)
     {
-        if (project.Status.RootName == null || profileName == null) return (new CreateAction("Create"), false);
+        if (project.Status.RootName == null || profileName == null) return (new CreateAction("Create"), false, false);
 
         RootConfig config;
         try
@@ -1910,31 +1918,37 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             throw new LaunchConfigException($"root config unreadable: {ex.Message}", ex);
         }
         return config.ResolveAction(project.ActionName) is { } action
-            ? (action, config.StripEnvVarProfile)
+            ? (action, config.StripEnvVarProfile, config.GetEffectiveActions().All(a => a.AllowSkipPermissions))
             : throw new LaunchConfigException($"root config has no action '{project.ActionName}'");
     }
 
     /// <summary>
-    /// Builds claude environment and args from action config + project settings + profile env.
+    /// Builds claude environment and args from action config + the launch's permissions + profile env.
+    /// Nothing is pre-approved: a tool call that needs approval reaches the permission prompt, unless
+    /// Claude Code's own settings, the permission mode, or skip-permissions, allow it.
     /// </summary>
-    private static (Dictionary<string, string>? Env, string[]? Args) BuildClaudeConfig(
-        string projectPath, CreateAction action, ProjectFiles.ProjectSettings settings,
+    private static (Dictionary<string, string>? Env, string[] Args) BuildClaudeConfig(
+        string projectPath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
         string? model = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
-        bool stripEnvVarProfile = false,
-        string? mcpConfigJson = null)
+        bool stripEnvVarProfile = false)
     {
         var env = MergeAndExpandEnvironment(profileEnv, action.Environment, profileName, stripEnvVarProfile);
 
         var args = new List<string>();
         if (action.ClaudeArgs != null)
             args.AddRange(action.ClaudeArgs);
-        if (settings.DangerouslySkipPermissions)
+        if (skipPermissions)
             args.Add("--dangerously-skip-permissions");
+        if (permissionMode != null)
+        {
+            args.Add("--permission-mode");
+            args.Add(permissionMode);
+        }
 
-        // Tool calls that need approval wait for the user's answer through the bridge. It also makes
-        // claude offer AskUserQuestion in --print mode, skip-permissions or not, and ask it the same way
+        // Tool calls that need approval wait for the user's answer through GodMode's MCP endpoint. It
+        // also makes claude offer AskUserQuestion in --print mode, skip-permissions or not, and ask it the same way
         args.Add("--permission-prompts");
         args.Add("host");
         args.Add("--permission-prompt-tool");
@@ -1944,213 +1958,45 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             args.Add("--model");
             args.Add(model);
         }
-        if (!string.IsNullOrWhiteSpace(mcpConfigJson))
-        {
-            // --mcp-config expects a file path, not inline JSON; the process manager deletes it on exit
-            args.Add("--mcp-config");
-            args.Add(McpConfigFile.Write(projectPath, mcpConfigJson));
-        }
+        // --mcp-config expects a file path, not inline JSON; the process manager deletes it on exit.
+        // It holds the project token, so every launch first makes sure git ignores it
+        ProjectFiles.ProjectFolder.EnsureGitIgnore(projectPath);
+        args.Add("--mcp-config");
+        args.Add(McpConfigFile.Write(projectPath, mcpConfigJson));
 
-        // Auto-allow all MCP tools so Claude doesn't block on permissions in --print mode.
-        // --allowedTools requires server-level prefixes (e.g. "mcp__jira"), not just "mcp__".
-        if (!settings.DangerouslySkipPermissions)
-        {
-            var mcpPrefixes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return (env, args.ToArray());
+    }
 
-            // From our --mcp-config
-            if (!string.IsNullOrWhiteSpace(mcpConfigJson))
+    /// <summary>
+    /// Issues the project a fresh token for this launch. Tokens live only in memory, so a project
+    /// recovered after a restart has none until it is launched again; a new launch also retires the
+    /// previous token. They are not persisted: shutdown kills every claude, and one that outlives a
+    /// crash has lost its pipes (its output reaches no server, its stdin is closed, so it ends with
+    /// its turn) and is not a process the next server tracks, so an old token would authorise nothing useful.
+    /// </summary>
+    private static string IssueProjectToken(ProjectInfo project) => project.ProjectToken = GenerateProjectToken();
+
+    /// <summary>
+    /// The session's MCP config: GodMode's own server, this server's MCP endpoint, and nothing else.
+    /// Its headers carry the project and its token, which claude sends on every call. The token is in
+    /// no environment variable, only in this file, which lives as long as the process does.
+    /// </summary>
+    private string McpConfigJson(ProjectInfo project, string token) => JsonSerializer.Serialize(new Dictionary<string, object>
+    {
+        ["mcpServers"] = new Dictionary<string, object>
+        {
+            [McpServerName] = new
             {
-                try
+                type = "http",
+                url = McpEndpointUrlOfThisServer(),
+                headers = new Dictionary<string, string>
                 {
-                    using var doc = JsonDocument.Parse(mcpConfigJson);
-                    if (doc.RootElement.TryGetProperty("mcpServers", out var servers))
-                        foreach (var server in servers.EnumerateObject())
-                            mcpPrefixes.Add($"mcp__{server.Name}");
-                }
-                catch { /* ignore */ }
-            }
-
-            // From user's local ~/.claude/settings.json (covers pencil, grafana, etc.)
-            var userSettingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "settings.json");
-            if (File.Exists(userSettingsPath))
-            {
-                try
-                {
-                    using var doc = JsonDocument.Parse(File.ReadAllText(userSettingsPath));
-                    if (doc.RootElement.TryGetProperty("mcpServers", out var localServers))
-                        foreach (var server in localServers.EnumerateObject())
-                            mcpPrefixes.Add($"mcp__{server.Name}");
-                }
-                catch { /* ignore */ }
-            }
-
-            if (mcpPrefixes.Count > 0)
-            {
-                args.Add("--allowedTools");
-                args.Add(string.Join(",", mcpPrefixes));
-            }
-        }
-
-        return (env, args.Count > 0 ? args.ToArray() : null);
-    }
-
-    /// <summary>
-    /// Merges MCP servers from profile and action levels and returns inline JSON for --mcp-config.
-    /// Returns the JSON string if MCP servers exist, null otherwise.
-    /// Merge order: profile → action (action wins on conflict).
-    /// Expands ${VAR} references in env values.
-    /// </summary>
-    private static string? BuildMcpConfigJson(
-        Dictionary<string, McpServerConfig>? profileMcpServers,
-        Dictionary<string, McpServerConfig>? actionMcpServers)
-    {
-        // Merge: profile is the base, action overrides
-        Dictionary<string, McpServerConfig>? merged = null;
-        if (profileMcpServers != null || actionMcpServers != null)
-        {
-            merged = new Dictionary<string, McpServerConfig>(StringComparer.OrdinalIgnoreCase);
-            if (profileMcpServers != null)
-                foreach (var (k, v) in profileMcpServers)
-                    merged[k] = v;
-            if (actionMcpServers != null)
-                foreach (var (k, v) in actionMcpServers)
-                    merged[k] = v;
-        }
-
-        if (merged is not { Count: > 0 })
-            return null;
-
-        // Build Claude MCP config format: { "mcpServers": { ... } }
-        // Stdio servers → { command, args, env }; URL servers → { type, url, headers }
-        var mcpConfig = new Dictionary<string, object>
-        {
-            ["mcpServers"] = merged.ToDictionary(
-                kvp => kvp.Key,
-                kvp =>
-                {
-                    if (!string.IsNullOrEmpty(kvp.Value.Url))
-                    {
-                        // URLs ending in /sse use legacy SSE transport; all others use streamable HTTP
-                        var transport = kvp.Value.Url.EndsWith("/sse", StringComparison.OrdinalIgnoreCase) ? "sse" : "http";
-                        var server = new Dictionary<string, object>
-                        {
-                            ["type"] = transport,
-                            ["url"] = kvp.Value.Url
-                        };
-                        var headers = ExpandEnvVars(kvp.Value.Headers);
-                        if (headers is { Count: > 0 })
-                            server["headers"] = headers;
-                        return (object)server;
-                    }
-                    {
-                        var env = ExpandEnvVars(kvp.Value.Env);
-                        if (env is { Count: > 0 })
-                            return (object)new { command = kvp.Value.Command ?? "", args = kvp.Value.Args ?? [], env };
-                        return (object)new { command = kvp.Value.Command ?? "", args = kvp.Value.Args ?? Array.Empty<string>() };
-                    }
-                })
-        };
-
-        return JsonSerializer.Serialize(mcpConfig);
-    }
-
-    /// <summary>
-    /// Sets the env vars the GodMode MCP bridge calls back to this server with, issuing a fresh
-    /// project token for this launch. Tokens live only in memory, so a project recovered after a
-    /// restart has none until it is launched again; a new launch also retires the previous token.
-    /// They are not persisted: shutdown kills every claude, and one that outlives a crash has lost
-    /// its pipes (its output reaches no server, its stdin is closed, so it ends with its turn) and
-    /// is not a process the next server tracks, so an old token would authorise nothing useful.
-    /// </summary>
-    private Dictionary<string, string> AddMcpBridgeEnvironment(ProjectInfo project, Dictionary<string, string>? env)
-    {
-        project.ProjectToken = GenerateProjectToken();
-        env ??= new Dictionary<string, string>();
-        env["GODMODE_PROJECT_ID"] = project.Status.Id;
-        env["GODMODE_PROJECT_TOKEN"] = project.ProjectToken;
-        env["GODMODE_SERVER_URL"] = ServerUrl();
-        return env;
-    }
-
-    /// <summary>
-    /// Injects the GodMode MCP bridge server into an MCP config JSON string.
-    /// The bridge env vars (GODMODE_PROJECT_ID, etc.) are inherited from the Claude process env.
-    /// </summary>
-    private string InjectMcpBridge(string? existingJson)
-    {
-        var bridgePath = _mcpBridgePath;
-
-        Dictionary<string, object>? mcpConfig;
-        Dictionary<string, object> servers;
-
-        if (!string.IsNullOrEmpty(existingJson))
-        {
-            mcpConfig = JsonSerializer.Deserialize<Dictionary<string, object>>(existingJson);
-            if (mcpConfig != null && mcpConfig.TryGetValue("mcpServers", out var serversObj) && serversObj is JsonElement el)
-            {
-                servers = JsonSerializer.Deserialize<Dictionary<string, object>>(el.GetRawText()) ?? new();
-            }
-            else
-            {
-                servers = new();
-                mcpConfig ??= new();
-            }
-        }
-        else
-        {
-            mcpConfig = new();
-            servers = new();
-        }
-
-        // Add the bridge as a stdio MCP server — env vars are inherited from the Claude process
-        servers[McpBridgeServerName] = new
-        {
-            command = "node",
-            args = new[] { bridgePath },
-            env = new Dictionary<string, string>()
-        };
-
-        mcpConfig["mcpServers"] = servers;
-        return JsonSerializer.Serialize(mcpConfig);
-    }
-
-    /// <summary>
-    /// The bridge bundle every session runs: <see cref="McpBridgePathSetting"/> (or the
-    /// GODMODE_MCP_BRIDGE_PATH environment variable), else where the server build puts it. Throws
-    /// when it is not there: a session without it cannot ask for permission, and would deny every
-    /// tool call that needs approval without asking.
-    /// </summary>
-    private static string ResolveMcpBridgePath(IConfiguration configuration)
-    {
-        var configured = configuration[McpBridgePathSetting] is { Length: > 0 } setting ? setting
-            : Environment.GetEnvironmentVariable("GODMODE_MCP_BRIDGE_PATH") is { Length: > 0 } env ? env
-            : null;
-        var path = Path.GetFullPath(configured ?? Path.Combine(AppContext.BaseDirectory, BundledMcpBridge));
-        if (!File.Exists(path))
-            throw new FileNotFoundException(configured != null
-                ? $"The GodMode MCP bridge is not at {path}, where {McpBridgePathSetting} (or GODMODE_MCP_BRIDGE_PATH) points."
-                : $"The GodMode MCP bridge is not at {path}. The server build puts it there (src/GodMode.McpBridge, " +
-                  "built with -p:BuildMcpBridge left on), or set " + McpBridgePathSetting + " to its godmode-mcp-bridge.cjs.", path);
-        return path;
-    }
-
-    /// <summary>
-    /// Expands ${VAR} references in dictionary values using the current process environment.
-    /// </summary>
-    private static Dictionary<string, string>? ExpandEnvVars(Dictionary<string, string>? env)
-    {
-        if (env is null or { Count: 0 }) return env;
-
-        var expanded = new Dictionary<string, string>(env.Count);
-        foreach (var (key, value) in env)
-        {
-            expanded[key] = System.Text.RegularExpressions.Regex.Replace(
-                value, @"\$\{(\w+)\}",
-                m => Environment.GetEnvironmentVariable(m.Groups[1].Value) ?? m.Value);
-        }
-        return expanded;
-    }
+                    ["Authorization"] = $"Bearer {token}",
+                    [ProjectTokenAuthenticationHandler.ProjectIdHeader] = project.Status.Id,
+                },
+            },
+        },
+    });
 
     /// <summary>
     /// Builds the full environment variables dictionary for scripts.
@@ -2172,9 +2018,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // GODMODE_* vars always win
         env["GODMODE_ROOT_PATH"] = rootPath;
         env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
-        // Scripts name branches and folders after it: the folder name, as before project IDs carried
-        // the profile and root. Claude's own GODMODE_PROJECT_ID, for the MCP bridge, is the project ID
-        env["GODMODE_PROJECT_ID"] = Path.GetFileName(project.ProjectPath);
+        // Scripts name branches and folders after it. It is not the project's ID, {profile}/{root}/{folder}
+        env["GODMODE_PROJECT_FOLDER"] = Path.GetFileName(project.ProjectPath);
         env["GODMODE_PROJECT_NAME"] = project.Status.Name;
 
         if (resultFilePath != null)
@@ -2210,10 +2055,10 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     private Task NotifyStatusChanged(ProjectInfo project) => _lifecycle.NotifyStatusChangedAsync(project);
 
-    // ── Internal API helpers (project tokens, result storage) ──
+    // ── The MCP endpoint's project tokens ──
 
     /// <summary>
-    /// Generates a cryptographically random project-scoped token for MCP bridge auth.
+    /// Generates a cryptographically random project-scoped token for the MCP endpoint.
     /// </summary>
     private static string GenerateProjectToken()
     {
@@ -2222,15 +2067,15 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// The URL the bridge calls this server on, from the addresses it is bound to once started
-    /// (port 0 resolved, --urls and URLS applied), else the configured Urls: see <see cref="BridgeUrl"/>.
+    /// The URL claude calls this server's MCP endpoint on, from the addresses it is bound to once
+    /// started (port 0 resolved, --urls and URLS applied), else the configured Urls: see <see cref="McpEndpointUrl"/>.
     /// </summary>
-    private string ServerUrl() =>
-        BridgeUrl.From(_server?.Features.Get<IServerAddressesFeature>()?.Addresses is { Count: > 0 } bound ? bound : _configuredUrls);
+    private string McpEndpointUrlOfThisServer() =>
+        McpEndpointUrl.From(_server?.Features.Get<IServerAddressesFeature>()?.Addresses is { Count: > 0 } bound ? bound : _configuredUrls);
 
     /// <summary>
     /// Validates a project token and returns the project info if valid.
-    /// Used by internal API endpoints.
+    /// Used by the MCP endpoint's project-token authentication.
     /// </summary>
     public ProjectInfo? ValidateProjectToken(string projectId, string token)
     {
@@ -2246,68 +2091,5 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(storedBytes, providedBytes)
             ? project
             : null;
-    }
-
-    /// <summary>
-    /// Stores a structured result for a project (called by MCP bridge via internal API).
-    /// </summary>
-    public async Task StoreProjectResultAsync(string projectId, SubmitResultRequest resultRequest)
-    {
-        if (!_projects.TryGetValue(projectId, out var project))
-            throw new KeyNotFoundException($"Project {projectId} not found");
-
-        var result = new ProjectResult(resultRequest.Result, resultRequest.Summary, DateTime.UtcNow);
-        var resultPath = Path.Combine(project.ProjectPath, ".godmode", "result.json");
-        var json = JsonSerializer.Serialize(result, new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        });
-        await File.WriteAllTextAsync(resultPath, json);
-
-        _logger.LogInformation("Project {ProjectId} submitted result ({Summary})",
-            projectId, resultRequest.Summary ?? "no summary");
-
-        // Notify clients of the result
-        await NotifyStatusChanged(project);
-    }
-
-    /// <summary>
-    /// Updates the custom status message for a project (called by MCP bridge).
-    /// </summary>
-    public async Task UpdateCustomStatusAsync(string projectId, string message)
-    {
-        if (!_projects.TryGetValue(projectId, out var project))
-            throw new KeyNotFoundException($"Project {projectId} not found");
-
-        project.CustomStatus = message;
-        _logger.LogInformation("Project {ProjectId} custom status: {Status}", projectId, message);
-
-        await NotifyStatusChanged(project);
-    }
-
-    /// <summary>
-    /// Requests human review for a project (called by MCP bridge).
-    /// Puts the project into WaitingInput state with the review question.
-    /// </summary>
-    public async Task RequestHumanReviewAsync(string projectId, RequestReviewRequest reviewRequest)
-    {
-        if (!_projects.TryGetValue(projectId, out var project))
-            throw new KeyNotFoundException($"Project {projectId} not found");
-
-        var question = string.IsNullOrEmpty(reviewRequest.Context)
-            ? reviewRequest.Question
-            : $"{reviewRequest.Question}\n\nContext: {reviewRequest.Context}";
-
-        await _lifecycle.UpdateStatusAsync(project, status => status with
-        {
-            State = ProjectState.WaitingInput,
-            CurrentQuestion = question,
-            QuestionAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        });
-        await NotifyStatusChanged(project);
-
-        _logger.LogInformation("Project {ProjectId} requested human review: {Question}", projectId, reviewRequest.Question);
     }
 }

@@ -23,7 +23,16 @@ public class StatusUpdater : IStatusUpdater
 
     public async Task SaveStatusAsync(ProjectInfo project)
     {
-        var statusPath = Path.Combine(project.ProjectPath, ".godmode", "status.json");
+        // A project without one has nowhere to keep its status: a create that failed before its
+        // script made the folder, or a folder removed outside GodMode. Making it would make the
+        // folder, which a create script expects not to find. Its status is in memory until it is deleted
+        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
+        if (!Directory.Exists(godModePath))
+        {
+            _logger.LogDebug("Project {ProjectId} has no {Path}; its status is not saved", project.Status.Id, godModePath);
+            return;
+        }
+        var statusPath = Path.Combine(godModePath, "status.json");
 
         var json = JsonSerializer.Serialize(project.Status, JsonDefaults.Options);
 
@@ -44,6 +53,15 @@ public class StatusUpdater : IStatusUpdater
                 // A new turn is starting — clear any memo of the previous turn's
                 // trailing assistant text so stale questions don't leak forward.
                 process.LastAssistantText = null;
+                // claude has taken a message the user sent: it is working on it, whatever a result
+                // of an earlier turn, handled after the send, said. It echoes it at once between
+                // turns, and at its next step in one
+                if (IsEcho(outputEvent) && status is { PendingPermission: null, PendingQuestion: null }
+                    && (status.State != ProjectState.Running || status.CurrentQuestion != null))
+                {
+                    status = status with { State = ProjectState.Running, CurrentQuestion = null };
+                    stateChanged = true;
+                }
                 break;
 
             case OutputEventType.Assistant:
@@ -57,6 +75,11 @@ public class StatusUpdater : IStatusUpdater
 
             // Error events are stderr lines shown in the UI; the process's exit and error results
             // decide whether the session failed
+
+            // claude's answer to the interrupt a stop sends: the stop decides the state
+            case OutputEventType.Result when IsErrorResult(outputEvent) && process.Stopping:
+                process.LastAssistantText = null;
+                break;
 
             case OutputEventType.Result when IsErrorResult(outputEvent):
                 status = status with
@@ -86,12 +109,17 @@ public class StatusUpdater : IStatusUpdater
 
             case OutputEventType.System when IsSessionStart(outputEvent):
                 // The session claude keeps is the one it reports, which a resume must name
-                if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string sessionId && sessionId != project.SessionId)
+                if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string reported && !SessionIdFile.IsValid(reported))
+                    _logger.LogWarning("Project {ProjectId} reported a session id that is not a GUID; it keeps {SessionId}",
+                        project.Status.Id, project.SessionId);
+                else if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string sessionId && sessionId != project.SessionId)
                 {
                     _logger.LogInformation("Project {ProjectId} runs session {SessionId} (asked for {Requested})",
                         project.Status.Id, sessionId, project.SessionId);
                     project.SessionId = sessionId;
-                    await SessionIdFile.WriteAsync(project.ProjectPath, sessionId);
+                    // A write that fails is not the session failing: it is written again on the next init
+                    try { await SessionIdFile.WriteAsync(project.ProjectPath, sessionId); }
+                    catch (Exception ex) { _logger.LogError(ex, "Could not save the session id of project {ProjectId}", project.Status.Id); }
                 }
                 // The session (re)started - project is running
                 stateChanged = status.State != ProjectState.Running || status.LastError != null;
@@ -112,12 +140,18 @@ public class StatusUpdater : IStatusUpdater
         status = status with { Metrics = status.Metrics with { CostEstimate = inputCost + outputCost } };
 
         project.Status = status with { UpdatedAt = DateTime.UtcNow };
-        await SaveStatusAsync(project);
         return true;
     }
 
     /// <summary>The metadata key a <c>system</c> event carries claude's session ID under.</summary>
     public const string SessionIdKey = "session_id";
+
+    /// <summary>The metadata key a <c>user</c> event that claude echoed (<c>isReplay</c>) carries.</summary>
+    public const string IsReplayKey = "is_replay";
+
+    /// <summary>A user message the user sent, echoed by claude as it takes it (<c>--replay-user-messages</c>).</summary>
+    private static bool IsEcho(OutputEvent outputEvent) =>
+        outputEvent.Metadata?.GetValueOrDefault(IsReplayKey) is true;
 
     /// <summary><c>system/init</c>: claude (re)started its session. It writes it once it has read its first input.</summary>
     public static bool IsSessionStart(OutputEvent outputEvent) =>

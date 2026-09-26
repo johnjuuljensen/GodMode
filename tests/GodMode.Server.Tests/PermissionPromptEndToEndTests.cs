@@ -6,16 +6,17 @@ using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace GodMode.Server.Tests;
 
 /// <summary>
-/// A permission prompt from end to end, against the real server process: the fake claude POSTs to
-/// /api/internal/permission with its project token exactly as the bridge's permission_prompt tool
-/// does, a SignalR client sees the request in the status and answers it with RespondToPermission
-/// or AnswerQuestion, and the fake receives what claude would.
+/// A permission prompt from end to end, against the real server process: the fake claude calls
+/// the permission_prompt tool on GodMode's MCP endpoint as claude does, an MCP client with the url
+/// and headers of its --mcp-config, a SignalR client sees the request in the status and answers it
+/// with RespondToPermission or AnswerQuestion, and the fake receives what claude would.
 /// </summary>
 public class PermissionPromptEndToEndTests
 {
@@ -24,7 +25,7 @@ public class PermissionPromptEndToEndTests
     private const string Question = "Which color do you prefer?";
 
     [Fact]
-    public async Task FakeAsksThroughTheBridgeEndpoint_ClientAnswers_FakeReceivesTheDecision()
+    public async Task FakeAsksThroughTheMcpEndpoint_ClientAnswers_FakeReceivesTheDecision()
     {
         var workDir = ServerProcess.CreateWorkDir("permission");
         var scriptPath = Path.Combine(workDir, "fake-claude.script");
@@ -77,7 +78,9 @@ public class PermissionPromptEndToEndTests
             Assert.Equal(ProjectState.WaitingPermission, push.State);
             Assert.Equal("Bash", push.PendingPermission!.ToolName);
             Assert.Equal("Bash: git push origin feature/12-x", push.PendingPermission.Summary);
-            Assert.Equal("git push origin feature/12-x", push.PendingPermission.Input.GetProperty("command").GetString());
+            // The push carries the summary; the whole of what runs is fetched (#234)
+            var detail = await first.Hub.InvokeAsync<PermissionDetail>(nameof(IProjectHub.GetPermissionDetail), created.Id, push.PendingPermission.RequestId);
+            Assert.Equal(new PermissionDetail(push.PendingPermission.RequestId, "git push origin feature/12-x", false), detail);
             await first.DisposeAsync();
 
             await using var second = new ServerHubClient(baseUrl);
@@ -88,6 +91,10 @@ public class PermissionPromptEndToEndTests
             var edited = JsonSerializer.SerializeToElement(new { command = "git push --dry-run origin feature/12-x", description = "Push the branch" });
             await second.Hub.InvokeAsync(nameof(IProjectHub.RespondToPermission), created.Id, push.PendingPermission.RequestId,
                 new PermissionDecision(true, UpdatedInput: edited));
+            // Only one answer counts: a second, as from another client, is an error (#234)
+            var late = await Assert.ThrowsAsync<HubException>(() => second.Hub.InvokeAsync(nameof(IProjectHub.RespondToPermission),
+                created.Id, push.PendingPermission.RequestId, new PermissionDecision(false)));
+            Assert.Contains(push.PendingPermission.RequestId, late.Message);
 
             // ── Denied with a message ──
             var remove = await second.WaitForAsync(created.Id, s => s.PendingPermission is { } p && p.RequestId != push.PendingPermission.RequestId, server);
@@ -111,10 +118,21 @@ public class PermissionPromptEndToEndTests
             Assert.Null(idle.PendingPermission);
             Assert.Null(idle.PendingQuestion);
 
-            // What the fake got back is what the bridge hands claude
+            // What the fake got back is what the tool hands claude
             var folder = created.Id.Split('/')[^1];
             var launch = Assert.Single(FakeRecording.Read(Path.Combine(workDir, "roots", Root, folder, "fake-claude.jsonl")));
             Assert.Equal(3, launch.Permissions.Count);
+
+            // The one tool, with the flat arguments claude calls it with
+            using var tools = JsonDocument.Parse(launch.Tools ?? throw new InvalidOperationException("the fake listed no tools"));
+            var tool = Assert.Single(tools.RootElement.EnumerateArray());
+            Assert.Equal("permission_prompt", tool.GetProperty("name").GetString());
+            var schema = tool.GetProperty("inputSchema");
+            Assert.Equal("object", schema.GetProperty("type").GetString());
+            Assert.Equal("string", schema.GetProperty("properties").GetProperty("tool_name").GetProperty("type").GetString());
+            Assert.Equal("object", schema.GetProperty("properties").GetProperty("input").GetProperty("type").GetString());
+            Assert.True(schema.GetProperty("properties").TryGetProperty("tool_use_id", out _));
+            Assert.Equal(["tool_name", "input"], schema.GetProperty("required").EnumerateArray().Select(r => r.GetString()));
 
             using var allowed = JsonDocument.Parse(launch.Permissions[0]);
             Assert.Equal("allow", allowed.RootElement.GetProperty("behavior").GetString());
@@ -131,7 +149,7 @@ public class PermissionPromptEndToEndTests
             Assert.Equal("Blue", input.GetProperty("answers").GetProperty(Question).GetString());
             Assert.Equal(Question, input.GetProperty("questions")[0].GetProperty("question").GetString());
 
-            // claude is launched to ask through the bridge
+            // claude is launched to ask through the MCP endpoint
             Assert.Equal(ProjectManager.PermissionPromptTool, launch.ArgValue("--permission-prompt-tool"));
         }
         finally

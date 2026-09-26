@@ -91,8 +91,9 @@ public class AttentionTests
         await WaitForAttentionPushAsync(harness, 1);
         var statusPushes = harness.Hub.StatusPushes(asking.Id).Count;
 
+        // Seeing a question pushes the status, and leaves the question as it was
         for (var i = 0; i < 5; i++)
-            await harness.Projects.UpdateCustomStatusAsync(asking.Id, $"step {i}");
+            await harness.Projects.MarkSeenAsync(asking.Id);
 
         Assert.Equal(statusPushes + 5, harness.Hub.StatusPushes(asking.Id).Count);
         Assert.Single(harness.Hub.AttentionPushes);
@@ -213,20 +214,24 @@ public class AttentionTests
         Assert.Equal(2, harness.Hub.AttentionPushes.Count);
     }
 
-    /// <summary>Deleting a profile with its contents removes its projects from the list, and says so.</summary>
+    /// <summary>Deleting a project that needs the user pushes the list without it.</summary>
     [Fact]
-    public async Task DeletingAProfileWithItsContents_PushesTheListWithoutItsProjects()
+    public async Task DeletingAProjectThatNeedsTheUser_PushesTheListWithoutIt()
     {
-        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().Stderr("boom").Exit(1));
-        var created = await harness.CreateProjectAsync();
-        await harness.WaitForStateAsync(created.Id, ProjectState.Error);
-        Assert.Single(await WaitForAttentionPushAsync(harness, 1));
+        await using var harness = new LifecycleHarness(Asking());
+        var asking = await harness.CreateProjectAsync("asking");
+        await harness.WaitForStateAsync(asking.Id, ProjectState.WaitingInput);
+        harness.UseScript(Finishing("Done."));
+        var finished = await harness.CreateProjectAsync("finished");
+        await harness.WaitForStateAsync(finished.Id, ProjectState.Idle);
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.Hub.AttentionPushes.Count > 0 && harness.Hub.AttentionPushes[^1].Count == 2), null,
+            () => $"the list with both was never pushed: {string.Join(" | ", harness.Hub.AttentionPushes.Select(Describe))}");
 
-        await harness.Projects.DeleteProfileAsync(LifecycleHarness.ProfileName, deleteContents: true);
+        await harness.Projects.DeleteProjectAsync(asking.Id);
 
-        Assert.Empty(await WaitForAttentionPushAsync(harness, 2));
-        Assert.Empty(harness.Projects.GetAttention());
-        Assert.Equal(2, harness.Hub.AttentionPushes.Count);
+        var pushed = harness.Hub.AttentionPushes[^1];
+        Assert.Equal([finished.Id], pushed.Select(i => i.ProjectId));
+        Assert.Equal([finished.Id], harness.Projects.GetAttention().Select(i => i.ProjectId));
     }
 
     /// <summary>Texts are plain, for a phone or a voice: code blocks go, and they are cut to about 500 characters.</summary>

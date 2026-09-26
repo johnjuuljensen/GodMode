@@ -55,9 +55,17 @@ public interface IProjectHub
     /// <summary>
     /// Answers the project's <see cref="ProjectStatus.PendingPermission"/>: the tool call runs, or
     /// claude is told it was denied. Fails when the project has no pending request with that id
-    /// (it was answered already, or claude stopped waiting).
+    /// (it was answered already, or claude stopped waiting), and when another answer to it, from
+    /// another client, came first: only one answer succeeds.
     /// </summary>
     Task RespondToPermission(string projectId, string requestId, PermissionDecision decision);
+
+    /// <summary>
+    /// Everything the project's pending permission request <paramref name="requestId"/> would run, to
+    /// show before it is allowed. Fails as <see cref="RespondToPermission"/> does when the request is
+    /// not pending, or is a question.
+    /// </summary>
+    Task<PermissionDetail> GetPermissionDetail(string projectId, string requestId);
 
     /// <summary>
     /// Answers the project's <see cref="ProjectStatus.PendingQuestion"/>. <paramref name="answers"/>
@@ -98,7 +106,11 @@ public interface IProjectHub
     /// arrives once and in order. fromOffset is the offset of the last line the client has (0 for
     /// everything; an offset inside a line snaps forward to the next line), or -N for the last N turns.
     /// </summary>
-    Task SubscribeProject(string projectId, long fromOffset);
+    /// <param name="subscriptionId">Made up by the client, and echoed by this subscription's batches
+    /// and complete, so a client that has subscribed again since can tell an older one's answer.</param>
+    /// <param name="generation">The output generation the client's offset is in (null when it holds
+    /// none). A positive offset in any other generation is not in this file: all of it is replayed, from 0.</param>
+    Task SubscribeProject(string projectId, long fromOffset, string subscriptionId, string? generation);
 
     /// <summary>
     /// Unsubscribes from output events from a project.
@@ -109,37 +121,6 @@ public interface IProjectHub
     /// Deletes a project, running teardown scripts and removing all files.
     /// </summary>
     Task DeleteProject(string projectId, bool force = false);
-
-    /// <summary>
-    /// Archives a project (stops it, moves to archive, keeps data).
-    /// </summary>
-    Task ArchiveProject(string projectId);
-
-    /// <summary>
-    /// Restores an archived project.
-    /// </summary>
-    Task UnarchiveProject(string projectId);
-
-    /// <summary>
-    /// Lists all archived projects.
-    /// </summary>
-    Task<ProjectSummary[]> ListArchivedProjects();
-
-    /// <summary>
-    /// Creates a new profile with an optional description.
-    /// </summary>
-    Task CreateProfile(string name, string? description);
-
-    /// <summary>
-    /// Deletes a profile. When deleteContents is true, cascade-deletes all root directories
-    /// and their projects; otherwise reassigns roots to the Default profile.
-    /// </summary>
-    Task DeleteProfile(string name, bool deleteContents = false);
-
-    /// <summary>
-    /// Updates a profile's description.
-    /// </summary>
-    Task UpdateProfileDescription(string name, string? description);
 
     // ── Utility ──
 

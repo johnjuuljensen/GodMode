@@ -246,27 +246,34 @@ public class ProjectLifecycleTests
 
     /// <summary>
     /// A result still queued when Stop kills the process is handled before Stopped is applied, so it
-    /// cannot turn Stopped back into Idle. The consumer is held on the assistant line's broadcast
-    /// while the result waits behind it.
+    /// cannot turn Stopped back into Idle. The consumer is held on the assistant line's state (the
+    /// test takes the state lock) while the result waits behind it.
     /// </summary>
     [Fact]
     public async Task ResultQueuedWhenStopped_StaysStopped()
     {
-        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().Sleep(100)
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().Sleep(300)
             .EmitAssistant("Almost").EmitResult("late"));
         var created = await harness.CreateProjectAsync();
         var launch = await harness.WaitForStdinAsync(created.Id);
-        // Hold only once init is broadcast: holding it would keep "Almost" out of output.jsonl
         await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.Hub.Pushes.Any(p => p.RawJson?.Contains("\"init\"") == true)), null,
             () => $"the init line was never broadcast.\n{harness.Describe(created.Id)}");
-        harness.Hub.HoldOutput();
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadOutputFile(created.Id).Contains("Almost")), null,
-            () => $"the assistant line never reached output.jsonl.\n{harness.Describe(created.Id)}");
-
-        var stop = harness.Projects.StopProjectAsync(created.Id);
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(!LifecycleHarness.IsProcessAlive(launch.Pid)), null,
-            () => $"fake claude (pid {launch.Pid}) is still running after Stop");
-        harness.Hub.ReleaseOutput();
+        var stateLock = harness.ProjectInfo(created.Id).Process.StateLock;
+        Assert.True(await stateLock.WaitAsync(LifecycleHarness.DefaultTimeout), "the state lock was not free");
+        Task stop;
+        try
+        {
+            // Persisted, then held on its state: the result waits behind it
+            await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadOutputFile(created.Id).Contains("Almost")), null,
+                () => $"the assistant line never reached output.jsonl.\n{harness.Describe(created.Id)}");
+            stop = harness.Projects.StopProjectAsync(created.Id);
+            await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(!LifecycleHarness.IsProcessAlive(launch.Pid)), null,
+                () => $"fake claude (pid {launch.Pid}) is still running after Stop");
+        }
+        finally
+        {
+            stateLock.Release();
+        }
         await stop;
         await LifecycleHarness.WaitUntilAsync(
             () => Task.FromResult(harness.Hub.Pushes.Any(p => p.RawJson?.Contains("\"late\"") == true)), null,
@@ -308,7 +315,8 @@ public class ProjectLifecycleTests
 
     /// <summary>
     /// A delete that its script refuses (godmode-dev's refuses with uncommitted changes) leaves the
-    /// project as it was: resumed, its output is still persisted and still moves its state on.
+    /// project Stopped, and still a project: resumed, its output is still persisted and still moves
+    /// its state on.
     /// </summary>
     [Fact]
     public async Task DeleteRefusedByItsScript_ThenResume_StillHandlesOutput()
@@ -351,7 +359,10 @@ public class ProjectLifecycleTests
         var fresh = await harness.WaitForStdinAsync(created.Id, index: 2);
         Assert.Equal(sessionId, fresh.ArgValue("--session-id"));
         Assert.StartsWith("Continue from where we left off", PromptText(Assert.Single(fresh.Stdin)));
-        await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Idle, skip: pushedBefore);
+        // Idle from the bare resume first; the fresh session's turn then runs, and ends Idle again
+        var running = await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Running, skip: pushedBefore);
+        await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Idle,
+            skip: harness.Hub.StatusPushes(created.Id).ToList().LastIndexOf(running) + 1);
         Assert.True(File.Exists(configPath), $"{configPath} should exist while the fresh session runs.\n{harness.Describe(created.Id)}");
         Assert.Equal(fresh.Pid, harness.ProjectInfo(created.Id).Process.ProcessId);
         Assert.DoesNotContain(harness.Hub.StatusPushes(created.Id), s => s.State == ProjectState.Error);

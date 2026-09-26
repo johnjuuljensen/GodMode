@@ -34,3 +34,35 @@
   border: 1px solid var(--glass-border);
   border-radius: 8px;
 }
+
+/* Everything the call runs, in full: scrolls within the card, above Allow (#234) */
+.permission-detail {
+  margin: 8px 16px;
+  padding: 8px 10px;
+  max-height: min(40vh, 320px);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+}
+
+.permission-note {
+  padding: 0 16px 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.permission-truncated,
+.permission-error {
+  color: var(--warning);
+}
+
+.permission-answer-error {
+  color: var(--error);
+}

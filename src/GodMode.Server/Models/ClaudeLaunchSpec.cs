@@ -2,8 +2,8 @@ namespace GodMode.Server.Models;
 
 /// <summary>
 /// Everything one claude launch is given beyond the process manager's fixed flags: the configured
-/// environment (profile, action, the MCP bridge's <c>GODMODE_*</c> variables) and the arguments
-/// (the action's, permissions, model, the MCP config with the bridge in it). Create and resume
+/// environment (profile, action) and the arguments (the action's, permissions, model, the MCP
+/// config with GodMode's MCP endpoint and the launch's project token in it). Create and resume
 /// launch from the same spec; they differ only in <c>--session-id</c> vs <c>--resume</c>, which
 /// the process manager adds.
 /// </summary>
@@ -18,3 +18,10 @@ public sealed class LaunchConfigException(string message, Exception? inner = nul
 
 /// <summary>The server is stopping, and launches nothing more: a process started now would outlive it.</summary>
 public sealed class ServerStoppingException() : InvalidOperationException("The server is stopping");
+
+/// <summary>
+/// A create would make a project that is already there: a tracked project has its ID or its folder,
+/// or another create is making it. Nothing is written, and the project there is left as it is.
+/// </summary>
+public sealed class ProjectInUseException(string projectId, string reason)
+    : InvalidOperationException($"Project {projectId} is in use: {reason}");

@@ -54,15 +54,17 @@ export function LoginPage({ error, onSubmit }: LoginPageProps) {
             autoFocus
             value={key}
             onChange={e => setKey(e.target.value)}
-            placeholder="Authentication:ApiKey from the server's configuration"
+            placeholder="Printed by the server on its first start"
           />
           <button className="auth-submit-btn" type="submit" disabled={submitting || !key.trim()}>
             {submitting ? 'Checking...' : 'Continue'}
           </button>
         </form>
         <p className="auth-hint">
-          The key is stored in this browser only. On a GitHub Codespace server, use a GitHub token
-          belonging to the codespace owner.
+          Every GodMode server requires its key, on this machine too. A server with no
+          Authentication:ApiKey configured generates one on its first start, prints it, and keeps it in
+          its key file. The key is stored in this browser only. On a GitHub Codespace server, use a
+          GitHub token of the codespace owner, other than the codespace's own GITHUB_TOKEN.
         </p>
       </div>
     </div>

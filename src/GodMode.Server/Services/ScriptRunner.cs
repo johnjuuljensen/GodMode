@@ -4,7 +4,9 @@ using System.Text;
 namespace GodMode.Server.Services;
 
 /// <summary>
-/// Runs scripts as part of project creation workflow.
+/// Runs a root's scripts (prepare, create, delete, status). A script's environment is the OS essentials
+/// (<see cref="ChildEnvironment.Script"/>), then the configured environment the caller passes: never the
+/// server's own, which holds its secrets.
 ///
 /// Scripts can be specified with or without extension:
 /// - With extension ("scripts/init.ps1") — used as-is.
@@ -21,11 +23,20 @@ public class ScriptRunner : IScriptRunner
     /// <summary>The stderr lines a script run for its output keeps for its error.</summary>
     private const int MaxStderrLines = 20;
 
-    private readonly ILogger<ScriptRunner> _logger;
+    /// <summary>
+    /// Configuration key for the PowerShell 7 executable that runs <c>.ps1</c> scripts (a name on PATH
+    /// or a full path). The Docker image names its own, so a <c>pwsh</c> the session writes into a
+    /// directory on PATH is never the one run.
+    /// </summary>
+    public const string PowerShellExecutableSetting = "PowerShell:Executable";
 
-    public ScriptRunner(ILogger<ScriptRunner> logger)
+    private readonly ILogger<ScriptRunner> _logger;
+    private readonly string _powerShell;
+
+    public ScriptRunner(ILogger<ScriptRunner> logger, IConfiguration configuration)
     {
         _logger = logger;
+        _powerShell = configuration[PowerShellExecutableSetting] is { Length: > 0 } powerShell ? powerShell : "pwsh";
     }
 
     public async Task RunAsync(
@@ -129,43 +140,46 @@ public class ScriptRunner : IScriptRunner
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        foreach (var (key, value) in environment)
-        {
+        // Start from the allowlist, not the server's environment, which holds its secrets (the API key
+        // among them), then the configured variables and the GODMODE_* ones
+        startInfo.Environment.Clear();
+        foreach (var (key, value) in ChildEnvironment.Script.Build(ChildEnvironment.Current(), environment))
             startInfo.Environment[key] = value;
-        }
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         var exitTcs = new TaskCompletionSource<int>();
 
         process.Exited += (_, _) => exitTcs.TrySetResult(process.ExitCode);
 
-        process.OutputDataReceived += async (_, e) =>
+        async void OnStdout(string? line)
         {
-            if (e.Data != null)
+            if (line != null)
             {
-                await LogLineAsync(logWriter, $"[stdout] {e.Data}");
-                try { await onProgress(e.Data); }
+                await LogLineAsync(logWriter, $"[stdout] {line}");
+                try { await onProgress(line); }
                 catch { /* swallow callback errors */ }
             }
-        };
+        }
 
         var stderrLines = new List<string>();
-        process.ErrorDataReceived += async (_, e) =>
+        async void OnStderr(string? line)
         {
-            if (e.Data != null)
+            if (line != null)
             {
                 lock (stderrLines)
                 {
-                    stderrLines.Add(e.Data);
+                    stderrLines.Add(line);
                     if (forOutput && stderrLines.Count > MaxStderrLines) stderrLines.RemoveAt(0);
                 }
-                await LogLineAsync(logWriter, $"[stderr] {e.Data}");
+                await LogLineAsync(logWriter, $"[stderr] {line}");
             }
-        };
+        }
 
         process.Start();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        // On threads of their own, not the thread pool's (ChildOutput)
+        var read = Task.WhenAll(
+            ChildOutput.ReadLinesAsync(process.StandardOutput, OnStdout, $"script {process.Id} stdout"),
+            ChildOutput.ReadLinesAsync(process.StandardError, OnStderr, $"script {process.Id} stderr"));
 
         using var reg = cancellationToken.Register(() =>
         {
@@ -176,7 +190,7 @@ public class ScriptRunner : IScriptRunner
         var exitCode = await exitTcs.Task;
         // Killed: the exit code says only that
         cancellationToken.ThrowIfCancellationRequested();
-        if (forOutput) await process.WaitForExitAsync(cancellationToken);
+        if (forOutput) await read.WaitAsync(cancellationToken);
 
         await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Exit code: {exitCode}");
 
@@ -239,12 +253,12 @@ public class ScriptRunner : IScriptRunner
             string.Join(", ", extensions.Select(e => basePath + e)));
     }
 
-    private static (string FileName, string Args) GetShellCommand(string scriptPath)
+    private (string FileName, string Args) GetShellCommand(string scriptPath)
     {
         var ext = Path.GetExtension(scriptPath).ToLowerInvariant();
         return ext switch
         {
-            ".ps1" => ("pwsh", $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\""),
+            ".ps1" => (_powerShell, $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\""),
             ".bat" or ".cmd" => ("cmd", $"/c \"{scriptPath}\""),
             ".sh" => ("bash", $"\"{scriptPath}\""),
             _ => ("bash", $"\"{scriptPath}\"")

@@ -6,14 +6,6 @@ RUN npm ci
 COPY src/GodMode.Client.React/ .
 RUN npm run build
 
-# ── Build the MCP bridge (every claude session runs it; one bundled file, no node_modules) ──
-FROM node:22-slim AS bridge-build
-WORKDIR /app
-COPY src/GodMode.McpBridge/package.json src/GodMode.McpBridge/package-lock.json ./
-RUN npm ci
-COPY src/GodMode.McpBridge/ .
-RUN npm run build
-
 # ── Build .NET server ──
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
 WORKDIR /src
@@ -24,19 +16,16 @@ COPY src/Directory.Build.props src/
 COPY src/GodMode.Server/GodMode.Server.csproj src/GodMode.Server/
 COPY src/GodMode.Shared/GodMode.Shared.csproj src/GodMode.Shared/
 COPY src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj src/GodMode.ProjectFiles/
-RUN dotnet restore src/GodMode.Server/GodMode.Server.csproj
+RUN dotnet restore src/GodMode.Server/GodMode.Server.csproj -p:PublishReactClient=false
 
 # Copy source and publish
 COPY src/GodMode.Server/ src/GodMode.Server/
 COPY src/GodMode.Shared/ src/GodMode.Shared/
 COPY src/GodMode.ProjectFiles/ src/GodMode.ProjectFiles/
-RUN dotnet publish src/GodMode.Server/GodMode.Server.csproj -c Release -o /app/publish -p:PublishReactClient=false -p:BuildMcpBridge=false
+RUN dotnet publish src/GodMode.Server/GodMode.Server.csproj -c Release -o /app/publish -p:PublishReactClient=false
 
 # Copy React build output into wwwroot
 COPY --from=react-build /app/dist /app/publish/wwwroot/
-
-# The bridge where the server looks for it (ProjectManager.ResolveMcpBridgePath); it will not start without it
-COPY --from=bridge-build /app/dist/godmode-mcp-bridge.cjs /app/publish/mcp-bridge/
 
 # ── Runtime ──
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
@@ -45,9 +34,12 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 RUN groupadd -r godmode && useradd -r -g godmode -m -d /home/godmode godmode
 
 ENV HOME=/home/godmode
-ENV PATH="/home/godmode/.local/bin:/home/godmode/.claude/local/bin:${PATH}"
+# The godmode user's own bin directory comes last: user-scope installs land there, and a session can
+# write it, so nothing in it shadows a system binary. The server names its pwsh and claude outright
+# (PowerShell__Executable and Claude__Executable, below) and looks up neither on PATH.
+ENV PATH="${PATH}:/home/godmode/.local/bin"
 
-# Install system deps + Node.js (runs the GodMode MCP bridge, and npx MCP servers)
+# Install system deps + Node.js (for the npx MCP servers a repo's .mcp.json names, and JS toolchains)
 RUN apt-get update && \
     apt-get install -y git curl bash && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
@@ -75,28 +67,49 @@ RUN mkdir -p -m 755 /etc/apt/keyrings && \
     apt-get install -y gh && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI as the non-root user
-USER godmode
-RUN curl -fsSL https://claude.ai/install.sh | bash && \
-    echo "Claude installed at: $(which claude)" && \
+# Install Claude Code system-wide and root-owned, so no session can replace the claude the server
+# runs. The native installer's ~/.local/bin/claude is the user's to write, and claude updates itself
+# there. npm's global install is root's (/usr/lib/node_modules, linked from /usr/bin/claude), and
+# self-update is off: a claude run as godmode could not write it anyway. The managed settings turn it
+# off in every claude process too, whose environment the server builds from an allowlist without this ENV.
+ENV DISABLE_AUTOUPDATER=1
+RUN npm install -g @anthropic-ai/claude-code && \
+    npm cache clean --force && \
+    mkdir -p /etc/claude-code && \
+    echo '{ "env": { "DISABLE_AUTOUPDATER": "1" } }' > /etc/claude-code/managed-settings.json && \
+    test "$(command -v claude)" = /usr/bin/claude && \
+    test -x /usr/bin/pwsh && \
     claude --version
 
-# Switch back to root for file operations, then drop to godmode
-USER root
+# The executables the server starts, by full path (see PATH above)
+ENV PowerShell__Executable=/usr/bin/pwsh
+ENV Claude__Executable=/usr/bin/claude
+
+# The server and its SPA stay root's, read-only to godmode: a session could otherwise rewrite them.
+# godmode owns only what the server writes: the roots (ProjectRootsDir, /app/roots by default, where
+# a volume goes), the default root's projects when no root is configured, /data, and its home.
 WORKDIR /app
 COPY --from=dotnet-build /app/publish .
 
-RUN mkdir -p /app/projects /data && \
-    chown -R godmode:godmode /app/projects /data /app
+RUN mkdir -p /app/roots /app/projects /data && \
+    chown godmode:godmode /app/roots /app/projects /data
 
 EXPOSE 31337
 
 # Unprefixed URLS, not ASPNETCORE_URLS: ASPNETCORE_* is read before appsettings.json, whose
-# loopback "Urls" would win. The server refuses to start on this binding without an API key:
-# run with -e Authentication__ApiKey=<key>.
+# loopback "Urls" would win. Every request needs the API key. With none configured, the server
+# generates one into /home/godmode/.local/share/GodMode.Server/api-key, which is lost when the
+# container is replaced unless that directory is a volume: run with -e Authentication__ApiKey=<key>,
+# or -v godmode-key:/home/godmode/.local/share/GodMode.Server.
+# A browser is let in only from the container's own origin, http://localhost:31337 (published on
+# the same port). Opening it by a host name, a LAN address or another published port needs that
+# origin in -e Authentication__AllowedOrigins=http://<host>:<port>.
 ENV URLS=http://+:31337
 
 USER godmode
+# The key file's directory, owner-only and godmode's: a named volume mounted there starts with
+# this owner and mode, where one Docker creates itself would be root's and unwritable
+RUN mkdir -p -m 700 /home/godmode/.local/share/GodMode.Server
 ENTRYPOINT ["dotnet", "GodMode.Server.dll"]
 
 # ── SDK variant ──

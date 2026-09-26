@@ -35,6 +35,15 @@ public class ClaudeProcessManager : IClaudeProcessManager
     /// </summary>
     private static readonly TimeSpan PipeDrainTimeout = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Configuration key: how long a stop gives claude, once interrupted, to exit before its whole
+    /// process tree is killed. Seconds; 10 by default.
+    /// </summary>
+    public const string StopGracePeriodSetting = "StopGracePeriodSeconds";
+
+    /// <summary>How long a stop waits for a send in progress before it closes claude's input anyway.</summary>
+    private static readonly TimeSpan StdinCloseWait = TimeSpan.FromSeconds(1);
+
     private readonly ILogger<ClaudeProcessManager> _logger;
     private readonly string _executable;
     private readonly ConcurrentDictionary<string, Launch> _processes = new();
@@ -43,30 +52,33 @@ public class ClaudeProcessManager : IClaudeProcessManager
     {
         _logger = logger;
         _executable = configuration[ExecutableSetting] is { Length: > 0 } executable ? executable : "claude";
+        StopGracePeriod = TimeSpan.FromSeconds(configuration.GetValue(StopGracePeriodSetting, 10.0));
     }
 
+    public TimeSpan StopGracePeriod { get; }
+
     /// <summary>One claude process, from its start until its exit has been handed to the pipeline.</summary>
-    private sealed class Launch(Process process)
+    private sealed class Launch(Process process, SessionProcessTree tree)
     {
         public Process Process { get; } = process;
+
+        /// <summary>The process and everything it starts: what a stop interrupts, then kills.</summary>
+        public SessionProcessTree Tree { get; } = tree;
+
         public int Id { get; set; }
+
+        /// <summary>Completes when the process has exited, before its pipes are drained and its exit handled.</summary>
+        public TaskCompletionSource Exited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>Completes once the exit is on the pipeline (or a fallback launch replaced it).</summary>
         public TaskCompletionSource Handled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        private volatile bool _killed;
-        public bool Killed => _killed;
+        private volatile bool _stopped;
 
-        /// <summary>Marks the launch killed, so its exit is not reported as a failure, and kills its tree if it still runs.</summary>
-        public void Kill()
-        {
-            _killed = true;
-            try
-            {
-                if (!Process.HasExited) Process.Kill(entireProcessTree: true);
-            }
-            catch (InvalidOperationException) { /* exited and disposed meanwhile */ }
-        }
+        /// <summary>The server is stopping it: its exit is not a failure, no launch takes its place, and it takes no more input.</summary>
+        public bool Stopped => _stopped;
+
+        public void MarkStopped() => _stopped = true;
     }
 
     /// <summary>
@@ -101,15 +113,19 @@ public class ClaudeProcessManager : IClaudeProcessManager
         Dictionary<string, string>? extraEnvironment = null,
         string[]? extraArgs = null)
     {
-        _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
-            project.Status.Id, project.SessionId);
-
-        if (string.IsNullOrEmpty(project.SessionId))
+        // No session to resume (none saved, or one that was no GUID): a fresh one takes its place,
+        // as it does when claude has no conversation for the session
+        if (project.SessionId is not { } sessionId)
         {
-            throw new InvalidOperationException($"Cannot resume project {project.Status.Id}: no session ID found");
+            _logger.LogWarning("Project {ProjectId} has no session to resume. Starting fresh session.", project.Status.Id);
+            project.SessionId = Guid.NewGuid().ToString();
+            return await StartFreshSessionAsync(project, cancellationToken, extraEnvironment, extraArgs);
         }
 
-        var args = BuildArgs(["--resume", project.SessionId], extraArgs);
+        _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
+            project.Status.Id, sessionId);
+
+        var args = BuildArgs(["--resume", sessionId], extraArgs);
 
         // claude has no conversation for the session: it exits at once, and a fresh session on the
         // same id takes its place. That launch uses the MCP config the resume was given, which is
@@ -123,10 +139,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
                     project.Status.Id, project.SessionId);
                 try
                 {
-                    await SessionIdFile.WriteAsync(project.ProjectPath, project.SessionId, cancellationToken);
-                    var freshArgs = BuildArgs(["--session-id", project.SessionId], extraArgs);
-                    await RunClaudeProcessAsync(project, freshArgs, "Continue from where we left off. Review the codebase and previous work.",
-                        cancellationToken, extraEnvironment);
+                    await StartFreshSessionAsync(project, cancellationToken, extraEnvironment, extraArgs);
                     return true;
                 }
                 catch (Exception ex)
@@ -135,6 +148,15 @@ public class ClaudeProcessManager : IClaudeProcessManager
                     return false;
                 }
             });
+    }
+
+    /// <summary>A new session on the project's session ID, told to carry on from the work in its folder.</summary>
+    private async Task<int> StartFreshSessionAsync(ProjectInfo project, CancellationToken cancellationToken,
+        Dictionary<string, string>? extraEnvironment, string[]? extraArgs)
+    {
+        await SessionIdFile.WriteAsync(project.ProjectPath, project.SessionId!, cancellationToken);
+        return await RunClaudeProcessAsync(project, BuildArgs(["--session-id", project.SessionId!], extraArgs),
+            "Continue from where we left off. Review the codebase and previous work.", cancellationToken, extraEnvironment);
     }
 
     private static string[] BuildArgs(string[] additionalArgs, string[]? extraArgs = null)
@@ -166,20 +188,30 @@ public class ClaudeProcessManager : IClaudeProcessManager
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = false,
-            WindowStyle = ProcessWindowStyle.Normal,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
         };
 
         // Start from the allowlist, not the server's environment, then the configured variables
         startInfo.Environment.Clear();
-        foreach (var (key, value) in ChildEnvironment.Build(ChildEnvironment.Current(), extraEnvironment))
+        foreach (var (key, value) in ChildEnvironment.Claude.Build(ChildEnvironment.Current(), extraEnvironment))
             startInfo.Environment[key] = value;
 
         foreach (var arg in args)
         {
             startInfo.ArgumentList.Add(arg);
+        }
+
+        // Its own tree, off the server's console: what a stop interrupts, then kills whole
+        var tree = SessionProcessTree.Create(_logger);
+        try
+        {
+            tree.Prepare(startInfo);
+        }
+        catch
+        {
+            tree.Dispose();
+            throw;
         }
 
         // stdout goes to the project's output pipeline, whose consumer writes output.jsonl
@@ -191,30 +223,29 @@ public class ClaudeProcessManager : IClaudeProcessManager
             StartInfo = startInfo,
             EnableRaisingEvents = true,
         };
-        var launch = new Launch(process);
+        var launch = new Launch(process, tree);
 
         // The exit is handled once the process has exited and both pipes are drained, so it
         // follows every line the process wrote
-        var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stdoutClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stderrClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var stderrTail = new ConcurrentQueue<string>();
 
-        process.Exited += (_, _) => exited.TrySetResult();
+        process.Exited += (_, _) => launch.Exited.TrySetResult();
 
         // stdout: only hand the line on. The project's one consumer writes it to output.jsonl, updates
         // state and broadcasts it, in order; doing that here raced the lines of one burst.
-        process.OutputDataReceived += (_, e) =>
+        void OnStdout(string? line)
         {
-            if (e.Data == null)
+            if (line == null)
                 stdoutClosed.TrySetResult();
-            else if (!output.TryWrite(new PipelineItem.Line(e.Data)))
+            else if (!output.TryWrite(new PipelineItem.Line(line)))
                 _logger.LogDebug("Dropped output for project {ProjectId}: its pipeline is closed", project.Status.Id);
-        };
+        }
 
-        process.ErrorDataReceived += (_, e) =>
+        void OnStderr(string? line)
         {
-            if (e.Data == null)
+            if (line == null)
             {
                 stderrWriter.Dispose();
                 stderrClosed.TrySetResult();
@@ -223,23 +254,23 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
             try
             {
-                stderrWriter.WriteLine($"[{DateTime.UtcNow:O}] {e.Data}");
-                _logger.LogWarning("Claude stderr [{ProjectId}]: {Error}", project.Status.Id, e.Data);
+                stderrWriter.WriteLine($"[{DateTime.UtcNow:O}] {line}");
+                _logger.LogWarning("Claude stderr [{ProjectId}]: {Error}", project.Status.Id, line);
 
-                stderrTail.Enqueue(e.Data);
+                stderrTail.Enqueue(line);
                 while (stderrTail.Count > StderrTailLines) stderrTail.TryDequeue(out string? _);
 
                 // Show error lines in the UI as synthetic error output events, through the same
                 // pipeline so they persist to output.jsonl for backfill on refresh. They do not
                 // change the project's state: the exit and error results do.
-                if (e.Data.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
-                    output.TryWrite(new PipelineItem.Line(JsonSerializer.Serialize(new { type = "error", error = e.Data })));
+                if (line.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
+                    output.TryWrite(new PipelineItem.Line(JsonSerializer.Serialize(new { type = "error", error = line })));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error writing stderr for project {ProjectId}", project.Status.Id);
             }
-        };
+        }
 
         _logger.LogInformation("Starting Claude process for project {ProjectId} with args: {Args}",
             project.Status.Id, string.Join(" ", args));
@@ -247,6 +278,8 @@ public class ClaudeProcessManager : IClaudeProcessManager
         var launchedAt = DateTime.UtcNow;
         try
         {
+            // A stop came first (it cancels the launch): nothing is started
+            cancellationToken.ThrowIfCancellationRequested();
             process.Start();
         }
         catch
@@ -254,32 +287,34 @@ public class ClaudeProcessManager : IClaudeProcessManager
             // Never started: there is no exit to handle
             stderrWriter.Dispose();
             process.Dispose();
+            tree.Dispose();
             throw;
+        }
+
+        try
+        {
+            tree.Attach(process);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Claude process {ProcessId} for project {ProjectId} is not in a process tree of its own: a stop kills it and the children it still has",
+                process.Id, project.Status.Id);
         }
 
         launch.Id = process.Id;
         _processes[project.Status.Id] = launch;
         project.Process.ProcessId = launch.Id;
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        // On threads of their own: a session holds no thread-pool thread for its lifetime
+        _ = ChildOutput.ReadLinesAsync(process.StandardOutput, OnStdout, $"claude {launch.Id} stdout");
+        _ = ChildOutput.ReadLinesAsync(process.StandardError, OnStderr, $"claude {launch.Id} stderr");
 
         _logger.LogInformation("Claude process started for project {ProjectId} with PID {ProcessId}",
             project.Status.Id, launch.Id);
 
-        var cancellation = cancellationToken.Register(() =>
-        {
-            try
-            {
-                _logger.LogInformation("Cancellation requested, killing process for project {ProjectId}", project.Status.Id);
-                launch.Kill();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error killing process for project {ProjectId}", project.Status.Id);
-            }
-        });
+        // A stop cancels the launch: this process is being stopped, and no fresh session takes its place
+        var cancellation = cancellationToken.Register(launch.MarkStopped);
 
-        _ = HandleExitAsync(project, launch, launchedAt, exited.Task, Task.WhenAll(stdoutClosed.Task, stderrClosed.Task),
+        _ = HandleExitAsync(project, launch, launchedAt, Task.WhenAll(stdoutClosed.Task, stderrClosed.Task),
             stderrTail, takeover, cancellation);
 
         // Send initial prompt via stdin if provided
@@ -293,15 +328,16 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
     /// <summary>
     /// After the process exits and its pipes drain: lets <paramref name="takeover"/> replace it, or
-    /// else deletes its MCP config, clears its PID and puts its exit on the pipeline, last.
+    /// else deletes its MCP config, clears its PID and puts its exit on the pipeline, last. What is
+    /// left of its tree goes with it.
     /// </summary>
-    private async Task HandleExitAsync(ProjectInfo project, Launch launch, DateTime launchedAt, Task exited, Task drained,
+    private async Task HandleExitAsync(ProjectInfo project, Launch launch, DateTime launchedAt, Task drained,
         ConcurrentQueue<string> stderrTail, ExitTakeover? takeover, CancellationTokenRegistration cancellation)
     {
         var id = project.Status.Id;
         try
         {
-            await exited;
+            await launch.Exited.Task;
             if (await Task.WhenAny(drained, Task.Delay(PipeDrainTimeout)) != drained)
                 _logger.LogWarning("Claude process {ProcessId} for project {ProjectId} exited, but its output is still open; handling the exit without it",
                     launch.Id, id);
@@ -309,10 +345,10 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
             var exitCode = launch.Process.ExitCode;
             var tail = stderrTail.ToArray();
-            _logger.LogInformation("Claude process exited for project {ProjectId} with exit code {ExitCode} (PID {ProcessId}{Killed})",
-                id, exitCode, launch.Id, launch.Killed ? ", killed" : "");
+            _logger.LogInformation("Claude process exited for project {ProjectId} with exit code {ExitCode} (PID {ProcessId}{Stopped})",
+                id, exitCode, launch.Id, launch.Stopped ? ", stopped" : "");
 
-            if (!launch.Killed && takeover != null && await takeover(exitCode, tail))
+            if (!launch.Stopped && takeover != null && await takeover(exitCode, tail))
                 return;
 
             try { McpConfigFile.DeleteIfWrittenBefore(project.ProjectPath, launchedAt); }
@@ -320,7 +356,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
             project.Process.ClearProcessId(launch.Id);
             var stderr = tail.Length > 0 ? string.Join("\n", tail) : null;
-            if (!project.Process.Output.TryWrite(new PipelineItem.Exited(new ProcessExit(launch.Id, exitCode, launch.Killed, stderr))))
+            if (!project.Process.Output.TryWrite(new PipelineItem.Exited(new ProcessExit(launch.Id, exitCode, launch.Stopped, stderr))))
                 _logger.LogDebug("Dropped the exit of project {ProjectId}: its pipeline is closed", id);
         }
         catch (Exception ex)
@@ -329,8 +365,9 @@ public class ClaudeProcessManager : IClaudeProcessManager
         }
         finally
         {
-            // Only now, so a Stop until here finds the launch, marks it killed and waits for its exit
+            // Only now, so a Stop until here finds the launch, marks it stopped and waits for its exit
             _processes.TryRemove(new KeyValuePair<string, Launch>(id, launch));
+            launch.Tree.Dispose();
             launch.Process.Dispose();
             launch.Handled.TrySetResult();
         }
@@ -338,9 +375,13 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
     public async Task SendInputAsync(ProjectInfo project, string input)
     {
-        if (!_processes.TryGetValue(project.Status.Id, out var launch) || launch.Process.HasExited)
+        if (!_processes.TryGetValue(project.Status.Id, out var launch) || launch.Exited.Task.IsCompleted)
         {
             throw new InvalidOperationException($"No running process found for project {project.Status.Id}");
+        }
+        if (launch.Stopped)
+        {
+            throw new InvalidOperationException($"The process of project {project.Status.Id} is being stopped");
         }
 
         _logger.LogInformation("Sending input to project {ProjectId}: {Input}",
@@ -381,12 +422,17 @@ public class ClaudeProcessManager : IClaudeProcessManager
         }
     }
 
-    /// <summary>Kills the process tree and returns once its exit is on the pipeline, after all its output.</summary>
-    public async Task StopProcessAsync(ProjectInfo project)
+    /// <summary>
+    /// Stops the project's claude, gracefully first: interrupts it and closes its input, gives it
+    /// <paramref name="grace"/> (<see cref="StopGracePeriod"/> by default) to exit, then kills its
+    /// process tree, children included. Returns once its exit is on the pipeline, after all its output.
+    /// </summary>
+    public async Task StopProcessAsync(ProjectInfo project, TimeSpan? grace = null)
     {
-        _logger.LogInformation("Stopping process for project {ProjectId}", project.Status.Id);
+        var id = project.Status.Id;
+        _logger.LogInformation("Stopping process for project {ProjectId}", id);
 
-        // Cancelling kills the launch through its registration
+        // Cancelling marks the launch stopped through its registration, so no fresh session takes its place
         if (project.Process.Cancellation is { } cancellation)
         {
             await cancellation.CancelAsync();
@@ -394,14 +440,50 @@ public class ClaudeProcessManager : IClaudeProcessManager
             project.Process.Cancellation = null;
         }
 
-        if (_processes.TryGetValue(project.Status.Id, out var launch))
+        // A fresh session that took its place before the cancel is stopped in turn
+        while (_processes.TryGetValue(id, out var launch))
         {
-            try { launch.Kill(); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Error stopping process for project {ProjectId}", project.Status.Id); }
+            await StopLaunchAsync(project, launch, grace ?? StopGracePeriod);
             await launch.Handled.Task;
         }
 
         project.Process.ProcessId = 0;
+    }
+
+    private async Task StopLaunchAsync(ProjectInfo project, Launch launch, TimeSpan grace)
+    {
+        launch.MarkStopped();
+        if (!launch.Exited.Task.IsCompleted)
+        {
+            var deadline = Task.Delay(grace);
+            _ = InterruptAsync(project, launch);
+            if (await Task.WhenAny(launch.Exited.Task, deadline) == launch.Exited.Task)
+                _logger.LogInformation("Claude process {ProcessId} for project {ProjectId} exited when interrupted", launch.Id, project.Status.Id);
+            else
+                _logger.LogWarning("Claude process {ProcessId} for project {ProjectId} did not exit within {Grace}s of its interrupt; killing it",
+                    launch.Id, project.Status.Id, grace.TotalSeconds);
+        }
+        // All of the session that is left: the process if it outlived the grace period, and any child of it
+        launch.Tree.Kill();
+    }
+
+    /// <summary>What claude honours whatever it is doing (<see cref="SessionProcessTree.InterruptAsync"/>), then the end of its input, which an idle claude exits on too.</summary>
+    private async Task InterruptAsync(ProjectInfo project, Launch launch)
+    {
+        try { await launch.Tree.InterruptAsync(); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Could not interrupt claude for project {ProjectId}", project.Status.Id); }
+
+        var stdinLock = project.Process.StdinLock;
+        if (!await stdinLock.WaitAsync(StdinCloseWait)) return;
+        try { launch.Process.StandardInput.Close(); }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException) { /* exited meanwhile */ }
+        finally { stdinLock.Release(); }
+    }
+
+    public async Task SettleAsync(ProjectInfo project)
+    {
+        while (_processes.TryGetValue(project.Status.Id, out var launch) && launch.Exited.Task.IsCompleted)
+            await launch.Handled.Task;
     }
 
     public bool IsProcessRunning(int processId)

@@ -41,6 +41,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private readonly List<ServiceProvider> _stopped = [];
     private readonly List<string> _projectIds = [];
     private readonly CapturingLoggerProvider _logs = new();
+    private readonly McpHost? _mcp;
 
     /// <summary>The temp dir everything the harness and the server write lives under.</summary>
     public string WorkDir => _workDir;
@@ -67,12 +68,14 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <param name="settings">Extra server configuration, applied over the harness defaults.</param>
     /// <param name="extraRoots">More roots beside <see cref="RootName"/>, each in the profile given, configured as it is.</param>
     /// <param name="profileEnvironment">The environment of <see cref="ProfileName"/>, in its <c>.profiles/</c> env.json.</param>
+    /// <param name="mcpEndpoint">Serve the MCP endpoint (<see cref="McpHost"/>), so a fake's <c>permission</c> step reaches the server.</param>
     public LifecycleHarness(
         FakeScript script,
         IReadOnlyDictionary<string, object>? rootConfig = null,
         IReadOnlyDictionary<string, string?>? settings = null,
         IReadOnlyList<(string Root, string Profile)>? extraRoots = null,
-        IReadOnlyDictionary<string, string>? profileEnvironment = null)
+        IReadOnlyDictionary<string, string>? profileEnvironment = null,
+        bool mcpEndpoint = false)
     {
         _workDir = ServerProcess.CreateWorkDir("lifecycle");
         RootsDir = Path.Combine(_workDir, "roots");
@@ -94,6 +97,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             ["ProjectRootsDir"] = RootsDir,
             [ClaudeProcessManager.ExecutableSetting] = FakeClaudePath,
         };
+        if (mcpEndpoint)
+        {
+            _mcp = new McpHost(() => Projects!, _logs);
+            configuration["Urls"] = _mcp.Url;
+        }
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
             configuration[key] = value;
 
@@ -148,8 +156,12 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         services.AddSignalR();
         services.AddSingleton<IHubContext<ProjectHub, IProjectHubClient>>(hub);
         services.AddSingleton(configuration);
-        services.AddSingleton<IClaudeProcessManager, ClaudeProcessManager>();
-        services.AddSingleton<IStatusUpdater, StatusUpdater>();
+        services.AddSingleton<ClaudeProcessManager>();
+        services.AddSingleton<HoldingProcessManager>();
+        services.AddSingleton<IClaudeProcessManager>(provider => provider.GetRequiredService<HoldingProcessManager>());
+        services.AddSingleton<StatusUpdater>();
+        services.AddSingleton<FailingSaves>();
+        services.AddSingleton<IStatusUpdater>(provider => provider.GetRequiredService<FailingSaves>());
         services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
@@ -189,6 +201,17 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     public IClaudeProcessManager ProcessManager => _services.GetRequiredService<IClaudeProcessManager>();
 
+    public ProjectLifecycle Lifecycle => _services.GetRequiredService<ProjectLifecycle>();
+
+    /// <summary>The server's status saves, which a test can make fail (since the last <see cref="RestartAsync"/>).</summary>
+    public FailingSaves StatusSaves => _services.GetRequiredService<FailingSaves>();
+
+    /// <summary>
+    /// Holds the next launch (a create's or a resume's) after its claim, before its process is
+    /// started, until <see cref="LaunchHold.Release"/>.
+    /// </summary>
+    public LaunchHold HoldNextLaunch() => _services.GetRequiredService<HoldingProcessManager>().HoldNext();
+
     /// <summary>Opens a client connection to the hub.</summary>
     public HarnessConnection Connect(string connectionId) =>
         new(connectionId, Hub, Projects, _services.GetRequiredService<ILogger<ProjectHub>>());
@@ -203,10 +226,14 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public void OnHostStopping(Action callback) =>
         _services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(callback);
 
-    /// <summary>The server's own record of a project, found as the MCP bridge finds it: by its latest launch's token.</summary>
+    /// <summary>The server's own record of a project, found as the MCP endpoint finds it: by the token in its latest launch's MCP config.</summary>
     public ProjectInfo ProjectInfo(string projectId) =>
-        Projects.ValidateProjectToken(projectId, Launches(projectId)[^1].Environment["GODMODE_PROJECT_TOKEN"])
+        Projects.ValidateProjectToken(projectId, GodModeMcpEntry.Of(Launches(projectId)[^1]).Token)
         ?? throw new InvalidOperationException($"project {projectId} does not accept its launch's token");
+
+    /// <summary>The server's own record of a project, whether or not a launch of it has recorded anything.</summary>
+    public ProjectInfo Tracked(string projectId) =>
+        ((ProjectManager)Projects).Tracked(projectId) ?? throw new InvalidOperationException($"project {projectId} is not tracked");
 
     /// <summary>Polls the in-memory status until it reaches <paramref name="state"/>.</summary>
     public async Task<ProjectStatus> WaitForStateAsync(string projectId, ProjectState state, TimeSpan? timeout = null)
@@ -239,9 +266,21 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public ProjectStatus ReadStatusFile(string projectId)
     {
         var path = Path.Combine(ProjectPath(projectId), ".godmode", "status.json");
+        return Retried(() => JsonSerializer.Deserialize<ProjectStatus>(ReadShared(path), JsonDefaults.Options)!);
+    }
+
+    /// <summary>
+    /// session-id as it is on disk. The server replaces it whole (a new file moved over it), and on
+    /// Windows the file cannot be opened while it is being replaced; that is retried.
+    /// </summary>
+    public string ReadSessionIdFile(string projectId) =>
+        Retried(() => ReadShared(Path.Combine(ProjectPath(projectId), ".godmode", "session-id")));
+
+    private static T Retried<T>(Func<T> read)
+    {
         for (var attempt = 1; ; attempt++)
         {
-            try { return JsonSerializer.Deserialize<ProjectStatus>(ReadShared(path), JsonDefaults.Options)!; }
+            try { return read(); }
             catch (Exception ex) when (ex is IOException or JsonException && attempt < 50) { Thread.Sleep(20); }
         }
     }
@@ -250,7 +289,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         ReadShared(Path.Combine(ProjectPath(projectId), ".godmode", "output.jsonl"));
 
     /// <summary>Reads a file the server may still hold open for writing (output.jsonl, errs.txt, status.json).</summary>
-    private static string ReadShared(string path)
+    internal static string ReadShared(string path)
     {
         using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
         return reader.ReadToEnd();
@@ -323,21 +362,75 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             errs.txt:
             {Read("errs.txt")}
             fake launches: {launches.Count}
-            {string.Join("\n", launches.Select(l => $"  pid {l.Pid}, stdin lines {l.Stdin.Count}, exit {l.ExitCode?.ToString() ?? "(none)"}"))}
+            {string.Join("\n", launches.Select(l => $"  pid {l.Pid}, stdin lines {l.Stdin.Count}, exit {l.ExitCode?.ToString() ?? "(none)"}" +
+                string.Concat(l.Permissions.Select(p => $"\n    permission answer: {p}"))))}
             server warnings and errors (all projects):
             {string.Join("\n", _logs.Lines)}
             """;
+    }
+
+    /// <summary>The real <see cref="ClaudeProcessManager"/>, whose next launch a test can hold before it starts its process.</summary>
+    private sealed class HoldingProcessManager(ClaudeProcessManager inner) : IClaudeProcessManager
+    {
+        private LaunchHold? _next;
+
+        public LaunchHold HoldNext() => _next = new LaunchHold();
+
+        private async Task PassAsync()
+        {
+            if (Interlocked.Exchange(ref _next, null) is { } hold) await hold.WaitAsync();
+        }
+
+        public async Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
+            Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null)
+        {
+            await PassAsync();
+            return await inner.StartClaudeProcessAsync(project, initialPrompt, cancellationToken, extraEnvironment, extraArgs);
+        }
+
+        public async Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken,
+            Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null)
+        {
+            await PassAsync();
+            return await inner.ResumeClaudeProcessAsync(project, cancellationToken, extraEnvironment, extraArgs);
+        }
+
+        public Task SendInputAsync(ProjectInfo project, string input) => inner.SendInputAsync(project, input);
+        public Task StopProcessAsync(ProjectInfo project, TimeSpan? grace = null) => inner.StopProcessAsync(project, grace);
+        public Task SettleAsync(ProjectInfo project) => inner.SettleAsync(project);
+        public TimeSpan StopGracePeriod => inner.StopGracePeriod;
+        public bool IsProcessRunning(int processId) => inner.IsProcessRunning(processId);
     }
 
     public async ValueTask DisposeAsync()
     {
         foreach (var id in _projectIds)
         {
-            try { await Projects.StopProjectAsync(id); }
+            // Bounded: a project that cannot be stopped fails its test, not the whole run
+            try { await Projects.StopProjectAsync(id).WaitAsync(DefaultTimeout); }
             catch (Exception) { /* best effort: the test may have stopped or broken it already */ }
         }
         await _services.DisposeAsync();
         foreach (var stopped in _stopped) await stopped.DisposeAsync();
+        if (_mcp != null) await _mcp.DisposeAsync();
         ServerProcess.DeleteWorkDir(_workDir);
+    }
+}
+
+/// <summary>A launch held before its process starts: see <see cref="LifecycleHarness.HoldNextLaunch"/>.</summary>
+internal sealed class LaunchHold
+{
+    private readonly TaskCompletionSource _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Completes when the launch has come to the hold.</summary>
+    public Task Reached => _reached.Task;
+
+    public void Release() => _released.TrySetResult();
+
+    internal Task WaitAsync()
+    {
+        _reached.TrySetResult();
+        return _released.Task;
     }
 }

@@ -188,4 +188,26 @@ public sealed class AttentionWatcherTests : IAsyncLifetime
         await UntilAsync(() => _notifier.Items.Count == 1, "the reachable server's item");
         Assert.DoesNotContain(_notifier.Items, i => i.ServerId == down);
     }
+
+    [Fact]
+    public async Task RefreshAsync_tells_how_many_servers_it_watches()
+    {
+        await AddAsync(_alpha, "key-alpha");
+        var beta = await AddAsync(_beta, "key-beta");
+
+        Assert.Equal(2, await _watcher.RefreshAsync());
+
+        await _registry.RemoveServerAsync(beta);
+        Assert.Equal(1, await _watcher.RefreshAsync());
+    }
+
+    [Fact]
+    public async Task A_registration_whose_token_cannot_be_read_leaves_nothing_to_watch()
+    {
+        var alpha = await AddAsync(_alpha, "key-alpha");
+        _secrets.MakeUnreadable(ServerRegistryService.TokenKey(alpha));
+
+        Assert.Equal(0, await _watcher.RefreshAsync());
+        Assert.Equal(0, _alpha.Connections);
+    }
 }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useAppStore, type ServerAttentionItem } from '../../store';
+import { useAppStore, projectKey, type ServerAttentionItem } from '../../store';
 import type { AttentionKind } from '../../signalr/types';
 import { PermissionCard } from '../Project/PermissionCard';
 import { ReplyInput } from '../Project/ReplyInput';
@@ -32,12 +32,32 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const replyAndResume = useAppStore(s => s.replyAndResume);
   const respondToPermission = useAppStore(s => s.respondToPermission);
   const markSeen = useAppStore(s => s.markSeen);
-  const [reply, setReply] = useState('');
+  const { serverId, ProjectId: projectId, Kind: kind } = item;
+  // Held in the store, so a remount of this item (a layout change, the pane collapsed) keeps it
+  const draft = useAppStore(s => s.inboxDrafts[projectKey(serverId, projectId)]);
+  const setInboxDraft = useAppStore(s => s.setInboxDraft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Held from before its server was lost: still answerable once it is back, and a reply meanwhile says it is offline (#221)
+  const offline = useAppStore(s => s.getConnection(serverId)?.connectionState !== 'connected');
 
-  const { serverId, ProjectId: projectId, Kind: kind } = item;
+  // The project needs the user anew (another kind, or the same kind again): nothing of the last one carries over (#218)
+  const need = `${kind} ${item.Since}`;
+  const [needSeen, setNeedSeen] = useState(need);
+  if (need !== needSeen) {
+    setNeedSeen(need);
+    setBusy(false);
+    setError(null);
+  }
+
   const permission = kind === 'Permission' ? item.Permission ?? null : null;
+  const reply = draft?.reply ?? '';
+  const setReply = (text: string) => setInboxDraft(serverId, projectId, { reply: text });
+  // A reason typed for a request answered elsewhere is not the next request's (#218)
+  const denyMessage = permission && draft?.deny?.requestId === permission.RequestId ? draft.deny.message : '';
+  const setDenyMessage = (text: string) => {
+    if (permission) setInboxDraft(serverId, projectId, { deny: text ? { requestId: permission.RequestId, message: text } : null });
+  };
   // A single AskUserQuestion is answered by a reply with the chosen label
   const question = kind === 'Question' && item.Question?.Questions.length === 1 ? item.Question.Questions[0] : null;
   const canReply = REPLY_KINDS.has(kind) || (kind === 'Permission' && !permission);
@@ -64,22 +84,30 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
 
   const answerPermission = async (allow: boolean, message?: string) => {
     if (!permission) return;
-    await run(() => respondToPermission(serverId, projectId, permission.RequestId, { Allow: allow, Message: message ?? null }));
+    if (await run(() => respondToPermission(serverId, projectId, permission.RequestId, { Allow: allow, Message: message ?? null }))) setDenyMessage('');
   };
 
-  const meta = [item.Profile && item.Profile !== 'Default' ? item.Profile : null, serverName, `waiting ${waitingFor(item.Since, now)}`]
+  const open = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // A clicked button keeps the focus (Chromium on Windows, WebView2), and beside the open project this one
+    // stays: let go of it, so its question's keys, which are the prompt's or the page's (#240), reach it (#218)
+    e.currentTarget.blur();
+    selectProject(serverId, projectId);
+  };
+
+  const meta = [item.Profile && item.Profile !== 'Default' ? item.Profile : null, serverName, offline ? 'offline' : null, `waiting ${waitingFor(item.Since, now)}`]
     .filter(Boolean).join(' · ');
 
   return (
-    <article className={`inbox-item inbox-kind-${kind}${focused ? ' inbox-item-focused' : ''}`}>
-      <button className="inbox-item-header" onClick={() => selectProject(serverId, projectId)} title="Open the project">
+    <article className={`inbox-item inbox-kind-${kind}${focused ? ' inbox-item-focused' : ''}${offline ? ' inbox-item-offline' : ''}`}>
+      <button className="inbox-item-header" onClick={open} title="Open the project">
         <span className="inbox-item-kind">{KIND_LABELS[kind]}</span>
         <span className="inbox-item-name">{item.ProjectName}</span>
         <span className="inbox-item-meta">{meta}</span>
       </button>
 
       {permission ? (
-        <PermissionCard permission={permission} onAnswer={answerPermission} withDenyMessage />
+        // One card per request: the next one does not start out sending, as the last one was (#218)
+        <PermissionCard key={permission.RequestId} serverId={serverId} projectId={projectId} permission={permission} onAnswer={answerPermission} denyMessage={{ value: denyMessage, onChange: setDenyMessage }} />
       ) : (
         <div className="inbox-item-text">{item.Text}</div>
       )}

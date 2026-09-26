@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 # Per-project: remove git worktree and local branch (only if all changes are pushed)
 $barePath = Join-Path $env:GODMODE_ROOT_PATH "GodMode.git"
 $projectPath = $env:GODMODE_PROJECT_PATH
-$projectId = $env:GODMODE_PROJECT_ID
+$projectId = $env:GODMODE_PROJECT_FOLDER
 
 if ($env:GODMODE_FORCE -ne "true") {
     # Check for uncommitted changes

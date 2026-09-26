@@ -1,17 +1,16 @@
 import { useEffect, useState } from 'react';
-import { useAppStore, type ActivePage } from '../store';
+import { useAppStore, projectKey, type ActivePage } from '../store';
 import { Sidebar, SidebarHeader, SidebarFooter } from './Sidebar/Sidebar';
 import { ProjectView } from './Project/ProjectView';
 import { TileGrid } from './Tiles/TileGrid';
 import { AddServer } from './Servers/AddServer';
 import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
-import { ProfileSettings } from './Profiles/ProfileSettings';
 import { AppSettings } from './AppSettings';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Inbox, HomeTabBar } from './Inbox/Inbox';
 import { useAttentionTitle } from './Inbox/useAttentionTitle';
-import { goBack, useHashRoute } from '../routing';
+import { formatRoute, goBack, useHashRoute } from '../routing';
 import { subscribeAttentionLinks } from '../services/hostApi';
 import './Shell.css';
 
@@ -29,19 +28,39 @@ function PageContent({ page }: { page: ActivePage }) {
         <button className="btn btn-secondary btn-sm" onClick={() => goBack(closePage)}>← Back</button>
       </div>
       <div className="page-body">
-        {page.type === 'profileSettings' && <ProfileSettings />}
         {page.type === 'appSettings' && <AppSettings />}
         {page.type === 'addServer' && <AddServer />}
         {page.type === 'editServer' && <EditServer serverId={page.serverId} />}
-        {page.type === 'createProject' && <CreateProject />}
+        {/* One form per route: another root's "+" while the page is open shows that root's form */}
+        {page.type === 'createProject' && <CreateProject key={formatRoute({ screen: 'page', page })} context={page.context} />}
       </div>
     </div>
   );
 }
 
+/**
+ * The phone project view's own connection indicator (#221): its server's, while it is not connected,
+ * which the sidebar's (not shown here) would say. A tap retries at once.
+ */
+function ProjectConnection({ serverId }: { serverId: string }) {
+  const conn = useAppStore(s => s.getConnection(serverId));
+  const retryServers = useAppStore(s => s.retryServers);
+  if (!conn || conn.connectionState === 'connected') return null;
+  const { connectionState: state, serverInfo: { Name: name } } = conn;
+  const label = state === 'disconnected' ? 'Offline' : state === 'connecting' ? 'Connecting…' : 'Reconnecting…';
+  return (
+    <button className="connection-indicator-item project-connection" onClick={retryServers}
+      title={`${name}: ${label} Tap to retry now.`}>
+      <span className={`server-dot ${state}`} />
+      <span className="connection-indicator-name">{label}</span>
+    </button>
+  );
+}
+
 export function Shell() {
   const selectedProject = useAppStore(s => s.selectedProject);
-  const isTileView = useAppStore(s => s.isTileView);
+  // Tiles are a wide screen's: a phone shows its own home, the inbox, whatever the toggle last said (#218)
+  const isTileView = useAppStore(s => s.isTileView && !s.isMobile);
   const clearSelection = useAppStore(s => s.clearSelection);
   const activePage = useAppStore(s => s.activePage);
   const isMobile = useAppStore(s => s.isMobile);
@@ -62,14 +81,18 @@ export function Shell() {
     localStorage.setItem('godmode-theme', theme);
   }, [theme]);
 
-  // Mobile detection
+  // Mobile detection. A wide screen shows the list beside the inbox, so it has no list screen for the URL to name (#218)
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    const apply = (mobile: boolean) => {
+      setIsMobile(mobile);
+      if (!mobile) setHomeView('inbox');
+    };
+    apply(mq.matches);
+    const handler = (e: MediaQueryListEvent) => apply(e.matches);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
-  }, [setIsMobile]);
+  }, [setIsMobile, setHomeView]);
 
   // One tree for every layout: the slots below keep their positions whichever layout shows,
   // so crossing the phone breakpoint re-renders a page or a project instead of remounting it
@@ -80,19 +103,20 @@ export function Shell() {
   // On a phone home is the inbox, or the project list, with nothing beside it
   const phoneHome = isMobile && !showsPage && !project && !isTileView;
 
+  // The inbox is inside the sidebar in both layouts: beside the list on a wide screen, the phone's home in place of it
   const sidebarSlot = isTileView
     ? (!isMobile || showsTiles) && <SidebarHeader />
-    : !isMobile ? <div className="shell-sidebar"><Sidebar withInbox /></div>
-    : phoneHome && (
-      <div className="shell-sidebar shell-mobile-home">
-        {homeView === 'inbox' ? <><SidebarHeader /><Inbox variant="screen" /></> : <Sidebar />}
-        <HomeTabBar tab={homeView} onChange={setHomeView} />
+    : (!isMobile || phoneHome) && (
+      <div className={isMobile ? 'shell-sidebar shell-mobile-home' : 'shell-sidebar'}>
+        <Sidebar inbox={!isMobile ? 'pane' : homeView === 'inbox' ? 'screen' : undefined} />
+        {isMobile && <HomeTabBar tab={homeView} onChange={setHomeView} />}
       </div>
     );
   const footerSlot = isTileView && (!isMobile || showsTiles) && <SidebarFooter />;
   const backBar = project && (isMobile || isTileView) && (
     <div className={isMobile ? 'page-back-bar' : 'shell-back-bar'}>
       <button className="btn btn-secondary btn-sm" onClick={() => goBack(clearSelection)}>{isMobile ? '← Back' : '← Tiles'}</button>
+      {isMobile && <ProjectConnection serverId={project.serverId} />}
     </div>
   );
 
@@ -106,7 +130,8 @@ export function Shell() {
         <div className={contentClass}>
           {backBar}
           {activePage && <PageContent page={activePage} />}
-          {project && <ProjectView serverId={project.serverId} projectId={project.projectId} />}
+          {/* A project's own: what is typed for one project is never sent to the next (#240) */}
+          {project && <ProjectView key={projectKey(project.serverId, project.projectId)} serverId={project.serverId} projectId={project.projectId} />}
           {showsTiles && !isMobile && <Inbox variant="pane" />}
           {showsTiles && <TileGrid />}
           {!isMobile && !isTileView && !showsPage && !project && (

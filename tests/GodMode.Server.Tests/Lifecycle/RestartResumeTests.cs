@@ -61,8 +61,8 @@ public class RestartResumeTests
     }
 
     /// <summary>
-    /// The resume a restart makes is the resume the user makes (#164): the same arguments and
-    /// environment (bridge, <c>GODMODE_*</c>, the profile's), except the token each launch is issued afresh.
+    /// The resume a restart makes is the resume the user makes (#164): the same arguments,
+    /// environment (the profile's) and MCP config, except the token each launch is issued afresh.
     /// </summary>
     [Fact]
     public async Task ResumeAfterARestart_LaunchesAsAResumeByTheUser()
@@ -78,8 +78,8 @@ public class RestartResumeTests
         var byUser = await harness.WaitForLaunchAsync(created.Id, _ => true, index: 2);
 
         Assert.Equal(byUser.Argv, afterRestart.Argv);
-        Assert.Equal(WithoutToken(byUser.Environment), WithoutToken(afterRestart.Environment));
-        Assert.Contains("GODMODE_SERVER_URL", afterRestart.Environment.Keys);
+        Assert.Equal(Sorted(byUser.Environment), Sorted(afterRestart.Environment));
+        Assert.Equal(GodModeMcpEntry.Of(byUser).WithoutToken(), GodModeMcpEntry.Of(afterRestart).WithoutToken());
         Assert.Equal(byUser.Environment["CLAUDE_CONFIG_DIR"], afterRestart.Environment["CLAUDE_CONFIG_DIR"]);
     }
 
@@ -238,13 +238,21 @@ public class RestartResumeTests
             Assert.Equal(CreateAction.DefaultResumePrompt, Prompt(await harness.WaitForStdinAsync(project.Id, index: 1)));
     }
 
-    /// <summary>A resumed claude that holds its slot a while: it starts its session 3 s after its first input.</summary>
-    private static FakeScript SlowToStart() => new FakeScript().AwaitStdin().Sleep(3000).EmitInit().AwaitStdin();
+    /// <summary>
+    /// A resumed claude that holds its slot until the test lets it go (<see cref="LetResumesStart"/>):
+    /// it starts its session then, after its first input.
+    /// </summary>
+    private static FakeScript HeldAtStart(LifecycleHarness harness) =>
+        new FakeScript().AwaitStdin().AwaitFile(ResumesMayStart(harness)).EmitInit().AwaitStdin();
+
+    private static string ResumesMayStart(LifecycleHarness harness) => Path.Combine(harness.RootPath, "resumes-may-start");
+
+    private static void LetResumesStart(LifecycleHarness harness) => File.WriteAllText(ResumesMayStart(harness), "");
 
     /// <summary>Restarts without carrying on, then starts carrying on and waits until 3 projects have their resume launched.</summary>
     private static async Task<Task> RestartResumingAsync(LifecycleHarness harness, IReadOnlyList<ProjectStatus> projects)
     {
-        harness.UseScript(SlowToStart());
+        harness.UseScript(HeldAtStart(harness));
         await harness.RestartAsync(resume: false);
         var resuming = harness.Projects.ResumeInterruptedProjectsAsync();
         await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Resumed(harness, projects).Count() == 3), null,
@@ -271,6 +279,7 @@ public class RestartResumeTests
         Assert.Equal(3, Resumed(harness, created).Count());
         var queued = Assert.Single(created.Except(Resumed(harness, created)));
         await harness.Projects.StopProjectAsync(queued.Id);
+        LetResumesStart(harness);
         await resuming.WaitAsync(LifecycleHarness.DefaultTimeout);
 
         Assert.Single(harness.Launches(queued.Id));
@@ -307,24 +316,6 @@ public class RestartResumeTests
         await harness.RestartAsync();
         foreach (var project in created)
             Assert.Equal(CreateAction.DefaultResumePrompt, Prompt(await harness.WaitForStdinAsync(project.Id, index: before[project.Id])));
-    }
-
-    /// <summary>Archived and restored by the user: it was not running when restored, and the next start does not resume it.</summary>
-    [Fact]
-    public async Task ArchivedAndRestored_IsNotResumed()
-    {
-        await using var harness = new LifecycleHarness(Working());
-        var created = await CreateWorkingAsync(harness);
-        await harness.RestartAsync(resume: false);
-        Assert.Equal(ProjectState.Running, (await harness.Projects.GetStatusAsync(created.Id)).StateAtShutdown);
-
-        await harness.Projects.ArchiveProjectAsync(created.Id);
-        await harness.Projects.UnarchiveProjectAsync(created.Id);
-        await harness.RestartAsync();
-
-        Assert.Equal(ProjectState.Stopped, (await harness.Projects.GetStatusAsync(created.Id)).State);
-        Assert.Null(harness.ReadStatusFile(created.Id).StateAtShutdown);
-        Assert.Single(harness.Launches(created.Id));
     }
 
     /// <summary>
@@ -386,6 +377,6 @@ public class RestartResumeTests
             () => Task.FromResult(harness.ReadOutputFile(projectId).Split(text).Length - 1 >= count), null,
             () => $"output.jsonl does not have \"{text}\" {count} times.\n{harness.Describe(projectId)}");
 
-    private static SortedDictionary<string, string> WithoutToken(IReadOnlyDictionary<string, string> environment) =>
-        new(environment.Where(e => e.Key != "GODMODE_PROJECT_TOKEN").ToDictionary(e => e.Key, e => e.Value), StringComparer.Ordinal);
+    private static SortedDictionary<string, string> Sorted(IReadOnlyDictionary<string, string> environment) =>
+        new(environment.ToDictionary(e => e.Key, e => e.Value), StringComparer.Ordinal);
 }

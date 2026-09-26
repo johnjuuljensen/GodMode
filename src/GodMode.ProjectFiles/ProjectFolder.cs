@@ -15,9 +15,46 @@ public sealed class ProjectFolder : IDisposable
     private const string StatusFileName = "status.json";
     private const string InputFileName = "input.jsonl";
     private const string OutputFileName = "output.jsonl";
-    private const string SessionIdFileName = "session-id";
     private const string MetricsFileName = "metrics.html";
     private const string GitIgnoreFileName = ".gitignore";
+    private const string IgnoreEverything = "*";
+    private const string GitIgnoreContent = $"# Exclude all GodMode state files\n{IgnoreEverything}\n";
+
+    /// <summary>A root's own config and scripts: <c>{root}/.godmode-root/</c>.</summary>
+    public const string RootConfigFolderName = ".godmode-root";
+
+    /// <summary>A root's script logs and result files: <c>{root}/logs/</c>.</summary>
+    public const string ScriptLogsFolderName = "logs";
+
+    /// <summary>Where archived projects went before archiving was removed; a leftover can still be on disk.</summary>
+    public const string ArchivedFolderName = ".archived";
+
+    /// <summary>
+    /// The folders a root keeps for itself at its top level, which no project may be: a delete of
+    /// the project would delete the root's config or every script log. Compared ignoring case, and
+    /// trailing dots and spaces, as Windows compares folder names (refusing <c>LOGS</c> on Linux too).
+    /// </summary>
+    public static readonly IReadOnlySet<string> ReservedFolderNames =
+        new HashSet<string>([RootConfigFolderName, ScriptLogsFolderName, ArchivedFolderName], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The names Windows keeps for devices: a folder of one (with any extension, <c>nul.txt</c>) is
+    /// the device, not a folder. Refused on every OS, as the root's own folders are, so a root moves
+    /// between hosts with its projects. Compared ignoring case.
+    /// </summary>
+    private static readonly IReadOnlySet<string> WindowsDeviceNames = new HashSet<string>(
+        ["CON", "PRN", "AUX", "NUL",
+            .. Enumerable.Range(0, 10).SelectMany(n => new[] { $"COM{n}", $"LPT{n}" }),
+            // With a superscript digit too
+            "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"],
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether <paramref name="folderName"/> is one of the <see cref="ReservedFolderNames"/>, compared
+    /// as Windows compares folder names: ignoring case, and trailing dots and spaces.
+    /// </summary>
+    public static bool IsReservedFolderName(string folderName) =>
+        ReservedFolderNames.Contains(folderName.TrimEnd('.', ' '));
 
     private readonly string _projectPath;
     private readonly JsonlWriter _inputWriter;
@@ -31,7 +68,7 @@ public sealed class ProjectFolder : IDisposable
     public string ProjectPath => _projectPath;
 
     /// <summary>
-    /// Gets the project ID (folder name).
+    /// Gets the project's folder name. The server's project ID is <c>{profile}/{root}/{folder}</c>.
     /// </summary>
     public string ProjectId => Path.GetFileName(_projectPath);
 
@@ -54,11 +91,6 @@ public sealed class ProjectFolder : IDisposable
     /// Gets the path to the output.jsonl file.
     /// </summary>
     public string OutputFilePath => Path.Combine(GodModePath, OutputFileName);
-
-    /// <summary>
-    /// Gets the path to the session-id file.
-    /// </summary>
-    public string SessionIdFilePath => Path.Combine(GodModePath, SessionIdFileName);
 
     /// <summary>
     /// Gets the path to the metrics.html file.
@@ -119,6 +151,10 @@ public sealed class ProjectFolder : IDisposable
     /// empty, no path separators or other invalid characters, and not made of dots and spaces only.
     /// <c>.</c> and <c>..</c> are the root and its parent, and Windows strips trailing dots and
     /// spaces, so <c>...</c> is the root too; a delete of such a project deletes that recursively.
+    /// Nor may it be one of the <see cref="ReservedFolderNames"/>. Nor may it end in a dot or a space,
+    /// which Windows drops: <c>foo.</c> would be the folder <c>foo</c>, another project's, and its ID
+    /// would change at the next recovery. Nor a Windows device name (<c>CON</c>, <c>NUL</c>,
+    /// <c>COM1</c>), which is no folder there. Both are refused on every OS.
     /// </summary>
     public static void ValidateFolderName(string? folderName, string paramName = "folderName")
     {
@@ -130,6 +166,37 @@ public sealed class ProjectFolder : IDisposable
 
         if (folderName.All(c => c is '.' or ' '))
             throw new ArgumentException($"'{folderName}' is not a valid project folder name.", paramName);
+
+        if (IsReservedFolderName(folderName))
+            throw new ArgumentException($"'{folderName}' is a folder the project root uses for itself.", paramName);
+
+        if (folderName[^1] is '.' or ' ')
+            throw new ArgumentException($"Project folder name '{folderName}' ends in a dot or a space, which Windows drops from a folder name.", paramName);
+
+        if (WindowsDeviceNames.Contains(folderName.Split('.')[0].TrimEnd(' ')))
+            throw new ArgumentException($"'{folderName}' is a Windows device name, not a folder name.", paramName);
+    }
+
+    /// <summary>
+    /// Makes sure <c>.godmode/.gitignore</c> keeps everything in <c>.godmode</c> out of git (its MCP
+    /// config holds the project token while claude runs): written if missing, and the rule appended,
+    /// keeping its lines, to one that lacks it (a checkout's own). Creates <c>.godmode</c> if need be.
+    /// </summary>
+    public static void EnsureGitIgnore(string projectPath)
+    {
+        var godModePath = Path.Combine(projectPath, GodModeDirectoryName);
+        Directory.CreateDirectory(godModePath);
+        var gitIgnorePath = Path.Combine(godModePath, GitIgnoreFileName);
+        if (!File.Exists(gitIgnorePath))
+        {
+            File.WriteAllText(gitIgnorePath, GitIgnoreContent, Encoding.UTF8);
+            return;
+        }
+
+        var existing = File.ReadAllText(gitIgnorePath);
+        if (existing.Split('\n').Any(line => line.Trim() == IgnoreEverything)) return;
+        var separator = existing.Length == 0 || existing.EndsWith('\n') ? "" : "\n";
+        File.AppendAllText(gitIgnorePath, separator + GitIgnoreContent);
     }
 
     private static ProjectFolder InitializeProjectFolder(string projectPath, string projectId, string name)
@@ -144,9 +211,7 @@ public sealed class ProjectFolder : IDisposable
             File.SetAttributes(godModePath, File.GetAttributes(godModePath) | FileAttributes.Hidden);
         }
 
-        // Create .gitignore in .godmode to exclude all state files from git
-        var gitIgnorePath = Path.Combine(godModePath, GitIgnoreFileName);
-        File.WriteAllText(gitIgnorePath, "# Exclude all GodMode state files\n*\n", Encoding.UTF8);
+        EnsureGitIgnore(projectPath);
 
         // Create initial status
         var now = DateTime.UtcNow;
@@ -382,60 +447,6 @@ public sealed class ProjectFolder : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return JsonlReader.ReadFrom(OutputFilePath, offset);
-    }
-
-    /// <summary>
-    /// Gets the Claude session ID from the session-id file.
-    /// </summary>
-    /// <returns>The session ID, or null if file doesn't exist.</returns>
-    public string? GetSessionId()
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        if (!File.Exists(SessionIdFilePath))
-            return null;
-
-        return File.ReadAllText(SessionIdFilePath, Encoding.UTF8).Trim();
-    }
-
-    /// <summary>
-    /// Gets the Claude session ID from the session-id file asynchronously.
-    /// </summary>
-    /// <returns>The session ID, or null if file doesn't exist.</returns>
-    public async Task<string?> GetSessionIdAsync(CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        if (!File.Exists(SessionIdFilePath))
-            return null;
-
-        var content = await File.ReadAllTextAsync(SessionIdFilePath, Encoding.UTF8, cancellationToken);
-        return content.Trim();
-    }
-
-    /// <summary>
-    /// Sets the Claude session ID in the session-id file.
-    /// </summary>
-    /// <param name="sessionId">The session ID to save.</param>
-    public void SetSessionId(string sessionId)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(sessionId);
-
-        File.WriteAllText(SessionIdFilePath, sessionId, Encoding.UTF8);
-    }
-
-    /// <summary>
-    /// Sets the Claude session ID in the session-id file asynchronously.
-    /// </summary>
-    /// <param name="sessionId">The session ID to save.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public Task SetSessionIdAsync(string sessionId, CancellationToken cancellationToken = default)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        ArgumentNullException.ThrowIfNull(sessionId);
-
-        return File.WriteAllTextAsync(SessionIdFilePath, sessionId, Encoding.UTF8, cancellationToken);
     }
 
     /// <summary>

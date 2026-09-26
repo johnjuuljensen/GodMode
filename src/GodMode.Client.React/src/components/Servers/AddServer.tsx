@@ -12,22 +12,28 @@ export function AddServer() {
   const [username, setUsername] = useState('');
   const [accessToken, setAccessToken] = useState('');
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Every GodMode server requires its API key, a local one included; a GitHub account, its token
+  const complete = accessToken.trim() !== '' && (type === 'local' ? url.trim() !== '' : username.trim() !== '');
 
   const handleSave = async () => {
-    if (type === 'local' && !url.trim()) return;
-    if (type === 'github' && (!username.trim() || !accessToken.trim())) return;
+    if (!complete) return;
 
     setSaving(true);
+    setError(null);
     try {
       await addServer({
         Type: type,
         Url: type === 'local' ? url.trim() : '',
         DisplayName: displayName.trim() || (type === 'local' ? url.trim() : `GitHub (${username.trim()})`),
         Username: type === 'github' ? username.trim() : null,
-        AccessToken: accessToken.trim() || null,
+        AccessToken: accessToken.trim(),
       });
     } catch (err) {
       console.error('Failed to add server:', err);
+      // The shell's own words, e.g. that secure storage would not keep the token
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }
@@ -60,8 +66,9 @@ export function AddServer() {
             <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="My Server" />
           </div>
           <div className="form-group">
-            <label>Access Token (optional)</label>
-            <input type="password" value={accessToken} onChange={e => setAccessToken(e.target.value)} />
+            <label>API Key</label>
+            <input type="password" value={accessToken} onChange={e => setAccessToken(e.target.value)}
+              placeholder="Printed by the server on its first start, or its Authentication:ApiKey" />
           </div>
         </>
       ) : (
@@ -81,8 +88,10 @@ export function AddServer() {
         </>
       )}
 
+      {error && <div className="settings-error" role="alert">{error}</div>}
+
       <div className="settings-form-actions">
-        <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+        <button className="btn btn-primary" onClick={handleSave} disabled={saving || !complete}>
           {saving ? 'Adding...' : 'Add Server'}
         </button>
       </div>
