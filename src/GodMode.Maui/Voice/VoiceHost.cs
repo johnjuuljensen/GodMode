@@ -126,8 +126,16 @@ public sealed class VoiceHost : IVoiceEvents
             if (_running is { } running)
             {
                 _running = null;
-                await running.DisposeAsync();
-                _logger.LogInformation("Voice stopped");
+                try
+                {
+                    await running.DisposeAsync();
+                    _logger.LogInformation("Voice stopped");
+                }
+                catch (Exception ex)
+                {
+                    // Stopped all the same: the audio and the connections are let go of whatever the session did
+                    _logger.LogWarning(ex, "Voice stopped; the session's teardown failed");
+                }
             }
             StateChanged(VoiceState.Off);
             return Status;
@@ -233,11 +241,21 @@ public sealed class VoiceHost : IVoiceEvents
 
     private sealed record Running(VoiceSession Session, IVoiceAudio Audio, HubServers Servers) : IAsyncDisposable
     {
+        /// <summary>
+        /// The audio goes back even when the session's teardown throws (VoiceBot's ElevenLabs engine, disposed twice,
+        /// does): on Android it holds the microphone, the foreground service and the audio mode.
+        /// </summary>
         public async ValueTask DisposeAsync()
         {
-            await Session.DisposeAsync();
-            Audio.Dispose();
-            await Servers.DisposeAsync();
+            try
+            {
+                await Session.DisposeAsync();
+            }
+            finally
+            {
+                Audio.Dispose();
+                await Servers.DisposeAsync();
+            }
         }
     }
 }
