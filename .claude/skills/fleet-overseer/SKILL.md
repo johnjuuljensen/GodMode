@@ -135,8 +135,8 @@ Group the runnable issues into lanes that do not share files, run **one worker p
 within a lane rather than widening it. **Lanes are about who edits what at the same time — never a
 licence to split one result across several issues.**
 
-The natural lanes here are the server (`src/GodMode.Server`, with `GodMode.ProjectFiles` and
-`src/GodMode.McpBridge`), the React client (`src/GodMode.Client.React`), and the MAUI shell
+The natural lanes here are the server (`src/GodMode.Server`, with `GodMode.ProjectFiles`; it also
+hosts the sessions' MCP endpoint), the React client (`src/GodMode.Client.React`), and the MAUI shell
 (`src/GodMode.Maui`, `GodMode.ClientBase`, `SignalR.Proxy`). **The hub contract is the one seam they
 all share**: `IProjectHub` / `IProjectHubClient` and the models in `src/GodMode.Shared` are mirrored
 by hand in the client's `signalr/types.ts` and `signalr/hub.ts`. A change to the contract edits both sides, so give it
@@ -320,9 +320,9 @@ cd src/GodMode.Client.React; npm run lint; npm test
 ```
 
 **The base is not green on this gate**, so "green" means **no new failures against the base**. On
-2026-09-24 the epic #168 branch (`41d60c4`) built with 0 errors, passed all 278 `GodMode.Server.Tests`,
-and had 7 errors and 2 warnings from `npm run lint` in `src/GodMode.Client.React`. It had no `npm test`:
-Vitest arrived with #169, whose merge brought 14 tests, all passing. A build under load can print MSBuild `PLUGIN_TIMINGS`
+2026-09-26 `master` (`2c28d97`, the merge of epic #243) built with 0 errors and 0 warnings, passed
+483/0/0 `GodMode.Server.Tests`, 99/0/0 `GodMode.Relay.Tests` and 180 `npm test`, and had 3 errors
+from `npm run lint` in `src/GodMode.Client.React`. A build under load can print MSBuild `PLUGIN_TIMINGS`
 warnings; they are about the machine, not the code. A body states the base's numbers
 next to its own. A pull request that removes a baseline failure says so. One that adds a failure is
 red, whatever else the gate shows.

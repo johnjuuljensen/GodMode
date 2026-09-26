@@ -1,6 +1,6 @@
 # GodMode.ProjectFiles
 
-A .NET 9 class library providing utilities for working with project folders and their standard file structures in the Claude Autonomous Development System.
+A .NET 10 class library providing utilities for working with project folders and their standard file structures in the Claude Autonomous Development System.
 
 ## Overview
 
@@ -8,18 +8,22 @@ This library manages the standardized folder structure for Claude Code projects,
 
 ## Project Folder Structure
 
-Each project is represented as a folder with the following structure:
+Each project is a folder inside its root. Claude works in the folder itself, and GodMode keeps its state in `.godmode/` (the project's ID is `{profile}/{root}/{project-folder}`):
 
 ```
-/projects/{project-id}/
-├── status.json           # Current state, metadata, metrics
-├── input.jsonl          # Append-only log of user inputs
-├── output.jsonl         # Append-only log of Claude outputs
-├── metrics.html         # Optional, generated metrics visualization
-├── session-id           # Claude session ID for resumption
-└── work/                # Working directory for Claude
-    └── (project files)
+{ProjectRootsDir}/{root}/{project-folder}/
+├── .godmode/
+│   ├── status.json        # Current state, metadata, metrics
+│   ├── settings.json      # Per-project settings (skip-permissions, permission mode, action)
+│   ├── input.jsonl        # Append-only log of user inputs
+│   ├── output.jsonl       # Append-only log of Claude outputs
+│   ├── output-generation  # Changes when output.jsonl starts over
+│   ├── session-id         # Claude session ID for resumption
+│   └── .gitignore         # Keeps .godmode out of git
+└── (project files)        # Claude's working directory
 ```
+
+The usage examples below predate that layout; check `ProjectFolder` for the current API.
 
 ## Core Components
 
