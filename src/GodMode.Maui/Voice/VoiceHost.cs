@@ -58,7 +58,7 @@ public sealed class VoiceHost : IVoiceEvents
     public async Task<VoiceStatus> StartAsync()
     {
         if (VoiceAudio.Open is not { } open)
-            throw new PlatformNotSupportedException("Voice is available in the Windows app only");
+            throw new PlatformNotSupportedException("Voice is available in the Windows and Android apps only");
 
         await _switching.WaitAsync();
         try
@@ -81,7 +81,7 @@ public sealed class VoiceHost : IVoiceEvents
             HubServers? servers = null;
             try
             {
-                audio = open(settings.EchoCancellation);
+                audio = await open(new VoiceAudioRequest(settings.EchoCancellation, AudioLost));
                 servers = new HubServers(_directory, _loggerFactory);
                 var hub = servers;
                 var session = await VoiceSession.StartAsync(new VoiceSessionSetup
@@ -147,6 +147,16 @@ public sealed class VoiceHost : IVoiceEvents
 
     /// <summary>The network changed: make each connection again.</summary>
     public void NetworkChanged() => _running?.Servers.Reconnect();
+
+    /// <summary>The platform took the audio (a phone call, on Android): stop, and leave the reason on show.</summary>
+    private void AudioLost(string why) => _ = StopForAsync(why);
+
+    private async Task StopForAsync(string why)
+    {
+        _logger.LogWarning("Voice stops: {Why}", why);
+        await StopAsync();
+        Error(SessionService.Session, SessionErrorKind.ServiceError, why);
+    }
 
     /// <summary>A session that ends by itself (its transcription source ended, say) is stopped as if asked.</summary>
     private async Task WatchAsync(Running running)

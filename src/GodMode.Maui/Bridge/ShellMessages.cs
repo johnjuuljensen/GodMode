@@ -77,7 +77,7 @@ public enum VoiceSpeaker { User, Bot }
 public sealed record VoiceLine(VoiceSpeaker Speaker, string Text, bool Partial = false);
 
 /// <summary>
-/// Voice in this app: <paramref name="Available"/> is false where the platform has no voice (only Windows has it), and
+/// Voice in this app: <paramref name="Available"/> is false where the platform has no voice (Windows and Android have it), and
 /// <paramref name="Lines"/> is the conversation so far, so a page loaded again shows it.
 /// </summary>
 public sealed record VoiceStatus(bool Available, VoiceState State, IReadOnlyList<VoiceLine> Lines, VoiceErrorPayload? Error = null);

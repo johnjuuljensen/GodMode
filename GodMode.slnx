@@ -12,6 +12,7 @@
     <Project Path="external/VoiceBot/src/VoiceBot.AI/VoiceBot.AI.csproj" />
     <Project Path="external/VoiceBot/src/Providers/VoiceBot.Providers.Anthropic/VoiceBot.Providers.Anthropic.csproj" />
     <Project Path="external/VoiceBot/src/Providers/VoiceBot.Providers.ElevenLabs/VoiceBot.Providers.ElevenLabs.csproj" />
+    <Project Path="external/VoiceBot/src/Providers/VoiceBot.Providers.Android/VoiceBot.Providers.Android.csproj" />
     <Project Path="external/VoiceBot/src/Providers/VoiceBot.Providers.Windows/VoiceBot.Providers.Windows.csproj" />
   </Folder>
   <Folder Name="/src/">
