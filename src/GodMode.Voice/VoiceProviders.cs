@@ -27,7 +27,8 @@ public sealed class CloudVoiceProviders(VoiceKeys keys) : IVoiceProviders
 
     /// <summary>The keys voice cannot start without, by what the settings call them; empty when both are set.</summary>
     public IReadOnlyList<string> MissingKeys =>
-        [.. new[] { ("ElevenLabs", keys.ElevenLabs), ("Claude", keys.Anthropic) }.Where(k => string.IsNullOrEmpty(k.Item2)).Select(k => k.Item1)];
+        [.. new[] { (Name: "ElevenLabs", Key: keys.ElevenLabs), (Name: "Claude", Key: keys.Anthropic) }
+            .Where(k => string.IsNullOrEmpty(k.Key)).Select(k => k.Name)];
 
     public void Register(IServiceCollection services, VoiceSettings settings, ElevenLabsLanguageOptions language)
     {
