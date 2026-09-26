@@ -69,7 +69,8 @@ cd src/GodMode.Client.React && npm run dev
 - **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React
 - **GodMode.ProjectFiles** — File system utilities for project folders (status.json, JSONL streams)
 - **SignalR.Proxy** — SignalR WebSocket relay used by MAUI for multi-server connectivity
-- **GodMode.Server.Tests** — xUnit tests for GodMode.Server (`tests/`)
+- **GodMode.Server.Tests** — xUnit tests for GodMode.Server (`tests/`), driving real sessions against `tests/GodMode.FakeClaude`, a scripted stand-in for `claude`
+- **GodMode.Relay.Tests** — xUnit tests for the MAUI relay, server registry and ClientBase (`tests/`)
 - **GodMode.TypeGen** — build-time generator of the React client's hub types from GodMode.Shared (`tools/`)
 
 ### Key Patterns
@@ -83,7 +84,7 @@ cd src/GodMode.Client.React && npm run dev
 
 **Config-Driven Project Roots (Multi-File)**
 - A root is a subdirectory of `ProjectRootsDir` (appsettings, default `roots`) that contains a `.godmode-root/` folder with config files
-- `config.json` defines base/shared config (profileName, prepare, delete, environment, claudeArgs)
+- `config.json` defines base/shared config (profileName, prepare, delete, status, environment, claudeArgs, model, permissionMode, allowSkipPermissions)
 - Roots and profiles (`{ProjectRootsDir}/.profiles/`) are maintained by hand on the host: no hub method writes config, and the server archives nothing
 - GodMode gives a session one MCP server, the server's own `/mcp` endpoint, whose only tool is the permission prompt, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
 - `config.{action}.json` files define per-action overlays (merged with base)
@@ -102,7 +103,7 @@ cd src/GodMode.Client.React && npm run dev
 
 **Process Management**
 - `ClaudeProcessManager` uses `System.Diagnostics.Process` directly (not CliWrap) for proper stdin handling
-- `--dangerously-skip-permissions` is per-project (stored in `.godmode/settings.json`), not global
+- `--dangerously-skip-permissions` is passed only when the project asks for it (`.godmode/settings.json`) and its root's config, read at that launch, allows it (`allowSkipPermissions`, default false, for every action of the root). Otherwise the project's stored `permissionMode` (else the root's, e.g. `auto`) applies, and approvals go to the permission prompt
 - `ClaudeProcessManager` appends each process's stdout to `.godmode/output.jsonl`, which backfills clients that subscribe later
 
 **Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
@@ -113,13 +114,14 @@ cd src/GodMode.Client.React && npm run dev
 
 ### Project Folder Structure
 ```
-/root/{project-id}/
+/root/{project-folder}/
 ├── .godmode/
 │   ├── status.json      # Current state, metrics
 │   ├── settings.json    # Per-project settings (skip-permissions, etc.)
 │   ├── input.jsonl      # User input log
 │   ├── output.jsonl     # Claude output stream
 │   ├── session-id       # Claude session ID for resumption
+│   ├── output-generation  # Changes when output.jsonl starts over, so clients drop what they hold
 │   └── .gitignore       # Excludes .godmode state from git
 └── (project files)      # Working directory for Claude
 ```
@@ -139,8 +141,9 @@ cd src/GodMode.Client.React && npm run dev
 │   │   └── create.ps1           # Action-specific create script
 │   └── scripts/                 # Shared scripts (cross-platform)
 │       ├── prepare.ps1
-│       └── delete.ps1
-└── {project-id}/                # Project folders
+│       ├── delete.ps1
+│       └── status.ps1           # Optional: reports the project's pull request as JSON
+└── {project-folder}/            # Project folders (ID {profile}/{root}/{project-folder})
 ```
 
 ### Script Constraints (Server Deployment)
@@ -189,7 +192,7 @@ The `.devcontainer/godmode-server/devcontainer.json` provisions a codespace with
 - **Binary**: `/opt/godmode-server/` (root-owned, read-only)
 - **Config**: `/opt/godmode-server/appsettings.json` (via `--contentRoot`)
 - **Roots**: `~/roots/` (`--ProjectRootsDir roots`, server CWD is `$HOME`), copied from `.devcontainer/godmode-server/roots/` in the repo
-- **Projects**: inside their root, `~/roots/<root>/<project-id>/`
+- **Projects**: inside their root, `~/roots/<root>/<project-folder>/`
 - **Logs**: `~/.godmode-logs/`
 - **Claude Code**: `~/.local/bin/claude` (added to PATH in postStartCommand)
 
