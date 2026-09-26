@@ -99,7 +99,9 @@ public sealed class VoiceService : Service
         {
             // SecurityException on Android 14 without RECORD_AUDIO, or started from the background
             logger.LogWarning("Voice service could not go to the foreground: {Error}", ex.Message);
-            started?.TrySetException(new InvalidOperationException($"Voice could not start its service: {ex.Message}", ex));
+            started?.TrySetException(new InvalidOperationException(ex is Java.Lang.SecurityException
+                ? "Android lets voice start only while GodMode is on screen, with the microphone allowed"
+                : $"Voice could not start its service: {ex.Message}", ex));
             StopSelf();
         }
         // After a kill the session is gone with the process, and a microphone service may not start from the background
