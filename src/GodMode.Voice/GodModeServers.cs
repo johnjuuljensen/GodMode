@@ -53,6 +53,7 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
     private readonly ServerConnections _connections;
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<string, string> _names = new();
+    private readonly ConcurrentDictionary<string, byte> _listed = new();
 
     public HubServers(IServerDirectory directory, ILoggerFactory loggerFactory, TimeSpan? retryDelay = null, TimeSpan? maxRetryDelay = null)
     {
@@ -64,6 +65,26 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
     /// <summary>Connects to the servers listed now, and lets go of those gone (<see cref="ServerConnections.RefreshAsync"/>).</summary>
     public Task<int> RefreshAsync(CancellationToken ct = default) => _connections.RefreshAsync(ct);
+
+    /// <summary>
+    /// Connects to the servers listed now, and waits until each has given its attention list, or
+    /// <paramref name="wait"/> has passed (a server that is down is not waited for longer).
+    /// </summary>
+    public async Task ConnectAsync(TimeSpan wait, CancellationToken ct = default)
+    {
+        var servers = await RefreshAsync(ct);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(wait);
+        try
+        {
+            while (_listed.Count < servers)
+                await Task.Delay(50, timeout.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogInformation("Voice: {Listed} of {Servers} servers answered within {Wait}", _listed.Count, servers, wait);
+        }
+    }
 
     /// <summary>Makes every connection again (the network changed).</summary>
     public void Reconnect() => _connections.Reconnect();
@@ -124,10 +145,12 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
         _names[server.Id] = server.Name;
         var items = await connection.InvokeAsync<AttentionItem[]>(nameof(IProjectHub.GetAttention), ct);
         AttentionChanged?.Invoke(server.Id, server.Name, items);
+        _listed[server.Id] = 0;
     }
 
     void IServerConnectionHandler.OnRemoved(string serverId)
     {
+        _listed.TryRemove(serverId, out _);
         if (_names.TryRemove(serverId, out var name))
             AttentionChanged?.Invoke(serverId, name, []);
     }

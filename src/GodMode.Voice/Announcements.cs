@@ -58,7 +58,8 @@ public sealed class NeverThrowingFormatter(IAnnouncementFormatter inner, ILogger
         catch (Exception ex)
         {
             logger.LogError(ex, "Voice: the announcement formatter failed on {Count} announcement(s); saying them plainly", announcements.Count);
-            return string.Join(" ", announcements.Select(a => a.Text.Trim()).Where(t => t.Length > 0));
+            return string.Join(" ", announcements.Select(a => a.Text.Trim()).Where(t => t.Length > 0)
+                .Select(t => t[^1] is '.' or '!' or '?' ? t : t + "."));
         }
     }
 }
