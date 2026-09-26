@@ -100,6 +100,51 @@ public sealed class VoiceSessionTests
         Assert.Equal(new ProjectRef(ServerA, "p/r/101"), Assert.Single(servers.Replies).Project);
     }
 
+    /// <summary>
+    /// A number is its project, not the handle closest to it: "28" is a project that has not needed the user yet,
+    /// not 283, which has (their Jaro-Winkler score is about 0.91).
+    /// </summary>
+    [Fact]
+    public async Task An_answer_to_a_number_goes_to_that_project_not_to_a_handle_like_it()
+    {
+        var servers = new FakeServers();
+        servers.AddProject(ServerA, "p/r/28-x", "28-x");
+        var model = new ScriptedModel()
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "28", [VoiceTools.TextParameter] = "Kør testene." })
+            .Respond("Sendt til 28.");
+        await using var voice = await OfflineVoice.StartAsync(servers, model,
+            connect: _ => { servers.Set(ServerB, Question("p/r/283", "283-voice", "Migration?")); return Task.CompletedTask; });
+        await voice.Events.SaidAsync("283 har et spørgsmål.");
+
+        voice.Transcriptions.Say("Svar 28 at den skal køre testene");
+        await voice.Events.SaidAsync("Sendt til 28.");
+
+        Assert.Equal(new ProjectRef(ServerA, "p/r/28-x"), Assert.Single(servers.Replies).Project);
+    }
+
+    /// <summary>
+    /// What "what needs me" read out is what the conversation is about: its one project, or none when it read out
+    /// several, so an unnamed answer never goes to a project talked about before.
+    /// </summary>
+    [Fact]
+    public async Task What_needs_me_makes_its_one_project_the_one_answered_and_several_none()
+    {
+        var servers = new FakeServers();
+        var handles = new ProjectHandles();
+        var conversation = new VoiceConversation { Current = new ProjectRef(ServerA, "p/r/101") };
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles), handles, conversation);
+        servers.Set(ServerB, Question("p/r/283", "283-voice", "Migration?"));
+
+        await tools.WhatNeedsMeAsync(CancellationToken.None);
+        Assert.Equal(new ProjectRef(ServerB, "p/r/283"), conversation.Current);
+
+        servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Slet kolonnerne?"));
+        await tools.WhatNeedsMeAsync(CancellationToken.None);
+        Assert.Null(conversation.Current);
+        Assert.StartsWith("No project is being talked about", await tools.AnswerAsync(null, "Brug den eksisterende.", CancellationToken.None));
+        Assert.Empty(servers.Replies);
+    }
+
     /// <summary>No permission is granted or denied by voice: ReplyAndResume would deny one with the text.</summary>
     [Fact]
     public async Task A_permission_request_is_not_answered_by_voice()

@@ -38,7 +38,7 @@ public sealed class EndToEndTests
 
         var model = new ScriptedModel()
             .CallTool(VoiceTools.WhatNeedsMe).Respond("2 venter: 101 og 283 har spørgsmål.")
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = Answer }).Respond("Sendt til 283.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "283", [VoiceTools.TextParameter] = Answer }).Respond("Sendt til 283.");
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
         await voice.Events.SaidAsync("101 har et spørgsmål.");
@@ -54,7 +54,7 @@ public sealed class EndToEndTests
         Assert.Contains($"101: question: {OlderQuestion}", listed);
         Assert.Contains($"283: question: {Question}", listed);
 
-        voice.Transcriptions.Say("Svar at den skal bruge den eksisterende migration");
+        voice.Transcriptions.Say("Svar 283 at den skal bruge den eksisterende migration");
         await voice.Events.SaidAsync("Sendt til 283.");
 
         // It reached FakeClaude's stdin through ReplyAndResume, and the session carried on

@@ -47,6 +47,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public async Task<string> WhatNeedsMeAsync(CancellationToken ct)
     {
         var items = await servers.GetAttentionAsync(ct);
+        // What was read out is what the conversation is about now: one project, or none to answer unnamed
+        conversation.Current = items is [var only] ? only.Project : null;
         if (items.Count == 0)
             return "Nothing needs the user.";
 
@@ -106,19 +108,21 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     }
 
     /// <summary>
-    /// The project named, or the one the conversation is about when none is named. A name no handle matches yet may
-    /// be a project that has not needed the user: every server's projects get handles, and it is looked up again.
+    /// The project named, or the one the conversation is about when none is named. A name no handle matches exactly
+    /// may be a project that has not needed the user: every server's projects get handles, it is looked up exactly
+    /// again, and only then matched closely.
     /// </summary>
     private async Task<ProjectRef?> TargetAsync(string? reference, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(reference))
             return conversation.Current;
-        if (handles.Resolve(reference) is { } known)
+        if (handles.Resolve(reference, fuzzy: false) is { } known)
             return known;
 
+        // Exactly first, on every project, before a close match to one that has a handle already
         foreach (var project in await servers.ListProjectsAsync(ct))
             handles.For(project.Ref, project.Project.Name);
-        return handles.Resolve(reference);
+        return handles.Resolve(reference, fuzzy: false) ?? handles.Resolve(reference);
     }
 
     private async Task<string> UnknownAsync(string? reference, CancellationToken ct)

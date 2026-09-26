@@ -62,10 +62,11 @@ public sealed partial class ProjectHandles
 
     /// <summary>
     /// The project a spoken reference names: a handle, a number said in digits or Danish words ("to hundrede og
-    /// treogfirs"), a word of a project's name that only one project has, or a handle misheard slightly.
-    /// Null when it names none, or more than one.
+    /// treogfirs"), a word of a project's name that only one project has, or, with <paramref name="fuzzy"/>, a
+    /// handle misheard slightly. A number is never matched fuzzily: "28" is not "283". Null when it names none, or
+    /// more than one.
     /// </summary>
-    public ProjectRef? Resolve(string spoken)
+    public ProjectRef? Resolve(string spoken, bool fuzzy = true)
     {
         var reference = Clean(spoken);
         if (reference.Length == 0) return null;
@@ -84,7 +85,7 @@ public sealed partial class ProjectHandles
                 .Select(p => p.Key)
                 .ToList();
             if (named.Count == 1) return named[0];
-            if (named.Count > 1) return null;
+            if (named.Count > 1 || !fuzzy || DanishNumbers.Parse(reference) is not null) return null;
 
             var close = _byHandle
                 .Select(h => (h.Value, Score: FuzzyMatch.JaroWinkler(FuzzyMatch.Normalize(h.Key), FuzzyMatch.Normalize(reference))))
