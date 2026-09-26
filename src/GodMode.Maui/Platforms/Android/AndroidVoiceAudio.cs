@@ -155,7 +155,7 @@ public sealed class AndroidVoiceAudio : IVoiceAudio
                              ?? devices.FirstOrDefault(d => d.Type == AudioDeviceType.BuiltinSpeaker);
                 if (device is null)
                     _logger.LogWarning("No speaker or headset to talk through; Android picks");
-                else if (_manager.CommunicationDevice?.Id != device.Id)
+                else
                     _logger.LogInformation("Communication device {Type} ({Name}): {Set}",
                         device.Type, device.ProductName, _manager.SetCommunicationDevice(device) ? "set" : "refused");
                 return;
