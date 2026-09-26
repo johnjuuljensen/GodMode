@@ -1,5 +1,7 @@
 using GodMode.ClientBase.Services;
 using GodMode.ClientBase.Services.Models;
+using GodMode.Maui.Voice;
+using GodMode.Voice;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +26,7 @@ public sealed class ShellBridge : IDisposable
     private readonly LocalServer _relay;
     private readonly IServerDirectory _directory;
     private readonly IServerRegistryService _registry;
+    private readonly VoiceHost _voice;
     private readonly ILogger _logger;
 
     private ShellBridge(HostBridge bridge, IServiceProvider services, ILogger logger)
@@ -32,6 +35,7 @@ public sealed class ShellBridge : IDisposable
         _relay = services.GetRequiredService<LocalServer>();
         _directory = services.GetRequiredService<IServerDirectory>();
         _registry = services.GetRequiredService<IServerRegistryService>();
+        _voice = services.GetRequiredService<VoiceHost>();
         _logger = logger;
     }
 
@@ -42,6 +46,7 @@ public sealed class ShellBridge : IDisposable
         var shell = new ShellBridge(new HostBridge(webView, logger), services, logger);
         Interlocked.Exchange(ref _attached, shell)?.Dispose();
         shell.Register();
+        shell._voice.Attach(shell._bridge.Send);
         PendingAttentionLink.Arrived += shell.OnAttentionArrived;
         Connectivity.Current.ConnectivityChanged += shell.OnNetworkChanged;
         logger.LogInformation("Shell bridge #{Number} attached; bridges listening for notification taps: {Listening}",
@@ -75,6 +80,12 @@ public sealed class ShellBridge : IDisposable
             MainPage.OpenDevTools();
             return Task.FromResult(true);
         });
+
+        _bridge.Handle(ShellMessageTypes.VoiceState, () => Task.FromResult(_voice.Status));
+        _bridge.Handle(ShellMessageTypes.VoiceStart, _voice.StartAsync);
+        _bridge.Handle(ShellMessageTypes.VoiceStop, _voice.StopAsync);
+        _bridge.Handle(ShellMessageTypes.VoiceSettingsGet, _voice.Settings.GetViewAsync);
+        _bridge.Handle<VoiceSettingsUpdate, VoiceSettingsView>(ShellMessageTypes.VoiceSettingsSet, _voice.Settings.UpdateAsync);
     }
 
     private async Task<AddServerResult> AddServerAsync(AddServerPayload p)
@@ -101,6 +112,7 @@ public sealed class ShellBridge : IDisposable
     private T Changed<T>(T result)
     {
         _bridge.Send(ShellMessageTypes.ServersChanged);
+        _voice.ServersChanged();
 #if ANDROID
         AttentionService.Refresh();
 #endif
@@ -145,6 +157,7 @@ public sealed class ShellBridge : IDisposable
     {
         _logger.LogInformation("Network changed ({Access}); bridge #{Number} drops the relays", e.NetworkAccess, _number);
         _relay.DropAllRelays();
+        _voice.NetworkChanged();
         _bridge.Send(ShellMessageTypes.ServersChanged);
     }
 }

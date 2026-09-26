@@ -43,6 +43,12 @@
 		<ProjectReference Include="..\GodMode.Shared\GodMode.Shared.csproj" />
 		<ProjectReference Include="..\GodMode.ClientBase\GodMode.ClientBase.csproj" />
 		<ProjectReference Include="..\SignalR.Proxy\SignalR.Proxy.csproj" />
+		<ProjectReference Include="..\GodMode.Voice\GodMode.Voice.csproj" />
+	</ItemGroup>
+
+	<!-- The microphone and speaker for voice: Windows only (issue #285). From the VoiceBot submodule -->
+	<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">
+		<ProjectReference Include="..\..\external\VoiceBot\src\Providers\VoiceBot.Providers.Windows\VoiceBot.Providers.Windows.csproj" />
 	</ItemGroup>
 
 	<!-- The React client: GodMode.Client.React.csproj builds it into dist/, once per build for every target
