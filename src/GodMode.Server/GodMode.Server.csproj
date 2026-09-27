@@ -28,35 +28,4 @@
     </Content>
   </ItemGroup>
 
-  <!-- ── React client ───────────────────────────────────────────
-       src/GodMode.Client.React/GodMode.Client.React.csproj generates the client's hub types and
-       builds it into dist/, once per build for this project and GodMode.Maui alike. This project
-       copies dist/ into wwwroot. -->
-
-  <PropertyGroup>
-    <_ReactDir>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'GodMode.Client.React'))</_ReactDir>
-  </PropertyGroup>
-
-  <!-- Only when the client is built here: the Dockerfile builds it on its own, and copies neither
-       the client's project nor tools/ -->
-  <ItemGroup Condition="'$(PublishReactClient)' != 'false'">
-    <ProjectReference Include="..\GodMode.Client.React\GodMode.Client.React.csproj"
-                      ReferenceOutputAssembly="false" Private="false" />
-  </ItemGroup>
-
-  <!-- ResolveProjectReferences builds the client (incremental: skipped when sources unchanged) -->
-  <Target Name="CopyReactToWwwroot"
-          DependsOnTargets="ResolveProjectReferences"
-          BeforeTargets="PrepareForBuild"
-          Condition="'$(PublishReactClient)' != 'false'"
-          Inputs="$(_ReactDir)\dist\index.html"
-          Outputs="wwwroot\index.html">
-    <ItemGroup>
-      <_ReactDist Include="$(_ReactDir)\dist\**" />
-    </ItemGroup>
-    <Copy SourceFiles="@(_ReactDist)"
-          DestinationFiles="@(_ReactDist->'wwwroot\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-  </Target>
-
 </Project>

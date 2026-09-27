@@ -1,11 +1,3 @@
-# ── Build React client ──
-FROM node:22-slim AS react-build
-WORKDIR /app
-COPY src/GodMode.Client.React/package.json src/GodMode.Client.React/package-lock.json* ./
-RUN npm ci
-COPY src/GodMode.Client.React/ .
-RUN npm run build
-
 # ── Build .NET server ──
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
 WORKDIR /src
@@ -16,16 +8,13 @@ COPY src/Directory.Build.props src/
 COPY src/GodMode.Server/GodMode.Server.csproj src/GodMode.Server/
 COPY src/GodMode.Shared/GodMode.Shared.csproj src/GodMode.Shared/
 COPY src/GodMode.ProjectFiles/GodMode.ProjectFiles.csproj src/GodMode.ProjectFiles/
-RUN dotnet restore src/GodMode.Server/GodMode.Server.csproj -p:PublishReactClient=false
+RUN dotnet restore src/GodMode.Server/GodMode.Server.csproj
 
 # Copy source and publish
 COPY src/GodMode.Server/ src/GodMode.Server/
 COPY src/GodMode.Shared/ src/GodMode.Shared/
 COPY src/GodMode.ProjectFiles/ src/GodMode.ProjectFiles/
-RUN dotnet publish src/GodMode.Server/GodMode.Server.csproj -c Release -o /app/publish -p:PublishReactClient=false
-
-# Copy React build output into wwwroot
-COPY --from=react-build /app/dist /app/publish/wwwroot/
+RUN dotnet publish src/GodMode.Server/GodMode.Server.csproj -c Release -o /app/publish
 
 # ── Runtime ──
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
@@ -85,7 +74,7 @@ RUN npm install -g @anthropic-ai/claude-code && \
 ENV PowerShell__Executable=/usr/bin/pwsh
 ENV Claude__Executable=/usr/bin/claude
 
-# The server and its SPA stay root's, read-only to godmode: a session could otherwise rewrite them.
+# The server stays root's, read-only to godmode: a session could otherwise rewrite them.
 # godmode owns only what the server writes: the roots (ProjectRootsDir, /app/roots by default, where
 # a volume goes), the default root's projects when no root is configured, /data, and its home.
 WORKDIR /app
@@ -101,9 +90,7 @@ EXPOSE 31337
 # generates one into /home/godmode/.local/share/GodMode.Server/api-key, which is lost when the
 # container is replaced unless that directory is a volume: run with -e Authentication__ApiKey=<key>,
 # or -v godmode-key:/home/godmode/.local/share/GodMode.Server.
-# A browser is let in only from the container's own origin, http://localhost:31337 (published on
-# the same port). Opening it by a host name, a LAN address or another published port needs that
-# origin in -e Authentication__AllowedOrigins=http://<host>:<port>.
+# The server serves no page: add it in the GodMode app, at any address its published port is reached on.
 ENV URLS=http://+:31337
 
 USER godmode
