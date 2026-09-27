@@ -22,8 +22,6 @@ vi.mock('../services/hostApi', () => ({
   subscribeEvents: () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,
   getHubOptions: () => ({}),
-  isMaui: false,
-  clearApiKey: () => {},
 }));
 
 const item = (projectId: string, kind: AttentionItem['Kind']): AttentionItem => ({

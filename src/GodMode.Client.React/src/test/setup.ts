@@ -1,5 +1,9 @@
-/** A Map-backed localStorage for Node: the store reads it at import. Cleared before each test. */
+/**
+ * A Map-backed localStorage for Node: the store reads it at import. Cleared before each test.
+ * A jsdom test runs as the app's page, with the app's shell around it (appShell.ts).
+ */
 import { beforeEach } from 'vitest';
+import { installAppShell, resetAppShell } from './appShell';
 
 class MemoryStorage implements Storage {
   private items = new Map<string, string>();
@@ -22,4 +26,9 @@ if (typeof window !== 'undefined' && !window.matchMedia) {
     addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {},
     dispatchEvent: () => false,
   });
+}
+
+if (typeof window !== 'undefined') {
+  installAppShell();
+  beforeEach(resetAppShell);
 }

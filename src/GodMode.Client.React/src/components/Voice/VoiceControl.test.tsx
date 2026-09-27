@@ -11,7 +11,6 @@ import { click, render, typeInto, type Rendered } from '../../test/render';
 import { VoiceControl } from './VoiceControl';
 import { VoiceSettings } from './VoiceSettings';
 
-vi.mock('../../services/hostApi', () => ({ isMaui: true }));
 vi.mock('../../services/hostBridge', () => ({ request: vi.fn(), on: vi.fn() }));
 
 const handlers = new Map<string, (payload: unknown) => void>();

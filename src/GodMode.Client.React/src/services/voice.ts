@@ -1,10 +1,9 @@
 /**
- * Voice, in the Windows app: the shell runs the session (GodMode.Maui/Voice/VoiceHost.cs) and this page shows it.
+ * Voice, in the app: the shell runs the session (GodMode.Maui/Voice/VoiceHost.cs) and this page shows it.
  * The session is the app's, not the page's: a reload finds it running and gets the conversation so far.
- * Everywhere else (the browser, the Android app) voice is not available and nothing here reaches the shell.
+ * Where the app has no voice, voice.state says it is not Available.
  */
 import { useEffect, useState } from 'react';
-import { isMaui } from './hostApi';
 import * as bridge from './hostBridge';
 import type {
   VoiceError, VoiceLine, VoiceService, VoiceSettingsUpdate, VoiceSettingsView, VoiceStatus,
@@ -12,10 +11,7 @@ import type {
 
 export type { VoiceError, VoiceLine, VoiceSettingsUpdate, VoiceSettingsView, VoiceStatus } from './hostBridge';
 
-const UNAVAILABLE: VoiceStatus = { Available: false, State: 'Off', Lines: [] };
-
-export const getVoiceStatus = (): Promise<VoiceStatus> =>
-  isMaui ? bridge.request('voice.state') : Promise.resolve(UNAVAILABLE);
+export const getVoiceStatus = (): Promise<VoiceStatus> => bridge.request('voice.state');
 export const startVoice = (): Promise<VoiceStatus> => bridge.request('voice.start');
 export const stopVoice = (): Promise<VoiceStatus> => bridge.request('voice.stop');
 export const getVoiceSettings = (): Promise<VoiceSettingsView> => bridge.request('voice.settings.get');
@@ -51,12 +47,11 @@ export function withLine(lines: VoiceLine[], line: VoiceLine): VoiceLine[] {
   return [...kept, line];
 }
 
-/** Voice as the shell reports it, kept current by its events. Null until the shell answers (never in a browser). */
+/** Voice as the shell reports it, kept current by its events. Null until the shell answers. */
 export function useVoice(): VoiceStatus | null {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
 
   useEffect(() => {
-    if (!isMaui) return;
     let live = true;
     const update = (change: (s: VoiceStatus) => VoiceStatus) => setStatus(s => (s ? change(s) : s));
     const unsubscribe = [

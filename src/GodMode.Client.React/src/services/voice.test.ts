@@ -1,14 +1,17 @@
-/** Voice is the Windows app's: in the browser nothing reaches for the shell, and the page shows no voice. */
+/** Voice is the app's: the page asks the shell for it, and says what failed in words. */
 import { expect, it, vi } from 'vitest';
 import * as bridge from './hostBridge';
+import type { VoiceStatus } from './hostBridge';
 import { describeVoiceError, getVoiceStatus, withLine } from './voice';
 
-vi.mock('./hostApi', () => ({ isMaui: false }));
 vi.mock('./hostBridge', () => ({ request: vi.fn(), on: vi.fn() }));
 
-it('is not available in the browser, without asking a shell', async () => {
-  expect(await getVoiceStatus()).toEqual({ Available: false, State: 'Off', Lines: [] });
-  expect(bridge.request).not.toHaveBeenCalled();
+it('asks the shell whether the app has voice', async () => {
+  const none: VoiceStatus = { Available: false, State: 'Off', Lines: [] };
+  vi.mocked(bridge.request).mockResolvedValueOnce(none);
+
+  expect(await getVoiceStatus()).toEqual(none);
+  expect(bridge.request).toHaveBeenCalledWith('voice.state');
 });
 
 it('says what failed and what to do', () => {

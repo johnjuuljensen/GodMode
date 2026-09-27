@@ -6,7 +6,6 @@ import {
 } from '../../store';
 import { ProjectItem } from './ProjectItem';
 import { Inbox } from '../Inbox/Inbox';
-import { isMaui, clearApiKey } from '../../services/hostApi';
 import './Sidebar.css';
 
 const GROUP_LABELS: Record<SidebarGroupBy, string> = {
@@ -67,15 +66,13 @@ export function SidebarHeader() {
             </svg>
           </button>
         )}
-        {isMaui && (
-          <button className="sidebar-add-btn" onClick={() => setActivePage({ type: 'addServer' })} title="Add server">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
-              <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
-              <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
-            </svg>
-          </button>
-        )}
+        <button className="sidebar-add-btn" onClick={() => setActivePage({ type: 'addServer' })} title="Add server">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+            <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+            <line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+          </svg>
+        </button>
       </div>
     </div>
   );
@@ -145,7 +142,7 @@ export function Sidebar({ inbox }: { inbox?: 'pane' | 'screen' }) {
           {!hasAnything ? (
             <div className="sidebar-empty">
               <p>No servers configured</p>
-              {isMaui && <button className="btn btn-primary" onClick={() => setActivePage({ type: 'addServer' })}>Add Server</button>}
+              <button className="btn btn-primary" onClick={() => setActivePage({ type: 'addServer' })}>Add Server</button>
             </div>
           ) : (
             <>
@@ -220,18 +217,6 @@ export function SidebarFooter() {
               </svg>
             )}
             {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-          </button>
-          <button className="sidebar-footer-menu-item sidebar-logout-btn" onClick={() => {
-            // Forget the API key held by this browser; the key page shows again on reload
-            clearApiKey();
-            window.location.href = '/';
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            Logout
           </button>
         </div>
       )}

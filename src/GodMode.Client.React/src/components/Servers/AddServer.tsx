@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useAppStore } from '../../store';
-import { isMaui } from '../../services/hostApi';
 import '../settings-common.css';
 
 export function AddServer() {
@@ -45,15 +44,13 @@ export function AddServer() {
         <h2>Add Server</h2>
       </div>
 
-      {isMaui && (
-        <div className="form-group">
-          <label>Type</label>
-          <select value={type} onChange={e => setType(e.target.value as 'local' | 'github')}>
-            <option value="local">Local Server</option>
-            <option value="github">GitHub Codespaces</option>
-          </select>
-        </div>
-      )}
+      <div className="form-group">
+        <label>Type</label>
+        <select value={type} onChange={e => setType(e.target.value as 'local' | 'github')}>
+          <option value="local">Local Server</option>
+          <option value="github">GitHub Codespaces</option>
+        </select>
+      </div>
 
       {type === 'local' ? (
         <>

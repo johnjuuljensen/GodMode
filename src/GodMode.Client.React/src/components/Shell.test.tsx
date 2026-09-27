@@ -21,8 +21,6 @@ vi.mock('../services/hostApi', () => ({
   subscribeAttentionLinks: () => () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,
   getHubOptions: () => ({}),
-  isMaui: false,
-  clearApiKey: () => {},
 }));
 
 // The window's (max-width: 768px), which a test sets as a resized window changes it; every other query is as before

@@ -20,8 +20,6 @@ vi.mock('../services/hostApi', () => ({
   subscribeEvents: () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,
   getHubOptions: () => ({}),
-  isMaui: false,
-  clearApiKey: () => {},
 }));
 
 const at = (...offsets: number[]) => offsets.map(o => `at ${o}`);

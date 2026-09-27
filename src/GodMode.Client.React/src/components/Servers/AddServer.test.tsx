@@ -6,21 +6,12 @@
  */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act } from 'react';
-import * as api from '../../services/hostApi';
 import { render, typeInto, type Rendered } from '../../test/render';
+import { answer, sent, settle } from '../../test/appShell';
 import { useAppStore } from '../../store';
 import { AddServer } from './AddServer';
 
 vi.mock('../../signalr/hub', () => ({ GodModeHub: class {} }));
-vi.mock('../../services/hostApi', () => ({
-  isMaui: true,
-  addServer: vi.fn(),
-  waitUntilReady: async () => {},
-  fetchServers: async () => [],
-  subscribeEvents: () => {},
-  getHubUrl: (serverId: string) => `http://test/${serverId}`,
-  getHubOptions: () => ({}),
-}));
 
 const REFUSED = "The server was not added: this device's secure storage would not keep its access token (Keystore unavailable).";
 
@@ -32,10 +23,17 @@ const errorText = () => view.container.querySelector('.settings-error')?.textCon
 
 const keyInput = () => view.container.querySelector<HTMLInputElement>('input[type="password"]')!;
 
+const adds = () => sent.filter(m => m.Type === 'servers.add');
+const clickAdd = async () => {
+  await act(async () => { addButton().click(); });
+  await settle();
+};
+
 beforeEach(async () => {
   useAppStore.setState(initialState, true);
   useAppStore.getState().setActivePage({ type: 'addServer' });
-  vi.mocked(api.addServer).mockReset();
+  answer('relay.info', { BaseUrl: 'http://127.0.0.1:49152', Secret: 'relay-secret' });
+  answer('servers.list', []);
   view = await render(<AddServer />);
 });
 
@@ -43,8 +41,8 @@ afterEach(() => view.unmount());
 
 it('asks for the API key of a local server before it adds one', async () => {
   expect(addButton().disabled).toBe(true);
-  await act(async () => { addButton().click(); });
-  expect(api.addServer).not.toHaveBeenCalled();
+  await clickAdd();
+  expect(adds()).toEqual([]);
 
   await typeInto(keyInput(), '   ');
   expect(addButton().disabled).toBe(true);
@@ -55,9 +53,9 @@ it('asks for the API key of a local server before it adds one', async () => {
 
 it('shows why the shell refused the server and keeps the form open', async () => {
   await typeInto(keyInput(), 'secret-key');
-  vi.mocked(api.addServer).mockRejectedValueOnce(new Error(REFUSED));
+  answer('servers.add', new Error(REFUSED));
 
-  await act(async () => { addButton().click(); });
+  await clickAdd();
 
   expect(errorText()).toBe(REFUSED);
   expect(useAppStore.getState().activePage).toEqual({ type: 'addServer' });
@@ -65,12 +63,13 @@ it('shows why the shell refused the server and keeps the form open', async () =>
 
 it('clears the reason and closes the form when a retry succeeds', async () => {
   await typeInto(keyInput(), 'secret-key');
-  vi.mocked(api.addServer).mockRejectedValueOnce(new Error(REFUSED)).mockResolvedValueOnce();
-  await act(async () => { addButton().click(); });
+  answer('servers.add', new Error(REFUSED));
+  await clickAdd();
 
-  await act(async () => { addButton().click(); });
+  answer('servers.add', { Id: 'B' });
+  await clickAdd();
 
   expect(errorText()).toBeNull();
-  expect(vi.mocked(api.addServer).mock.calls.at(-1)?.[0]).toMatchObject({ Type: 'local', AccessToken: 'secret-key' });
+  expect(adds().at(-1)?.Payload).toMatchObject({ Type: 'local', Urls: ['http://localhost:31337'], AccessToken: 'secret-key' });
   expect(useAppStore.getState().activePage).toBeNull();
 });
