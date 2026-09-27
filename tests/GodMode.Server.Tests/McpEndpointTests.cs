@@ -65,8 +65,7 @@ public class McpEndpointTests
         {
             (HttpMethod.Post, "/hubs/projects/negotiate?negotiateVersion=1"),
             (HttpMethod.Get, "/hubs/projects"),
-            (HttpMethod.Get, "/api/status"),
-            (HttpMethod.Get, "/servers"),
+            (HttpMethod.Get, "/"),
         })
         foreach (var projectId in new[] { id, null })
         {
