@@ -38,6 +38,13 @@ internal sealed class TextTranscriptions : ITranscriptionSource
 
     public void Say(string text) => _channel.Writer.TryWrite(new TranscriptionEvent { Text = text, IsPartial = false });
 
+    /// <summary>What ElevenLabs' realtime recognizer sends for an utterance: a partial, then the final with the same text.</summary>
+    public void SayAsRecognized(string text)
+    {
+        _channel.Writer.TryWrite(new TranscriptionEvent { Text = text, IsPartial = true });
+        Say(text);
+    }
+
     public Task StartAsync(string language, CancellationToken ct) => Task.CompletedTask;
 
     public ValueTask DisposeAsync()
@@ -89,6 +96,9 @@ internal sealed class ScriptedModel : IInferenceProvider, IChatClient
     private int _calls;
 
     public ConcurrentQueue<IReadOnlyList<ChatMessage>> Requests { get; } = new();
+
+    /// <summary>How many times the model was called.</summary>
+    public int Calls => Volatile.Read(ref _calls);
 
     public ScriptedModel CallTool(string name, Dictionary<string, object?>? arguments = null)
     {

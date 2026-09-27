@@ -48,14 +48,18 @@ public sealed class EndToEndTests
         var asking = await CreateAsync(hub, "283-add-migration");
         await voice.Events.SaidAsync("283 har et spørgsmål.");
 
-        voice.Transcriptions.Say("Hvad venter på mig?");
+        // As ElevenLabs sends it: a partial, then a final with the same text. The final reaches the model once
+        voice.Transcriptions.SayAsRecognized("Hvad venter på mig?");
         await voice.Events.SaidAsync("2 venter: 101 og 283 har spørgsmål.");
+        Assert.Equal(2, model.Calls);
         var listed = Assert.Single(model.ToolResults);
         Assert.Contains($"101: question: {OlderQuestion}", listed);
         Assert.Contains($"283: question: {Question}", listed);
 
-        voice.Transcriptions.Say("Svar 283 at den skal bruge den eksisterende migration");
+        voice.Transcriptions.SayAsRecognized("Svar 283 at den skal bruge den eksisterende migration");
         await voice.Events.SaidAsync("Sendt til 283.");
+        // Each utterance once: a tool round and a respond, no more
+        Assert.Equal(4, model.Calls);
 
         // It reached FakeClaude's stdin through ReplyAndResume, and the session carried on
         await Eventually.UntilAsync(() => server.StdinOf(asking.Id).Count == 2, () => $"the answer on stdin: {string.Join(" | ", server.StdinOf(asking.Id))}\n{server.Output}");
