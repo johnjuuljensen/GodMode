@@ -11,6 +11,8 @@ x86/
 
 # Copies of the React client that MAUI builds made before #219; nothing writes here now
 src/GodMode.Maui/Resources/Raw/wwwroot/
+# Copies of the React client that server builds made before #291; nothing writes here now
+src/GodMode.Server/wwwroot/
 
 # Visual Studio
 .vs/
