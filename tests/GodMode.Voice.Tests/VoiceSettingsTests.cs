@@ -28,6 +28,7 @@ public sealed class VoiceSettingsTests : IDisposable
         var view = await _store.GetViewAsync();
 
         Assert.Equal("da-DK+en", view.Language);
+        Assert.Equal("OyYu1oFho6PvCH2wRY3S", view.VoiceId);
         Assert.False(view.EchoCancellation);
         Assert.Equal(new VoiceModels("claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5-5"), view.Models);
         Assert.False(view.ElevenLabsKeySet);
@@ -72,6 +73,16 @@ public sealed class VoiceSettingsTests : IDisposable
         Assert.False(view.ElevenLabsKeySet);
         Assert.True(view.AnthropicKeySet);
         Assert.Equal("en-US", (await new VoiceSettingsStore(_dir, _secrets).LoadAsync()).Language);
+    }
+
+    /// <summary>No migration: a voice.json saved before the default changed keeps the voice it names.</summary>
+    [Fact]
+    public async Task A_saved_voice_is_kept_whatever_the_default()
+    {
+        Directory.CreateDirectory(_dir);
+        await File.WriteAllTextAsync(Path.Combine(_dir, VoiceSettingsStore.FileName), """{ "VoiceId": "xj6X4BCUsv9oxohm1E8o" }""");
+
+        Assert.Equal("xj6X4BCUsv9oxohm1E8o", (await _store.GetViewAsync()).VoiceId);
     }
 
     [Theory]

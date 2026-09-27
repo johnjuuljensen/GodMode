@@ -22,8 +22,11 @@ public sealed record VoiceSettings
     /// <summary>Danish replies, with English mixed into what the user says.</summary>
     public const string DefaultLanguage = "da-DK+en";
 
-    /// <summary>The ElevenLabs voice VoiceBot's own clients use.</summary>
-    public const string DefaultVoiceId = "xj6X4BCUsv9oxohm1E8o";
+    /// <summary>
+    /// GodMode's ElevenLabs voice (the user's choice). A saved voice.json that names a voice keeps it; Settings → Voice
+    /// changes it.
+    /// </summary>
+    public const string DefaultVoiceId = "OyYu1oFho6PvCH2wRY3S";
 
     /// <summary>The session's languages, in VoiceBot's form: the primary, then each mixed-in one after a '+'.</summary>
     public string Language { get; init; } = DefaultLanguage;
