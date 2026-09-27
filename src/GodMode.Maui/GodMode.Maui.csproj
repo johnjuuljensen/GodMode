@@ -34,12 +34,12 @@
 		<PackageReference Include="Microsoft.Maui.Controls" VersionOverride="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" />
 
-		<!-- The app icon: Doom's god-mode face on a transparent layer. Windows keeps it transparent, for a light or dark
+		<!-- The app icon: the voice prompt on a transparent layer. Windows keeps it transparent, for a light or dark
 		     taskbar. Android's adaptive icon puts it on a plain near-black and shrinks it into the launcher's safe zone,
-		     the centre 66 of 108 dp (the face reaches 0.618 of the canvas) -->
+		     the centre 66 of 108 dp (the prompt's rounded corners reach 0.59 of the canvas) -->
 		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg">
 			<Color Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">#121212</Color>
-			<ForegroundScale Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">0.58</ForegroundScale>
+			<ForegroundScale Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">0.56</ForegroundScale>
 		</MauiIcon>
 
 		<!-- wwwroot/ is the React client, added from its dist/ below. Builds before #219 copied it here and never
@@ -74,5 +74,61 @@
 			<MauiAsset Include="@(_ReactAsset)" LogicalName="wwwroot\%(_ReactAsset.RecursiveDir)%(_ReactAsset.Filename)%(_ReactAsset.Extension)" />
 		</ItemGroup>
 	</Target>
+
+	<!-- Windows: Resizetizer's appicon.ico holds one 64 px image, which Windows rescales for the title bar, the taskbar and
+	     Explorer. This packs the sizes Resizetizer renders from the same SVG into one .ico and makes it the exe's icon;
+	     the window takes its icon from the exe (MauiWinUIWindow.SetIcon) -->
+	<Target Name="PackAppIcon"
+	        Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'"
+	        AfterTargets="ResizetizeImages"
+	        Inputs="@(_AppIconPng)"
+	        Outputs="$(_AppIconFile)"
+	        DependsOnTargets="_GetAppIconPngs">
+		<PackIco Pngs="@(_AppIconPng)" Ico="$(_AppIconFile)" />
+		<ItemGroup>
+			<FileWrites Include="$(_AppIconFile)" />
+		</ItemGroup>
+	</Target>
+
+	<Target Name="_GetAppIconPngs">
+		<PropertyGroup>
+			<_AppIconFile>$(IntermediateOutputPath)GodMode.ico</_AppIconFile>
+			<ApplicationIcon>$(_AppIconFile)</ApplicationIcon>
+		</PropertyGroup>
+		<ItemGroup>
+			<_AppIconPng Include="$(_MauiIntermediateImages)appiconLogo.altform-unplated_targetsize-16.png;
+			                      $(_MauiIntermediateImages)appiconLogo.altform-unplated_targetsize-24.png;
+			                      $(_MauiIntermediateImages)appiconLogo.altform-unplated_targetsize-32.png;
+			                      $(_MauiIntermediateImages)appiconLogo.altform-unplated_targetsize-48.png;
+			                      $(_MauiIntermediateImages)appiconLogo.altform-unplated_targetsize-256.png" />
+		</ItemGroup>
+	</Target>
+
+	<!-- An .ico of PNG images, one per size (Windows Vista and later read PNG entries) -->
+	<UsingTask TaskName="PackIco" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+		<ParameterGroup>
+			<Pngs ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+			<Ico ParameterType="System.String" Required="true" />
+		</ParameterGroup>
+		<Task>
+			<Code Type="Fragment" Language="cs"><![CDATA[
+var images = Pngs.Select(p => File.ReadAllBytes(p.ItemSpec)).ToArray();
+using var w = new BinaryWriter(File.Create(Ico));
+w.Write((short)0); w.Write((short)1); w.Write((short)images.Length);
+var offset = 6 + 16 * images.Length;
+foreach (var png in images)
+{
+    // The width and height sit big-endian at bytes 16 and 20 of a PNG's IHDR; 0 in an .ico entry means 256
+    int Side(int at) => (png[at] << 24) | (png[at + 1] << 16) | (png[at + 2] << 8) | png[at + 3];
+    w.Write((byte)(Side(16) % 256)); w.Write((byte)(Side(20) % 256));
+    w.Write((byte)0); w.Write((byte)0); w.Write((short)1); w.Write((short)32);
+    w.Write(png.Length); w.Write(offset);
+    offset += png.Length;
+}
+foreach (var png in images)
+    w.Write(png);
+]]></Code>
+		</Task>
+	</UsingTask>
 
 </Project>
