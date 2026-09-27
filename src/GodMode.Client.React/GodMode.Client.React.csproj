@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.Build.NoTargets/3.7.134">
 
   <!-- ── The React client's build ───────────────────────────────
-       Builds the client into dist/, which GodMode.Server copies into its wwwroot and GodMode.Maui
-       packages. They reference this project instead of each running `npm run build`. MSBuild builds a
-       project once per set of global properties, and a reference asks with the same set from every
-       project and target framework, so a solution build runs one `npm run build`, not several whose
-       Vite empties dist/ under the others (#219). -->
+       Builds the client into dist/, which GodMode.Maui packages: the app is the page's only host (the
+       server serves no page). The app references this project instead of running `npm run build`. MSBuild
+       builds a project once per set of global properties, and a reference asks with the same set from
+       every target framework, so a solution build runs one `npm run build`, not several whose Vite
+       empties dist/ under the others (#219). -->
 
   <PropertyGroup>
     <!-- Nothing here is compiled, and a default glob would walk node_modules on every evaluation -->
@@ -21,6 +21,7 @@
     <_ReactSource Include="src\**\*" />
     <_ReactSource Include="index.html" />
     <_ReactSource Include="package.json" />
+    <_ReactSource Include="package-lock.json" />
     <_ReactSource Include="vite.config.ts" />
     <_ReactSource Include="tsconfig*.json" />
   </ItemGroup>
@@ -29,7 +30,7 @@
        tools/GodMode.TypeGen writes signalr/generated/hub-types.ts from GodMode.Shared on every
        build, before the client builds, so the client compiles against the contract as it is. It
        rewrites the file only when its text changes, which keeps BuildReact incremental. The file is
-       committed so `npm run dev` needs no .NET build, and a hand edit is undone by the next build. -->
+       committed so the client's tests and lint need no .NET build, and a hand edit is undone by the next build. -->
 
   <PropertyGroup>
     <_HubTypesFile>$(MSBuildProjectDirectory)\src\signalr\generated\hub-types.ts</_HubTypesFile>
@@ -62,15 +63,23 @@
   </Target>
 
   <!-- Build the client (incremental: skipped when sources unchanged). Its packages are installed
-       first when they are missing, as in a fresh clone (the codespace's publish). It runs after
-       Build but within it: a referencing project's request for Build returns once this is done -->
+       first when they are missing, as in a fresh clone, or stale: package-lock.json is newer than the
+       lock npm wrote into node_modules when it last installed them (a pull that changed the packages).
+       It runs after Build but within it: a referencing project's request for Build returns once this is done -->
   <Target Name="BuildReact"
           AfterTargets="Build"
           Condition="'$(_BuildReactClient)' == 'true'"
           Inputs="@(_ReactSource)"
           Outputs="dist\index.html">
+    <PropertyGroup>
+      <_PackageLock>$(MSBuildProjectDirectory)\package-lock.json</_PackageLock>
+      <_InstalledLock>$(MSBuildProjectDirectory)\node_modules\.package-lock.json</_InstalledLock>
+      <_InstallPackages Condition="!Exists('$(_InstalledLock)')">true</_InstallPackages>
+      <_InstallPackages Condition="'$(_InstallPackages)' != 'true' And $([System.IO.File]::GetLastWriteTime('$(_PackageLock)').Ticks) &gt; $([System.IO.File]::GetLastWriteTime('$(_InstalledLock)').Ticks)">true</_InstallPackages>
+    </PropertyGroup>
     <Message Importance="high" Text="Building React client..." />
-    <Exec Command="npm ci" Condition="!Exists('node_modules')" />
+    <Message Importance="high" Text="Installing the React client's packages (package-lock.json is newer than node_modules)..." Condition="'$(_InstallPackages)' == 'true' And Exists('$(_InstalledLock)')" />
+    <Exec Command="npm ci" Condition="'$(_InstallPackages)' == 'true'" />
     <Exec Command="npm run build" />
   </Target>
 
