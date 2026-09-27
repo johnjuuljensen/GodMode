@@ -34,6 +34,14 @@
 		<PackageReference Include="Microsoft.Maui.Controls" VersionOverride="$(MauiVersion)" />
 		<PackageReference Include="Microsoft.Extensions.Logging.Debug" />
 
+		<!-- The app icon: Doom's god-mode face on a transparent layer. Windows keeps it transparent, for a light or dark
+		     taskbar. Android's adaptive icon puts it on a plain near-black and shrinks it into the launcher's safe zone,
+		     the centre 66 of 108 dp (the face reaches 0.618 of the canvas) -->
+		<MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg">
+			<Color Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">#121212</Color>
+			<ForegroundScale Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">0.58</ForegroundScale>
+		</MauiIcon>
+
 		<!-- wwwroot/ is the React client, added from its dist/ below. Builds before #219 copied it here and never
 		     removed an old bundle, so a checkout can still hold copies that must not ship -->
 		<MauiAsset Include="Resources\Raw\**" Exclude="Resources\Raw\wwwroot\**" LogicalName="%(RecursiveDir)%(Filename)%(Extension)" />
