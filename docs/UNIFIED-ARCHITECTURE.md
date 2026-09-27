@@ -6,10 +6,7 @@ This document is the single source of truth for Claude Code sessions working on 
 
 ## 1. What GodMode Is
 
-GodMode runs Claude Code sessions that ship issues, and lets you follow and steer them from a browser or a phone. It is a .NET 10 solution with two UI surfaces:
-
-1. **React SPA** — served directly by GodMode.Server, accessed via browser
-2. **MAUI app** — hosts the same React SPA in a HybridWebView, with a local proxy for multi-server connectivity
+GodMode runs Claude Code sessions that ship issues, and lets you follow and steer them from the GodMode app, on a PC or a phone. It is a .NET 10 solution with one UI surface: the **MAUI app**, which hosts the React SPA in a HybridWebView, with a local relay for multi-server connectivity. The server serves no page, and no browser is its client (Section 4.4).
 
 A server runs on a machine you own: a PC, a VM or a GitHub Codespace. Its **project roots** are directories on that machine, each with scripts and input schemas in `.godmode-root/`. **Profiles** group roots and carry shared environment variables. Both are maintained by hand on the host. You create **projects** from a root's actions. Each project is a folder with a Claude Code process working in it.
 
@@ -21,7 +18,7 @@ A server runs on a machine you own: a PC, a VM or a GitHub Codespace. Its **proj
 GodMode.slnx
 ├── src/
 │   ├── GodMode.Shared/            # Shared types, models, enums, hub interfaces
-│   ├── GodMode.Server/            # ASP.NET SignalR server, spawns Claude processes, serves the SPA and the MCP endpoint
+│   ├── GodMode.Server/            # ASP.NET SignalR server, spawns Claude processes, serves the hub and the MCP endpoint (no page)
 │   ├── GodMode.Client.React/      # React SPA (Vite + Zustand + SignalR), an npm project; its NoTargets csproj builds it
 │   ├── GodMode.ProjectFiles/      # File system utilities for project folders
 │   ├── GodMode.ClientBase/        # Shared .NET client abstractions (host providers, registry)
@@ -47,7 +44,7 @@ GodMode.ClientBase  ← (host providers, server registry, URL selection)  ← Go
 GodMode.Maui
 ```
 
-`GodMode.Client.React/GodMode.Client.React.csproj`, a NoTargets project in the slnx, generates the hub types and runs `npm run build`. The server and the MAUI app reference it, so one build of either or both runs it once. The server copies its `dist/` into `wwwroot`; the MAUI app packages `dist/` as its `wwwroot`.
+`GodMode.Client.React/GodMode.Client.React.csproj`, a NoTargets project in the slnx, generates the hub types and runs `npm run build`, first running `npm ci` when `node_modules` is missing or older than `package-lock.json`. The MAUI app references it and packages `dist/` as its `wwwroot`. The server does not reference it: building or running the server builds no React and needs no npm.
 
 ### Where to Put New Code
 
@@ -58,7 +55,7 @@ GodMode.Maui
 | New server-side service | `GodMode.Server/Services/` — register in `Program.cs` |
 | New React UI component | `src/GodMode.Client.React/src/components/{Feature}/` |
 | New React store action | `src/GodMode.Client.React/src/store/index.ts` |
-| New TypeScript hub type | Generated: add the C# type to `GodMode.Shared` and build GodMode.Server (`tools/GodMode.TypeGen` writes `signalr/generated/hub-types.ts`). Client-only types go in `signalr/types.ts` |
+| New TypeScript hub type | Generated: add the C# type to `GodMode.Shared` and build the client (`dotnet build src/GodMode.Client.React`, or GodMode.Maui; `tools/GodMode.TypeGen` writes `signalr/generated/hub-types.ts`). Client-only types go in `signalr/types.ts` |
 | Client-side .NET abstractions | `GodMode.ClientBase/` |
 | File system project utilities | `GodMode.ProjectFiles/` |
 | **All UI changes** | **React only** — never in .NET projects |
@@ -69,12 +66,12 @@ GodMode.Maui
 
 ### 3.1 The Rule: All UI Lives in React
 
-React is the **single UI implementation**. There is no native .NET UI. The MAUI app is a thin shell that hosts the React SPA in a WebView and provides a local proxy server for multi-server connectivity.
+React is the **single UI implementation**, and the MAUI app is its only host. There is no native .NET UI. The MAUI app is a thin shell that hosts the React SPA in a WebView and provides a local proxy server for multi-server connectivity.
 
 When building UI features:
 - Build everything in `GodMode.Client.React/`
-- Test in the browser against a running GodMode.Server
-- The MAUI app will pick up changes automatically (React is rebuilt and embedded on MAUI build)
+- See a change in the Windows app: build and run `GodMode.Maui` (it rebuilds the client when its sources changed) against a running GodMode.Server; its WebView2 has DevTools enabled (F12)
+- The client's tests (`npm test`) run as the app's page, with a fake shell behind `window.HybridWebView` (`src/test/appShell.ts`)
 
 ### 3.2 How MAUI Hosts React
 
@@ -112,22 +109,11 @@ When building UI features:
 
 **The relay** (`LocalServer`) serves only the WebSocket relay, and only to a request with the WebView's `Origin` (`https://0.0.0.1`, or `app://0.0.0.1` on Apple platforms; else 403) and the per-launch secret as the `access_token` query parameter (else 401). It forwards to registered servers by server ID and adds that server's key itself. SignalR frames pass through untouched, so the hub contract needs no relay changes.
 
-**React detects hosting mode** via hostname:
-```typescript
-// hostApi.ts
-export const isMaui = window.location.hostname === '0.0.0.1';
-```
+**There is one hosting mode.** `hostApi.ts` has no browser branch: the page's React source is embedded in the app, it connects to every server through the LocalServer relay (`skipNegotiation: true`, WebSocket only), finds its servers over the bridge (`servers.list`), and manages them there (`servers.*`). Each server's access token is in platform secure storage (Android Keystore, DPAPI, Keychain) and added by the relay; React sends the relay only its per-launch secret, and has no sign-in of its own.
 
-### 3.3 Browser vs MAUI: What Differs
+### 3.3 No Browser
 
-| Concern | Browser (direct) | MAUI (via proxy) |
-|---|---|---|
-| React source | Served by GodMode.Server `/wwwroot` | Embedded in MAUI resources |
-| SignalR connection | Direct to server `/hubs/projects` | Via LocalServer WebSocket relay |
-| Server discovery | Single server (the one serving the page) | Multiple servers via the bridge (`servers.list`) |
-| Authentication | API key entered once, kept in that browser (Section 4.4) | Access token per server in platform secure storage (Android Keystore, DPAPI, Keychain), added by the relay; React sends the relay only its per-launch secret |
-| SignalR negotiate | Standard | Skipped (`skipNegotiation: true`, relay handles it) |
-| Server management | Not available | Add/remove/start/stop servers via the bridge (`servers.*`) |
+The server serves no page, and refuses any request with an `Origin` (Section 4.4), so a browser tab can neither load the client nor reach a hub. There is no Vite dev server either: the React dev loop is the Windows app.
 
 ### 3.4 What MAUI Developers Need to Know
 
@@ -151,17 +137,17 @@ The MAUI project (`GodMode.Maui/`) contains:
 
 When making React changes, keep these MAUI constraints in mind:
 
-1. **No server-relative URLs** — React may be served from `0.0.0.1` (MAUI) or from the server. Make HTTP calls through the helpers in `hostApi.ts`, which resolve the base URL for both modes.
+1. **No server URLs** — React is served from `0.0.0.1` by the app and reaches servers only through the relay. Go through the helpers in `hostApi.ts`; React makes no HTTP calls to a server.
 
 2. **SignalR connection differences** — Use `getHubUrl(serverId)` and `getHubOptions(serverId)` from `hostApi.ts`. Never hardcode hub paths.
 
-3. **Multi-server support** — In MAUI, React manages connections to multiple servers. The store's `ServerConnection[]` array and `serverId` parameters exist for this reason. Don't assume a single server.
+3. **Multi-server support** — React manages connections to multiple servers. The store's `ServerConnection[]` array and `serverId` parameters exist for this reason. Don't assume a single server.
 
 4. **No browser-only APIs without fallback** — HybridWebView is not a full browser. Avoid APIs that may not be available (e.g., `window.open`, `navigator.clipboard` may need fallbacks).
 
 5. **Offline-capable assets** — All React assets are embedded. Don't rely on CDN-hosted fonts, icons, or scripts. Bundle everything.
 
-6. **Test both modes** — After significant changes, verify in both browser (direct to server) and note any MAUI-specific behavior (server discovery, multi-server, auth flow).
+6. **Test in the app** — After significant changes, check the Windows app against a running server, and consider Android (another WebView, a phone's screen).
 
 ---
 
@@ -197,7 +183,7 @@ The hub is the session loop plus reading profiles and roots:
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
 2. Implement in `ProjectHub`
-3. Build GodMode.Server: it regenerates `signalr/generated/hub-types.ts`; commit the change
+3. Build the client (`dotnet build src/GodMode.Client.React`, or GodMode.Maui): it regenerates `signalr/generated/hub-types.ts`; commit the change
 4. Wire up in `signalr/hub.ts` (GodModeHub class)
 5. Expose in Zustand store if UI needs it
 
@@ -275,9 +261,9 @@ Every request needs a credential, whatever the server is bound to, loopback incl
 1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`, which its sessions are given.
 2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade). The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under `ProjectRootsDir`.
 
-**Browser origins** (`Auth/OriginPolicy.cs`). A request with an `Origin`, as a browser sends on every WebSocket upgrade and any request but a same-origin GET, is refused with 403 before authentication unless it is one of the server's own origins: each address it listens on (a loopback or wildcard address also stands for `localhost`, `127.0.0.1` and `[::1]` on its port), those in `Authentication:AllowedOrigins` (a reverse proxy's, a host name's), a codespace's forwarded port, and the Vite dev server in Development. A request with no `Origin` (the MAUI relay, the attention service) needs the key alone.
+**No browser** (`Auth/OriginPolicy.cs`). A request with an `Origin`, as a browser sends on every WebSocket upgrade and any request but a same-origin GET, is refused with 403 before authentication, whatever origin it names: the server's own bindings included, in Development and in a codespace too, and no setting allows one. A request with no `Origin` (the MAUI relay, the attention service, a session's claude on `/mcp`) needs its credential alone.
 
-Only `/health` and the SPA's static files are anonymous. The MCP endpoint, `/mcp`, takes a per-project token instead, and nothing else (Section 8.2). A Claude process and a root script start from an environment allowlist (`ChildEnvironment`), so the key reaches neither. Sessions still run as the server's OS user, so one that can run arbitrary commands can read the key file: the permission prompt is a gate, not a sandbox. `src/GodMode.Server/README.md` has the full binding guide.
+The server serves no page. Only `/health` is anonymous; `/`, with the key, says what the server is (`{"service":"GodMode.Server",…}`), which the app's codespace probe reads. The MCP endpoint, `/mcp`, takes a per-project token instead, and nothing else (Section 8.2). A Claude process and a root script start from an environment allowlist (`ChildEnvironment`), so the key reaches neither. Sessions still run as the server's OS user, so one that can run arbitrary commands can read the key file: the permission prompt is a gate, not a sandbox. `src/GodMode.Server/README.md` has the full binding guide.
 
 ### 4.5 React Client Architecture
 
@@ -444,15 +430,14 @@ For a long-running server, `dotnet publish -c Release` and run the output. Put r
 `src/GodMode.Server/Dockerfile` builds a multi-stage image:
 
 ```
-Stage 1: Node 22 — builds React client (npm run build)
-Stage 2: .NET SDK 10.0 — restores and publishes GodMode.Server
-Stage 3: .NET ASP.NET 10.0 runtime — final image (`runtime` target)
-Stage 4: runtime + .NET SDK — the `:sdk` tag, for sessions that build .NET code
+Stage 1: .NET SDK 10.0 — restores and publishes GodMode.Server
+Stage 2: .NET ASP.NET 10.0 runtime — final image (`runtime` target)
+Stage 3: runtime + .NET SDK — the `:sdk` tag, for sessions that build .NET code
 ```
 
-The runtime image includes the published server and SPA, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`. Run it with `-e Authentication__ApiKey=<key>`: without one it generates a key into the `godmode` user's home, which a replaced container does not keep. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
+No stage builds the React client: the server serves no page. The runtime image includes the published server, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`. Run it with `-e Authentication__ApiKey=<key>`: without one it generates a key into the `godmode` user's home, which a replaced container does not keep. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
 
-**Nothing a session runs as can change the server.** `/app` (the server and `wwwroot`) is root's and read-only to `godmode`, which owns only what the server writes: `/app/roots`, `/app/projects` (the default root when none is configured), `/data` and its home. Claude Code is installed root-owned with `npm install -g` (`/usr/bin/claude`), with self-update off (`DISABLE_AUTOUPDATER`, also in `/etc/claude-code/managed-settings.json`, since a claude process's environment is an allowlist). The server starts `claude` and `pwsh` by full path (`Claude__Executable=/usr/bin/claude`, `PowerShell__Executable=/usr/bin/pwsh`), and `/home/godmode/.local/bin`, which a session can write, is last on the `PATH`. Off Docker the two settings default to a `PATH` lookup (`claude`, `pwsh`): a codespace's claude is in `~/.local/bin`, installed by `postCreateCommand`, and the server runs as the sessions' user there anyway.
+**Nothing a session runs as can change the server.** `/app` (the server) is root's and read-only to `godmode`, which owns only what the server writes: `/app/roots`, `/app/projects` (the default root when none is configured), `/data` and its home. Claude Code is installed root-owned with `npm install -g` (`/usr/bin/claude`), with self-update off (`DISABLE_AUTOUPDATER`, also in `/etc/claude-code/managed-settings.json`, since a claude process's environment is an allowlist). The server starts `claude` and `pwsh` by full path (`Claude__Executable=/usr/bin/claude`, `PowerShell__Executable=/usr/bin/pwsh`), and `/home/godmode/.local/bin`, which a session can write, is last on the `PATH`. Off Docker the two settings default to a `PATH` lookup (`claude`, `pwsh`): a codespace's claude is in `~/.local/bin`, installed by `postCreateCommand`, and the server runs as the sessions' user there anyway.
 
 GitHub Actions (`.github/workflows/build-and-push.yml`) builds and pushes both targets to GHCR (`ghcr.io/johnjuuljensen/godmode`) on pushes to `master` that touch `src/`, `tests/` or the slnx (`latest`, `sdk`), and on a published release (plus the release tag).
 
@@ -463,8 +448,7 @@ Every target separates the **server binary** from the **workspace data**:
 ```
 /opt/godmode-server/          # Server binary (replaced on updates)
 ├── GodMode.Server.dll
-├── appsettings.json          # Static config (URLs, auth, logging)
-└── wwwroot/                  # React SPA
+└── appsettings.json          # Static config (URLs, auth, logging)
 
 ~/roots/                      # Workspace data = ProjectRootsDir (persists across updates)
 ├── .profiles/                # Profile definitions
@@ -522,4 +506,4 @@ When building a new feature on GodMode:
 
 6. **For new UI pages**: Create a component directory under `components/`, add an `activePage` variant in the store, add CSS alongside the component.
 
-7. **Test both hosting modes**: Verify the feature works in browser (direct to server) and consider MAUI constraints (multi-server, proxy, embedded assets).
+7. **Test in the app**: Verify the feature in the Windows app against a running server, and consider the app's constraints (multi-server, relay, embedded assets, Android).

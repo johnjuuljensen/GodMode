@@ -30,10 +30,7 @@ Recipe:
 
 ## Project Overview
 
-GodMode runs Claude Code sessions that ship issues, on machines you own (a PC, a VM or a GitHub Codespace), and lets you follow and steer them from a browser or a phone. It is a .NET 10 solution with two UI surfaces:
-
-1. **React SPA** — served directly by GodMode.Server, accessed via browser
-2. **MAUI app** — hosts the same React SPA in a HybridWebView, with a local proxy for multi-server connectivity
+GodMode runs Claude Code sessions that ship issues, on machines you own (a PC, a VM or a GitHub Codespace), and lets you follow and steer them from the GodMode app, on a PC or a phone. It is a .NET 10 solution with one UI surface: the **MAUI app**, which hosts the React SPA in a HybridWebView, with a local proxy for multi-server connectivity. GodMode.Server serves no page, and no browser is its client.
 
 **All UI work is done in React.** The MAUI app is a thin shell — it hosts the React SPA and provides a WebSocket relay for multi-server connectivity. There is no native .NET UI.
 
@@ -42,31 +39,34 @@ GodMode runs Claude Code sessions that ship issues, on machines you own (a PC, a
 The solution build needs the VoiceBot submodule (`external/VoiceBot`, VoiceBot's repo, which is private): run `git submodule update --init --recursive` once in a new checkout (`ac-gwt-add` does it in every worktree it makes). `GodMode.Voice`, its tests and `GodMode.Maui` reference VoiceBot's projects by path; `GodMode.Server`, the Docker image, the codespace and the image workflow need none of it. Nothing is committed inside the submodule: what VoiceBot lacks is a johnjuuljensen/VoiceBot issue, and upgrading it is a commit here that moves the pin.
 
 ```bash
-# Build server (includes React SPA build)
+# Build server (no React: it serves no page, and needs no npm)
 dotnet build src/GodMode.Server/GodMode.Server.csproj
 
 # Run server (http://127.0.0.1:31337; with no Authentication:ApiKey it generates a key on its first start and prints it)
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
-# Build MAUI app (requires MAUI workload)
+# Build MAUI app (requires MAUI workload; builds the React client into it)
 dotnet build src/GodMode.Maui/GodMode.Maui.csproj
+
+# Run the Windows app
+dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.19041.0
 
 # Run all tests
 dotnet test
 
-# React dev server (hot reload only; it has no proxy, so it cannot reach a GodMode.Server)
-cd src/GodMode.Client.React && npm run dev
+# React client tests and lint (run as the app's page, with a fake shell)
+cd src/GodMode.Client.React && npm test && npm run lint
 ```
 
-**Running/Debugging**: The server and MAUI app are separate processes. The server serves the React SPA and manages Claude Code processes. The MAUI app connects to one or more servers via its local proxy. To see a React change against a running server, rebuild the server (`dotnet build`, or restart `dotnet run`) and reload the page: the server build rebuilds the client when its sources changed and copies `dist/` into `wwwroot/`. `npm run dev` starts Vite with hot reload, but `vite.config.ts` has no proxy, so that page shows "No servers configured".
+**Running/Debugging**: The server and MAUI app are separate processes. The server manages Claude Code processes and serves the hub; it serves no page. The MAUI app connects to one or more servers via its local proxy. To see a React change, rebuild and run the Windows app against a running server (add the server there with its key): the app's build rebuilds the client when its sources changed (`npm ci` first, when `node_modules` is missing or older than `package-lock.json`). Its WebView2 has DevTools enabled (F12). There is no Vite dev server.
 
 ## Architecture
 
 ### Projects
 
 - **GodMode.Shared** — Shared types, models, enums, and SignalR hub interfaces (`IProjectHub`, `IProjectHubClient`)
-- **GodMode.Server** — ASP.NET SignalR server that spawns/manages Claude Code processes, serves React SPA
-- **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation. An npm project with a NoTargets `GodMode.Client.React.csproj` in the slnx, which runs TypeGen and `npm run build`; GodMode.Server and GodMode.Maui reference it
+- **GodMode.Server** — ASP.NET SignalR server that spawns/manages Claude Code processes; serves the hub and its MCP endpoint, and no page
+- **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation. An npm project with a NoTargets `GodMode.Client.React.csproj` in the slnx, which runs TypeGen and `npm run build`; GodMode.Maui references it
 - **GodMode.ClientBase** — Shared .NET client abstractions (host providers, server registry, token protection)
 - **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React; on Windows it also runs the voice session (`Voice/VoiceHost.cs`, `voice.*` bridge messages)
 - **GodMode.Voice** — voice over GodMode on VoiceBot (the `external/VoiceBot` submodule): a Danish-first voice graph whose tools use the hub as it is (what needs me, a project's status, answer it, mark it seen), announcements of new attention items, spoken project handles, the voice settings (keys in `ISecretStore`)
@@ -84,7 +84,7 @@ cd src/GodMode.Client.React && npm run dev
 - `IProjectHubClient` (Shared) — Server→Client callbacks (including `CreationProgress`)
 - `ProjectHub` (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
 - `HubConnectionFactory` (ClientBase) — .NET clients get a raw `HubConnection` and use `TypedSignalR.Client`'s `CreateHubProxy<IProjectHub>()` for typed calls
-- `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of GodMode.Server or GodMode.Maui (via `GodMode.Client.React.csproj`) (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
+- `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of `GodMode.Client.React.csproj` (GodMode.Maui's reference, or the solution) (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
 
 **Config-Driven Project Roots (Multi-File)**
 - A root is a subdirectory of `ProjectRootsDir` (appsettings, default `roots`) that contains a `.godmode-root/` folder with config files
@@ -100,10 +100,9 @@ cd src/GodMode.Client.React && npm run dev
 
 **React + MAUI Hosting**
 - React is the single UI — all UI changes go in `GodMode.Client.React/`
-- In browser mode: React connects directly to GodMode.Server via SignalR
-- In MAUI mode: React connects via a local proxy (`LocalServer`) that relays WebSocket to remote servers
-- React detects hosting mode via `window.location.hostname === '0.0.0.1'` (HybridWebView address)
-- Use the helpers in `hostApi.ts` (`getHubUrl()`, `getHubOptions()`, and its fetch helpers) — never hardcode URLs
+- The MAUI app is its only host: there is no browser mode, no `isMaui`, and no sign-in page. React connects via a local proxy (`LocalServer`) that relays WebSocket to remote servers, and gets its servers from the shell over the host bridge
+- Use the helpers in `hostApi.ts` (`getHubUrl()`, `getHubOptions()`, and its bridge calls) — never hardcode URLs
+- Client tests run as the app's page: jsdom at `https://0.0.0.1/`, with a fake shell behind `window.HybridWebView` (`src/test/appShell.ts`)
 
 **Process Management**
 - `ClaudeProcessManager` uses `System.Diagnostics.Process` directly (not CliWrap) for proper stdin handling
@@ -113,7 +112,8 @@ cd src/GodMode.Client.React && npm run dev
 **Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
 - Every request needs a credential, loopback included. One mode per run: codespace (`CODESPACES=true`: a GitHub token of `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`) or API key
 - The key is `Authentication:ApiKey`, else one the server generates on its first start into an owner-only key file in its own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key`, `~/.local/share/GodMode.Server/api-key`; never under `ProjectRootsDir`), prints once, and reuses on every start
-- A request with an `Origin` gets 403 unless it is one of the server's own origins (its bindings, where loopback and wildcards also stand for `localhost`/`127.0.0.1`/`[::1]`, plus `Authentication:AllowedOrigins`); a request with no `Origin` needs the key alone
+- Any request with an `Origin` gets 403, whatever it names (the server's own bindings included; no setting allows one): no browser is a client. A request with no `Origin` (the MAUI relay, the attention service, a session's claude) needs its credential alone
+- Only `/health` is anonymous. `/`, with the key, answers `{"service":"GodMode.Server",…}`; nothing serves a page
 - Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them; a credential they need goes in the root's `environment`
 
 ### Project Folder Structure
@@ -185,7 +185,7 @@ Root scripts run on whatever machine hosts the server: a Windows or Linux PC or 
   - Use `hostApi.ts` helpers for URLs — never hardcode server paths
   - Support multi-server (don't assume single server)
   - Bundle all assets — no CDN dependencies
-  - Test in browser; be aware of MAUI differences
+  - Test in the Windows app; be aware of Android differences
 
 ## GitHub Codespaces (GodMode Server)
 
@@ -221,19 +221,19 @@ GitHub reads the devcontainer from the branch the codespace is created on (the d
 # List codespaces and their state
 gh codespace list
 
-# Server probe (authenticated — bypasses port forwarding auth)
+# Server probe (authenticated — bypasses port forwarding auth): `/` answers {"service":"GodMode.Server",...}
 TOKEN=$(gh auth token)
 curl -s -H "Authorization: Bearer $TOKEN" "https://<codespace-name>-31337.app.github.dev/"
 
 # SSH in and check
-ssh <codespace-name> 'ss -tlnp | grep 31337'          # port listening?
-ssh <codespace-name> 'curl -s http://localhost:31337/'  # server responding?
+ssh <codespace-name> 'ss -tlnp | grep 31337'                 # port listening?
+ssh <codespace-name> 'curl -s http://localhost:31337/health'  # server responding? (anonymous)
 ssh <codespace-name> 'which claude || ~/.local/bin/claude --version'  # claude installed?
 ```
 
 ### Port forwarding
 
-Port 31337 is forwarded automatically. The `postStartCommand` sets it to public via `gh codespace ports visibility`.
+Port 31337 is forwarded automatically. The `postStartCommand` sets it to public via `gh codespace ports visibility`. It serves no page: add the codespace in the app (a GitHub Codespaces server, `GitHubCodespaceProvider`), not in a browser.
 
 Server URL pattern: `https://<codespace-name>-31337.app.github.dev/`
 
