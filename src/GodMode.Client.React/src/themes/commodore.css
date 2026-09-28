@@ -197,7 +197,7 @@
 }
 
 /* ── Titles: the C64's light blue, lifted ── */
-[data-theme="commodore"] :is(.sidebar-title, .inbox-title, .settings-header h2, .modal h2) {
+[data-theme="commodore"] :is(.inbox-title, .settings-header h2, .modal h2) {
   color: #A99DEB;
 }
 

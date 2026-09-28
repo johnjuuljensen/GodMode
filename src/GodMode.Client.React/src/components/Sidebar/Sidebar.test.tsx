@@ -2,7 +2,8 @@
 /**
  * The left list under its profiles (#308): a root's + opens Create project on that root and its server,
  * and the group-by cycles through what is under each profile. Add server is in the gear menu, not the
- * header (#311). Renders the Shell on the real store.
+ * header (#311). The header spells out no "GodMode": the window's title bar does (#313). Renders the Shell on
+ * the real store.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectRootInfo } from '../../signalr/types';
@@ -94,6 +95,16 @@ describe('the group-by', () => {
       'Status: Default, 0 root headers',
       'Root: Default, 1 root headers',
     ]);
+  });
+});
+
+describe('the header (#313)', () => {
+  it("has no title: the name is the title bar's", async () => {
+    await connectServers({ A: new FakeHub([], [rootNamed('work')]) });
+    view = await render(<Shell />);
+    const header = view!.container.querySelector('.sidebar-header')!;
+    expect(header.querySelector('.sidebar-title')).toBeNull();
+    expect(header.textContent).not.toContain('GodMode');
   });
 });
 

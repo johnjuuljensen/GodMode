@@ -155,7 +155,7 @@
 }
 
 /* ── Titles: the face's gold, with a hard pixel drop ── */
-[data-theme="doom"] :is(.sidebar-title, .inbox-title, .settings-header h2, .modal h2) {
+[data-theme="doom"] :is(.inbox-title, .settings-header h2, .modal h2) {
   color: #d5bb46;
   text-shadow: 2px 2px 0 #000;
 }

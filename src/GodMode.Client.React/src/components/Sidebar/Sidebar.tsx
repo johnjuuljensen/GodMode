@@ -32,7 +32,6 @@ export function SidebarHeader() {
 
   return (
     <div className="sidebar-header">
-      <span className="sidebar-title">GodMode</span>
       <ConnectionIndicator />
       <div className="sidebar-header-actions">
         {showProfileFilter && (
