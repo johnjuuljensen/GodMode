@@ -56,13 +56,13 @@ beforeEach(async () => {
 });
 
 describe('grouping', () => {
-  it.each<SidebarGroupBy>(['profile', 'root', 'recent', 'status'])('by %s keeps each project on its own server', g => {
+  it.each<SidebarGroupBy>(['root', 'recent', 'status'])('by %s keeps each project on its own server', g => {
     groupBy(g);
     const entries = sidebarEntries().map(e => `${e.serverId}:${e.projectId}`).sort();
     expect(entries).toEqual(['A:p1', 'A:p2', 'B:p1', 'B:p3']);
   });
 
-  it.each<SidebarGroupBy>(['profile', 'root', 'recent', 'status'])('by %s opens the project shown, on its server', g => {
+  it.each<SidebarGroupBy>(['root', 'recent', 'status'])('by %s opens the project shown, on its server', g => {
     groupBy(g);
     for (const e of sidebarEntries()) {
       useAppStore.getState().selectProject(e.serverId, e.projectId);
@@ -73,7 +73,7 @@ describe('grouping', () => {
   });
 
   it('labels a name shown from two servers with its server', () => {
-    groupBy('profile');
+    groupBy('root');
     const labels = Object.fromEntries(sidebarEntries().map(e => [`${e.serverId}:${e.projectId}`, e.label]));
     expect(labels).toEqual({ 'A:p1': 'Server A', 'B:p1': 'Server B', 'A:p2': undefined, 'B:p3': undefined });
   });

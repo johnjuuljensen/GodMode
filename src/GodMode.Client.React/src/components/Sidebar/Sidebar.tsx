@@ -8,8 +8,8 @@ import { ProjectItem } from './ProjectItem';
 import { Inbox } from '../Inbox/Inbox';
 import './Sidebar.css';
 
+/** What is under each profile: the profile is always the top level (#308). */
 const GROUP_LABELS: Record<SidebarGroupBy, string> = {
-  profile: 'Profile',
   root: 'Root',
   recent: 'Recent',
   status: 'Status',
@@ -234,7 +234,7 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
       {!rootGroup.flat && (
         <div className="root-group-header">
           <span className="root-group-name">{rootGroup.name}</span>
-          {rootGroup.actions.length > 0 && serverId && (
+          {rootGroup.canCreate && serverId && (
             <button
               className="root-action-btn"
               onClick={() => setActivePage({ type: 'createProject', context: { serverId, rootName } })}
