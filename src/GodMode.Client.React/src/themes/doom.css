@@ -14,14 +14,14 @@
   color-scheme: dark;
 
   /* ── Colour: the face's browns, the status bar's stone ── */
-  --bg-base:          #1a120a;
+  --bg-base:          #231810;
   --bg-ambient-1:     rgba(196,30,22,0.16);
   --bg-ambient-2:     rgba(141,94,52,0.14);
   --bg-ambient-3:     transparent;
 
-  --glass:            #2c1f11;
-  --glass-hover:      #3a2917;
-  --glass-strong:     #49361d;
+  --glass:            #362617;
+  --glass-hover:      #43301c;
+  --glass-strong:     #4f3a20;
   --glass-border:     #614023;
   --glass-border-strong: #8d5e34;
   --glass-highlight:  transparent;
@@ -97,27 +97,27 @@
   --radius-pill:      0;
 
   /* ── Depth: hard offset shadows, no blur. Focus is a solid ring. No shadow is `0 0 0 0 transparent` ── */
-  --shadow-window:    0 0 0 2px #0d0904;
-  --shadow-card:      4px 4px 0 0 #0d0904;
-  --shadow-card-hover: 6px 6px 0 0 #0d0904;
-  --shadow-menu:      4px 4px 0 0 #0d0904;
+  --shadow-window:    0 0 0 2px #000;
+  --shadow-card:      4px 4px 0 0 #000;
+  --shadow-card-hover: 6px 6px 0 0 #000;
+  --shadow-menu:      4px 4px 0 0 #000;
   --shadow-inset-highlight: inset 2px 2px 0 0 rgba(255,236,190,0.08);
   --shadow-inset-input: inset 2px 2px 0 0 rgba(0,0,0,0.35);
   --shadow-focus:     0 0 0 2px var(--accent);
   --shadow-focus-sm:  0 0 0 2px var(--accent);
   --shadow-focus-success: 0 0 0 2px var(--success);
   --shadow-outline-accent: 0 0 0 2px var(--accent);
-  --shadow-accent:    3px 3px 0 0 #0d0904;
-  --shadow-accent-hover: 4px 4px 0 0 #0d0904;
+  --shadow-accent:    3px 3px 0 0 #000;
+  --shadow-accent-hover: 4px 4px 0 0 #000;
   /* Status lights are square pixels: an outline, not a glow */
-  --shadow-led-success: 0 0 0 1px #0d0904;
-  --shadow-led-error: 0 0 0 1px #0d0904;
-  --shadow-led-accent: 0 0 0 1px #0d0904;
-  --shadow-led-accent-soft: 0 0 0 1px #0d0904;
-  --shadow-led-waiting: 0 0 0 1px #0d0904;
-  --shadow-dot-success: 0 0 0 1px #0d0904;
-  --shadow-dot-warning: 0 0 0 1px #0d0904;
-  --shadow-dot-error: 0 0 0 1px #0d0904;
+  --shadow-led-success: 0 0 0 1px #000;
+  --shadow-led-error: 0 0 0 1px #000;
+  --shadow-led-accent: 0 0 0 1px #000;
+  --shadow-led-accent-soft: 0 0 0 1px #000;
+  --shadow-led-waiting: 0 0 0 1px #000;
+  --shadow-dot-success: 0 0 0 1px #000;
+  --shadow-dot-warning: 0 0 0 1px #000;
+  --shadow-dot-error: 0 0 0 1px #000;
   /* A waiting tile holds a steady orange frame */
   --shadow-waiting:   0 0 0 2px var(--warning);
   --shadow-waiting-peak: var(--shadow-waiting);
@@ -157,13 +157,19 @@
 /* ── Titles: the face's gold, with a hard pixel drop ── */
 [data-theme="doom"] :is(.sidebar-title, .inbox-title, .settings-header h2, .modal h2) {
   color: #d5bb46;
-  text-shadow: 2px 2px 0 #0d0904;
+  text-shadow: 2px 2px 0 #000;
 }
 
 /* A pressed button sinks into its shadow, as a sprite button would */
 [data-theme="doom"] .btn-primary:active {
   transform: translate(3px, 3px);
   box-shadow: 0 0 0 0 transparent;
+}
+
+/* A button with no background of its own is a brown panel, not the browser's grey (zero specificity: .btn-primary and the rest keep theirs) */
+:where(:root[data-theme="doom"] .btn) {
+  background: var(--glass-strong);
+  color: var(--text-primary);
 }
 
 [data-theme="doom"] ::selection {

@@ -139,7 +139,7 @@
   --font-mono:        'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
   --font-display:     'Orbitron', 'Chakra Petch', sans-serif;
   /* Orbitron is wide: a size-for-size swap would crowd the badges */
-  --font-display-adjust: 0.48;
+  --font-display-adjust: 0.56;
   --label-case:       uppercase;
   --label-tracking:   0.06em;
 
@@ -164,6 +164,12 @@
 
 [data-theme="neon"] .btn-primary {
   text-shadow: none;
+}
+
+/* A button with no background of its own is a dark panel, not the browser's grey (zero specificity: .btn-primary and the rest keep theirs) */
+:where(:root[data-theme="neon"] .btn) {
+  background: var(--glass-strong);
+  color: var(--text-primary);
 }
 
 [data-theme="neon"] ::selection {
