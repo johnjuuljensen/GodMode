@@ -3,6 +3,8 @@
     <!-- No backup or device transfer: servers.json and the SecureStorage preferences stay on this device. -->
     <application android:allowBackup="false"
                  android:dataExtractionRules="@xml/data_extraction_rules"
+                 android:icon="@mipmap/appicon"
+                 android:roundIcon="@mipmap/appicon_round"
                  android:label="GodMode"
                  android:supportsRtl="true"
                  android:usesCleartextTraffic="true">
