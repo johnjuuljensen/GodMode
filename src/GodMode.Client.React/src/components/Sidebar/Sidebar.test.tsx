@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
  * The left list under its profiles (#308): a root's + opens Create project on that root and its server,
- * and the group-by cycles through what is under each profile. Renders the Shell on the real store.
+ * and the group-by cycles through what is under each profile. Add server is in the gear menu, not the
+ * header (#311). Renders the Shell on the real store.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectRootInfo } from '../../signalr/types';
@@ -25,6 +26,15 @@ const rootNamed = (name: string): ProjectRootInfo => ({
   Actions: [{ Name: 'issue', AllowSkipPermissions: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } } } }],
 });
 
+// The window's (max-width: 768px), which a test sets before rendering; every other query is as before
+let phone = false;
+const otherMedia = window.matchMedia;
+window.matchMedia = (query: string) => query !== '(max-width: 768px)' ? otherMedia(query) : ({
+  matches: phone, media: query, onchange: null,
+  addEventListener: () => {}, removeEventListener: () => {},
+  addListener: () => {}, removeListener: () => {}, dispatchEvent: () => false,
+}) as unknown as MediaQueryList;
+
 const initialState = useAppStore.getState();
 let view: Rendered | undefined;
 
@@ -37,6 +47,7 @@ beforeEach(() => {
   useAppStore.setState(initialState, true);
   history.replaceState(null, '', '#/');
   sessionStorage.clear();
+  phone = false;
 });
 
 afterEach(() => { view?.unmount(); view = undefined; });
@@ -83,6 +94,40 @@ describe('the group-by', () => {
       'Status: Default, 0 root headers',
       'Root: Default, 1 root headers',
     ]);
+  });
+});
+
+describe('Add server (#311)', () => {
+  const gear = () => view!.container.querySelector<HTMLButtonElement>('.sidebar-settings-btn');
+  const menuItem = (label: string) => q<HTMLButtonElement>('.sidebar-footer-menu-item').find(b => b.textContent === label);
+
+  it('is not in the header, whose buttons are the everyday ones', async () => {
+    await connectServers({ A: new FakeHub([], [rootNamed('work')]) });
+    view = await render(<Shell />);
+    expect(q('.sidebar-header button').map(b => b.getAttribute('title'))).toEqual(['Tile view', 'Create project']);
+  });
+
+  it.each([false, true])('is in the gear menu beside View Settings, and opens Add server closing the menu (phone: %s)', async isPhone => {
+    phone = isPhone;
+    await connectServers({ A: new FakeHub([], [rootNamed('work')]) });
+    view = await render(<Shell />);
+    // The phone's gear menu is under its list, the home's Projects tab
+    if (isPhone) await click(q('.home-tab').find(b => b.textContent === 'Projects')!);
+
+    await click(gear()!);
+    expect(q('.sidebar-footer-menu-item').map(b => b.textContent)).toEqual(['View Settings', 'Add server']);
+
+    await click(menuItem('Add server')!);
+    expect(useAppStore.getState().activePage).toEqual({ type: 'addServer' });
+    expect(view!.container.querySelector('.page-body h2')?.textContent).toBe('Add Server');
+    expect(view!.container.querySelector('.sidebar-footer-menu')).toBeNull();
+  });
+
+  it('is still offered by the empty list, the first-run path', async () => {
+    view = await render(<Shell />);
+    expect(view!.container.querySelector('.sidebar-empty p')?.textContent).toBe('No servers configured');
+    await click(view!.container.querySelector<HTMLButtonElement>('.sidebar-empty .btn-primary')!);
+    expect(useAppStore.getState().activePage).toEqual({ type: 'addServer' });
   });
 });
 
