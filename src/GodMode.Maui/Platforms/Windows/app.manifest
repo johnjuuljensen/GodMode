@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="GodMode.Maui.WinUI.app"/>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <!-- The window is per-monitor DPI aware (MAUI's template, picked up by its name and place). Without this the
+           window runs DPI-unaware and Windows stretches it, while WebView2 places its own popups (a <select>'s list,
+           a title tooltip) in physical pixels. The two scalings stack, so at 150 % a popup lands at 1.5 times its
+           screen position (issue #309) -->
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/PM</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2, PerMonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>
