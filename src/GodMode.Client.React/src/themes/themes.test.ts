@@ -48,9 +48,9 @@ describe('the registry', () => {
 
 // A theme's fonts are its own chunk, fetched the first time it is applied; the bundle's are Glass's alone
 it.each(themes.filter(t => !t.id.startsWith('glass-')).map(t => [t.id, t.fonts] as const))('%s loads its fonts in a module of its own', (id, fonts) => {
-  const module = read(`${id}.fonts.ts`);
+  const module = read(`${id}-fonts.ts`);
   for (const font of fonts) expect(module).toContain(`@fontsource/${font.toLowerCase().replace(/ /g, '-')}/`);
-  expect(read('index.ts')).toContain(`import('./${id}.fonts')`);
+  expect(read('index.ts')).toContain(`import('./${id}-fonts')`);
 });
 
 describe('the tokens', () => {
