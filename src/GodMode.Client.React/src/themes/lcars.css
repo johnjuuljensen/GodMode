@@ -243,6 +243,7 @@
 
 [data-theme="lcars"] .sidebar-title { font-size: 20px; }
 [data-theme="lcars"] .project-header-name { font-size: 18px; }
+[data-theme="lcars"] .shell-mobile .project-header-name { font-size: 15px; letter-spacing: 0.03em; }
 
 /* Labels: condensed, upper case */
 [data-theme="lcars"] :is(.profile-group-name, .form-group label, .settings-section-header, .inbox-item-kind, .question-label, .tile-waiting-badge, .project-status-btn) {
@@ -376,6 +377,7 @@
   border-color: #FF9900;
 }
 [data-theme="lcars"] .theme-option.selected .settings-item-name { color: #000; }
+[data-theme="lcars"] .theme-option.selected .settings-dot { background: #000; }
 
 [data-theme="lcars"] ::selection {
   background: #FF9900;
