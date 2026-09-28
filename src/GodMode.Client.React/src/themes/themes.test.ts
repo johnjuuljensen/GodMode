@@ -3,6 +3,7 @@
  * The theme registry and its stylesheets (#296): each theme's tokens are scoped to it, a theme beyond Glass defines
  * every token (none falls through to Glass's look), and every token a stylesheet names exists.
  */
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -31,6 +32,7 @@ describe('the registry', () => {
     expect(resolveThemeId('phosphor')).toBe('phosphor');
     expect(resolveThemeId('neon')).toBe('neon');
     expect(resolveThemeId('doom')).toBe('doom');
+    expect(resolveThemeId('commodore')).toBe('commodore');
     expect(resolveThemeId('nope')).toBe('glass-dark');
     expect(resolveThemeId(null)).toBe('glass-dark');
   });
@@ -46,11 +48,31 @@ describe('the registry', () => {
   });
 });
 
-// A theme's fonts are its own chunk, fetched the first time it is applied; the bundle's are Glass's alone
+// A theme's fonts are its own chunk, fetched the first time it is applied; the bundle's are Glass's alone.
+// Each is an @fontsource package, or a font bundled here whose @font-face is a stylesheet the module imports
 it.each(themes.filter(t => !t.id.startsWith('glass-')).map(t => [t.id, t.fonts] as const))('%s loads its fonts in a module of its own', (id, fonts) => {
   const module = read(`${id}-fonts.ts`);
-  for (const font of fonts) expect(module).toContain(`@fontsource/${font.toLowerCase().replace(/ /g, '-')}/`);
+  const faces = [...module.matchAll(/^import '(\.\/[^']+\.css)';/gm)].map(m => read(m[1]))
+    .flatMap(css => [...css.matchAll(/@font-face\s*\{[^}]*font-family:\s*'([^']+)'/g)].map(m => m[1]));
+  for (const font of fonts) {
+    if (!faces.includes(font)) expect(module).toContain(`@fontsource/${font.toLowerCase().replace(/ /g, '-')}/`);
+  }
   expect(read('index.ts')).toContain(`import('./${id}-fonts')`);
+});
+
+// Pet Me 64 is Kreative Software's, given away only with its licence verbatim and credit, and never modified
+describe("Commodore's bundled font", () => {
+  const petMe = (file: string) => readFileSync(join(dir, 'fonts', 'pet-me', file));
+  const sha256 = (file: string) => createHash('sha256').update(petMe(file)).digest('hex');
+
+  it('is the font and the licence Kreative ships, byte for byte', () => {
+    expect(sha256('PetMe64.ttf')).toBe('1a5a4bf4af2076345480b1a99490a16503f0f5c167e200c8e7644fd40b72d9fd');
+    expect(sha256('FreeLicense.txt')).toBe('5b26f7318dddc8d1ace2353992924d5dc0fc6123656de7bdd81ac69f9a8b0878');
+  });
+
+  it('credits Kreative Software', () => {
+    expect(petMe('README.md').toString('utf8')).toContain('Kreative Software');
+  });
 });
 
 describe('the tokens', () => {
