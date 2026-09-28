@@ -1,5 +1,7 @@
 import { useAppStore } from '../store';
 import { Toggle } from './settings-shared';
+import { VoiceSettings } from './Voice/VoiceSettings';
+import { useVoice } from '../services/voice';
 import './settings-common.css';
 
 const FLAGS: { key: 'featureProfiles'; label: string; desc: string }[] = [
@@ -11,6 +13,7 @@ export function AppSettings() {
   const setFeatureFlag = useAppStore(s => s.setFeatureFlag);
 
   const values: Record<string, boolean> = { featureProfiles };
+  const voice = useVoice();
 
   return (
     <>
@@ -28,6 +31,7 @@ export function AppSettings() {
           </div>
         ))}
       </div>
+      {voice?.Available && <VoiceSettings />}
     </>
   );
 }

@@ -7,7 +7,7 @@
  * A request carries an Id; the shell answers with the same Type and Id, and either a
  * Payload or an Error. A message without an Id is an event (e.g. servers.changed).
  *
- * No message from the shell carries a server's access token.
+ * No message from the shell carries a server's access token, nor a voice key.
  */
 import type { ServerInfo } from '../signalr/types';
 
@@ -36,6 +36,64 @@ export interface AttentionLinkPayload {
   ProjectId: string;
 }
 
+// ── Voice (the Windows app only: voice.state says whether it is Available) ──
+
+export type VoiceStateName = 'Off' | 'Starting' | 'Listening' | 'Thinking' | 'Speaking' | 'Error';
+
+/** VoiceBot's SessionService: the part of the session that failed. */
+export type VoiceService = 'SpeechRecognition' | 'SpeechSynthesis' | 'Model' | 'Session';
+
+/** VoiceBot's SessionErrorKind. */
+export type VoiceErrorKind = 'Authentication' | 'ConnectionLost' | 'ServiceError' | 'ModelError';
+
+export interface VoiceError {
+  Service: VoiceService;
+  Kind: VoiceErrorKind;
+  Message: string;
+}
+
+export interface VoiceLine {
+  Speaker: 'User' | 'Bot';
+  Text: string;
+  /** What the user is still saying: the next line from them replaces it. */
+  Partial?: boolean;
+}
+
+/** Voice in this app, and the conversation so far (the session is the app's, so a reloaded page gets it back). */
+export interface VoiceStatus {
+  Available: boolean;
+  State: VoiceStateName;
+  Lines: VoiceLine[];
+  /** The last failure not yet recovered from. */
+  Error?: VoiceError | null;
+}
+
+export interface VoiceModels {
+  Light: string;
+  Medium: string;
+  Heavy: string;
+}
+
+/** The voice settings, and whether each key is set. The shell never sends a key back. */
+export interface VoiceSettingsView {
+  Language: string;
+  VoiceId: string;
+  EchoCancellation: boolean;
+  Models: VoiceModels;
+  ElevenLabsKeySet: boolean;
+  AnthropicKeySet: boolean;
+}
+
+/** What to change: an absent field stays as it is; a key that is an empty string is removed. */
+export interface VoiceSettingsUpdate {
+  Language?: string;
+  VoiceId?: string;
+  EchoCancellation?: boolean;
+  Models?: VoiceModels;
+  ElevenLabsKey?: string;
+  AnthropicKey?: string;
+}
+
 /** Request types → [payload, response]. */
 interface BridgeRequests {
   'relay.info': [void, RelayInfo];
@@ -47,10 +105,30 @@ interface BridgeRequests {
   'host.openDevTools': [void, boolean];
   /** The item the last notification tap opened, once; null when there is none (or it was taken). */
   'attention.take': [void, AttentionLinkPayload | null];
+  'voice.state': [void, VoiceStatus];
+  /** Fails saying why: a missing key, no microphone, voice not available here. */
+  'voice.start': [void, VoiceStatus];
+  'voice.stop': [void, VoiceStatus];
+  'voice.settings.get': [void, VoiceSettingsView];
+  'voice.settings.set': [VoiceSettingsUpdate, VoiceSettingsView];
 }
 
-/** Event types the shell sends. attention.open: a notification was tapped, and attention.take has its item. */
-export type BridgeEvent = 'servers.changed' | 'attention.open';
+/** Event types the shell sends → their payloads. attention.open: a notification was tapped, and attention.take has its item. */
+interface BridgeEvents {
+  'servers.changed': void;
+  'attention.open': void;
+  /** What the user said; partial while they speak. */
+  'voice.transcript': VoiceLine;
+  /** What the bot says. */
+  'voice.response': VoiceLine;
+  /** A service failed; the session keeps running. */
+  'voice.error': VoiceError;
+  /** A service that failed works again. */
+  'voice.recovered': { Service: VoiceService };
+  'voice.stateChanged': VoiceStatus;
+}
+
+export type BridgeEvent = keyof BridgeEvents;
 
 interface BridgeMessage {
   Type: string;
@@ -90,7 +168,7 @@ function loadHost(): Promise<NonNullable<Window['HybridWebView']>> {
 
 let nextId = 0;
 const pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
-const listeners = new Map<string, Set<() => void>>();
+const listeners = new Map<string, Set<(payload: unknown) => void>>();
 let listening = false;
 
 function ensureListening(): void {
@@ -113,7 +191,7 @@ function ensureListening(): void {
       else waiter.resolve(msg.Payload);
       return;
     }
-    listeners.get(msg.Type)?.forEach(fn => fn());
+    listeners.get(msg.Type)?.forEach(fn => fn(msg.Payload));
   });
 }
 
@@ -140,11 +218,12 @@ export async function request<K extends keyof BridgeRequests>(
   });
 }
 
-/** Subscribes to a shell event. Returns the unsubscribe function. */
-export function on(type: BridgeEvent, handler: () => void): () => void {
+/** Subscribes to a shell event; the handler gets its payload. Returns the unsubscribe function. */
+export function on<K extends BridgeEvent>(type: K, handler: (payload: BridgeEvents[K]) => void): () => void {
   ensureListening();
   let set = listeners.get(type);
   if (!set) listeners.set(type, set = new Set());
-  set.add(handler);
-  return () => { set.delete(handler); };
+  const listener = handler as (payload: unknown) => void;
+  set.add(listener);
+  return () => { set.delete(listener); };
 }

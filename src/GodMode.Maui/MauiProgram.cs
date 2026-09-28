@@ -1,5 +1,6 @@
 using GodMode.ClientBase;
 using GodMode.ClientBase.Services;
+using GodMode.Maui.Voice;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SignalR.Proxy;
@@ -28,6 +29,8 @@ public static class MauiProgram
             var directory = sp.GetRequiredService<IServerDirectory>();
             return new LocalServer(directory.ResolveAsync, WebViewOrigins, sp.GetRequiredService<ILoggerFactory>());
         });
+        // The voice session belongs to the app, so it outlives a page
+        services.AddSingleton<VoiceHost>();
         // Add debug window sink (MAUI-specific)
         services.AddLogging(builder => builder.AddDebug());
         Services = services.BuildServiceProvider();

@@ -1,0 +1,3 @@
+[submodule "external/VoiceBot"]
+	path = external/VoiceBot
+	url = ../VoiceBot.git

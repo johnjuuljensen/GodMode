@@ -39,6 +39,8 @@ GodMode runs Claude Code sessions that ship issues, on machines you own (a PC, a
 
 ## Build Commands
 
+The solution build needs the VoiceBot submodule (`external/VoiceBot`, VoiceBot's repo, which is private): run `git submodule update --init --recursive` once in a new checkout (`ac-gwt-add` does it in every worktree it makes). `GodMode.Voice`, its tests and `GodMode.Maui` reference VoiceBot's projects by path; `GodMode.Server`, the Docker image, the codespace and the image workflow need none of it. Nothing is committed inside the submodule: what VoiceBot lacks is a johnjuuljensen/VoiceBot issue, and upgrading it is a commit here that moves the pin.
+
 ```bash
 # Build server (includes React SPA build)
 dotnet build src/GodMode.Server/GodMode.Server.csproj
@@ -66,11 +68,13 @@ cd src/GodMode.Client.React && npm run dev
 - **GodMode.Server** — ASP.NET SignalR server that spawns/manages Claude Code processes, serves React SPA
 - **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation. An npm project with a NoTargets `GodMode.Client.React.csproj` in the slnx, which runs TypeGen and `npm run build`; GodMode.Server and GodMode.Maui reference it
 - **GodMode.ClientBase** — Shared .NET client abstractions (host providers, server registry, token protection)
-- **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React
+- **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React; on Windows it also runs the voice session (`Voice/VoiceHost.cs`, `voice.*` bridge messages)
+- **GodMode.Voice** — voice over GodMode on VoiceBot (the `external/VoiceBot` submodule): a Danish-first voice graph whose tools use the hub as it is (what needs me, a project's status, answer it, mark it seen), announcements of new attention items, spoken project handles, the voice settings (keys in `ISecretStore`)
 - **GodMode.ProjectFiles** — File system utilities for project folders (status.json, JSONL streams)
 - **SignalR.Proxy** — SignalR WebSocket relay used by MAUI for multi-server connectivity
 - **GodMode.Server.Tests** — xUnit tests for GodMode.Server (`tests/`), driving real sessions against `tests/GodMode.FakeClaude`, a scripted stand-in for `claude`
 - **GodMode.Relay.Tests** — xUnit tests for the MAUI relay, server registry and ClientBase (`tests/`)
+- **GodMode.Voice.Tests** — xUnit tests for GodMode.Voice (`tests/`): sessions over fake servers, and end to end against the real server with FakeClaude, with text in place of speech, a silent synthesizer and a scripted model (no keys, no audio)
 - **GodMode.TypeGen** — build-time generator of the React client's hub types from GodMode.Shared (`tools/`)
 
 ### Key Patterns
