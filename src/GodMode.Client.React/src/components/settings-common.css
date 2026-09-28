@@ -203,6 +203,10 @@
   margin-top: 24px;
 }
 
+.theme-picker {
+  margin-bottom: 24px;
+}
+
 .theme-option {
   width: 100%;
   text-align: left;

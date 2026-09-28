@@ -147,6 +147,8 @@
 /* ── The screen: text glows faintly, and the scanlines lie over everything ── */
 [data-theme="phosphor"] body {
   text-shadow: 0 0 3px rgba(51,255,102,0.35);
+  /* VT323 has one weight: a bold title keeps its pixels rather than smearing them */
+  font-synthesis: none;
 }
 
 [data-theme="phosphor"] body::after {
@@ -180,6 +182,8 @@
 [data-theme="phosphor"] .project-state-badge:is(.Running, .WaitingInput, .WaitingPermission, .Error, .Stopped, .Idle),
 [data-theme="phosphor"] .project-status-btn:is(.Running, .WaitingInput, .WaitingPermission, .Error, .Stopped, .Idle) .project-status-label {
   font-size: 0;
+  /* The hidden text keeps no width: a spacing inherited in px would still space its letters */
+  letter-spacing: 0;
 }
 [data-theme="phosphor"] :is(.project-state-badge, .project-status-label)::after { font-size: 11px; }
 
@@ -200,6 +204,7 @@
   background: transparent;
   padding: 0;
   min-width: 6ch;
+  letter-spacing: 0;
 }
 
 /* A tile's status light is its label */
