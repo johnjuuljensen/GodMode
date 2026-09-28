@@ -1,9 +1,9 @@
 /* ── Question Prompt ── */
 .question-prompt {
-  border-top: 1px solid var(--glass-border);
+  border-top: var(--border-width) var(--border-style) var(--glass-border);
   background: var(--glass);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
   flex-shrink: 0;
 }
 
@@ -14,13 +14,13 @@
   gap: 10px;
   padding: 10px 16px;
   background: var(--warning-soft);
-  border-bottom: 1px solid rgba(251,191,36,0.12);
+  border-bottom: var(--border-width) var(--border-style) var(--warning-border-faint);
 }
 
 .question-pulse {
   width: 22px;
   height: 22px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--warning-soft);
   color: var(--warning);
   font-weight: 700;
@@ -28,21 +28,23 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: pulse-glow 2s ease-in-out infinite;
+  animation: pulse-glow 2s ease-in-out var(--loop-iterations);
   flex-shrink: 0;
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.35); }
-  50% { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
+  0%, 100% { box-shadow: var(--shadow-question-pulse); }
+  50% { box-shadow: var(--shadow-question-pulse-peak); }
 }
 
 .question-label {
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: calc(0.08em + var(--label-tracking));
   color: var(--warning);
-  text-transform: uppercase;
+  text-transform: var(--label-case);
+  font-family: var(--font-display);
+  font-size-adjust: var(--font-display-adjust);
 }
 
 .question-header {
@@ -54,15 +56,15 @@
 
 .question-dismiss {
   background: var(--glass);
-  border: 1px solid var(--glass-border);
-  border-radius: 5px;
+  border: var(--border-width) var(--border-style) var(--glass-border);
+  border-radius: var(--radius-sm);
   color: var(--text-tertiary);
   font-size: 12px;
   cursor: pointer;
   padding: 2px 8px;
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
   margin-left: 6px;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--duration-fast), color var(--duration-fast);
 }
 
 .question-dismiss:hover {
@@ -95,37 +97,37 @@
   width: 100%;
   padding: 7px 12px;
   margin: 3px 0;
-  border: 1px solid var(--glass-border);
+  border: var(--border-width) var(--border-style) var(--glass-border);
   border-radius: var(--radius);
   background: var(--glass);
   color: var(--text-primary);
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
   font-size: 12.5px;
   cursor: pointer;
   text-align: left;
-  transition: all 0.12s;
-  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  transition: all var(--duration-fast);
+  box-shadow: var(--shadow-inset-highlight);
 }
 
 .question-option:hover,
 .question-option-active {
   border-color: var(--accent);
   background: var(--accent-soft);
-  box-shadow: 0 0 0 2px var(--accent-soft), inset 0 1px 0 var(--glass-highlight);
+  box-shadow: var(--shadow-focus-sm), var(--shadow-inset-highlight);
 }
 
 .question-option-bar {
   width: 3px;
   height: 16px;
-  border-radius: 2px;
+  border-radius: var(--radius-2xs);
   background: transparent;
   flex-shrink: 0;
-  transition: background 0.1s;
+  transition: background var(--duration-instant);
 }
 
 .question-option-active .question-option-bar {
   background: var(--accent);
-  box-shadow: 0 0 4px var(--accent-glow);
+  box-shadow: var(--shadow-led-accent-soft);
 }
 
 .question-option-num {
@@ -155,8 +157,8 @@
   font-family: var(--font-mono);
   color: var(--text-tertiary);
   padding: 1px 5px;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
+  border: var(--border-width) var(--border-style) var(--glass-border);
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
   background: var(--glass);
 }
@@ -172,8 +174,8 @@
 
 .question-keys span {
   padding: 1px 5px;
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
+  border: var(--border-width) var(--border-style) var(--glass-border);
+  border-radius: var(--radius-xs);
   background: var(--glass);
   font-family: var(--font-mono);
 }
