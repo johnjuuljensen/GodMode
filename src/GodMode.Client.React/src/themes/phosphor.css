@@ -161,6 +161,12 @@
   text-shadow: none;
 }
 
+/* A button with no background of its own is a dark panel, not the browser's grey (zero specificity: .btn-primary and the rest keep theirs) */
+:where(:root[data-theme="phosphor"] .btn) {
+  background: var(--glass-strong);
+  color: var(--text-primary);
+}
+
 [data-theme="phosphor"] ::selection {
   background: #33ff66;
   color: #0a0f0a;
