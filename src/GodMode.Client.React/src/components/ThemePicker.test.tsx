@@ -12,6 +12,7 @@ vi.mock('../themes/phosphor-fonts', () => ({}));
 vi.mock('../themes/neon-fonts', () => ({}));
 vi.mock('../themes/doom-fonts', () => ({}));
 vi.mock('../themes/commodore-fonts', () => ({}));
+vi.mock('../themes/lcars-fonts', () => ({}));
 
 let view: Rendered | undefined;
 const options = () => [...view!.container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
@@ -35,7 +36,7 @@ afterEach(() => { view?.unmount(); view = undefined; });
 
 it('lists every theme, and a pick applies at once, without a reload', async () => {
   await start();
-  expect(options().map(o => o.textContent)).toEqual(['Glass dark', 'Glass light', 'Phosphor', 'Neon', 'Doom', 'Commodore']);
+  expect(options().map(o => o.textContent)).toEqual(['Glass dark', 'Glass light', 'Phosphor', 'Neon', 'Doom', 'Commodore', 'LCARS']);
   expect(shown()).toBe('glass-dark');
   const page = view!.container;
 
@@ -56,6 +57,10 @@ it('lists every theme, and a pick applies at once, without a reload', async () =
   await click(option('Commodore'));
   expect(shown()).toBe('commodore');
   expect(checked()).toEqual(['Commodore']);
+
+  await click(option('LCARS'));
+  expect(shown()).toBe('lcars');
+  expect(checked()).toEqual(['LCARS']);
 
   await click(option('Glass light'));
   expect(shown()).toBe('glass-light');
@@ -80,6 +85,7 @@ it.each([
   ['neon', 'neon', 'Neon'],
   ['doom', 'doom', 'Doom'],
   ['commodore', 'commodore', 'Commodore'],
+  ['lcars', 'lcars', 'LCARS'],
   ['no-such-theme', 'glass-dark', 'Glass dark'],
   ['', 'glass-dark', 'Glass dark'],
 ])('a stored %j starts in %s', async (stored, id, name) => {

@@ -1,0 +1,383 @@
+/* ═══════════════════════════════════════════════════════════════
+   LCARS — Star Trek's banded panel graphics
+   Bands in LCARS tones on black: orange, peach and salmon,
+   lavender, periwinkle and red. A rounded elbow where the sidebar
+   meets the header bar, pill-ended buttons and tabs, thin wire lines
+   between sections. Condensed uppercase labels (Antonio) and a
+   readable sans for the text you read (Barlow).
+
+   The frame is drawn round the existing layout: the elbow and the
+   left band are .shell's pseudo-elements, the header bar is .shell's
+   own background. No wrapper, no class, nothing in a component.
+
+   States, each a band of its own: running periwinkle, warning peach,
+   error red, waiting lavender. The accent is orange. Nothing loops;
+   a band lighting up on press is a transition.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root[data-theme="lcars"] {
+  color-scheme: dark;
+
+  /* ── Colour: black, and the bands ── */
+  --bg-base:          #000;
+  --bg-ambient-1:     transparent;
+  --bg-ambient-2:     transparent;
+  --bg-ambient-3:     transparent;
+
+  --glass:            #0b0a0d;
+  --glass-hover:      #1a1520;
+  --glass-strong:     #15121a;
+  /* The wire lines between sections */
+  --glass-border:     rgba(153,153,255,0.45);
+  --glass-border-strong: #9999FF;
+  --glass-highlight:  transparent;
+  --sidebar-bg:       #000;
+  --titlebar-bg:      #000;
+  --menu-bg:          #0b0a0d;
+
+  --accent:           #FF9900;
+  --accent-glow:      rgba(255,153,0,0.35);
+  --accent-soft:      rgba(255,153,0,0.16);
+  --accent-border:    #FF9900;
+  --accent-border-medium: rgba(255,153,0,0.6);
+  --accent-border-soft: rgba(255,153,0,0.4);
+  --text-on-accent:   #000;
+  --group-label:      #FF9966;
+
+  --text-primary:     #F5E6D6;
+  --text-secondary:   #C8B6A4;
+  --text-tertiary:    #8C7E72;
+
+  --success:          #9999FF;
+  --success-soft:     rgba(153,153,255,0.16);
+  --success-border:   rgba(153,153,255,0.6);
+  --success-border-soft: rgba(153,153,255,0.4);
+  --warning:          #FFCC99;
+  --warning-soft:     rgba(255,204,153,0.14);
+  --warning-border-faint: rgba(255,204,153,0.3);
+  --warning-border-soft: rgba(255,204,153,0.4);
+  --warning-border-medium: rgba(255,204,153,0.6);
+  --error:            #E07A7A;
+  --error-soft:       rgba(204,102,102,0.22);
+  --error-hover:      rgba(204,102,102,0.35);
+  --error-border:     #CC6666;
+  --error-border-soft: rgba(204,102,102,0.6);
+  --error-border-strong: #E07A7A;
+  --waiting:          #CC99CC;
+  --waiting-soft:     rgba(204,153,204,0.18);
+  --waiting-border:   rgba(204,153,204,0.6);
+
+  --purple:           #CC99CC;
+  --purple-soft:      rgba(204,153,204,0.18);
+  --purple-border-soft: rgba(204,153,204,0.45);
+  --indigo-soft:      rgba(153,153,255,0.14);
+  --pink:             #FF9966;
+
+  --toggle-knob:      #000;
+  --modal-overlay:    rgba(0,0,0,0.8);
+  --scrollbar-thumb:  #CC99CC;
+  --scrollbar-hover:  #FF9900;
+
+  /* ── Surfaces: black panels, no blur, thin wire lines ── */
+  --blur-xs:          none;
+  --blur-sm:          none;
+  --blur-md:          none;
+  --blur-lg:          none;
+  --blur-xl:          none;
+  --blur-window:      none;
+  --border-width:     1px;
+  --border-style:     solid;
+
+  /* ── Corners: panels are square; buttons and tabs are pills (below), dots stay round ── */
+  --radius-2xs:       0;
+  --radius-xs:        0;
+  --radius-sm:        0;
+  --radius-md:        0;
+  --radius-ml:        0;
+  --radius:           0;
+  --radius-badge:     0;
+  --radius-menu:      0;
+  --radius-lg:        0;
+  --radius-xl:        0;
+  --radius-round:     50%;
+  --radius-pill:      999px;
+
+  /* ── Depth: flat. No shadow is `0 0 0 0 transparent` ── */
+  --shadow-window:    0 0 0 1px #9999FF;
+  --shadow-card:      0 0 0 0 transparent;
+  --shadow-card-hover: 0 0 0 0 transparent;
+  --shadow-menu:      0 0 0 0 transparent;
+  --shadow-inset-highlight: 0 0 0 0 transparent;
+  --shadow-inset-input: 0 0 0 0 transparent;
+  --shadow-focus:     0 0 0 2px var(--accent);
+  --shadow-focus-sm:  0 0 0 2px var(--accent);
+  --shadow-focus-success: 0 0 0 2px var(--success);
+  --shadow-outline-accent: 0 0 0 2px var(--accent);
+  --shadow-accent:    0 0 0 0 transparent;
+  --shadow-accent-hover: 0 0 0 0 transparent;
+  /* Status lights are flat: no glow */
+  --shadow-led-success: 0 0 0 0 transparent;
+  --shadow-led-error: 0 0 0 0 transparent;
+  --shadow-led-accent: 0 0 0 0 transparent;
+  --shadow-led-accent-soft: 0 0 0 0 transparent;
+  --shadow-led-waiting: 0 0 0 0 transparent;
+  --shadow-dot-success: 0 0 0 0 transparent;
+  --shadow-dot-warning: 0 0 0 0 transparent;
+  --shadow-dot-error: 0 0 0 0 transparent;
+  /* A waiting tile holds a steady peach frame */
+  --shadow-waiting:   0 0 0 2px var(--warning);
+  --shadow-waiting-peak: var(--shadow-waiting);
+  --shadow-question-pulse: 0 0 0 2px var(--warning);
+  --shadow-question-pulse-peak: var(--shadow-question-pulse);
+
+  /* ── Backdrop: plain black ── */
+  --backdrop-glow:    none;
+  --backdrop-texture: none;
+  --backdrop-texture-opacity: 0;
+  --backdrop-texture-blend: normal;
+
+  /* ── Type: condensed uppercase labels, a readable sans for the text you read ── */
+  --font-body:        'Barlow', 'Segoe UI', sans-serif;
+  --font-mono:        'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  --font-display:     'Antonio', 'Barlow', sans-serif;
+  --font-display-adjust: none;
+  --label-case:       uppercase;
+  --label-tracking:   0.04em;
+
+  /* ── Motion: transitions only ── */
+  --duration-instant: 0.1s;
+  --duration-fast:    0.12s;
+  --duration:         0.15s;
+  --duration-slow:    0.2s;
+  --loop-iterations:  0;
+}
+
+/* ═══ The frame ═══════════════════════════════════════════════
+   The elbow (::before) sits where the sidebar meets the header bar:
+   thick top and left arms, and a border radius larger than both,
+   which rounds the outside and leaves the concave curve inside. The
+   header bar runs on from it across the top (.shell's background,
+   ending in a rounded cap), and the left band runs down from it
+   (::after), in segments. The layout sits inside, in .shell's padding.
+   ═════════════════════════════════════════════════════════════ */
+[data-theme="lcars"] .shell {
+  position: relative;
+  padding: 20px 0 0 36px;
+  background:
+    radial-gradient(circle at 7px 7px, #FF9900 6.5px, transparent 7px) right 4px top 0 / 14px 14px no-repeat,
+    linear-gradient(to right,
+      #FFCC99 0 58%, transparent 58% calc(58% + 5px),
+      #CC99CC calc(58% + 5px) 78%, transparent 78% calc(78% + 5px),
+      #FF9900 calc(78% + 5px) 100%) 301px 0 / calc(100% - 301px - 11px) 14px no-repeat;
+}
+
+[data-theme="lcars"] .shell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 296px;
+  height: 112px;
+  border-top: 14px solid #FF9900;
+  border-left: 30px solid #FF9900;
+  border-top-left-radius: 52px 40px;
+  pointer-events: none;
+}
+
+[data-theme="lcars"] .shell::after {
+  content: '';
+  position: absolute;
+  top: 117px;
+  bottom: 0;
+  left: 0;
+  width: 30px;
+  background: linear-gradient(to bottom,
+    #CC99CC 0 96px, transparent 96px 101px,
+    #9999FF 101px 190px, transparent 190px 195px,
+    #FF9966 195px calc(100% - 64px), transparent calc(100% - 64px) calc(100% - 59px),
+    #CC6666 calc(100% - 59px) 100%);
+  pointer-events: none;
+}
+
+/* A phone: the same frame, slimmer */
+[data-theme="lcars"] .shell.shell-mobile {
+  padding: 13px 0 0 20px;
+  background:
+    radial-gradient(circle at 4px 4px, #FF9900 3.5px, transparent 4px) right 4px top 0 / 8px 8px no-repeat,
+    linear-gradient(to right,
+      #FFCC99 0 62%, transparent 62% calc(62% + 4px),
+      #FF9900 calc(62% + 4px) 100%) 124px 0 / calc(100% - 124px - 8px) 8px no-repeat;
+}
+
+[data-theme="lcars"] .shell.shell-mobile::before {
+  width: 120px;
+  height: 56px;
+  border-top-width: 8px;
+  border-left-width: 16px;
+  border-top-left-radius: 28px 22px;
+}
+
+[data-theme="lcars"] .shell.shell-mobile::after {
+  top: 60px;
+  width: 16px;
+  background: linear-gradient(to bottom,
+    #CC99CC 0 64px, transparent 64px 68px,
+    #9999FF 68px calc(100% - 44px), transparent calc(100% - 44px) calc(100% - 40px),
+    #CC6666 calc(100% - 40px) 100%);
+}
+
+/* The sections inside meet at thin wire lines */
+[data-theme="lcars"] .shell-sidebar {
+  border-right-color: #9999FF;
+}
+
+/* ═══ Type ═══ */
+/* Titles: orange, condensed, upper case */
+[data-theme="lcars"] :is(.sidebar-title, .inbox-title, .settings-header h2, .modal h2, .project-header-name) {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+  color: #FF9900;
+}
+
+[data-theme="lcars"] .sidebar-title { font-size: 20px; }
+[data-theme="lcars"] .project-header-name { font-size: 18px; }
+
+/* Labels: condensed, upper case */
+[data-theme="lcars"] :is(.profile-group-name, .form-group label, .settings-section-header, .inbox-item-kind, .question-label, .tile-waiting-badge, .project-status-btn) {
+  font-family: var(--font-display);
+}
+
+/* ═══ Pills: buttons and tabs ═══ */
+[data-theme="lcars"] :is(.btn, .sidebar-add-btn, .sidebar-settings-btn, .sidebar-footer-menu-item, .project-status-btn, .settings-add-btn, .delete-btn, .home-tab, .theme-option, .project-state-badge, .inbox-count) {
+  border-radius: var(--radius-pill);
+}
+
+/* A button is a band: filled, black text, condensed. It lights up on press */
+[data-theme="lcars"] .btn {
+  border-color: transparent;
+  color: #000;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 500;
+}
+
+/* One with no background of its own is periwinkle, not the browser's grey (zero specificity: the rest keep theirs) */
+:where(:root[data-theme="lcars"] .btn) {
+  background: #9999FF;
+}
+
+[data-theme="lcars"] .btn-primary { background: #FF9900; color: #000; }
+[data-theme="lcars"] .btn-secondary { background: #CC99CC; color: #000; }
+[data-theme="lcars"] .btn-danger { background: #CC6666; color: #000; }
+[data-theme="lcars"] .btn:hover:not(:disabled) { filter: brightness(1.12); }
+[data-theme="lcars"] .btn:active:not(:disabled) { background: #FFCC99; filter: none; }
+[data-theme="lcars"] .btn { transition: background var(--duration), filter var(--duration), color var(--duration); }
+
+/* A toggle is a dim band until it is on */
+[data-theme="lcars"] .btn-toggle { background: #332833; color: #CC99CC; }
+[data-theme="lcars"] .btn-toggle.active { background: #FF9900; color: #000; }
+
+/* The header's status button: a wire pill in the state's colour (a pending permission is peach, as its card is) */
+[data-theme="lcars"] .project-status-btn.WaitingPermission { color: var(--warning); border-color: var(--warning-border-medium); }
+[data-theme="lcars"] .project-status-btn.WaitingPermission .project-status-dot { background: var(--warning); }
+
+[data-theme="lcars"] .delete-btn { background: #332833; border-color: transparent; color: #CC6666; }
+[data-theme="lcars"] .delete-btn:hover { background: #CC6666; border-color: transparent; color: #000; }
+
+/* The icon buttons in the header, and the footer's: bands too */
+[data-theme="lcars"] .sidebar-add-btn {
+  background: #CC99CC;
+  border-color: transparent;
+  color: #000;
+}
+[data-theme="lcars"] .sidebar-settings-btn {
+  background: #FF9966;
+  border-color: transparent;
+  color: #000;
+  font-family: var(--font-display);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+[data-theme="lcars"] :is(.sidebar-add-btn, .sidebar-settings-btn):hover { background: #FFCC99; color: #000; }
+
+/* Tabs: a lit band for the active one */
+[data-theme="lcars"] .home-tabs { gap: 6px; padding: 6px 8px; }
+[data-theme="lcars"] .home-tab {
+  background: #332833;
+  color: #CC99CC;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  transition: background var(--duration), color var(--duration);
+}
+[data-theme="lcars"] .home-tab.active { background: #FF9900; color: #000; }
+
+/* ═══ State badges: filled bands, black text ═══ */
+[data-theme="lcars"] .project-state-badge { background: #332833; color: var(--text-secondary); }
+[data-theme="lcars"] .project-state-badge.Running { background: var(--success); color: #000; }
+[data-theme="lcars"] .project-state-badge.WaitingInput { background: var(--waiting); color: #000; }
+[data-theme="lcars"] .project-state-badge.WaitingPermission { background: var(--warning); color: #000; }
+[data-theme="lcars"] .project-state-badge.Error { background: var(--error-border); color: #000; }
+
+/* ═══ Tiles: a black panel under a band; the band is the tile's state ═══ */
+[data-theme="lcars"] .tile { border-top-width: 1px; }
+[data-theme="lcars"] .tile-header {
+  margin: 6px 6px 0;
+  padding: 6px 12px;
+  border-bottom: none;
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+  background: #8C7A99;
+  color: #000;
+  transition: background var(--duration);
+}
+[data-theme="lcars"] .tile-state-Running .tile-header { background: var(--success); }
+[data-theme="lcars"] :is(.tile-state-WaitingInput, .tile-state-WaitingPermission) .tile-header { background: var(--warning); }
+[data-theme="lcars"] .tile-state-Error .tile-header { background: var(--error-border); }
+[data-theme="lcars"] .tile-selected .tile-header { background: var(--accent); }
+[data-theme="lcars"] .tile-header :is(.tile-name, .tile-time) { color: #000; }
+[data-theme="lcars"] .tile-name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+[data-theme="lcars"] .tile-header .tile-dot { background: #000; }
+[data-theme="lcars"] .tile-waiting-badge { background: #000; border-color: #000; border-radius: var(--radius-pill); }
+[data-theme="lcars"] .tile-profile { padding-top: 4px; }
+
+/* Nothing slides: a loading tile shows a steady orange line */
+[data-theme="lcars"] .tile-loading {
+  height: 3px;
+  background: #FF9900;
+}
+
+/* ═══ Inbox cards: a thick band down the left, rounded like an elbow ═══ */
+[data-theme="lcars"] .inbox-item {
+  border-left-width: 10px;
+  border-radius: 18px 0 0 18px;
+}
+
+/* The selected project in the list: a band down its left */
+[data-theme="lcars"] .project-item.selected {
+  border: none;
+  box-shadow: inset 6px 0 0 #FF9900;
+}
+
+/* Menus: black, in a wire frame */
+[data-theme="lcars"] .sidebar-footer-menu-item:hover { background: #FF9900; color: #000; }
+
+/* ═══ The theme picker: each theme a band, the chosen one lit ═══ */
+[data-theme="lcars"] .theme-option.selected {
+  background: #FF9900;
+  border-color: #FF9900;
+}
+[data-theme="lcars"] .theme-option.selected .settings-item-name { color: #000; }
+
+[data-theme="lcars"] ::selection {
+  background: #FF9900;
+  color: #000;
+}

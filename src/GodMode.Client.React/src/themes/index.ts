@@ -12,6 +12,7 @@ import './phosphor.css';
 import './neon.css';
 import './doom.css';
 import './commodore.css';
+import './lcars.css';
 
 export interface Theme {
   id: string;
@@ -29,6 +30,7 @@ export const themes: readonly Theme[] = [
   { id: 'neon', name: 'Neon', fonts: ['Orbitron', 'Chakra Petch', 'JetBrains Mono'], loadFonts: () => import('./neon-fonts') },
   { id: 'doom', name: 'Doom', fonts: ['Silkscreen', 'IBM Plex Mono'], loadFonts: () => import('./doom-fonts') },
   { id: 'commodore', name: 'Commodore', fonts: ['Pet Me 64', 'JetBrains Mono'], loadFonts: () => import('./commodore-fonts') },
+  { id: 'lcars', name: 'LCARS', fonts: ['Antonio', 'Barlow', 'JetBrains Mono'], loadFonts: () => import('./lcars-fonts') },
 ];
 
 export const defaultThemeId = 'glass-dark';
