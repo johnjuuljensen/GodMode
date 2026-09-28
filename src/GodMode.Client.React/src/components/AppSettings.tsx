@@ -1,6 +1,7 @@
 import { useAppStore } from '../store';
 import { Toggle } from './settings-shared';
 import { VoiceSettings } from './Voice/VoiceSettings';
+import { ThemePicker } from './ThemePicker';
 import { useVoice } from '../services/voice';
 import './settings-common.css';
 
@@ -31,6 +32,10 @@ export function AppSettings() {
           </div>
         ))}
       </div>
+      <div className="settings-header settings-section-header">
+        <h2>Theme</h2>
+      </div>
+      <ThemePicker />
       {voice?.Available && <VoiceSettings />}
     </>
   );

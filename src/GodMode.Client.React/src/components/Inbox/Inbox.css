@@ -18,6 +18,8 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size-adjust: var(--font-display-adjust);
 }
 
 .inbox-toggle {
@@ -28,23 +30,24 @@
   background: none;
   border: none;
   cursor: pointer;
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
+  font-size-adjust: var(--font-display-adjust);
 }
 
-.inbox-chevron { transform: rotate(-90deg); transition: transform 0.15s; color: var(--text-secondary); }
+.inbox-chevron { transform: rotate(-90deg); transition: transform var(--duration); color: var(--text-secondary); }
 .inbox-chevron.expanded { transform: none; }
 
 .inbox-count {
   min-width: 18px;
   padding: 1px 6px;
-  border-radius: 9px;
+  border-radius: var(--radius-badge);
   font-size: 11px;
   font-weight: 600;
   text-align: center;
   color: var(--text-secondary);
   background: var(--glass);
 }
-.inbox-count.active { color: #fff; background: var(--accent); }
+.inbox-count.active { color: var(--text-on-accent); background: var(--accent); }
 
 .inbox-list {
   display: flex;
@@ -57,7 +60,7 @@
 
 /* Above the project list: at most half the sidebar, so the list stays reachable */
 .inbox-pane {
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: var(--border-width) var(--border-style) var(--glass-border);
   max-height: 50%;
   flex-shrink: 0;
 }
@@ -81,7 +84,7 @@
   display: flex;
   flex-direction: column;
   background: var(--glass);
-  border: 1px solid var(--glass-border);
+  border: var(--border-width) var(--border-style) var(--glass-border);
   border-left: 3px solid var(--waiting);
   border-radius: var(--radius-lg);
   overflow: hidden;
@@ -90,7 +93,7 @@
 }
 .inbox-kind-Permission { border-left-color: var(--warning); }
 /* The item a tapped notification opened */
-.inbox-item-focused { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.inbox-item-focused { border-color: var(--accent); box-shadow: var(--shadow-outline-accent); }
 .inbox-kind-Error { border-left-color: var(--error); }
 .inbox-kind-Finished { border-left-color: var(--success); }
 .inbox-kind-Review { border-left-color: var(--purple); }
@@ -106,15 +109,15 @@
   text-align: left;
   cursor: pointer;
   color: inherit;
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
 }
 .inbox-item-header:hover .inbox-item-name { text-decoration: underline; }
 
 .inbox-item-kind {
   font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: var(--label-case);
+  letter-spacing: calc(0.04em + var(--label-tracking));
   color: var(--text-secondary);
 }
 .inbox-item-name {
@@ -173,10 +176,10 @@
   box-sizing: border-box;
   padding: 7px 10px;
   background: var(--glass);
-  border: 1px solid var(--glass-border);
+  border: var(--border-width) var(--border-style) var(--glass-border);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
   font-size: 13px;
   line-height: 19px;
   min-height: calc(19px + 2 * 7px + 2px);
@@ -205,8 +208,8 @@
   margin: 0 0 6px;
   font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: var(--label-case);
+  letter-spacing: calc(0.04em + var(--label-tracking));
   color: var(--text-tertiary);
 }
 .inbox-running { list-style: none; margin: 0; padding: 0; }
@@ -220,14 +223,14 @@
   border: none;
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
 .inbox-running-item:hover { background: var(--glass-hover); }
 .inbox-running-item .inbox-item-meta { margin-left: auto; }
-.inbox-running-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+.inbox-running-dot { width: 7px; height: 7px; border-radius: var(--radius-round); background: var(--success); flex-shrink: 0; }
 .inbox-running-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Phone home (the Shell's sidebar slot): the sidebar showing the inbox or the project list, with a tab bar ── */
@@ -236,7 +239,7 @@
 .home-tabs {
   display: flex;
   flex-shrink: 0;
-  border-top: 1px solid var(--glass-border);
+  border-top: var(--border-width) var(--border-style) var(--glass-border);
   background: var(--sidebar-bg);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -250,7 +253,7 @@
   background: none;
   border: none;
   color: var(--text-secondary);
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;

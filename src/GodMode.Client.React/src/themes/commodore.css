@@ -1,0 +1,235 @@
+/* ═══════════════════════════════════════════════════════════════
+   Commodore — as if Commodore had gone modern
+   The C64's blue screen inside its light blue border band, on
+   today's layout. Accents from the VIC-II's sixteen colours (the
+   Pepto palette), square corners, chunky borders in the border
+   colour, a pixel font for display (Pet Me 64) and a readable mono
+   for the rest (JetBrains Mono).
+
+   Signature, all static: raster-bar stripes under the headers, on
+   the active tile and as the loading bar; READY. above the input,
+   and a block cursor in it. Nothing loops.
+
+   States: running light green, warning yellow, error light red,
+   waiting cyan, as the accent is. Text and error are the palette's
+   light blue and light red lifted, so they read on the blue.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root[data-theme="commodore"] {
+  color-scheme: dark;
+
+  /* ── Colour: the blue screen; the border band is light blue ── */
+  --bg-base:          #40318D;
+  --bg-ambient-1:     transparent;
+  --bg-ambient-2:     transparent;
+  --bg-ambient-3:     transparent;
+
+  --glass:            #3a2c85;
+  --glass-hover:      #45379a;
+  --glass-strong:     #4b3ca3;
+  --glass-border:     #7869C4;
+  --glass-border-strong: #A99DEB;
+  --glass-highlight:  transparent;
+  --sidebar-bg:       #352879;
+  --titlebar-bg:      #352879;
+  --menu-bg:          #2c2168;
+
+  --accent:           #67B6BD;
+  --accent-glow:      rgba(103,182,189,0.4);
+  --accent-soft:      rgba(103,182,189,0.18);
+  --accent-border:    #67B6BD;
+  --accent-border-medium: rgba(103,182,189,0.6);
+  --accent-border-soft: rgba(103,182,189,0.45);
+  --text-on-accent:   #1d1640;
+  --group-label:      #BFCE72;
+
+  --text-primary:     #CFC8FA;
+  --text-secondary:   #A99DEB;
+  --text-tertiary:    #8F82D9;
+
+  --success:          #94E089;
+  --success-soft:     rgba(148,224,137,0.16);
+  --success-border:   rgba(148,224,137,0.6);
+  --success-border-soft: rgba(148,224,137,0.45);
+  --warning:          #BFCE72;
+  --warning-soft:     rgba(191,206,114,0.16);
+  --warning-border-faint: rgba(191,206,114,0.35);
+  --warning-border-soft: rgba(191,206,114,0.45);
+  --warning-border-medium: rgba(191,206,114,0.6);
+  --error:            #EC8F86;
+  --error-soft:       rgba(184,105,98,0.3);
+  --error-hover:      rgba(184,105,98,0.45);
+  --error-border:     #B86962;
+  --error-border-soft: rgba(184,105,98,0.6);
+  --error-border-strong: #EC8F86;
+  --waiting:          #67B6BD;
+  --waiting-soft:     rgba(103,182,189,0.18);
+  --waiting-border:   rgba(103,182,189,0.6);
+
+  --purple:           #C08BC9;
+  --purple-soft:      rgba(139,63,150,0.3);
+  --purple-border-soft: rgba(139,63,150,0.7);
+  --indigo-soft:      rgba(120,105,196,0.2);
+  --pink:             #B86962;
+
+  --toggle-knob:      #CFC8FA;
+  --modal-overlay:    rgba(29,22,64,0.8);
+  --scrollbar-thumb:  #7869C4;
+  --scrollbar-hover:  #A99DEB;
+
+  /* ── Surfaces: solid, no blur, chunky borders in the border colour ── */
+  --blur-xs:          none;
+  --blur-sm:          none;
+  --blur-md:          none;
+  --blur-lg:          none;
+  --blur-xl:          none;
+  --blur-window:      none;
+  --border-width:     2px;
+  --border-style:     solid;
+
+  /* ── Corners: square, dots too: a character cell has no round ── */
+  --radius-2xs:       0;
+  --radius-xs:        0;
+  --radius-sm:        0;
+  --radius-md:        0;
+  --radius-ml:        0;
+  --radius:           0;
+  --radius-badge:     0;
+  --radius-menu:      0;
+  --radius-lg:        0;
+  --radius-xl:        0;
+  --radius-round:     0;
+  --radius-pill:      0;
+
+  /* ── Depth: flat, with a hard deep-blue drop where something lifts. No shadow is `0 0 0 0 transparent` ── */
+  --shadow-window:    0 0 0 2px #7869C4;
+  --shadow-card:      0 0 0 0 transparent;
+  --shadow-card-hover: 4px 4px 0 0 #1d1640;
+  --shadow-menu:      4px 4px 0 0 #1d1640;
+  --shadow-inset-highlight: 0 0 0 0 transparent;
+  --shadow-inset-input: 0 0 0 0 transparent;
+  --shadow-focus:     0 0 0 2px var(--accent);
+  --shadow-focus-sm:  0 0 0 2px var(--accent);
+  --shadow-focus-success: 0 0 0 2px var(--success);
+  --shadow-outline-accent: 0 0 0 2px var(--accent);
+  --shadow-accent:    3px 3px 0 0 #1d1640;
+  --shadow-accent-hover: 4px 4px 0 0 #1d1640;
+  /* Status lights are square character cells: no glow */
+  --shadow-led-success: 0 0 0 0 transparent;
+  --shadow-led-error: 0 0 0 0 transparent;
+  --shadow-led-accent: 0 0 0 0 transparent;
+  --shadow-led-accent-soft: 0 0 0 0 transparent;
+  --shadow-led-waiting: 0 0 0 0 transparent;
+  --shadow-dot-success: 0 0 0 0 transparent;
+  --shadow-dot-warning: 0 0 0 0 transparent;
+  --shadow-dot-error: 0 0 0 0 transparent;
+  /* A waiting tile holds a steady yellow frame */
+  --shadow-waiting:   0 0 0 2px var(--warning);
+  --shadow-waiting-peak: var(--shadow-waiting);
+  --shadow-question-pulse: 0 0 0 2px var(--warning);
+  --shadow-question-pulse-peak: var(--shadow-question-pulse);
+
+  /* ── Backdrop: the screen is flat blue ── */
+  --backdrop-glow:    none;
+  --backdrop-texture: none;
+  --backdrop-texture-opacity: 0;
+  --backdrop-texture-blend: normal;
+
+  /* ── Type: the C64's characters for display, a readable mono for everything else ── */
+  --font-body:        'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  --font-mono:        'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  --font-display:     'Pet Me 64', 'JetBrains Mono', monospace;
+  /* Pet Me 64's letters fill their cell: shrink it to sit with the text */
+  --font-display-adjust: 0.5;
+  --label-case:       uppercase;
+  --label-tracking:   0em;
+
+  /* ── Motion: transitions only ── */
+  --duration-instant: 0.1s;
+  --duration-fast:    0.12s;
+  --duration:         0.15s;
+  --duration-slow:    0.2s;
+  --loop-iterations:  0;
+}
+
+/* ── Pixels stay pixels: Pet Me 64 has one weight, never a smeared fake bold ── */
+[data-theme="commodore"] body {
+  font-synthesis: none;
+}
+
+/* ── The border band: the light blue frame round the blue screen ── */
+[data-theme="commodore"] .shell {
+  border: 12px solid #7869C4;
+}
+@media (max-width: 768px) {
+  [data-theme="commodore"] .shell { border-width: 4px; }
+}
+
+/* ── Raster bars, static: the VIC-II's colours in 2px stripes, under the headers and on the active tile ── */
+/* (the tile mode's header is .shell.shell-tile-mode > .sidebar-header, whose own background would win) */
+[data-theme="commodore"] :is(.sidebar-header, .project-header, .shell.shell-tile-mode > .sidebar-header) {
+  background-image: linear-gradient(to bottom,
+    #B86962 0 2px, #BFCE72 2px 4px, #94E089 4px 6px, #67B6BD 6px 8px, #7869C4 8px 10px);
+  background-repeat: no-repeat;
+  background-position: bottom;
+  background-size: 100% 10px;
+}
+
+/* On the active tile: a running one (a selected tile opens full screen, but has them too) */
+[data-theme="commodore"] :is(.tile-state-Running, .tile-selected) {
+  background-image: linear-gradient(to bottom,
+    #7869C4 0 2px, #67B6BD 2px 4px, #94E089 4px 6px, #BFCE72 6px 8px, #B86962 8px 10px);
+  background-repeat: no-repeat;
+  background-position: top;
+  background-size: 100% 10px;
+}
+
+/* A tile's frame is chunkier than the rest (its colours stay the tile's: border, state on top, accent when selected) */
+[data-theme="commodore"] .tile {
+  border-width: 3px;
+}
+
+/* Nothing slides: a loading tile shows a steady raster line, not the half-gradient a paused slide would leave */
+[data-theme="commodore"] .tile-loading {
+  height: 4px;
+  background: repeating-linear-gradient(90deg,
+    #B86962 0 8px, #BFCE72 8px 16px, #94E089 16px 24px, #67B6BD 24px 32px, #7869C4 32px 40px);
+}
+
+/* ── Titles: the C64's light blue, lifted ── */
+[data-theme="commodore"] :is(.sidebar-title, .inbox-title, .settings-header h2, .modal h2) {
+  color: #A99DEB;
+}
+
+/* A button with no background of its own is a blue panel, not the browser's grey (zero specificity: .btn-primary and the rest keep theirs) */
+:where(:root[data-theme="commodore"] .btn) {
+  background: var(--glass-strong);
+  color: var(--text-primary);
+}
+
+/* Reverse video */
+[data-theme="commodore"] ::selection {
+  background: #A99DEB;
+  color: #2c2168;
+}
+
+/* ── The input: READY. above it, and a steady block cursor in it ── */
+[data-theme="commodore"] .project-input-bar {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+[data-theme="commodore"] .project-input-bar::before {
+  content: 'READY.';
+  flex-basis: 100%;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-size-adjust: none;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+[data-theme="commodore"] .project-input {
+  caret-color: var(--text-secondary);
+  caret-shape: block;
+}
