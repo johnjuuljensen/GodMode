@@ -22,8 +22,6 @@ vi.mock('../services/hostApi', () => ({
   subscribeEvents: () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,
   getHubOptions: () => ({}),
-  isMaui: false,
-  clearApiKey: () => {},
 }));
 
 /** The server's answer to the project's newest subscription: the lines replayed, then replay complete at the last. */

@@ -1,6 +1,6 @@
 # GodMode.Server
 
-SignalR server for GodMode. It runs Claude Code sessions in project folders on the machine it runs on, streams their output to clients, and serves the React client.
+SignalR server for GodMode. It runs Claude Code sessions in project folders on the machine it runs on and streams their output to its clients, the GodMode app's relay and attention service. It serves no page: the React client is built into the app alone, and no browser is a client.
 
 ## Features
 
@@ -43,7 +43,7 @@ A lookup takes the first match on the `PATH`, so a directory on it that a sessio
 
 ### Authentication and binding
 
-Every endpoint and the SignalR hub require authentication, whatever the server is bound to, loopback included: nothing on this machine gets in without the key either. Only `/health` and the React client's static files are anonymous, because the page has to load before you can enter the key. The server picks one mode at startup:
+Every endpoint and the SignalR hub require authentication, whatever the server is bound to, loopback included: nothing on this machine gets in without the key either. Only `/health` is anonymous. The server picks one mode at startup:
 
 | Mode | When | Callers authenticate with |
 |---|---|---|
@@ -67,25 +67,18 @@ Every endpoint and the SignalR hub require authentication, whatever the server i
 
 A key of your own can go in `appsettings.json` (`"Authentication": { "ApiKey": "..." }`), in user secrets, in the `Authentication__ApiKey` environment variable, or on the command line as `--Authentication:ApiKey=<key>`. `openssl rand -hex 32` makes one.
 
-**Browser origins.** A browser sends an `Origin` header on every WebSocket upgrade, which CORS does not cover, and on any request but a same-origin GET. A request with an `Origin` is let through only from one of the server's own origins, and is refused with 403, before authentication, from anywhere else, `Origin: null` included. The server's own origins are:
+**No browser.** A browser sends an `Origin` header on every WebSocket upgrade, which CORS does not cover, and on any request but a same-origin GET. The server serves no page and refuses every request that carries an `Origin`, with 403 and before authentication, whatever it names: its own bindings, `localhost`, a codespace's forwarded port, `Origin: null`, in Development too. No setting allows one (there is no `Authentication:AllowedOrigins`). So no page in a browser, served from anywhere, can use the server, with the key or without. A request with no `Origin` (the app's relay and attention service, a session's claude on `/mcp`, `curl`) needs its credential alone. The server logs a warning for each request it refuses, naming the origin.
 
-- the scheme, host and port of each address it listens on. A loopback address, or a wildcard (`0.0.0.0`, `+`, `*`, `[::]`, which listens on loopback too), also stands for `localhost`, `127.0.0.1` and `[::1]` on its port;
-- the origins listed in `Authentication:AllowedOrigins`: addresses you reach the server by that it cannot tell are its own, such as a reverse proxy's (`https://machine.tailnet.ts.net`) or a host name on a wildcard binding (`http://nas.local:31337`). It is a list (`Authentication__AllowedOrigins__0=https://…`) or one `;`-separated string, and an entry that is not an origin stops the server at startup;
-- in a codespace, its forwarded port's: `https://<codespace-name>-31337.app.github.dev`;
-- in Development, the Vite dev server's, `http://localhost:5173`.
+**Bindings.** The shipped config binds `http://127.0.0.1:31337`, so a fresh `dotnet run` is reachable only from the same machine, and still needs the key. The GodMode app stores the key per server (the API key you enter when adding it) and adds it when relaying.
 
-So a page served from another port on this machine, such as a dev server a session starts, cannot use the server, with the key or without. A request with no `Origin` (the MAUI app's relay and attention service, `curl`) needs the key alone. The server logs the origins it accepts when it starts, and a warning for each request it refuses, naming the origin.
-
-**Bindings.** The shipped config binds `http://127.0.0.1:31337`, so a fresh `dotnet run` is reachable only from the same machine, and still needs the key. The browser client asks for the key once and keeps it in that browser. The MAUI app stores the key per server (the API key you enter when adding it) and adds it when relaying.
-
-**Reaching the server from other devices.** Bind to a private-network address, such as the machine's Tailscale IP, rather than `0.0.0.0`. Keep the loopback binding as well: projects' claude calls the server's MCP endpoint on it. A phone's browser that opens `http://<tailscale-ip>:31337` is on one of the server's own origins; one that opens it by a name (MagicDNS, `tailscale serve`) needs that origin in `Authentication:AllowedOrigins`.
+**Reaching the server from other devices.** Bind to a private-network address, such as the machine's Tailscale IP, rather than `0.0.0.0`. Keep the loopback binding as well: projects' claude calls the server's MCP endpoint on it. Add the server in the app on the phone by that address (`http://<tailscale-ip>:31337`), or by a name for it (MagicDNS); the app accepts several URLs for one server and uses the first that answers.
 
 ```bash
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
   --urls "http://127.0.0.1:31337;http://$(tailscale ip -4):31337"
 ```
 
-**Docker:** the image sets `URLS=http://+:31337` (all interfaces). A browser on the Docker host at `http://localhost:31337`, with the port published as the same number, is on the server's own origin. Any other address you open it by (a host name, a LAN address, another published port such as `-p 8080:31337`) goes in `Authentication:AllowedOrigins`, for example `-e Authentication__AllowedOrigins__0=http://nas.local:8080`. To change the binding, use the unprefixed `URLS` variable or `--urls`. `ASPNETCORE_URLS` loses to the `Urls` in `appsettings.json`.
+**Docker:** the image sets `URLS=http://+:31337` (all interfaces). Add it in the app by whatever address its published port is reached on (`http://localhost:31337`, a host name, a LAN address, another published port such as `-p 8080:31337`). To change the binding, use the unprefixed `URLS` variable or `--urls`. `ASPNETCORE_URLS` loses to the `Urls` in `appsettings.json`.
 
 **What the key does not stop.** Sessions run as the server's own OS user. A session that can run arbitrary commands can read the key file, `appsettings.json` or the server's environment, and with the key drive the hub, answering its own permission prompts. The permission prompt is a gate as long as the commands it approves don't do that; it is not a sandbox. The server hands neither a session nor a root script the key (their environment is an allowlist, see [Environment](#environment), and the key file is never under `ProjectRootsDir`), but real isolation, a separate OS user or container per session, is out of scope. The same goes for a codespace's `GITHUB_TOKEN`: the server refuses it, but sessions that are given it hold it.
 
@@ -418,7 +411,7 @@ A root keeps some folders for itself at its top level, and no project may be one
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 ```
 
-The build runs `npm run build` in `src/GodMode.Client.React` when the client's sources changed, and the server serves the result from `wwwroot/`. Run `npm ci` there once first. `npm run dev` cannot reach the server: `vite.config.ts` has no proxy.
+The server builds no React and needs no npm. To see the client, run the GodMode app (on Windows, `dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.19041.0`) and add the server there with its key.
 
 ### Production
 
@@ -476,7 +469,7 @@ Utility:
 ### HTTP Endpoints
 
 - `GET /health` — Anonymous liveness probe
-- `GET /servers`, `GET /events` — The same shape as the MAUI app's local proxy, so the React client works against either
+- `GET /` — What the server is, with the key: `{"service":"GodMode.Server","version":…,"status":"running"}` (the app's codespace probe reads it). No path serves a page
 - `POST /mcp` — GodMode's MCP endpoint, for its sessions' claude, with the project token of its MCP config: see [The MCP endpoint](#the-mcp-endpoint)
 
 ## Dependencies
@@ -492,7 +485,6 @@ Utility:
 ### Server Exits at Startup
 
 - "will not start: … API key file": the key file cannot be written, or is under `ProjectRootsDir`. Set `Authentication:ApiKeyFile`, or a key. See *Authentication and binding* above.
-- "will not start: Authentication:AllowedOrigins lists …": an entry is not an origin (`scheme://host[:port]`, no path).
 - "will not start: PermissionPromptKeepAliveSeconds …": it must be more than 0 and less than 300.
 
 ### Claude Process Not Starting
@@ -517,6 +509,6 @@ Utility:
 
 ### SignalR Connection Failures
 
-- The browser client asks for the API key, which every server requires; a rejected key shows the key page again
-- A browser that has the key but cannot connect may be on an origin the server does not know as its own: its log names the origin it refused. Add it to `Authentication:AllowedOrigins`
+- Every server requires its API key: add the server in the app with it (a codespace, with a GitHub token of its owner)
+- A request refused with 403 carried an `Origin`, as a browser's does: the server's log names it. Only the app is a client
 - Check firewall rules for port 31337

@@ -3,8 +3,6 @@ using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
 using GodMode.Shared;
-using GodMode.Shared.Enums;
-using GodMode.Shared.Models;
 using ModelContextProtocol.AspNetCore;
 using Serilog;
 using Serilog.Events;
@@ -28,15 +26,12 @@ builder.Host.UseSerilog((context, configuration) =>
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 31));
 
-// Select the auth mode (codespace, else the API key: configured, else generated into the key file) and
-// the browser origins; every mode needs a credential. Refuse to start on configuration that cannot work
+// Select the auth mode (codespace, else the API key: configured, else generated into the key file);
+// every mode needs a credential. Refuse to start on configuration that cannot work
 AuthSettings authSettings;
-OriginPolicy originPolicy;
 try
 {
     authSettings = AuthModeSelector.Resolve(builder.Configuration);
-    originPolicy = OriginPolicy.From(builder.Configuration, builder.Environment.IsDevelopment(),
-        isCodespace: authSettings.Mode == AuthMode.Codespace);
     PermissionPromptTool.KeepAliveFrom(builder.Configuration);
 }
 catch (StartupConfigurationException ex)
@@ -68,22 +63,6 @@ builder.Services.ConfigureHttpJsonOptions(options =>
         options.SerializerOptions.Converters.Add(converter);
 });
 
-// CORS: not needed in production (React is same-origin, MAUI proxy is server-to-server).
-// Only allow cross-origin in development (vite dev server on a different port).
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddCors(options =>
-    {
-        options.AddDefaultPolicy(policy =>
-        {
-            policy.AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials()
-                  .WithOrigins("http://localhost:5173", "https://localhost:5173");
-        });
-    });
-}
-
 builder.Services.AddHttpClient();
 
 builder.Services.AddGodModeAuth(authSettings);
@@ -106,22 +85,15 @@ builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = Pro
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline. A browser's request from an origin other than the server's own
-// is refused first, before static files, CORS and authentication
-app.UseOriginPolicy(originPolicy);
-
-if (app.Environment.IsDevelopment())
-    app.UseCors();
-
-// Serve the React client from wwwroot/ (if present). Registered ahead of authentication on purpose:
-// the page has to load before the user has entered the API key, and wwwroot holds only the built bundle.
-app.UseDefaultFiles();
-app.UseStaticFiles();
+// Configure the HTTP request pipeline. The server serves no page and no browser is its client: a request
+// with an Origin is refused first, before authentication
+app.UseOriginPolicy();
 
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/api/status", () => new
+// What this server is, with the key: the app's codespace probe (GitHubCodespaceProvider) asks here
+app.MapGet("/", () => new
 {
     service = "GodMode.Server",
     version = "1.0.0",
@@ -130,35 +102,11 @@ app.MapGet("/api/status", () => new
 
 app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
 
-// ── React client API surface (matches MAUI LocalServer) ────────
-
-// Server list: return this server as the only entry
-app.MapGet("/servers", () => new[]
-{
-    new ServerInfo("self", "Local Server", "local", ServerState.Running)
-});
-
-// SSE event stream (placeholder — no dynamic server changes in single-server mode)
-app.MapGet("/events", async (HttpContext ctx) =>
-{
-    ctx.Response.ContentType = "text/event-stream";
-    ctx.Response.Headers.CacheControl = "no-cache";
-    ctx.Response.Headers.Connection = "keep-alive";
-    await ctx.Response.Body.FlushAsync();
-    // Keep connection open until client disconnects
-    try { await Task.Delay(Timeout.Infinite, ctx.RequestAborted); }
-    catch (OperationCanceledException) { }
-});
-
 app.MapHub<ProjectHub>(GodModeAuthExtensions.HubPath).RequireAuthorization();
 
 // ── MCP (a project's claude → server, project-token auth): the permission prompt, its one tool ──
 
 app.MapMcp(McpEndpointUrl.Path).RequireAuthorization(GodModeAuthExtensions.ProjectPolicy);
-
-// SPA fallback: serve index.html for non-API/non-hub routes (React client routing).
-// Anonymous for the same reason as the static files above: it is the client bundle's entry page.
-app.MapFallbackToFile("index.html").AllowAnonymous();
 
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authSettings.Mode);
 if (authSettings is { KeyFilePath: { } keyFile, KeyFileCreated: false })
@@ -172,13 +120,9 @@ if (authSettings is { KeyFilePath: { } newKeyFile, KeyFileCreated: true })
 
             {authSettings.ApiKey}
 
-        Every client needs it: enter it on the browser's key page, or as the server's API key when you add it in the app.
+        Enter it as the server's API key when you add the server in the GodMode app.
         It is kept in {newKeyFile}, readable by this user only, and used on every start.
         This is the only time it is printed.
-
-        A browser is let in only from this server's own addresses (its log line "Browser requests are accepted from").
-        One that opens it by a host name, a LAN address or another port (a container's published port) needs
-        that origin in {OriginPolicy.AllowedOriginsSetting}.
 
         """));
 }

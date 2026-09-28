@@ -1,6 +1,6 @@
 /**
- * Typed request/response channel to the MAUI shell, over HybridWebView's raw messages.
- * Used only in MAUI mode (see hostApi.ts). The C# side is GodMode.Maui/Bridge
+ * Typed request/response channel to the MAUI shell, over HybridWebView's raw messages (see hostApi.ts).
+ * The C# side is GodMode.Maui/Bridge
  * (HostBridge, ShellBridge, ShellMessages.cs); keep the message types in sync.
  *
  * Envelope (JSON, PascalCase like GodMode.Shared): { Type, Id?, Payload?, Error? }.
@@ -95,7 +95,7 @@ export interface VoiceSettingsUpdate {
 }
 
 /** Request types → [payload, response]. */
-interface BridgeRequests {
+export interface BridgeRequests {
   'relay.info': [void, RelayInfo];
   'servers.list': [void, ServerInfo[]];
   'servers.add': [AddServerPayload, { Id: string }];
@@ -114,7 +114,7 @@ interface BridgeRequests {
 }
 
 /** Event types the shell sends → their payloads. attention.open: a notification was tapped, and attention.take has its item. */
-interface BridgeEvents {
+export interface BridgeEvents {
   'servers.changed': void;
   'attention.open': void;
   /** What the user said; partial while they speak. */
@@ -130,7 +130,7 @@ interface BridgeEvents {
 
 export type BridgeEvent = keyof BridgeEvents;
 
-interface BridgeMessage {
+export interface BridgeMessage {
   Type: string;
   Id?: string | null;
   Payload?: unknown;
@@ -150,7 +150,7 @@ const HYBRID_WEBVIEW_SCRIPT = '_framework/hybridwebview.js';
 
 let hostReady: Promise<NonNullable<Window['HybridWebView']>> | null = null;
 
-/** Loads the HybridWebView script once, on first use, so the browser build never requests it. */
+/** Loads the HybridWebView script once, on first use. */
 function loadHost(): Promise<NonNullable<Window['HybridWebView']>> {
   hostReady ??= new Promise((resolve, reject) => {
     if (window.HybridWebView) return resolve(window.HybridWebView);

@@ -16,5 +16,3 @@ docs
 tests
 AGENT-*.md
 *.md
-!src/GodMode.Client.React/package.json
-!src/GodMode.Client.React/package-lock.json

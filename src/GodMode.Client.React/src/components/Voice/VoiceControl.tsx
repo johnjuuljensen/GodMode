@@ -15,8 +15,8 @@ const STATE_LABELS: Record<VoiceStateName, string> = {
 };
 
 /**
- * The voice button, its state and the live transcript, in the Windows app (the shell reports voice.state Available).
- * Nothing shows elsewhere: the browser and the Android app have no voice.
+ * The voice button, its state and the live transcript, where the app has voice (the shell reports voice.state Available).
+ * Nothing shows where it has none.
  */
 export function VoiceControl() {
   const status = useVoice();

@@ -21,8 +21,6 @@ vi.mock('../../services/hostApi', () => ({
   subscribeAttentionLinks: () => () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,
   getHubOptions: () => ({}),
-  isMaui: false,
-  clearApiKey: () => {},
 }));
 
 const rootNamed = (name: string): ProjectRootInfo => ({

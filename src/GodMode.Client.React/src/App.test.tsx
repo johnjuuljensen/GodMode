@@ -1,34 +1,21 @@
 // @vitest-environment jsdom
 /**
- * Every GodMode server requires its API key (#232), a loopback one included: until the browser holds a key
- * the server accepts, the app shows the key page, and once it does, the shell. The server here answers
- * /servers as GodMode.Server does: 401 without the key.
+ * The page is the app's (#291): the app holds every server's key, so the page opens on the shell with no key to
+ * enter, gets its servers from the app, and asks no server for anything over HTTP.
  */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act } from 'react';
-import { render, typeInto, type Rendered } from './test/render';
-import { clearApiKey, getApiKey } from './services/hostApi';
+import { render, type Rendered } from './test/render';
+import { answer, sent, settle } from './test/appShell';
+import { useAppStore } from './store';
 import App from './App';
 
 vi.mock('./components/Shell', () => ({ Shell: () => <div className="test-shell" /> }));
-vi.mock('./store', () => ({
-  useAppStore: (select: (state: { loadServers: () => Promise<void> }) => unknown) => select({ loadServers: async () => {} }),
-}));
+vi.mock('./signalr/hub', () => ({ GodModeHub: class {} }));
 
-const KEY = 'the-servers-key';
 let view: Rendered;
 
-const keyPage = () => view.container.querySelector('.auth-page');
-const shell = () => view.container.querySelector('.test-shell');
-const keyInput = () => view.container.querySelector<HTMLInputElement>('#auth-api-key')!;
-const submit = () => act(async () => {
-  view.container.querySelector<HTMLFormElement>('.auth-form')!.requestSubmit();
-});
-
 beforeEach(() => {
-  clearApiKey();
-  vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) =>
-    new Response('[]', { status: (init?.headers as Record<string, string>)?.Authorization === `Bearer ${KEY}` ? 200 : 401 })));
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('the page fetched'); }));
 });
 
 afterEach(() => {
@@ -36,24 +23,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('shows the key page to a browser that holds no key, and the shell once the key is entered', async () => {
+it('opens on the shell and lists the servers the app holds', async () => {
+  answer('relay.info', { BaseUrl: 'http://127.0.0.1:49152', Secret: 'relay-secret' });
+  answer('servers.list', []);
+
   view = await render(<App />);
-  expect(keyPage()).not.toBeNull();
-  expect(shell()).toBeNull();
+  await settle();
 
-  await typeInto(keyInput(), KEY);
-  await submit();
-
-  expect(shell()).not.toBeNull();
-  expect(getApiKey()).toBe(KEY);
-});
-
-it('says so when the server refuses the key entered', async () => {
-  view = await render(<App />);
-
-  await typeInto(keyInput(), 'not-the-key');
-  await submit();
-
-  expect(keyPage()).not.toBeNull();
-  expect(view.container.querySelector('.auth-error')?.textContent).toBe('The server did not accept that key.');
+  expect(view.container.querySelector('.test-shell')).not.toBeNull();
+  expect(sent.map(m => m.Type)).toEqual(['relay.info', 'servers.list']);
+  expect(useAppStore.getState().serverConnections).toEqual([]);
+  expect(fetch).not.toHaveBeenCalled();
 });

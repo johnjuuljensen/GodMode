@@ -8,10 +8,11 @@ using Microsoft.AspNetCore.SignalR.Client;
 namespace GodMode.Server.Tests;
 
 /// <summary>
-/// Authentication and browser origins, exercised against the real server process. Every mode needs a
-/// credential, whatever the binding: <c>codespace</c> (CODESPACES=true) beats <c>apikey</c>, whose key is
+/// Authentication and origins, exercised against the real server process. Every mode needs a credential,
+/// whatever the binding: <c>codespace</c> (CODESPACES=true) beats <c>apikey</c>, whose key is
 /// <c>Authentication:ApiKey</c>, else the one the server generates into its key file on its first start.
-/// A request with an <c>Origin</c> other than the server's own is refused with 403 before authentication.
+/// No browser is a client: the server serves no page, and a request with any <c>Origin</c> is refused
+/// with 403 before authentication.
 /// </summary>
 public class AuthTests
 {
@@ -40,8 +41,8 @@ public class AuthTests
 
                 // Loopback is no exception: the caller here is 127.0.0.1
                 await AssertKeyRequiredAsync(first, key);
-                using var servers = await first.Http.GetAsync("/servers");
-                Assert.Equal(HttpStatusCode.Unauthorized, servers.StatusCode);
+                using var status = await first.Http.GetAsync("/");
+                Assert.Equal(HttpStatusCode.Unauthorized, status.StatusCode);
                 await using var hub = BuildHub(first.BaseUrl, key);
                 await hub.StartAsync();
                 Assert.Equal(JsonValueKind.Array, (await hub.InvokeAsync<JsonElement>("ListProfiles")).ValueKind);
@@ -76,35 +77,36 @@ public class AuthTests
         await AssertKeyRequiredAsync(run, ApiKey);
     }
 
-    // ── Browser origins: the server's own, or none ──
+    // ── Origins: none is accepted ──
 
     /// <summary>
-    /// A page in the user's browser from anywhere but the server itself, a dev server on another
-    /// localhost port included, is refused before authentication: with the key, without it, and on
-    /// an anonymous endpoint.
+    /// Whatever a request's <c>Origin</c> names, the server's own binding and the app's WebView included, it is
+    /// refused before authentication: with the key, without it, and on an anonymous endpoint.
     /// </summary>
     [Theory]
-    [MemberData(nameof(ForeignOrigins))]
-    public async Task ForeignOrigin_Is403_OverHttp(string origin)
+    [MemberData(nameof(Origins))]
+    public async Task AnyOrigin_Is403_OverHttp(string origin)
     {
         await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
-        origin = WithPorts(origin, run);
+        origin = WithPort(origin, run);
 
         using var withKey = await NegotiateAsync(run.Http, ApiKey, origin);
         Assert.Equal(HttpStatusCode.Forbidden, withKey.StatusCode);
         using var withoutKey = await NegotiateAsync(run.Http, token: null, origin);
         Assert.Equal(HttpStatusCode.Forbidden, withoutKey.StatusCode);
+        using var status = await SendAsync(run.Http, HttpMethod.Get, "/", ApiKey, origin);
+        Assert.Equal(HttpStatusCode.Forbidden, status.StatusCode);
         using var health = await SendAsync(run.Http, HttpMethod.Get, "/health", token: null, origin);
         Assert.Equal(HttpStatusCode.Forbidden, health.StatusCode);
     }
 
-    /// <summary>The hub's WebSocket upgrade, which CORS does not cover, opened with the key as a cross-site page would open it.</summary>
+    /// <summary>The hub's WebSocket upgrade, which CORS does not cover, opened with the key as a page would open it.</summary>
     [Theory]
-    [MemberData(nameof(ForeignOrigins))]
-    public async Task ForeignOrigin_Is403_OnTheWebSocketUpgrade(string origin)
+    [MemberData(nameof(Origins))]
+    public async Task AnyOrigin_Is403_OnTheWebSocketUpgrade(string origin)
     {
         await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
-        origin = WithPorts(origin, run);
+        origin = WithPort(origin, run);
 
         using var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("Origin", origin);
@@ -112,76 +114,41 @@ public class AuthTests
         Assert.Contains("403", ex.Message);
     }
 
-    public static TheoryData<string> ForeignOrigins =>
+    public static TheoryData<string> Origins =>
     [
-        "http://localhost:5173", // the Vite dev server, outside Development
-        "http://localhost:{other}",
-        "http://127.0.0.1:{other}",
-        "https://127.0.0.1:{port}",
-        "http://rebind.evil.example:{port}",
+        // The server's own binding, as a page it served would have sent it
+        "http://127.0.0.1:{port}",
+        "http://localhost:{port}",
+        "http://[::1]:{port}",
+        // The app's WebView: its page reaches servers only through the app's relay
+        "https://0.0.0.1",
+        "http://localhost:5173", // the Vite dev server
         "https://evil.example",
         "null",
-        "http://127.0.0.1:{port}/path",
     ];
 
-    [Theory]
-    [InlineData("http://127.0.0.1:{port}")]
-    [InlineData("http://localhost:{port}")]
-    [InlineData("http://[::1]:{port}")]
-    public async Task OwnOrigin_GetsThroughWithTheKey_OverHttpAndTheWebSocketUpgrade(string origin)
-    {
-        await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
-        origin = WithPorts(origin, run);
-
-        using var withKey = await NegotiateAsync(run.Http, ApiKey, origin);
-        Assert.Equal(HttpStatusCode.OK, withKey.StatusCode);
-        // The origin is no credential
-        using var withoutKey = await NegotiateAsync(run.Http, token: null, origin);
-        Assert.Equal(HttpStatusCode.Unauthorized, withoutKey.StatusCode);
-
-        using var socket = new ClientWebSocket();
-        socket.Options.SetRequestHeader("Origin", origin);
-        await socket.ConnectAsync(HubSocketUrl(run, ApiKey), CancellationToken.None);
-        Assert.Equal(WebSocketState.Open, socket.State);
-
-        using var keyless = new ClientWebSocket();
-        keyless.Options.SetRequestHeader("Origin", origin);
-        var ex = await Assert.ThrowsAsync<WebSocketException>(() => keyless.ConnectAsync(HubSocketUrl(run, token: null), CancellationToken.None));
-        Assert.Contains("401", ex.Message);
-    }
-
-    /// <summary>A server bound twice (loopback and a Tailscale IP, say): each binding is one of its own origins, on the WebSocket upgrade too.</summary>
+    /// <summary>
+    /// Nothing lets an origin in any more: not <c>Authentication:AllowedOrigins</c>, which is no setting now
+    /// and stops no start, and not Development (the Vite dev server). A codespace's forwarded port: <see cref="Codespace_StartsOnAnyBinding_AndRequiresGitHubToken"/>.
+    /// </summary>
     [Fact]
-    public async Task TwoBindings_EachIsOneOfTheServersOwnOrigins()
+    public async Task NoConfigurationLetsAnOriginIn()
     {
-        var workDir = ServerProcess.CreateWorkDir("auth");
-        var ports = new[] { ServerProcess.GetFreePort(), ServerProcess.GetFreePort() };
-        using var server = ServerProcess.Start(workDir, string.Join(';', ports.Select(port => $"http://127.0.0.1:{port}")), ApiKey);
-        try
+        await using var run = await StartHealthyAsync("127.0.0.1", ApiKey, environment: new Dictionary<string, string>
         {
-            foreach (var port in ports)
-            {
-                var baseUrl = $"http://127.0.0.1:{port}";
-                using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(10) };
-                await server.WaitForHealthyAsync(http);
-                var run = new Run(server, http, baseUrl, OwnsWorkDir: false);
+            ["ASPNETCORE_ENVIRONMENT"] = "Development",
+            ["Authentication__AllowedOrigins__0"] = "https://godmode.tailnet.ts.net",
+            ["Authentication__AllowedOrigins__1"] = "not an origin",
+        });
 
-                using var negotiate = await NegotiateAsync(http, ApiKey, baseUrl);
-                Assert.Equal(HttpStatusCode.OK, negotiate.StatusCode);
-                using var socket = new ClientWebSocket();
-                socket.Options.SetRequestHeader("Origin", baseUrl);
-                await socket.ConnectAsync(HubSocketUrl(run, ApiKey), CancellationToken.None);
-                Assert.Equal(WebSocketState.Open, socket.State);
-            }
-        }
-        finally
+        foreach (var origin in new[] { "https://godmode.tailnet.ts.net", "http://localhost:5173" })
         {
-            server.Dispose();
-            ServerProcess.DeleteWorkDir(workDir);
+            using var negotiate = await NegotiateAsync(run.Http, ApiKey, origin);
+            Assert.True(negotiate.StatusCode == HttpStatusCode.Forbidden, $"{origin} → {(int)negotiate.StatusCode}, expected 403");
         }
     }
 
-    /// <summary>Not a browser (the MAUI relay, the app's attention service): no Origin, and the key alone.</summary>
+    /// <summary>Not a browser (the MAUI relay, the app's attention service): no Origin, and the key alone reaches the hub.</summary>
     [Fact]
     public async Task NoOrigin_NeedsTheKeyAlone_OverHttpAndTheWebSocketUpgrade()
     {
@@ -196,45 +163,11 @@ public class AuthTests
         using var keyless = new ClientWebSocket();
         var ex = await Assert.ThrowsAsync<WebSocketException>(() => keyless.ConnectAsync(HubSocketUrl(run, token: null), CancellationToken.None));
         Assert.Contains("401", ex.Message);
-    }
 
-    /// <summary>An origin the server cannot tell is its own (a reverse proxy's, a host name's) is let through when listed.</summary>
-    [Fact]
-    public async Task AllowedOrigins_AreLetThrough_AndNoOthers()
-    {
-        await using var run = await StartHealthyAsync("127.0.0.1", ApiKey, environment: new Dictionary<string, string>
-        {
-            ["Authentication__AllowedOrigins__0"] = "https://godmode.tailnet.ts.net",
-            ["Authentication__AllowedOrigins__1"] = "http://nas.local:8080/",
-        });
-
-        foreach (var origin in new[] { "https://godmode.tailnet.ts.net", "http://nas.local:8080" })
-        {
-            using var negotiate = await NegotiateAsync(run.Http, ApiKey, origin);
-            Assert.Equal(HttpStatusCode.OK, negotiate.StatusCode);
-            using var socket = new ClientWebSocket();
-            socket.Options.SetRequestHeader("Origin", origin);
-            await socket.ConnectAsync(HubSocketUrl(run, ApiKey), CancellationToken.None);
-            Assert.Equal(WebSocketState.Open, socket.State);
-        }
-
-        using var other = await NegotiateAsync(run.Http, ApiKey, "https://other.tailnet.ts.net");
-        Assert.Equal(HttpStatusCode.Forbidden, other.StatusCode);
-    }
-
-    [Fact]
-    public async Task AllowedOrigins_EntryThatIsNotAnOrigin_FailsAtStartupWithMessage()
-    {
-        var workDir = ServerProcess.CreateWorkDir("auth");
-        using (var server = ServerProcess.Start(workDir, $"http://127.0.0.1:{ServerProcess.GetFreePort()}",
-            environment: new Dictionary<string, string> { ["Authentication__AllowedOrigins__0"] = "https://godmode.example/app" }))
-        {
-            Assert.True(await server.WaitForExitAsync(TimeSpan.FromSeconds(30)), $"Server kept running.\n{server.Output}");
-            Assert.NotEqual(0, server.ExitCode);
-            Assert.Contains("Authentication:AllowedOrigins", server.Output);
-            Assert.Contains("https://godmode.example/app", server.Output);
-        }
-        ServerProcess.DeleteWorkDir(workDir);
+        // As the relay connects: a hub method answers
+        await using var hub = BuildHub(run.BaseUrl, ApiKey);
+        await hub.StartAsync();
+        Assert.Equal(JsonValueKind.Array, (await hub.InvokeAsync<JsonElement>("ListProfiles")).ValueKind);
     }
 
     // ── The hub ──
@@ -270,8 +203,8 @@ public class AuthTests
         await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
 
         // Outside the hub, a key in the URL is refused.
-        using var servers = await run.Http.GetAsync($"/servers?access_token={ApiKey}");
-        Assert.Equal(HttpStatusCode.Unauthorized, servers.StatusCode);
+        using var status = await run.Http.GetAsync($"/?access_token={ApiKey}");
+        Assert.Equal(HttpStatusCode.Unauthorized, status.StatusCode);
 
         // The hub's WebSocket upgrade carries it in the query string, all a browser can do, and works.
         await using (var hub = new HubConnectionBuilder()
@@ -299,33 +232,42 @@ public class AuthTests
         }
     }
 
-    // ── Fail closed: only /health and the SPA's static files are anonymous ──
+    // ── No page: only /health is anonymous, and / says what the server is ──
 
+    /// <summary>
+    /// The server serves no page, even with a built client where its web root would be: /, /index.html, a
+    /// bundle file and a client route are 401 without the key, and with it / says what the server is (the
+    /// app's codespace probe reads it) while the rest are 404. The browser client's endpoints are gone.
+    /// </summary>
     [Fact]
-    public async Task Key_OnlyHealthAndStaticFilesAreAnonymous()
+    public async Task NoPathServesThePage_AndOnlyHealthIsAnonymous()
     {
         await using var run = await StartHealthyAsync("127.0.0.1", ApiKey, writeSpa: true);
 
-        foreach (var path in new[] { "/health", "/", "/index.html", "/assets/app.js", "/projects/some-client-route" })
-        {
-            using var response = await run.Http.GetAsync(path);
-            Assert.True(response.StatusCode == HttpStatusCode.OK, $"GET {path} → {(int)response.StatusCode}, expected 200 anonymously");
-        }
+        using (var health = await run.Http.GetAsync("/health"))
+            Assert.Equal(HttpStatusCode.OK, health.StatusCode);
 
-        foreach (var path in new[] { "/servers", "/api/status", "/events" })
+        string[] pagePaths = ["/", "/index.html", "/assets/app.js", "/projects/some-client-route"];
+        string[] browserEndpoints = ["/servers", "/events", "/api/status"];
+        foreach (var path in pagePaths.Concat(browserEndpoints).Append("/api/auth/challenge"))
         {
             using var anonymous = await run.Http.GetAsync(path, HttpCompletionOption.ResponseHeadersRead);
             Assert.True(anonymous.StatusCode == HttpStatusCode.Unauthorized,
                 $"GET {path} anonymously → {(int)anonymous.StatusCode}, expected 401");
         }
 
-        // The old anonymous auth-challenge endpoint no longer answers with auth state.
-        using var challenge = await run.Http.GetAsync("/api/auth/challenge");
-        Assert.True(challenge.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound || IsSpaIndex(challenge),
-            $"GET /api/auth/challenge anonymously → {(int)challenge.StatusCode}");
+        foreach (var path in pagePaths.Skip(1).Concat(browserEndpoints))
+        {
+            using var withKey = await SendAsync(run.Http, HttpMethod.Get, path, ApiKey);
+            Assert.True(withKey.StatusCode == HttpStatusCode.NotFound, $"GET {path} with the key → {(int)withKey.StatusCode}, expected 404");
+        }
 
-        using var serversWithKey = await SendAsync(run.Http, HttpMethod.Get, "/servers", ApiKey);
-        Assert.Equal(HttpStatusCode.OK, serversWithKey.StatusCode);
+        using var status = await SendAsync(run.Http, HttpMethod.Get, "/", ApiKey);
+        Assert.Equal(HttpStatusCode.OK, status.StatusCode);
+        Assert.Equal("application/json", status.Content.Headers.ContentType?.MediaType);
+        var body = await status.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(SpaMarker, body);
+        Assert.Equal("GodMode.Server", JsonDocument.Parse(body).RootElement.GetProperty("service").GetString());
     }
 
     [Fact]
@@ -345,7 +287,7 @@ public class AuthTests
             using var response = await run.Http.GetAsync(path);
             Assert.False((int)response.StatusCode is >= 300 and < 400,
                 $"GET {path} → {(int)response.StatusCode} redirect; the OAuth route should not exist");
-            Assert.True(response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound || IsSpaIndex(response),
+            Assert.True(response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NotFound,
                 $"GET {path} → {(int)response.StatusCode}");
         }
     }
@@ -388,6 +330,7 @@ public class AuthTests
         {
             ["CODESPACES"] = "true",
             ["GITHUB_USER"] = "godmode-test-user",
+            ["CODESPACE_NAME"] = "fuzzy-train-g4x",
         };
         await using var run = await StartHealthyAsync(host, apiKey, environment: codespace);
 
@@ -405,6 +348,10 @@ public class AuthTests
             using var withKey = await NegotiateAsync(run.Http, apiKey);
             Assert.Equal(HttpStatusCode.Unauthorized, withKey.StatusCode);
         }
+
+        // Its forwarded port is no browser's way in either
+        using var forwarded = await NegotiateAsync(run.Http, token: null, $"https://fuzzy-train-g4x-{new Uri(run.BaseUrl).Port}.app.github.dev");
+        Assert.Equal(HttpStatusCode.Forbidden, forwarded.StatusCode);
     }
 
     // ── Helpers ──
@@ -425,12 +372,8 @@ public class AuthTests
     private static Uri HubSocketUrl(Run run, string? token) =>
         new($"{run.BaseUrl.Replace("http", "ws")}{HubPath}{(token == null ? "" : $"?access_token={Uri.EscapeDataString(token)}")}");
 
-    /// <summary><c>{port}</c> is the server's, <c>{other}</c> one it does not listen on.</summary>
-    private static string WithPorts(string origin, Run run)
-    {
-        var port = new Uri(run.BaseUrl).Port;
-        return origin.Replace("{port}", $"{port}").Replace("{other}", $"{(port == 65535 ? port - 1 : port + 1)}");
-    }
+    /// <summary><c>{port}</c> is the server's.</summary>
+    private static string WithPort(string origin, Run run) => origin.Replace("{port}", $"{new Uri(run.BaseUrl).Port}");
 
     private static async Task<string> ReadLogsAsync(Run run)
     {
@@ -467,11 +410,6 @@ public class AuthTests
 
     private const string SpaMarker = "<!-- godmode-test-spa -->";
 
-    private static bool IsSpaIndex(HttpResponseMessage response) =>
-        response.StatusCode == HttpStatusCode.OK
-        && response.Content.Headers.ContentType?.MediaType == "text/html"
-        && response.Content.ReadAsStringAsync().GetAwaiter().GetResult().Contains(SpaMarker);
-
     /// <param name="apiKey">The configured key; null for none, so the server generates one.</param>
     /// <param name="workDir">A work directory to reuse (a restart), which the run then leaves in place.</param>
     private static async Task<Run> StartHealthyAsync(
@@ -485,7 +423,7 @@ public class AuthTests
         workDir ??= ServerProcess.CreateWorkDir("auth");
         if (writeSpa)
         {
-            // The server's web root is {contentRoot}/wwwroot, and the content root is the work directory.
+            // A built client where the server's web root would be: {contentRoot}/wwwroot, the content root being the work directory.
             Directory.CreateDirectory(Path.Combine(workDir, "wwwroot", "assets"));
             File.WriteAllText(Path.Combine(workDir, "wwwroot", "index.html"), $"<!doctype html>{SpaMarker}<div id=root></div>");
             File.WriteAllText(Path.Combine(workDir, "wwwroot", "assets", "app.js"), "console.log('spa');");

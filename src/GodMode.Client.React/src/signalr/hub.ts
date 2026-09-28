@@ -1,9 +1,6 @@
 /**
- * SignalR connection manager.
- * Supports two connection modes:
- *  - MAUI proxy relay (via local WebSocket proxy)
- *  - Direct connection to GodMode.Server (standalone browser)
- * The caller provides the hub URL and connection options via IHostApi.
+ * SignalR connection manager, over the app's local relay (the caller provides the hub URL and
+ * connection options, from hostApi.ts).
  */
 import * as signalR from '@microsoft/signalr';
 import type {
