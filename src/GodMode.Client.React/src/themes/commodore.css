@@ -7,7 +7,7 @@
    for the rest (JetBrains Mono).
 
    Signature, all static: raster-bar stripes under the headers, on
-   the selected tile and as the loading bar; READY. above the input,
+   the active tile and as the loading bar; READY. above the input,
    and a block cursor in it. Nothing loops.
 
    States: running light green, warning yellow, error light red,
@@ -165,8 +165,9 @@
   [data-theme="commodore"] .shell { border-width: 4px; }
 }
 
-/* ── Raster bars, static: the VIC-II's colours in 2px stripes, under the headers and on the selected tile ── */
-[data-theme="commodore"] :is(.sidebar-header, .project-header) {
+/* ── Raster bars, static: the VIC-II's colours in 2px stripes, under the headers and on the active tile ── */
+/* (the tile mode's header is .shell.shell-tile-mode > .sidebar-header, whose own background would win) */
+[data-theme="commodore"] :is(.sidebar-header, .project-header, .shell.shell-tile-mode > .sidebar-header) {
   background-image: linear-gradient(to bottom,
     #B86962 0 2px, #BFCE72 2px 4px, #94E089 4px 6px, #67B6BD 6px 8px, #7869C4 8px 10px);
   background-repeat: no-repeat;
@@ -174,7 +175,8 @@
   background-size: 100% 10px;
 }
 
-[data-theme="commodore"] .tile-selected {
+/* On the active tile: a running one (a selected tile opens full screen, but has them too) */
+[data-theme="commodore"] :is(.tile-state-Running, .tile-selected) {
   background-image: linear-gradient(to bottom,
     #7869C4 0 2px, #67B6BD 2px 4px, #94E089 4px 6px, #BFCE72 6px 8px, #B86962 8px 10px);
   background-repeat: no-repeat;
