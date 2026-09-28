@@ -15,7 +15,7 @@ import {
 } from '../services/questionDetection';
 import { projectKey, type ProjectKey } from './projectKey';
 import {
-  rebuildHierarchy, computeTotalWaiting, SIDEBAR_GROUP_ORDER,
+  rebuildHierarchy, computeTotalWaiting, SIDEBAR_GROUP_ORDER, DEFAULT_GROUP_BY,
   type ServerConnection, type SidebarGroupBy, type ProfileGroup,
 } from './hierarchy';
 
@@ -376,9 +376,10 @@ function listed(state: AppState, serverId: string, project: ProjectSummary): Par
 
 // Helper to persist sidebar groupBy
 const GROUPBY_KEY = 'godmode-sidebar-groupby';
-function loadGroupBy(): SidebarGroupBy {
+/** The stored group-by, else the default: a stored value that is no longer a mode (`profile`, before #308) included. */
+export function loadGroupBy(): SidebarGroupBy {
   const v = localStorage.getItem(GROUPBY_KEY);
-  return SIDEBAR_GROUP_ORDER.includes(v as SidebarGroupBy) ? v as SidebarGroupBy : 'profile';
+  return SIDEBAR_GROUP_ORDER.includes(v as SidebarGroupBy) ? v as SidebarGroupBy : DEFAULT_GROUP_BY;
 }
 
 /** What a call to a server that is not connected says: a server offline, reconnecting or not. */

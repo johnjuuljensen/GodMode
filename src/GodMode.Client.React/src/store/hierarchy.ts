@@ -1,13 +1,16 @@
 /**
  * The sidebar's grouping of every connected (or reconnecting) server's projects. Pure: rebuilt from the server
- * connections on each change. An item carries the server it is from, so a group may mix servers.
+ * connections on each change. Always a group per profile, whatever the group-by; an item carries the server it
+ * is from, so a profile's group may mix servers.
  */
 import type { GodModeHub, ConnectionState } from '../signalr/hub';
-import type { ProjectSummary, ProjectRootInfo, ProfileInfo, CreateActionInfo, ServerInfo } from '../signalr/types';
+import type { ProjectSummary, ProjectRootInfo, ProfileInfo, ServerInfo } from '../signalr/types';
 import { projectKey, type ProjectKey } from './projectKey';
 
-export type SidebarGroupBy = 'profile' | 'root' | 'recent' | 'status';
-export const SIDEBAR_GROUP_ORDER: SidebarGroupBy[] = ['profile', 'root', 'recent', 'status'];
+/** What the sidebar lists under each profile: the profile is always the top level (#308). */
+export type SidebarGroupBy = 'root' | 'recent' | 'status';
+export const SIDEBAR_GROUP_ORDER: SidebarGroupBy[] = ['root', 'recent', 'status'];
+export const DEFAULT_GROUP_BY: SidebarGroupBy = 'root';
 
 export interface ServerConnection {
   serverInfo: ServerInfo;
@@ -35,7 +38,8 @@ export interface RootGroup {
   serverId?: string;
   serverName: string;
   items: SidebarItem[];
-  actions: CreateActionInfo[];
+  /** Whether the root's header offers +: the root has create actions and its server is connected. */
+  canCreate: boolean;
   flat?: boolean;        // true = render projects directly without root header
 }
 
@@ -58,6 +62,9 @@ type RootEntry = { root: ProjectRootInfo; items: SidebarItem[]; conn: ServerConn
 /** A server whose projects are shown: connected, or reconnecting (shown as it was until it is back). */
 export const isListed = (c: ServerConnection) => c.connectionState === 'connected' || c.connectionState === 'reconnecting';
 
+/** A root is named within its profile: one server may have a root of one name in two profiles. */
+const rootKey = (profileName: string | null | undefined, rootName: string) => `${profileName ?? 'Default'}/${rootName}`;
+
 /** Collect all listed projects + roots, filtered by profile. A reconnecting server keeps its last lists. */
 function collectFilteredData(connections: ServerConnection[], filter: string) {
   const allProfileNames = new Set<string>();
@@ -74,7 +81,7 @@ function collectFilteredData(connections: ServerConnection[], filter: string) {
     const serverId = conn.serverInfo.Id;
     const itemsByRoot = new Map<string, SidebarItem[]>();
     for (const p of conn.projects) {
-      const rn = p.RootName ?? 'default';
+      const rn = rootKey(p.ProfileName, p.RootName ?? 'default');
       if (!itemsByRoot.has(rn)) itemsByRoot.set(rn, []);
       itemsByRoot.get(rn)!.push({ key: projectKey(serverId, p.Id), serverId, project: p });
     }
@@ -82,7 +89,7 @@ function collectFilteredData(connections: ServerConnection[], filter: string) {
       const profileName = root.ProfileName ?? 'Default';
       allProfileNames.add(profileName);
       if (filter !== 'All' && profileName.toLowerCase() !== filter.toLowerCase()) continue;
-      allRoots.push({ root, items: itemsByRoot.get(root.Name) ?? [], conn, profileName });
+      allRoots.push({ root, items: itemsByRoot.get(rootKey(root.ProfileName, root.Name)) ?? [], conn, profileName });
       representedServerIds.add(serverId);
     }
   }
@@ -112,78 +119,67 @@ function labelSharedNames(allRoots: RootEntry[]) {
 export function rebuildHierarchy(
   connections: ServerConnection[],
   filter: string,
-  groupBy: SidebarGroupBy = 'profile',
+  groupBy: SidebarGroupBy = DEFAULT_GROUP_BY,
 ): HierarchyResult {
   const { allRoots, inactiveServers, profileFilterOptions } = collectFilteredData(connections, filter);
-  const build = { profile: buildByProfile, root: buildByRoot, recent: buildByRecent, status: buildByStatus }[groupBy];
-  return { profileGroups: build(allRoots), inactiveServers, profileFilterOptions };
+  const build = { root: rootGroupsOf, recent: recentGroupOf, status: statusGroupOf }[groupBy];
+  return { profileGroups: byProfile(allRoots, build), inactiveServers, profileFilterOptions };
 }
 
-/** A group listing its items directly, with no root header. */
-const flatGroup = (key: string, name: string, items: SidebarItem[], root?: { rootName: string; serverId: string }): ProfileGroup => ({
-  key, name,
-  rootGroups: [{
-    name: '', rootName: root?.rootName ?? '', profileName: '', serverId: root?.serverId, serverName: '',
-    items, actions: [], flat: true,
-  }],
-  projectCount: items.length,
-});
-
-/** Adds items to a group's list, once each. */
-function addItems(target: SidebarItem[], items: SidebarItem[]) {
-  for (const i of items) if (!target.some(t => t.key === i.key)) target.push(i);
-}
-
-function buildByProfile(allRoots: RootEntry[]): ProfileGroup[] {
-  const dict = new Map<string, SidebarItem[]>();
-  for (const { items, profileName } of allRoots) {
-    if (!dict.has(profileName)) dict.set(profileName, []);
-    addItems(dict.get(profileName)!, items);
+/**
+ * One group per profile name, sorted, whatever servers it is on: a profile never mixes with another (#308).
+ * `build` chooses what is under each profile, from that profile's roots.
+ */
+function byProfile(allRoots: RootEntry[], build: (roots: RootEntry[]) => RootGroup[]): ProfileGroup[] {
+  const dict = new Map<string, RootEntry[]>();
+  for (const r of allRoots) {
+    if (!dict.has(r.profileName)) dict.set(r.profileName, []);
+    dict.get(r.profileName)!.push(r);
   }
   return [...dict.entries()].sort(([a], [b]) => a.localeCompare(b))
-    .map(([name, items]) => flatGroup(name, name, items));
+    .map(([name, roots]) => {
+      const rootGroups = build(roots);
+      return { key: name, name, rootGroups, projectCount: rootGroups.reduce((n, rg) => n + rg.items.length, 0) };
+    });
 }
 
-function buildByRoot(allRoots: RootEntry[]): ProfileGroup[] {
-  const dict = new Map<string, { rootName: string; conn: ServerConnection; items: SidebarItem[] }>();
+/** A profile's projects listed directly, with no root header. */
+const flatGroup = (profileName: string, items: SidebarItem[]): RootGroup => ({
+  name: '', rootName: '', profileName, serverName: '', items, canCreate: false, flat: true,
+});
+
+/** A root header per server, each with its +, then that root's projects. */
+function rootGroupsOf(roots: RootEntry[]): RootGroup[] {
   const serversByRoot = new Map<string, number>();
-  for (const { root, items, conn } of allRoots) {
-    const key = `${conn.serverInfo.Id}:${root.Name}`;
-    if (!dict.has(key)) {
-      dict.set(key, { rootName: root.Name, conn, items: [] });
-      serversByRoot.set(root.Name, (serversByRoot.get(root.Name) ?? 0) + 1);
-    }
-    addItems(dict.get(key)!.items, items);
-  }
-  return [...dict.entries()]
-    .sort(([, a], [, b]) => a.rootName.localeCompare(b.rootName) || a.conn.serverInfo.Name.localeCompare(b.conn.serverInfo.Name))
-    .map(([key, { rootName, conn, items }]) => flatGroup(
-      key,
-      serversByRoot.get(rootName)! > 1 ? `${rootName} (${conn.serverInfo.Name})` : rootName,
+  for (const { root } of roots) serversByRoot.set(root.Name, (serversByRoot.get(root.Name) ?? 0) + 1);
+  return [...roots]
+    .sort((a, b) => a.root.Name.localeCompare(b.root.Name) || a.conn.serverInfo.Name.localeCompare(b.conn.serverInfo.Name))
+    .map(({ root, items, conn, profileName }) => ({
+      name: serversByRoot.get(root.Name)! > 1 ? `${root.Name} (${conn.serverInfo.Name})` : root.Name,
+      rootName: root.Name,
+      profileName,
+      serverId: conn.serverInfo.Id,
+      serverName: conn.serverInfo.Name,
       items,
-      { rootName, serverId: conn.serverInfo.Id },
-    ));
+      canCreate: (root.Actions?.length ?? 0) > 0 && conn.connectionState === 'connected',
+    }));
 }
 
-function buildByRecent(allRoots: RootEntry[]): ProfileGroup[] {
-  // Flat list of all projects sorted by UpdatedAt desc
-  const items = allRoots.flatMap(r => r.items)
-    .sort((a, b) => new Date(b.project.UpdatedAt).getTime() - new Date(a.project.UpdatedAt).getTime());
-  return items.length === 0 ? [] : [flatGroup('Recent', 'Recent', items)];
+const byUpdatedDesc = (a: SidebarItem, b: SidebarItem) =>
+  new Date(b.project.UpdatedAt).getTime() - new Date(a.project.UpdatedAt).getTime();
+
+function recentGroupOf(roots: RootEntry[]): RootGroup[] {
+  const items = roots.flatMap(r => r.items).sort(byUpdatedDesc);
+  return [flatGroup(roots[0].profileName, items)];
 }
 
 const STATUS_ORDER: Record<string, number> = { Running: 0, WaitingPermission: 1, WaitingInput: 1, Idle: 2, Error: 3, Stopped: 4 };
+const statusRank = (i: SidebarItem) => STATUS_ORDER[String(i.project.State ?? 'Idle')] ?? 99;
 
-function buildByStatus(allRoots: RootEntry[]): ProfileGroup[] {
-  const dict = new Map<string, SidebarItem[]>();
-  for (const i of allRoots.flatMap(r => r.items)) {
-    const status = String(i.project.State ?? 'Idle');
-    if (!dict.has(status)) dict.set(status, []);
-    dict.get(status)!.push(i);
-  }
-  return [...dict.entries()]
-    .sort(([a], [b]) => (STATUS_ORDER[a] ?? 99) - (STATUS_ORDER[b] ?? 99))
-    .map(([status, items]) => flatGroup(status, status, items));
+/** A profile's projects by status, the most recent first within one. */
+function statusGroupOf(roots: RootEntry[]): RootGroup[] {
+  const items = roots.flatMap(r => r.items).sort((a, b) => statusRank(a) - statusRank(b) || byUpdatedDesc(a, b));
+  return [flatGroup(roots[0].profileName, items)];
 }
 
 export function computeTotalWaiting(
