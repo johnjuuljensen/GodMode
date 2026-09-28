@@ -3,6 +3,7 @@
  * The theme registry and its stylesheets (#296): each theme's tokens are scoped to it, a theme beyond Glass defines
  * every token (none falls through to Glass's look), and every token a stylesheet names exists.
  */
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -31,6 +32,7 @@ describe('the registry', () => {
     expect(resolveThemeId('phosphor')).toBe('phosphor');
     expect(resolveThemeId('neon')).toBe('neon');
     expect(resolveThemeId('doom')).toBe('doom');
+    expect(resolveThemeId('commodore')).toBe('commodore');
     expect(resolveThemeId('nope')).toBe('glass-dark');
     expect(resolveThemeId(null)).toBe('glass-dark');
   });
@@ -46,11 +48,31 @@ describe('the registry', () => {
   });
 });
 
-// A theme's fonts are its own chunk, fetched the first time it is applied; the bundle's are Glass's alone
+// A theme's fonts are its own chunk, fetched the first time it is applied; the bundle's are Glass's alone.
+// Each is an @fontsource package, or a font bundled here whose @font-face is a stylesheet the module imports
 it.each(themes.filter(t => !t.id.startsWith('glass-')).map(t => [t.id, t.fonts] as const))('%s loads its fonts in a module of its own', (id, fonts) => {
   const module = read(`${id}-fonts.ts`);
-  for (const font of fonts) expect(module).toContain(`@fontsource/${font.toLowerCase().replace(/ /g, '-')}/`);
+  const faces = [...module.matchAll(/^import '(\.\/[^']+\.css)';/gm)].map(m => read(m[1]))
+    .flatMap(css => [...css.matchAll(/@font-face\s*\{[^}]*font-family:\s*'([^']+)'/g)].map(m => m[1]));
+  for (const font of fonts) {
+    if (!faces.includes(font)) expect(module).toContain(`@fontsource/${font.toLowerCase().replace(/ /g, '-')}/`);
+  }
   expect(read('index.ts')).toContain(`import('./${id}-fonts')`);
+});
+
+// Pet Me 64 is Kreative Software's, given away only with its licence verbatim, and never modified
+describe('Commodore's bundled font', () => {
+  const petMe = join(dir, 'fonts', 'pet-me');
+  it('comes with its licence and its credit', () => {
+    expect(readFileSync(join(petMe, 'FreeLicense.txt'), 'utf8')).toMatch(/^KREATIVE SOFTWARE RELAY FONTS FREE USE LICENSE?
+version 1\.2f/);
+    expect(readFileSync(join(petMe, 'README.md'), 'utf8')).toContain('Kreative Software');
+  });
+
+  it('is the file Kreative ships, unchanged', () => {
+    const sha = createHash('sha256').update(readFileSync(join(petMe, 'PetMe64.ttf'))).digest('hex');
+    expect(sha).toBe('1a5a4bf4af2076345480b1a99490a16503f0f5c167e200c8e7644fd40b72d9fd');
+  });
 });
 
 describe('the tokens', () => {

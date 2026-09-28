@@ -1,0 +1,8 @@
+/* Pet Me 64 (Kreative Software), bundled as it came: FreeLicense.txt, README.md */
+@font-face {
+  font-family: 'Pet Me 64';
+  src: url('./PetMe64.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}

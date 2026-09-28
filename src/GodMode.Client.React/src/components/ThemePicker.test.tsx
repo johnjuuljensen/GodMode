@@ -28,7 +28,7 @@ afterEach(() => { view?.unmount(); view = undefined; });
 
 it('lists every theme, and a pick applies at once, without a reload', async () => {
   await start();
-  expect(options().map(o => o.textContent)).toEqual(['Glass dark', 'Glass light', 'Phosphor', 'Neon', 'Doom']);
+  expect(options().map(o => o.textContent)).toEqual(['Glass dark', 'Glass light', 'Phosphor', 'Neon', 'Doom', 'Commodore']);
   expect(shown()).toBe('glass-dark');
   const page = view!.container;
 
@@ -45,6 +45,10 @@ it('lists every theme, and a pick applies at once, without a reload', async () =
   await click(option('Doom'));
   expect(shown()).toBe('doom');
   expect(checked()).toEqual(['Doom']);
+
+  await click(option('Commodore'));
+  expect(shown()).toBe('commodore');
+  expect(checked()).toEqual(['Commodore']);
 
   await click(option('Glass light'));
   expect(shown()).toBe('glass-light');
@@ -68,6 +72,7 @@ it.each([
   ['glass-light', 'glass-light', 'Glass light'],
   ['neon', 'neon', 'Neon'],
   ['doom', 'doom', 'Doom'],
+  ['commodore', 'commodore', 'Commodore'],
   ['no-such-theme', 'glass-dark', 'Glass dark'],
   ['', 'glass-dark', 'Glass dark'],
 ])('a stored %j starts in %s', async (stored, id, name) => {
