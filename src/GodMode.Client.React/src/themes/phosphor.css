@@ -27,6 +27,7 @@
   --sidebar-bg:       #0b120b;
   --titlebar-bg:      #0b120b;
   --menu-bg:          #0d150d;
+  --option-bg:        var(--glass);
 
   --accent:           #33ff66;
   --accent-glow:      rgba(51,255,102,0.35);

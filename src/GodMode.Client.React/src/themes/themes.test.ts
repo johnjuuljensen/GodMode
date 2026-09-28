@@ -101,6 +101,14 @@ describe('the tokens', () => {
       .toMatch(new RegExp(`:where\\(:root\\[data-theme="${id}"\\] \\.btn\\)\\s*\\{[^}]*background:`));
   });
 
+  // #316: a native select's open list lays a translucent option background on white, under the page's light text.
+  // So a theme's --option-bg is opaque: a hex colour, or its --glass where that is one
+  it.each(themes.map(t => t.id))('%s gives a native list\'s options an opaque background', id => {
+    const token = (name: string) => read(`${id}.css`).match(new RegExp(`${name}:\\s*([^;]+);`))?.[1].trim();
+    const value = token('--option-bg') === 'var(--glass)' ? token('--glass') : token('--option-bg');
+    expect(value).toMatch(/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i);
+  });
+
   it('every token a stylesheet names is defined', () => {
     const named = new Set(allCss.flatMap(css => [...css.matchAll(/var\((--[\w-]+)/g)].map(m => m[1])));
     expect([...named].filter(t => !glassTokens.has(t))).toEqual([]);
