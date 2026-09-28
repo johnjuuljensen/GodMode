@@ -376,6 +376,12 @@ body::after {
   background: var(--glass-hover);
 }
 
+/* A native select's open list (#316): its options get an opaque surface, where the select's is translucent */
+option {
+  background-color: var(--option-bg);
+  color: var(--text-primary);
+}
+
 .form-group input::placeholder,
 .form-group textarea::placeholder {
   color: var(--text-tertiary);

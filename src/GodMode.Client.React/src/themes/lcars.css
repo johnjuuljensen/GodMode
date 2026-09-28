@@ -34,6 +34,7 @@
   --sidebar-bg:       #000;
   --titlebar-bg:      #000;
   --menu-bg:          #0b0a0d;
+  --option-bg:        var(--glass);
 
   --accent:           #FF9900;
   --accent-glow:      rgba(255,153,0,0.35);

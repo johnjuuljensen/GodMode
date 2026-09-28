@@ -23,6 +23,7 @@
   --sidebar-bg:       rgba(255,255,255,0.025);
   --titlebar-bg:      rgba(255,255,255,0.018);
   --menu-bg:          rgba(22,22,30,0.92);
+  --option-bg:        #16161e;   /* opaque: a native list lays a translucent one on white (#316) */
 
   --accent:           #5e9eff;
   --accent-glow:      rgba(94,158,255,0.30);
