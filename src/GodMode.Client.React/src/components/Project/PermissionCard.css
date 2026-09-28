@@ -14,7 +14,7 @@
 
 .permission-deny {
   color: var(--error);
-  border-color: rgba(248,113,113,0.3);
+  border-color: var(--error-border-strong);
 }
 
 .permission-hint {
@@ -31,8 +31,8 @@
   font-size: 13px;
   color: var(--text-primary);
   background: var(--glass);
-  border: 1px solid var(--glass-border);
-  border-radius: 8px;
+  border: var(--border-width) var(--border-style) var(--glass-border);
+  border-radius: var(--radius);
 }
 
 /* Everything the call runs, in full: scrolls within the card, above Allow (#234) */
@@ -48,8 +48,8 @@
   overflow-wrap: anywhere;
   color: var(--text-primary);
   background: var(--glass);
-  border: 1px solid var(--glass-border);
-  border-radius: 8px;
+  border: var(--border-width) var(--border-style) var(--glass-border);
+  border-radius: var(--radius);
 }
 
 .permission-note {

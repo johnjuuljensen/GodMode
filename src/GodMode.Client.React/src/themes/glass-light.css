@@ -1,0 +1,54 @@
+/* ═══════════════════════════════════════════════════════════════
+   Glass light — Glass dark's shape, in light colours
+   Everything it leaves out is Glass dark's (glass-dark.css, on :root),
+   as it was when both lived in Shell.css
+   ═══════════════════════════════════════════════════════════════ */
+
+:root[data-theme="glass-light"] {
+  --bg-base:          #dde0ea;
+  --bg-ambient-1:     rgba(40,113,240,0.12);
+  --bg-ambient-2:     rgba(124,77,255,0.09);
+  --bg-ambient-3:     rgba(209,54,122,0.06);
+
+  --glass:            rgba(255,255,255,0.58);
+  --glass-hover:      rgba(255,255,255,0.80);
+  --glass-strong:     rgba(255,255,255,0.70);
+  --glass-border:     rgba(0,0,0,0.07);
+  --glass-border-strong: rgba(0,0,0,0.11);
+  --glass-highlight:  rgba(255,255,255,0.95);
+  --sidebar-bg:       rgba(255,255,255,0.38);
+  --titlebar-bg:      rgba(255,255,255,0.42);
+  --menu-bg:          rgba(255,255,255,0.94);
+
+  --accent:           #2871f0;
+  --accent-glow:      rgba(40,113,240,0.28);
+  --accent-soft:      rgba(40,113,240,0.09);
+
+  --text-primary:     rgba(10,10,20,0.88);
+  --text-secondary:   rgba(10,10,20,0.46);
+  --text-tertiary:    rgba(10,10,20,0.26);
+
+  --success:          #1ab87a;
+  --success-soft:     rgba(26,184,122,0.12);
+  --warning:          #d97706;
+  --warning-soft:     rgba(217,119,6,0.10);
+  --error:            #e53535;
+  --error-soft:       rgba(229,53,53,0.10);
+  --waiting:          #2871f0;
+  --waiting-soft:     rgba(40,113,240,0.09);
+
+  --purple:           #7c4dff;
+  --pink:             #d1367a;
+
+  --shadow-window:    0 0 0 0.5px rgba(0,0,0,0.09), 0 32px 72px rgba(70,80,130,0.18), 0 8px 20px rgba(70,80,130,0.10);
+  --shadow-card:      0 1px 3px rgba(60,70,120,0.06), 0 4px 12px rgba(60,70,120,0.05), inset 0 1px 0 rgba(255,255,255,0.90);
+  --shadow-card-hover: 0 2px 6px rgba(60,70,120,0.09), 0 12px 30px rgba(60,70,120,0.10), inset 0 1px 0 rgba(255,255,255,0.95);
+  --shadow-menu:      0 -4px 20px rgba(0,0,0,0.1), 0 0 0 0.5px rgba(0,0,0,0.05);
+
+  --modal-overlay:    rgba(0,0,0,0.3);
+  --scrollbar-thumb:  rgba(0,0,0,0.10);
+  --scrollbar-hover:  rgba(0,0,0,0.18);
+
+  --backdrop-texture-opacity: 0.035;
+  --backdrop-texture-blend: multiply;
+}

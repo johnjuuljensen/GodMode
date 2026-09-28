@@ -1,0 +1,146 @@
+/* ═══════════════════════════════════════════════════════════════
+   Glass dark — the default theme, and every token's default
+   Inspired by macOS Sonoma vibrancy materials
+
+   On :root, so it is the look before a theme is applied and the value
+   of any token a theme leaves out. Glass light overrides its colours;
+   every other theme defines the whole set (themes.test.ts checks).
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Colour ── */
+  --bg-base:          #0d0d14;
+  --bg-ambient-1:     rgba(79,142,247,0.11);
+  --bg-ambient-2:     rgba(167,139,250,0.09);
+  --bg-ambient-3:     rgba(244,114,182,0.06);
+
+  --glass:            rgba(255,255,255,0.042);
+  --glass-hover:      rgba(255,255,255,0.068);
+  --glass-strong:     rgba(255,255,255,0.08);
+  --glass-border:     rgba(255,255,255,0.075);
+  --glass-border-strong: rgba(255,255,255,0.11);
+  --glass-highlight:  rgba(255,255,255,0.11);
+  --sidebar-bg:       rgba(255,255,255,0.025);
+  --titlebar-bg:      rgba(255,255,255,0.018);
+  --menu-bg:          rgba(22,22,30,0.92);
+
+  --accent:           #5e9eff;
+  --accent-glow:      rgba(94,158,255,0.30);
+  --accent-soft:      rgba(94,158,255,0.12);
+  --accent-border:    rgba(94,158,255,0.2);
+  --accent-border-medium: rgba(94,158,255,0.18);
+  --accent-border-soft: rgba(94,158,255,0.15);
+  --text-on-accent:   #fff;
+  --group-label:      rgb(94 158 255);
+
+  --text-primary:     rgba(255,255,255,0.88);
+  --text-secondary:   rgba(255,255,255,0.44);
+  --text-tertiary:    rgba(255,255,255,0.22);
+
+  --success:          #34d399;
+  --success-soft:     rgba(52,211,153,0.15);
+  --success-border:   rgba(52,211,153,0.2);
+  --success-border-soft: rgba(52,211,153,0.15);
+  --warning:          #fbbf24;
+  --warning-soft:     rgba(251,191,36,0.12);
+  --warning-border-faint: rgba(251,191,36,0.12);
+  --warning-border-soft: rgba(251,191,36,0.15);
+  --warning-border-medium: rgba(251,191,36,0.18);
+  --error:            #f87171;
+  --error-soft:       rgba(248,113,113,0.15);
+  --error-hover:      rgba(248,113,113,0.2);
+  --error-border:     rgba(248,113,113,0.2);
+  --error-border-soft: rgba(248,113,113,0.15);
+  --error-border-strong: rgba(248,113,113,0.3);
+  --waiting:          #5e9eff;
+  --waiting-soft:     rgba(94,158,255,0.12);
+  --waiting-border:   rgba(94,158,255,0.2);
+
+  --purple:           #a78bfa;
+  --purple-soft:      rgba(167,139,250,0.12);
+  --purple-border-soft: rgba(167,139,250,0.15);
+  --indigo-soft:      rgba(99,102,241,0.08);
+  --pink:             #f472b6;
+
+  --toggle-knob:      white;
+  --modal-overlay:    rgba(0,0,0,0.6);
+  --scrollbar-thumb:  rgba(255,255,255,0.08);
+  --scrollbar-hover:  rgba(255,255,255,0.14);
+
+  /* ── Surfaces: blur behind a panel, and its border ── */
+  --blur-xs:          blur(8px);
+  --blur-sm:          blur(12px);
+  --blur-md:          blur(16px);
+  --blur-lg:          blur(20px);
+  --blur-xl:          blur(24px);
+  --blur-window:      blur(40px) saturate(180%);
+  --border-width:     1px;
+  --border-style:     solid;
+
+  /* ── Corners: Glass's steps, smallest to largest. A theme with square corners sets them all to 0 ── */
+  --radius-2xs:       2px;
+  --radius-xs:        4px;
+  --radius-sm:        5px;
+  --radius-md:        6px;
+  --radius-ml:        7px;
+  --radius:           8px;
+  --radius-badge:     9px;
+  --radius-menu:      10px;
+  --radius-lg:        12px;
+  --radius-xl:        14px;
+  --radius-round:     50%;     /* dots and round buttons */
+  --radius-pill:      999px;   /* pill ends, whatever the height */
+
+  /* ── Depth ── */
+  --shadow-window:    0 0 0 0.5px rgba(0,0,0,0.85), 0 36px 80px rgba(0,0,0,0.55), 0 8px 20px rgba(0,0,0,0.25);
+  --shadow-card:      0 1px 3px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06);
+  --shadow-card-hover: 0 4px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08);
+  --shadow-menu:      0 -4px 20px rgba(0,0,0,0.3), 0 0 0 0.5px rgba(0,0,0,0.2);
+  --shadow-inset-highlight: inset 0 1px 0 var(--glass-highlight);
+  --shadow-inset-input: inset 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-focus:     0 0 0 3px var(--accent-soft);
+  --shadow-focus-sm:  0 0 0 2px var(--accent-soft);
+  --shadow-focus-success: 0 0 0 3px var(--success-soft);
+  --shadow-outline-accent: 0 0 0 1px var(--accent);
+  --shadow-accent:    0 2px 8px var(--accent-glow);
+  --shadow-accent-hover: 0 4px 14px var(--accent-glow);
+  /* The glow of a status light */
+  --shadow-led-success: 0 0 4px var(--success);
+  --shadow-led-error: 0 0 4px var(--error);
+  --shadow-led-accent: 0 0 4px var(--accent);
+  --shadow-led-accent-soft: 0 0 4px var(--accent-glow);
+  --shadow-led-waiting: 0 0 4px var(--waiting);
+  --shadow-dot-success: 0 0 5px rgba(52,211,153,0.5);
+  --shadow-dot-warning: 0 0 5px rgba(251,191,36,0.5);
+  --shadow-dot-error: 0 0 5px rgba(248,113,113,0.5);
+  /* A waiting tile: at rest, and at the peak of its pulse */
+  --shadow-waiting:   0 0 0 0 rgba(251,191,36,0.10);
+  --shadow-waiting-peak: 0 0 16px 2px rgba(251,191,36,0.12);
+  /* The question prompt's marker: at rest, and at the peak of its pulse */
+  --shadow-question-pulse: 0 0 0 0 rgba(251, 191, 36, 0.35);
+  --shadow-question-pulse-peak: 0 0 0 8px rgba(251, 191, 36, 0);
+
+  /* ── Backdrop: what body::before and body::after draw ── */
+  --backdrop-glow:
+    radial-gradient(ellipse 55% 45% at 18% 28%, var(--bg-ambient-1) 0%, transparent 65%),
+    radial-gradient(ellipse 45% 55% at 78% 68%, var(--bg-ambient-2) 0%, transparent 65%),
+    radial-gradient(ellipse 40% 35% at 55% 8%,  var(--bg-ambient-3) 0%, transparent 65%);
+  --backdrop-texture: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  --backdrop-texture-opacity: 0.025;
+  --backdrop-texture-blend: normal;
+
+  /* ── Type: the text you read, code and paths, and titles, badges and status labels ── */
+  --font-body:        'DM Sans Variable', 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:        'DM Mono', 'Cascadia Code', 'Fira Code', monospace;
+  --font-display:     var(--font-body);
+  --font-display-adjust: none;   /* font-size-adjust for the display font: a pixel font's small x-height */
+  --label-case:       uppercase; /* small labels: section names, badges, status */
+  --label-tracking:   0em;       /* added to a label's own letter spacing */
+
+  /* ── Motion: transitions, and whether looping effects run (a pulse, a glow) ── */
+  --duration-instant: 0.1s;
+  --duration-fast:    0.12s;
+  --duration:         0.15s;
+  --duration-slow:    0.2s;
+  --loop-iterations:  infinite;  /* 0 in a theme without looping animation */
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useAppStore, projectKey, type ActivePage } from '../store';
 import { Sidebar, SidebarHeader, SidebarFooter } from './Sidebar/Sidebar';
 import { ProjectView } from './Project/ProjectView';
@@ -14,12 +14,6 @@ import { useAttentionTitle } from './Inbox/useAttentionTitle';
 import { formatRoute, goBack, useHashRoute } from '../routing';
 import { subscribeAttentionLinks } from '../services/hostApi';
 import './Shell.css';
-
-function getInitialTheme(): 'dark' | 'light' {
-  const stored = localStorage.getItem('godmode-theme');
-  if (stored === 'light' || stored === 'dark') return stored;
-  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-}
 
 function PageContent({ page }: { page: ActivePage }) {
   const closePage = useAppStore(s => s.closePage);
@@ -69,18 +63,11 @@ export function Shell() {
   const homeView = useAppStore(s => s.homeView);
   const setHomeView = useAppStore(s => s.setHomeView);
 
-  const [theme] = useState<'dark' | 'light'>(getInitialTheme);
-
   // Each screen is a history entry, so browser and Android back walk back through them
   useHashRoute();
   useAttentionTitle();
   // A tapped notification opens the inbox on its item
   useEffect(() => subscribeAttentionLinks(useAppStore.getState().openInboxItem), []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('godmode-theme', theme);
-  }, [theme]);
 
   // Mobile detection. A wide screen shows the list beside the inbox, so it has no list screen for the URL to name (#218)
   useEffect(() => {

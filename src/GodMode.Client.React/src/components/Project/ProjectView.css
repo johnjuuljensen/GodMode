@@ -12,10 +12,10 @@
   justify-content: space-between;
   height: 61px;
   padding: 0 16px;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: var(--border-width) var(--border-style) var(--glass-border);
   background: var(--glass);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
   flex-shrink: 0;
 }
 
@@ -55,16 +55,16 @@
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   background: var(--glass);
-  border: 1px solid var(--glass-border);
+  border: var(--border-width) var(--border-style) var(--glass-border);
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: calc(0.02em + var(--label-tracking));
   cursor: pointer;
-  transition: all 0.15s;
-  text-transform: uppercase;
+  transition: all var(--duration);
+  text-transform: var(--label-case);
 }
 
 .project-status-btn:disabled {
@@ -74,44 +74,44 @@
 .project-status-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   flex-shrink: 0;
 }
 
 .project-status-action {
   margin-left: 2px;
   padding-left: 6px;
-  border-left: 1px solid var(--glass-border);
+  border-left: var(--border-width) var(--border-style) var(--glass-border);
   font-weight: 600;
 }
 
 /* Running */
-.project-status-btn.Running { color: var(--success); border-color: rgba(52,211,153,0.2); }
-.project-status-btn.Running .project-status-dot { background: var(--success); box-shadow: 0 0 4px var(--success); animation: status-pulse 2s ease-in-out infinite; }
-.project-status-btn.Running .project-status-action { color: var(--text-secondary); border-color: rgba(52,211,153,0.2); }
-.project-status-btn.Running:hover { background: var(--error-soft); color: var(--error); border-color: rgba(248,113,113,0.2); }
-.project-status-btn.Running:hover .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); animation: none; }
-.project-status-btn.Running:hover .project-status-action { color: var(--error); border-color: rgba(248,113,113,0.2); }
+.project-status-btn.Running { color: var(--success); border-color: var(--success-border); }
+.project-status-btn.Running .project-status-dot { background: var(--success); box-shadow: var(--shadow-led-success); animation: status-pulse 2s ease-in-out var(--loop-iterations); }
+.project-status-btn.Running .project-status-action { color: var(--text-secondary); border-color: var(--success-border); }
+.project-status-btn.Running:hover { background: var(--error-soft); color: var(--error); border-color: var(--error-border); }
+.project-status-btn.Running:hover .project-status-dot { background: var(--error); box-shadow: var(--shadow-led-error); animation: none; }
+.project-status-btn.Running:hover .project-status-action { color: var(--error); border-color: var(--error-border); }
 
 /* WaitingInput */
-.project-status-btn.WaitingInput { color: var(--accent); border-color: rgba(94,158,255,0.2); }
-.project-status-btn.WaitingInput .project-status-dot { background: var(--accent); box-shadow: 0 0 4px var(--accent); animation: status-pulse 2s ease-in-out infinite; }
-.project-status-btn.WaitingInput .project-status-action { color: var(--text-secondary); border-color: rgba(94,158,255,0.2); }
-.project-status-btn.WaitingInput:hover { background: var(--error-soft); color: var(--error); border-color: rgba(248,113,113,0.2); }
-.project-status-btn.WaitingInput:hover .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); animation: none; }
-.project-status-btn.WaitingInput:hover .project-status-action { color: var(--error); border-color: rgba(248,113,113,0.2); }
+.project-status-btn.WaitingInput { color: var(--waiting); border-color: var(--waiting-border); }
+.project-status-btn.WaitingInput .project-status-dot { background: var(--waiting); box-shadow: var(--shadow-led-waiting); animation: status-pulse 2s ease-in-out var(--loop-iterations); }
+.project-status-btn.WaitingInput .project-status-action { color: var(--text-secondary); border-color: var(--waiting-border); }
+.project-status-btn.WaitingInput:hover { background: var(--error-soft); color: var(--error); border-color: var(--error-border); }
+.project-status-btn.WaitingInput:hover .project-status-dot { background: var(--error); box-shadow: var(--shadow-led-error); animation: none; }
+.project-status-btn.WaitingInput:hover .project-status-action { color: var(--error); border-color: var(--error-border); }
 
 /* Stopped / Idle */
 .project-status-btn.Stopped, .project-status-btn.Idle { color: var(--text-tertiary); }
 .project-status-btn.Stopped .project-status-dot, .project-status-btn.Idle .project-status-dot { background: var(--text-tertiary); }
 .project-status-btn.Stopped .project-status-action, .project-status-btn.Idle .project-status-action { color: var(--text-secondary); }
-.project-status-btn.Stopped:hover, .project-status-btn.Idle:hover { background: var(--accent-soft); color: var(--accent); border-color: rgba(94,158,255,0.2); }
-.project-status-btn.Stopped:hover .project-status-dot, .project-status-btn.Idle:hover .project-status-dot { background: var(--accent); box-shadow: 0 0 4px var(--accent); }
-.project-status-btn.Stopped:hover .project-status-action, .project-status-btn.Idle:hover .project-status-action { color: var(--accent); border-color: rgba(94,158,255,0.2); }
+.project-status-btn.Stopped:hover, .project-status-btn.Idle:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-border); }
+.project-status-btn.Stopped:hover .project-status-dot, .project-status-btn.Idle:hover .project-status-dot { background: var(--accent); box-shadow: var(--shadow-led-accent); }
+.project-status-btn.Stopped:hover .project-status-action, .project-status-btn.Idle:hover .project-status-action { color: var(--accent); border-color: var(--accent-border); }
 
 /* Error */
-.project-status-btn.Error { color: var(--error); border-color: rgba(248,113,113,0.2); }
-.project-status-btn.Error .project-status-dot { background: var(--error); box-shadow: 0 0 4px var(--error); }
+.project-status-btn.Error { color: var(--error); border-color: var(--error-border); }
+.project-status-btn.Error .project-status-dot { background: var(--error); box-shadow: var(--shadow-led-error); }
 
 @keyframes status-pulse {
   0%, 100% { opacity: 1; }
@@ -125,12 +125,12 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--glass);
-  border: 1px solid var(--glass-border);
+  border: var(--border-width) var(--border-style) var(--glass-border);
   color: var(--text-tertiary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--duration);
 }
 
 .delete-btn:hover {
@@ -144,12 +144,12 @@
   font-size: 11px;
   height: 32px;
   padding: 0 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--glass);
-  border: 1px solid var(--glass-border);
+  border: var(--border-width) var(--border-style) var(--glass-border);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--duration);
   font-family: var(--font-mono);
   letter-spacing: 0.02em;
 }
@@ -162,7 +162,7 @@
 .btn-toggle.active {
   background: var(--accent-soft);
   color: var(--accent);
-  border-color: rgba(94,158,255,0.2);
+  border-color: var(--accent-border);
 }
 
 /* ── Messages Area ── */
@@ -188,10 +188,10 @@
   align-items: flex-end;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid var(--glass-border);
+  border-top: var(--border-width) var(--border-style) var(--glass-border);
   background: var(--glass);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: var(--blur-md);
+  -webkit-backdrop-filter: var(--blur-md);
 }
 
 /* As tall as one line of the input, and stays at the bottom as it grows */
@@ -203,10 +203,10 @@
   flex: 1;
   padding: 7px 14px;
   background: var(--glass);
-  border: 1px solid var(--glass-border);
+  border: var(--border-width) var(--border-style) var(--glass-border);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-family: var(--font-sans);
+  font-family: var(--font-body);
   font-size: 13.5px;
   line-height: 19px;
   /* One line, growing to ten (ProjectView sets the height), then scrolling */
@@ -215,14 +215,14 @@
   max-height: calc(10 * 19px + 2 * 7px + 2px);
   overflow-y: auto;
   resize: none;
-  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
-  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  transition: border-color var(--duration), box-shadow var(--duration), background var(--duration);
+  box-shadow: var(--shadow-inset-highlight);
 }
 
 .project-input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft), inset 0 1px 0 var(--glass-highlight);
+  box-shadow: var(--shadow-focus), var(--shadow-inset-highlight);
   background: var(--glass-hover);
 }
 
@@ -240,5 +240,5 @@
   padding: 6px 16px;
   font-size: 12px;
   color: var(--error);
-  border-top: 1px solid var(--glass-border);
+  border-top: var(--border-width) var(--border-style) var(--glass-border);
 }
