@@ -152,7 +152,7 @@
 }
 
 /* ── Signs: titles are lit tubes, in magenta ── */
-[data-theme="neon"] :is(.sidebar-title, .inbox-title, .settings-header h2, .modal h2) {
+[data-theme="neon"] :is(.inbox-title, .settings-header h2, .modal h2) {
   color: #ff2a6d;
   text-shadow: 0 0 6px rgba(255,42,109,0.75), 0 0 1px #ff9fbf;
 }

@@ -233,7 +233,7 @@
 
 /* ═══ Type ═══ */
 /* Titles: orange, condensed, upper case */
-[data-theme="lcars"] :is(.sidebar-title, .inbox-title, .settings-header h2, .modal h2, .project-header-name) {
+[data-theme="lcars"] :is(.inbox-title, .settings-header h2, .modal h2, .project-header-name) {
   font-family: var(--font-display);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -241,7 +241,6 @@
   color: #FF9900;
 }
 
-[data-theme="lcars"] .sidebar-title { font-size: 20px; }
 [data-theme="lcars"] .project-header-name { font-size: 18px; }
 [data-theme="lcars"] .shell-mobile .project-header-name { font-size: 15px; letter-spacing: 0.03em; }
 
