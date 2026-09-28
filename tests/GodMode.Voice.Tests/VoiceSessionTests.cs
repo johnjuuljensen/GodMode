@@ -167,6 +167,32 @@ public sealed class VoiceSessionTests
         Assert.Contains(model.ToolResults, r => r.Contains("answered on screen") && r.Contains("Nothing was sent"));
     }
 
+    /// <summary>
+    /// The same answer twice in a row, each to its own question, is answered twice: neither the session nor the
+    /// chat node takes the second "ja" for a repeat of the first (VoiceBot#39). Said as ElevenLabs sends it.
+    /// </summary>
+    [Fact]
+    public async Task The_same_answer_twice_to_two_questions_is_answered_both_times()
+    {
+        var servers = new FakeServers();
+        var model = new ScriptedModel()
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." }).Respond("Sendt til 101.")
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." }).Respond("Sendt til 283.");
+        await using var voice = await OfflineVoice.StartAsync(servers, model,
+            connect: _ => { servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Skal jeg slette kolonnerne?", minutesAgo: 30)); return Task.CompletedTask; });
+        await voice.Events.SaidAsync("101 har et spørgsmål.");
+
+        voice.Transcriptions.SayAsRecognized("ja");
+        await voice.Events.SaidAsync("Sendt til 101.");
+        servers.Set(ServerB, Question("p/r/283", "283-voice", "Skal jeg bruge den eksisterende migration?"));
+        await voice.Events.SaidAsync("283 har et spørgsmål.");
+        voice.Transcriptions.SayAsRecognized("ja");
+        await voice.Events.SaidAsync("Sendt til 283.");
+
+        Assert.Equal([new ProjectRef(ServerA, "p/r/101"), new ProjectRef(ServerB, "p/r/283")], servers.Replies.Select(r => r.Project));
+        Assert.Equal(4, model.Calls);
+    }
+
     /// <summary>"ja" and "nej" are answers: no noise filter may drop them before they reach the model.</summary>
     [Theory]
     [InlineData("ja")]
