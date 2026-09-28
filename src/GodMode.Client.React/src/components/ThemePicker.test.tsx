@@ -6,6 +6,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { click, render, type Rendered } from '../test/render';
 
+// A pick loads the theme's fonts (themes.test.ts checks what each module imports). Here they would still be
+// loading when the file ends, and Vitest reports each late import as an unhandled error
+vi.mock('../themes/phosphor-fonts', () => ({}));
+vi.mock('../themes/neon-fonts', () => ({}));
+vi.mock('../themes/doom-fonts', () => ({}));
+vi.mock('../themes/commodore-fonts', () => ({}));
+
 let view: Rendered | undefined;
 const options = () => [...view!.container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
 const option = (name: string) => options().find(o => o.textContent === name)!;

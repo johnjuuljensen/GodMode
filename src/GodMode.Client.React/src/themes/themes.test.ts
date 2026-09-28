@@ -60,18 +60,18 @@ it.each(themes.filter(t => !t.id.startsWith('glass-')).map(t => [t.id, t.fonts] 
   expect(read('index.ts')).toContain(`import('./${id}-fonts')`);
 });
 
-// Pet Me 64 is Kreative Software's, given away only with its licence verbatim, and never modified
-describe('Commodore's bundled font', () => {
-  const petMe = join(dir, 'fonts', 'pet-me');
-  it('comes with its licence and its credit', () => {
-    expect(readFileSync(join(petMe, 'FreeLicense.txt'), 'utf8')).toMatch(/^KREATIVE SOFTWARE RELAY FONTS FREE USE LICENSE?
-version 1\.2f/);
-    expect(readFileSync(join(petMe, 'README.md'), 'utf8')).toContain('Kreative Software');
+// Pet Me 64 is Kreative Software's, given away only with its licence verbatim and credit, and never modified
+describe("Commodore's bundled font", () => {
+  const petMe = (file: string) => readFileSync(join(dir, 'fonts', 'pet-me', file));
+  const sha256 = (file: string) => createHash('sha256').update(petMe(file)).digest('hex');
+
+  it('is the font and the licence Kreative ships, byte for byte', () => {
+    expect(sha256('PetMe64.ttf')).toBe('1a5a4bf4af2076345480b1a99490a16503f0f5c167e200c8e7644fd40b72d9fd');
+    expect(sha256('FreeLicense.txt')).toBe('5b26f7318dddc8d1ace2353992924d5dc0fc6123656de7bdd81ac69f9a8b0878');
   });
 
-  it('is the file Kreative ships, unchanged', () => {
-    const sha = createHash('sha256').update(readFileSync(join(petMe, 'PetMe64.ttf'))).digest('hex');
-    expect(sha).toBe('1a5a4bf4af2076345480b1a99490a16503f0f5c167e200c8e7644fd40b72d9fd');
+  it('credits Kreative Software', () => {
+    expect(petMe('README.md').toString('utf8')).toContain('Kreative Software');
   });
 });
 
