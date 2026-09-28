@@ -1,0 +1,189 @@
+/* ═══════════════════════════════════════════════════════════════
+   Neon — cyberpunk: magenta, cyan and yellow on a deep near-black
+   Sharp corners, solid panels, no blur, and a static neon glow on
+   accents, focus and the status lights. Orbitron for display,
+   Chakra Petch for the text you read, JetBrains Mono for code.
+   A static grid on the backdrop, and nothing that loops.
+
+   The four states each have a hue of their own: running green,
+   warning yellow, error hot pink, waiting violet; the accent is cyan.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root[data-theme="neon"] {
+  color-scheme: dark;
+
+  /* ── Colour ── */
+  --bg-base:          #0d0221;
+  --bg-ambient-1:     rgba(255,42,109,0.16);
+  --bg-ambient-2:     rgba(5,217,232,0.12);
+  --bg-ambient-3:     rgba(185,103,255,0.10);
+
+  --glass:            #140532;
+  --glass-hover:      #1c0944;
+  --glass-strong:     #1a0840;
+  --glass-border:     rgba(5,217,232,0.22);
+  --glass-border-strong: rgba(5,217,232,0.5);
+  --glass-highlight:  transparent;
+  --sidebar-bg:       #10032a;
+  --titlebar-bg:      #10032a;
+  --menu-bg:          #140532;
+
+  --accent:           #05d9e8;
+  --accent-glow:      rgba(5,217,232,0.45);
+  --accent-soft:      rgba(5,217,232,0.14);
+  --accent-border:    rgba(5,217,232,0.5);
+  --accent-border-medium: rgba(5,217,232,0.42);
+  --accent-border-soft: rgba(5,217,232,0.32);
+  --text-on-accent:   #0d0221;
+  --group-label:      #ff2a6d;
+
+  --text-primary:     #eaf6ff;
+  --text-secondary:   #9fb8e0;
+  --text-tertiary:    #6c6aa3;
+
+  --success:          #3cff7a;
+  --success-soft:     rgba(60,255,122,0.13);
+  --success-border:   rgba(60,255,122,0.45);
+  --success-border-soft: rgba(60,255,122,0.32);
+  --warning:          #f9f002;
+  --warning-soft:     rgba(249,240,2,0.12);
+  --warning-border-faint: rgba(249,240,2,0.3);
+  --warning-border-soft: rgba(249,240,2,0.36);
+  --warning-border-medium: rgba(249,240,2,0.45);
+  --error:            #ff2a6d;
+  --error-soft:       rgba(255,42,109,0.15);
+  --error-hover:      rgba(255,42,109,0.24);
+  --error-border:     rgba(255,42,109,0.5);
+  --error-border-soft: rgba(255,42,109,0.36);
+  --error-border-strong: rgba(255,42,109,0.7);
+  --waiting:          #c77dff;
+  --waiting-soft:     rgba(199,125,255,0.14);
+  --waiting-border:   rgba(199,125,255,0.5);
+
+  --purple:           #c77dff;
+  --purple-soft:      rgba(199,125,255,0.14);
+  --purple-border-soft: rgba(199,125,255,0.36);
+  --indigo-soft:      rgba(5,217,232,0.08);
+  --pink:             #ff2a6d;
+
+  --toggle-knob:      #0d0221;
+  --modal-overlay:    rgba(5,1,16,0.78);
+  --scrollbar-thumb:  rgba(5,217,232,0.25);
+  --scrollbar-hover:  rgba(5,217,232,0.45);
+
+  /* ── Surfaces: solid, no blur, 1px lines ── */
+  --blur-xs:          none;
+  --blur-sm:          none;
+  --blur-md:          none;
+  --blur-lg:          none;
+  --blur-xl:          none;
+  --blur-window:      none;
+  --border-width:     1px;
+  --border-style:     solid;
+
+  /* ── Corners: sharp; the dots stay round, a status light is a light ── */
+  --radius-2xs:       0;
+  --radius-xs:        0;
+  --radius-sm:        0;
+  --radius-md:        0;
+  --radius-ml:        0;
+  --radius:           0;
+  --radius-badge:     0;
+  --radius-menu:      0;
+  --radius-lg:        0;
+  --radius-xl:        0;
+  --radius-round:     50%;
+  --radius-pill:      0;
+
+  /* ── Depth: a static neon glow, never a soft drop shadow. No shadow is `0 0 0 0 transparent` ── */
+  --shadow-window:    0 0 0 1px rgba(255,42,109,0.55), 0 0 28px rgba(255,42,109,0.18);
+  --shadow-card:      0 0 0 0 transparent;
+  --shadow-card-hover: 0 0 0 1px rgba(5,217,232,0.45), 0 0 14px rgba(5,217,232,0.28);
+  --shadow-menu:      0 0 0 1px rgba(5,217,232,0.5), 0 0 16px rgba(5,217,232,0.22);
+  --shadow-inset-highlight: 0 0 0 0 transparent;
+  --shadow-inset-input: 0 0 0 0 transparent;
+  --shadow-focus:     0 0 0 1px var(--accent), 0 0 10px var(--accent-glow);
+  --shadow-focus-sm:  0 0 0 1px var(--accent), 0 0 8px var(--accent-glow);
+  --shadow-focus-success: 0 0 0 1px var(--success), 0 0 10px rgba(60,255,122,0.4);
+  --shadow-outline-accent: 0 0 0 1px var(--accent), 0 0 6px var(--accent-glow);
+  --shadow-accent:    0 0 10px rgba(5,217,232,0.55), 0 0 2px rgba(5,217,232,0.9);
+  --shadow-accent-hover: 0 0 18px rgba(5,217,232,0.7), 0 0 3px rgba(5,217,232,1);
+  --shadow-led-success: 0 0 6px var(--success), 0 0 2px var(--success);
+  --shadow-led-error: 0 0 6px var(--error), 0 0 2px var(--error);
+  --shadow-led-accent: 0 0 6px var(--accent), 0 0 2px var(--accent);
+  --shadow-led-accent-soft: 0 0 8px var(--accent-glow);
+  --shadow-led-waiting: 0 0 6px var(--waiting), 0 0 2px var(--waiting);
+  --shadow-dot-success: 0 0 6px var(--success), 0 0 2px var(--success);
+  --shadow-dot-warning: 0 0 6px var(--warning), 0 0 2px var(--warning);
+  --shadow-dot-error: 0 0 6px var(--error), 0 0 2px var(--error);
+  /* A waiting tile holds a steady yellow glow */
+  --shadow-waiting:   0 0 0 1px var(--warning), 0 0 16px rgba(249,240,2,0.25);
+  --shadow-waiting-peak: var(--shadow-waiting);
+  --shadow-question-pulse: 0 0 0 1px var(--warning), 0 0 8px rgba(249,240,2,0.45);
+  --shadow-question-pulse-peak: var(--shadow-question-pulse);
+
+  /* ── Backdrop: magenta and cyan haze, and a static grid over the floor ── */
+  --backdrop-glow:
+    radial-gradient(ellipse 70% 45% at 50% 105%, var(--bg-ambient-1) 0%, transparent 70%),
+    radial-gradient(ellipse 45% 40% at 90% 10%, var(--bg-ambient-2) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 35% at 8% 20%, var(--bg-ambient-3) 0%, transparent 70%);
+  --backdrop-texture:
+    linear-gradient(to bottom, transparent 0%, rgba(13,2,33,0.85) 55%, rgba(13,2,33,0) 100%),
+    linear-gradient(rgba(255,42,109,0.5) 1px, transparent 1px) 0 0 / 48px 48px,
+    linear-gradient(90deg, rgba(5,217,232,0.5) 1px, transparent 1px) 0 0 / 48px 48px;
+  --backdrop-texture-opacity: 0.16;
+  --backdrop-texture-blend: normal;
+
+  /* ── Type ── */
+  --font-body:        'Chakra Petch', 'Segoe UI', sans-serif;
+  --font-mono:        'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+  --font-display:     'Orbitron', 'Chakra Petch', sans-serif;
+  /* Orbitron is wide: a size-for-size swap would crowd the badges */
+  --font-display-adjust: 0.56;
+  --label-case:       uppercase;
+  --label-tracking:   0.06em;
+
+  /* ── Motion: transitions only ── */
+  --duration-instant: 0.1s;
+  --duration-fast:    0.12s;
+  --duration:         0.15s;
+  --duration-slow:    0.2s;
+  --loop-iterations:  0;
+}
+
+/* ── Signs: titles are lit tubes, in magenta ── */
+[data-theme="neon"] :is(.sidebar-title, .inbox-title, .settings-header h2, .modal h2) {
+  color: #ff2a6d;
+  text-shadow: 0 0 6px rgba(255,42,109,0.75), 0 0 1px #ff9fbf;
+}
+
+[data-theme="neon"] .project-state-badge,
+[data-theme="neon"] .tile-waiting-badge {
+  text-shadow: 0 0 5px currentColor;
+}
+
+[data-theme="neon"] .btn-primary {
+  text-shadow: none;
+}
+
+/* A button with no background of its own is a dark panel, not the browser's grey (zero specificity: .btn-primary and the rest keep theirs) */
+:where(:root[data-theme="neon"] .btn) {
+  background: var(--glass-strong);
+  color: var(--text-primary);
+}
+
+[data-theme="neon"] ::selection {
+  background: #ff2a6d;
+  color: #0d0221;
+}
+
+/* Nothing slides: a loading tile shows a steady lit line, not the half-gradient a paused slide would leave */
+[data-theme="neon"] .tile-loading {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+
+/* ── The input: a cyan caret ── */
+[data-theme="neon"] .project-input {
+  caret-color: var(--accent);
+}
