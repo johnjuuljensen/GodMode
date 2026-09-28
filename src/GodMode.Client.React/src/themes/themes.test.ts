@@ -29,6 +29,8 @@ describe('the registry', () => {
     expect(resolveThemeId('dark')).toBe('glass-dark');
     expect(resolveThemeId('light')).toBe('glass-light');
     expect(resolveThemeId('phosphor')).toBe('phosphor');
+    expect(resolveThemeId('neon')).toBe('neon');
+    expect(resolveThemeId('doom')).toBe('doom');
     expect(resolveThemeId('nope')).toBe('glass-dark');
     expect(resolveThemeId(null)).toBe('glass-dark');
   });
@@ -44,6 +46,13 @@ describe('the registry', () => {
   });
 });
 
+// A theme's fonts are its own chunk, fetched the first time it is applied; the bundle's are Glass's alone
+it.each(themes.filter(t => !t.id.startsWith('glass-')).map(t => [t.id, t.fonts] as const))('%s loads its fonts in a module of its own', (id, fonts) => {
+  const module = read(`${id}.fonts.ts`);
+  for (const font of fonts) expect(module).toContain(`@fontsource/${font.toLowerCase().replace(/ /g, '-')}/`);
+  expect(read('index.ts')).toContain(`import('./${id}.fonts')`);
+});
+
 describe('the tokens', () => {
   it('Glass dark defines the look, as :root', () => {
     expect(glassTokens.size).toBeGreaterThan(100);
@@ -54,6 +63,12 @@ describe('the tokens', () => {
   it.each(themes.filter(t => !t.id.startsWith('glass-')).map(t => t.id))('%s defines every token Glass defines', id => {
     const own = defined(read(`${id}.css`));
     expect([...glassTokens].filter(t => !own.has(t))).toEqual([]);
+  });
+
+  // Epic #295: a new theme adds no looping animation; Glass keeps its pulses
+  it.each(themes.filter(t => !t.id.startsWith('glass-')).map(t => t.id))('%s loops nothing', id => {
+    expect(read(`${id}.css`)).toMatch(/--loop-iterations:\s*0;/);
+    expect(read(`${id}.css`)).not.toMatch(/@keyframes|animation(?:-iteration-count)?\s*:/);
   });
 
   it('every token a stylesheet names is defined', () => {

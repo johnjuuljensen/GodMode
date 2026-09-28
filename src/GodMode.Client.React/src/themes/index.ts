@@ -9,6 +9,8 @@
 import './glass-dark.css';
 import './glass-light.css';
 import './phosphor.css';
+import './neon.css';
+import './doom.css';
 
 export interface Theme {
   id: string;
@@ -23,6 +25,8 @@ export const themes: readonly Theme[] = [
   { id: 'glass-dark', name: 'Glass dark', fonts: ['DM Sans Variable', 'DM Mono'] },
   { id: 'glass-light', name: 'Glass light', fonts: ['DM Sans Variable', 'DM Mono'] },
   { id: 'phosphor', name: 'Phosphor', fonts: ['JetBrains Mono', 'VT323'], loadFonts: () => import('./phosphor.fonts') },
+  { id: 'neon', name: 'Neon', fonts: ['Orbitron', 'Chakra Petch', 'JetBrains Mono'], loadFonts: () => import('./neon.fonts') },
+  { id: 'doom', name: 'Doom', fonts: ['Silkscreen', 'IBM Plex Mono'], loadFonts: () => import('./doom.fonts') },
 ];
 
 export const defaultThemeId = 'glass-dark';

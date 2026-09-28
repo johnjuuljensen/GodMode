@@ -1,0 +1,182 @@
+/* ═══════════════════════════════════════════════════════════════
+   Doom — 8-bit, in the app icon's palette
+   The god-mode face's browns and gold, blood red, and the status
+   bar's stone grey for the chrome. Square corners, 2px borders,
+   hard offset shadows with no blur, a pixel font for display
+   (Silkscreen) and a readable mono for the rest (IBM Plex Mono).
+   A static dither on the backdrop, and nothing that loops.
+
+   States: running green, warning orange, error blood red, waiting
+   the face's gold, as the accent is.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root[data-theme="doom"] {
+  color-scheme: dark;
+
+  /* ── Colour: the face's browns, the status bar's stone ── */
+  --bg-base:          #1a120a;
+  --bg-ambient-1:     rgba(196,30,22,0.16);
+  --bg-ambient-2:     rgba(141,94,52,0.14);
+  --bg-ambient-3:     transparent;
+
+  --glass:            #2c1f11;
+  --glass-hover:      #3a2917;
+  --glass-strong:     #49361d;
+  --glass-border:     #614023;
+  --glass-border-strong: #8d5e34;
+  --glass-highlight:  transparent;
+  --sidebar-bg:       #3b3936;
+  --titlebar-bg:      #3b3936;
+  --menu-bg:          #4a4744;
+
+  --accent:           #d5bb46;
+  --accent-glow:      rgba(213,187,70,0.4);
+  --accent-soft:      rgba(213,187,70,0.16);
+  --accent-border:    #aa7b1c;
+  --accent-border-medium: rgba(213,187,70,0.55);
+  --accent-border-soft: rgba(213,187,70,0.4);
+  --text-on-accent:   #1a120a;
+  --group-label:      #e5996a;
+
+  --text-primary:     #f2e3c2;
+  --text-secondary:   #cbb58c;
+  --text-tertiary:    #9a8563;
+
+  --success:          #6fcf4f;
+  --success-soft:     rgba(111,207,79,0.16);
+  --success-border:   rgba(111,207,79,0.55);
+  --success-border-soft: rgba(111,207,79,0.4);
+  --warning:          #f08a24;
+  --warning-soft:     rgba(240,138,36,0.16);
+  --warning-border-faint: rgba(240,138,36,0.35);
+  --warning-border-soft: rgba(240,138,36,0.45);
+  --warning-border-medium: rgba(240,138,36,0.55);
+  --error:            #e0413a;
+  --error-soft:       rgba(196,30,22,0.22);
+  --error-hover:      rgba(196,30,22,0.34);
+  --error-border:     #a8170f;
+  --error-border-soft: rgba(196,30,22,0.5);
+  --error-border-strong: #c41e16;
+  --waiting:          #e8c547;
+  --waiting-soft:     rgba(232,197,71,0.16);
+  --waiting-border:   rgba(232,197,71,0.55);
+
+  --purple:           #e5996a;
+  --purple-soft:      rgba(229,153,106,0.14);
+  --purple-border-soft: rgba(229,153,106,0.4);
+  --indigo-soft:      rgba(141,94,52,0.18);
+  --pink:             #c41e16;
+
+  --toggle-knob:      #f2e3c2;
+  --modal-overlay:    rgba(10,6,2,0.8);
+  --scrollbar-thumb:  #614023;
+  --scrollbar-hover:  #8d5e34;
+
+  /* ── Surfaces: solid, no blur, 2px pixel borders ── */
+  --blur-xs:          none;
+  --blur-sm:          none;
+  --blur-md:          none;
+  --blur-lg:          none;
+  --blur-xl:          none;
+  --blur-window:      none;
+  --border-width:     2px;
+  --border-style:     solid;
+
+  /* ── Corners: square, dots too ── */
+  --radius-2xs:       0;
+  --radius-xs:        0;
+  --radius-sm:        0;
+  --radius-md:        0;
+  --radius-ml:        0;
+  --radius:           0;
+  --radius-badge:     0;
+  --radius-menu:      0;
+  --radius-lg:        0;
+  --radius-xl:        0;
+  --radius-round:     0;
+  --radius-pill:      0;
+
+  /* ── Depth: hard offset shadows, no blur. Focus is a solid ring. No shadow is `0 0 0 0 transparent` ── */
+  --shadow-window:    0 0 0 2px #0d0904;
+  --shadow-card:      4px 4px 0 0 #0d0904;
+  --shadow-card-hover: 6px 6px 0 0 #0d0904;
+  --shadow-menu:      4px 4px 0 0 #0d0904;
+  --shadow-inset-highlight: inset 2px 2px 0 0 rgba(255,236,190,0.08);
+  --shadow-inset-input: inset 2px 2px 0 0 rgba(0,0,0,0.35);
+  --shadow-focus:     0 0 0 2px var(--accent);
+  --shadow-focus-sm:  0 0 0 2px var(--accent);
+  --shadow-focus-success: 0 0 0 2px var(--success);
+  --shadow-outline-accent: 0 0 0 2px var(--accent);
+  --shadow-accent:    3px 3px 0 0 #0d0904;
+  --shadow-accent-hover: 4px 4px 0 0 #0d0904;
+  /* Status lights are square pixels: an outline, not a glow */
+  --shadow-led-success: 0 0 0 1px #0d0904;
+  --shadow-led-error: 0 0 0 1px #0d0904;
+  --shadow-led-accent: 0 0 0 1px #0d0904;
+  --shadow-led-accent-soft: 0 0 0 1px #0d0904;
+  --shadow-led-waiting: 0 0 0 1px #0d0904;
+  --shadow-dot-success: 0 0 0 1px #0d0904;
+  --shadow-dot-warning: 0 0 0 1px #0d0904;
+  --shadow-dot-error: 0 0 0 1px #0d0904;
+  /* A waiting tile holds a steady orange frame */
+  --shadow-waiting:   0 0 0 2px var(--warning);
+  --shadow-waiting-peak: var(--shadow-waiting);
+  --shadow-question-pulse: 0 0 0 2px var(--warning);
+  --shadow-question-pulse-peak: var(--shadow-question-pulse);
+
+  /* ── Backdrop: a hellish glow from below, and a static 2px dither ── */
+  --backdrop-glow:
+    radial-gradient(ellipse 80% 45% at 50% 110%, var(--bg-ambient-1) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 45% at 15% 15%, var(--bg-ambient-2) 0%, transparent 70%);
+  --backdrop-texture: repeating-conic-gradient(rgba(0,0,0,0.5) 0% 25%, transparent 0% 50%) 0 0 / 4px 4px;
+  --backdrop-texture-opacity: 0.35;
+  --backdrop-texture-blend: normal;
+
+  /* ── Type: a pixel font for display, a readable mono for everything else ── */
+  --font-body:        'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
+  --font-mono:        'IBM Plex Mono', 'Cascadia Mono', Consolas, monospace;
+  --font-display:     'Silkscreen', 'IBM Plex Mono', monospace;
+  /* Silkscreen is all caps and wide: shrink it to sit with the text */
+  --font-display-adjust: 0.5;
+  --label-case:       uppercase;
+  --label-tracking:   0.02em;
+
+  /* ── Motion: transitions only ── */
+  --duration-instant: 0.1s;
+  --duration-fast:    0.12s;
+  --duration:         0.15s;
+  --duration-slow:    0.2s;
+  --loop-iterations:  0;
+}
+
+/* ── Pixels stay pixels: Silkscreen's two weights, never a smeared fake bold ── */
+[data-theme="doom"] body {
+  font-synthesis: none;
+}
+
+/* ── Titles: the face's gold, with a hard pixel drop ── */
+[data-theme="doom"] :is(.sidebar-title, .inbox-title, .settings-header h2, .modal h2) {
+  color: #d5bb46;
+  text-shadow: 2px 2px 0 #0d0904;
+}
+
+/* A pressed button sinks into its shadow, as a sprite button would */
+[data-theme="doom"] .btn-primary:active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 0 transparent;
+}
+
+[data-theme="doom"] ::selection {
+  background: #c41e16;
+  color: #f2e3c2;
+}
+
+/* Nothing slides: a loading tile shows a steady dashed line, not the half-gradient a paused slide would leave */
+[data-theme="doom"] .tile-loading {
+  height: 3px;
+  background: repeating-linear-gradient(90deg, var(--accent) 0 6px, transparent 6px 10px);
+}
+
+[data-theme="doom"] .project-input {
+  caret-color: var(--accent);
+}
