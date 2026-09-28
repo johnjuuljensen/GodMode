@@ -33,6 +33,7 @@ describe('the registry', () => {
     expect(resolveThemeId('neon')).toBe('neon');
     expect(resolveThemeId('doom')).toBe('doom');
     expect(resolveThemeId('commodore')).toBe('commodore');
+    expect(resolveThemeId('lcars')).toBe('lcars');
     expect(resolveThemeId('nope')).toBe('glass-dark');
     expect(resolveThemeId(null)).toBe('glass-dark');
   });
