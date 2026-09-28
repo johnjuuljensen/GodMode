@@ -94,6 +94,13 @@ describe('the tokens', () => {
     expect(read(`${id}.css`)).not.toMatch(/@keyframes|animation(?:-iteration-count)?\s*:/);
   });
 
+  // #303: under a dark color-scheme a .btn with no background of its own gets the browser's grey face; a theme gives it
+  // its surface at zero specificity, so .btn-primary and the rest keep theirs
+  it.each(themes.filter(t => !t.id.startsWith('glass-')).map(t => t.id))('%s gives a plain .btn a background', id => {
+    expect(read(`${id}.css`).replace(/\/\*[\s\S]*?\*\//g, ''))
+      .toMatch(new RegExp(`:where\\(:root\\[data-theme="${id}"\\] \\.btn\\)\\s*\\{[^}]*background:`));
+  });
+
   it('every token a stylesheet names is defined', () => {
     const named = new Set(allCss.flatMap(css => [...css.matchAll(/var\((--[\w-]+)/g)].map(m => m[1])));
     expect([...named].filter(t => !glassTokens.has(t))).toEqual([]);
