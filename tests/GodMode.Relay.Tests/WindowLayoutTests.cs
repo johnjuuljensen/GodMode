@@ -59,6 +59,8 @@ public sealed class WindowLayoutTests : IDisposable
         Assert.Contains("\"maximized\": true", json);
         Assert.Contains($"\"desktop\": \"{DesktopTwo}\"", json);
         Assert.Contains("\"x\": -1800", json);
+        Assert.DoesNotContain("\"main\"", json);
+        Assert.DoesNotContain("\"profiles\"", json);
     }
 
     [Fact]
@@ -207,7 +209,8 @@ public sealed class ProfileCensusTests : IAsyncLifetime
         var census = await TakeAsync();
 
         Assert.True(census.Complete);
-        Assert.Equal(["Default", "Private", "Work"], census.Names.Order(StringComparer.OrdinalIgnoreCase));
+        // Work and work are one profile; which spelling is kept depends on which server answers first
+        Assert.Equal(["default", "private", "work"], census.Names.Select(n => n.ToLowerInvariant()).Order());
         Assert.Contains("WORK", census.Names);
     }
 

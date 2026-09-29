@@ -25,9 +25,11 @@ public sealed record WindowLayout(IReadOnlyList<SavedWindow> Windows)
     };
 
     /// <summary>The main window's entry, the first with no profile.</summary>
+    [JsonIgnore]
     public SavedWindow? Main => Windows.FirstOrDefault(w => w.Profile is null);
 
     /// <summary>The profile windows' entries, once per profile (by name without case), in the order they were saved.</summary>
+    [JsonIgnore]
     public IReadOnlyList<SavedWindow> Profiles =>
         [.. Windows.Where(w => !string.IsNullOrWhiteSpace(w.Profile)).DistinctBy(w => w.Profile!, StringComparer.OrdinalIgnoreCase)];
 
