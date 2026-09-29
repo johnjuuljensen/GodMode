@@ -121,7 +121,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - The key is `Authentication:ApiKey`, else one the server generates on its first start into an owner-only key file in its own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key`, `~/.local/share/GodMode.Server/api-key`; never under a scan folder or explicit root), prints once, and reuses on every start
 - Any request with an `Origin` gets 403, whatever it names (the server's own bindings included; no setting allows one): no browser is a client. A request with no `Origin` (the MAUI relay, the attention service, a session's claude) needs its credential alone
 - Only `/health` is anonymous. `/`, with the key, answers `{"service":"GodMode.Server",…}`; nothing serves a page
-- Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them; a credential they need goes in the root's `environment`
+- Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them; a credential they need goes in the root's `environment`, or its profile's
 
 ### Project Folder Structure
 ```
