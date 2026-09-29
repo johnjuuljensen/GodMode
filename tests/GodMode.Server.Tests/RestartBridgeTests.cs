@@ -62,7 +62,7 @@ public class RestartBridgeTests
                         ["prompt"] = JsonSerializer.SerializeToElement("Start"),
                     });
                 projectId = created.Id;
-                record = Path.Combine(workDir, "roots", Root, projectId.Split('/')[^1], "fake-claude.jsonl");
+                record = Path.Combine(ServerProcess.WorkingFolderOf(Path.Combine(workDir, "roots", Root), projectId), "fake-claude.jsonl");
                 Assert.True(await LifecycleHarness.WaitForAsync(() => Task.FromResult(FakeRecording.Read(record) is [{ Stdin.Count: > 0 }])),
                     $"the first launch never got its prompt.\n{first.Output}");
             }

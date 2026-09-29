@@ -51,8 +51,8 @@ public class LaunchPermissionsTests
     /// <summary>Changes the project's settings.json, as the session in it could.</summary>
     private static void EditSettings(LifecycleHarness harness, string projectId, Func<ProjectSettings, ProjectSettings> edit)
     {
-        var folder = harness.ProjectPath(projectId);
-        edit(ProjectSettings.Load(folder)).Save(folder);
+        var state = harness.StatePath(projectId);
+        edit(ProjectSettings.Load(state)).Save(state);
     }
 
     private static async Task StopAsync(LifecycleHarness harness, string projectId)
@@ -130,7 +130,7 @@ public class LaunchPermissionsTests
         var created = await harness.CreateProjectAsync(inputs: AskingForSkip(true));
         var create = await harness.WaitForStdinAsync(created.Id);
 
-        Assert.True(ProjectSettings.Load(harness.ProjectPath(created.Id)).DangerouslySkipPermissions, "the create did not ask for skip");
+        Assert.True(ProjectSettings.Load(harness.StatePath(created.Id)).DangerouslySkipPermissions, "the create did not ask for skip");
         Assert.DoesNotContain(Skip, create.Argv);
         Assert.Equal(1, WarningsAbout(harness, "asks to skip permissions"));
     }
@@ -227,7 +227,7 @@ public class LaunchPermissionsTests
 
         Assert.Equal("auto", create.ArgValue(Mode));
         Assert.Equal("auto", resume.ArgValue(Mode));
-        Assert.Equal("auto", ProjectSettings.Load(harness.ProjectPath(created.Id)).PermissionMode);
+        Assert.Equal("auto", ProjectSettings.Load(harness.StatePath(created.Id)).PermissionMode);
     }
 
     /// <summary>A root with no mode passes none: claude's own settings decide, as before.</summary>

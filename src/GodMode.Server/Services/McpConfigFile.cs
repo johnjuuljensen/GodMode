@@ -2,19 +2,19 @@ namespace GodMode.Server.Services;
 
 /// <summary>
 /// The MCP config a Claude process is launched with (<c>--mcp-config</c> takes a file path):
-/// GodMode's own server only. It lives in the project's <c>.godmode/</c> folder, owner-only where
+/// GodMode's own server only. It lives in the session's state folder (<c>.godmode/sessions/{id}/</c>), owner-only where
 /// the OS supports it, and only for as long as the process runs.
 /// </summary>
 public static class McpConfigFile
 {
     public const string FileName = "mcp-config.json";
 
-    public static string PathFor(string projectPath) => Path.Combine(projectPath, ".godmode", FileName);
+    public static string PathFor(string statePath) => Path.Combine(statePath, FileName);
 
     /// <summary>Writes the config and returns its path.</summary>
-    public static string Write(string projectPath, string json)
+    public static string Write(string statePath, string json)
     {
-        var path = PathFor(projectPath);
+        var path = PathFor(statePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
         // The create mode applies only to a new file, so replace rather than overwrite
@@ -49,9 +49,9 @@ public static class McpConfigFile
     /// Deletes the config if it was written before <paramref name="launchedAtUtc"/>. A later file
     /// belongs to a newer launch of the same project and is left alone.
     /// </summary>
-    public static void DeleteIfWrittenBefore(string projectPath, DateTime launchedAtUtc)
+    public static void DeleteIfWrittenBefore(string statePath, DateTime launchedAtUtc)
     {
-        var path = PathFor(projectPath);
+        var path = PathFor(statePath);
         if (File.Exists(path) && File.GetLastWriteTimeUtc(path) <= launchedAtUtc)
             File.Delete(path);
     }

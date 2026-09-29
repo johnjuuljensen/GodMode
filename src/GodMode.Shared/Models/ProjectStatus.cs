@@ -5,7 +5,7 @@ namespace GodMode.Shared.Models;
 /// <summary>
 /// Detailed status information about a project.
 /// </summary>
-/// <param name="Id">The project identifier, <c>{profile}/{root}/{folder}</c>: where its folder is. Opaque to clients, which pass it back as received; not the folder name.</param>
+/// <param name="Id">The session's identifier, <c>{profile}/{root}/{id}</c>, with its id (<c>260929-feat-left-list-k7q2</c>), the name of its state folder, <c>.godmode/sessions/{id}/</c>. Opaque to clients, which pass it back as received; not the folder name.</param>
 /// <param name="Name">The project name.</param>
 /// <param name="State">The current state of the project.</param>
 /// <param name="CreatedAt">The timestamp when the project was created.</param>
@@ -27,6 +27,7 @@ namespace GodMode.Shared.Models;
 /// start carries on with it. Null when the project was not active then, was stopped by the user, or
 /// has been launched or resumed since.
 /// </param>
+/// <param name="Kind">What kind of session it is (<c>bug</c>, <c>feat</c>, <c>experiment</c>, <c>chat</c>…): its create script's <c>kind</c>, else its action's name, as its id has it (lowercase <c>[a-z0-9-]</c>). The app labels the session with it.</param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -49,5 +50,6 @@ public record ProjectStatus(
     DateTime? QuestionAt = null,
     DateTime? SeenAt = null,
     PullRequestStatus? PullRequest = null,
-    ProjectState? StateAtShutdown = null
+    ProjectState? StateAtShutdown = null,
+    string? Kind = null
 );

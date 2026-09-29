@@ -110,13 +110,12 @@ public class NoProvisioningTests
         File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "config.Create.json"),
             """{ "mcpServers": { "from-action": { "url": "https://mcp.example.test/mcp" } } }""");
 
-    /// <summary>A project folder as an older server archived it: its .godmode state, and archive.json beside it.</summary>
+    /// <summary>A project folder as an older server archived it: its session's state, and archive.json beside it.</summary>
     private static void WriteArchivedProject(string folder)
     {
-        var godMode = Path.Combine(folder, ".godmode");
-        Directory.CreateDirectory(godMode);
+        var godMode = LifecycleHarness.PlantSession(folder);
         var now = DateTime.UtcNow;
-        var status = new ProjectStatus(Path.GetFileName(folder), "Old one", ProjectState.Stopped, now, now, null,
+        var status = new ProjectStatus(LifecycleHarness.PlantedId(), "Old one", ProjectState.Stopped, now, now, null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0);
         File.WriteAllText(Path.Combine(godMode, "status.json"), JsonSerializer.Serialize(status, JsonDefaults.Options));
         File.WriteAllText(Path.Combine(godMode, "archive.json"), """{ "ArchivedAt": "2026-01-01T00:00:00Z", "Name": "Old one" }""");

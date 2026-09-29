@@ -47,6 +47,12 @@ internal sealed class ServerProcess : IDisposable
     public const string ApiKey = "test-server-api-key-0123456789abcdef";
 
     /// <summary>Where a server started in <paramref name="workDir"/> keeps its generated key: never the user's own.</summary>
+    /// <summary>
+    /// The working folder in <paramref name="rootPath"/> of the session <paramref name="projectId"/>
+    /// (<c>{profile}/{root}/{id}</c>): the one with <c>.godmode/sessions/{id}/</c> in it.
+    /// </summary>
+    public static string WorkingFolderOf(string rootPath, string projectId) =>
+        Directory.GetDirectories(rootPath).Single(folder => Directory.Exists(GodMode.ProjectFiles.SessionState.PathOf(folder, projectId.Split('/')[^1])));
     public static string KeyFilePath(string workDir) => Path.Combine(workDir, "data", "api-key");
 
     /// <summary>

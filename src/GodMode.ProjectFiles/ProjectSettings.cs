@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace GodMode.ProjectFiles;
 
 /// <summary>
-/// Per-project settings persisted to .godmode/settings.json.
+/// A session's settings, persisted to settings.json in its state folder (<c>.godmode/sessions/{id}/</c>).
 /// Survives process restarts and server recovery.
 /// </summary>
 /// <param name="DangerouslySkipPermissions">
@@ -24,9 +24,9 @@ public record ProjectSettings(
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
-    public static ProjectSettings Load(string projectPath)
+    public static ProjectSettings Load(string statePath)
     {
-        var path = GetSettingsPath(projectPath);
+        var path = GetSettingsPath(statePath);
         if (!File.Exists(path))
             return new ProjectSettings();
 
@@ -41,13 +41,13 @@ public record ProjectSettings(
         }
     }
 
-    public void Save(string projectPath)
+    public void Save(string statePath)
     {
-        var path = GetSettingsPath(projectPath);
+        var path = GetSettingsPath(statePath);
         var json = JsonSerializer.Serialize(this, JsonOptions);
         File.WriteAllText(path, json, Encoding.UTF8);
     }
 
-    private static string GetSettingsPath(string projectPath) =>
-        Path.Combine(projectPath, ".godmode", "settings.json");
+    private static string GetSettingsPath(string statePath) =>
+        Path.Combine(statePath, "settings.json");
 }

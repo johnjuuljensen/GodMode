@@ -36,7 +36,7 @@ public class GitIgnoreTests
         var created = await harness.CreateProjectAsync();
         await harness.WaitForStdinAsync(created.Id);
         await harness.Projects.StopProjectAsync(created.Id);
-        var gitIgnore = Path.Combine(harness.ProjectPath(created.Id), ".godmode", ".gitignore");
+        var gitIgnore = Path.Combine(harness.StatePath(created.Id), ".gitignore");
         File.Delete(gitIgnore);
 
         await harness.Projects.ResumeProjectAsync(created.Id).WaitAsync(LifecycleHarness.DefaultTimeout);

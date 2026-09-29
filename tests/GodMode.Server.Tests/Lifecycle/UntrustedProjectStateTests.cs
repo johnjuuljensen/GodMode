@@ -27,7 +27,7 @@ public class UntrustedProjectStateTests
         await harness.Projects.StopProjectAsync(created.Id);
         await harness.WaitForStateAsync(created.Id, ProjectState.Stopped);
         harness.StopHost();
-        var sessionFile = Path.Combine(harness.ProjectPath(created.Id), ".godmode", "session-id");
+        var sessionFile = Path.Combine(harness.StatePath(created.Id), "session-id");
         File.WriteAllText(sessionFile, saved);
 
         await harness.RestartAsync();
@@ -59,7 +59,7 @@ public class UntrustedProjectStateTests
         await harness.Projects.StopProjectAsync(created.Id);
         await harness.WaitForStateAsync(created.Id, ProjectState.Stopped);
         harness.StopHost();
-        var statusFile = Path.Combine(harness.ProjectPath(created.Id), ".godmode", "status.json");
+        var statusFile = Path.Combine(harness.StatePath(created.Id), "status.json");
         var pullRequest = new PullRequestStatus(url, 7, PullRequestState.Open, PullRequestReview.None, DateTime.UtcNow);
         File.WriteAllText(statusFile, JsonSerializer.Serialize(harness.ReadStatusFile(created.Id) with { PullRequest = pullRequest }, JsonDefaults.Options));
 

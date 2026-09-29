@@ -94,7 +94,7 @@ public class OutputResumeTests
         await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
         await WaitForLineAsync(harness, connection, created.Id, "\"type\":\"result\"");
 
-        var bytes = File.ReadAllBytes(Path.Combine(harness.ProjectPath(created.Id), ".godmode", "output.jsonl"));
+        var bytes = File.ReadAllBytes(Path.Combine(harness.StatePath(created.Id), "output.jsonl"));
         var ends = bytes.Select((b, i) => (b, i)).Where(x => x.b == (byte)'\n').Select(x => (long)x.i + 1).ToArray();
         Assert.Equal(ends, Received(connection, created.Id).Select(l => l.Offset));
         Assert.Equal(bytes.LongLength, (await harness.Projects.GetStatusAsync(created.Id)).OutputOffset);
@@ -159,7 +159,7 @@ public class OutputResumeTests
         var created = await harness.CreateProjectAsync();
         await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(FileLines(harness, created.Id).Length == K + 2), null,
             () => $"the lines were not written.\n{harness.Describe(created.Id)}");
-        var onDisk = File.ReadAllText(OutputLog.GenerationPathOf(harness.ProjectPath(created.Id)));
+        var onDisk = File.ReadAllText(OutputLog.GenerationPathOf(harness.StatePath(created.Id)));
 
         var connection = harness.Connect("c1");
         await connection.SubscribeAsync(created.Id, 0, "tile-1");
@@ -179,7 +179,7 @@ public class OutputResumeTests
     /// the generation tells the client's offset is not in it.
     /// </summary>
     [Fact]
-    public async Task DeletedAndCreatedAgainWithTheSameId_AResubscribeFromTheOldOffset_ReplaysTheNewFileFromZero_InItsGeneration()
+    public async Task DeletedAndCreatedAgain_IsAnotherId_AndAResubscribeFromTheOldOffset_ReplaysTheNewFileFromZero_InItsGeneration()
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().EmitAssistant("first conversation").EmitResult().AwaitStdin());
         var created = await harness.CreateProjectAsync();
@@ -194,22 +194,24 @@ public class OutputResumeTests
         for (var i = 0; i < K; i++) script.Emit(Assistant(Text("second conversation ", i)));
         harness.UseScript(script.EmitResult().AwaitStdin());
         var recreated = await harness.CreateProjectAsync();
-        Assert.Equal(created.Id, recreated.Id);
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(FileLines(harness, created.Id).Length == K + 2), null,
-            () => $"the new conversation was not written.\n{harness.Describe(created.Id)}");
-        Assert.True(new FileInfo(OutputLog.PathOf(harness.ProjectPath(created.Id))).Length > oldOffset,
+        // A new session: the name gives it the same slug, the random suffix another id
+        Assert.NotEqual(created.Id, recreated.Id);
+        Assert.Equal(Path.GetFileName(harness.ProjectPath(created.Id)), Path.GetFileName(harness.ProjectPath(recreated.Id)));
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(FileLines(harness, recreated.Id).Length == K + 2), null,
+            () => $"the new conversation was not written.\n{harness.Describe(recreated.Id)}");
+        Assert.True(new FileInfo(OutputLog.PathOf(harness.StatePath(recreated.Id))).Length > oldOffset,
             "the new output.jsonl must be longer than the old offset, or its end alone would send the client back to 0");
 
         var second = harness.Connect("c2");
-        await second.SubscribeAsync(created.Id, oldOffset, "s2", oldGeneration);
+        await second.SubscribeAsync(recreated.Id, oldOffset, "s2", oldGeneration);
 
-        var replays = Replays(second, created.Id);
-        var newGeneration = File.ReadAllText(OutputLog.GenerationPathOf(harness.ProjectPath(created.Id)));
+        var replays = Replays(second, recreated.Id);
+        var newGeneration = File.ReadAllText(OutputLog.GenerationPathOf(harness.StatePath(recreated.Id)));
         Assert.NotEqual(oldGeneration, newGeneration);
         Assert.Equal(0, replays[0].Offset);
         Assert.All(replays, p => Assert.Equal(newGeneration, p.Generation));
-        Assert.Equal(FileLines(harness, created.Id), Lines(second, created.Id));
-        Assert.DoesNotContain(Lines(second, created.Id), l => l.Contains("first conversation"));
+        Assert.Equal(FileLines(harness, recreated.Id), Lines(second, recreated.Id));
+        Assert.DoesNotContain(Lines(second, recreated.Id), l => l.Contains("first conversation"));
     }
 
     /// <summary>
@@ -223,8 +225,9 @@ public class OutputResumeTests
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin(),
             rootConfig: new Dictionary<string, object> { ["scriptsCreateFolder"] = true, ["create"] = "make.ps1" });
         File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "make.ps1"), "exit 1");
-        var projectId = $"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p1";
         await Assert.ThrowsAnyAsync<Exception>(() => harness.CreateProjectAsync());
+        var projectId = Assert.Single(await harness.Projects.ListProjectsAsync()).Id;
+        Assert.Matches(LifecycleHarness.IdPattern("p1"), projectId);
         Assert.Equal(ProjectState.Error, (await harness.Projects.GetStatusAsync(projectId)).State);
 
         var connection = harness.Connect("c1");

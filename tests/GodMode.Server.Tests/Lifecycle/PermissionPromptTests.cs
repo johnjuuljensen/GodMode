@@ -211,7 +211,7 @@ public class PermissionPromptTests
             ("GetAttention", JsonSerializer.Serialize(harness.Projects.GetAttention(), JsonDefaults.Options)),
             ("ListProjects", JsonSerializer.Serialize(await harness.Projects.ListProjectsAsync(), JsonDefaults.Options)),
             ("GetStatus", JsonSerializer.Serialize(await harness.Projects.GetStatusAsync(created.Id), JsonDefaults.Options)),
-            ("status.json", File.ReadAllText(Path.Combine(harness.ProjectPath(created.Id), ".godmode", "status.json"))),
+            ("status.json", File.ReadAllText(Path.Combine(harness.StatePath(created.Id), "status.json"))),
         };
         foreach (var (name, json) in payloads)
         {
@@ -384,10 +384,9 @@ public class PermissionPromptTests
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
         var folder = Path.Combine(harness.RootPath, "left");
-        var godMode = Path.Combine(folder, ".godmode");
-        Directory.CreateDirectory(godMode);
+        var godMode = LifecycleHarness.PlantSession(folder);
         var now = DateTime.UtcNow;
-        var left = new ProjectStatus("left", "left", ProjectState.WaitingPermission, now, now, null,
+        var left = new ProjectStatus(LifecycleHarness.PlantedId(), "left", ProjectState.WaitingPermission, now, now, null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0,
             PendingPermission: new PendingPermission("r1", "Bash", "Bash: ls", now));
         // As a server before #234 wrote it, with the tool's input in the request
@@ -397,7 +396,7 @@ public class PermissionPromptTests
 
         await harness.Projects.RecoverProjectsAsync();
 
-        var status = await harness.Projects.GetStatusAsync($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/left");
+        var status = await harness.Projects.GetStatusAsync(LifecycleHarness.PlantedId());
         Assert.Equal(ProjectState.Stopped, status.State);
         Assert.Null(status.PendingPermission);
     }
