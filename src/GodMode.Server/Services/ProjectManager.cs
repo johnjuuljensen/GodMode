@@ -129,6 +129,16 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private readonly TimeSpan _rootsPoll;
 
     /// <summary>
+    /// How long a trashed session (a shared session's delete, <c>.godmode/trash/{id}/</c>) stays there
+    /// for an undo, and how often the trash is purged of those older: at the start, then on this schedule
+    /// (0 turns the schedule off; the start still purges).
+    /// </summary>
+    public const string TrashRetentionSetting = "TrashRetentionSeconds";
+    public const string TrashPurgeSetting = "TrashPurgeSeconds";
+    private readonly TimeSpan _trashRetention;
+    private readonly TimeSpan _trashPurge;
+
+    /// <summary>
     /// One refresh of the roots at a time (<see cref="RefreshRootsAsync"/>), the startup's recovery
     /// included: what each changes (the fields below, the tracked sessions of roots that come and go)
     /// and what it pushes follow one another.
@@ -213,6 +223,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         _pullRequests = new PullRequestPoller(CheckPullRequestAsync,
             TimeSpan.FromSeconds(configuration.GetValue(PullRequestPollSetting, 600.0)), logger);
         _rootsPoll = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(RootsPollSetting, 5.0)));
+        _trashRetention = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(TrashRetentionSetting, TimeSpan.FromDays(1).TotalSeconds)));
+        _trashPurge = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(TrashPurgeSetting, TimeSpan.FromHours(1).TotalSeconds)));
         _lifecycle.StatusNotified += OnStatusNotifiedAsync;
 
         _instance = configuration[InstanceSetting] is { Length: > 0 } instance ? instance : DefaultInstance;
@@ -642,7 +654,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             var config = snap.RootConfigs.GetValueOrDefault(FullPath(root.Path)) ?? _rootConfigReader.ReadConfig(root.Path);
             var actions = config.GetEffectiveActions()
                 .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Session ? a.Model : null,
-                    a.Session && a.AllowSkipPermissions, a.Session))
+                    a.Session && a.AllowSkipPermissions, a.Session, a.Session && a.Transient))
                 .ToArray();
             return new ProjectRootInfo(root.Root, config.Description, actions, ProfileName: root.Profile);
         }).ToArray();
@@ -667,7 +679,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 PendingPermission: s.PendingPermission,
                 PendingQuestion: s.PendingQuestion,
                 PullRequest: s.PullRequest,
-                Kind: s.Kind
+                Kind: s.Kind,
+                ActionName: s.ActionName,
+                SharedFolder: s.SharedFolder
             ));
         }
 
@@ -786,10 +800,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         // Unless the scripts create the project directory (e.g. git worktree add). Its session's
         // state is made once the scripts have run, when its id is final
+        // A shared folder is made if missing and used if there, so two creates making it at once both have it
+        var madeSharedFolder = false;
         if (!action.ScriptsCreateFolder)
         {
-            if (reuseExisting || (action.SharedFolder && Directory.Exists(projectPath)))
+            if (reuseExisting)
                 ProjectFiles.ProjectFolder.Reuse(rootPath, folder);
+            else if (action.SharedFolder)
+                madeSharedFolder = ProjectFiles.ProjectFolder.CreateShared(rootPath, folder).Made;
             else
                 ProjectFiles.ProjectFolder.Create(rootPath, folder);
         }
@@ -810,7 +828,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 OutputOffset: 0,
                 RootName: rootName,
                 ProfileName: profileName,
-                Kind: kind
+                Kind: kind,
+                ActionName: action.Name,
+                SharedFolder: action.SharedFolder
             ),
             ProjectPath = projectPath,
             RootPath = FullPath(rootPath),
@@ -818,6 +838,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             ActionName = action.Name,
             ProfileName = profileName,
             SharedFolder = action.SharedFolder,
+            MadeSharedFolder = madeSharedFolder,
         };
 
         // Result file — scripts can write key=value pairs to override project path/name. It and the
@@ -926,8 +947,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             // The log and result file follow the id, so they are found by the id the session keeps.
             // Replacing is safe: the final id is free (FreeSessionId) and claimed above, so no other
             // create or session has files under it
-            MoveScriptFile(logFilePath, GetScriptLogPath(rootPath, finalId));
-            MoveScriptFile(resultFilePath, GetResultFilePath(rootPath, finalId));
+            MoveScriptFile(logFilePath, GetScriptLogPath(rootPath, finalId), projectId);
+            MoveScriptFile(resultFilePath, GetResultFilePath(rootPath, finalId), projectId);
             sessionId = finalId;
             projectId = ProjectId(profileName, rootName, sessionId);
             project.SessionId = sessionId;
@@ -1520,17 +1541,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await NotifyStatusChanged(project);
     }
 
-    public async Task DeleteProjectAsync(string projectId, bool force = false)
+    public async Task<DeleteProjectResult> DeleteProjectAsync(string projectId, bool force = false)
     {
         if (!_projects.TryGetValue(projectId, out var project))
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        await WithTrackedLockAsync(project, () => DeleteLockedAsync(project, force));
+        return await WithTrackedLockAsync(project, () => DeleteLockedAsync(project, force));
     }
 
-    private async Task DeleteLockedAsync(ProjectInfo project, bool force)
+    private async Task<DeleteProjectResult> DeleteLockedAsync(ProjectInfo project, bool force)
     {
         var projectId = project.Status.Id;
         _logger.LogInformation("Deleting project {ProjectId} ({Name}), force={Force}", projectId, project.Status.Name, force);
@@ -1548,7 +1569,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
         var snap = _snapshot;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
-        var sharedFolder = project.SharedFolder || OthersInFolder(project);
+        var othersInFolder = OthersInFolder(project);
+        var sharedFolder = project.SharedFolder || othersInFolder;
         try
         {
             if (project.Status.RootName != null && profileName != null)
@@ -1561,8 +1583,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
                 if (action?.Delete is { Length: > 0 })
                 {
-                    snap.Profiles.TryGetValue(profileName, out var profileCfg);
-                    var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+                    var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), ProfileEnvironment(snap, profileName),
                         profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
 
                     if (force)
@@ -1591,17 +1612,41 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await project.Process.CloseAsync();
         await _pullRequests.ForgetAsync(projectId);
 
-        // A session that shares its folder takes only its own state with it. Otherwise the folder is
-        // its own: use robust deletion to handle locked/read-only files (common with .git directories
-        // on Windows after git init or process shutdown)
-        if (sharedFolder)
-            await RemoveSessionStateAsync(project);
-        else
+        // A session that shares its folder takes only its own state with it, into the folder's trash for
+        // an undo; a create that failed before it had its state, and made the folder, takes the folder
+        // when nobody else has come into it. Otherwise the folder is its own: use robust deletion to
+        // handle locked/read-only files (common with .git directories on Windows after git init or
+        // process shutdown)
+        var trashed = false;
+        var folderGoes = !sharedFolder
+            || (project.MadeSharedFolder && !othersInFolder && !Directory.Exists(project.StatePath) && !IsClaimedByCreate(project.ProjectPath)
+                && ProjectFiles.SessionState.ListTrashed(project.ProjectPath).Count == 0);
+        if (folderGoes)
             await DeleteDirectoryRobustAsync(project.ProjectPath, project.RootPath);
+        else
+            trashed = await TrashSessionStateAsync(project);
 
         _logger.LogInformation("Project {ProjectId} deleted successfully{Kept}", projectId,
-            sharedFolder ? $"; its working folder {project.ProjectPath} is shared, and stays" : "");
+            folderGoes ? "" : $"; its working folder {project.ProjectPath} is shared, and stays{(trashed ? ", with its state in the trash" : "")}");
         await PushAttentionIfChangedAsync();
+        return new DeleteProjectResult(trashed);
+    }
+
+    /// <summary>
+    /// A profile's environment, for the scripts of a session under it: the snapshot's, else the
+    /// configuration's. A session whose root has left the profile (moved to another, or removed) while
+    /// its claude ran is still that profile's, and the snapshot lists only profiles with roots.
+    /// </summary>
+    private Dictionary<string, string>? ProfileEnvironment(ProfileSnapshot snap, string profileName) =>
+        snap.Profiles.TryGetValue(profileName, out var profile) ? profile.Environment
+        : RootSources.From(_configuration).Profiles.TryGetValue(profileName, out var settings) && settings.Environment.Count > 0
+            ? new Dictionary<string, string>(settings.Environment)
+            : null;
+
+    /// <summary>Whether a create in progress has claimed the folder at <paramref name="path"/>.</summary>
+    private bool IsClaimedByCreate(string path)
+    {
+        lock (_creatingPathsLock) return _creatingPaths.ContainsKey(FullPath(path));
     }
 
     public async Task ResumeProjectAsync(string projectId)
@@ -1782,6 +1827,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         {
             // Rebuild to pick up roots added on the host or in config
             var snap = RebuildSnapshot();
+            // The trash a stop left, before anything can be restored from it
+            await PurgeTrashLockedAsync(snap);
             _logger.LogInformation("Recovering projects from all project roots");
             var roots = RootsOf(snap);
             await RecoverRootsAsync(snap, roots);
@@ -1812,21 +1859,144 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private async Task<RootsView> RefreshRootsAsync()
     {
-        RootsView view;
-        var sessionsChanged = false;
+        (RootsView View, ProfileSnapshot Snap, bool SessionsChanged) refreshed;
         await _refreshLock.WaitAsync();
         try
         {
-            var snap = RebuildSnapshot();
-            view = await PublishRootsViewAsync(snap);
-            if (_liveRoots && !_lifecycle.ShuttingDown) sessionsChanged = await ReconcileSessionsAsync(snap);
+            refreshed = await RefreshLockedAsync();
         }
         finally
         {
             _refreshLock.Release();
         }
-        if (sessionsChanged) await PushAttentionIfChangedAsync();
-        return view;
+        if (refreshed.SessionsChanged) await PushAttentionIfChangedAsync();
+        return refreshed.View;
+    }
+
+    /// <summary><see cref="RefreshRootsAsync"/>'s work, under <see cref="_refreshLock"/>: the snapshot it made, and whether sessions came or went.</summary>
+    private async Task<(RootsView View, ProfileSnapshot Snap, bool SessionsChanged)> RefreshLockedAsync()
+    {
+        var snap = RebuildSnapshot();
+        var view = await PublishRootsViewAsync(snap);
+        var sessionsChanged = _liveRoots && !_lifecycle.ShuttingDown && await ReconcileSessionsAsync(snap);
+        return (view, snap, sessionsChanged);
+    }
+
+    // ── The trash: a shared session's delete, undone until it is purged ──
+
+    public async Task<ProjectStatus> RestoreProjectAsync(string projectId)
+    {
+        ProjectInfo restored;
+        await _refreshLock.WaitAsync();
+        try
+        {
+            // The roots as they are now: a root removed or renamed since the delete is not this ID's any more
+            var (_, snap, _) = await RefreshLockedAsync();
+            restored = await RestoreLockedAsync(snap, projectId);
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+
+        var status = restored.Status;
+        await PushAsync(() => _hubContext.Clients.All.ProjectCreated(status), $"project {status.Id} restored");
+        await PushAttentionIfChangedAsync();
+        return status;
+    }
+
+    /// <summary>
+    /// Restores <paramref name="projectId"/> from the trash of its root in <paramref name="snap"/>, under
+    /// that ID: the root is the one listed under the profile and name the ID begins with, compared as
+    /// written, so a root since removed, moved to another profile or renamed is none, and the restore
+    /// fails rather than bring the session back under another ID. Its folder must take it back as a
+    /// create into it would (<see cref="CreateClaims"/>, as a shared session), and no state folder or
+    /// tracked session may have its ID. Changes nothing when it fails.
+    /// </summary>
+    private async Task<ProjectInfo> RestoreLockedAsync(ProfileSnapshot snap, string projectId)
+    {
+        if (_projects.ContainsKey(projectId))
+            throw new InvalidOperationException($"Project {projectId} is in the list: there is nothing to restore");
+
+        var root = snap.RootLookup.Keys
+            .Select(key => (Profile: key.Item1, Root: key.Item2, Prefix: CompositeKey(key.Item1, key.Item2) + "/"))
+            .Where(key => projectId.StartsWith(key.Prefix, StringComparison.Ordinal) && ProjectFiles.SessionState.IsId(projectId[key.Prefix.Length..]))
+            .Select(key => (key.Profile, key.Root, SessionId: projectId[key.Prefix.Length..]))
+            .FirstOrDefault();
+        if (root.SessionId is not { } sessionId)
+            throw new KeyNotFoundException(
+                $"Project {projectId} cannot be restored: this server lists no root under the profile and name its ID has (the root was removed, or its profile or name changed), so it would not keep its ID");
+
+        var compositeKey = CompositeKey(root.Profile, root.Root);
+        var rootPath = FullPath(snap.ProjectFiles.GetProjectRootPath(compositeKey));
+        var folders = snap.ProjectFiles.ListTrashed(compositeKey).Where(trashed => trashed.SessionId == sessionId).Select(trashed => trashed.WorkingFolder).ToArray();
+        if (folders.Length == 0)
+            throw new KeyNotFoundException($"Project {projectId} is not in the trash: it was purged, or its delete removed its working folder");
+        if (folders.Length > 1)
+            _logger.LogWarning("Session {ProjectId} is in the trash of {Folders}: the first is restored", projectId, string.Join(", ", folders));
+        var folder = folders[0];
+        if (snap.ProjectFiles.ListSessions(compositeKey).Any(session => session.SessionId == sessionId))
+            throw new InvalidOperationException($"Project {projectId} cannot be restored: a session of its id has its state in the root");
+
+        // As a create into the folder would claim it: no create in progress has the ID or owns the
+        // folder, and no session that owns the folder is in it now
+        using (var claims = new CreateClaims(this, shared: true))
+        {
+            claims.Claim(projectId, folder);
+            var statePath = ProjectFiles.SessionState.Restore(folder, sessionId);
+            // It was deleted as a session that shares its folder, and stays one: a later delete leaves the folder
+            if (ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings) && !settings.SharedFolder)
+                (settings with { SharedFolder = true }).Save(statePath);
+        }
+
+        var project = await RecoverSessionAsync(folder, sessionId, root.Profile, root.Root, rootPath)
+            ?? throw new InvalidOperationException($"Project {projectId} is back in {folder}, but could not be recovered from its files: see the server log");
+        _logger.LogInformation("Project {ProjectId} was restored from the trash of {Folder}", projectId, folder);
+        return project;
+    }
+
+    /// <summary>
+    /// Deletes every trashed session older than <see cref="TrashRetentionSetting"/> in the working folders
+    /// of <paramref name="snap"/>'s roots, under <see cref="_refreshLock"/>, so a restore is not purged
+    /// while it moves. A folder that cannot be deleted is logged and tried again at the next purge.
+    /// </summary>
+    private async Task PurgeTrashLockedAsync(ProfileSnapshot snap)
+    {
+        var before = DateTime.UtcNow - _trashRetention;
+        foreach (var (profile, root, rootPath) in RootsOf(snap))
+        {
+            foreach (var (folder, sessionId) in snap.ProjectFiles.ListTrashed(CompositeKey(profile, root)))
+            {
+                if (ProjectFiles.SessionState.TrashedAt(folder, sessionId) > before) continue;
+                var trashed = ProjectFiles.SessionState.TrashedPathOf(folder, sessionId);
+                try
+                {
+                    await DeleteDirectoryRobustAsync(trashed, rootPath);
+                    _logger.LogInformation("Purged {ProjectId} from the trash of {Folder}", ProjectId(profile, root, sessionId), folder);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Could not purge {Path} from the trash, tried again at the next purge: {Reason}", trashed, ex.Message);
+                }
+            }
+        }
+    }
+
+    /// <summary>The purge on its schedule (<see cref="TrashPurgeSetting"/>), started after the startup's, which recovery runs.</summary>
+    private async Task PurgeTrashPeriodicallyAsync(CancellationToken stop)
+    {
+        using var timer = new PeriodicTimer(_trashPurge);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stop))
+            {
+                await _refreshLock.WaitAsync(stop);
+                try { await PurgeTrashLockedAsync(_snapshot); }
+                catch (Exception ex) { _logger.LogError(ex, "Could not purge the trash"); }
+                finally { _refreshLock.Release(); }
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     /// <summary>The lists of <paramref name="snap"/>, pushed to every client when they differ from the last ones made (the first ones are listed, not pushed).</summary>
@@ -1914,17 +2084,23 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Stops tracking a session that has no claude, running or launching, leaving its files as they
-    /// are; false when it has one, or is not tracked. Under its resume lock, so no launch starts meanwhile.
+    /// are; false when it has one, or is not tracked. Under its resume lock, so no launch starts
+    /// meanwhile; false too while another holds the lock (a delete whose script runs long, a reply
+    /// waiting for its claude), so a refresh never waits on one session: the next refresh tries again.
     /// </summary>
     private async Task<bool> TryForgetAsync(ProjectInfo project)
     {
         var id = project.Status.Id;
-        var forgotten = await WithResumeLockAsync(project, async () =>
+        var resumeLock = project.Process.ResumeLock;
+        if (!await resumeLock.WaitAsync(TimeSpan.Zero)) return false;
+        bool forgotten;
+        try
         {
             await _lifecycle.SettleAsync(project);
-            return !project.Process.Launching && !_lifecycle.IsRunning(project)
+            forgotten = !project.Process.Launching && !_lifecycle.IsRunning(project)
                 && _projects.TryRemove(new KeyValuePair<string, ProjectInfo>(id, project));
-        });
+        }
+        finally { resumeLock.Release(); }
         if (!forgotten) return false;
         await project.Process.CloseAsync();
         await _pullRequests.ForgetAsync(id);
@@ -1937,6 +2113,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (Interlocked.Exchange(ref _watching, 1) == 1 || _watchStop.IsCancellationRequested) return;
         _configReload = ChangeToken.OnChange(_configuration.GetReloadToken, () => _ = RefreshInBackgroundAsync("the config was reloaded"));
         if (_rootsPoll > TimeSpan.Zero) _ = PollRootsAsync(_watchStop.Token);
+        if (_trashPurge > TimeSpan.Zero) _ = PurgeTrashPeriodicallyAsync(_watchStop.Token);
         _logger.LogInformation("Roots are read again on a config reload{Poll}",
             _rootsPoll > TimeSpan.Zero ? $" and every {_rootsPoll.TotalSeconds:0.##}s ({RootsPollSetting})" : $"; the poll is off ({RootsPollSetting} is 0)");
         // Stopped while this started: what it started is stopped too
@@ -2014,90 +2191,106 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var recovered = new ConcurrentBag<ProjectInfo>();
         await Parallel.ForEachAsync(unique, async (found, ct) =>
         {
-            var (projectPath, sessionId, profileName, rootName, rootPath) = found;
-            var statePath = ProjectFiles.SessionState.PathOf(projectPath, sessionId);
-            try
-            {
-                var statusPath = Path.Combine(statePath, ProjectFiles.SessionState.StatusFileName);
-                if (!File.Exists(statusPath))
-                {
-                    return;
-                }
-
-                var json = await File.ReadAllTextAsync(statusPath, ct);
-                var status = JsonSerializer.Deserialize<ProjectStatus>(json, CaseInsensitiveOptions);
-
-                if (status == null) return;
-
-                // Check if state needs to be corrected (was running when server stopped)
-                var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission;
-                // A permission prompt ended with the process that asked: its call to the MCP endpoint failed with the server
-                status = status with { PendingPermission = null, PendingQuestion = null };
-                // status.json is the project folder's, which its session can write: a pull request
-                // link is kept only if it is one the status script's output could have set
-                if (status.PullRequest is { } pr && !PullRequestScript.IsValidUrl(pr.Url))
-                {
-                    _logger.LogWarning("Session at {Path} had a pull request URL that is not http(s); it is dropped", statePath);
-                    status = status with { PullRequest = null };
-                }
-
-                // Load action name from settings. One that cannot be read may be a shared session's:
-                // it is taken as shared, so its delete removes only its state, never the folder
-                var settingsRead = ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings);
-                if (!settingsRead)
-                    _logger.LogWarning("Session at {Path} has no settings.json that can be read: it is taken as sharing its folder, so a delete leaves the folder", statePath);
-
-                // The ID is where the state folder is: its root, and its id. A status.json that says
-                // otherwise (its root moved profile) is rewritten below. Nothing else in .godmode holds
-                // the ID. Its kind is a label, kept as the id has kinds: lowercase [a-z0-9-]
-                var id = ProjectId(profileName, rootName, sessionId);
-                var kind = ProjectFiles.SessionState.Kind(status.Kind ?? settings.ActionName);
-                var idChanged = status.Id != id || status.Kind != kind;
-                if (status.Id != id)
-                    _logger.LogInformation("Session at {Path} had ID {OldId}; it is now {ProjectId}", statePath, status.Id, id);
-
-                // The offset is output.jsonl's, not status.json's, which is saved less often than output is written
-                var outputOffset = OutputLog.End(statePath);
-                var correctedStatus = stateChanged
-                    ? status with { Id = id, Kind = kind, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
-                    : status with { Id = id, Kind = kind, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };
-
-                var project = new ProjectInfo
-                {
-                    Status = correctedStatus,
-                    ProjectPath = projectPath,
-                    RootPath = rootPath,
-                    SessionId = sessionId,
-                    ProfileName = profileName,
-                    ActionName = settings.ActionName,
-                    SharedFolder = !settingsRead || settings.SharedFolder,
-                };
-
-                project.ClaudeSessionId = await SessionIdFile.ReadAsync(statePath, _logger, ct);
-
-                // An ID another session has (its old root's, running on under it) is that session's
-                if (!_projects.TryAdd(project.Status.Id, project))
-                {
-                    _logger.LogWarning("Session at {Path} is not recovered: session {ProjectId} is tracked already, in another folder", statePath, project.Status.Id);
-                    return;
-                }
-
-                // Only save if state or ID changed
-                if (stateChanged || idChanged)
-                {
-                    await _statusUpdater.SaveStatusAsync(project);
-                }
-                ResumeChecks(project);
+            if (await RecoverSessionAsync(found.WorkingFolder, found.SessionId, found.Profile, found.Root, found.RootPath, ct) is { } project)
                 recovered.Add(project);
-
-                _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Status.Id, project.Status.Name);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to recover project from {Path}", statePath);
-            }
         });
         return recovered.ToArray();
+    }
+
+    /// <summary>
+    /// Tracks the session <paramref name="sessionId"/> of <paramref name="projectPath"/>, in the root at
+    /// <paramref name="rootPath"/>, from its files, under the ID they give it there, Stopped if it was
+    /// active: recovery's, for one session. Null when it is not recovered (no status.json, one that cannot
+    /// be read, or an ID another session has), logged.
+    /// </summary>
+    private async Task<ProjectInfo?> RecoverSessionAsync(string projectPath, string sessionId, string profileName, string rootName, string rootPath,
+        CancellationToken ct = default)
+    {
+        var statePath = ProjectFiles.SessionState.PathOf(projectPath, sessionId);
+        try
+        {
+            var statusPath = Path.Combine(statePath, ProjectFiles.SessionState.StatusFileName);
+            if (!File.Exists(statusPath))
+            {
+                return null;
+            }
+
+            var json = await File.ReadAllTextAsync(statusPath, ct);
+            var status = JsonSerializer.Deserialize<ProjectStatus>(json, CaseInsensitiveOptions);
+
+            if (status == null) return null;
+
+            // Check if state needs to be corrected (was running when server stopped)
+            var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission;
+            // A permission prompt ended with the process that asked: its call to the MCP endpoint failed with the server
+            status = status with { PendingPermission = null, PendingQuestion = null };
+            // status.json is the project folder's, which its session can write: a pull request
+            // link is kept only if it is one the status script's output could have set
+            if (status.PullRequest is { } pr && !PullRequestScript.IsValidUrl(pr.Url))
+            {
+                _logger.LogWarning("Session at {Path} had a pull request URL that is not http(s); it is dropped", statePath);
+                status = status with { PullRequest = null };
+            }
+
+            // Load action name from settings. One that cannot be read may be a shared session's:
+            // it is taken as shared, so its delete removes only its state, never the folder
+            var settingsRead = ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings);
+            if (!settingsRead)
+                _logger.LogWarning("Session at {Path} has no settings.json that can be read: it is taken as sharing its folder, so a delete leaves the folder", statePath);
+
+            // The ID is where the state folder is: its root, and its id. A status.json that says
+            // otherwise (its root moved profile) is rewritten below. Nothing else in .godmode holds
+            // the ID. Its kind is a label, kept as the id has kinds: lowercase [a-z0-9-]
+            var id = ProjectId(profileName, rootName, sessionId);
+            var kind = ProjectFiles.SessionState.Kind(status.Kind ?? settings.ActionName);
+            var idChanged = status.Id != id || status.Kind != kind;
+            if (status.Id != id)
+                _logger.LogInformation("Session at {Path} had ID {OldId}; it is now {ProjectId}", statePath, status.Id, id);
+
+            // The offset is output.jsonl's, not status.json's, which is saved less often than output is written
+            var outputOffset = OutputLog.End(statePath);
+            // What the app is told of the session's settings is settings.json's, not status.json's
+            var sharedFolder = !settingsRead || settings.SharedFolder;
+            var fromSettings = status with { ActionName = settings.ActionName, SharedFolder = sharedFolder };
+            var correctedStatus = stateChanged
+                ? fromSettings with { Id = id, Kind = kind, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
+                : fromSettings with { Id = id, Kind = kind, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };
+
+            var project = new ProjectInfo
+            {
+                Status = correctedStatus,
+                ProjectPath = projectPath,
+                RootPath = rootPath,
+                SessionId = sessionId,
+                ProfileName = profileName,
+                ActionName = settings.ActionName,
+                SharedFolder = sharedFolder,
+            };
+
+            project.ClaudeSessionId = await SessionIdFile.ReadAsync(statePath, _logger, ct);
+
+            // An ID another session has (its old root's, running on under it) is that session's
+            if (!_projects.TryAdd(project.Status.Id, project))
+            {
+                _logger.LogWarning("Session at {Path} is not recovered: session {ProjectId} is tracked already, in another folder", statePath, project.Status.Id);
+                return null;
+            }
+
+            // Only save if state or ID changed
+            if (stateChanged || idChanged)
+            {
+                await _statusUpdater.SaveStatusAsync(project);
+            }
+            ResumeChecks(project);
+
+            _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Status.Id, project.Status.Name);
+            return project;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to recover project from {Path}", statePath);
+            return null;
+        }
     }
 
     public async Task ResumeInterruptedProjectsAsync()
@@ -2245,11 +2438,31 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Removes a session's state, <c>.godmode/sessions/{id}/</c>, and nothing else of its working
-    /// folder: the delete of a session that shares its folder. The one place that does, so undo can
-    /// move it to <c>.godmode/trash/</c> here instead (#325).
+    /// Moves a session's state, <c>.godmode/sessions/{id}/</c>, to its working folder's
+    /// <c>.godmode/trash/{id}/</c>, and nothing else of the folder: the delete of a session that shares
+    /// its folder, which <see cref="RestoreProjectAsync"/> undoes until the trash is purged
+    /// (<see cref="PurgeTrashAsync"/>). A move a file lock refuses is tried again, as a robust delete
+    /// is. False when the session had no state folder (a create that failed before it was made).
+    /// Refused, and nothing moved, unless the folder is a project folder of the session's root.
     /// </summary>
-    private Task RemoveSessionStateAsync(ProjectInfo project) => DeleteDirectoryRobustAsync(project.StatePath, project.RootPath);
+    private async Task<bool> TrashSessionStateAsync(ProjectInfo project)
+    {
+        if (!Directory.Exists(project.StatePath)) return false;
+        if (WhyNotAProjectFolderOf(project.RootPath, project.StatePath) is not null)
+            throw new InvalidOperationException($"The session's state '{project.StatePath}' is not inside a project root, so it is not moved.");
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return ProjectFiles.SessionState.Trash(project.ProjectPath, project.SessionId, DateTime.UtcNow);
+            }
+            catch (Exception ex) when (attempt < 2 && ex is UnauthorizedAccessException or IOException)
+            {
+                _logger.LogWarning("Moving {Path} to the trash failed (attempt {Attempt}): {Message}. Retrying...", project.StatePath, attempt + 1, ex.Message);
+                await Task.Delay(500 * (attempt + 1));
+            }
+        }
+    }
 
     /// <summary>
     /// Makes the session's state folder, <c>.godmode/sessions/{id}/</c>, with the working folder's
@@ -2307,10 +2520,21 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return Path.Combine(logsDir, fileName);
     }
 
-    /// <summary>Moves a script log or result file to <paramref name="to"/>, replacing one there; nothing when there is none.</summary>
-    private static void MoveScriptFile(string from, string to)
+    /// <summary>
+    /// Moves a script log or result file to <paramref name="to"/>, replacing one there; nothing when there
+    /// is none. One that cannot be moved (a Windows file lock) stays where it is, logged: the scripts have
+    /// run, and a log under the first id is no reason to leave the create unregistered.
+    /// </summary>
+    private void MoveScriptFile(string from, string to, string projectId)
     {
-        if (File.Exists(from)) File.Move(from, to, overwrite: true);
+        try
+        {
+            if (File.Exists(from)) File.Move(from, to, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Project {ProjectId}: {From} could not be moved to {To}, and stays: {Reason}", projectId, from, to, ex.Message);
+        }
     }
 
     /// <summary>

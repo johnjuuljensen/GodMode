@@ -32,6 +32,11 @@ namespace GodMode.Shared.Models;
 /// action provisions something on the host (a new root, say), and its result file's <c>message</c>
 /// says what it made.
 /// </param>
+/// <param name="Transient">
+/// Whether the action's sessions are short-lived (chats, experiments): the app folds them away from
+/// its list sooner. Nothing is deleted by it. Set in <c>config.json</c> for every action of the root,
+/// or in an action's overlay for that action.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -51,7 +56,8 @@ public record CreateAction(
     bool AllowSkipPermissions = false,
     string? PermissionMode = null,
     bool SharedFolder = false,
-    bool Session = true
+    bool Session = true,
+    bool Transient = false
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";

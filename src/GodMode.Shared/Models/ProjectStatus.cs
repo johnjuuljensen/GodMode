@@ -28,6 +28,12 @@ namespace GodMode.Shared.Models;
 /// has been launched or resumed since.
 /// </param>
 /// <param name="Kind">What kind of session it is (<c>bug</c>, <c>feat</c>, <c>experiment</c>, <c>chat</c>…): its create script's <c>kind</c>, else its action's name, as its id has it (lowercase <c>[a-z0-9-]</c>). The app labels the session with it.</param>
+/// <param name="ActionName">The action the session was created with, as its <c>settings.json</c> says: the app finds the action's <see cref="CreateActionInfo.Transient"/> by it.</param>
+/// <param name="SharedFolder">
+/// Whether the session shares its working folder (its <c>settings.json</c>'s <c>sharedFolder</c>, or one
+/// that cannot be read): its delete removes only its state, into the folder's trash, and
+/// <see cref="Hubs.IProjectHub.RestoreProject"/> can bring it back. Otherwise the delete removes the working folder.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -51,5 +57,7 @@ public record ProjectStatus(
     DateTime? SeenAt = null,
     PullRequestStatus? PullRequest = null,
     ProjectState? StateAtShutdown = null,
-    string? Kind = null
+    string? Kind = null,
+    string? ActionName = null,
+    bool SharedFolder = false
 );

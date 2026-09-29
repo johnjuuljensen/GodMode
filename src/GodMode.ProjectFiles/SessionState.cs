@@ -16,6 +16,15 @@ public static partial class SessionState
     /// <summary>The folder in <c>.godmode/</c> that holds one folder per session.</summary>
     public const string SessionsFolderName = "sessions";
 
+    /// <summary>
+    /// The folder in <c>.godmode/</c> where a deleted session's state waits, <c>trash/{id}/</c>, for an
+    /// undo (<see cref="Restore"/>) until it is purged. Nothing in it is a session.
+    /// </summary>
+    public const string TrashFolderName = "trash";
+
+    /// <summary>The file in a trashed state folder that says when it was trashed (round-trip UTC), for the purge.</summary>
+    public const string TrashedAtFileName = "trashed-at";
+
     /// <summary>The state file a session's folder has: without it, a folder in <c>sessions/</c> is no session.</summary>
     public const string StatusFileName = "status.json";
 
@@ -52,6 +61,13 @@ public static partial class SessionState
     /// <summary>The state folder of session <paramref name="id"/> in <paramref name="workingFolder"/>: <c>.godmode/sessions/{id}/</c>.</summary>
     public static string PathOf(string workingFolder, string id) => Path.Combine(SessionsPathOf(workingFolder), id);
 
+    /// <summary><c>{workingFolder}/.godmode/trash/</c>.</summary>
+    public static string TrashPathOf(string workingFolder) =>
+        Path.Combine(workingFolder, ProjectFolder.GodModeDirectoryName, TrashFolderName);
+
+    /// <summary>Where session <paramref name="id"/>'s state is while it is in the trash: <c>.godmode/trash/{id}/</c>.</summary>
+    public static string TrashedPathOf(string workingFolder, string id) => Path.Combine(TrashPathOf(workingFolder), id);
+
     /// <summary>
     /// Whether <paramref name="id"/> is a session id as <see cref="NewId"/> makes them. A folder in
     /// <c>sessions/</c> with any other name is no session: the session can write its working folder,
@@ -74,6 +90,75 @@ public static partial class SessionState
             .Where(id => IsId(id) && File.Exists(Path.Combine(sessions, id, StatusFileName)))
             .Order(StringComparer.Ordinal)
             .ToArray();
+    }
+
+    /// <summary>
+    /// The ids in <paramref name="workingFolder"/>'s trash: each folder in <c>.godmode/trash/</c> whose
+    /// name <see cref="IsId"/>, in ordinal order.
+    /// </summary>
+    public static IReadOnlyList<string> ListTrashed(string workingFolder)
+    {
+        var trash = TrashPathOf(workingFolder);
+        if (!Directory.Exists(trash)) return [];
+        return Directory.GetDirectories(trash)
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .Where(IsId)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Moves session <paramref name="id"/>'s state from <c>sessions/</c> to <c>trash/</c>, and marks
+    /// when (<see cref="TrashedAtFileName"/>). One of that id in the trash already is replaced. False
+    /// when the session has no state folder: nothing is moved.
+    /// </summary>
+    public static bool Trash(string workingFolder, string id, DateTime at)
+    {
+        if (!IsId(id)) throw new ArgumentException($"'{id}' is not a session id.", nameof(id));
+        var from = PathOf(workingFolder, id);
+        if (!Directory.Exists(from)) return false;
+        var to = TrashedPathOf(workingFolder, id);
+        Directory.CreateDirectory(TrashPathOf(workingFolder));
+        if (Directory.Exists(to)) Directory.Delete(to, recursive: true);
+        Directory.Move(from, to);
+        File.WriteAllText(Path.Combine(to, TrashedAtFileName), at.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        return true;
+    }
+
+    /// <summary>
+    /// Moves session <paramref name="id"/>'s state back from <c>trash/</c> to <c>sessions/</c>, without
+    /// its <see cref="TrashedAtFileName"/>. Throws when it is not in the trash, or <c>sessions/</c> has
+    /// one of that id; nothing is moved then.
+    /// </summary>
+    public static string Restore(string workingFolder, string id)
+    {
+        if (!IsId(id)) throw new ArgumentException($"'{id}' is not a session id.", nameof(id));
+        var from = TrashedPathOf(workingFolder, id);
+        if (!Directory.Exists(from)) throw new DirectoryNotFoundException($"Session {id} is not in the trash of {workingFolder}.");
+        var to = PathOf(workingFolder, id);
+        if (Directory.Exists(to)) throw new IOException($"Session {id} has a state folder in {workingFolder} already.");
+        Directory.CreateDirectory(SessionsPathOf(workingFolder));
+        Directory.Move(from, to);
+        File.Delete(Path.Combine(to, TrashedAtFileName));
+        return to;
+    }
+
+    /// <summary>
+    /// When session <paramref name="id"/> was trashed, by its <see cref="TrashedAtFileName"/>; when that
+    /// is missing or cannot be read, the folder's last write, so a trash without it is purged too.
+    /// </summary>
+    public static DateTime TrashedAt(string workingFolder, string id)
+    {
+        var folder = TrashedPathOf(workingFolder, id);
+        try
+        {
+            if (DateTime.TryParse(File.ReadAllText(Path.Combine(folder, TrashedAtFileName)).Trim(), CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind, out var at))
+                return at.ToUniversalTime();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return Directory.GetLastWriteTimeUtc(folder);
     }
 
     /// <summary>

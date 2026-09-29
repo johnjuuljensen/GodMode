@@ -237,7 +237,8 @@ public class RootConfigReader : IRootConfigReader
         AllowSkipPermissions = overlay.AllowSkipPermissions ?? baseConfig.AllowSkipPermissions,
         PermissionMode = overlay.PermissionMode ?? baseConfig.PermissionMode,
         SharedFolder = overlay.SharedFolder ?? baseConfig.SharedFolder,
-        Session = overlay.Session ?? baseConfig.Session
+        Session = overlay.Session ?? baseConfig.Session,
+        Transient = overlay.Transient ?? baseConfig.Transient
     };
 
     /// <summary>
@@ -287,7 +288,8 @@ public class RootConfigReader : IRootConfigReader
             AllowSkipPermissions: raw.AllowSkipPermissions ?? false,
             PermissionMode: raw.PermissionMode,
             SharedFolder: raw.SharedFolder ?? false,
-            Session: raw.Session ?? true
+            Session: raw.Session ?? true,
+            Transient: raw.Transient ?? false
         );
     }
 
@@ -394,6 +396,7 @@ public class RootConfigReader : IRootConfigReader
         public string? PermissionMode { get; init; }
         public bool? SharedFolder { get; init; }
         public bool? Session { get; init; }
+        public bool? Transient { get; init; }
 
         /// <summary>Keys this reader does not know, such as a leftover MCP server config.</summary>
         [JsonExtensionData]

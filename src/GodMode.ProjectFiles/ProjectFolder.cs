@@ -129,6 +129,20 @@ public sealed class ProjectFolder : IDisposable
     }
 
     /// <summary>
+    /// A working folder that sessions share (<c>sharedFolder</c>): made when it is missing, used as it
+    /// is when it is there, so two creates into one new shared folder at once both have it.
+    /// </summary>
+    /// <returns>The folder's full path, and whether this call made it.</returns>
+    public static (string Path, bool Made) CreateShared(string rootPath, string folderName)
+    {
+        ValidateFolderName(folderName, nameof(folderName));
+        var projectPath = Path.Combine(rootPath, folderName);
+        var made = !Directory.Exists(projectPath);
+        Directory.CreateDirectory(projectPath);
+        return (projectPath, made);
+    }
+
+    /// <summary>
     /// An existing working folder in the root, reused as it is: its files stay, and the new session's
     /// state is made in its <c>.godmode/sessions/</c>.
     /// </summary>
@@ -186,19 +200,26 @@ public sealed class ProjectFolder : IDisposable
     /// </summary>
     public static void EnsureIgnoredByGit(string folder)
     {
-        Directory.CreateDirectory(folder);
-        var gitIgnorePath = Path.Combine(folder, GitIgnoreFileName);
-        if (!File.Exists(gitIgnorePath))
+        // One check and write at a time: two first creates in one shared folder would both find no
+        // .gitignore and write it at once, and on Windows the second write fails
+        lock (GitIgnoreLock)
         {
-            File.WriteAllText(gitIgnorePath, GitIgnoreContent, Encoding.UTF8);
-            return;
-        }
+            Directory.CreateDirectory(folder);
+            var gitIgnorePath = Path.Combine(folder, GitIgnoreFileName);
+            if (!File.Exists(gitIgnorePath))
+            {
+                File.WriteAllText(gitIgnorePath, GitIgnoreContent, Encoding.UTF8);
+                return;
+            }
 
-        var existing = File.ReadAllText(gitIgnorePath);
-        if (existing.Split('\n').Any(line => line.Trim() == IgnoreEverything)) return;
-        var separator = existing.Length == 0 || existing.EndsWith('\n') ? "" : "\n";
-        File.AppendAllText(gitIgnorePath, separator + GitIgnoreContent);
+            var existing = File.ReadAllText(gitIgnorePath);
+            if (existing.Split('\n').Any(line => line.Trim() == IgnoreEverything)) return;
+            var separator = existing.Length == 0 || existing.EndsWith('\n') ? "" : "\n";
+            File.AppendAllText(gitIgnorePath, separator + GitIgnoreContent);
+        }
     }
+
+    private static readonly Lock GitIgnoreLock = new();
 
     /// <summary>
     /// Opens a session's state in an existing working folder.

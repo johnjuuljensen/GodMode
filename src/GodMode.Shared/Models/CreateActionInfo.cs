@@ -14,11 +14,13 @@ namespace GodMode.Shared.Models;
 /// Whether the action starts a session. One that does not only runs its scripts: the create form
 /// offers no model for it, and its create returns no project to open (<see cref="CreateProjectResult"/>).
 /// </param>
+/// <param name="Transient">Whether the action's sessions are short-lived (<see cref="CreateAction.Transient"/>): the app folds them sooner.</param>
 public record CreateActionInfo(
     string Name,
     string? Description = null,
     JsonElement? InputSchema = null,
     string? Model = null,
     bool AllowSkipPermissions = false,
-    bool Session = true
+    bool Session = true,
+    bool Transient = false
 );

@@ -82,9 +82,16 @@ public interface IProjectManager
     Task UnsubscribeProjectAsync(string projectId, string connectionId);
 
     /// <summary>
-    /// Deletes a project, running teardown scripts and removing all files.
+    /// Deletes a project: stops it, runs its delete script, and removes its working folder, or, for a
+    /// session that shares its folder, moves only its state to the folder's trash (<see cref="DeleteProjectResult.Trashed"/>).
     /// </summary>
-    Task DeleteProjectAsync(string projectId, bool force = false);
+    Task<DeleteProjectResult> DeleteProjectAsync(string projectId, bool force = false);
+
+    /// <summary>
+    /// Brings a trashed session back under the same ID, Stopped, and pushes it as ProjectCreated: see
+    /// <see cref="GodMode.Shared.Hubs.IProjectHub.RestoreProject"/> for when it refuses.
+    /// </summary>
+    Task<ProjectStatus> RestoreProjectAsync(string projectId);
 
     /// <summary>
     /// Cleans up resources for a disconnected client.
