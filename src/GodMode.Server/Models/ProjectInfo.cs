@@ -18,6 +18,13 @@ public class ProjectInfo
     public required string ProjectPath { get; set; }
 
     /// <summary>
+    /// The folder (full path) of the root the session is in, as it was when the session was created or
+    /// recovered. Its config and scripts are read there, whatever the root is called now: a root name
+    /// that comes to name another folder (a new explicit root that wins the clash) is not this root.
+    /// </summary>
+    public required string RootPath { get; init; }
+
+    /// <summary>
     /// The session's id, <c>yymmdd-{kind}-{slug}-{suffix}</c> (<see cref="ProjectFiles.SessionState"/>): the
     /// last part of its opaque ID, and the name of its state folder. Unique within its root.
     /// </summary>
