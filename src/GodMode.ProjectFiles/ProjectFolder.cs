@@ -31,11 +31,13 @@ public sealed class ProjectFolder : IDisposable
 
     /// <summary>
     /// The folders a root keeps for itself at its top level, which no project may be: a delete of
-    /// the project would delete the root's config or every script log. Compared ignoring case, and
-    /// trailing dots and spaces, as Windows compares folder names (refusing <c>LOGS</c> on Linux too).
+    /// the project would delete the root's config, every script log, or the state of the sessions
+    /// that work in the root itself (<c>{root}/.godmode/</c>, when the root is its own workspace).
+    /// Compared ignoring case, and trailing dots and spaces, as Windows compares folder names
+    /// (refusing <c>LOGS</c> on Linux too).
     /// </summary>
     public static readonly IReadOnlySet<string> ReservedFolderNames =
-        new HashSet<string>([RootConfigFolderName, ScriptLogsFolderName, ArchivedFolderName], StringComparer.OrdinalIgnoreCase);
+        new HashSet<string>([RootConfigFolderName, ScriptLogsFolderName, ArchivedFolderName, GodModeDirectoryName], StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// The names Windows keeps for devices: a folder of one (with any extension, <c>nul.txt</c>) is

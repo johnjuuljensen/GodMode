@@ -128,6 +128,8 @@ public class ProjectIdentityTests
     [InlineData("logs", true)]
     [InlineData(".archived", false)]
     [InlineData(".archived", true)]
+    [InlineData(".godmode", false)]
+    [InlineData(".godmode", true)]
     public async Task NameOfAFolderTheRootUses_IsRefused_AndNothingIsCreatedOrDeleted(string name, bool reuseExisting)
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
@@ -290,6 +292,7 @@ public class ProjectIdentityTests
     [InlineData("logs")]
     [InlineData(".godmode-root")]
     [InlineData(".archived")]
+    [InlineData(".godmode")]
     public async Task FolderTheRootUses_WithAStatusFile_IsNotRecovered(string folder)
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());

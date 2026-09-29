@@ -63,8 +63,8 @@ public sealed class ProjectManager
         => _projectRoots.Select(kvp => (kvp.Key, kvp.Value));
 
     /// <summary>
-    /// The sessions in a root: in each of its working folders (its immediate subfolders but its own,
-    /// <see cref="ProjectFolder.ReservedFolderNames"/>), each of <see cref="SessionState.List"/>.
+    /// The sessions in a root: in each of its working folders (<see cref="WorkingFolders"/>), each of
+    /// <see cref="SessionState.List"/>.
     /// </summary>
     /// <param name="rootName">The name of the project root.</param>
     public IReadOnlyList<(string WorkingFolder, string SessionId)> ListSessions(string rootName)
@@ -77,22 +77,24 @@ public sealed class ProjectManager
         WorkingFolders(rootName).SelectMany(folder => SessionState.ListTrashed(folder).Select(id => (folder, id))).ToArray();
 
     /// <summary>
-    /// The root's working folders: its immediate subfolders, in ordinal order, but its own. A folder the
-    /// root keeps for itself is never a working folder, even one with sessions in it from before such
-    /// names were refused: a delete would delete the root's config or its logs.
+    /// The root's working folders: the root itself, whose own <c>.godmode/sessions/</c> holds the sessions
+    /// of an action that works in the root (a root that is its own workspace), then its immediate
+    /// subfolders, in ordinal order, but its own. A folder the root keeps for itself is never a working
+    /// folder, even one with sessions in it from before such names were refused: a delete would delete
+    /// the root's config, its logs, or the state of the sessions in the root.
     /// </summary>
     private IEnumerable<string> WorkingFolders(string rootName)
     {
         var rootPath = GetProjectRootPath(rootName);
         return Directory.Exists(rootPath)
-            ? Directory.GetDirectories(rootPath)
+            ? [rootPath, .. Directory.GetDirectories(rootPath)
                 .Where(folder => !ProjectFolder.IsReservedFolderName(Path.GetFileName(folder)))
-                .Order(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)]
             : [];
     }
 
     /// <summary>
-    /// Whether a working folder of the root has a session with <paramref name="sessionId"/>, on disk
+    /// Whether the root, or a folder in it, has a session with <paramref name="sessionId"/>, on disk
     /// (with a status.json or not), or in its trash: an id is unique within its root, and a trashed
     /// session keeps its id for an undo until the trash is purged.
     /// </summary>
@@ -100,7 +102,7 @@ public sealed class ProjectManager
     {
         var rootPath = GetProjectRootPath(rootName);
         return Directory.Exists(rootPath)
-            && Directory.GetDirectories(rootPath).Any(folder => Directory.Exists(SessionState.PathOf(folder, sessionId))
+            && new[] { rootPath }.Concat(Directory.GetDirectories(rootPath)).Any(folder => Directory.Exists(SessionState.PathOf(folder, sessionId))
                 || Directory.Exists(SessionState.TrashedPathOf(folder, sessionId)));
     }
 
