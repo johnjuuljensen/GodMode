@@ -12,12 +12,25 @@ public class ProjectInfo
     public required ProjectStatus Status { get; set; }
 
     /// <summary>
-    /// The project directory path. This is also the working directory for Claude.
+    /// The working folder: Claude's working directory, where the session's state is too (<see cref="StatePath"/>).
     /// May be updated after create scripts run (scripts can override via result file).
     /// </summary>
     public required string ProjectPath { get; set; }
 
-    public string? SessionId { get; set; }
+    /// <summary>
+    /// The session's id, <c>yymmdd-{kind}-{slug}-{suffix}</c> (<see cref="ProjectFiles.SessionState"/>): the
+    /// last part of its opaque ID, and the name of its state folder. Unique within its root.
+    /// </summary>
+    public required string SessionId { get; set; }
+
+    /// <summary>The session's state folder, <c>{ProjectPath}/.godmode/sessions/{SessionId}/</c>: status.json, output.jsonl and the rest.</summary>
+    public string StatePath => ProjectFiles.SessionState.PathOf(ProjectPath, SessionId);
+
+    /// <summary>
+    /// claude's session GUID (<c>--session-id</c>, <c>--resume</c>), kept in <c>session-id</c> in the state folder.
+    /// Not the session's id: GodMode replaces it when a resume finds no conversation.
+    /// </summary>
+    public string? ClaudeSessionId { get; set; }
 
     /// <summary>
     /// The name of the create action used to create this project.

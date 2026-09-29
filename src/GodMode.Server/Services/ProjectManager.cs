@@ -512,11 +512,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private static string CompositeKey(string profile, string root) => $"{profile}/{root}";
 
     /// <summary>
-    /// A project's ID: <c>{profile}/{root}/{folder}</c>, where it lives, so a folder name used in two
-    /// roots is two projects. Clients treat it as opaque; it is never parsed. It is derived again
-    /// from the folder's location on every recovery, not trusted from status.json.
+    /// A session's opaque ID: <c>{profile}/{root}/{id}</c>, its id being unique within its root, so one
+    /// id in two roots is two sessions. Clients treat it as opaque; it is never parsed. It is derived again
+    /// from where its state folder is on every recovery, not trusted from status.json.
     /// </summary>
-    private static string ProjectId(string profile, string root, string folder) => $"{CompositeKey(profile, root)}/{folder}";
+    private static string ProjectId(string profile, string root, string sessionId) => $"{CompositeKey(profile, root)}/{sessionId}";
 
     /// <summary>Every root with its profile and root names as configured, and its full path.</summary>
     private static IEnumerable<(string Profile, string Root, string Path)> AllRoots(ProfileSnapshot snap) =>
@@ -617,7 +617,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 ProfileName: project.ProfileName ?? s.ProfileName,
                 PendingPermission: s.PendingPermission,
                 PendingQuestion: s.PendingQuestion,
-                PullRequest: s.PullRequest
+                PullRequest: s.PullRequest,
+                Kind: s.Kind
             ));
         }
 
@@ -714,24 +715,29 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var projectPath = Path.Combine(rootPath, folder);
 
         var (profileName, rootName) = ConfiguredNames(snap, request.ProfileName, request.ProjectRootName);
-        var projectId = ProjectId(profileName, rootName, folder);
+
+        // The session's id, yymmdd-{kind}-{slug}-{suffix}, unique within its root. Until the create
+        // script has run its kind is the action's name, and its slug the name so far: the script's
+        // result may name another of either, and the date and suffix stay
+        var createdOn = DateTime.Now;
+        var kind = ProjectFiles.SessionState.Kind(action.Name);
+        var sessionId = FreeSessionId(snap, compositeKey, profileName, rootName,
+            suffix => ProjectFiles.SessionState.Id(createdOn, kind, name, suffix));
+        var projectId = ProjectId(profileName, rootName, sessionId);
 
         // One project per ID and per folder: a tracked project's claude would be orphaned, and its
         // files overwritten. Claimed before a folder is reused or any script runs, until registered
         using var claims = new CreateClaims(this);
         claims.Claim(projectId, projectPath);
 
-        // Unless the scripts create the project directory (e.g. git worktree add)
+        // Unless the scripts create the project directory (e.g. git worktree add). Its session's
+        // state is made once the scripts have run, when its id is final
         if (!action.ScriptsCreateFolder)
         {
             if (reuseExisting)
-                // Reuse existing folder — reinitialize .godmode state
-                ProjectFiles.ProjectFolder.Reuse(rootPath, folder, name);
-            else if (suffixed)
-                ProjectFiles.ProjectFolder.Create(rootPath, folder, name);
+                ProjectFiles.ProjectFolder.Reuse(rootPath, folder);
             else
-                // Server creates the project folder via ProjectFiles
-                snap.ProjectFiles.CreateProject(compositeKey, name);
+                ProjectFiles.ProjectFolder.Create(rootPath, folder);
         }
 
         var now = DateTime.UtcNow;
@@ -749,9 +755,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 Tests: null,
                 OutputOffset: 0,
                 RootName: rootName,
-                ProfileName: profileName
+                ProfileName: profileName,
+                Kind: kind
             ),
             ProjectPath = projectPath,
+            SessionId = sessionId,
             ActionName = action.Name,
             ProfileName = profileName,
         };
@@ -811,7 +819,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             }
         }
 
-        // Apply script result overrides (project_path, project_name)
+        // Apply script result overrides (project_path, project_name, kind)
         var scriptResults = ReadResultFile(resultFilePath);
         if (scriptResults.TryGetValue("project_path", out var overridePath) && !string.IsNullOrWhiteSpace(overridePath))
         {
@@ -819,7 +827,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             {
                 (projectPath, folder) = ValidateScriptProjectPath(overridePath, rootPath);
                 // Nor may a script's folder be a tracked project's
-                claims.Claim(ProjectId(profileName, rootName, folder), projectPath);
+                claims.Claim(projectId, projectPath);
             }
             catch (Exception ex) when (ex is ArgumentException or ProjectInUseException)
             {
@@ -828,14 +836,40 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 RegisterFailedCreate(project, ex.Message);
                 throw;
             }
-            projectId = ProjectId(profileName, rootName, folder);
             project.ProjectPath = projectPath;
-            _logger.LogInformation("Script overrode project path to {ProjectPath} (id: {ProjectId})", projectPath, projectId);
+            _logger.LogInformation("Script overrode project path to {ProjectPath}", projectPath);
         }
         if (scriptResults.TryGetValue("project_name", out var overrideName) && !string.IsNullOrWhiteSpace(overrideName))
         {
             name = overrideName;
             _logger.LogInformation("Script overrode project name to '{ProjectName}'", name);
+        }
+        if (scriptResults.TryGetValue("kind", out var scriptKind) && !string.IsNullOrWhiteSpace(scriptKind))
+        {
+            kind = ProjectFiles.SessionState.Kind(scriptKind);
+            _logger.LogInformation("Script named the session's kind '{Kind}'", kind);
+        }
+
+        // The id as the script's result leaves it: its kind and name, with the date and suffix it had
+        var finalId = ProjectFiles.SessionState.Id(createdOn, kind, name, sessionId[^ProjectFiles.SessionState.SuffixLength..]);
+        if (finalId != sessionId)
+        {
+            try
+            {
+                finalId = FreeSessionId(snap, compositeKey, profileName, rootName,
+                    suffix => ProjectFiles.SessionState.Id(createdOn, kind, name, suffix), finalId);
+                claims.Claim(ProjectId(profileName, rootName, finalId), projectPath);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ProjectInUseException)
+            {
+                _logger.LogError("Project {ProjectId} could not have the id {SessionId}: {Message}", projectId, finalId, ex.Message);
+                RegisterFailedCreate(project, ex.Message);
+                throw;
+            }
+            sessionId = finalId;
+            projectId = ProjectId(profileName, rootName, sessionId);
+            project.SessionId = sessionId;
+            _logger.LogInformation("The session's id is {ProjectId}", projectId);
         }
         if (scriptResults.TryGetValue("project_prompt", out var overridePrompt) && !string.IsNullOrWhiteSpace(overridePrompt))
         {
@@ -846,10 +880,10 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Persisted in status.json so resumes keep using the same model even if the
         // root config changes or the machine-wide Claude default differs.
         var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
-        project.Status = project.Status with { Id = projectId, Name = name, Model = model };
+        project.Status = project.Status with { Id = projectId, Name = name, Model = model, Kind = kind };
 
-        // Ensure .godmode directory exists (scripts may have created the project dir without it)
-        EnsureGodModeDirectory(projectPath);
+        // The session's state folder, now its id is final (scripts may have created the project dir without .godmode)
+        CreateSessionState(project);
 
         // Save project settings (persists across restarts, includes action name for delete/resume).
         // The permission mode is kept with the project, as its model is, so its resumes keep it
@@ -857,7 +891,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             DangerouslySkipPermissions: skipPermissions,
             ActionName: action.Name,
             PermissionMode: action.PermissionMode);
-        settings.Save(projectPath);
+        settings.Save(project.StatePath);
 
         // Save initial status
         await _statusUpdater.SaveStatusAsync(project);
@@ -1429,7 +1463,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
         if (!claimed) return false;
 
-        _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}", projectId, project.SessionId);
+        _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}", projectId, project.ClaudeSessionId);
         try
         {
             // Cancels the previous launch's token and gives this one its own
@@ -1545,23 +1579,38 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var recoverSnap = _snapshot;
         _logger.LogInformation("Recovering projects from all project roots");
 
-        // Each root's own folders, so the root is known exactly: "root" is not a prefix match for
-        // "root2". A folder two roots share (two profiles naming one path) is recovered once
-        var seen = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        var projectPaths = AllRoots(recoverSnap)
-            .SelectMany(root => recoverSnap.ProjectFiles.ListProjectPaths(CompositeKey(root.Profile, root.Root))
-                .Select(path => (Path: path, root.Profile, root.Root)))
-            .Where(project => seen.Add(project.Path))
+        // Each root's own working folders, so the root is known exactly: "root" is not a prefix match
+        // for "root2". A folder two roots share (two profiles naming one path) is recovered once. The
+        // sessions are the state folders in .godmode/sessions/; a flat .godmode/status.json is none
+        var seen = new HashSet<string>(PathComparer);
+        var sessions = AllRoots(recoverSnap)
+            .SelectMany(root => recoverSnap.ProjectFiles.ListSessions(CompositeKey(root.Profile, root.Root))
+                .Select(session => (session.WorkingFolder, session.SessionId, root.Profile, root.Root)))
+            .Where(session => seen.Add(ProjectFiles.SessionState.PathOf(session.WorkingFolder, session.SessionId)))
             .ToList();
 
-        // Process all projects in parallel for faster startup
-        await Parallel.ForEachAsync(projectPaths, async (found, ct) =>
+        // An id is unique within its root: one found in two working folders (a folder copied) is the
+        // first folder's, in ordinal order, and the other is left on disk, untracked
+        var unique = sessions
+            .GroupBy(session => ProjectId(session.Profile, session.Root, session.SessionId))
+            .Select(same =>
+            {
+                var ordered = same.OrderBy(session => session.WorkingFolder, StringComparer.Ordinal).ToArray();
+                foreach (var other in ordered.Skip(1))
+                    _logger.LogWarning("Session {ProjectId} is in {Folder} and in {Other}: the second is not recovered, since an id is unique within its root",
+                        same.Key, ordered[0].WorkingFolder, other.WorkingFolder);
+                return ordered[0];
+            })
+            .ToList();
+
+        // Process all sessions in parallel for faster startup
+        await Parallel.ForEachAsync(unique, async (found, ct) =>
         {
-            var (projectPath, profileName, rootName) = found;
+            var (projectPath, sessionId, profileName, rootName) = found;
+            var statePath = ProjectFiles.SessionState.PathOf(projectPath, sessionId);
             try
             {
-                var godModePath = Path.Combine(projectPath, ".godmode");
-                var statusPath = Path.Combine(godModePath, "status.json");
+                var statusPath = Path.Combine(statePath, ProjectFiles.SessionState.StatusFileName);
                 if (!File.Exists(statusPath))
                 {
                     return;
@@ -1580,35 +1629,38 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 // link is kept only if it is one the status script's output could have set
                 if (status.PullRequest is { } pr && !PullRequestScript.IsValidUrl(pr.Url))
                 {
-                    _logger.LogWarning("Project at {Path} had a pull request URL that is not http(s); it is dropped", projectPath);
+                    _logger.LogWarning("Session at {Path} had a pull request URL that is not http(s); it is dropped", statePath);
                     status = status with { PullRequest = null };
                 }
 
-                // The ID is where the folder is. A status.json that says otherwise (its root moved
-                // profile, or the folder moved) is rewritten below. Nothing else in .godmode holds the ID
-                var id = ProjectId(profileName, rootName, Path.GetFileName(projectPath));
-                var idChanged = status.Id != id;
-                if (idChanged)
-                    _logger.LogInformation("Project at {Path} had ID {OldId}; it is now {ProjectId}", projectPath, status.Id, id);
+                // Load action name from settings
+                var settings = ProjectFiles.ProjectSettings.Load(statePath);
+
+                // The ID is where the state folder is: its root, and its id. A status.json that says
+                // otherwise (its root moved profile) is rewritten below. Nothing else in .godmode holds
+                // the ID. Its kind is a label, kept as the id has kinds: lowercase [a-z0-9-]
+                var id = ProjectId(profileName, rootName, sessionId);
+                var kind = ProjectFiles.SessionState.Kind(status.Kind ?? settings.ActionName);
+                var idChanged = status.Id != id || status.Kind != kind;
+                if (status.Id != id)
+                    _logger.LogInformation("Session at {Path} had ID {OldId}; it is now {ProjectId}", statePath, status.Id, id);
 
                 // The offset is output.jsonl's, not status.json's, which is saved less often than output is written
-                var outputOffset = OutputLog.End(projectPath);
+                var outputOffset = OutputLog.End(statePath);
                 var correctedStatus = stateChanged
-                    ? status with { Id = id, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
-                    : status with { Id = id, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };
+                    ? status with { Id = id, Kind = kind, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
+                    : status with { Id = id, Kind = kind, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };
 
                 var project = new ProjectInfo
                 {
                     Status = correctedStatus,
                     ProjectPath = projectPath,
-                    ProfileName = profileName
+                    SessionId = sessionId,
+                    ProfileName = profileName,
+                    ActionName = settings.ActionName,
                 };
 
-                // Load action name from settings
-                var settings = ProjectFiles.ProjectSettings.Load(projectPath);
-                project.ActionName = settings.ActionName;
-
-                project.SessionId = await SessionIdFile.ReadAsync(projectPath, _logger, ct);
+                project.ClaudeSessionId = await SessionIdFile.ReadAsync(statePath, _logger, ct);
 
                 _projects[project.Status.Id] = project;
 
@@ -1623,10 +1675,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to recover project from {Path}", projectPath);
+                _logger.LogError(ex, "Failed to recover project from {Path}", statePath);
             }
         });
-
         await PushAttentionIfChangedAsync();
     }
 
@@ -1764,16 +1815,39 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Ensures the .godmode directory and its .gitignore exist in a project folder, and starts its
-    /// output's generation. Called after scripts run, which may have created the project dir without
-    /// .godmode, or checked out one that has a .godmode without its .gitignore.
+    /// Makes the session's state folder, <c>.godmode/sessions/{id}/</c>, with the working folder's
+    /// <c>.godmode/.gitignore</c>, and starts its output's generation. Called after scripts run, which
+    /// may have created the project dir without .godmode, or checked out one that has a .godmode
+    /// without its .gitignore.
     /// </summary>
-    private static void EnsureGodModeDirectory(string projectPath)
+    private static void CreateSessionState(ProjectInfo project)
     {
-        ProjectFiles.ProjectFolder.EnsureGitIgnore(projectPath);
+        ProjectFiles.SessionState.Create(project.ProjectPath, project.SessionId);
 
         // A new one each time: an ID created again starts a new generation, so no client resumes into it from an old offset
-        OutputLog.StartGeneration(projectPath);
+        OutputLog.StartGeneration(project.StatePath);
+    }
+
+    /// <summary>
+    /// A session id no session of the root has: <paramref name="first"/> when it is free, else
+    /// <paramref name="idWith"/> a new random suffix, tried a few times. Taken means a tracked
+    /// session's, one a create in progress claimed, or a state folder on disk in one of the root's
+    /// working folders. Throws <see cref="InvalidOperationException"/> when none is free.
+    /// </summary>
+    private string FreeSessionId(ProfileSnapshot snap, string compositeKey, string profileName, string rootName,
+        Func<string, string> idWith, string? first = null)
+    {
+        const int attempts = 8;
+        var id = first ?? idWith(ProjectFiles.SessionState.NewSuffix());
+        for (var attempt = 1; ; attempt++)
+        {
+            var projectId = ProjectId(profileName, rootName, id);
+            if (!_projects.ContainsKey(projectId) && !_creatingIds.ContainsKey(projectId) && !snap.ProjectFiles.HasSession(compositeKey, id))
+                return id;
+            if (attempt == attempts)
+                throw new InvalidOperationException($"No free session id in root '{rootName}' after {attempts} tries (last {id}).");
+            id = idWith(ProjectFiles.SessionState.NewSuffix());
+        }
     }
 
     /// <summary>
@@ -1978,7 +2052,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private ClaudeLaunchSpec BuildLaunchSpec(ProjectInfo project)
     {
         var snap = _snapshot;
-        var settings = ProjectFiles.ProjectSettings.Load(project.ProjectPath);
+        var settings = ProjectFiles.ProjectSettings.Load(project.StatePath);
         // Recovery reads the action name from settings too; a project created before it was saved has none
         project.ActionName ??= settings.ActionName;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
@@ -1986,7 +2060,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(snap, project, profileName);
         var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
-        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project)),
+        var (env, args) = BuildClaudeConfig(project.ProjectPath, project.StatePath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project)),
             project.Status.Model ?? action.Model, profile?.Environment, profileName, stripEnvVarProfile);
         return new ClaudeLaunchSpec(env ?? new Dictionary<string, string>(), args);
     }
@@ -2026,11 +2100,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return (skip, mode);
     }
 
-    /// <summary>The launch warnings said so far, by project folder and what they are about: each is said once.</summary>
+    /// <summary>The launch warnings said so far, by session state folder and what they are about: each is said once.</summary>
     private readonly ConcurrentDictionary<string, byte> _launchWarnings = new(PathComparer);
 
     private bool FirstLaunchWarning(ProjectInfo project, string about) =>
-        _launchWarnings.TryAdd($"{FullPath(project.ProjectPath)}\n{about}", 0);
+        _launchWarnings.TryAdd($"{FullPath(project.StatePath)}\n{about}", 0);
 
     /// <summary>
     /// The project's action in its root's config (the default action for a project with no root), and
@@ -2061,7 +2135,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// Claude Code's own settings, the permission mode, or skip-permissions, allow it.
     /// </summary>
     private static (Dictionary<string, string>? Env, string[] Args) BuildClaudeConfig(
-        string projectPath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
+        string projectPath, string statePath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
         string? model = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
@@ -2095,7 +2169,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // It holds the project token, so every launch first makes sure git ignores it
         ProjectFiles.ProjectFolder.EnsureGitIgnore(projectPath);
         args.Add("--mcp-config");
-        args.Add(McpConfigFile.Write(projectPath, mcpConfigJson));
+        args.Add(McpConfigFile.Write(statePath, mcpConfigJson));
 
         return (env, args.ToArray());
     }
@@ -2151,9 +2225,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // GODMODE_* vars always win
         env["GODMODE_ROOT_PATH"] = rootPath;
         env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
-        // Scripts name branches and folders after it. It is not the project's ID, {profile}/{root}/{folder}
+        // Scripts name branches and folders after it. It is not the session's ID, {profile}/{root}/{id}
         env["GODMODE_PROJECT_FOLDER"] = Path.GetFileName(project.ProjectPath);
         env["GODMODE_PROJECT_NAME"] = project.Status.Name;
+        // The session's id, yymmdd-{kind}-{slug}-{suffix}: its state is in .godmode/sessions/{id}/. During a create, the id
+        // as the action makes it; a kind or project_name in the result file gives the session its final one
+        env["GODMODE_SESSION_ID"] = project.SessionId;
 
         if (resultFilePath != null)
             env["GODMODE_RESULT_FILE"] = resultFilePath;

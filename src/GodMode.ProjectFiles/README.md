@@ -1,95 +1,81 @@
 # GodMode.ProjectFiles
 
-A .NET 10 class library providing utilities for working with project folders and their standard file structures in the Claude Autonomous Development System.
-
-## Overview
-
-This library manages the standardized folder structure for Claude Code projects, handling JSON status files, JSONL event streams, and file watching capabilities.
+A .NET 10 class library for the files GodMode keeps on disk: a root's working folders, and each session's state in them, with its JSON status and JSONL streams.
 
 ## Project Folder Structure
 
-Each project is a folder inside its root. Claude works in the folder itself, and GodMode keeps its state in `.godmode/` (the project's ID is `{profile}/{root}/{project-folder}`):
+Every session has a working folder inside its root, where Claude works, and GodMode keeps the session's state in that folder's `.godmode/sessions/<id>/`. The same layout serves every kind of root: a worktree is a working folder with one session. The session's opaque ID, on the server, is `{profile}/{root}/{id}`.
 
 ```
 {root}/{project-folder}/
 ├── .godmode/
-│   ├── status.json        # Current state, metadata, metrics
-│   ├── settings.json      # Per-project settings (skip-permissions, permission mode, action)
-│   ├── input.jsonl        # Append-only log of user inputs
-│   ├── output.jsonl       # Append-only log of Claude outputs
-│   ├── output-generation  # Changes when output.jsonl starts over
-│   ├── session-id         # Claude session ID for resumption
-│   └── .gitignore         # Keeps .godmode out of git
-└── (project files)        # Claude's working directory
+│   ├── .gitignore               # "*": keeps .godmode out of git
+│   └── sessions/
+│       └── {id}/                # e.g. 260929-feat-left-list-k7q2
+│           ├── status.json      # Current state, metadata, metrics, kind
+│           ├── settings.json    # The session's settings (skip-permissions, permission mode, action)
+│           ├── input.jsonl      # Append-only log of user inputs
+│           ├── output.jsonl     # Append-only log of Claude outputs
+│           ├── output-generation # Changes when output.jsonl starts over
+│           └── session-id       # Claude's session GUID for --resume (not the id)
+└── (project files)              # Claude's working directory
 ```
 
-The usage examples below predate that layout; check `ProjectFolder` for the current API.
+The old flat layout (`.godmode/status.json` directly in `.godmode/`) is no session: nothing here reads it.
 
 ## Core Components
 
-### 1. ProjectFolder
+### 1. SessionState
 
-The main class for managing project folders. Provides methods for:
+Where a session's state is, and its id:
 
-- Creating new projects with initial structure
-- Opening existing projects
-- Reading/writing status.json
-- Appending to input.jsonl and output.jsonl
-- Managing session IDs
-- Reading metrics
-
-**Usage:**
+- `SessionState.Id(createdAt, kind, name, suffix)`: `yymmdd-{kind}-{slug}-{suffix}`. The kind and slug are lowercase `[a-z0-9-]` (`Kind`, `Slug`; `æ`/`ø`/`å` spelled `ae`/`oe`/`aa`, other accents dropped), the kind at most 12 characters (`session` when it has none), the slug at most 24 (left out when the name has none), the suffix 4 random base32 characters (`NewSuffix`). The id is unique only by chance: the server checks its root.
+- `SessionState.IsId(id)`: whether a folder name is an id in that form. No other folder in `sessions/` is a session.
+- `SessionState.PathOf(workingFolder, id)`: `.godmode/sessions/{id}/`.
+- `SessionState.List(workingFolder)`: the ids of the sessions in a working folder, each folder in `sessions/` that is an id and has a `status.json`.
+- `SessionState.Create(workingFolder, id)`: makes the state folder, with the folder's `.godmode/.gitignore` first and empty `input.jsonl` and `output.jsonl`.
 
 ```csharp
-// Create a new project
-using var project = ProjectFolder.Create(
-    rootPath: "/projects",
-    projectId: "my-project",
-    name: "My Project"
-);
-
-// Write initial status
-var status = await project.ReadStatusAsync();
-status = status with { State = ProjectState.Running };
-await project.WriteStatusAsync(status);
-
-// Append output event
-var evt = new OutputEvent(
-    DateTime.UtcNow,
-    OutputEventType.AssistantOutput,
-    "Hello from Claude!",
-    null
-);
-await project.AppendOutputAsync(evt);
-
-// Read new events from offset
-var (events, newOffset) = project.ReadOutputFrom(0);
+var id = SessionState.Id(DateTime.Now, "feat", "Left list", SessionState.NewSuffix()); // 260929-feat-left-list-k7q2
+var state = SessionState.Create("/roots/app/left-list", id);                         // /roots/app/left-list/.godmode/sessions/260929-feat-left-list-k7q2
 ```
 
-### 2. ProjectManager
+### 2. ProjectFolder
 
-Manages project folders across named project roots.
+A root's working folders, and one session's state in one:
 
-**Usage:**
+- `ProjectFolder.Create(rootPath, folderName)` makes a new working folder (`FOLDER_EXISTS` when it is there); `Reuse` takes an existing one. Neither writes a session's state: the server does that once the session's id is final.
+- `ProjectFolder.ValidateFolderName`, `IsReservedFolderName`: a working folder is a folder of its own in the root, not one of the root's own (`.godmode-root`, `logs`, `.archived`), and a name Windows keeps as it is.
+- `ProjectFolder.EnsureGitIgnore(workingFolder)`: `.godmode/.gitignore` ignores everything.
+- `ProjectFolder.Open(workingFolder, sessionId)`: one session's state, to read and write its `status.json` and append to its JSONL streams.
+
+```csharp
+using var session = ProjectFolder.Open("/roots/app/left-list", "260929-feat-left-list-k7q2");
+
+var status = await session.ReadStatusAsync();
+await session.WriteStatusAsync(status with { State = ProjectState.Running });
+
+await session.AppendOutputAsync(new OutputEvent(DateTime.UtcNow, OutputEventType.AssistantOutput, "Hello from Claude!", null));
+var (events, newOffset) = session.ReadOutputFrom(0);
+```
+
+### 3. ProjectManager
+
+Named project roots, and the sessions in their working folders:
 
 ```csharp
 var manager = new ProjectManager(new Dictionary<string, string> { ["work"] = "/projects" });
 
-// List all projects
-var projects = await manager.ListProjectsAsync();
+// Every session in the root's working folders (its own folders left out)
+foreach (var (workingFolder, sessionId) in manager.ListSessions("work")) { /* ... */ }
 
-// Create a project in the "work" root
-var (project, projectId) = manager.CreateProject("work", "My Project");
-project.Dispose();
+// Whether an id is taken in the root: the server's check that an id is unique within its root
+var taken = manager.HasSession("work", "260929-feat-left-list-k7q2");
 
-// Open existing project
-using var existing = manager.OpenProject("project-1");
-
-// Delete a project
-await manager.DeleteProjectAsync("project-1");
+// A display name as a folder name: "My fix" is my_fix
+var folder = ProjectManager.ConvertNameToPath("My fix");
 ```
-
-### 3. JsonlReader
+### 4. JsonlReader
 
 Utility for reading JSONL (JSON Lines) files incrementally.
 
@@ -112,7 +98,7 @@ var (newEvents, newOffset) = JsonlReader.ReadFrom("/path/to/output.jsonl", lastO
 var size = JsonlReader.GetFileSize("/path/to/output.jsonl");
 ```
 
-### 4. JsonlWriter
+### 5. JsonlWriter
 
 Thread-safe writer for JSONL files.
 
@@ -138,7 +124,7 @@ await writer.AppendBatchAsync(events);
 var offset = writer.GetCurrentOffset();
 ```
 
-### 5. ProjectFolderWatcher
+### 6. ProjectFolderWatcher
 
 FileSystemWatcher wrapper for monitoring output.jsonl changes in real-time.
 
@@ -152,7 +138,7 @@ FileSystemWatcher wrapper for monitoring output.jsonl changes in real-time.
 **Usage:**
 
 ```csharp
-using var project = ProjectFolder.Open("/projects/my-project");
+using var project = ProjectFolder.Open("/projects/my-project", "260929-feat-my-project-k7q2");
 using var watcher = new ProjectFolderWatcher(project, startOffset: 0);
 
 // Subscribe to events
@@ -177,7 +163,7 @@ watcher.CheckForChanges();
 watcher.Stop();
 ```
 
-### 6. ProjectJsonContext
+### 7. ProjectJsonContext
 
 JSON source generator context for high-performance serialization.
 
@@ -279,7 +265,7 @@ Thrown when a project folder structure is invalid or corrupted.
 ```csharp
 try
 {
-    using var project = ProjectFolder.Open("/projects/invalid");
+    using var project = ProjectFolder.Open("/projects/invalid", "260929-feat-invalid-k7q2");
 }
 catch (CorruptProjectException ex)
 {
@@ -319,9 +305,13 @@ dotnet build GodMode.ProjectFiles.csproj
 ## Testing Example
 
 ```csharp
-// Create a test project
+// A test session: a working folder, and its state with a status.json
 var testRoot = Path.Combine(Path.GetTempPath(), "test-projects");
-using var project = ProjectFolder.Create(testRoot, "test-1", "Test Project");
+var folder = ProjectFolder.Create(testRoot, "test-1");
+var id = SessionState.Id(DateTime.Now, "test", "Test Project", SessionState.NewSuffix());
+var state = SessionState.Create(folder, id);
+File.WriteAllText(Path.Combine(state, SessionState.StatusFileName), JsonSerializer.Serialize(initialStatus, ProjectJsonContext.Default.ProjectStatus));
+using var project = ProjectFolder.Open(folder, id);
 
 // Write some events
 var evt = new OutputEvent(DateTime.UtcNow, OutputEventType.System, "Starting...", null);
@@ -349,7 +339,7 @@ Directory.Delete(testRoot, true);
 ## Design Patterns
 
 - **Disposable Pattern**: All resource-holding classes implement IDisposable
-- **Factory Methods**: Static Create/Open methods for ProjectFolder
+- **Factory Methods**: Static Create/Reuse (a working folder) and Open (a session's state) on ProjectFolder
 - **Record Types**: Immutable data structures for thread safety
 - **Event-Based Async**: Watcher uses events for notifications
 - **Repository Pattern**: ProjectManager provides high-level project operations

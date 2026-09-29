@@ -380,11 +380,11 @@ public sealed class ProjectLifecycle
     {
         var id = project.Status.Id;
         var replay = new Replay(_hubContext.Clients.Client(connectionId), id, subscriptionId,
-            await OutputLog.GenerationAsync(project.ProjectPath));
+            await OutputLog.GenerationAsync(project.StatePath));
         await _hubContext.Groups.RemoveFromGroupAsync(connectionId, OutputGroup(id));
 
         var from = fromOffset > 0 && generation != replay.Generation ? 0 : fromOffset;
-        var offset = await ReplayAsync(project, replay, await OutputLog.StartAsync(project.ProjectPath, from));
+        var offset = await ReplayAsync(project, replay, await OutputLog.StartAsync(project.StatePath, from));
         // On the consumer, the sends are started in order and not waited for: a subscriber that
         // reads slowly holds up its own subscribe, not the project's output
         var sent = new List<Task>();
@@ -409,7 +409,7 @@ public sealed class ProjectLifecycle
     /// </summary>
     private static async Task<long> ReplayAsync(ProjectInfo project, Replay replay, long offset, List<Task>? sent = null)
     {
-        await foreach (var batch in OutputLog.ReadBatchesAsync(project.ProjectPath, offset))
+        await foreach (var batch in OutputLog.ReadBatchesAsync(project.StatePath, offset))
         {
             var send = replay.Client.OutputBatch(replay.ProjectId, replay.SubscriptionId, replay.Generation, offset, batch);
             if (sent != null) sent.Add(send);
@@ -504,7 +504,7 @@ public sealed class ProjectLifecycle
             _opened = true;
             try
             {
-                _writer = OutputLog.OpenWriter(project.ProjectPath, _end, lifecycle.WrapOutput);
+                _writer = OutputLog.OpenWriter(project.StatePath, _end, lifecycle.WrapOutput);
                 _end = null;
                 return _writer;
             }

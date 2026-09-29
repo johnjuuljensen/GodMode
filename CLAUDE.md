@@ -113,8 +113,8 @@ cd src/GodMode.Client.React && npm test && npm run lint
 
 **Process Management**
 - `ClaudeProcessManager` uses `System.Diagnostics.Process` directly (not CliWrap) for proper stdin handling
-- `--dangerously-skip-permissions` is passed only when the project asks for it (`.godmode/settings.json`) and its root's config, read at that launch, allows it (`allowSkipPermissions`, default false, for every action of the root). Otherwise the project's stored `permissionMode` (else the root's, e.g. `auto`) applies, and approvals go to the permission prompt
-- `ClaudeProcessManager` appends each process's stdout to `.godmode/output.jsonl`, which backfills clients that subscribe later
+- `--dangerously-skip-permissions` is passed only when the project asks for it (its session's `settings.json`) and its root's config, read at that launch, allows it (`allowSkipPermissions`, default false, for every action of the root). Otherwise the project's stored `permissionMode` (else the root's, e.g. `auto`) applies, and approvals go to the permission prompt
+- `ClaudeProcessManager` appends each process's stdout to its session's `output.jsonl` (`.godmode/sessions/{id}/`), which backfills clients that subscribe later
 
 **Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
 - Every request needs a credential, loopback included. One mode per run: codespace (`CODESPACES=true`: a GitHub token of `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`) or API key
@@ -125,17 +125,21 @@ cd src/GodMode.Client.React && npm test && npm run lint
 
 ### Project Folder Structure
 ```
-/root/{project-folder}/
+/root/{project-folder}/            # A session's working folder
 ├── .godmode/
-│   ├── status.json      # Current state, metrics
-│   ├── settings.json    # Per-project settings (skip-permissions, etc.)
-│   ├── input.jsonl      # User input log
-│   ├── output.jsonl     # Claude output stream
-│   ├── session-id       # Claude session ID for resumption
-│   ├── output-generation  # Changes when output.jsonl starts over, so clients drop what they hold
-│   └── .gitignore       # Excludes .godmode state from git
-└── (project files)      # Working directory for Claude
+│   ├── .gitignore                 # "*": all of .godmode stays out of git
+│   └── sessions/
+│       └── {id}/                  # One session's state; id yymmdd-{kind}-{slug}-{suffix}, e.g. 260929-feat-left-list-k7q2
+│           ├── status.json        # Current state, metrics, kind
+│           ├── settings.json      # The session's settings (action, permission mode, skip-permissions asked for)
+│           ├── input.jsonl        # User input log
+│           ├── output.jsonl       # Claude output stream (GodMode's own; Claude's transcripts are not read)
+│           ├── output-generation  # Changes when output.jsonl starts over, so clients drop what they hold
+│           ├── session-id         # Claude's session GUID for --resume (not the id)
+│           └── mcp-config.json    # While claude runs: the session's MCP config, with its token
+└── (project files)                # Working directory for Claude
 ```
+The same layout for every kind of root: a worktree is a working folder with one session (one per folder for now). A session's opaque ID is `{profile}/{root}/{id}`, the id unique within its root. Its kind (`ProjectStatus.Kind`, the app's label) is the create script's `kind=` result, else the action's name. The old flat `.godmode/status.json` is not read or migrated.
 
 ### Project Root Config
 ```
@@ -154,7 +158,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 │       ├── prepare.ps1
 │       ├── delete.ps1
 │       └── status.ps1           # Optional: reports the project's pull request as JSON
-└── {project-folder}/            # Project folders (ID {profile}/{root}/{project-folder})
+└── {project-folder}/            # Working folders, each with its session in .godmode/sessions/{id}/ (ID {profile}/{root}/{id})
 ```
 
 ### Script Constraints (Server Deployment)

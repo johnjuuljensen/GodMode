@@ -1,3 +1,4 @@
+using GodMode.Server.Tests.Lifecycle;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Hosting.Internal;
 using System.Text.Json;
@@ -59,7 +60,9 @@ public class ProjectCreationFromFilesTests
             var status = await projects.CreateProjectAsync(new CreateProjectRequest("team", "shipit", inputs, "issue"));
 
             Assert.Equal("issue_42", status.Name);
-            Assert.Equal("team/shipit/issue_42", status.Id);
+            // The kind is the action's, the slug the name's
+            Assert.Matches(LifecycleHarness.IdPattern("issue-42", kind: "issue", root: "shipit", profile: "team"), status.Id);
+            Assert.Equal("issue", status.Kind);
             var marker = Path.Combine(rootsDir, "shipit", "issue_42", "created-by-script.txt");
             Assert.True(File.Exists(marker), $"create script did not run: no {marker}");
             Assert.Equal("42", File.ReadAllText(marker).Trim());

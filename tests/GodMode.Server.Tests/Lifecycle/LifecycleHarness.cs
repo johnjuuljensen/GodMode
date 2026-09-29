@@ -1,6 +1,9 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using GodMode.FakeClaude;
+using SessionState = GodMode.ProjectFiles.SessionState;
 using GodMode.Server.Auth;
 using GodMode.Server.Models;
 using GodMode.Server.Services;
@@ -199,15 +202,58 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             request[key] = JsonSerializer.SerializeToElement(value);
         var status = await Projects.CreateProjectAsync(new CreateProjectRequest(profile, root, request));
         _projectIds.Add(status.Id);
+        Session(status.Id);
         return status;
     }
 
+    /// <summary>The working folder and id of each session seen tracked, so a deleted one's are still known.</summary>
+    private readonly ConcurrentDictionary<string, (string ProjectPath, string SessionId)> _sessions = new();
+
     /// <summary>
-    /// The folder of a project: <c>{profile}/{root}/{folder}</c> is found in its root's directory
-    /// (a discovered root's name is its directory's); a bare folder name in <see cref="RootPath"/>.
+    /// The working folder of a session, as the server tracks it, or as it did: its ID,
+    /// <c>{profile}/{root}/{id}</c>, does not say where its folder is.
     /// </summary>
-    public string ProjectPath(string projectId) =>
-        projectId.Split('/') is [.., var root, var folder] ? Path.Combine(RootsDir, root, folder) : Path.Combine(RootPath, projectId);
+    public string ProjectPath(string projectId) => Session(projectId).ProjectPath;
+
+    /// <summary>The session's state folder, <c>{working folder}/.godmode/sessions/{id}/</c>.</summary>
+    public string StatePath(string projectId) =>
+        Session(projectId) is var (projectPath, sessionId) ? SessionState.PathOf(projectPath, sessionId) : throw new UnreachableException();
+
+    /// <summary>
+    /// The pattern of the ID of a session created today in <paramref name="root"/> from
+    /// <paramref name="kind"/> (the harness's one action, <c>Create</c>, unless a script names one), named
+    /// <paramref name="slug"/>: <c>{profile}/{root}/yymmdd-{kind}-{slug}-{suffix}</c>.
+    /// </summary>
+    public static string IdPattern(string slug, string kind = "create", string root = RootName, string profile = ProfileName) =>
+        $"^{Regex.Escape($"{profile}/{root}/{DateTime.Now:yyMMdd}-{kind}-{slug}-")}[a-z2-7]{{4}}$";
+
+    /// <summary>An id as the server makes them, for a session a test writes to disk itself.</summary>
+    public const string PlantedSessionId = "260101-create-planted-abcd";
+
+    /// <summary>The ID the server recovers a session planted in this harness's root under.</summary>
+    public static string PlantedId(string sessionId = PlantedSessionId) => $"{ProfileName}/{RootName}/{sessionId}";
+
+    /// <summary>
+    /// Makes the state folder of session <paramref name="sessionId"/> in <paramref name="folder"/>, as a
+    /// server leaves it (<c>.godmode/sessions/{id}/</c>), with <paramref name="status"/> in it when given;
+    /// returns the state folder.
+    /// </summary>
+    public static string PlantSession(string folder, string sessionId = PlantedSessionId, ProjectStatus? status = null)
+    {
+        var state = SessionState.PathOf(folder, sessionId);
+        Directory.CreateDirectory(state);
+        if (status != null)
+            File.WriteAllText(Path.Combine(state, "status.json"), JsonSerializer.Serialize(status, JsonDefaults.Options));
+        return state;
+    }
+
+    private (string ProjectPath, string SessionId) Session(string projectId)
+    {
+        if (((ProjectManager)Projects).Tracked(projectId) is { } tracked)
+            return _sessions[projectId] = (tracked.ProjectPath, tracked.SessionId);
+        return _sessions.TryGetValue(projectId, out var seen) ? seen
+            : throw new InvalidOperationException($"session {projectId} is not tracked, and has not been");
+    }
 
     public IClaudeProcessManager ProcessManager => _services.GetRequiredService<IClaudeProcessManager>();
 
@@ -275,7 +321,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// </summary>
     public ProjectStatus ReadStatusFile(string projectId)
     {
-        var path = Path.Combine(ProjectPath(projectId), ".godmode", "status.json");
+        var path = Path.Combine(StatePath(projectId), "status.json");
         return Retried(() => JsonSerializer.Deserialize<ProjectStatus>(ReadShared(path), JsonDefaults.Options)!);
     }
 
@@ -284,7 +330,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// Windows the file cannot be opened while it is being replaced; that is retried.
     /// </summary>
     public string ReadSessionIdFile(string projectId) =>
-        Retried(() => ReadShared(Path.Combine(ProjectPath(projectId), ".godmode", "session-id")));
+        Retried(() => ReadShared(Path.Combine(StatePath(projectId), "session-id")));
 
     private static T Retried<T>(Func<T> read)
     {
@@ -296,7 +342,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     }
 
     public string ReadOutputFile(string projectId) =>
-        ReadShared(Path.Combine(ProjectPath(projectId), ".godmode", "output.jsonl"));
+        ReadShared(Path.Combine(StatePath(projectId), "output.jsonl"));
 
     /// <summary>Reads a file the server may still hold open for writing (output.jsonl, errs.txt, status.json).</summary>
     internal static string ReadShared(string path)
@@ -362,7 +408,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <summary>Everything a failed wait needs to be diagnosed from the test output alone.</summary>
     public string Describe(string projectId)
     {
-        var godMode = Path.Combine(ProjectPath(projectId), ".godmode");
+        var godMode = StatePath(projectId);
         string Read(string file) => File.Exists(Path.Combine(godMode, file)) ? ReadShared(Path.Combine(godMode, file)) : "(none)";
         var launches = Launches(projectId);
         return $"""

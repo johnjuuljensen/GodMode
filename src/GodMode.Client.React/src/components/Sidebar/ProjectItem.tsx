@@ -1,4 +1,5 @@
 import { useAppStore, type SidebarItem } from '../../store';
+import { KindLabel } from '../KindLabel/KindLabel';
 
 interface Props {
   item: SidebarItem;
@@ -24,7 +25,10 @@ export function ProjectItem({ item, isSelected, onSelect }: Props) {
           {stateLabel}
         </span>
         <div className="project-info">
-          <div className="project-name">{project.Name}</div>
+          <div className="project-name-row">
+            <div className="project-name">{project.Name}</div>
+            <KindLabel kind={project.Kind} />
+          </div>
           <div className="project-meta">
             {serverLabel && `${serverLabel} · `}{project.RootName && `${project.RootName} · `}{timeAgo}
             {isWaiting && project.CurrentQuestion && (

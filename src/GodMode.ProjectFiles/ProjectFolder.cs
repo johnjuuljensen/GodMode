@@ -1,17 +1,17 @@
 using System.Text;
 using System.Text.Json;
-using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 
 
 namespace GodMode.ProjectFiles;
 
 /// <summary>
-/// Represents and manages a project folder with its standard file structure.
+/// A working folder, and one session's state in it (<c>.godmode/sessions/{id}/</c>, see <see cref="SessionState"/>).
 /// </summary>
 public sealed class ProjectFolder : IDisposable
 {
-    private const string GodModeDirectoryName = ".godmode";
+    /// <summary>A working folder's GodMode state: <c>{working folder}/.godmode/</c>, all of it out of git.</summary>
+    public const string GodModeDirectoryName = ".godmode";
     private const string StatusFileName = "status.json";
     private const string InputFileName = "input.jsonl";
     private const string OutputFileName = "output.jsonl";
@@ -57,93 +57,89 @@ public sealed class ProjectFolder : IDisposable
         ReservedFolderNames.Contains(folderName.TrimEnd('.', ' '));
 
     private readonly string _projectPath;
+    private readonly string _sessionId;
     private readonly JsonlWriter _inputWriter;
     private readonly JsonlWriter _outputWriter;
     private readonly SemaphoreSlim _statusLock = new(1, 1);
     private bool _disposed;
 
     /// <summary>
-    /// Gets the full path to the project directory.
+    /// Gets the full path to the working folder, Claude's working directory.
     /// </summary>
     public string ProjectPath => _projectPath;
 
     /// <summary>
-    /// Gets the project's folder name. The server's project ID is <c>{profile}/{root}/{folder}</c>.
+    /// Gets the session's id (<see cref="SessionState"/>). The server's opaque ID is <c>{profile}/{root}/{id}</c>.
     /// </summary>
-    public string ProjectId => Path.GetFileName(_projectPath);
+    public string SessionId => _sessionId;
 
     /// <summary>
-    /// Gets the path to the .godmode directory where all state files are stored.
+    /// Gets the path to the session's state folder, <c>.godmode/sessions/{id}/</c>, where all its state files are.
     /// </summary>
-    public string GodModePath => Path.Combine(_projectPath, GodModeDirectoryName);
+    public string StatePath => SessionState.PathOf(_projectPath, _sessionId);
 
     /// <summary>
     /// Gets the path to the status.json file.
     /// </summary>
-    public string StatusFilePath => Path.Combine(GodModePath, StatusFileName);
+    public string StatusFilePath => Path.Combine(StatePath, StatusFileName);
 
     /// <summary>
     /// Gets the path to the input.jsonl file.
     /// </summary>
-    public string InputFilePath => Path.Combine(GodModePath, InputFileName);
+    public string InputFilePath => Path.Combine(StatePath, InputFileName);
 
     /// <summary>
     /// Gets the path to the output.jsonl file.
     /// </summary>
-    public string OutputFilePath => Path.Combine(GodModePath, OutputFileName);
+    public string OutputFilePath => Path.Combine(StatePath, OutputFileName);
 
     /// <summary>
     /// Gets the path to the metrics.html file.
     /// </summary>
-    public string MetricsFilePath => Path.Combine(GodModePath, MetricsFileName);
+    public string MetricsFilePath => Path.Combine(StatePath, MetricsFileName);
 
-    private ProjectFolder(string projectPath)
+    private ProjectFolder(string projectPath, string sessionId)
     {
         _projectPath = projectPath;
+        _sessionId = sessionId;
         _inputWriter = new JsonlWriter(InputFilePath);
         _outputWriter = new JsonlWriter(OutputFilePath);
     }
 
     /// <summary>
-    /// Creates a new project folder with initial files.
+    /// Creates a new working folder in the root, with nothing in it: its session's state is made
+    /// once its id is known (<see cref="SessionState.Create"/>).
     /// </summary>
-    /// <param name="rootPath">Root directory where project folders are stored.</param>
-    /// <param name="projectId">Unique project identifier (will be used as folder name).</param>
-    /// <param name="name">Human-readable project name.</param>
-    /// <returns>A new ProjectFolder instance.</returns>
-    /// <exception cref="ArgumentException">Thrown when parameters are invalid.</exception>
-    /// <exception cref="IOException">Thrown when project folder already exists or I/O fails.</exception>
-    public static ProjectFolder Create(string rootPath, string projectId, string name)
+    /// <returns>The folder's full path.</returns>
+    /// <exception cref="ArgumentException">The folder name is not a folder of its own (<see cref="ValidateFolderName"/>).</exception>
+    /// <exception cref="IOException">The folder exists.</exception>
+    public static string Create(string rootPath, string folderName)
     {
         if (string.IsNullOrWhiteSpace(rootPath))
             throw new ArgumentException("Root path cannot be empty.", nameof(rootPath));
 
-        ValidateFolderName(projectId, nameof(projectId));
+        ValidateFolderName(folderName, nameof(folderName));
 
-        if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("Project name cannot be empty.", nameof(name));
-
-        var projectPath = Path.Combine(rootPath, projectId);
-
+        var projectPath = Path.Combine(rootPath, folderName);
         if (Directory.Exists(projectPath))
             throw new IOException($"FOLDER_EXISTS:{projectPath}");
 
-        // Create project directory
         Directory.CreateDirectory(projectPath);
-        return InitializeProjectFolder(projectPath, projectId, name);
+        return projectPath;
     }
 
     /// <summary>
-    /// Reuses an existing project directory — reinitializes .godmode state without deleting project files.
+    /// An existing working folder in the root, reused as it is: its files stay, and the new session's
+    /// state is made in its <c>.godmode/sessions/</c>.
     /// </summary>
-    public static ProjectFolder Reuse(string rootPath, string projectId, string name)
+    /// <returns>The folder's full path.</returns>
+    public static string Reuse(string rootPath, string folderName)
     {
-        ValidateFolderName(projectId, nameof(projectId));
-        var projectPath = Path.Combine(rootPath, projectId);
+        ValidateFolderName(folderName, nameof(folderName));
+        var projectPath = Path.Combine(rootPath, folderName);
         if (!Directory.Exists(projectPath))
             throw new DirectoryNotFoundException($"Project folder not found: {projectPath}");
-
-        return InitializeProjectFolder(projectPath, projectId, name);
+        return projectPath;
     }
 
     /// <summary>
@@ -204,67 +200,30 @@ public sealed class ProjectFolder : IDisposable
         File.AppendAllText(gitIgnorePath, separator + GitIgnoreContent);
     }
 
-    private static ProjectFolder InitializeProjectFolder(string projectPath, string projectId, string name)
-    {
-        // Create .godmode directory for all state files
-        var godModePath = Path.Combine(projectPath, GodModeDirectoryName);
-        Directory.CreateDirectory(godModePath);
-
-        // Make .godmode a hidden folder on Windows
-        if (OperatingSystem.IsWindows())
-        {
-            File.SetAttributes(godModePath, File.GetAttributes(godModePath) | FileAttributes.Hidden);
-        }
-
-        EnsureGitIgnore(projectPath);
-
-        // Create initial status
-        var now = DateTime.UtcNow;
-        var initialStatus = new ProjectStatus(
-            Id: projectId,
-            Name: name,
-            State: ProjectState.Idle,
-            CreatedAt: now,
-            UpdatedAt: now,
-            CurrentQuestion: null,
-            Metrics: new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0m),
-            Git: null,
-            Tests: null,
-            OutputOffset: 0
-        );
-
-        var statusPath = Path.Combine(godModePath, StatusFileName);
-        var statusJson = JsonSerializer.Serialize(initialStatus, ProjectJsonContext.Default.ProjectStatus);
-        File.WriteAllText(statusPath, statusJson, Encoding.UTF8);
-
-        // Create empty JSONL files in .godmode
-        File.WriteAllText(Path.Combine(godModePath, InputFileName), string.Empty);
-        File.WriteAllText(Path.Combine(godModePath, OutputFileName), string.Empty);
-
-        return new ProjectFolder(projectPath);
-    }
-
     /// <summary>
-    /// Opens an existing project folder.
+    /// Opens a session's state in an existing working folder.
     /// </summary>
-    /// <param name="projectPath">Path to the project folder.</param>
+    /// <param name="projectPath">Path to the working folder.</param>
+    /// <param name="sessionId">The session's id, its folder in <c>.godmode/sessions/</c>.</param>
     /// <returns>A ProjectFolder instance.</returns>
-    /// <exception cref="DirectoryNotFoundException">Thrown when project folder doesn't exist.</exception>
-    /// <exception cref="FileNotFoundException">Thrown when required files are missing.</exception>
-    public static ProjectFolder Open(string projectPath)
+    /// <exception cref="DirectoryNotFoundException">Thrown when the working folder doesn't exist.</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the session has no status.json.</exception>
+    public static ProjectFolder Open(string projectPath, string sessionId)
     {
         if (string.IsNullOrWhiteSpace(projectPath))
             throw new ArgumentException("Project path cannot be empty.", nameof(projectPath));
 
+        if (!SessionState.IsId(sessionId))
+            throw new ArgumentException($"'{sessionId}' is not a session id.", nameof(sessionId));
+
         if (!Directory.Exists(projectPath))
             throw new DirectoryNotFoundException($"Project folder not found: {projectPath}");
 
-        var godModePath = Path.Combine(projectPath, GodModeDirectoryName);
-        var statusPath = Path.Combine(godModePath, StatusFileName);
+        var statusPath = Path.Combine(SessionState.PathOf(projectPath, sessionId), StatusFileName);
         if (!File.Exists(statusPath))
             throw new FileNotFoundException($"Status file not found: {statusPath}");
 
-        return new ProjectFolder(projectPath);
+        return new ProjectFolder(projectPath, sessionId);
     }
 
     /// <summary>

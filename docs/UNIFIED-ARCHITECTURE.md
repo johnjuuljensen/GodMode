@@ -178,7 +178,7 @@ The hub is the session loop plus reading profiles and roots:
 |---|
 | `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted` |
 
-**A project's ID is `{profile}/{root}/{project-folder}`**, where its folder is, so one folder name in two roots is two projects. Every hub method and callback that names a project takes or gives this ID (`ProjectStatus.Id`, `ProjectSummary.Id`). Clients treat it as opaque and pass it back as they received it; the server derives it from the folder's location on every recovery. Root scripts get the folder name alone, as `GODMODE_PROJECT_FOLDER`.
+**A session's ID is `{profile}/{root}/{id}`**, its id being GodMode's own, `yymmdd-{kind}-{slug}-{suffix}` (`260929-feat-left-list-k7q2`), unique within its root and the name of its state folder (4.3). Every hub method and callback that names a project takes or gives this ID (`ProjectStatus.Id`, `ProjectSummary.Id`). Clients treat it as opaque and pass it back as they received it; the server derives it from where the state folder is on every recovery. Root scripts get the id as `GODMODE_SESSION_ID` and the folder name as `GODMODE_PROJECT_FOLDER`. The session's kind (`ProjectStatus.Kind`, `ProjectSummary.Kind`), which the app shows as a label, is its create script's `kind` result, else its action's name.
 
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
@@ -203,7 +203,7 @@ root-name/
 │       ├── prepare.ps1            # Shared prepare script
 │       ├── delete.ps1             # Shared delete script
 │       └── status.ps1             # Reports the project's pull request (optional)
-└── {project-folder}/              # Projects created from this root
+└── {project-folder}/              # Working folders created from this root, each with its session
 ```
 
 **Merge order**: `config.json` (base) → `config.{action}.json` (overlay). Action overlay wins on conflict.
@@ -227,19 +227,27 @@ Key services:
 
 ### 4.3 Project Folder Structure
 
+The same `.godmode` structure for everything: every session keeps its state in its working folder's `.godmode/sessions/{id}/`, and a worktree is simply a folder with one session.
+
 ```
 {root}/{project-folder}/
 ├── .godmode/
-│   ├── status.json      # Current state, metrics
-│   ├── settings.json    # Per-project settings (action, permission mode, skip-permissions asked for)
-│   ├── input.jsonl      # User input log
-│   ├── output.jsonl     # Claude output stream
-│   ├── session-id       # Claude session ID for resumption
-│   └── .gitignore
-└── (project files)      # Working directory for Claude
+│   ├── .gitignore               # "*"
+│   └── sessions/
+│       └── {id}/                # yymmdd-{kind}-{slug}-{suffix}
+│           ├── status.json      # Current state, metrics, kind
+│           ├── settings.json    # The session's settings (action, permission mode, skip-permissions asked for)
+│           ├── input.jsonl      # User input log
+│           ├── output.jsonl     # Claude output stream, GodMode's own
+│           ├── output-generation
+│           ├── session-id       # Claude's session GUID, for --resume
+│           └── mcp-config.json  # While claude runs, with the session's token
+└── (project files)              # Working directory for Claude
 ```
 
-A project is a folder directly inside its root with a `.godmode/status.json`, unless it is one of the root's own folders (below), which recovery skips. `{project-folder}` is its folder name, not its ID (4.1). The server does not archive or move project folders.
+A session is a folder in `.godmode/sessions/` of a working folder directly inside its root, named as an id is and with a `status.json`, unless the working folder is one of the root's own folders (below), which recovery skips (`SessionState.List`, `ProjectFiles.ProjectManager.ListSessions`). There is one session per working folder for now; the layout and discovery already allow several. `{project-folder}` is its folder name, not its ID (4.1). The old flat layout (`.godmode/status.json`) is neither read nor migrated. The server does not archive or move project folders.
+
+**The id** is `yymmdd-{kind}-{slug}-{suffix}` (`SessionState.Id`): the creation date, the kind, a slug of the name (lowercase `[a-z0-9-]`, 24 characters at most), and 4 random base32 characters. It is short, for Windows' path limits, and unique within its root: a create takes another suffix when a tracked session, a create in progress or a state folder on disk has it. Until the create script has run the kind is the action's name and the slug the name so far; its result (`kind`, `project_name`) gives the final id, with the same date and suffix. Claude's session GUID is not the id: it stays in `session-id`, since GodMode replaces it when a resume finds no conversation. GodMode keeps its own `output.jsonl` and reads no Claude transcript.
 
 **`.godmode/.gitignore` is ensured on every launch** (`ProjectFolder.EnsureGitIgnore`), before the MCP config with the project token is written: created when missing, since a create script's checkout can bring a `.godmode/` without one, and given the `*` rule when it lacks it.
 
@@ -381,7 +389,7 @@ GodMode gives a session one MCP server, its own MCP endpoint (8.2). It configure
 | The repo | its `.mcp.json` (Claude Code's project scope) |
 | The profile's Claude account | user scope in the `CLAUDE_CONFIG_DIR` the profile's or root's `environment` sets |
 
-The server writes the session's MCP config, its own entry alone, to `.godmode/mcp-config.json` in the project (owner-only where the OS allows) and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
+The server writes the session's MCP config, its own entry alone, to `mcp-config.json` in the session's state folder, `.godmode/sessions/{id}/` (owner-only where the OS allows) and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
 
 **Nothing is pre-approved.** GodMode passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (8.2), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's permission mode lets it through, or the project runs with skip-permissions, which only a root with `allowSkipPermissions` allows (4.2).
 
@@ -499,7 +507,7 @@ An empty `Authentication:ApiKey` means the key file's (Section 4.4). The sources
 
 When building a new feature on GodMode:
 
-1. **Check the design principles** (Section 5). Does your feature keep its state in files on disk (a root's `.godmode-root/`, a project's `.godmode/`), read fresh? Does it avoid shadow state and in-app config authoring?
+1. **Check the design principles** (Section 5). Does your feature keep its state in files on disk (a root's `.godmode-root/`, a session's `.godmode/sessions/{id}/`), read fresh? Does it avoid shadow state and in-app config authoring?
 
 2. **Choose the right layer**:
    - Server-side logic → `GodMode.Server/Services/`

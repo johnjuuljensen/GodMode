@@ -9,7 +9,7 @@ SignalR server for GodMode. It runs Claude Code sessions in project folders on t
 - **Config-Driven Project Roots**: Roots from the server's config (scan folders and explicit roots), with per-action config overlays
 - **Script-Based Creation**: VCS-agnostic — all prepare/create/delete logic lives in scripts, not server code
 - **Cross-Platform Scripts**: Write `.ps1` scripts once; they run under `pwsh` on Windows and Linux
-- **State Persistence**: Project state lives in each project's `.godmode/` folder and is recovered on restart
+- **State Persistence**: Each session's state lives in its working folder's `.godmode/sessions/<id>/` and is recovered on restart
 - **Permission prompts**: Every session asks the user for permission through the server's own MCP endpoint, `/mcp`, whose one tool is claude's `--permission-prompt-tool`
 
 ## Configuration
@@ -160,7 +160,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
     │       ├── prepare.ps1           # Shared prepare script
     │       ├── delete.ps1            # Shared delete script
     │       └── status.ps1            # Reports the project's pull request (optional)
-    └── {project-folder}/             # Projects created from this root (ID {profile}/{root}/{project-folder})
+    └── {project-folder}/             # Working folders created from this root, each with its session in .godmode/sessions/<id>/ (ID {profile}/{root}/{id})
 ```
 
 `.devcontainer/godmode-server/roots/godmode-dev/` in this repository is a complete example.
@@ -260,7 +260,7 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 **`permissionMode`** is the normal way to let a session work unattended. It is passed as `--permission-mode <mode>`, beside the permission prompt, which stays: what the mode does not decide still reaches the user.
 
 - **Values:** `acceptEdits`, `auto`, `manual`, `dontAsk` and `plan`, in any case (passed as claude spells them). `bypassPermissions` is refused: skipping is `allowSkipPermissions`' to allow. Any other value is a config error in the file that has it: a create fails, naming the file and the value, before anything is written; the roots listing leaves that action out (or, in `config.json`, lists the root as the default config); a resume fails as it does for any config it cannot read.
-- **Kept with the project.** A create stores the action's mode in the project's `.godmode/settings.json` (`permissionMode`), and every launch of it uses that one, even after the root's config has changed. A project with none stored, such as one created before the root had a mode, takes the root's current one. The stored one is checked again at each launch, since the session can write that file: an unknown one, or `bypassPermissions`, is left out, with a warning.
+- **Kept with the project.** A create stores the action's mode in the session's `settings.json` (in `.godmode/sessions/<id>/`, `permissionMode`), and every launch of it uses that one, even after the root's config has changed. A project with none stored, such as one created before the root had a mode, takes the root's current one. The stored one is checked again at each launch, since the session can write that file: an unknown one, or `bypassPermissions`, is left out, with a warning.
 - **Skip-permissions overrides it:** a project that runs with skip is launched without `--permission-mode`, with a warning.
 - **Measured with claude 2.1.282 on Windows**, for six requests (Bash `echo hello > probe.txt`, a Write, an Edit, a WebFetch, Bash `curl -s -o page.html …`, Bash `rm -f …` in the project), each answered Allow where it was asked:
   - `manual` (or no mode): all six reached the permission prompt.
@@ -289,7 +289,7 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 ```
 
 - **The URL** is an address this machine reaches the server on, from the addresses it is bound to: a loopback binding first, a wildcard's `127.0.0.1` next, else the one IP bound.
-- **The token** is issued afresh for each launch and lives only in memory and in this file. The file is `.godmode/mcp-config.json` in the project, owner-only where the OS allows, and is deleted when the process exits. No environment variable carries it.
+- **The token** is issued afresh for each launch and lives only in memory and in this file. The file is `mcp-config.json` in the session's state folder (`.godmode/sessions/<id>/`), owner-only where the OS allows, and is deleted when the process exits. No environment variable carries it.
 - **Only a project token opens `/mcp`**, and only for the project it was issued to. The user's API key does not, and a project token opens nothing else: not the hub, not `/api/*`.
 - **The tool** takes claude's flat arguments, `tool_name`, `input` (an object) and `tool_use_id` (optional). It waits until the user answers, however long that takes, and returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}` as text.
 - **While it waits,** it sends a progress notification every `PermissionPromptKeepAliveSeconds` (default 30). claude gives up on a tool call that sends no response or progress for 300 seconds.
@@ -338,8 +338,9 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 |----------|-------------|
 | `GODMODE_ROOT_PATH` | Root directory path |
 | `GODMODE_PROJECT_PATH` | Project directory path |
-| `GODMODE_PROJECT_FOLDER` | The project's folder name, the last segment of `GODMODE_PROJECT_PATH`. Not the project's ID, which is `{profile}/{root}/{folder}` (see below); no script is given that |
+| `GODMODE_PROJECT_FOLDER` | The project's folder name, the last segment of `GODMODE_PROJECT_PATH`. Not the session's ID, which is `{profile}/{root}/{id}` (see below); no script is given that |
 | `GODMODE_PROJECT_NAME` | Display name |
+| `GODMODE_SESSION_ID` | The session's id, `yymmdd-<kind>-<slug>-<suffix>` (see [Project Folder Structure](#project-folder-structure)): its state is in `$GODMODE_PROJECT_PATH/.godmode/sessions/<id>/`. A create script is given the id as its action makes it (the action's name as the kind, the name as it was asked for); a `kind` or `project_name` in its result gives the session its final one, with the same date and suffix |
 | `GODMODE_INPUT_*` | All form inputs (key in upper snake case, e.g. `GODMODE_INPUT_ISSUE_NUMBER`) |
 | `GODMODE_RESULT_FILE` | Create scripts only: a file the script can write `key=value` lines to (see below) |
 | `GODMODE_FORCE` | Delete scripts only: `true` when the user forced the delete |
@@ -347,7 +348,21 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 
 See [Environment](#environment) for everything else a script gets.
 
-A create script can override the project's `project_path`, `project_name` or `project_prompt` by writing them to `GODMODE_RESULT_FILE`, one `key=value` per line. The last key may span several lines, which suits a multiline prompt.
+A create script can override the project's `project_path`, `project_name` or `project_prompt`, and name the session's `kind`, by writing them to `GODMODE_RESULT_FILE`, one `key=value` per line. The last key may span several lines, which suits a multiline prompt.
+
+| Key | What it sets |
+|-----|--------------|
+| `project_path` | The working folder, strictly inside the root (see [Project Folder Structure](#project-folder-structure)) |
+| `project_name` | The display name, and the id's slug |
+| `project_prompt` | The first prompt |
+| `kind` | The session's kind (`bug`, `feat`, `experiment`, `chat`…): the label the app shows, and the id's kind. Without one, the kind is the action's name. Kept as the id has it: lowercase `[a-z0-9-]`, 12 characters at most |
+
+For example, an issue script that names the kind from the issue's labels:
+
+```powershell
+$kind = if ($labels -contains 'epic') { 'epic' } elseif ($labels -contains 'bug') { 'bug' } else { 'feat' }
+"kind=$kind" | Add-Content $env:GODMODE_RESULT_FILE
+```
 
 Script stdout is streamed to the client as creation progress. Non-zero exit code aborts creation.
 
@@ -429,28 +444,33 @@ A project's state follows claude, whatever else fails:
 
 ## Project Folder Structure
 
-Each project is stored in a folder under its root:
+Every session has a working folder under its root, and keeps its state in that folder's `.godmode/sessions/<id>/`. The same layout serves every kind of root: a worktree is a working folder with one session. There is one session per working folder for now.
 
 ```
 {root}/{folder}/
 ├── .godmode/
-│   ├── status.json      # Current project state
-│   ├── settings.json    # Per-project settings (action, permission mode, skip-permissions asked for)
-│   ├── input.jsonl      # User input log
-│   ├── output.jsonl     # Claude output log
-│   ├── output-generation # A GUID, new on each create: which output.jsonl a client's offset is in
-│   ├── session-id       # Claude session ID for resumption
-│   └── .gitignore       # Excludes all .godmode state from git
-└── (project files)      # Working directory for Claude
+│   ├── .gitignore               # "*": everything in .godmode is out of git
+│   └── sessions/
+│       └── {id}/                # One session's state, e.g. 260929-feat-left-list-k7q2
+│           ├── status.json      # Current state
+│           ├── settings.json    # The session's settings (action, permission mode, skip-permissions asked for)
+│           ├── input.jsonl      # User input log
+│           ├── output.jsonl     # Claude output log (GodMode's own; Claude's transcripts are not read)
+│           ├── output-generation # A GUID, new on each create: which output.jsonl a client's offset is in
+│           ├── session-id       # Claude's session GUID, for --resume
+│           └── mcp-config.json  # While claude runs: the session's MCP config, with its token
+└── (project files)              # Working directory for Claude
 ```
 
-**`.godmode/.gitignore` ignores everything in `.godmode`**, which holds the MCP config with the project's token while claude runs. The server makes sure of it when it sets up the project and on every launch, before it writes that config: it writes the file when missing (a checkout can bring a `.godmode/` without one), and appends the `*` rule to one that lacks it, keeping its lines.
+**`.godmode/.gitignore` ignores everything in `.godmode`**, which holds the MCP config with the session's token while claude runs. The server makes sure of it when it sets up the session and on every launch, before it writes that config: it writes the file when missing (a checkout can bring a `.godmode/` without one), and appends the `*` rule to one that lacks it, keeping its lines.
 
-A project is a folder directly inside its root that has a `.godmode/status.json`, other than a folder the root keeps for itself (below): a `logs/.godmode/status.json` from before those names were refused is not recovered, so it is never listed, resumed or deleted. Nothing deeper is recovered, and the server moves no project folder anywhere.
+**A session is a folder in `.godmode/sessions/`** of a working folder directly inside its root, named as an id is (below), with a `status.json` in it. A folder the root keeps for itself (below) is no working folder: a `logs/.godmode/sessions/…` from before those names were refused is not recovered, so it is never listed, resumed or deleted. Nothing deeper is recovered, and the server moves no folder anywhere. **The old flat layout is not read:** a `.godmode/status.json` directly in `.godmode/` is no session, and nothing migrates it. An id found in two working folders of one root (a folder copied) is recovered from the first, in ordinal order, and the other is logged and left untracked.
 
-**Project ID.** A project is identified by `{profile}/{root}/{folder}`: where its folder is. Two projects with the same name in different roots or profiles are separate projects, with their own process, output and SignalR group. Clients treat the ID as opaque and pass it back as they received it. The server derives it from the folder's location on every start and writes it to `status.json`, so a folder that was moved, or whose root has moved to another profile, is recovered under its current ID. Nothing else in `.godmode` holds the ID.
+**Session ID.** A session's id is GodMode's own, `yymmdd-<kind>-<slug>-<suffix>`: the server's local date when it was created, its kind, a slug of its name (lowercase `[a-z0-9-]`, with `æ`/`ø`/`å` spelled `ae`/`oe`/`aa` and other accents dropped, at most 24 characters, and left out when the name has none), and 4 random base32 characters. It is short, for Windows' path limits, and unique within its root: a create picks another suffix when a tracked session, a create in progress, or a state folder on disk in one of the root's working folders has it. It is not Claude's session GUID, which is in `session-id`: GodMode replaces that when a resume finds no conversation.
 
-The folder name comes from the project's name: spaces become underscores, characters that are invalid in a file name are dropped, and so are trailing dots, which Windows drops from a folder name (`foo.` is the folder `foo`, and its ID ends in `foo`). A name that leaves no folder of its own (empty, `.`, `..`, or dots only) is refused before anything is created or run. So is a folder name, reused or returned by a script, that ends in a dot or a space, and a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, with or without an extension: `nul.txt`), on every OS, so a root's projects are the same on every host.
+**The session's opaque ID** is `{profile}/{root}/{id}`. Two sessions with one name in different roots or profiles are separate, with their own process, output and SignalR group, and so are two with one name in one root on one day. Clients treat the ID as opaque and pass it back as they received it. The server derives it from where the state folder is on every start and writes it to `status.json`, so a session whose root has moved to another profile is recovered under its current ID. Nothing else in `.godmode` holds the ID. The session's kind (`ProjectStatus.Kind`, `ProjectSummary.Kind`) is the create script's `kind`, else the action's name, and the app shows it as a label on the session's row and tile.
+
+The folder name comes from the project's name: spaces become underscores, characters that are invalid in a file name are dropped, and so are trailing dots, which Windows drops from a folder name (`foo.` is the folder `foo`). A name that leaves no folder of its own (empty, `.`, `..`, or dots only) is refused before anything is created or run. So is a folder name, reused or returned by a script, that ends in a dot or a space, and a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, with or without an extension: `nul.txt`), on every OS, so a root's projects are the same on every host.
 
 A create script's `project_path` must be strictly inside the script's own root: not the root, not above it, not in a sibling root or anywhere else. Links are followed where the OS allows, so a link in the root to a folder elsewhere is that folder, and refused.
 

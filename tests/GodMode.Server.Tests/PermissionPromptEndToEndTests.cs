@@ -119,8 +119,8 @@ public class PermissionPromptEndToEndTests
             Assert.Null(idle.PendingQuestion);
 
             // What the fake got back is what the tool hands claude
-            var folder = created.Id.Split('/')[^1];
-            var launch = Assert.Single(FakeRecording.Read(Path.Combine(workDir, "roots", Root, folder, "fake-claude.jsonl")));
+            var folder = ServerProcess.WorkingFolderOf(Path.Combine(workDir, "roots", Root), created.Id);
+            var launch = Assert.Single(FakeRecording.Read(Path.Combine(folder, "fake-claude.jsonl")));
             Assert.Equal(3, launch.Permissions.Count);
 
             // The one tool, with the flat arguments claude calls it with

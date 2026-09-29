@@ -1,10 +1,7 @@
-using GodMode.Shared.Enums;
-using GodMode.Shared.Models;
-
 namespace GodMode.ProjectFiles;
 
 /// <summary>
-/// Manager for discovering and managing multiple project folders across named project roots.
+/// Named project roots, and the sessions in their working folders.
 /// VCS-agnostic — all creation logic lives in scripts, not here.
 /// </summary>
 public sealed class ProjectManager
@@ -66,136 +63,39 @@ public sealed class ProjectManager
         => _projectRoots.Select(kvp => (kvp.Key, kvp.Value));
 
     /// <summary>
-    /// Lists all project folders across all project roots.
-    /// </summary>
-    /// <returns>Array of project folder paths.</returns>
-    public string[] ListProjectPaths()
-    {
-        var paths = new List<string>();
-
-        foreach (var rootPath in _projectRoots.Values)
-        {
-            if (!Directory.Exists(rootPath))
-                continue;
-
-            paths.AddRange(
-                Directory.GetDirectories(rootPath)
-                    .Where(IsValidProjectFolder)
-            );
-        }
-
-        return paths.ToArray();
-    }
-
-    /// <summary>
-    /// Lists all project folders in a specific project root.
+    /// The sessions in a root: in each of its working folders (its immediate subfolders but its own,
+    /// <see cref="ProjectFolder.ReservedFolderNames"/>), each of <see cref="SessionState.List"/>.
     /// </summary>
     /// <param name="rootName">The name of the project root.</param>
-    /// <returns>Array of project folder paths.</returns>
-    public string[] ListProjectPaths(string rootName)
+    public IReadOnlyList<(string WorkingFolder, string SessionId)> ListSessions(string rootName)
     {
         var rootPath = GetProjectRootPath(rootName);
-
         if (!Directory.Exists(rootPath))
-            return Array.Empty<string>();
+            return [];
 
         return Directory.GetDirectories(rootPath)
-            .Where(IsValidProjectFolder)
+            // A folder the root keeps for itself is never a working folder, even one with sessions in
+            // it from before such names were refused: a delete would delete the root's config or its logs
+            .Where(folder => !ProjectFolder.IsReservedFolderName(Path.GetFileName(folder)))
+            .SelectMany(folder => SessionState.List(folder).Select(id => (folder, id)))
             .ToArray();
     }
 
     /// <summary>
-    /// Lists all project summaries across all project roots.
+    /// Whether a working folder of the root has a session with <paramref name="sessionId"/>, on disk
+    /// (with a status.json or not): an id is unique within its root.
     /// </summary>
-    /// <returns>Array of project summaries.</returns>
-    public ProjectSummary[] ListProjects()
+    public bool HasSession(string rootName, string sessionId)
     {
-        var projectPaths = ListProjectPaths();
-        var summaries = new List<ProjectSummary>();
-
-        foreach (var path in projectPaths)
-        {
-            try
-            {
-                using var project = ProjectFolder.Open(path);
-                var status = project.ReadStatus();
-                summaries.Add(new ProjectSummary(
-                    status.Id,
-                    status.Name,
-                    status.State,
-                    status.UpdatedAt,
-                    status.CurrentQuestion
-                ));
-            }
-            catch
-            {
-                // Skip invalid projects
-                continue;
-            }
-        }
-
-        return summaries.OrderByDescending(p => p.UpdatedAt).ToArray();
-    }
-
-    /// <summary>
-    /// Lists all project summaries asynchronously.
-    /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Array of project summaries.</returns>
-    public async Task<ProjectSummary[]> ListProjectsAsync(CancellationToken cancellationToken = default)
-    {
-        var projectPaths = ListProjectPaths();
-        var summaries = new List<ProjectSummary>();
-
-        foreach (var path in projectPaths)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            try
-            {
-                using var project = ProjectFolder.Open(path);
-                var status = await project.ReadStatusAsync(cancellationToken);
-                summaries.Add(new ProjectSummary(
-                    status.Id,
-                    status.Name,
-                    status.State,
-                    status.UpdatedAt,
-                    status.CurrentQuestion
-                ));
-            }
-            catch
-            {
-                // Skip invalid projects
-                continue;
-            }
-        }
-
-        return summaries.OrderByDescending(p => p.UpdatedAt).ToArray();
-    }
-
-    /// <summary>
-    /// Creates a new project in the specified project root.
-    /// VCS-agnostic — just creates the folder with .godmode state.
-    /// </summary>
-    /// <param name="rootName">The name of the project root.</param>
-    /// <param name="name">Human-readable project name.</param>
-    /// <returns>A new ProjectFolder instance and the project ID.</returns>
-    /// <exception cref="ArgumentException">Thrown when required parameters are missing.</exception>
-    public (ProjectFolder Folder, string ProjectId) CreateProject(string rootName, string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("Project name cannot be empty.", nameof(name));
-
         var rootPath = GetProjectRootPath(rootName);
-        var projectId = ConvertNameToPath(name);
-        var folder = ProjectFolder.Create(rootPath, projectId, name);
-        return (folder, projectId);
+        return Directory.Exists(rootPath)
+            && Directory.GetDirectories(rootPath).Any(folder => Directory.Exists(SessionState.PathOf(folder, sessionId)));
     }
 
     /// <summary>
     /// Converts a display name to a path-safe project folder name.
     /// Spaces become underscores; invalid filename characters are removed, and so are trailing dots,
-    /// which Windows drops from a folder name (<c>foo.</c> is the folder <c>foo</c>, so its ID is too).
+    /// which Windows drops from a folder name (<c>foo.</c> is the folder <c>foo</c>).
     /// </summary>
     /// <exception cref="ArgumentException">
     /// The name leaves no folder of its own: empty once cleaned, or dots only (<c>.</c>, <c>..</c>).
@@ -211,183 +111,5 @@ public sealed class ProjectManager
             cleaned = cleaned.TrimEnd('.');
         ProjectFolder.ValidateFolderName(cleaned, nameof(name));
         return cleaned;
-    }
-
-    /// <summary>
-    /// Converts a path-safe project ID back to a display name.
-    /// Convention: underscores become spaces.
-    /// </summary>
-    public static string ConvertPathToName(string path)
-    {
-        return path.Replace('_', ' ');
-    }
-
-    /// <summary>
-    /// Opens an existing project by ID, searching across all project roots.
-    /// </summary>
-    /// <param name="projectId">The project ID.</param>
-    /// <returns>A ProjectFolder instance.</returns>
-    /// <exception cref="DirectoryNotFoundException">Thrown when project doesn't exist.</exception>
-    public ProjectFolder OpenProject(string projectId)
-    {
-        if (string.IsNullOrWhiteSpace(projectId))
-            throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
-
-        var projectPath = FindProjectPath(projectId);
-        if (projectPath == null)
-            throw new DirectoryNotFoundException($"Project '{projectId}' not found in any project root.");
-
-        return ProjectFolder.Open(projectPath);
-    }
-
-    /// <summary>
-    /// Opens an existing project by ID in a specific project root.
-    /// </summary>
-    /// <param name="rootName">The name of the project root.</param>
-    /// <param name="projectId">The project ID.</param>
-    /// <returns>A ProjectFolder instance.</returns>
-    /// <exception cref="DirectoryNotFoundException">Thrown when project doesn't exist.</exception>
-    public ProjectFolder OpenProject(string rootName, string projectId)
-    {
-        if (string.IsNullOrWhiteSpace(projectId))
-            throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
-
-        var rootPath = GetProjectRootPath(rootName);
-        var projectPath = Path.Combine(rootPath, projectId);
-        return ProjectFolder.Open(projectPath);
-    }
-
-    /// <summary>
-    /// Checks if a project exists in any project root.
-    /// </summary>
-    /// <param name="projectId">The project ID.</param>
-    /// <returns>True if project exists and is valid.</returns>
-    public bool ProjectExists(string projectId)
-    {
-        if (string.IsNullOrWhiteSpace(projectId))
-            return false;
-
-        return FindProjectPath(projectId) != null;
-    }
-
-    /// <summary>
-    /// Finds the full path to a project by searching all project roots.
-    /// </summary>
-    /// <param name="projectId">The project ID.</param>
-    /// <returns>The full path to the project, or null if not found.</returns>
-    public string? FindProjectPath(string projectId)
-    {
-        foreach (var rootPath in _projectRoots.Values)
-        {
-            var projectPath = Path.Combine(rootPath, projectId);
-            if (IsValidProjectFolder(projectPath))
-                return projectPath;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Deletes a project folder and all its contents.
-    /// </summary>
-    /// <param name="projectId">The project ID.</param>
-    /// <param name="force">If true, deletes even if project is in running state.</param>
-    /// <exception cref="InvalidOperationException">Thrown when trying to delete a running project without force.</exception>
-    public void DeleteProject(string projectId, bool force = false)
-    {
-        if (string.IsNullOrWhiteSpace(projectId))
-            throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
-
-        var projectPath = FindProjectPath(projectId);
-        if (projectPath == null)
-            return;
-
-        if (!force)
-        {
-            // Check if project is running
-            try
-            {
-                using var project = ProjectFolder.Open(projectPath);
-                var status = project.ReadStatus();
-                if (status.State == ProjectState.Running)
-                {
-                    throw new InvalidOperationException(
-                        $"Cannot delete running project '{projectId}'. Stop the project first or use force=true.");
-                }
-            }
-            catch (Exception ex) when (ex is not InvalidOperationException)
-            {
-                // If we can't read status, allow deletion
-            }
-        }
-
-        Directory.Delete(projectPath, recursive: true);
-    }
-
-    /// <summary>
-    /// Deletes a project folder asynchronously.
-    /// </summary>
-    /// <param name="projectId">The project ID.</param>
-    /// <param name="force">If true, deletes even if project is in running state.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    public async Task DeleteProjectAsync(string projectId, bool force = false, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(projectId))
-            throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
-
-        var projectPath = FindProjectPath(projectId);
-        if (projectPath == null)
-            return;
-
-        if (!force)
-        {
-            // Check if project is running
-            try
-            {
-                using var project = ProjectFolder.Open(projectPath);
-                var status = await project.ReadStatusAsync(cancellationToken);
-                if (status.State == ProjectState.Running)
-                {
-                    throw new InvalidOperationException(
-                        $"Cannot delete running project '{projectId}'. Stop the project first or use force=true.");
-                }
-            }
-            catch (Exception ex) when (ex is not InvalidOperationException)
-            {
-                // If we can't read status, allow deletion
-            }
-        }
-
-        await Task.Run(() => Directory.Delete(projectPath, recursive: true), cancellationToken);
-    }
-
-    /// <summary>
-    /// Gets the full path for a project ID by searching all project roots.
-    /// </summary>
-    /// <param name="projectId">The project ID.</param>
-    /// <returns>Full path to the project folder.</returns>
-    /// <exception cref="DirectoryNotFoundException">Thrown when project is not found.</exception>
-    public string GetProjectPath(string projectId)
-    {
-        if (string.IsNullOrWhiteSpace(projectId))
-            throw new ArgumentException("Project ID cannot be empty.", nameof(projectId));
-
-        return FindProjectPath(projectId)
-            ?? throw new DirectoryNotFoundException($"Project '{projectId}' not found in any project root.");
-    }
-
-    private static bool IsValidProjectFolder(string path)
-    {
-        if (!Directory.Exists(path))
-            return false;
-
-        // A folder the root keeps for itself is never a project's, even one with a status.json from
-        // before such names were refused: a delete of it would delete the root's config or its logs
-        if (ProjectFolder.IsReservedFolderName(Path.GetFileName(path)))
-            return false;
-
-        // Check for required files in .godmode subfolder
-        var statusFile = Path.Combine(path, ".godmode", "status.json");
-        return File.Exists(statusFile);
     }
 }

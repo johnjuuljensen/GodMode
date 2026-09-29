@@ -110,8 +110,10 @@ internal sealed class TestServer : IAsyncDisposable
     /// <summary>What the fake claude of a project read from its stdin, over all its launches.</summary>
     public IReadOnlyList<string> StdinOf(string projectId)
     {
-        var folder = projectId.Split('/')[^1];
-        return [.. FakeRecording.Read(Path.Combine(RootPath, folder, RecordFileName)).SelectMany(l => l.Stdin)];
+        // The working folder with the session's state in it: .godmode/sessions/{id}/, its id the ID's last part
+        var id = projectId.Split('/')[^1];
+        var folder = Directory.GetDirectories(RootPath).Single(f => Directory.Exists(Path.Combine(f, ".godmode", "sessions", id)));
+        return [.. FakeRecording.Read(Path.Combine(folder, RecordFileName)).SelectMany(l => l.Stdin)];
     }
 
     public async ValueTask DisposeAsync()
