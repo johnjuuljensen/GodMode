@@ -48,6 +48,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private readonly CapturingLoggerProvider _logs = new();
     private readonly McpHost? _mcp;
     private readonly AuthSettings? _auth;
+    private readonly Func<IRootConfigReader, IRootConfigReader>? _rootConfigReader;
 
     /// <summary>The setting of the harness's scan folder, <see cref="RootsDir"/>.</summary>
     public const string ScanSetting = $"{RootSources.ScanSection}:test";
@@ -83,6 +84,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <param name="mcpEndpoint">Serve the MCP endpoint (<see cref="McpHost"/>), so a fake's <c>permission</c> step reaches the server.</param>
     /// <param name="configFiles">JSON config files after the settings, in order, as the instance's file comes after appsettings.</param>
     /// <param name="auth">The server's authentication settings, as the start resolved them (its key file, say); none when null.</param>
+    /// <param name="rootConfigReader">Wraps the server's reader of root configs, so a test can act between two of its reads.</param>
     public LifecycleHarness(
         FakeScript script,
         IReadOnlyDictionary<string, object>? rootConfig = null,
@@ -91,9 +93,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         IReadOnlyDictionary<string, string>? profileEnvironment = null,
         bool mcpEndpoint = false,
         IReadOnlyList<string>? configFiles = null,
-        AuthSettings? auth = null)
+        AuthSettings? auth = null,
+        Func<IRootConfigReader, IRootConfigReader>? rootConfigReader = null)
     {
         _auth = auth;
+        _rootConfigReader = rootConfigReader;
         _workDir = ServerProcess.CreateWorkDir("lifecycle");
         RootsDir = Path.Combine(_workDir, "roots");
         RootPath = Path.Combine(RootsDir, RootName);
@@ -120,7 +124,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         var builder = new ConfigurationBuilder().AddInMemoryCollection(configuration);
         foreach (var file in configFiles ?? []) builder.AddJsonFile(file, optional: false);
         _configuration = builder.Build();
-        _services = BuildServices(_configuration, _logs, Hub, _auth);
+        _services = BuildServices(_configuration, _logs, Hub, _auth, _rootConfigReader);
         Projects = _services.GetRequiredService<IProjectManager>();
     }
 
@@ -135,7 +139,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         StopHost();
         _stopped.Add(_services);
         Hub = new RecordingHubContext();
-        _services = BuildServices(_configuration, _logs, Hub, _auth);
+        _services = BuildServices(_configuration, _logs, Hub, _auth, _rootConfigReader);
         Projects = _services.GetRequiredService<IProjectManager>();
         await Projects.RecoverProjectsAsync();
         if (resume) await Projects.ResumeInterruptedProjectsAsync();
@@ -166,7 +170,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         File.WriteAllText(Path.Combine(godModeRoot, "config.json"), JsonSerializer.Serialize(config));
     }
 
-    private static ServiceProvider BuildServices(IConfiguration configuration, ILoggerProvider logs, RecordingHubContext hub, AuthSettings? auth)
+    private static ServiceProvider BuildServices(IConfiguration configuration, ILoggerProvider logs, RecordingHubContext hub, AuthSettings? auth,
+        Func<IRootConfigReader, IRootConfigReader>? wrapRootConfigReader)
     {
         var services = new ServiceCollection();
         if (auth != null) services.AddSingleton(auth);
@@ -181,7 +186,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         services.AddSingleton<FailingSaves>();
         services.AddSingleton<IStatusUpdater>(provider => provider.GetRequiredService<FailingSaves>());
         services.AddSingleton<ProjectLifecycle>();
-        services.AddSingleton<IRootConfigReader, RootConfigReader>();
+        services.AddSingleton<RootConfigReader>();
+        services.AddSingleton<IRootConfigReader>(provider =>
+            wrapRootConfigReader is null ? provider.GetRequiredService<RootConfigReader>() : wrapRootConfigReader(provider.GetRequiredService<RootConfigReader>()));
         services.AddSingleton<IScriptRunner, ScriptRunner>();
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
@@ -272,6 +279,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// started, until <see cref="LaunchHold.Release"/>.
     /// </summary>
     public LaunchHold HoldNextLaunch() => _services.GetRequiredService<HoldingProcessManager>().HoldNext();
+
+    /// <summary>How many launches (creates' and resumes') of the project have been asked of the process manager, whether or not their process has started yet.</summary>
+    public int LaunchesAsked(string projectId) => _services.GetRequiredService<HoldingProcessManager>().Asked(projectId);
 
     /// <summary>Opens a client connection to the hub.</summary>
     public HarnessConnection Connect(string connectionId) =>
@@ -436,8 +446,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private sealed class HoldingProcessManager(ClaudeProcessManager inner) : IClaudeProcessManager
     {
         private LaunchHold? _next;
+        private readonly ConcurrentQueue<string> _asked = new();
 
         public LaunchHold HoldNext() => _next = new LaunchHold();
+
+        public int Asked(string projectId) => _asked.Count(id => id == projectId);
 
         private async Task PassAsync()
         {
@@ -447,6 +460,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         public async Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
             Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null)
         {
+            _asked.Enqueue(project.Status.Id);
             await PassAsync();
             return await inner.StartClaudeProcessAsync(project, initialPrompt, cancellationToken, extraEnvironment, extraArgs);
         }
@@ -454,6 +468,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         public async Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken,
             Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null)
         {
+            _asked.Enqueue(project.Status.Id);
             await PassAsync();
             return await inner.ResumeClaudeProcessAsync(project, cancellationToken, extraEnvironment, extraArgs);
         }
