@@ -87,7 +87,8 @@ internal static class SingleInstance
                 "Single instance: the app is running (process {Pid}, may take the foreground: {Foreground}); handed off this start [{Args}], exiting",
                 pid, foreground, string.Join(' ', args));
         }
-        catch (Exception ex) when (ex is TimeoutException or IOException)
+        // UnauthorizedAccessException: a pipe of that name that isn't this user's
+        catch (Exception ex) when (ex is TimeoutException or IOException or UnauthorizedAccessException)
         {
             logger.LogWarning(ex, "Single instance: the app holds the mutex but took no hand-off; exiting");
         }
