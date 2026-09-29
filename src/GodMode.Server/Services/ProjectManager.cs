@@ -282,6 +282,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             }
         }
 
+        // One server per root: before the default, so a server all of whose roots are held elsewhere has what a server with no roots has
+        HoldRoots(merged);
+
         // If still empty after discovery, create a default
         if (merged.Count == 0)
         {
@@ -290,8 +293,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 Roots = new Dictionary<string, string> { ["default"] = "projects" }
             };
         }
-
-        HoldRoots(merged);
 
         var (rootLookup, pathToProfileRoot) = BuildRootLookups(merged);
 
@@ -316,13 +317,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// holds, and takes the lock on each one that is free. A root held elsewhere is logged once, with
     /// its holder where that can be read, and tried again on every rebuild; a root this server holds
     /// stays held across rebuilds, and is let go once it is no longer found. A root whose folder does
-    /// not exist holds nothing yet, and is kept.
+    /// not exist holds nothing yet, and is kept. A profile left with no root by this is not listed either.
     /// </summary>
     private void HoldRoots(Dictionary<string, ProfileConfig> profiles)
     {
         var found = new HashSet<string>(PathComparer);
-        foreach (var (profileName, config) in profiles)
+        foreach (var (profileName, config) in profiles.ToArray())
         {
+            var hadRoots = config.Roots.Count > 0;
             foreach (var (rootName, rootPath) in config.Roots.ToArray())
             {
                 var path = FullPath(rootPath);
@@ -346,6 +348,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                         profileName, rootName, path, holder is null ? "unknown" : $"instance {holder.Instance}, process {holder.ProcessId}");
                 }
             }
+            if (hadRoots && config.Roots.Count == 0) profiles.Remove(profileName);
         }
 
         foreach (var gone in _heldRoots.Keys.Where(path => !found.Contains(path)).ToArray())

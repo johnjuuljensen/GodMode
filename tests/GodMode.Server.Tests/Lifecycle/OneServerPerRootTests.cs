@@ -40,6 +40,9 @@ public class OneServerPerRootTests
             Assert.DoesNotContain(await dev.Projects.ListProjectRootsAsync(), root => root.Name is LifecycleHarness.RootName or OtherRoot);
         }
 
+        // Nor their profiles, which have no other root there
+        Assert.DoesNotContain(await dev.Projects.ListProfilesAsync(), profile => profile.Name is LifecycleHarness.ProfileName or "other");
+
         var skipped = SkippedLines(dev);
         Assert.Equal(2, skipped.Length);
         Assert.All(skipped, line => Assert.Contains($"instance main, process {Environment.ProcessId}", line));
@@ -51,6 +54,7 @@ public class OneServerPerRootTests
         var picked = await dev.Projects.ListProjectRootsAsync();
         Assert.Contains(picked, root => root.Name == LifecycleHarness.RootName);
         Assert.Contains(picked, root => root.Name == OtherRoot);
+        Assert.Contains(await dev.Projects.ListProfilesAsync(), profile => profile.Name == LifecycleHarness.ProfileName);
         Assert.Equal(2, SkippedLines(dev).Length);
     }
 
