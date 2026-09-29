@@ -12,10 +12,16 @@ namespace GodMode.ProjectFiles;
 /// session can write this file, so it cannot be what decides.
 /// </param>
 /// <param name="PermissionMode">The root's permission mode when the project was created, kept for its resumes.</param>
+/// <param name="SharedFolder">
+/// Whether the session was created by an action whose sessions share their working folder
+/// (<c>sharedFolder</c>): its delete then removes only its state, never the folder. Kept here so a
+/// root config that changes later does not turn a shared workspace into one a delete removes.
+/// </param>
 public record ProjectSettings(
     bool DangerouslySkipPermissions = false,
     string? ActionName = null,
-    string? PermissionMode = null
+    string? PermissionMode = null,
+    bool SharedFolder = false
 )
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

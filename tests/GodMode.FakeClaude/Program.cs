@@ -47,7 +47,8 @@ if (string.IsNullOrEmpty(scriptPath) || string.IsNullOrEmpty(recordPath))
         $"(or pass {FakeClaudeEnvironment.ScriptFlag} and {FakeClaudeEnvironment.RecordFlag}).");
     return 2;
 }
-recordPath = Path.GetFullPath(recordPath);
+recordPath = Path.GetFullPath(recordPath.Replace(FakeClaudeEnvironment.SessionPlaceholder,
+    ArgValue("--mcp-config") is { } sessionConfig ? Path.GetFileName(Path.GetDirectoryName(Path.GetFullPath(sessionConfig))) : "none"));
 
 var pid = Environment.ProcessId;
 var environment = Environment.GetEnvironmentVariables()
