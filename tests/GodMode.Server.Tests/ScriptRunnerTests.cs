@@ -59,6 +59,32 @@ public sealed class ScriptRunnerTests : IDisposable
     }
 
     /// <summary>
+    /// A line the script's output carries after its exit, here from a child it left to write it a
+    /// second later, is logged and reported before the exit is, and before the run returns.
+    /// </summary>
+    [Fact]
+    public async Task ALineWrittenAfterTheExit_IsLoggedAndReported_BeforeTheRunEnds()
+    {
+        File.WriteAllText(Path.Combine(_dir, "late.ps1"), """
+            $ErrorActionPreference = 'Stop'
+            if ($IsWindows) { Start-Process cmd -ArgumentList '/c', 'ping -n 2 127.0.0.1 >nul & echo late' -NoNewWindow }
+            else { Start-Process sh -ArgumentList '-c', 'sleep 1; echo late' -NoNewWindow }
+            'early'
+            """);
+        var logPath = Path.Combine(_dir, "logs", "late.log");
+        var progress = new ConcurrentQueue<string>();
+
+        await _runner.RunAsync(["late.ps1"], _dir, _dir, new(), line => { progress.Enqueue(line); return Task.CompletedTask; }, logPath)
+            .WaitAsync(TimeSpan.FromSeconds(60));
+
+        Assert.Contains("late", progress.Select(line => line.Trim()));
+        var log = File.ReadAllLines(logPath);
+        var late = Array.FindIndex(log, line => line.Trim() == "[stdout] late");
+        var exit = Array.FindIndex(log, line => line.EndsWith("] Exit code: 0"));
+        Assert.True(late >= 0 && late < exit, $"the late line is line {late} of the log, and the exit {exit}:\n{string.Join("\n", log)}");
+    }
+
+    /// <summary>
     /// A child the script leaves running in the background holds its output open: the run waits for
     /// it no longer than <see cref="ScriptRunner.DrainAfterExit"/>.
     /// </summary>
