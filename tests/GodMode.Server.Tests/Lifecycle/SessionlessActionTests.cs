@@ -31,8 +31,6 @@ public sealed class SessionlessActionTests
         Write-Output "session=[$env:GODMODE_SESSION_ID] folder=[$env:GODMODE_PROJECT_PATH] fake=[$env:GODMODE_FAKE_CLAUDE_SCRIPT]"
         if ($env:GODMODE_INPUT_FAIL) { throw 'provisioning failed' }
         Set-Content -Path $env:GODMODE_RESULT_FILE -Value "project_path=$target`nkind=experiment`nmessage=Root $env:GODMODE_INPUT_NAME is ready"
-        # Until #332: the server logs a line after it is read, and its log of the exit must not meet one still being written
-        Start-Sleep -Milliseconds 300
         """;
 
     private static FakeScript Waiting() => new FakeScript().EmitInit().AwaitStdin();
@@ -82,7 +80,7 @@ public sealed class SessionlessActionTests
 
     /// <summary>
     /// The result file's message is the create's answer, and the script's output streams as progress,
-    /// under the run's own id, which names its log. The script had the root's
+    /// under the run's own id; the run's log is its own, under that id. The script had the root's
     /// environment, and no session's.
     /// </summary>
     [Fact]
@@ -94,16 +92,15 @@ public sealed class SessionlessActionTests
         var result = await client.CreateProjectAsync(LifecycleHarness.ProfileName, LifecycleHarness.RootName, null, Inputs("fresh"));
 
         Assert.Equal("Root fresh is ready", result.Message);
-        // A script's lines are pushed and logged as they are read, which can be after the script has exited
-        HubPush[] Progress() => client.Received.Where(push => push.Method == nameof(IProjectHubClient.CreationProgress)).ToArray();
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Progress().Length >= 2), null,
-            () => $"the script's two lines were not pushed: {string.Join(" | ", Progress().Select(push => push.Message))}");
-        Assert.Contains(Progress(), push => push.Message!.StartsWith("made "));
-        var runId = Assert.Single(Progress().Select(push => push.ProjectId).Distinct())!;
+        // The run is over once the script's lines are read, pushed and logged
+        var progress = client.Received.Where(push => push.Method == nameof(IProjectHubClient.CreationProgress)).ToArray();
+        Assert.Contains(progress, push => push.Message!.StartsWith("made "));
+        var runId = Assert.Single(progress.Select(push => push.ProjectId).Distinct())!;
         Assert.Matches(LifecycleHarness.IdPattern("fresh"), runId);
-        Assert.Contains(Progress(), push => push.Message == $"session=[] folder=[] fake=[{harness.ScriptPath}]");
-        // Lines read after the script exits can miss the log, whose writer is closed by then (#332): its lines are not checked here
-        Assert.True(File.Exists(Path.Combine(harness.RootPath, "logs", $"{runId.Split('/')[^1]}.log")), "the run has no log of its own");
+        var environment = $"session=[] folder=[] fake=[{harness.ScriptPath}]";
+        Assert.Contains(progress, push => push.Message == environment);
+        var log = File.ReadAllText(Path.Combine(harness.RootPath, "logs", $"{runId.Split('/')[^1]}.log"));
+        Assert.Contains($"[stdout] {environment}", log);
     }
 
     [Fact]
