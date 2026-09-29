@@ -180,6 +180,8 @@ The hub is the session loop plus reading profiles and roots:
 
 **A session's ID is `{profile}/{root}/{id}`**, its id being GodMode's own, `yymmdd-{kind}-{slug}-{suffix}` (`260929-feat-left-list-k7q2`), unique within its root and the name of its state folder (4.3). Every hub method and callback that names a project takes or gives this ID (`ProjectStatus.Id`, `ProjectSummary.Id`). Clients treat it as opaque and pass it back as they received it; the server derives it from where the state folder is on every recovery. Root scripts get the id as `GODMODE_SESSION_ID` and the folder name as `GODMODE_PROJECT_FOLDER`. The session's kind (`ProjectStatus.Kind`, `ProjectSummary.Kind`), which the app shows as a label, is its create script's `kind` result, else its action's name.
 
+**`CreateProject` returns a `CreateProjectResult`**: the project created, or, for an action that starts no session (`"session": false`, 4.2), no project and its script's `message`. Its `CreationProgress` is under the ID of the session, or of the run (`{profile}/{root}/{id}`, naming no project), and ends when the call returns.
+
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
 2. Implement in `ProjectHub`
@@ -200,7 +202,7 @@ A root is a folder with a `.godmode-root/` in it, and the server's config says w
 ```
 root-name/
 ├── .godmode-root/
-│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, permissionMode, allowSkipPermissions, resumeOnRestart, resumePrompt)
+│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, permissionMode, allowSkipPermissions, resumeOnRestart, resumePrompt, sharedFolder, session)
 │   ├── config.{action}.json       # Per-action overlays (merged with base)
 │   ├── {action}/
 │   │   ├── schema.json            # Input form schema (JSON Schema)
@@ -213,6 +215,8 @@ root-name/
 ```
 
 **Merge order**: `config.json` (base) → `config.{action}.json` (overlay). Action overlay wins on conflict.
+
+**Actions that start no session.** `"session": false` makes an action its scripts alone: prepare and create run in the root, with its environment and inputs, and no folder is made, nothing tracked and no claude started. It is how a root provisions the host: a provisioning root's action makes a new root as a sibling in its scan folder, which live roots then list, and the server reads the roots again once it has run. The server still writes no config (5.3): the script does. Of its result file only `message` is read, which the app shows in place of opening a session; `project_path` and its checks do not apply. `sharedFolder`, `scriptsCreateFolder` or no create script with it is a config error. The server README (*Actions that start no session*) has the details.
 
 **Profile assignment**: `profileName` in `config.json` puts the root in that profile. An explicit root without it goes to its entry's `Profile`, and any other root to `Default`.
 
