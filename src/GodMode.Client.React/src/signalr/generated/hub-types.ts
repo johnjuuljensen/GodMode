@@ -127,6 +127,25 @@ export interface CreateActionInfo {
    * `skipPermissions`, and only then does the server accept it.
    */
   AllowSkipPermissions: boolean;
+  /**
+   * Whether the action starts a session. One that does not only runs its scripts: the create form offers no
+   * model for it, and its create returns no project to open (CreateProjectResult).
+   */
+  Session: boolean;
+}
+
+/**
+ * What a create made. An action that starts a session gives its project; one that starts none
+ * (CreateAction.Session off) gives none, and may say what its script made instead.
+ */
+export interface CreateProjectResult {
+  /** The session created, or null when the action starts none. */
+  Project?: ProjectStatus | null;
+  /**
+   * For an action that starts no session: its create script's `message` result (the result file's
+   * `message=`), for the app to show; null when it wrote none. Always null with a project.
+   */
+  Message?: string | null;
 }
 
 /** Git status information for a project. */
@@ -418,7 +437,7 @@ export interface IProjectHub {
   /** Gets the status of a specific project. */
   GetStatus(projectId: string): Promise<ProjectStatus>;
   /** Creates a new project using config-driven workflow. */
-  CreateProject(profileName: string, projectRootName: string, actionName: string | null, inputs: Record<string, unknown>): Promise<ProjectStatus>;
+  CreateProject(profileName: string, projectRootName: string, actionName: string | null, inputs: Record<string, unknown>): Promise<CreateProjectResult>;
   /** Sends input to a project. */
   SendInput(projectId: string, input: string): Promise<void>;
   /** Stops a running project. */
@@ -515,7 +534,11 @@ export interface IProjectHubClient {
   AttentionChanged(items: AttentionItem[]): void;
   /** Called when a new project is created. */
   ProjectCreated(status: ProjectStatus): void;
-  /** Called during project creation to stream script progress to the client. */
+  /**
+   * Called during project creation to stream script progress to the client. The ID is the session's; for an
+   * action that starts no session, the run's own, `{profile}/{root}/{id}`, which names no project. The stream
+   * ends when the create returns: it has no last message.
+   */
   CreationProgress(projectId: string, message: string): void;
   /** Called when a project is deleted. */
   ProjectDeleted(projectId: string): void;

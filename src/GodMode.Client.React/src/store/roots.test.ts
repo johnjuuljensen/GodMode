@@ -20,7 +20,7 @@ vi.mock('../services/hostApi', () => ({
 
 const store = () => useAppStore.getState();
 const initialState = useAppStore.getState();
-const fresh: ProjectRootInfo = { Name: 'fresh', ProfileName: 'Private', Actions: [{ Name: 'Create', AllowSkipPermissions: false }] };
+const fresh: ProjectRootInfo = { Name: 'fresh', ProfileName: 'Private', Actions: [{ Name: 'Create', AllowSkipPermissions: false, Session: true }] };
 
 /** The left list, as `profile`, `  root [+]` and `    project` lines. */
 const outline = () => store().profileGroups.flatMap(g => [

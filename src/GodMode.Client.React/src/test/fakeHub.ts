@@ -7,7 +7,7 @@
  */
 import type { ConnectionState, HubCallbacks, OutputMessage } from '../signalr/hub';
 import type {
-  PermissionDecision, PermissionDetail, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
+  CreateProjectResult, PermissionDecision, PermissionDetail, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
 } from '../signalr/types';
 import { parseClaudeMessage } from '../signalr/parseMessage';
 import { useAppStore, type ServerConnection } from '../store';
@@ -73,6 +73,8 @@ export class FakeHub {
   decisions: { projectId: string; requestId: string; decision: PermissionDecision }[] = [];
   seen: string[] = [];
   created: { profileName: string; rootName: string; actionName: string | null; inputs: Record<string, unknown> }[] = [];
+  /** What createProject answers, when not a new Running project: an action that starts no session answers with no project. */
+  createResult?: CreateProjectResult;
   /** Every SubscribeProject and UnsubscribeProject that reached the server, in order. */
   subscriptions: { projectId: string; fromOffset: number }[] = [];
   /** The same subscriptions, each to be answered when the test says. Kept by resetCalls. */
@@ -157,7 +159,7 @@ export class FakeHub {
   async createProject(profileName: string, rootName: string, actionName: string | null, inputs: Record<string, unknown>) {
     this.invoke();
     this.created.push({ profileName, rootName, actionName, inputs });
-    return status(`new${this.created.length}`, 'Running');
+    return this.createResult ?? { Project: status(`new${this.created.length}`, 'Running') };
   }
 }
 

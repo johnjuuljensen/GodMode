@@ -172,3 +172,15 @@
   color: var(--text-secondary);
   margin-bottom: 8px;
 }
+
+/* What an action that starts no session said it made */
+.form-success {
+  padding: 8px 12px;
+  background: var(--success-soft);
+  border: var(--border-width) var(--border-style) var(--success-border);
+  border-radius: var(--radius);
+  color: var(--success);
+  font-size: 12px;
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+}

@@ -5,7 +5,7 @@
 import * as signalR from '@microsoft/signalr';
 import type {
   ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, PermissionDetail, AttentionItem,
-  IProjectHub, IProjectHubClient,
+  CreateProjectResult, IProjectHub, IProjectHubClient,
 } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
@@ -267,7 +267,7 @@ export class GodModeHub {
     projectRootName: string,
     actionName: string | null,
     inputs: Record<string, unknown>,
-  ): Promise<ProjectStatus> {
+  ): Promise<CreateProjectResult> {
     return await this.invoke('CreateProject', profileName, projectRootName, actionName, inputs);
   }
 
