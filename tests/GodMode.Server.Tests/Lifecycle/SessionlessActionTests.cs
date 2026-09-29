@@ -71,11 +71,11 @@ public sealed class SessionlessActionTests
         Assert.True(File.Exists(Path.Combine(harness.RootsDir, "fresh", ".godmode-root", "config.json")), "the script did not make the root");
         Assert.Empty(await harness.Projects.ListProjectsAsync());
         Assert.DoesNotContain(harness.Hub.Pushes, push => push.Method == nameof(IProjectHubClient.ProjectCreated));
-        // No working folder, no session state, and no claude
+        // No claude, no working folder and no session state
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        Assert.True(FakeRecordings(harness).Length == 0, $"a claude started: {string.Join(", ", FakeRecordings(harness))}");
         Assert.False(Directory.Exists(Path.Combine(harness.RootPath, "fresh")), "a working folder was made");
         Assert.Empty(Directory.GetDirectories(harness.RootsDir, ".godmode", SearchOption.AllDirectories));
-        await Task.Delay(TimeSpan.FromMilliseconds(500));
-        Assert.Empty(FakeRecordings(harness));
     }
 
     /// <summary>
