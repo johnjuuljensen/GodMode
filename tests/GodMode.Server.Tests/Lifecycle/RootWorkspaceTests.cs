@@ -153,7 +153,8 @@ public class RootWorkspaceTests
 
     /// <summary>
     /// A forced delete, whose script fails, of a session in the root whose settings say it owns its
-    /// folder still removes nothing but its state: a session in the root shares it, whatever it says.
+    /// folder, in a root whose config has stopped sharing, still removes nothing but its state: a session
+    /// in the root shares it, whatever it or its config says.
     /// </summary>
     [Fact]
     public async Task ForcedDelete_OfASessionInTheRoot_RemovesNothingButItsState_EvenIfItClaimsTheFolder()
@@ -167,9 +168,13 @@ public class RootWorkspaceTests
         var files = RootFiles(harness);
         var (first, second) = await TwoInTheRootAsync(harness);
         await harness.Projects.DeleteProjectAsync(second.Id, force: true);
-        // As a tracked session whose settings say it owns its folder, and is the root's only one
+        // As a tracked session whose settings say it owns its folder, and is the root's only one, in a
+        // root whose config no longer shares folders: nothing says "shared" but where the session is
         harness.Tracked(first.Id).SharedFolder = false;
         harness.Tracked(first.Id).MadeSharedFolder = true;
+        var rootConfig = Path.Combine(harness.RootPath, ".godmode-root", "config.json");
+        File.WriteAllText(rootConfig, File.ReadAllText(rootConfig).Replace("\"sharedFolder\":true", "\"sharedFolder\":false"));
+        Assert.Contains("\"sharedFolder\":false", File.ReadAllText(rootConfig));
 
         await Assert.ThrowsAnyAsync<Exception>(() => harness.Projects.DeleteProjectAsync(first.Id));
         Assert.True((await harness.Projects.DeleteProjectAsync(first.Id, force: true)).Trashed, "the forced delete did not trash the state");
