@@ -28,7 +28,37 @@ SignalR server for GodMode. It runs Claude Code sessions in project folders on t
 
 Profiles live in `{ProjectRootsDir}/.profiles/` (see `docs/UNIFIED-ARCHITECTURE.md` Section 6). Profiles and roots are maintained by hand on the host: the server reads their config and never writes it.
 
-Every setting can also come from an environment variable (`ProjectRootsDir`, `Authentication__ApiKey`) or the command line (`--ProjectRootsDir=/srv/roots`).
+Every setting can also come from the instance's config file, an environment variable (`ProjectRootsDir`, `Authentication__ApiKey`) or the command line (`--ProjectRootsDir=/srv/roots`).
+
+### Config sources, and the instance's config file
+
+A server's settings come from these sources, each overriding the ones before it:
+
+1. `appsettings.json`, next to the server (its content root);
+2. `appsettings.{Environment}.json`, when there is one;
+3. **the instance's config file**, when the server is started with one: `--config <path>`, else the `GODMODE_CONFIG` environment variable. A relative path is resolved against the working directory. It is reloaded when it changes. A named file that does not exist stops the server at startup;
+4. environment variables;
+5. the command line.
+
+Config belongs to a server instance, named when it starts: nothing is read per user. There is no default config file, and the server reads no user secrets (it has no `UserSecretsId`). A server started without a config file runs on appsettings, whose `ProjectRootsDir` is `roots` under the working directory, a scratch folder of its own. So every worktree's `dotnet run` starts empty, and none of them finds the roots of the server you use.
+
+A config file is appsettings-shaped JSON:
+
+```json
+{
+  "Instance": "main",
+  "ProjectRootsDir": "C:\Users\me\source\repos",
+  "Authentication": { "ApiKey": "..." }
+}
+```
+
+`Instance` (default `default`) names the server: in the lock of each root it holds, and in its logs (`Server instance main` at startup, beside `Config file: …`).
+
+### One server per root
+
+A server holds a lock on every root it manages: `{root}/logs/server.lock`, kept open exclusively for as long as the server runs. The operating system lets it go when the server exits, however it exits (a crash or a kill included), so it never goes stale. Beside it, `{root}/logs/server.json` names the holder (`instance` and `processId`). `{root}/logs/` is the server's own folder, and the server keeps a `.gitignore` of `*` in it, so neither shows in `git status` when the root's folder is under source control.
+
+A root another live server holds is skipped: it is not listed, and none of its projects is recovered. The server logs it once as a warning, with the holder's instance and process when `server.json` can be read, and tries again every time it rebuilds its roots (on each list of profiles or roots). Once the other server has gone, the root is listed on the next rebuild. Its existing projects are picked up at the server's next start; picking them up live comes with live root updates (#323). A server lets its roots go once it has stopped its projects at shutdown.
 
 ### Executables
 
@@ -65,7 +95,7 @@ Every endpoint and the SignalR hub require authentication, whatever the server i
 - **A configured key always wins**, and the key file is then neither read nor written. So does a codespace, which uses no key.
 - **Docker:** a replaced container has a new home, so a new key. Run it with `-e Authentication__ApiKey=<key>`, or keep the key file on a named volume: `-v godmode-key:/home/godmode/.local/share/GodMode.Server`. The image creates that directory, owned by `godmode` with mode 0700, and a new named volume starts with its owner and mode. A bind mount (`-v /srv/godmode-key:…`) keeps the host directory's owner instead, which must be writable by the container's `godmode` user.
 
-A key of your own can go in `appsettings.json` (`"Authentication": { "ApiKey": "..." }`), in user secrets, in the `Authentication__ApiKey` environment variable, or on the command line as `--Authentication:ApiKey=<key>`. `openssl rand -hex 32` makes one.
+A key of your own can go in the instance's config file or `appsettings.json` (`"Authentication": { "ApiKey": "..." }`), in the `Authentication__ApiKey` environment variable, or on the command line as `--Authentication:ApiKey=<key>`. `openssl rand -hex 32` makes one.
 
 **No browser.** A browser sends an `Origin` header on every WebSocket upgrade, which CORS does not cover, and on any request but a same-origin GET. The server serves no page and refuses every request that carries an `Origin`, with 403 and before authentication, whatever it names: its own bindings, `localhost`, a codespace's forwarded port, `Origin: null`, in Development too. No setting allows one (there is no `Authentication:AllowedOrigins`). So no page in a browser, served from anywhere, can use the server, with the key or without. A request with no `Origin` (the app's relay and attention service, a session's claude on `/mcp`, `curl`) needs its credential alone. The server logs a warning for each request it refuses, naming the origin.
 
@@ -411,6 +441,15 @@ A root keeps some folders for itself at its top level, and no project may be one
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 ```
 
+With no config file this is a dev server: it runs on appsettings, with an empty `roots` folder under the working directory, and it leaves the roots of any other server alone (see [One server per root](#one-server-per-root)). Run it beside the server you use on another port, with its own config file or none:
+
+```bash
+dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --Urls=http://127.0.0.1:31338
+dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/godmode-dev.json --Urls=http://127.0.0.1:31338
+```
+
+The server you use gets its own file: `--config <path>` (or `GODMODE_CONFIG`), with its `Instance`, its `ProjectRootsDir` and, if you like, its key.
+
 The server builds no React and needs no npm. To see the client, run the GodMode app (on Windows, `dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.19041.0`) and add the server there with its key.
 
 ### Production
@@ -486,6 +525,7 @@ Utility:
 
 - "will not start: … API key file": the key file cannot be written, or is under `ProjectRootsDir`. Set `Authentication:ApiKeyFile`, or a key. See *Authentication and binding* above.
 - "will not start: PermissionPromptKeepAliveSeconds …": it must be more than 0 and less than 300.
+- "will not start: its config file, … does not exist": the file named by `--config` or `GODMODE_CONFIG` is not there.
 
 ### Claude Process Not Starting
 
@@ -496,7 +536,8 @@ Utility:
 
 ### Roots or Projects Missing
 
-- Check `ProjectRootsDir` points where you think (relative paths resolve against the working directory)
+- Check `ProjectRootsDir` points where you think (relative paths resolve against the working directory), and that the server was started with its config file (`Config file: …` at startup): user secrets are not read
+- A root another live server holds is skipped: look for "held by another server" in the log, which names the holder's instance and process
 - Each root needs a `.godmode-root/` folder directly inside it
 - Verify `status.json` files are valid JSON
 - Review startup logs
