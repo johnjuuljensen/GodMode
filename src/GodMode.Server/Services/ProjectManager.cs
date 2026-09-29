@@ -979,6 +979,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return new CreateProjectResult(project.Status);
     }
 
+    /// <summary>The longest message a run returns, as long as an attention item's text; a longer one is cut.</summary>
+    internal const int MaxRunMessageLength = Attention.MaxTextLength;
+
     /// <summary>
     /// An action that starts no session (<c>"session": false</c>): its prepare and create scripts run in
     /// the root, with the root's environment and inputs as a create's do, and that is all. No folder is
@@ -988,9 +991,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// names no project. A script that fails fails the create, and leaves no Error project. The roots are
     /// read again once it has run, so a root it made reaches every client (RootsChanged) at once.
     /// </summary>
-    /// <summary>The longest message a run returns, as long as an attention item's text; a longer one is cut.</summary>
-    internal const int MaxRunMessageLength = Attention.MaxTextLength;
-
     private async Task<CreateProjectResult> RunSessionlessActionAsync(CreateProjectRequest request, ProfileSnapshot snap,
         string rootPath, RootConfig config, CreateAction action)
     {
