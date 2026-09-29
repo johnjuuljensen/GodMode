@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.Win32.SafeHandles;
 
@@ -54,7 +55,10 @@ internal static class SingleInstance
         if (owned)
         {
             _mutex = mutex;
-            _ = Task.Run(() => ListenAsync(logger));
+            // Claim runs on the UI thread. Its queue takes a hand-off before the first window exists, which
+            // MainThread's (found through the active window) doesn't
+            var dispatcher = DispatcherQueue.GetForCurrentThread();
+            _ = Task.Run(() => ListenAsync(dispatcher, logger));
             logger.LogInformation("Single instance: this process is the app, listening for later starts");
             return true;
         }
@@ -89,7 +93,7 @@ internal static class SingleInstance
         }
     }
 
-    private static async Task ListenAsync(ILogger logger)
+    private static async Task ListenAsync(DispatcherQueue dispatcher, ILogger logger)
     {
         while (true)
         {
@@ -101,11 +105,13 @@ internal static class SingleInstance
                 var args = await JsonSerializer.DeserializeAsync<string[]>(pipe) ?? [];
                 logger.LogInformation("Single instance: a later start handed off [{Args}]; bringing the window to the front",
                     string.Join(' ', args));
-                MainThread.BeginInvokeOnMainThread(() =>
-                {
-                    BringToFront(logger);
-                    HandedOff?.Invoke(args);
-                });
+                if (!dispatcher.TryEnqueue(() =>
+                    {
+                        BringToFront(logger);
+                        HandedOff?.Invoke(args);
+                    }))
+                    logger.LogWarning("Single instance: the app is shutting down, and drops the hand-off [{Args}]",
+                        string.Join(' ', args));
             }
             catch (Exception ex)
             {
@@ -122,7 +128,10 @@ internal static class SingleInstance
     private static void BringToFront(ILogger logger)
     {
         if (Application.Current?.Windows.FirstOrDefault()?.Handler?.PlatformView is not Microsoft.UI.Xaml.Window window)
+        {
+            logger.LogInformation("Single instance: no window yet to bring to the front");
             return;
+        }
         if (window.AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
         window.Activate();
