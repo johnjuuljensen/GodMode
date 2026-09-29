@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
-  useAppStore,
+  useAppStore, foldItems,
   type ActivePage, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy,
 } from '../../store';
+import { projectKey } from '../../store/projectKey';
 import { ProjectItem } from './ProjectItem';
 import { Inbox } from '../Inbox/Inbox';
 import './Sidebar.css';
@@ -224,11 +225,35 @@ function ProfileSection({ group }: { group: ProfileGroup }) {
   );
 }
 
+/** How often the list looks again at which sessions have gone quiet long enough to fold. */
+const FOLD_TICK_MS = 60_000;
+
+/** The time now, again every `everyMs`. */
+function useNow(everyMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(timer);
+  }, [everyMs]);
+  return now;
+}
+
 function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
   const selectedProject = useAppStore(s => s.selectedProject);
   const selectProject = useAppStore(s => s.selectProject);
   const setActivePage = useAppStore(s => s.setActivePage);
+  const attention = useAppStore(s => s.attention);
+  const projectQuestions = useAppStore(s => s.projectQuestions);
+  const [showOlder, setShowOlder] = useState(false);
+  const now = useNow(FOLD_TICK_MS);
   const { serverId, profileName, rootName } = rootGroup;
+
+  // Older sessions fold under "N older", one tap away (#325): never one that needs the user or is open
+  const needsYou = new Set(attention.map(a => projectKey(a.serverId, a.ProjectId)));
+  const { shown, older } = foldItems(rootGroup.items, now, item =>
+    needsYou.has(item.key) || !!projectQuestions[item.key]
+    || (selectedProject?.serverId === item.serverId && selectedProject.projectId === item.project.Id));
+  const listed = showOlder ? [...shown, ...older] : shown;
 
   return (
     <div className="root-group">
@@ -248,7 +273,7 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
         {rootGroup.items.length === 0 ? (
           !rootGroup.flat && <div className="project-list-empty">No projects</div>
         ) : (
-          rootGroup.items.map(item => (
+          listed.map(item => (
             <ProjectItem
               key={item.key}
               item={item}
@@ -259,6 +284,11 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
               onSelect={() => selectProject(item.serverId, item.project.Id)}
             />
           ))
+        )}
+        {older.length > 0 && (
+          <button className="project-list-older" onClick={() => setShowOlder(!showOlder)} aria-expanded={showOlder}>
+            {showOlder ? 'Hide older' : `${older.length} older`}
+          </button>
         )}
       </div>
     </div>

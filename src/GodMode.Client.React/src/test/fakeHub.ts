@@ -167,7 +167,7 @@ export class FakeHub {
 export const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 export const project = (id: string, name: string, state: ProjectState, updatedAt: string): ProjectSummary => ({
-  Id: id, Name: name, State: state, UpdatedAt: updatedAt, RootName: 'work', ProfileName: 'Default',
+  Id: id, Name: name, State: state, UpdatedAt: updatedAt, RootName: 'work', ProfileName: 'Default', SharedFolder: false,
 });
 export const root: ProjectRootInfo = { Name: 'work', ProfileName: 'Default', Actions: [] } as unknown as ProjectRootInfo;
 export const status = (id: string, state: ProjectState) =>

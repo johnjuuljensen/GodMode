@@ -23,7 +23,7 @@ export { projectKey, type ProjectKey };
 /** The key of a transcript: a project's ProjectKey. */
 export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
-export { isListed } from './hierarchy';
+export { isListed, foldItems } from './hierarchy';
 
 // ── Persisted dismiss tracking ─────────────────────────────────
 // Keyed by ProjectKey; the unversioned key held project IDs alone, which collide across servers
@@ -72,6 +72,7 @@ function summaryOf(status: ProjectStatus): ProjectSummary {
     RootName: status.RootName, ProfileName: status.ProfileName,
     PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
     PullRequest: status.PullRequest, Kind: status.Kind,
+    ActionName: status.ActionName, SharedFolder: status.SharedFolder,
   };
 }
 

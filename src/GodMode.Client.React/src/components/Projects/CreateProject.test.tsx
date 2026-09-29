@@ -25,14 +25,14 @@ vi.mock('../../services/hostApi', () => ({
 
 const rootNamed = (name: string, profile = 'Default'): ProjectRootInfo => ({
   Name: name, ProfileName: profile,
-  Actions: [{ Name: 'issue', AllowSkipPermissions: false, Session: true, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
+  Actions: [{ Name: 'issue', AllowSkipPermissions: false, Session: true, Transient: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
 });
 
 /** A root whose schema has the Skip Permissions toggle, defaulting on as the dev root's once did; allowed or not by the root. */
 const rootWithSkip = (allowSkipPermissions: boolean): ProjectRootInfo => ({
   Name: 'work', ProfileName: 'Default',
   Actions: [{
-    Name: 'issue', AllowSkipPermissions: allowSkipPermissions, Session: true,
+    Name: 'issue', AllowSkipPermissions: allowSkipPermissions, Session: true, Transient: false,
     InputSchema: {
       type: 'object',
       properties: {
@@ -212,7 +212,7 @@ describe('an action that starts no session (#324)', () => {
   /** A provisioning root: its action only runs a script, which makes a new root. */
   const provisioning: ProjectRootInfo = {
     Name: 'experiments', ProfileName: 'Default',
-    Actions: [{ Name: 'new-root', AllowSkipPermissions: false, Session: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
+    Actions: [{ Name: 'new-root', AllowSkipPermissions: false, Session: false, Transient: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
   };
   const finishedView = () => view!.container.querySelector('.form-success')?.textContent ?? null;
   const modelPicker = () => [...view!.container.querySelectorAll('.form-group')].find(g => g.querySelector('label')?.textContent === 'Model') ?? null;

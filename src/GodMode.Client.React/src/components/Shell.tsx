@@ -8,6 +8,7 @@ import { EditServer } from './Servers/EditServer';
 import { CreateProject } from './Projects/CreateProject';
 import { AppSettings } from './AppSettings';
 import { ConfirmDialog } from './ConfirmDialog';
+import { Toast } from './Toast/Toast';
 import { VoiceControl } from './Voice/VoiceControl';
 import { Inbox, HomeTabBar } from './Inbox/Inbox';
 import { useAttentionTitle } from './Inbox/useAttentionTitle';
@@ -130,6 +131,7 @@ export function Shell() {
       {footerSlot}
       <VoiceControl />
       <ConfirmDialog />
+      <Toast />
     </div>
   );
 }

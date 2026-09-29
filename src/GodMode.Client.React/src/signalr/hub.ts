@@ -5,7 +5,7 @@
 import * as signalR from '@microsoft/signalr';
 import type {
   ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, PermissionDetail, AttentionItem,
-  CreateProjectResult, IProjectHub, IProjectHubClient,
+  CreateProjectResult, DeleteProjectResult, IProjectHub, IProjectHubClient,
 } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
@@ -331,8 +331,14 @@ export class GodModeHub {
     await this.invoke('UnsubscribeProject', projectId);
   }
 
-  async deleteProject(projectId: string, force: boolean = false): Promise<void> {
-    await this.invoke('DeleteProject', projectId, force);
+  /** Deletes the project: its working folder, or, for a session that shares it, only its state, into the folder's trash (Trashed). */
+  async deleteProject(projectId: string, force: boolean = false): Promise<DeleteProjectResult> {
+    return await this.invoke('DeleteProject', projectId, force);
+  }
+
+  /** Undoes a delete that trashed the session: it is back under the same ID, and pushed as ProjectCreated. */
+  async restoreProject(projectId: string): Promise<ProjectStatus> {
+    return await this.invoke('RestoreProject', projectId);
   }
 
   // ── Utility ──
