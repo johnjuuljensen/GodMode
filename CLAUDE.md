@@ -47,7 +47,7 @@ dotnet build src/GodMode.Server/GodMode.Server.csproj
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
 # Run the server you use on its own config file (Instance, ProjectRootsDir, ...): --config <path> or GODMODE_CONFIG
-dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/godmode-main.json
+dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.godmode-server/main.json
 
 # Build MAUI app (requires MAUI workload; builds the React client into it)
 dotnet build src/GodMode.Maui/GodMode.Maui.csproj

@@ -36,7 +36,7 @@ A server's settings come from these sources, each overriding the ones before it:
 
 1. `appsettings.json`, next to the server (its content root);
 2. `appsettings.{Environment}.json`, when there is one;
-3. **the instance's config file**, when the server is started with one: `--config <path>`, else the `GODMODE_CONFIG` environment variable. A relative path is resolved against the working directory. It is reloaded when it changes. A named file that does not exist stops the server at startup;
+3. **the instance's config file**, when the server is started with one: `--config <path>`, else the `GODMODE_CONFIG` environment variable. A relative path is resolved against the working directory. It is reloaded when it changes, and its folder is watched for that (recursively): keep it in a folder of its own, such as `~/.godmode-server/`, not directly in your home folder. What the server reads once at startup (`Instance`, `ProjectRootsDir`, `Authentication:*`, `Urls`) takes a restart to change. A named file that does not exist stops the server at startup;
 4. environment variables;
 5. the command line.
 
@@ -58,7 +58,7 @@ A config file is appsettings-shaped JSON:
 
 A server holds a lock on every root it manages: `{root}/logs/server.lock`, kept open exclusively for as long as the server runs. The operating system lets it go when the server exits, however it exits (a crash or a kill included), so it never goes stale. Beside it, `{root}/logs/server.json` names the holder (`instance` and `processId`). `{root}/logs/` is the server's own folder, and the server keeps a `.gitignore` of `*` in it, so neither shows in `git status` when the root's folder is under source control.
 
-A root another live server holds is skipped: it is not listed, and none of its projects is recovered. The server logs it once as a warning, with the holder's instance and process when `server.json` can be read, and tries again every time it rebuilds its roots (on each list of profiles or roots). Once the other server has gone, the root is listed on the next rebuild. Its existing projects are picked up at the server's next start; picking them up live comes with live root updates (#323). A server lets its roots go once it has stopped its projects at shutdown.
+A root another live server holds is skipped: it is not listed, and none of its projects is recovered. The server logs it once as a warning, with the holder's instance and process when `server.json` can be read, and tries again every time it rebuilds its roots (on each list of profiles or roots). Once the other server has gone, the root is listed on the next rebuild. Its existing projects are picked up at the server's next start; picking them up live comes with live root updates (#323). A root a rebuild no longer finds is let go only when no project of the server's is in it: a root that blinks (a folder replaced by an editor, a share that drops out) while its sessions run stays held. A server lets its roots go once it has stopped its projects at shutdown.
 
 ### Executables
 
@@ -445,7 +445,7 @@ With no config file this is a dev server: it runs on appsettings, with an empty 
 
 ```bash
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --Urls=http://127.0.0.1:31338
-dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/godmode-dev.json --Urls=http://127.0.0.1:31338
+dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.godmode-server/dev.json --Urls=http://127.0.0.1:31338
 ```
 
 The server you use gets its own file: `--config <path>` (or `GODMODE_CONFIG`), with its `Instance`, its `ProjectRootsDir` and, if you like, its key.
