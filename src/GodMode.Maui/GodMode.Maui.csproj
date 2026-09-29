@@ -26,6 +26,11 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.19041.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.19041.0</TargetPlatformMinVersion>
 
+		<!-- One app per user (issue #339, Windows): release builds take the single-instance mutex and hand a second start
+		     to the running app, debug builds run alongside it. -p:SingleInstance=false builds a release without it -->
+		<SingleInstance Condition="'$(SingleInstance)' == '' and '$(Configuration)' == 'Release'">true</SingleInstance>
+		<DefineConstants Condition="'$(SingleInstance)' == 'true'">$(DefineConstants);SINGLE_INSTANCE</DefineConstants>
+
 		<_ReactDir>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '..', 'GodMode.Client.React'))</_ReactDir>
 
 	</PropertyGroup>
