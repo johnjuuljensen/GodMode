@@ -42,6 +42,20 @@ public sealed record RootSources(
                     .ToDictionary(variable => variable.Key, variable => variable.Value!)),
             StringComparer.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// Settings that once named roots and are not read any more, each with what takes its place:
+    /// <c>ProjectRootsDir</c>, and a profile's <c>Roots</c> (<c>Profiles:&lt;p&gt;:Roots:&lt;name&gt;</c>).
+    /// </summary>
+    public static IEnumerable<string> RetiredSettings(IConfiguration config)
+    {
+        if (config["ProjectRootsDir"] is { Length: > 0 } folder)
+            yield return $"ProjectRootsDir ({folder}) is not read: name the folder as a scan folder, {ScanSection}:<key>";
+        foreach (var profile in config.GetSection(ProfilesSection).GetChildren())
+            foreach (var root in profile.GetSection("Roots").GetChildren())
+                yield return $"{ProfilesSection}:{profile.Key}:Roots:{root.Key} ({root.Value}) is not read: " +
+                    $"name it as an explicit root, {ExplicitSection}:{root.Key}:Path, with :Profile {profile.Key}";
+    }
+
     /// <summary>Every folder the roots come from, where sessions work: the scan folders and the explicit roots.</summary>
     public IEnumerable<(string Setting, string Folder)> Folders =>
         ScanFolders.Select(scan => ($"{ScanSection}:{scan.Key}", scan.Folder))

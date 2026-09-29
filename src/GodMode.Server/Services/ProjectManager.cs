@@ -163,6 +163,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         _configuration = configuration;
         foreach (var (setting, folder) in RootSources.From(configuration).Folders)
             _logger.LogInformation("Roots from {Setting}: {Folder}", setting, folder);
+        foreach (var retired in RootSources.RetiredSettings(configuration))
+            _logger.LogWarning("{Retired}", retired);
 
         // Build initial profile/root snapshot, taking the roots no other server holds
         lock (_profileLock) _snapshot = BuildSnapshot();

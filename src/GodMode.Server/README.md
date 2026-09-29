@@ -44,7 +44,7 @@ A server's roots, and what its profiles carry, come from its config. Each is a *
 - **Relative folders** resolve against the working directory.
 - **Read fresh on every list** of profiles or roots, from the config as it is then. So a root added on the host, or a scan folder, explicit root or profile added to the instance's config file, appears on the next refresh without a restart.
 - **A root's own `environment` wins** over its profile's.
-- **`ProjectRootsDir` and `.profiles/` are gone,** and neither is read. Profiles and roots are maintained by hand on the host: the server reads their config and never writes it.
+- **`ProjectRootsDir` and `.profiles/` are gone,** and neither is read. A `ProjectRootsDir`, or a profile's `Roots` (`Profiles:<p>:Roots:<name>`, explicit roots before March 2026), still set in a config source is logged at startup as a warning that names what takes its place. Profiles and roots are maintained by hand on the host: the server reads their config and never writes it.
 
 ### Config sources, and the instance's config file
 

@@ -278,6 +278,27 @@ public sealed class RootSourcesTests : IDisposable
         Assert.DoesNotContain(await harness.Projects.ListProjectRootsAsync(), root => root.Name == ".profiles");
     }
 
+    /// <summary>The settings that once named roots are not read, and each is named at startup with what takes its place.</summary>
+    [Fact]
+    public async Task RetiredRootSettings_AreNotRead_AndAreNamedAtStartup()
+    {
+        WriteRoot(Elsewhere("old-roots", "old-scanned"), "p");
+        WriteRoot(Elsewhere("anywhere", "old-explicit"), "p");
+        await using var harness = new LifecycleHarness(Waiting(), settings: new Dictionary<string, string?>
+        {
+            ["ProjectRootsDir"] = Elsewhere("old-roots"),
+            ["Profiles:Mega:Roots:old-explicit"] = Elsewhere("anywhere", "old-explicit"),
+        });
+
+        var names = (await harness.Projects.ListProjectRootsAsync()).Select(root => root.Name).ToArray();
+
+        Assert.DoesNotContain("old-scanned", names);
+        Assert.DoesNotContain("old-explicit", names);
+        Assert.Contains(harness.Warnings, line => line.Contains($"ProjectRootsDir ({Elsewhere("old-roots")}) is not read: name the folder as a scan folder, Roots:Scan:<key>"));
+        Assert.Contains(harness.Warnings, line => line.Contains(
+            "Profiles:Mega:Roots:old-explicit (" + Elsewhere("anywhere", "old-explicit") + ") is not read: name it as an explicit root, Roots:Explicit:old-explicit:Path, with :Profile Mega"));
+    }
+
     /// <summary>One server per root holds for explicit roots too: a second server naming the same folder leaves it alone.</summary>
     [Fact]
     public async Task ExplicitRoot_HeldByAnotherServer_IsLeftAlone()
