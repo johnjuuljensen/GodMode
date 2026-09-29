@@ -58,7 +58,7 @@ dotnet test
 cd src/GodMode.Client.React && npm test && npm run lint
 ```
 
-**Running/Debugging**: The server and MAUI app are separate processes. The server manages Claude Code processes and serves the hub; it serves no page. The MAUI app connects to one or more servers via its local proxy. To see a React change, rebuild and run the Windows app against a running server (add the server there with its key): the app's build rebuilds the client when its sources changed (`npm ci` first, when `node_modules` is missing or older than `package-lock.json`). Its WebView2 has DevTools enabled (F12). There is no Vite dev server.
+**Running/Debugging**: The server and MAUI app are separate processes. The server manages Claude Code processes and serves the hub; it serves no page. The MAUI app connects to one or more servers via its local proxy. To see a React change, rebuild and run the Windows app against a running server (add the server there with its key): the app's build rebuilds the client when its sources changed (`npm ci` first, when `node_modules` is missing or older than `package-lock.json`). Its WebView2 has DevTools enabled (F12). There is no Vite dev server. A release build of the Windows app refuses a second instance: a second start hands its arguments to the running app, which comes to the front, and exits (`Platforms/Windows/SingleInstance.cs`, the `SingleInstance` build property). A debug build takes no mutex, so it runs alongside the installed app.
 
 ## Architecture
 
