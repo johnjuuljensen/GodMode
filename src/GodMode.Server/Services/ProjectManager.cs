@@ -316,7 +316,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// One server per root: removes from <paramref name="profiles"/> every root another live server
     /// holds, and takes the lock on each one that is free. A root held elsewhere is logged once, with
     /// its holder where that can be read, and tried again on every rebuild; a root this server holds
-    /// stays held across rebuilds, and is let go once it is no longer found. A root whose folder does
+    /// stays held across rebuilds, and is let go once it is no longer found and no project of this
+    /// server's is in it (one being created included) until the server stops. A root whose folder does
     /// not exist holds nothing yet, and is kept. A profile left with no root by this is not listed either.
     /// </summary>
     private void HoldRoots(Dictionary<string, ProfileConfig> profiles)
@@ -351,13 +352,20 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             if (hadRoots && config.Roots.Count == 0) profiles.Remove(profileName);
         }
 
-        foreach (var gone in _heldRoots.Keys.Where(path => !found.Contains(path)).ToArray())
+        // Not found by one rebuild is not gone: a config.json saved mid-edit, or a folder that blinks.
+        // A root with a project of this server's in it stays held, so no other server takes its sessions
+        foreach (var gone in _heldRoots.Keys.Where(path => !found.Contains(path) && !HasProjectIn(path)).ToArray())
         {
             _heldRoots.Remove(gone, out var held);
             held!.Dispose();
         }
         _skippedRoots.IntersectWith(found);
     }
+
+    /// <summary>Whether a project this server tracks, or one it is creating, is in the root at <paramref name="rootPath"/>.</summary>
+    private bool HasProjectIn(string rootPath) =>
+        _projects.Values.Select(project => project.ProjectPath).Concat(_creatingPaths.Keys)
+            .Any(path => WhyNotAProjectFolderOf(rootPath, path) is null);
 
     /// <summary>The lock on the root at <paramref name="path"/>, or null when another server holds it or it cannot be taken.</summary>
     private RootLock? TryHoldRoot(string path)

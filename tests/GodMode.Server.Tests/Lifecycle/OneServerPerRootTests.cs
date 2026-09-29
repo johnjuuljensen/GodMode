@@ -58,6 +58,32 @@ public class OneServerPerRootTests
         Assert.Equal(2, SkippedLines(dev).Length);
     }
 
+    /// <summary>
+    /// A held root that one rebuild does not find (its folder blinks, an editor replaces it) stays held while a
+    /// session of this server's is in it: no other server takes it, and it is listed again once its
+    /// config is whole. A root with no project in it is let go.
+    /// </summary>
+    [Fact]
+    public async Task HeldRootThatOneRebuildDoesNotFind_StaysHeld_WhileASessionIsInIt()
+    {
+        await using var main = new LifecycleHarness(Waiting(), settings: Instance("main"), extraRoots: [(OtherRoot, "other")]);
+        await using var dev = new LifecycleHarness(Waiting(), settings: Instance("dev", main.RootsDir));
+        var created = await main.CreateProjectAsync();
+        await main.WaitForStdinAsync(created.Id);
+        var configDirs = new[] { LifecycleHarness.RootName, OtherRoot }.Select(root => Path.Combine(main.RootsDir, root, ".godmode-root")).ToArray();
+        foreach (var dir in configDirs) Directory.Move(dir, dir + ".away");
+
+        Assert.DoesNotContain(await main.Projects.ListProjectRootsAsync(), root => root.Name is LifecycleHarness.RootName or OtherRoot);
+        foreach (var dir in configDirs) Directory.Move(dir + ".away", dir);
+
+        var devRoots = await dev.Projects.ListProjectRootsAsync();
+        Assert.DoesNotContain(devRoots, root => root.Name == LifecycleHarness.RootName);
+        Assert.Contains(devRoots, root => root.Name == OtherRoot);
+        var mainRoots = await main.Projects.ListProjectRootsAsync();
+        Assert.Contains(mainRoots, root => root.Name == LifecycleHarness.RootName);
+        Assert.DoesNotContain(mainRoots, root => root.Name == OtherRoot);
+    }
+
     /// <summary>A server restarted over its roots holds them again: the one that stopped let them go.</summary>
     [Fact]
     public async Task RestartedServer_HoldsItsRootsAgain()
