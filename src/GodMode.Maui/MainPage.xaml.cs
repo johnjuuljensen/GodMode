@@ -5,15 +5,17 @@ namespace GodMode.Maui;
 
 public partial class MainPage : ContentPage
 {
-    private static MainPage? _instance;
+    private readonly ShellBridge _shell;
 
-    public MainPage()
+    /// <summary>The page of the main window (no profile), or of a profile's own window, locked to it (#340).</summary>
+    public MainPage(string? profile)
     {
-        _instance = this;
+        Profile = profile;
         InitializeComponent();
 
-        // React asks the shell for the relay's URL and secret over the bridge (relay.info).
-        ShellBridge.Attach(WebView, MauiProgram.Services);
+        // React asks the shell for the relay's URL and secret over the bridge (relay.info), and which window it is in
+        // (window.info)
+        _shell = ShellBridge.Attach(WebView, profile, MauiProgram.Services);
 
         // The WebView shows only the app: a link opens outside it (WebViewNavigation)
 #if ANDROID
@@ -33,6 +35,8 @@ public partial class MainPage : ContentPage
                 {
                     KeepOnApp.Attach(wv2.CoreWebView2);
                     wv2.CoreWebView2.Settings.AreDevToolsEnabled = true;
+                    // The page's title is the window's: "(2) GodMode — Work", the profile and what needs the user there
+                    wv2.CoreWebView2.DocumentTitleChanged += (_, _) => ShowTitle(wv2.CoreWebView2.DocumentTitle);
 
                     var logger = MauiProgram.LoggerFactory.CreateLogger("WebView");
 
@@ -83,6 +87,20 @@ public partial class MainPage : ContentPage
 #endif
     }
 
+    /// <summary>The profile the page's window is locked to; null in the main window.</summary>
+    public string? Profile { get; }
+
+    /// <summary>The window closed: its page's bridge lets go of the app's events.</summary>
+    public void Detach() => _shell.Dispose();
+
+    /// <summary>The page's title in the window's title bar, and the taskbar's. Not the address it has before it loads.</summary>
+    private void ShowTitle(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title) || title.Contains("://") || Window is not { } window) return;
+        window.Title = title;
+        if (window.TitleBar is TitleBar bar) bar.Title = title;
+    }
+
     // Android back walks the client's history, where each screen is an entry. With none left
     // the default runs, which leaves the app.
     protected override bool OnBackButtonPressed()
@@ -97,12 +115,13 @@ public partial class MainPage : ContentPage
         return base.OnBackButtonPressed();
     }
 
-    public static void OpenDevTools()
+    /// <summary>The developer tools of the page the WebView shows, where the platform has them (Windows).</summary>
+    public static void OpenDevTools(HybridWebView webView)
     {
 #if WINDOWS
-        _instance?.Dispatcher.Dispatch(() =>
+        webView.Dispatcher.Dispatch(() =>
         {
-            if (_instance.WebView.Handler?.PlatformView is Microsoft.UI.Xaml.Controls.WebView2 wv2
+            if (webView.Handler?.PlatformView is Microsoft.UI.Xaml.Controls.WebView2 wv2
                 && wv2.CoreWebView2 != null)
             {
                 wv2.CoreWebView2.OpenDevToolsWindow();
