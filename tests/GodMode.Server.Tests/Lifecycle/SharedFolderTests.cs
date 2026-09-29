@@ -210,16 +210,20 @@ public class SharedFolderTests
     }
 
     /// <summary>
-    /// Two creates into one shared folder at once both make their session: the claim that keeps one
-    /// session per ID is the session's, not the folder's. The first is held in its create script,
-    /// with its claims made, while the second is made.
+    /// Two creates into one shared folder at once both make their session, each from its own script
+    /// result: the claim that keeps one session per ID is the session's, not the folder's, and so are
+    /// the result file and log. The first is held in its create script, its result written and its
+    /// claims made, while the second is made.
     /// </summary>
     [Fact]
     public async Task TwoCreates_IntoOneSharedFolder_AtOnce_BothMakeTheirSession()
     {
         await using var harness = new LifecycleHarness(Waiting(),
-            rootConfig: new Dictionary<string, object>(Shared) { ["create"] = "create.ps1" });
+            rootConfig: new Dictionary<string, object>(Shared) { ["scriptsCreateFolder"] = true, ["create"] = "create.ps1" });
         File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "create.ps1"), """
+            $workspace = Join-Path $env:GODMODE_ROOT_PATH 'workspace'
+            New-Item -ItemType Directory -Force $workspace | Out-Null
+            Set-Content -Path $env:GODMODE_RESULT_FILE -Value "project_path=$workspace`nkind=chat"
             if ($env:GODMODE_INPUT_REACHED) {
                 Set-Content -Path $env:GODMODE_INPUT_REACHED -Value 'reached'
                 while (-not (Test-Path $env:GODMODE_INPUT_GO)) { Start-Sleep -Milliseconds 20 }
@@ -236,7 +240,9 @@ public class SharedFolderTests
         var first = await firstCreate;
 
         Assert.NotEqual(first.Id, second.Id);
-        Assert.Equal(harness.ProjectPath(first.Id), harness.ProjectPath(second.Id));
+        var workspace = Path.Combine(harness.RootPath, "workspace");
+        Assert.Equal((workspace, workspace), (harness.ProjectPath(first.Id), harness.ProjectPath(second.Id)));
+        Assert.Equal(("chat", "chat"), (first.Kind, second.Kind));
         await harness.WaitForStdinAsync(first.Id);
         await harness.WaitForStdinAsync(second.Id);
         Assert.Equal(2, (await harness.Projects.ListProjectsAsync()).Length);
