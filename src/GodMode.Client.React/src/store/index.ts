@@ -181,7 +181,7 @@ export type ActivePage =
   | { type: 'appSettings' }
   | { type: 'addServer' }
   | { type: 'editServer'; serverId: string }
-  | { type: 'createProject'; context?: { serverId: string; rootName: string } };
+  | { type: 'createProject'; context?: { serverId: string; profileName: string; rootName: string } };
 
 // ── Store interface ────────────────────────────────────────────
 

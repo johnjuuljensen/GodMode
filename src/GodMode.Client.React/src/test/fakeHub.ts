@@ -72,7 +72,7 @@ export class FakeHub {
   /** Every RespondToPermission's decision, MarkSeen and CreateProject, in order. */
   decisions: { projectId: string; requestId: string; decision: PermissionDecision }[] = [];
   seen: string[] = [];
-  created: { rootName: string; actionName: string | null; inputs: Record<string, unknown> }[] = [];
+  created: { profileName: string; rootName: string; actionName: string | null; inputs: Record<string, unknown> }[] = [];
   /** Every SubscribeProject and UnsubscribeProject that reached the server, in order. */
   subscriptions: { projectId: string; fromOffset: number }[] = [];
   /** The same subscriptions, each to be answered when the test says. Kept by resetCalls. */
@@ -154,9 +154,9 @@ export class FakeHub {
     this.decisions.push({ projectId, requestId, decision });
   }
   async markSeen(projectId: string) { this.invoke(); this.seen.push(projectId); }
-  async createProject(_profileName: string, rootName: string, actionName: string | null, inputs: Record<string, unknown>) {
+  async createProject(profileName: string, rootName: string, actionName: string | null, inputs: Record<string, unknown>) {
     this.invoke();
-    this.created.push({ rootName, actionName, inputs });
+    this.created.push({ profileName, rootName, actionName, inputs });
     return status(`new${this.created.length}`, 'Running');
   }
 }

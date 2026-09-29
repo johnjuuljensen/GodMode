@@ -31,7 +31,7 @@ const routeTable: readonly RouteDef[] = [
   { pattern: 'servers/add', toRoute: () => ({ screen: 'page', page: { type: 'addServer' } }) },
   { pattern: 'servers/:serverId', toRoute: p => ({ screen: 'page', page: { type: 'editServer', serverId: p.serverId } }) },
   { pattern: 'create', toRoute: () => ({ screen: 'page', page: { type: 'createProject' } }) },
-  { pattern: 'create/:serverId/:rootName', toRoute: p => ({ screen: 'page', page: { type: 'createProject', context: { serverId: p.serverId, rootName: p.rootName } } }) },
+  { pattern: 'create/:serverId/:profileName/:rootName', toRoute: p => ({ screen: 'page', page: { type: 'createProject', context: { serverId: p.serverId, profileName: p.profileName, rootName: p.rootName } } }) },
 ];
 
 const hashOf = (...segments: string[]) => '#/' + segments.map(encodeURIComponent).join('/');
@@ -47,7 +47,7 @@ export function formatRoute(route: Route): string {
         case 'appSettings': return hashOf('settings', 'app');
         case 'addServer': return hashOf('servers', 'add');
         case 'editServer': return hashOf('servers', page.serverId);
-        case 'createProject': return page.context ? hashOf('create', page.context.serverId, page.context.rootName) : hashOf('create');
+        case 'createProject': return page.context ? hashOf('create', page.context.serverId, page.context.profileName, page.context.rootName) : hashOf('create');
       }
     }
   }
