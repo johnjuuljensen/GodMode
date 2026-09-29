@@ -45,7 +45,7 @@ var state = SessionState.Create("/roots/app/left-list", id);                    
 A root's working folders, and one session's state in one:
 
 - `ProjectFolder.Create(rootPath, folderName)` makes a new working folder (`FOLDER_EXISTS` when it is there); `Reuse` takes an existing one. Neither writes a session's state: the server does that once the session's id is final.
-- `ProjectFolder.ValidateFolderName`, `IsReservedFolderName`: a working folder is a folder of its own in the root, not one of the root's own (`.godmode-root`, `logs`, `.archived`), and a name Windows keeps as it is.
+- `ProjectFolder.ValidateFolderName`, `IsReservedFolderName`: a working folder is a folder of its own in the root, not one of the root's own (`.godmode-root`, `logs`, `.godmode`, `.archived`), and a name Windows keeps as it is. The root itself is a working folder too, for the sessions of an action that shares its folder: `ProjectManager.ListSessions` and `ListTrashed` look in the root's own `.godmode/` first.
 - `ProjectFolder.EnsureGitIgnore(workingFolder)`: `.godmode/.gitignore` ignores everything.
 - `ProjectFolder.Open(workingFolder, sessionId)`: one session's state, to read and write its `status.json` and append to its JSONL streams.
 
