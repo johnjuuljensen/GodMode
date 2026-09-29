@@ -62,8 +62,12 @@ public class SharedFolderTests
         Assert.NotNull(harness.Projects.ValidateProjectToken(second.Id, secondMcp.Token));
         Assert.Null(harness.Projects.ValidateProjectToken(second.Id, firstMcp.Token));
 
-        // Each session's output is its own
+        // Each session's output is its own. Its init line reaches output.jsonl through the pipeline,
+        // which can be after claude has had its stdin
         Assert.NotEqual(firstLaunch.ArgValue("--session-id"), secondLaunch.ArgValue("--session-id"));
+        foreach (var (id, launch) in new[] { (first.Id, firstLaunch), (second.Id, secondLaunch) })
+            await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadOutputFile(id).Contains(launch.ArgValue("--session-id")!)), null,
+                () => $"{id}'s output has no init line:\n{harness.ReadOutputFile(id)}");
         Assert.Contains(firstLaunch.ArgValue("--session-id")!, harness.ReadOutputFile(first.Id));
         Assert.DoesNotContain(firstLaunch.ArgValue("--session-id")!, harness.ReadOutputFile(second.Id));
         Assert.Contains(secondLaunch.ArgValue("--session-id")!, harness.ReadOutputFile(second.Id));
