@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useAppStore, TILE_TAIL_TURNS, projectKey, isListed, type ProjectKey } from '../../store';
+import { useAppStore, TILE_TAIL_TURNS, projectKey, isListed, inProfile, type ProjectKey } from '../../store';
 import { ProjectTile } from './ProjectTile';
 import './TileGrid.css';
 
@@ -10,6 +10,8 @@ interface OpenTile {
 
 export function TileGrid() {
   const serverConnections = useAppStore(s => s.serverConnections);
+  // A locked page's tiles are its profile's (#340)
+  const profile = useAppStore(s => s.lockedProfile ?? 'All');
   const selectedProject = useAppStore(s => s.selectedProject);
   const selectProject = useAppStore(s => s.selectProject);
   const tileMessages = useAppStore(s => s.tileMessages);
@@ -22,7 +24,9 @@ export function TileGrid() {
   // When the list changes, only a tile added is opened and only a tile gone is closed: the others keep
   // their lines and their subscription (#239)
   const open = useRef(new Map<ProjectKey, OpenTile>());
-  const shown = serverConnections.flatMap(conn => conn.projects.map(p => ({ serverId: conn.serverInfo.Id, projectId: p.Id })));
+  const shown = serverConnections.flatMap(conn => conn.projects
+    .filter(p => inProfile(p.ProfileName, profile))
+    .map(p => ({ serverId: conn.serverInfo.Id, projectId: p.Id })));
   const shownKeys = shown.map(t => projectKey(t.serverId, t.projectId)).join('|');
   useEffect(() => {
     const next = new Map(shown.map(t => [projectKey(t.serverId, t.projectId), t]));
@@ -42,7 +46,9 @@ export function TileGrid() {
 
   // A reconnecting server's tiles stay, as they were until it is back
   const listed = serverConnections.filter(isListed);
-  const allProjects = listed.flatMap(conn => conn.projects.map(p => ({ serverId: conn.serverInfo.Id, project: p })));
+  const allProjects = listed.flatMap(conn => conn.projects
+    .filter(p => inProfile(p.ProfileName, profile))
+    .map(p => ({ serverId: conn.serverInfo.Id, project: p })));
 
   if (listed.length === 0) {
     return <div className="tile-grid-empty">No connected servers</div>;

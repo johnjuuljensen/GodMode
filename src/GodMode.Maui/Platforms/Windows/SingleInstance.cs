@@ -4,7 +4,6 @@ using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Dispatching;
-using Microsoft.UI.Windowing;
 using Microsoft.Win32.SafeHandles;
 
 namespace GodMode.Maui;
@@ -12,7 +11,8 @@ namespace GodMode.Maui;
 /// <summary>
 /// One app per user in release builds (issue #339). The first start holds a named mutex and listens on a named pipe of
 /// the same name; a later start finds the mutex held, sends its arguments down the pipe and exits, and the running app
-/// comes to the front. Debug builds (no SINGLE_INSTANCE, see the csproj) take neither, so they run alongside the
+/// comes to the front: the window of the profile it names (<c>--profile Work</c>, <see cref="AppWindows.HandOff"/>),
+/// else the main window. Debug builds (no SINGLE_INSTANCE, see the csproj) take neither, so they run alongside the
 /// installed app. The mutex is in the Global namespace and named for the user, so it is app-wide across the user's
 /// sessions and never blocks another user's app.
 /// </summary>
@@ -29,8 +29,8 @@ internal static class SingleInstance
 #endif
 
     /// <summary>
-    /// A later start handed its arguments (without the exe) to this app, on the main thread, after its window came to
-    /// the front.
+    /// A later start handed its arguments (without the exe) to this app, on the main thread, after the window they name
+    /// came to the front.
     /// </summary>
     public static event Action<IReadOnlyList<string>>? HandedOff;
 
@@ -103,11 +103,11 @@ internal static class SingleInstance
                     PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                 await pipe.WaitForConnectionAsync();
                 var args = await JsonSerializer.DeserializeAsync<string[]>(pipe) ?? [];
-                logger.LogInformation("Single instance: a later start handed off [{Args}]; bringing the window to the front",
+                logger.LogInformation("Single instance: a later start handed off [{Args}]; bringing its window to the front",
                     string.Join(' ', args));
                 if (!dispatcher.TryEnqueue(() =>
                     {
-                        BringToFront(logger);
+                        AppWindows.HandOff(args, logger);
                         HandedOff?.Invoke(args);
                     }))
                     logger.LogWarning("Single instance: the app is shutting down, and drops the hand-off [{Args}]",
@@ -121,25 +121,6 @@ internal static class SingleInstance
         }
     }
 
-    /// <summary>
-    /// Restores the main window if it is minimised and makes it the foreground window, which switches to its virtual
-    /// desktop.
-    /// </summary>
-    private static void BringToFront(ILogger logger)
-    {
-        if (Application.Current?.Windows.FirstOrDefault()?.Handler?.PlatformView is not Microsoft.UI.Xaml.Window window)
-        {
-            logger.LogInformation("Single instance: no window yet to bring to the front");
-            return;
-        }
-        if (window.AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
-            presenter.Restore();
-        window.Activate();
-        var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
-        if (!SetForegroundWindow(handle) || GetForegroundWindow() != handle)
-            logger.LogInformation("Single instance: Windows kept the foreground from the window");
-    }
-
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint serverProcessId);
@@ -147,11 +128,4 @@ internal static class SingleInstance
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AllowSetForegroundWindow(uint processId);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetForegroundWindow(nint window);
-
-    [DllImport("user32.dll")]
-    private static extern nint GetForegroundWindow();
 }

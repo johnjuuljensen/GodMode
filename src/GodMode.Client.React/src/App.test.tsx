@@ -26,12 +26,13 @@ afterEach(() => {
 it('opens on the shell and lists the servers the app holds', async () => {
   answer('relay.info', { BaseUrl: 'http://127.0.0.1:49152', Secret: 'relay-secret' });
   answer('servers.list', []);
+  answer('window.info', { Profile: null, CanOpenWindows: true });
 
   view = await render(<App />);
   await settle();
 
   expect(view.container.querySelector('.test-shell')).not.toBeNull();
-  expect(sent.map(m => m.Type)).toEqual(['relay.info', 'servers.list']);
+  expect(sent.map(m => m.Type)).toEqual(['relay.info', 'window.info', 'servers.list']);
   expect(useAppStore.getState().serverConnections).toEqual([]);
   expect(fetch).not.toHaveBeenCalled();
 });

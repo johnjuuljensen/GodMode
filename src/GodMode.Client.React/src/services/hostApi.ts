@@ -12,7 +12,7 @@
  */
 import type { AddServerRequest, ServerInfo } from '../signalr/types';
 import * as bridge from './hostBridge';
-import type { RelayInfo } from './hostBridge';
+import type { RelayInfo, WindowInfo } from './hostBridge';
 
 /** The relay's URL and secret, once the bridge has answered relay.info. */
 let relayInfo: RelayInfo | null = null;
@@ -69,6 +69,19 @@ export async function stopServer(serverId: string): Promise<void> {
 
 export async function openDevTools(): Promise<void> {
   await bridge.request('host.openDevTools');
+}
+
+/** The main window's, where the app does not answer: unlocked, and no windows to open. */
+const MAIN_WINDOW: WindowInfo = { Profile: null, CanOpenWindows: false };
+
+/** Which window this page is in (#340), asked of the app. */
+export const windowInfo = (): Promise<WindowInfo> => bridge.request('window.info').catch(err => {
+  console.warn('[api] Could not get the window info from the app, so the page is unlocked:', err);
+  return MAIN_WINDOW;
+});
+
+export async function openProfileWindow(profile: string): Promise<void> {
+  await bridge.request('window.openProfile', { Profile: profile });
 }
 
 export function subscribeEvents(onEvent: (type: string, data: unknown) => void): () => void {
