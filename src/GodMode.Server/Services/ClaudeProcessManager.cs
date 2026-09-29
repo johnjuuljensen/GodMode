@@ -96,11 +96,11 @@ public class ClaudeProcessManager : IClaudeProcessManager
     {
         _logger.LogInformation("Starting Claude process for project {ProjectId}", project.Status.Id);
 
-        var sessionId = project.SessionId ?? Guid.NewGuid().ToString();
-        project.SessionId = sessionId;
+        var sessionId = project.ClaudeSessionId ?? Guid.NewGuid().ToString();
+        project.ClaudeSessionId = sessionId;
 
         // The ID asked for; claude's system/init replaces it if claude keeps another
-        await SessionIdFile.WriteAsync(project.ProjectPath, sessionId, cancellationToken);
+        await SessionIdFile.WriteAsync(project.StatePath, sessionId, cancellationToken);
 
         // Start with session ID, send prompt via stdin
         var args = BuildArgs(["--session-id", sessionId], extraArgs);
@@ -115,10 +115,10 @@ public class ClaudeProcessManager : IClaudeProcessManager
     {
         // No session to resume (none saved, or one that was no GUID): a fresh one takes its place,
         // as it does when claude has no conversation for the session
-        if (project.SessionId is not { } sessionId)
+        if (project.ClaudeSessionId is not { } sessionId)
         {
             _logger.LogWarning("Project {ProjectId} has no session to resume. Starting fresh session.", project.Status.Id);
-            project.SessionId = Guid.NewGuid().ToString();
+            project.ClaudeSessionId = Guid.NewGuid().ToString();
             return await StartFreshSessionAsync(project, cancellationToken, extraEnvironment, extraArgs);
         }
 
@@ -136,7 +136,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
                 if (exitCode == 0 || !stderrTail.Any(line => line.Contains(NoConversationError))) return false;
 
                 _logger.LogWarning("Resume failed for project {ProjectId}, session {SessionId} not found. Starting fresh session.",
-                    project.Status.Id, project.SessionId);
+                    project.Status.Id, project.ClaudeSessionId);
                 try
                 {
                     await StartFreshSessionAsync(project, cancellationToken, extraEnvironment, extraArgs);
@@ -154,8 +154,8 @@ public class ClaudeProcessManager : IClaudeProcessManager
     private async Task<int> StartFreshSessionAsync(ProjectInfo project, CancellationToken cancellationToken,
         Dictionary<string, string>? extraEnvironment, string[]? extraArgs)
     {
-        await SessionIdFile.WriteAsync(project.ProjectPath, project.SessionId!, cancellationToken);
-        return await RunClaudeProcessAsync(project, BuildArgs(["--session-id", project.SessionId!], extraArgs),
+        await SessionIdFile.WriteAsync(project.StatePath, project.ClaudeSessionId!, cancellationToken);
+        return await RunClaudeProcessAsync(project, BuildArgs(["--session-id", project.ClaudeSessionId!], extraArgs),
             "Continue from where we left off. Review the codebase and previous work.", cancellationToken, extraEnvironment);
     }
 
@@ -176,7 +176,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         Dictionary<string, string>? extraEnvironment,
         ExitTakeover? takeover = null)
     {
-        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
+        var godModePath = project.StatePath;
         var output = project.Process.Output;
         var stderrPath = Path.Combine(godModePath, "errs.txt");
 
@@ -351,7 +351,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             if (!launch.Stopped && takeover != null && await takeover(exitCode, tail))
                 return;
 
-            try { McpConfigFile.DeleteIfWrittenBefore(project.ProjectPath, launchedAt); }
+            try { McpConfigFile.DeleteIfWrittenBefore(project.StatePath, launchedAt); }
             catch (Exception ex) { _logger.LogWarning(ex, "Could not delete the MCP config for project {ProjectId}", id); }
 
             project.Process.ClearProcessId(launch.Id);
@@ -413,7 +413,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             await launch.Process.StandardInput.WriteLineAsync(json);
             await launch.Process.StandardInput.FlushAsync();
 
-            var inputPath = Path.Combine(project.ProjectPath, ".godmode", "input.jsonl");
+            var inputPath = Path.Combine(project.StatePath, "input.jsonl");
             await LogInputAsync(inputPath, input, CancellationToken.None);
         }
         finally

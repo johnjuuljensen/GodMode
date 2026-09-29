@@ -3,6 +3,7 @@ import type { ProjectSummary, ClaudeMessage } from '../../signalr/types';
 import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
 import { callStatus, callStatusTitle, isConversation, resultLine } from '../Project/transcriptRow';
 import { useAppStore, projectKey } from '../../store';
+import { KindLabel } from '../KindLabel/KindLabel';
 import './ProjectTile.css';
 
 // A tile shows a few lines of a row: text past this is left out of the page, not only out of sight
@@ -48,6 +49,7 @@ export function ProjectTile({ project, serverId, messages, isLoading, isSelected
         <div className="tile-header-left">
           <span className={`tile-dot ${tileState}`} />
           <span className="tile-name">{project.Name}</span>
+          <KindLabel kind={project.Kind} />
           {isWaiting && <span className="tile-waiting-badge">WAITING</span>}
         </div>
         <span className="tile-time">{relativeTime(project.UpdatedAt)}</span>

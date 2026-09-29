@@ -70,12 +70,12 @@ public sealed class EndToEndTests
     }
 
     private static async Task<ProjectStatus> CreateAsync(HubConnection hub, string name) =>
-        await hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.CreateProject), TestServer.Profile, TestServer.Root, null,
+        (await hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), TestServer.Profile, TestServer.Root, null,
             new Dictionary<string, JsonElement>
             {
                 ["name"] = JsonSerializer.SerializeToElement(name),
                 ["prompt"] = JsonSerializer.SerializeToElement("Ship the issue"),
-            });
+            })).Project!;
 
     private static Task WaitForAttentionAsync(HubConnection hub, string projectId) =>
         Eventually.UntilAsync(

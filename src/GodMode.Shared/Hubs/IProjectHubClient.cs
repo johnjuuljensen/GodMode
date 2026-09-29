@@ -54,7 +54,9 @@ public interface IProjectHubClient
     Task ProjectCreated(ProjectStatus status);
 
     /// <summary>
-    /// Called during project creation to stream script progress to the client.
+    /// Called during project creation to stream script progress to the client. The ID is the
+    /// session's; for an action that starts no session, the run's own, <c>{profile}/{root}/{id}</c>,
+    /// which names no project. The stream ends when the create returns: it has no last message.
     /// </summary>
     Task CreationProgress(string projectId, string message);
 
@@ -63,4 +65,13 @@ public interface IProjectHubClient
     /// </summary>
     Task ProjectDeleted(string projectId);
 
+    /// <summary>
+    /// The server's roots or profiles changed: <paramref name="roots"/> and <paramref name="profiles"/>
+    /// are the whole lists, as <see cref="IProjectHub.ListProjectRoots"/> and
+    /// <see cref="IProjectHub.ListProfiles"/> return them. Pushed only when they differ from the last
+    /// lists the server made: a root added, edited (its profile, description, actions or schemas) or
+    /// removed on the host or in its config. Sessions that come or go with a root are pushed as
+    /// <see cref="ProjectCreated"/> and <see cref="ProjectDeleted"/>.
+    /// </summary>
+    Task RootsChanged(ProjectRootInfo[] roots, ProfileInfo[] profiles);
 }

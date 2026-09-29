@@ -165,20 +165,22 @@ All real-time communication uses strongly-typed SignalR on one hub, `/hubs/proje
 
 The hub is the session loop plus reading profiles and roots:
 
-| `IProjectHub` (18 methods) | |
+| `IProjectHub` (19 methods) | |
 |---|---|
-| Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject` |
+| Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `RestoreProject` |
 | Prompts | `RespondToPermission`, `GetPermissionDetail`, `AnswerQuestion` |
 | Attention | `GetAttention`, `MarkSeen`, `ReplyAndResume` |
 | Roots | `ListProjectRoots` |
 | Profiles | `ListProfiles` |
 | Utility | `CheckCommand` |
 
-| `IProjectHubClient` (8 callbacks) |
+| `IProjectHubClient` (9 callbacks) |
 |---|
-| `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted` |
+| `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted`, `RootsChanged` |
 
-**A project's ID is `{profile}/{root}/{project-folder}`**, where its folder is, so one folder name in two roots is two projects. Every hub method and callback that names a project takes or gives this ID (`ProjectStatus.Id`, `ProjectSummary.Id`). Clients treat it as opaque and pass it back as they received it; the server derives it from the folder's location on every recovery. Root scripts get the folder name alone, as `GODMODE_PROJECT_FOLDER`.
+**A session's ID is `{profile}/{root}/{id}`**, its id being GodMode's own, `yymmdd-{kind}-{slug}-{suffix}` (`260929-feat-left-list-k7q2`), unique within its root and the name of its state folder (4.3). Every hub method and callback that names a project takes or gives this ID (`ProjectStatus.Id`, `ProjectSummary.Id`). Clients treat it as opaque and pass it back as they received it; the server derives it from where the state folder is on every recovery. Root scripts get the id as `GODMODE_SESSION_ID` and the folder name as `GODMODE_PROJECT_FOLDER`. The session's kind (`ProjectStatus.Kind`, `ProjectSummary.Kind`), which the app shows as a label, is its create script's `kind` result, else its action's name.
+
+**`CreateProject` returns a `CreateProjectResult`**: the project created, or, for an action that starts no session (`"session": false`, 4.2), no project and its script's `message`. Its `CreationProgress` is under the ID of the session, or of the run (`{profile}/{root}/{id}`, naming no project), and ends when the call returns.
 
 When adding a new hub method:
 1. Add to `IProjectHub` (client→server) or `IProjectHubClient` (server→client)
@@ -189,12 +191,18 @@ When adding a new hub method:
 
 ### 4.2 Config-Driven Project Roots
 
-A root is a subdirectory of `ProjectRootsDir` that contains `.godmode-root/`. The server discovers roots by scanning that directory on each call, so a root added on the host shows up on the next refresh.
+A root is a folder with a `.godmode-root/` in it, and the server's config says where its roots are (Section 6): each **scan folder** (`Roots:Scan:<key>`) makes a root of every immediate subfolder that has a `.godmode-root/`, named after it, and an **explicit root** (`Roots:Explicit:<name>:Path`) is one named folder, anywhere on disk. The server reads its sources and scans its folders again on each list of profiles or roots, on each reload of the config, and every `RootsPollSeconds` (5; a file watcher misses changes on a network drive). A server has one root per name and per folder: an explicit root wins a clash, then the first scan key in ordinal order, and each loser is logged with both paths.
+
+**Live roots.** Once the startup's recovery has run, a root added, edited (its `profileName` included) or removed on the host, or in the instance's config file, reaches every client as `RootsChanged` (the whole lists of roots and profiles), sent only when they differ from the last ones read, so the app shows it without a reconnect. What follows for sessions:
+- A root that appears has its sessions recovered as at the start, each pushed as `ProjectCreated`.
+- A session is its root's by folder (`ProjectInfo.RootPath`): its delete, status, launch and restart read that folder's config and scripts, whatever the root is called now, so a root name that comes to name another folder is another root to it.
+- When a session's root folder is gone, or is listed under another profile or name, a session without a claude leaves the list (`ProjectDeleted`, its files kept), and is recovered again under the ID the folder gives it now, if the folder is still a root. One whose claude runs carries on under its ID, which its MCP config carries, until claude exits. Two reads in a row must agree first, since a half-saved `config.json` reads as the default. The root stays locked while a session of the server's is in it.
+- The server README (*Live roots*) has the details.
 
 ```
 root-name/
 ├── .godmode-root/
-│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, permissionMode, allowSkipPermissions, resumeOnRestart, resumePrompt)
+│   ├── config.json                # Base config (profileName, prepare, delete, status, environment, claudeArgs, permissionMode, allowSkipPermissions, resumeOnRestart, resumePrompt, sharedFolder, session)
 │   ├── config.{action}.json       # Per-action overlays (merged with base)
 │   ├── {action}/
 │   │   ├── schema.json            # Input form schema (JSON Schema)
@@ -203,12 +211,14 @@ root-name/
 │       ├── prepare.ps1            # Shared prepare script
 │       ├── delete.ps1             # Shared delete script
 │       └── status.ps1             # Reports the project's pull request (optional)
-└── {project-folder}/              # Projects created from this root
+└── {project-folder}/              # Working folders created from this root, each with its session
 ```
 
 **Merge order**: `config.json` (base) → `config.{action}.json` (overlay). Action overlay wins on conflict.
 
-**Profile assignment**: `profileName` in `config.json` puts the root in that profile. Roots without it go to `Default`.
+**Actions that start no session.** `"session": false` makes an action its scripts alone: prepare and create run in the root, with its environment and inputs, and no folder is made, nothing tracked and no claude started. It is how a root provisions the host: a provisioning root's action makes a new root as a sibling in its scan folder, which live roots then list, and the server reads the roots again once it has run. The server still writes no config (5.3): the script does. Of its result file only `message` is read, which the app shows in place of opening a session; `project_path` and its checks do not apply. `sharedFolder`, `scriptsCreateFolder` or no create script with it is a config error: its create is refused, and the listing leaves that action out (logged), keeping the root's profile and other actions. The server README (*Actions that start no session*) has the details.
+
+**Profile assignment**: `profileName` in `config.json` puts the root in that profile. An explicit root without it goes to its entry's `Profile`, and any other root to `Default`.
 
 **MCP servers** are not root config: a repo brings its own, and GodMode adds only its own MCP endpoint (Section 8).
 
@@ -227,25 +237,37 @@ Key services:
 
 ### 4.3 Project Folder Structure
 
+The same `.godmode` structure for everything: every session keeps its state in its working folder's `.godmode/sessions/{id}/`. A worktree is simply a folder with one session; an assistant's workspace is a folder with several (`sharedFolder`, below).
+
 ```
 {root}/{project-folder}/
 ├── .godmode/
-│   ├── status.json      # Current state, metrics
-│   ├── settings.json    # Per-project settings (action, permission mode, skip-permissions asked for)
-│   ├── input.jsonl      # User input log
-│   ├── output.jsonl     # Claude output stream
-│   ├── session-id       # Claude session ID for resumption
-│   └── .gitignore
-└── (project files)      # Working directory for Claude
+│   ├── .gitignore               # "*"
+│   └── sessions/
+│       └── {id}/                # yymmdd-{kind}-{slug}-{suffix}
+│           ├── status.json      # Current state, metrics, kind
+│           ├── settings.json    # The session's settings (action, permission mode, skip-permissions asked for, shared folder)
+│           ├── input.jsonl      # User input log
+│           ├── output.jsonl     # Claude output stream, GodMode's own
+│           ├── output-generation
+│           ├── session-id       # Claude's session GUID, for --resume
+│           └── mcp-config.json  # While claude runs, with the session's token
+└── (project files)              # Working directory for Claude
 ```
 
-A project is a folder directly inside its root with a `.godmode/status.json`, unless it is one of the root's own folders (below), which recovery skips. `{project-folder}` is its folder name, not its ID (4.1). The server does not archive or move project folders.
+A session is a folder in `.godmode/sessions/` of a working folder directly inside its root, named as an id is and with a `status.json`, unless the working folder is one of the root's own folders (below), which recovery skips (`SessionState.List`, `ProjectFiles.ProjectManager.ListSessions`). `{project-folder}` is its folder name, not its ID (4.1). The old flat layout (`.godmode/status.json`) is neither read nor migrated. The server does not archive or move project folders; it moves only a deleted shared session's state, to the trash (below).
+
+**Several sessions in one folder** is the action's to allow: `"sharedFolder": true` (default false), for an assistant root whose sessions all work in one workspace, which its create script names as `project_path` (`{root}/workspace`, strictly inside the root as every working folder is). Without it, a create whose folder another session has (tracked, or only its state on disk) is refused as in use, which keeps a worktree root from two sessions in one worktree; with it, a create may join sessions that share the folder too, never one that owns it, and a folder that sessions share takes no session that would own it. The claim a create holds from before anything is written is its ID's alone; its folder's is shared among creates that share it. Each session has its own state folder, output, MCP config and token, claude process and create log (`{root}/logs/{id}.log` and `{id}.result`, by the id it keeps). Claude Code keeps a transcript per session, so their histories do not collide; edits to the same files at once are the user's to avoid. **Deleting a session that shares its folder** runs the delete script with `GODMODE_SESSION_ID` and `GODMODE_SHARED_FOLDER=true`, then moves only its `sessions/{id}/` to the folder's `.godmode/trash/{id}/`, never the folder or its files. A session counts as sharing when its `settings.json` says it was created so, its action shares folders now, or another session is in the folder.
+
+**The trash, and undo.** `DeleteProject` returns `DeleteProjectResult`, whose `Trashed` says a shared session's state went to the trash. `RestoreProject` moves it back and tracks the session again, `Stopped`, under the same ID, pushed as `ProjectCreated`. It fails, changing nothing, when the ID's `{profile}/{root}/` names no root listed now (the root was removed, or its profile or name changed), so a session never comes back under another ID. Nothing in the trash is recovered, and its id stays taken in its root. The server purges trash older than `TrashRetentionSeconds` (a day) at every start and every `TrashPurgeSeconds` (an hour). The app deletes such a session at once with "Deleted · Undo" for 10 seconds; a worktree's delete, which removes the folder, asks first. Folding older sessions under "N older" is the app's alone (5.3): a session folds when it has no claude, needs nothing of the user and has been quiet a week, or a day when its action is `transient`. The server README (*The trash, and folding*) has the details.
+
+**The id** is `yymmdd-{kind}-{slug}-{suffix}` (`SessionState.Id`): the creation date, the kind, a slug of the name (lowercase `[a-z0-9-]`, 24 characters at most), and 4 random base32 characters. It is short, for Windows' path limits, and unique within its root: a create takes another suffix when a tracked session, a create in progress or a state folder on disk has it. Until the create script has run the kind is the action's name and the slug the name so far; its result (`kind`, `project_name`) gives the final id, with the same date and suffix. Claude's session GUID is not the id: it stays in `session-id`, since GodMode replaces it when a resume finds no conversation. GodMode keeps its own `output.jsonl` and reads no Claude transcript.
 
 **`.godmode/.gitignore` is ensured on every launch** (`ProjectFolder.EnsureGitIgnore`), before the MCP config with the project token is written: created when missing, since a create script's checkout can bring a `.godmode/` without one, and given the `*` rule when it lacks it.
 
 **A root's own folders are no project's.** `.godmode-root`, `logs` and `.archived` (a leftover) are refused as a project's folder (`ProjectFolder.ReservedFolderNames`), from the create dialog, a reuse, or a create script's `project_path`, and one found on disk with a `status.json` is not recovered. So are folder names Windows would change or not make a folder of, on every OS: a trailing dot or space (a name's trailing dots are dropped instead), and device names like `CON`, `NUL`, `COM1`. **A project's folder is strictly inside its root.** A create script's `project_path` must be inside that script's root, links followed, and not inside one of the root's own folders; the server deletes a project's folder only if it is inside a configured root by the same test, and otherwise leaves it on disk. **A project folder's files are untrusted:** its session can write them, so what reaches the `claude` command line or a link is checked when read back: `session-id` must be a GUID (anything else is no session, and the resume starts a fresh one), and a recovered pull request URL must be http(s).
 
-**One project, one claude.** A project has at most one claude process. A create is refused while a tracked project has its ID or folder, before anything is written; create, resume, stop and delete of one project take its lock, so launches and stops come one at a time. Each session runs in a process tree of its own, off the server's console (a Job Object and a hidden console on Windows, a process group started through `setsid` on Linux). A stop interrupts claude (Ctrl+Break in its console on Windows, SIGINT to its group elsewhere), gives it `StopGracePeriodSeconds` (10) to exit, then kills the whole tree; the server's shutdown does the same for every session at once. The server README (*Sessions*) has the details and what claude was measured to honour.
+**One project, one claude.** A project has at most one claude process. A create is refused while a tracked project has its ID, or its folder unless both share it (`sharedFolder`), before anything is written; create, resume, stop and delete of one project take its lock, so launches and stops come one at a time. Each session runs in a process tree of its own, off the server's console (a Job Object and a hidden console on Windows, a process group started through `setsid` on Linux). A stop interrupts claude (Ctrl+Break in its console on Windows, SIGINT to its group elsewhere), gives it `StopGracePeriodSeconds` (10) to exit, then kills the whole tree; the server's shutdown does the same for every session at once. The server README (*Sessions*) has the details and what claude was measured to honour.
 
 **Failures keep the true state.** A project's state follows claude, whatever else fails:
 - A `status.json` that cannot be saved does not fail the change: it is pushed, its events are raised, and it is saved with the next change (the failure is logged at Error).
@@ -259,7 +281,7 @@ A project is a folder directly inside its root with a `.godmode/status.json`, un
 Every request needs a credential, whatever the server is bound to, loopback included. The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
 
 1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`, which its sessions are given.
-2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade). The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under `ProjectRootsDir`.
+2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade). The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under a scan folder or an explicit root.
 
 **No browser** (`Auth/OriginPolicy.cs`). A request with an `Origin`, as a browser sends on every WebSocket upgrade and any request but a same-origin GET, is refused with 403 before authentication, whatever origin it names: the server's own bindings included, in Development and in a codespace too, and no setting allows one. A request with no `Origin` (the MAUI relay, the attention service, a session's claude on `/mcp`) needs its credential alone.
 
@@ -300,39 +322,52 @@ The server reads roots, actions, schemas and profiles. It does not edit, package
 
 ### 5.4 Roots Are External
 
-Root definitions live wherever you keep them, typically a git repo you clone into `ProjectRootsDir`. The server doesn't bundle root templates in its binary. `.devcontainer/godmode-server/roots/` is one such set, which the codespace copies into place.
+Root definitions live wherever you keep them, typically a git repo you clone into a scan folder, or name as an explicit root. The server doesn't bundle root templates in its binary. `.devcontainer/godmode-server/roots/` is one such set, which the codespace copies into place.
 
 ---
 
-## 6. File-Based Profile Configuration
+## 6. Roots and Profiles in the Host's Config
 
-Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means adding a directory, not editing a shared config file.
+A server's roots, and its profiles' descriptions and environments, are in its instance's config file (`--config <path>` or `GODMODE_CONFIG`, Section 10), on the host, beside appsettings' default. Each is a keyed map, so config sources merge entry by entry (.NET merges arrays by index). `.profiles/` is gone, and nothing reads it.
 
 ### Layout
 
+```json
+{
+  "Instance": "main",
+  "Roots": {
+    "Scan": { "repos": "C:\\Users\\me\\source\\repos" },
+    "Explicit": { "notes": { "Path": "D:\\notes", "Profile": "Private" } }
+  },
+  "Profiles": {
+    "Work": {
+      "Description": "The day job",
+      "Environment": { "CLAUDE_CONFIG_DIR": "C:\\Users\\me\\.claude-work" }
+    }
+  }
+}
 ```
-{ProjectRootsDir}/
-├── .profiles/
-│   ├── default/
-│   │   ├── profile.json           # { "description": "..." }
-│   │   └── env.json               # { "KEY": "value", ... }
-│   └── production/
-│       ├── profile.json
-│       └── env.json               # "CLAUDE_CONFIG_DIR": "..." pins its sessions to one Claude account
+
+```
+C:\Users\me\source\repos\            # Roots:Scan:repos
 ├── feature-root/
 │   └── .godmode-root/
-│       └── config.json            # "profileName": "production" puts this root in that profile
+│       └── config.json            # "profileName": "Work" puts this root in that profile
 └── bugfix-root/
     └── .godmode-root/
         └── ...
+D:\notes\                          # Roots:Explicit:notes, in Private unless its config.json names a profile
 ```
 
 ### Key Properties
 
-- **Adding a profile** = `mkdir .profiles/{name}` + write `profile.json`, on the host. No hub method creates, edits or deletes one
-- **Deleting a profile** = `rm -rf .profiles/{name}`
+- **A root's profile** is its `config.json`'s `profileName`, else its explicit entry's `Profile`, else `Default`. A profile is listed when it has a root; one under `Profiles` alone is only settings
+- **A profile's environment** (`Profiles:<name>:Environment:<VAR>`) reaches every session and root script of its roots; the root's own `environment` wins a clash. `CLAUDE_CONFIG_DIR` there pins the profile's sessions to one Claude account
+- **Secrets stay in environment variables**: `Profiles__Work__Environment__JIRA_TOKEN` in the server's environment is the same setting as the file's, and needs no file
+- **Adding a profile or a root** = an entry in the instance's config file, or a folder with a `.godmode-root/` in a scan folder, on the host. No hub method creates, edits or deletes one
+- **Turning off an entry** an earlier source set = setting it to `""` (appsettings' `Roots:Scan:default`, say)
 - **MCP servers** are not profile config: user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR` (Section 8.1)
-- **Git works** — the entire `{ProjectRootsDir}` can be a git repo
+- **Git works** — a scan folder, and each root in it, can be a git repo
 - **Profile env from the server's environment** — with `stripEnvVarProfile` in a root's config (or `{PROFILE}_STRIP_ENV_VAR_PROFILE=true` in the server's environment), server variables prefixed with the profile name (`MEGA_GITHUB_TOKEN`) reach that profile's sessions without the prefix (`GITHUB_TOKEN`)
 
 ---
@@ -345,7 +380,7 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 | `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process`, each in a process tree of its own (`SessionProcessTree`: a Job Object on Windows, a process group on Linux), writes their output to `output.jsonl`, and stops them: interrupt, grace period, then the tree |
 | `RootConfigReader` | Discovers and merges `.godmode-root/` configs |
 | `ScriptRunner` | Executes cross-platform scripts (`.ps1` via `pwsh`, or `PowerShell:Executable`; `.sh` via `bash`, `.cmd`/`.bat` on Windows) |
-| `ProfileFileManager` | Reads the `.profiles/` directory structure |
+| `RootSources` | Reads where the roots come from (`Roots:Scan`, `Roots:Explicit`) and each profile's settings (`Profiles`) from the configuration, fresh on every rebuild; `ProjectManager` finds the roots and `ApiKeyFile` keeps its file out of them |
 | `StatusUpdater` | Updates `status.json` during execution |
 | `TemplateResolver` | Resolves `{field}` placeholders |
 | `EnvironmentExpander` | Expands `${VAR}` in config values and strips profile prefixes from server env vars |
@@ -368,7 +403,7 @@ GodMode gives a session one MCP server, its own MCP endpoint (8.2). It configure
 | The repo | its `.mcp.json` (Claude Code's project scope) |
 | The profile's Claude account | user scope in the `CLAUDE_CONFIG_DIR` the profile's or root's `environment` sets |
 
-The server writes the session's MCP config, its own entry alone, to `.godmode/mcp-config.json` in the project (owner-only where the OS allows) and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
+The server writes the session's MCP config, its own entry alone, to `mcp-config.json` in the session's state folder, `.godmode/sessions/{id}/` (owner-only where the OS allows) and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
 
 **Nothing is pre-approved.** GodMode passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (8.2), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's permission mode lets it through, or the project runs with skip-permissions, which only a root with `allowSkipPermissions` allows (4.2).
 
@@ -407,7 +442,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
   --urls "http://127.0.0.1:31337;http://$(tailscale ip -4):31337"
 ```
 
-For a long-running server, `dotnet publish -c Release` and run the output. Put roots in `ProjectRootsDir` (default `roots` under the working directory). The machine needs `claude`, `git`, `pwsh` and whatever the roots' scripts call, such as `gh`. GodMode itself needs no Node; a repo whose `.mcp.json` starts `npx` MCP servers does.
+For a long-running server, `dotnet publish -c Release` and run the output. Put roots in a scan folder (appsettings' `Roots:Scan:default` is `roots` under the working directory), or name them in the instance's config file (Section 6). The machine needs `claude`, `git`, `pwsh` and whatever the roots' scripts call, such as `gh`. GodMode itself needs no Node; a repo whose `.mcp.json` starts `npx` MCP servers does.
 
 ### 9.3 GitHub Codespaces
 
@@ -419,7 +454,7 @@ For a long-running server, `dotnet publish -c Release` and run the output. Put r
 
 **Lifecycle**:
 - `postCreateCommand`: clones `master`, publishes the server to `/opt/godmode-server`, copies `roots/` to `~/roots`, installs Claude Code
-- `postStartCommand`: starts the server with `--ProjectRootsDir roots` from `$HOME`, sets port 31337 to public
+- `postStartCommand`: starts the server with `--Roots:Scan:default=roots` from `$HOME`, sets port 31337 to public
 
 **Server URL**: `https://<codespace-name>-31337.app.github.dev/`
 
@@ -435,7 +470,7 @@ Stage 2: .NET ASP.NET 10.0 runtime — final image (`runtime` target)
 Stage 3: runtime + .NET SDK — the `:sdk` tag, for sessions that build .NET code
 ```
 
-No stage builds the React client: the server serves no page. The runtime image includes the published server, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`. Run it with `-e Authentication__ApiKey=<key>`: without one it generates a key into the `godmode` user's home, which a replaced container does not keep. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
+No stage builds the React client: the server serves no page. The runtime image includes the published server, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`. Run it with `-e Authentication__ApiKey=<key>`: without one it generates a key into the `godmode` user's home, which a replaced container does not keep. Mount a volume at the scan folder (`/app/roots`, appsettings' `Roots:Scan:default` from the image's working directory) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
 
 **Nothing a session runs as can change the server.** `/app` (the server) is root's and read-only to `godmode`, which owns only what the server writes: `/app/roots`, `/app/projects` (the default root when none is configured), `/data` and its home. Claude Code is installed root-owned with `npm install -g` (`/usr/bin/claude`), with self-update off (`DISABLE_AUTOUPDATER`, also in `/etc/claude-code/managed-settings.json`, since a claude process's environment is an allowlist). The server starts `claude` and `pwsh` by full path (`Claude__Executable=/usr/bin/claude`, `PowerShell__Executable=/usr/bin/pwsh`), and `/home/godmode/.local/bin`, which a session can write, is last on the `PATH`. Off Docker the two settings default to a `PATH` lookup (`claude`, `pwsh`): a codespace's claude is in `~/.local/bin`, installed by `postCreateCommand`, and the server runs as the sessions' user there anyway.
 
@@ -450,11 +485,7 @@ Every target separates the **server binary** from the **workspace data**:
 ├── GodMode.Server.dll
 └── appsettings.json          # Static config (URLs, auth, logging)
 
-~/roots/                      # Workspace data = ProjectRootsDir (persists across updates)
-├── .profiles/                # Profile definitions
-│   └── default/
-│       ├── profile.json
-│       └── env.json
+~/roots/                      # Workspace data = a scan folder (persists across updates)
 └── my-root/                  # Project roots
     ├── .godmode-root/
     └── {project-folder}/     # Projects
@@ -462,7 +493,7 @@ Every target separates the **server binary** from the **workspace data**:
 ~/.godmode-logs/              # Server logs (relative to the working directory)
 ```
 
-**Key principle**: Server updates replace the binary without touching workspace data. The server reads `ProjectRootsDir` from config to find it. On startup it recovers the projects it finds there.
+**Key principle**: Server updates replace the binary without touching workspace data. The server reads its scan folders and explicit roots from config to find it. On startup it recovers the projects it finds there, and from then on those of any root that appears (4.2).
 
 ---
 
@@ -477,12 +508,12 @@ Contains only infrastructure config — not domain data:
   "Logging": { "LogLevel": { "Default": "Information" } },
   "AllowedHosts": "*",
   "Authentication": { "ApiKey": "" },
-  "ProjectRootsDir": "roots",
+  "Roots": { "Scan": { "default": "roots" } },
   "Urls": "http://127.0.0.1:31337"
 }
 ```
 
-An empty `Authentication:ApiKey` means the key file's (Section 4.4). Every key can also be set as an environment variable (`Authentication__ApiKey`) or a command-line argument (`--ProjectRootsDir=...`). Domain data (profiles, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
+An empty `Authentication:ApiKey` means the key file's (Section 4.4). The sources, each over the ones before: `appsettings.json`, `appsettings.{Environment}.json`, the instance's config file (`--config <path>` or `GODMODE_CONFIG`, reloaded on change), environment variables (`Authentication__ApiKey`), and the command line (`--Roots:Scan:default=...`). Config belongs to a server instance, named when it starts: there is no per-user file and no user secrets, so a server started without one runs on appsettings, with a scratch `roots` folder of its own. `Instance` (default `default`) names the server in the lock it holds on each root (`{root}/logs/server.lock`, open exclusively while it runs), and a root another live server holds is skipped (the server README has the details). Roots and profiles live in the host's config: where the roots are (`Roots:Scan`, `Roots:Explicit`) and what the profiles carry (`Profiles`) are in the instance's config file and the server's environment, and appsettings has only the scratch default. What a root is (its actions, scripts and schemas) lives in its own `.godmode-root/`. Section 6 and the server README have the keys. The API key file is refused under any scan folder or explicit root (Section 4.4).
 
 ---
 
@@ -490,7 +521,7 @@ An empty `Authentication:ApiKey` means the key file's (Section 4.4). Every key c
 
 When building a new feature on GodMode:
 
-1. **Check the design principles** (Section 5). Does your feature keep its state in files under `ProjectRootsDir`, read fresh from disk? Does it avoid shadow state and in-app config authoring?
+1. **Check the design principles** (Section 5). Does your feature keep its state in files on disk (a root's `.godmode-root/`, a session's `.godmode/sessions/{id}/`), read fresh? Does it avoid shadow state and in-app config authoring?
 
 2. **Choose the right layer**:
    - Server-side logic → `GodMode.Server/Services/`
@@ -500,7 +531,7 @@ When building a new feature on GodMode:
 
 3. **All UI work goes in React** — no native .NET UI. The MAUI app is a thin host.
 
-4. **For new config data**: Represent it as a file or directory under `ProjectRootsDir`, not as a section in `appsettings.json`. Adding config = adding a file. Removing config = removing a file.
+4. **For new config data**: What belongs to a root goes in a file under its `.godmode-root/`. What belongs to the server instance (where roots are, what a profile carries) goes in the host's config, the instance's config file, as a keyed map so sources merge entry by entry, and never in the shipped `appsettings.json` beyond a scratch default. Adding config = adding a file or an entry; removing it = removing that.
 
 5. **For new hub methods**: Add to the interface in Shared, implement in Server, add TypeScript types, wire into the React store.
 

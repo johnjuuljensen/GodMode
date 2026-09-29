@@ -68,12 +68,12 @@ public class PermissionPromptEndToEndTests
             // ── Allowed with an edited input; the request outlives the client that saw it ──
             await using var first = new ServerHubClient(baseUrl);
             await first.StartAsync();
-            var created = await first.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.CreateProject), Profile, Root, null,
+            var created = (await first.Hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), Profile, Root, null,
                 new Dictionary<string, JsonElement>
                 {
                     ["name"] = JsonSerializer.SerializeToElement("p1"),
                     ["prompt"] = JsonSerializer.SerializeToElement("Push it"),
-                });
+                })).Project!;
             var push = await first.WaitForAsync(created.Id, s => s.PendingPermission != null, server);
             Assert.Equal(ProjectState.WaitingPermission, push.State);
             Assert.Equal("Bash", push.PendingPermission!.ToolName);
@@ -119,8 +119,8 @@ public class PermissionPromptEndToEndTests
             Assert.Null(idle.PendingQuestion);
 
             // What the fake got back is what the tool hands claude
-            var folder = created.Id.Split('/')[^1];
-            var launch = Assert.Single(FakeRecording.Read(Path.Combine(workDir, "roots", Root, folder, "fake-claude.jsonl")));
+            var folder = ServerProcess.WorkingFolderOf(Path.Combine(workDir, "roots", Root), created.Id);
+            var launch = Assert.Single(FakeRecording.Read(Path.Combine(folder, "fake-claude.jsonl")));
             Assert.Equal(3, launch.Permissions.Count);
 
             // The one tool, with the flat arguments claude calls it with

@@ -20,6 +20,23 @@ namespace GodMode.Shared.Models;
 /// The claude permission mode (<c>--permission-mode</c>) a project of this action is created with,
 /// as claude spells it; null for claude's own default. Never <c>bypassPermissions</c>.
 /// </param>
+/// <param name="SharedFolder">
+/// Whether sessions of this action share their working folder (an assistant's workspace): a create
+/// may then go into a folder other sessions use, if they share it too, and a delete removes only the
+/// session's state (<c>.godmode/sessions/{id}/</c>), never the folder. Off: a folder another session
+/// uses is refused, and a delete removes the folder.
+/// </param>
+/// <param name="Session">
+/// Whether the action starts a session. Off (<c>"session": false</c>): its prepare and create scripts
+/// run in the root, as a create's do, and nothing more: no folder, no session, no claude. Such an
+/// action provisions something on the host (a new root, say), and its result file's <c>message</c>
+/// says what it made.
+/// </param>
+/// <param name="Transient">
+/// Whether the action's sessions are short-lived (chats, experiments): the app folds them away from
+/// its list sooner. Nothing is deleted by it. Set in <c>config.json</c> for every action of the root,
+/// or in an action's overlay for that action.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -37,7 +54,10 @@ public record CreateAction(
     bool ResumeOnRestart = true,
     string ResumePrompt = CreateAction.DefaultResumePrompt,
     bool AllowSkipPermissions = false,
-    string? PermissionMode = null
+    string? PermissionMode = null,
+    bool SharedFolder = false,
+    bool Session = true,
+    bool Transient = false
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";

@@ -1,0 +1,15 @@
+.kind-label {
+  flex-shrink: 0;
+  font-size: 9px;
+  line-height: 1.4;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  border: var(--border-width) var(--border-style) var(--glass-border-strong);
+  color: var(--text-secondary);
+  background: var(--glass);
+  text-transform: var(--label-case);
+  letter-spacing: calc(0.03em + var(--label-tracking));
+  font-family: var(--font-display);
+  font-size-adjust: var(--font-display-adjust);
+  white-space: nowrap;
+}

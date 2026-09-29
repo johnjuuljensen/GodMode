@@ -7,7 +7,7 @@
  */
 import type { ConnectionState, HubCallbacks, OutputMessage } from '../signalr/hub';
 import type {
-  PermissionDecision, PermissionDetail, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
+  CreateProjectResult, DeleteProjectResult, PermissionDecision, PermissionDetail, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
 } from '../signalr/types';
 import { parseClaudeMessage } from '../signalr/parseMessage';
 import { useAppStore, type ServerConnection } from '../store';
@@ -72,7 +72,9 @@ export class FakeHub {
   /** Every RespondToPermission's decision, MarkSeen and CreateProject, in order. */
   decisions: { projectId: string; requestId: string; decision: PermissionDecision }[] = [];
   seen: string[] = [];
-  created: { rootName: string; actionName: string | null; inputs: Record<string, unknown> }[] = [];
+  created: { profileName: string; rootName: string; actionName: string | null; inputs: Record<string, unknown> }[] = [];
+  /** What createProject answers, when not a new Running project: an action that starts no session answers with no project. */
+  createResult?: CreateProjectResult;
   /** Every SubscribeProject and UnsubscribeProject that reached the server, in order. */
   subscriptions: { projectId: string; fromOffset: number }[] = [];
   /** The same subscriptions, each to be answered when the test says. Kept by resetCalls. */
@@ -154,10 +156,28 @@ export class FakeHub {
     this.decisions.push({ projectId, requestId, decision });
   }
   async markSeen(projectId: string) { this.invoke(); this.seen.push(projectId); }
-  async createProject(_profileName: string, rootName: string, actionName: string | null, inputs: Record<string, unknown>) {
+  /** Every DeleteProject and RestoreProject, in order. A delete trashes a session that shares its folder, as the server does. */
+  deletes: { projectId: string; force: boolean }[] = [];
+  restores: string[] = [];
+  /** When set, deleteProject or restoreProject rejects with it, as a delete script that refuses. */
+  failDelete?: string;
+  failRestore?: string;
+  async deleteProject(projectId: string, force = false): Promise<DeleteProjectResult> {
     this.invoke();
-    this.created.push({ rootName, actionName, inputs });
-    return status(`new${this.created.length}`, 'Running');
+    this.deletes.push({ projectId, force });
+    if (this.failDelete) throw new Error(this.failDelete);
+    return { Trashed: !!this.projects.find(p => p.Id === projectId)?.SharedFolder };
+  }
+  async restoreProject(projectId: string): Promise<ProjectStatus> {
+    this.invoke();
+    this.restores.push(projectId);
+    if (this.failRestore) throw new Error(this.failRestore);
+    return status(projectId, 'Stopped');
+  }
+  async createProject(profileName: string, rootName: string, actionName: string | null, inputs: Record<string, unknown>) {
+    this.invoke();
+    this.created.push({ profileName, rootName, actionName, inputs });
+    return this.createResult ?? { Project: status(`new${this.created.length}`, 'Running') };
   }
 }
 
@@ -165,7 +185,7 @@ export class FakeHub {
 export const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 export const project = (id: string, name: string, state: ProjectState, updatedAt: string): ProjectSummary => ({
-  Id: id, Name: name, State: state, UpdatedAt: updatedAt, RootName: 'work', ProfileName: 'Default',
+  Id: id, Name: name, State: state, UpdatedAt: updatedAt, RootName: 'work', ProfileName: 'Default', SharedFolder: false,
 });
 export const root: ProjectRootInfo = { Name: 'work', ProfileName: 'Default', Actions: [] } as unknown as ProjectRootInfo;
 export const status = (id: string, state: ProjectState) =>

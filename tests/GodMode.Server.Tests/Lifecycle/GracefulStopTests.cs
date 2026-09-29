@@ -177,12 +177,12 @@ public class GracefulStopTests
             await server.WaitForHealthyAsync(http);
             await using var client = new ServerHubClient(baseUrl);
             await client.StartAsync();
-            var created = await client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.CreateProject), profile, root, null,
+            var created = (await client.Hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), profile, root, null,
                 new Dictionary<string, JsonElement>
                 {
                     ["name"] = JsonSerializer.SerializeToElement("p1"),
                     ["prompt"] = JsonSerializer.SerializeToElement("Work on it"),
-                });
+                })).Project!;
             var record = Path.Combine(workDir, "roots", root, "p1", "fake-claude.jsonl");
             FakeLaunch? launch = null;
             Assert.True(await LifecycleHarness.WaitForAsync(() => Task.FromResult((launch = FakeRecording.Read(record).FirstOrDefault()) is { Stdin.Count: 1 })),

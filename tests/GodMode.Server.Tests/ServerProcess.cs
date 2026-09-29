@@ -47,6 +47,12 @@ internal sealed class ServerProcess : IDisposable
     public const string ApiKey = "test-server-api-key-0123456789abcdef";
 
     /// <summary>Where a server started in <paramref name="workDir"/> keeps its generated key: never the user's own.</summary>
+    /// <summary>
+    /// The working folder in <paramref name="rootPath"/> of the session <paramref name="projectId"/>
+    /// (<c>{profile}/{root}/{id}</c>): the one with <c>.godmode/sessions/{id}/</c> in it.
+    /// </summary>
+    public static string WorkingFolderOf(string rootPath, string projectId) =>
+        Directory.GetDirectories(rootPath).Single(folder => Directory.Exists(GodMode.ProjectFiles.SessionState.PathOf(folder, projectId.Split('/')[^1])));
     public static string KeyFilePath(string workDir) => Path.Combine(workDir, "data", "api-key");
 
     /// <summary>
@@ -55,14 +61,18 @@ internal sealed class ServerProcess : IDisposable
     /// and <c>CODESPACES</c> is cleared unless overridden, so a developer's environment cannot leak in.
     /// With <paramref name="ownTerminal"/> the server has a console of its own (Windows) or a session
     /// and process group of its own (<c>setsid</c>, Linux), as a server run in a terminal does: what
-    /// a keypress there reaches, a test can reach without reaching itself.
+    /// a keypress there reaches, a test can reach without reaching itself. Without
+    /// <paramref name="rootsOnCommandLine"/> the server is not told its scan folder (<c>Roots:Scan:default</c>), and has
+    /// what its config gives it; <paramref name="arguments"/> go on its command line after the rest.
     /// </summary>
     public static ServerProcess Start(
         string workDir,
         string urls,
         string? apiKey = ApiKey,
         IReadOnlyDictionary<string, string>? environment = null,
-        bool ownTerminal = false)
+        bool ownTerminal = false,
+        bool rootsOnCommandLine = true,
+        IReadOnlyList<string>? arguments = null)
     {
         var rootsDir = Path.Combine(workDir, "roots");
         var serverDll = Path.Combine(AppContext.BaseDirectory, "GodMode.Server.dll");
@@ -79,15 +89,17 @@ internal sealed class ServerProcess : IDisposable
         };
         if (setsid) psi.ArgumentList.Add(dotnet);
         psi.ArgumentList.Add(serverDll);
-        psi.ArgumentList.Add($"--ProjectRootsDir={rootsDir}");
+        if (rootsOnCommandLine) psi.ArgumentList.Add($"--Roots:Scan:default={rootsDir}");
         psi.ArgumentList.Add($"--Urls={urls}");
         psi.ArgumentList.Add($"--Authentication:ApiKey={apiKey ?? ""}");
         psi.ArgumentList.Add($"--Authentication:ApiKeyFile={KeyFilePath(workDir)}");
+        foreach (var argument in arguments ?? []) psi.ArgumentList.Add(argument);
         psi.Environment["ASPNETCORE_ENVIRONMENT"] = "Production";
         psi.Environment["ASPNETCORE_URLS"] = "";
         psi.Environment["CODESPACES"] = "";
         psi.Environment["GITHUB_USER"] = "";
         psi.Environment.Remove("Authentication__ApiKey");
+        psi.Environment.Remove(InstanceConfig.EnvironmentVariable);
         if (environment != null)
             foreach (var (key, value) in environment)
                 psi.Environment[key] = value;

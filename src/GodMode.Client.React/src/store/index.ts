@@ -23,7 +23,7 @@ export { projectKey, type ProjectKey };
 /** The key of a transcript: a project's ProjectKey. */
 export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
-export { isListed } from './hierarchy';
+export { isListed, foldItems } from './hierarchy';
 
 // ── Persisted dismiss tracking ─────────────────────────────────
 // Keyed by ProjectKey; the unversioned key held project IDs alone, which collide across servers
@@ -71,7 +71,8 @@ function summaryOf(status: ProjectStatus): ProjectSummary {
     UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
     RootName: status.RootName, ProfileName: status.ProfileName,
     PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
-    PullRequest: status.PullRequest,
+    PullRequest: status.PullRequest, Kind: status.Kind,
+    ActionName: status.ActionName, SharedFolder: status.SharedFolder,
   };
 }
 
@@ -181,7 +182,7 @@ export type ActivePage =
   | { type: 'appSettings' }
   | { type: 'addServer' }
   | { type: 'editServer'; serverId: string }
-  | { type: 'createProject'; context?: { serverId: string; rootName: string } };
+  | { type: 'createProject'; context?: { serverId: string; profileName: string; rootName: string } };
 
 // ── Store interface ────────────────────────────────────────────
 
@@ -728,6 +729,14 @@ export const useAppStore = create<AppState>((set, get) => {
       // Every client hears of every created project: list it, and leave the view alone (#170)
       onProjectCreated: (status) => addProject(summaryOf(status)),
       onProjectDeleted: removeProject,
+      // A root added, edited or removed on the host: the server's whole lists. Its sessions that come
+      // or go are pushed as ProjectCreated and ProjectDeleted
+      onRootsChanged: (roots, profiles) => set(state => {
+        const connections = state.serverConnections.map(c =>
+          c.serverInfo.Id === serverId ? { ...c, roots, profiles } : c
+        );
+        return { serverConnections: connections, ...rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy) };
+      }),
       onStatusChanged: (_projectId, status) => {
         set(state => {
           const connections = state.serverConnections.map(c =>

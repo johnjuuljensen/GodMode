@@ -11,9 +11,13 @@ namespace GodMode.Server.Tests.Lifecycle;
 /// <param name="Attention">The list an AttentionChanged pushed.</param>
 /// <param name="SubscriptionId">The subscription a batch or complete answers.</param>
 /// <param name="Generation">The output generation a batch's or complete's offsets are in.</param>
+/// <param name="Roots">The roots a RootsChanged pushed.</param>
+/// <param name="Profiles">The profiles a RootsChanged pushed.</param>
+/// <param name="Message">A CreationProgress's line of script output.</param>
 internal sealed record HubPush(string Method, string? ProjectId, ProjectStatus? Status = null, string? RawJson = null,
     long? Offset = null, IReadOnlyList<OutputLine>? Lines = null, IReadOnlyList<AttentionItem>? Attention = null,
-    string? SubscriptionId = null, string? Generation = null);
+    string? SubscriptionId = null, string? Generation = null,
+    IReadOnlyList<ProjectRootInfo>? Roots = null, IReadOnlyList<ProfileInfo>? Profiles = null, string? Message = null);
 
 /// <summary>
 /// Stands in for the server's hub context: every push to any client is recorded, in order, as a
@@ -53,6 +57,9 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
     /// <summary>The lists <c>AttentionChanged</c> pushed, oldest first.</summary>
     public IReadOnlyList<IReadOnlyList<AttentionItem>> AttentionPushes =>
         Pushes.Where(p => p.Method == nameof(IProjectHubClient.AttentionChanged)).Select(p => p.Attention!).ToArray();
+
+    /// <summary>The <c>RootsChanged</c> pushes, oldest first.</summary>
+    public IReadOnlyList<HubPush> RootsPushes => Pushes.Where(p => p.Method == nameof(IProjectHubClient.RootsChanged)).ToArray();
 
     /// <summary>The connection stops reading: pushes to it wait, and so does whoever waits for them, until <see cref="Resume"/>.</summary>
     public void Pause(string connectionId) =>
@@ -133,8 +140,10 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
             Done(new HubPush(nameof(AttentionChanged), null, Attention: items));
 
         public Task ProjectCreated(ProjectStatus status) => Done(new HubPush(nameof(ProjectCreated), status.Id, status));
-        public Task CreationProgress(string projectId, string message) => Done(new HubPush(nameof(CreationProgress), projectId));
+        public Task CreationProgress(string projectId, string message) => Done(new HubPush(nameof(CreationProgress), projectId, Message: message));
         public Task ProjectDeleted(string projectId) => Done(new HubPush(nameof(ProjectDeleted), projectId));
+        public Task RootsChanged(ProjectRootInfo[] roots, ProfileInfo[] profiles) =>
+            Done(new HubPush(nameof(RootsChanged), null, Roots: roots, Profiles: profiles));
 
         private Task Done(HubPush push) => hub.Record(push, recipients());
     }
