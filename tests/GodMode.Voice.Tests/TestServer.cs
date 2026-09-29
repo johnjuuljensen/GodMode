@@ -60,7 +60,7 @@ internal sealed class TestServer : IAsyncDisposable
             UseShellExecute = false,
         };
         psi.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "GodMode.Server.dll"));
-        psi.ArgumentList.Add($"--ProjectRootsDir={Path.Combine(workDir, "roots")}");
+        psi.ArgumentList.Add($"--Roots:Scan:default={Path.Combine(workDir, "roots")}");
         psi.ArgumentList.Add($"--Urls={Url}");
         psi.ArgumentList.Add($"--Authentication:ApiKey={ApiKey}");
         psi.ArgumentList.Add($"--Authentication:ApiKeyFile={Path.Combine(workDir, "data", "api-key")}");

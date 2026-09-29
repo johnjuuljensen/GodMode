@@ -11,7 +11,7 @@ This library manages the standardized folder structure for Claude Code projects,
 Each project is a folder inside its root. Claude works in the folder itself, and GodMode keeps its state in `.godmode/` (the project's ID is `{profile}/{root}/{project-folder}`):
 
 ```
-{ProjectRootsDir}/{root}/{project-folder}/
+{root}/{project-folder}/
 ├── .godmode/
 │   ├── status.json        # Current state, metadata, metrics
 │   ├── settings.json      # Per-project settings (skip-permissions, permission mode, action)

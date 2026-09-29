@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using GodMode.FakeClaude;
+using GodMode.Server.Auth;
 using GodMode.Server.Models;
 using GodMode.Server.Services;
 using GodMode.Shared;
@@ -42,11 +43,15 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private readonly List<string> _projectIds = [];
     private readonly CapturingLoggerProvider _logs = new();
     private readonly McpHost? _mcp;
+    private readonly AuthSettings? _auth;
+
+    /// <summary>The setting of the harness's scan folder, <see cref="RootsDir"/>.</summary>
+    public const string ScanSetting = $"{RootSources.ScanSection}:test";
 
     /// <summary>The temp dir everything the harness and the server write lives under.</summary>
     public string WorkDir => _workDir;
 
-    /// <summary>The server's <c>ProjectRootsDir</c>: one subdirectory per root.</summary>
+    /// <summary>The server's one scan folder (<see cref="ScanSetting"/>): one subdirectory per root.</summary>
     public string RootsDir { get; }
 
     public string RootPath { get; }
@@ -67,16 +72,21 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <param name="rootConfig">Extra top-level properties for the root's config.json (for example <c>claudeArgs</c>).</param>
     /// <param name="settings">Extra server configuration, applied over the harness defaults.</param>
     /// <param name="extraRoots">More roots beside <see cref="RootName"/>, each in the profile given, configured as it is.</param>
-    /// <param name="profileEnvironment">The environment of <see cref="ProfileName"/>, in its <c>.profiles/</c> env.json.</param>
+    /// <param name="profileEnvironment">The environment of <see cref="ProfileName"/>, in the server's <c>Profiles:&lt;name&gt;:Environment</c>.</param>
     /// <param name="mcpEndpoint">Serve the MCP endpoint (<see cref="McpHost"/>), so a fake's <c>permission</c> step reaches the server.</param>
+    /// <param name="configFiles">JSON config files after the settings, in order, as the instance's file comes after appsettings.</param>
+    /// <param name="auth">The server's authentication settings, as the start resolved them (its key file, say); none when null.</param>
     public LifecycleHarness(
         FakeScript script,
         IReadOnlyDictionary<string, object>? rootConfig = null,
         IReadOnlyDictionary<string, string?>? settings = null,
         IReadOnlyList<(string Root, string Profile)>? extraRoots = null,
         IReadOnlyDictionary<string, string>? profileEnvironment = null,
-        bool mcpEndpoint = false)
+        bool mcpEndpoint = false,
+        IReadOnlyList<string>? configFiles = null,
+        AuthSettings? auth = null)
     {
+        _auth = auth;
         _workDir = ServerProcess.CreateWorkDir("lifecycle");
         RootsDir = Path.Combine(_workDir, "roots");
         RootPath = Path.Combine(RootsDir, RootName);
@@ -85,18 +95,13 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         WriteRootConfig(RootPath, ProfileName, rootConfig);
         foreach (var (root, profile) in extraRoots ?? [])
             WriteRootConfig(Path.Combine(RootsDir, root), profile, rootConfig);
-        if (profileEnvironment != null)
-        {
-            var profileDir = Path.Combine(RootsDir, ".profiles", ProfileName);
-            Directory.CreateDirectory(profileDir);
-            File.WriteAllText(Path.Combine(profileDir, "env.json"), JsonSerializer.Serialize(profileEnvironment));
-        }
-
         var configuration = new Dictionary<string, string?>
         {
-            ["ProjectRootsDir"] = RootsDir,
+            [ScanSetting] = RootsDir,
             [ClaudeProcessManager.ExecutableSetting] = FakeClaudePath,
         };
+        foreach (var (variable, value) in profileEnvironment ?? new Dictionary<string, string>())
+            configuration[$"{RootSources.ProfilesSection}:{ProfileName}:Environment:{variable}"] = value;
         if (mcpEndpoint)
         {
             _mcp = new McpHost(() => Projects!, _logs);
@@ -105,8 +110,10 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
             configuration[key] = value;
 
-        _configuration = new ConfigurationBuilder().AddInMemoryCollection(configuration).Build();
-        _services = BuildServices(_configuration, _logs, Hub);
+        var builder = new ConfigurationBuilder().AddInMemoryCollection(configuration);
+        foreach (var file in configFiles ?? []) builder.AddJsonFile(file, optional: false);
+        _configuration = builder.Build();
+        _services = BuildServices(_configuration, _logs, Hub, _auth);
         Projects = _services.GetRequiredService<IProjectManager>();
     }
 
@@ -121,11 +128,14 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         StopHost();
         _stopped.Add(_services);
         Hub = new RecordingHubContext();
-        _services = BuildServices(_configuration, _logs, Hub);
+        _services = BuildServices(_configuration, _logs, Hub, _auth);
         Projects = _services.GetRequiredService<IProjectManager>();
         await Projects.RecoverProjectsAsync();
         if (resume) await Projects.ResumeInterruptedProjectsAsync();
     }
+
+    /// <summary>Reads the configuration's sources again, as a reload of the instance's config file does.</summary>
+    public void ReloadConfiguration() => ((IConfigurationRoot)_configuration).Reload();
 
     /// <summary>Replaces the script that the next launch plays. Running fakes keep the one they loaded.</summary>
     public void UseScript(FakeScript script) => script.Save(ScriptPath);
@@ -149,9 +159,10 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         File.WriteAllText(Path.Combine(godModeRoot, "config.json"), JsonSerializer.Serialize(config));
     }
 
-    private static ServiceProvider BuildServices(IConfiguration configuration, ILoggerProvider logs, RecordingHubContext hub)
+    private static ServiceProvider BuildServices(IConfiguration configuration, ILoggerProvider logs, RecordingHubContext hub, AuthSettings? auth)
     {
         var services = new ServiceCollection();
+        if (auth != null) services.AddSingleton(auth);
         services.AddLogging(logging => logging.AddProvider(logs));
         services.AddSignalR();
         services.AddSingleton<IHubContext<ProjectHub, IProjectHubClient>>(hub);
@@ -165,7 +176,6 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
-        services.AddSingleton<ProfileFileManager>();
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();

@@ -70,9 +70,22 @@ describe("a root's +", () => {
     ['play', 'A', 'play', 'on Server A'],
   ])('%s opens Create project on that server and root', async (header, serverId, rootName, shownServer) => {
     await click(plusOf(header)!);
-    expect(useAppStore.getState().activePage).toEqual({ type: 'createProject', context: { serverId, rootName } });
+    expect(useAppStore.getState().activePage).toEqual({ type: 'createProject', context: { serverId, profileName: 'Default', rootName } });
     expect(view!.container.querySelector('.selected-root-name')?.textContent).toBe(rootName);
     expect(view!.container.querySelector('.selected-root-server')?.textContent).toBe(shownServer);
+  });
+});
+
+describe("a root's + in a profile of its own", () => {
+  it('passes the profile with the root name', async () => {
+    const mega: ProjectRootInfo = { ...rootNamed('work'), ProfileName: 'Mega' };
+    await connectServers({ A: new FakeHub([], [rootNamed('work'), mega]) });
+    view = await render(<Shell />);
+
+    const megaGroup = q('.profile-group').find(g => g.querySelector('.profile-group-name')?.textContent === 'Mega')!;
+    await click(megaGroup.querySelector<HTMLButtonElement>('.root-action-btn')!);
+
+    expect(useAppStore.getState().activePage).toEqual({ type: 'createProject', context: { serverId: 'A', profileName: 'Mega', rootName: 'work' } });
   });
 });
 

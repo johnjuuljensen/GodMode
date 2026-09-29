@@ -189,7 +189,7 @@ When adding a new hub method:
 
 ### 4.2 Config-Driven Project Roots
 
-A root is a subdirectory of `ProjectRootsDir` that contains `.godmode-root/`. The server discovers roots by scanning that directory on each call, so a root added on the host shows up on the next refresh.
+A root is a folder with a `.godmode-root/` in it, and the server's config says where its roots are (Section 6): each **scan folder** (`Roots:Scan:<key>`) makes a root of every immediate subfolder that has a `.godmode-root/`, named after it, and an **explicit root** (`Roots:Explicit:<name>:Path`) is one named folder, anywhere on disk. The server reads its sources and scans its folders again on each list of profiles or roots, so a root added on the host, or in the instance's config file, shows up on the next refresh. A server has one root per name and per folder: an explicit root wins a clash, then the first scan key in ordinal order, and each loser is logged with both paths.
 
 ```
 root-name/
@@ -208,7 +208,7 @@ root-name/
 
 **Merge order**: `config.json` (base) → `config.{action}.json` (overlay). Action overlay wins on conflict.
 
-**Profile assignment**: `profileName` in `config.json` puts the root in that profile. Roots without it go to `Default`.
+**Profile assignment**: `profileName` in `config.json` puts the root in that profile. An explicit root without it goes to its entry's `Profile`, and any other root to `Default`.
 
 **MCP servers** are not root config: a repo brings its own, and GodMode adds only its own MCP endpoint (Section 8).
 
@@ -259,7 +259,7 @@ A project is a folder directly inside its root with a `.godmode/status.json`, un
 Every request needs a credential, whatever the server is bound to, loopback included. The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
 
 1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`, which its sessions are given.
-2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade). The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under `ProjectRootsDir`.
+2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade). The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under a scan folder or an explicit root.
 
 **No browser** (`Auth/OriginPolicy.cs`). A request with an `Origin`, as a browser sends on every WebSocket upgrade and any request but a same-origin GET, is refused with 403 before authentication, whatever origin it names: the server's own bindings included, in Development and in a codespace too, and no setting allows one. A request with no `Origin` (the MAUI relay, the attention service, a session's claude on `/mcp`) needs its credential alone.
 
@@ -300,39 +300,52 @@ The server reads roots, actions, schemas and profiles. It does not edit, package
 
 ### 5.4 Roots Are External
 
-Root definitions live wherever you keep them, typically a git repo you clone into `ProjectRootsDir`. The server doesn't bundle root templates in its binary. `.devcontainer/godmode-server/roots/` is one such set, which the codespace copies into place.
+Root definitions live wherever you keep them, typically a git repo you clone into a scan folder, or name as an explicit root. The server doesn't bundle root templates in its binary. `.devcontainer/godmode-server/roots/` is one such set, which the codespace copies into place.
 
 ---
 
-## 6. File-Based Profile Configuration
+## 6. Roots and Profiles in the Host's Config
 
-Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means adding a directory, not editing a shared config file.
+A server's roots, and its profiles' descriptions and environments, are in its instance's config file (`--config <path>` or `GODMODE_CONFIG`, Section 10), on the host, beside appsettings' default. Each is a keyed map, so config sources merge entry by entry (.NET merges arrays by index). `.profiles/` is gone, and nothing reads it.
 
 ### Layout
 
+```json
+{
+  "Instance": "main",
+  "Roots": {
+    "Scan": { "repos": "C:\\Users\\me\\source\\repos" },
+    "Explicit": { "notes": { "Path": "D:\\notes", "Profile": "Private" } }
+  },
+  "Profiles": {
+    "Work": {
+      "Description": "The day job",
+      "Environment": { "CLAUDE_CONFIG_DIR": "C:\\Users\\me\\.claude-work" }
+    }
+  }
+}
 ```
-{ProjectRootsDir}/
-├── .profiles/
-│   ├── default/
-│   │   ├── profile.json           # { "description": "..." }
-│   │   └── env.json               # { "KEY": "value", ... }
-│   └── production/
-│       ├── profile.json
-│       └── env.json               # "CLAUDE_CONFIG_DIR": "..." pins its sessions to one Claude account
+
+```
+C:\Users\me\source\repos\            # Roots:Scan:repos
 ├── feature-root/
 │   └── .godmode-root/
-│       └── config.json            # "profileName": "production" puts this root in that profile
+│       └── config.json            # "profileName": "Work" puts this root in that profile
 └── bugfix-root/
     └── .godmode-root/
         └── ...
+D:\notes\                          # Roots:Explicit:notes, in Private unless its config.json names a profile
 ```
 
 ### Key Properties
 
-- **Adding a profile** = `mkdir .profiles/{name}` + write `profile.json`, on the host. No hub method creates, edits or deletes one
-- **Deleting a profile** = `rm -rf .profiles/{name}`
+- **A root's profile** is its `config.json`'s `profileName`, else its explicit entry's `Profile`, else `Default`. A profile is listed when it has a root; one under `Profiles` alone is only settings
+- **A profile's environment** (`Profiles:<name>:Environment:<VAR>`) reaches every session and root script of its roots; the root's own `environment` wins a clash. `CLAUDE_CONFIG_DIR` there pins the profile's sessions to one Claude account
+- **Secrets stay in environment variables**: `Profiles__Work__Environment__JIRA_TOKEN` in the server's environment is the same setting as the file's, and needs no file
+- **Adding a profile or a root** = an entry in the instance's config file, or a folder with a `.godmode-root/` in a scan folder, on the host. No hub method creates, edits or deletes one
+- **Turning off an entry** an earlier source set = setting it to `""` (appsettings' `Roots:Scan:default`, say)
 - **MCP servers** are not profile config: user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR` (Section 8.1)
-- **Git works** — the entire `{ProjectRootsDir}` can be a git repo
+- **Git works** — a scan folder, and each root in it, can be a git repo
 - **Profile env from the server's environment** — with `stripEnvVarProfile` in a root's config (or `{PROFILE}_STRIP_ENV_VAR_PROFILE=true` in the server's environment), server variables prefixed with the profile name (`MEGA_GITHUB_TOKEN`) reach that profile's sessions without the prefix (`GITHUB_TOKEN`)
 
 ---
@@ -345,7 +358,7 @@ Profiles live under `.profiles/` in `ProjectRootsDir`. Adding a profile means ad
 | `ClaudeProcessManager` | Spawns Claude Code processes via `System.Diagnostics.Process`, each in a process tree of its own (`SessionProcessTree`: a Job Object on Windows, a process group on Linux), writes their output to `output.jsonl`, and stops them: interrupt, grace period, then the tree |
 | `RootConfigReader` | Discovers and merges `.godmode-root/` configs |
 | `ScriptRunner` | Executes cross-platform scripts (`.ps1` via `pwsh`, or `PowerShell:Executable`; `.sh` via `bash`, `.cmd`/`.bat` on Windows) |
-| `ProfileFileManager` | Reads the `.profiles/` directory structure |
+| `RootSources` | Reads where the roots come from (`Roots:Scan`, `Roots:Explicit`) and each profile's settings (`Profiles`) from the configuration, fresh on every rebuild; `ProjectManager` finds the roots and `ApiKeyFile` keeps its file out of them |
 | `StatusUpdater` | Updates `status.json` during execution |
 | `TemplateResolver` | Resolves `{field}` placeholders |
 | `EnvironmentExpander` | Expands `${VAR}` in config values and strips profile prefixes from server env vars |
@@ -407,7 +420,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
   --urls "http://127.0.0.1:31337;http://$(tailscale ip -4):31337"
 ```
 
-For a long-running server, `dotnet publish -c Release` and run the output. Put roots in `ProjectRootsDir` (default `roots` under the working directory). The machine needs `claude`, `git`, `pwsh` and whatever the roots' scripts call, such as `gh`. GodMode itself needs no Node; a repo whose `.mcp.json` starts `npx` MCP servers does.
+For a long-running server, `dotnet publish -c Release` and run the output. Put roots in a scan folder (appsettings' `Roots:Scan:default` is `roots` under the working directory), or name them in the instance's config file (Section 6). The machine needs `claude`, `git`, `pwsh` and whatever the roots' scripts call, such as `gh`. GodMode itself needs no Node; a repo whose `.mcp.json` starts `npx` MCP servers does.
 
 ### 9.3 GitHub Codespaces
 
@@ -419,7 +432,7 @@ For a long-running server, `dotnet publish -c Release` and run the output. Put r
 
 **Lifecycle**:
 - `postCreateCommand`: clones `master`, publishes the server to `/opt/godmode-server`, copies `roots/` to `~/roots`, installs Claude Code
-- `postStartCommand`: starts the server with `--ProjectRootsDir roots` from `$HOME`, sets port 31337 to public
+- `postStartCommand`: starts the server with `--Roots:Scan:default=roots` from `$HOME`, sets port 31337 to public
 
 **Server URL**: `https://<codespace-name>-31337.app.github.dev/`
 
@@ -435,7 +448,7 @@ Stage 2: .NET ASP.NET 10.0 runtime — final image (`runtime` target)
 Stage 3: runtime + .NET SDK — the `:sdk` tag, for sessions that build .NET code
 ```
 
-No stage builds the React client: the server serves no page. The runtime image includes the published server, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`. Run it with `-e Authentication__ApiKey=<key>`: without one it generates a key into the `godmode` user's home, which a replaced container does not keep. Mount a volume at the `ProjectRootsDir` path (`/app/roots` by default) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
+No stage builds the React client: the server serves no page. The runtime image includes the published server, git, curl, Node 22 (for repos' `npx` MCP servers and JavaScript toolchains), PowerShell 7, the GitHub CLI and Claude Code, running as the non-root `godmode` user on port 31337. It sets `URLS=http://+:31337`. Run it with `-e Authentication__ApiKey=<key>`: without one it generates a key into the `godmode` user's home, which a replaced container does not keep. Mount a volume at the scan folder (`/app/roots`, appsettings' `Roots:Scan:default` from the image's working directory) to keep roots and projects across container replacements. The server manages local processes, so run one instance per workspace.
 
 **Nothing a session runs as can change the server.** `/app` (the server) is root's and read-only to `godmode`, which owns only what the server writes: `/app/roots`, `/app/projects` (the default root when none is configured), `/data` and its home. Claude Code is installed root-owned with `npm install -g` (`/usr/bin/claude`), with self-update off (`DISABLE_AUTOUPDATER`, also in `/etc/claude-code/managed-settings.json`, since a claude process's environment is an allowlist). The server starts `claude` and `pwsh` by full path (`Claude__Executable=/usr/bin/claude`, `PowerShell__Executable=/usr/bin/pwsh`), and `/home/godmode/.local/bin`, which a session can write, is last on the `PATH`. Off Docker the two settings default to a `PATH` lookup (`claude`, `pwsh`): a codespace's claude is in `~/.local/bin`, installed by `postCreateCommand`, and the server runs as the sessions' user there anyway.
 
@@ -450,11 +463,7 @@ Every target separates the **server binary** from the **workspace data**:
 ├── GodMode.Server.dll
 └── appsettings.json          # Static config (URLs, auth, logging)
 
-~/roots/                      # Workspace data = ProjectRootsDir (persists across updates)
-├── .profiles/                # Profile definitions
-│   └── default/
-│       ├── profile.json
-│       └── env.json
+~/roots/                      # Workspace data = a scan folder (persists across updates)
 └── my-root/                  # Project roots
     ├── .godmode-root/
     └── {project-folder}/     # Projects
@@ -462,7 +471,7 @@ Every target separates the **server binary** from the **workspace data**:
 ~/.godmode-logs/              # Server logs (relative to the working directory)
 ```
 
-**Key principle**: Server updates replace the binary without touching workspace data. The server reads `ProjectRootsDir` from config to find it. On startup it recovers the projects it finds there.
+**Key principle**: Server updates replace the binary without touching workspace data. The server reads its scan folders and explicit roots from config to find it. On startup it recovers the projects it finds there.
 
 ---
 
@@ -477,12 +486,12 @@ Contains only infrastructure config — not domain data:
   "Logging": { "LogLevel": { "Default": "Information" } },
   "AllowedHosts": "*",
   "Authentication": { "ApiKey": "" },
-  "ProjectRootsDir": "roots",
+  "Roots": { "Scan": { "default": "roots" } },
   "Urls": "http://127.0.0.1:31337"
 }
 ```
 
-An empty `Authentication:ApiKey` means the key file's (Section 4.4). The sources, each over the ones before: `appsettings.json`, `appsettings.{Environment}.json`, the instance's config file (`--config <path>` or `GODMODE_CONFIG`, reloaded on change), environment variables (`Authentication__ApiKey`), and the command line (`--ProjectRootsDir=...`). Config belongs to a server instance, named when it starts: there is no per-user file and no user secrets, so a server started without one runs on appsettings, with a scratch `roots` folder of its own. `Instance` (default `default`) names the server in the lock it holds on each root (`{root}/logs/server.lock`, open exclusively while it runs), and a root another live server holds is skipped (the server README has the details). Domain data (profiles, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
+An empty `Authentication:ApiKey` means the key file's (Section 4.4). The sources, each over the ones before: `appsettings.json`, `appsettings.{Environment}.json`, the instance's config file (`--config <path>` or `GODMODE_CONFIG`, reloaded on change), environment variables (`Authentication__ApiKey`), and the command line (`--Roots:Scan:default=...`). Config belongs to a server instance, named when it starts: there is no per-user file and no user secrets, so a server started without one runs on appsettings, with a scratch `roots` folder of its own. `Instance` (default `default`) names the server in the lock it holds on each root (`{root}/logs/server.lock`, open exclusively while it runs), and a root another live server holds is skipped (the server README has the details). Roots and profiles live in the host's config: where the roots are (`Roots:Scan`, `Roots:Explicit`) and what the profiles carry (`Profiles`) are in the instance's config file and the server's environment, and appsettings has only the scratch default. What a root is (its actions, scripts and schemas) lives in its own `.godmode-root/`. Section 6 and the server README have the keys. The API key file is refused under any scan folder or explicit root (Section 4.4).
 
 ---
 
@@ -490,7 +499,7 @@ An empty `Authentication:ApiKey` means the key file's (Section 4.4). The sources
 
 When building a new feature on GodMode:
 
-1. **Check the design principles** (Section 5). Does your feature keep its state in files under `ProjectRootsDir`, read fresh from disk? Does it avoid shadow state and in-app config authoring?
+1. **Check the design principles** (Section 5). Does your feature keep its state in files on disk (a root's `.godmode-root/`, a project's `.godmode/`), read fresh? Does it avoid shadow state and in-app config authoring?
 
 2. **Choose the right layer**:
    - Server-side logic → `GodMode.Server/Services/`
@@ -500,7 +509,7 @@ When building a new feature on GodMode:
 
 3. **All UI work goes in React** — no native .NET UI. The MAUI app is a thin host.
 
-4. **For new config data**: Represent it as a file or directory under `ProjectRootsDir`, not as a section in `appsettings.json`. Adding config = adding a file. Removing config = removing a file.
+4. **For new config data**: What belongs to a root goes in a file under its `.godmode-root/`. What belongs to the server instance (where roots are, what a profile carries) goes in the host's config, the instance's config file, as a keyed map so sources merge entry by entry, and never in the shipped `appsettings.json` beyond a scratch default. Adding config = adding a file or an entry; removing it = removing that.
 
 5. **For new hub methods**: Add to the interface in Shared, implement in Server, add TypeScript types, wire into the React store.
 

@@ -24,7 +24,9 @@ public sealed class AuthModeSelectorTests : IDisposable
         new ConfigurationBuilder().AddInMemoryCollection(
             new Dictionary<string, string?>
             {
-                ["ProjectRootsDir"] = Path.Combine(_dir, "roots"),
+                ["Roots:Scan:main"] = Path.Combine(_dir, "roots"),
+                ["Roots:Scan:more"] = Path.Combine(_dir, "more-roots"),
+                ["Roots:Explicit:solo:Path"] = Path.Combine(_dir, "elsewhere", "solo"),
                 [ApiKeyFile.PathSetting] = KeyFile,
             }.Concat(settings.Select(s => KeyValuePair.Create(s.Key, s.Value)))
             .GroupBy(s => s.Key).ToDictionary(g => g.Key, g => g.Last().Value)).Build();
@@ -106,26 +108,31 @@ public sealed class AuthModeSelectorTests : IDisposable
         Assert.Equal(("my-own-key", false), ApiKeyFile.LoadOrCreate(KeyFile));
     }
 
-    /// <summary>Sessions work under ProjectRootsDir: the key file is never there.</summary>
+    /// <summary>Sessions work in every root: the key file is under no scan folder and no explicit root.</summary>
     [Theory]
-    [InlineData("roots/api-key")]
-    [InlineData("roots/.profiles/api-key")]
-    [InlineData("roots/some-root/project/.godmode/api-key")]
-    public void KeyFileUnderProjectRootsDir_IsRefused(string relative)
+    [InlineData("roots/api-key", "Roots:Scan:main")]
+    [InlineData("roots/some-root/project/.godmode/api-key", "Roots:Scan:main")]
+    [InlineData("more-roots/api-key", "Roots:Scan:more")]
+    [InlineData("elsewhere/solo/api-key", "Roots:Explicit:solo:Path")]
+    [InlineData("elsewhere/solo/project/.godmode/api-key", "Roots:Explicit:solo:Path")]
+    public void KeyFileUnderARoot_IsRefused(string relative, string setting)
     {
         var path = Path.Combine(_dir, relative);
 
         var ex = Assert.Throws<StartupConfigurationException>(() => AuthModeSelector.Resolve(Config((ApiKeyFile.PathSetting, path))));
 
-        Assert.Contains("ProjectRootsDir", ex.Message);
+        Assert.Contains($"under {setting} ", ex.Message);
         Assert.False(File.Exists(path));
     }
 
-    [Fact]
-    public void KeyFileBesideProjectRootsDir_IsNotUnderIt()
+    [Theory]
+    // "roots-data" starts with "roots" but is not inside it
+    [InlineData("roots-data/api-key")]
+    // Beside the explicit root, in the folder that holds it
+    [InlineData("elsewhere/api-key")]
+    public void KeyFileBesideTheRoots_IsNotUnderThem(string relative)
     {
-        // "roots-data" starts with "roots" but is not inside it
-        var path = Path.Combine(_dir, "roots-data", "api-key");
+        var path = Path.GetFullPath(Path.Combine(_dir, relative));
 
         Assert.Equal(path, AuthModeSelector.Resolve(Config((ApiKeyFile.PathSetting, path))).KeyFilePath);
     }

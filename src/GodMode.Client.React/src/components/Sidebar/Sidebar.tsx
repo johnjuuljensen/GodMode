@@ -228,7 +228,7 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
   const selectedProject = useAppStore(s => s.selectedProject);
   const selectProject = useAppStore(s => s.selectProject);
   const setActivePage = useAppStore(s => s.setActivePage);
-  const { serverId, rootName } = rootGroup;
+  const { serverId, profileName, rootName } = rootGroup;
 
   return (
     <div className="root-group">
@@ -238,7 +238,7 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
           {rootGroup.canCreate && serverId && (
             <button
               className="root-action-btn"
-              onClick={() => setActivePage({ type: 'createProject', context: { serverId, rootName } })}
+              onClick={() => setActivePage({ type: 'createProject', context: { serverId, profileName, rootName } })}
               title="New project"
             >+</button>
           )}

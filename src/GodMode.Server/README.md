@@ -6,7 +6,7 @@ SignalR server for GodMode. It runs Claude Code sessions in project folders on t
 
 - **Real-time Communication**: SignalR hub (`/hubs/projects`) for bidirectional communication
 - **Process Management**: Spawn, stop and resume Claude Code processes
-- **Config-Driven Project Roots**: Roots discovered from `ProjectRootsDir`, with per-action config overlays
+- **Config-Driven Project Roots**: Roots from the server's config (scan folders and explicit roots), with per-action config overlays
 - **Script-Based Creation**: VCS-agnostic — all prepare/create/delete logic lives in scripts, not server code
 - **Cross-Platform Scripts**: Write `.ps1` scripts once; they run under `pwsh` on Windows and Linux
 - **State Persistence**: Project state lives in each project's `.godmode/` folder and is recovered on restart
@@ -19,16 +19,32 @@ SignalR server for GodMode. It runs Claude Code sessions in project folders on t
 ```json
 {
   "Authentication": { "ApiKey": "" },
-  "ProjectRootsDir": "roots",
+  "Roots": { "Scan": { "default": "roots" } },
   "Urls": "http://127.0.0.1:31337"
 }
 ```
 
-`ProjectRootsDir` is the directory the server scans for roots: every subdirectory that contains a `.godmode-root/` folder is a root, named after the subdirectory. A relative path is resolved against the working directory. The scan runs on each call, so a root you add appears on the next refresh without a restart.
+Every setting can also come from the instance's config file, an environment variable (`Roots__Scan__default`, `Authentication__ApiKey`) or the command line (`--Roots:Scan:default=/srv/roots`).
 
-Profiles live in `{ProjectRootsDir}/.profiles/` (see `docs/UNIFIED-ARCHITECTURE.md` Section 6). Profiles and roots are maintained by hand on the host: the server reads their config and never writes it.
+### Roots and profiles
 
-Every setting can also come from the instance's config file, an environment variable (`ProjectRootsDir`, `Authentication__ApiKey`) or the command line (`--ProjectRootsDir=/srv/roots`).
+A server's roots, and what its profiles carry, come from its config. Each is a **keyed map**, so the config sources below merge entry by entry: a later source replaces the entries it names and keeps the rest. (.NET merges arrays by index, so a list would let the instance's one entry replace appsettings' first.)
+
+| Setting | What it is |
+|---|---|
+| `Roots:Scan:<key>` = folder | A scan folder: each immediate subfolder with a `.godmode-root/` folder is a root, named after the subfolder. appsettings has one, `default` = `roots`, a scratch folder under the working directory |
+| `Roots:Explicit:<name>:Path` = folder | The folder is the root `<name>`, anywhere on disk. A folder with no `.godmode-root/` has the default action |
+| `Roots:Explicit:<name>:Profile` | The explicit root's profile, when its own `config.json` names no `profileName` |
+| `Profiles:<name>:Description` | The profile's description, as the app shows it |
+| `Profiles:<name>:Environment:<VAR>` = value | An environment variable of every session and root script in the profile (a `CLAUDE_CONFIG_DIR`, a service's token) |
+
+- **A root's profile** is its `config.json`'s `profileName`, else its explicit entry's `Profile`, else `Default`. A profile is listed when it has a root; one named under `Profiles` alone is only settings.
+- **One name, one root per server, and one folder, one root.** An explicit root wins a clash, and between scan folders the first key in ordinal order does. Each loser is logged once as a warning, with both paths and the settings they came from. An explicit root in a scan folder under its own name is the one root, and no clash.
+- **An entry set to `""`** is none, so a later source can turn off one an earlier source set (`"Roots": { "Scan": { "default": "" } }`). An explicit root whose folder does not exist is logged once, and listed once it does.
+- **Relative folders** resolve against the working directory.
+- **Read fresh on every list** of profiles or roots, from the config as it is then. So a root added on the host, or a scan folder, explicit root or profile added to the instance's config file, appears on the next refresh without a restart.
+- **A root's own `environment` wins** over its profile's.
+- **`ProjectRootsDir` and `.profiles/` are gone,** and neither is read. A `ProjectRootsDir`, or a profile's `Roots` (`Profiles:<p>:Roots:<name>`, explicit roots before March 2026), still set in a config source is logged at startup as a warning that names what takes its place. Profiles and roots are maintained by hand on the host: the server reads their config and never writes it.
 
 ### Config sources, and the instance's config file
 
@@ -36,21 +52,32 @@ A server's settings come from these sources, each overriding the ones before it:
 
 1. `appsettings.json`, next to the server (its content root);
 2. `appsettings.{Environment}.json`, when there is one;
-3. **the instance's config file**, when the server is started with one: `--config <path>`, else the `GODMODE_CONFIG` environment variable. A relative path is resolved against the working directory. It is reloaded when it changes, and its folder is watched for that (recursively): keep it in a folder of its own, such as `~/.godmode-server/`, not directly in your home folder. What the server reads once at startup (`Instance`, `ProjectRootsDir`, `Authentication:*`, `Urls`) takes a restart to change. A named file that does not exist stops the server at startup;
+3. **the instance's config file**, when the server is started with one: `--config <path>`, else the `GODMODE_CONFIG` environment variable. A relative path is resolved against the working directory. It is reloaded when it changes, and its folder is watched for that (recursively): keep it in a folder of its own, such as `~/.godmode-server/`, not directly in your home folder. What the server reads once at startup (`Instance`, `Authentication:*`, `Urls`) takes a restart to change; the roots and profiles are read again on every list. A named file that does not exist stops the server at startup;
 4. environment variables;
 5. the command line.
 
-Config belongs to a server instance, named when it starts: nothing is read per user. There is no default config file, and the server reads no user secrets (it has no `UserSecretsId`). A server started without a config file runs on appsettings, whose `ProjectRootsDir` is `roots` under the working directory, a scratch folder of its own. So every worktree's `dotnet run` starts empty, and none of them finds the roots of the server you use.
+Config belongs to a server instance, named when it starts: nothing is read per user. There is no default config file, and the server reads no user secrets (it has no `UserSecretsId`). A server started without a config file runs on appsettings, whose one scan folder (`Roots:Scan:default`) is `roots` under the working directory, a scratch folder of its own. So every worktree's `dotnet run` starts empty, and none of them finds the roots of the server you use.
 
 A config file is appsettings-shaped JSON:
 
 ```json
 {
   "Instance": "main",
-  "ProjectRootsDir": "C:\Users\me\source\repos",
+  "Roots": {
+    "Scan": { "repos": "C:\\Users\\me\\source\\repos" },
+    "Explicit": { "notes": { "Path": "D:\\notes", "Profile": "Private" } }
+  },
+  "Profiles": {
+    "Work": {
+      "Description": "The day job",
+      "Environment": { "CLAUDE_CONFIG_DIR": "C:\\Users\\me\\.claude-work" }
+    }
+  },
   "Authentication": { "ApiKey": "..." }
 }
 ```
+
+A secret a profile's sessions need can stay out of the file: `Profiles__Work__Environment__JIRA_TOKEN` in the server's environment is the same setting.
 
 `Instance` (default `default`) names the server: in the lock of each root it holds, and in its logs (`Server instance main` at startup, beside `Config file: …`).
 
@@ -90,7 +117,7 @@ Every endpoint and the SignalR hub require authentication, whatever the server i
 | The Docker image | `/home/godmode/.local/share/GodMode.Server/api-key`, in the home of the image's non-root `godmode` user, who owns it |
 
 - **Owner-only.** The file is created readable by the server's user alone: mode 0600 in a 0700 directory on Linux and macOS, an ACL of that user alone on Windows. It is created with those permissions rather than changed afterwards, so a file system that refuses permission changes (Azure Files, other network mounts) does not stop the server; there it is a plain file.
-- **Another place:** `Authentication:ApiKeyFile`. It must not be under `ProjectRootsDir`, where sessions work: the server refuses to start if it is.
+- **Another place:** `Authentication:ApiKeyFile`. It must not be under any root's folder, a scan folder or an explicit root, where sessions work: the server refuses to start if it is, and names the setting. A scan folder or explicit root added to the config while the server runs, whose tree holds the key file, is left out and logged once as a warning, so it never gets that far.
 - **Read it again** with `cat ~/.local/share/GodMode.Server/api-key` (Windows: `type %LOCALAPPDATA%\GodMode.Server\api-key`). Write your own key into it, or delete it for a new one on the next start.
 - **A configured key always wins**, and the key file is then neither read nor written. So does a codespace, which uses no key.
 - **Docker:** a replaced container has a new home, so a new key. Run it with `-e Authentication__ApiKey=<key>`, or keep the key file on a named volume: `-v godmode-key:/home/godmode/.local/share/GodMode.Server`. The image creates that directory, owned by `godmode` with mode 0700, and a new named volume starts with its owner and mode. A bind mount (`-v /srv/godmode-key:…`) keeps the host directory's owner instead, which must be writable by the container's `godmode` user.
@@ -110,14 +137,14 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- \
 
 **Docker:** the image sets `URLS=http://+:31337` (all interfaces). Add it in the app by whatever address its published port is reached on (`http://localhost:31337`, a host name, a LAN address, another published port such as `-p 8080:31337`). To change the binding, use the unprefixed `URLS` variable or `--urls`. `ASPNETCORE_URLS` loses to the `Urls` in `appsettings.json`.
 
-**What the key does not stop.** Sessions run as the server's own OS user. A session that can run arbitrary commands can read the key file, `appsettings.json` or the server's environment, and with the key drive the hub, answering its own permission prompts. The permission prompt is a gate as long as the commands it approves don't do that; it is not a sandbox. The server hands neither a session nor a root script the key (their environment is an allowlist, see [Environment](#environment), and the key file is never under `ProjectRootsDir`), but real isolation, a separate OS user or container per session, is out of scope. The same goes for a codespace's `GITHUB_TOKEN`: the server refuses it, but sessions that are given it hold it.
+**What the key does not stop.** Sessions run as the server's own OS user. A session that can run arbitrary commands can read the key file, `appsettings.json` or the server's environment, and with the key drive the hub, answering its own permission prompts. The permission prompt is a gate as long as the commands it approves don't do that; it is not a sandbox. The server hands neither a session nor a root script the key (their environment is an allowlist, see [Environment](#environment), and the key file is under no root), but real isolation, a separate OS user or container per session, is out of scope. The same goes for a codespace's `GITHUB_TOKEN`: the server refuses it, but sessions that are given it hold it.
 
 ## Project Roots
 
 ### Multi-File Config Structure
 
 ```
-{ProjectRootsDir}/
+{scan folder}/                        # or an explicit root anywhere
 └── my-root/
     ├── .godmode-root/
     │   ├── config.json               # Base/shared config (also the default action if no others exist)
@@ -316,7 +343,7 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 | `GODMODE_INPUT_*` | All form inputs (key in upper snake case, e.g. `GODMODE_INPUT_ISSUE_NUMBER`) |
 | `GODMODE_RESULT_FILE` | Create scripts only: a file the script can write `key=value` lines to (see below) |
 | `GODMODE_FORCE` | Delete scripts only: `true` when the user forced the delete |
-| *(from `environment`)* | All vars from the profile's `env.json` and the config's `environment` block |
+| *(from `environment`)* | All vars from the profile's `Profiles:<name>:Environment` and the config's `environment` block, which wins a clash |
 
 See [Environment](#environment) for everything else a script gets.
 
@@ -326,12 +353,12 @@ Script stdout is streamed to the client as creation progress. Non-zero exit code
 
 ### Environment
 
-Neither a Claude process nor a root script (`prepare`, `create`, `delete`, `status`) inherits the server's environment, which holds its secrets: an `Authentication__ApiKey`, a codespace's `GITHUB_TOKEN`. Each starts from an allowlist, then the profile's and root's `environment`, then the `GODMODE_*` variables above:
+Neither a Claude process nor a root script (`prepare`, `create`, `delete`, `status`) inherits the server's environment, which holds its secrets: an `Authentication__ApiKey`, a codespace's `GITHUB_TOKEN`. Each starts from an allowlist, then the profile's environment (`Profiles:<name>:Environment`), then the root's `environment`, then the `GODMODE_*` variables above:
 
 - **Both** get the OS essentials: `PATH`, `HOME`, `TEMP`/`TMP`/`TMPDIR`, `LANG`, `LC_*`, `TZ`, `TERM`, `USER`, `SHELL`, the `XDG_*` directories; on Windows also `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `SystemRoot`, `ComSpec`, `PATHEXT`, `PSModulePath`, the `ProgramFiles` family and their like; the proxy and certificate variables (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, `ALL_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `SSL_CERT_DIR`); and `DOTNET_ROOT`. That is what `pwsh`, `git` and `gh` need to run and to find their own configuration.
 - **Claude** also gets Claude Code's own: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_GIT_BASH_PATH`.
 
-A credential a script or a session needs that is not a file in the user's home goes in the root's (or profile's) `environment`, and then reaches both: `GH_TOKEN` or `GITHUB_TOKEN` for `gh` and its git credential helper, `SSH_AUTH_SOCK` for an SSH agent, `GIT_SSH_COMMAND`, a desktop keyring's `DBUS_SESSION_BUS_ADDRESS`. `godmode-dev` passes the codespace's token this way, `"environment": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }`; on a machine where `gh` is logged in with its own stored credentials (`gh auth login`, the Windows credential manager), the entry expands to nothing and is dropped, and `gh` reads its login from the home directory.
+A credential a script or a session needs that is not a file in the user's home goes in the root's `environment` (or the profile's, `Profiles:<name>:Environment`), and then reaches both: `GH_TOKEN` or `GITHUB_TOKEN` for `gh` and its git credential helper, `SSH_AUTH_SOCK` for an SSH agent, `GIT_SSH_COMMAND`, a desktop keyring's `DBUS_SESSION_BUS_ADDRESS`. `godmode-dev` passes the codespace's token this way, `"environment": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }`; on a machine where `gh` is logged in with its own stored credentials (`gh auth login`, the Windows credential manager), the entry expands to nothing and is dropped, and `gh` reads its login from the home directory.
 
 ### Pull Request Status
 
@@ -448,7 +475,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --Urls=http://1
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.godmode-server/dev.json --Urls=http://127.0.0.1:31338
 ```
 
-The server you use gets its own file: `--config <path>` (or `GODMODE_CONFIG`), with its `Instance`, its `ProjectRootsDir` and, if you like, its key.
+The server you use gets its own file: `--config <path>` (or `GODMODE_CONFIG`), with its `Instance`, its roots (`Roots:Scan`, `Roots:Explicit`), its `Profiles` and, if you like, its key.
 
 The server builds no React and needs no npm. To see the client, run the GodMode app (on Windows, `dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.19041.0`) and add the server there with its key.
 
@@ -523,7 +550,7 @@ Utility:
 
 ### Server Exits at Startup
 
-- "will not start: … API key file": the key file cannot be written, or is under `ProjectRootsDir`. Set `Authentication:ApiKeyFile`, or a key. See *Authentication and binding* above.
+- "will not start: … API key file": the key file cannot be written, or is under a scan folder or an explicit root (the message names which). Set `Authentication:ApiKeyFile`, or a key. See *Authentication and binding* above.
 - "will not start: PermissionPromptKeepAliveSeconds …": it must be more than 0 and less than 300.
 - "will not start: its config file, … does not exist": the file named by `--config` or `GODMODE_CONFIG` is not there.
 
@@ -536,7 +563,8 @@ Utility:
 
 ### Roots or Projects Missing
 
-- Check `ProjectRootsDir` points where you think (relative paths resolve against the working directory), and that the server was started with its config file (`Config file: …` at startup): user secrets are not read
+- Check the roots' sources are what you think: the server logs each at startup (`Roots from Roots:Scan:<key>: <folder>`; relative paths resolve against the working directory). And check it was started with its config file (`Config file: …` at startup): user secrets are not read
+- A root whose name or folder another root has is skipped: look for "clashes with the root" in the log, which names both paths
 - A root another live server holds is skipped: look for "held by another server" in the log, which names the holder's instance and process
 - Each root needs a `.godmode-root/` folder directly inside it
 - Verify `status.json` files are valid JSON
