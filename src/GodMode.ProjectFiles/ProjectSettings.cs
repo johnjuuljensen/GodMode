@@ -30,20 +30,35 @@ public record ProjectSettings(
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
+    /// <summary>The session's settings; the defaults when its settings.json is missing or cannot be read.</summary>
     public static ProjectSettings Load(string statePath)
     {
+        TryLoad(statePath, out var settings);
+        return settings;
+    }
+
+    /// <summary>
+    /// The session's settings, and whether its settings.json was there and could be read: when it was
+    /// not, <paramref name="settings"/> is the defaults, and a caller that must not guess (whether the
+    /// session shares its folder) can tell.
+    /// </summary>
+    public static bool TryLoad(string statePath, out ProjectSettings settings)
+    {
+        settings = new ProjectSettings();
         var path = GetSettingsPath(statePath);
         if (!File.Exists(path))
-            return new ProjectSettings();
+            return false;
 
         try
         {
             var json = File.ReadAllText(path, Encoding.UTF8);
-            return JsonSerializer.Deserialize<ProjectSettings>(json, JsonOptions) ?? new ProjectSettings();
+            if (JsonSerializer.Deserialize<ProjectSettings>(json, JsonOptions) is not { } read) return false;
+            settings = read;
+            return true;
         }
         catch
         {
-            return new ProjectSettings();
+            return false;
         }
     }
 

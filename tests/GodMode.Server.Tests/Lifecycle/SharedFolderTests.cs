@@ -146,6 +146,33 @@ public class SharedFolderTests
     }
 
     /// <summary>
+    /// A recovered session whose settings.json cannot be read is taken as shared: with its action no
+    /// longer sharing, and no other session in the folder, its delete still removes only its state,
+    /// never the workspace and its files.
+    /// </summary>
+    [Fact]
+    public async Task Delete_OfASessionWhoseSettingsCannotBeRead_LeavesTheFolder()
+    {
+        await using var harness = new LifecycleHarness(Waiting(), rootConfig: Shared);
+        var created = await harness.CreateProjectAsync("assistant");
+        await harness.WaitForStdinAsync(created.Id);
+        var folder = harness.ProjectPath(created.Id);
+        var notes = Path.Combine(folder, "notes.md");
+        File.WriteAllText(notes, "the workspace's own");
+        File.WriteAllText(Path.Combine(harness.StatePath(created.Id), "settings.json"), "{ not json");
+        var config = Path.Combine(harness.RootPath, ".godmode-root", "config.json");
+        File.WriteAllText(config, File.ReadAllText(config).Replace("\"sharedFolder\":true", "\"sharedFolder\":false"));
+        await harness.RestartAsync(resume: false);
+        Assert.True(harness.Tracked(created.Id).SharedFolder, "a session whose settings cannot be read was taken as owning its folder");
+
+        await harness.Projects.DeleteProjectAsync(created.Id);
+
+        Assert.True(File.Exists(notes), "the workspace went with the session");
+        Assert.False(Directory.Exists(harness.StatePath(created.Id)), "the session's state is still there");
+        Assert.Contains(harness.Warnings, line => line.Contains("settings.json") && line.Contains("sharing its folder"));
+    }
+
+    /// <summary>
     /// Without sharedFolder, a create into a folder another session uses is refused, as before: the
     /// worktree root's guard against two sessions in one worktree.
     /// </summary>

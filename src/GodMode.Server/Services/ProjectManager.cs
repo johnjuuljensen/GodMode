@@ -349,8 +349,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     /// <summary>Whether a project this server tracks, or one it is creating, is in the root at <paramref name="rootPath"/>.</summary>
     private bool HasProjectIn(string rootPath) =>
-        _projects.Values.Select(project => project.ProjectPath).Concat(_creatingPaths.Keys)
+        _projects.Values.Select(project => project.ProjectPath).Concat(CreatingPaths())
             .Any(path => WhyNotAProjectFolderOf(rootPath, path) is null);
+
+    /// <summary>The folders creates in progress have claimed, copied under their lock.</summary>
+    private string[] CreatingPaths()
+    {
+        lock (_creatingPathsLock) return [.. _creatingPaths.Keys];
+    }
 
     /// <summary>The lock on the root at <paramref name="path"/>, or null when another server holds it or it cannot be taken.</summary>
     private RootLock? TryHoldRoot(string path)
@@ -870,7 +876,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 RegisterFailedCreate(project, ex.Message);
                 throw;
             }
-            // The log and result file follow the id, so they are found by the id the session keeps
+            // The log and result file follow the id, so they are found by the id the session keeps.
+            // Replacing is safe: the final id is free (FreeSessionId) and claimed above, so no other
+            // create or session has files under it
             MoveScriptFile(logFilePath, GetScriptLogPath(rootPath, finalId));
             MoveScriptFile(resultFilePath, GetResultFilePath(rootPath, finalId));
             sessionId = finalId;
@@ -1696,8 +1704,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                     status = status with { PullRequest = null };
                 }
 
-                // Load action name from settings
-                var settings = ProjectFiles.ProjectSettings.Load(statePath);
+                // Load action name from settings. One that cannot be read may be a shared session's:
+                // it is taken as shared, so its delete removes only its state, never the folder
+                var settingsRead = ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings);
+                if (!settingsRead)
+                    _logger.LogWarning("Session at {Path} has no settings.json that can be read: it is taken as sharing its folder, so a delete leaves the folder", statePath);
 
                 // The ID is where the state folder is: its root, and its id. A status.json that says
                 // otherwise (its root moved profile) is rewritten below. Nothing else in .godmode holds
@@ -1721,7 +1732,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                     SessionId = sessionId,
                     ProfileName = profileName,
                     ActionName = settings.ActionName,
-                    SharedFolder = settings.SharedFolder,
+                    SharedFolder = !settingsRead || settings.SharedFolder,
                 };
 
                 project.ClaudeSessionId = await SessionIdFile.ReadAsync(statePath, _logger, ct);
