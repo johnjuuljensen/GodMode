@@ -1,20 +1,26 @@
 import { useEffect, useSyncExternalStore } from 'react';
-import { dismissToast, durationOf, getToast, subscribeToast } from '../../toast';
+import { dismissToast, durationOf, getToasts, subscribeToast, type OpenToast } from '../../toast';
 import './Toast.css';
 
-/** Renders the toast showToast opened, until its time is up, it is dismissed, or its action is tapped. Mount once, in the Shell. */
+/** Renders the toasts showToast opened, stacked, each until its time is up, it is dismissed, or its action is tapped. Mount once, in the Shell. */
 export function Toast() {
-  const toast = useSyncExternalStore(subscribeToast, getToast);
+  const toasts = useSyncExternalStore(subscribeToast, getToasts);
+  if (!toasts.length) return null;
 
+  return (
+    <div className="toast-stack">
+      {toasts.map(toast => <ToastItem key={toast.id} toast={toast} />)}
+    </div>
+  );
+}
+
+function ToastItem({ toast }: { toast: OpenToast }) {
   useEffect(() => {
-    if (!toast) return;
     const timer = setTimeout(() => dismissToast(toast.id), durationOf(toast));
     return () => clearTimeout(timer);
   }, [toast]);
 
-  if (!toast) return null;
   const { action } = toast;
-
   return (
     <div className={`toast toast-${toast.tone ?? 'info'}`} role={toast.tone === 'error' ? 'alert' : 'status'}>
       <span className="toast-text">{toast.text}</span>

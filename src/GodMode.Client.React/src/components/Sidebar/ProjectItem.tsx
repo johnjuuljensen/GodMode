@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAppStore, type SidebarItem } from '../../store';
 import { KindLabel } from '../KindLabel/KindLabel';
 import { deleteSession } from '../../deleteSession';
@@ -59,7 +60,8 @@ export function ProjectItem({ item, isSelected, onSelect }: Props) {
   const close = () => { setMenu(null); setRevealed(false); setOffset(0); };
   const handleDelete = () => { close(); void deleteSession(item.serverId, project); };
 
-  // Kept on the screen: a menu opened near its right or bottom edge opens back from it
+  // Kept on the screen: a menu opened near its right or bottom edge opens back from it. It is portalled to
+  // the body (below), so these are the viewport's edges and not the sidebar's, which clips it otherwise
   const openMenuAt = (x: number, y: number) => setMenu({
     x: Math.max(8, Math.min(x, window.innerWidth - MENU_WIDTH_PX - 8)),
     y: Math.max(8, Math.min(y, window.innerHeight - MENU_HEIGHT_PX - 8)),
@@ -150,12 +152,14 @@ export function ProjectItem({ item, isSelected, onSelect }: Props) {
           >⋯</button>
         )}
       </div>
-      {menu && (
+      {/* Out of the sidebar: its backdrop-filter makes it the containing block of a fixed menu, and its overflow clips it */}
+      {menu && createPortal(
         <div ref={menuRef} className="project-item-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={e => e.stopPropagation()}>
           <button className="project-item-menu-item danger" role="menuitem" onClick={handleDelete}>
             {project.SharedFolder ? 'Delete' : 'Delete…'}
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

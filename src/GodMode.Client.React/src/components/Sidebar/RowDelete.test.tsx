@@ -108,6 +108,23 @@ describe('a row', () => {
     expect(q('.project-item-menu [role=menuitem]').map(b => b.textContent)).toEqual(['Delete']);
     expect(useAppStore.getState().selectedProject).toBeNull();
   });
+  it('opens its menu outside the sidebar, which clips a fixed menu, and on the screen near its edge', async () => {
+    await show([session('notes', { shared: true })]);
+
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: window.innerWidth - 4, clientY: window.innerHeight - 4 });
+    await act(async () => { row('notes')!.dispatchEvent(event); });
+
+    const menu = document.querySelector<HTMLElement>('.project-item-menu')!;
+    expect(menu).not.toBeNull();
+    expect(menu.closest('.shell-sidebar')).toBeNull();
+    expect(menu.parentElement).toBe(document.body);
+    expect(parseFloat(menu.style.left) + 160).toBeLessThanOrEqual(window.innerWidth);
+    expect(parseFloat(menu.style.top) + 44).toBeLessThanOrEqual(window.innerHeight);
+
+    await openMenu('notes');
+    await openMenu('notes');
+    expect(document.querySelector('.project-item-menu')?.closest('.shell-sidebar')).toBeNull();
+  });
 });
 
 describe('a session-only delete', () => {
@@ -127,6 +144,48 @@ describe('a session-only delete', () => {
 
     await vi.waitFor(() => expect(hub.restores).toEqual(['Default/work/260929-chat-notes-abcd']));
     expect(toast()).toBeNull();
+  });
+
+  it('keeps the first Undo when a second delete follows at once, and each undoes its own', async () => {
+    await show([session('a', { shared: true }), session('b', { shared: true }), session('c', { shared: true })]);
+
+    await openMenu('a');
+    await click(buttonIn(document.querySelector('.project-item-menu'), 'Delete')!);
+    await vi.waitFor(() => expect(q('.toast')).toHaveLength(1));
+    await openMenu('b');
+    await click(buttonIn(document.querySelector('.project-item-menu'), 'Delete')!);
+    await vi.waitFor(() => expect(q('.toast')).toHaveLength(2));
+
+    expect(q('.toast').map(t => t.querySelector('.toast-text')?.textContent)).toEqual(['Deleted "a"', 'Deleted "b"']);
+    const [first, second] = q('.toast');
+    await click(buttonIn(first, 'Undo')!);
+    await vi.waitFor(() => expect(hub.restores).toEqual(['Default/work/260929-chat-a-abcd']));
+    expect(q('.toast').map(t => t.querySelector('.toast-text')?.textContent)).toEqual(['Deleted "b"']);
+
+    await click(buttonIn(second, 'Undo')!);
+    await vi.waitFor(() => expect(hub.restores).toEqual(['Default/work/260929-chat-a-abcd', 'Default/work/260929-chat-b-abcd']));
+    expect(q('.toast')).toHaveLength(0);
+  });
+
+  it('ends each Undo after its own window, not the latest one', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      await show([session('a', { shared: true }), session('b', { shared: true })]);
+      await openMenu('a');
+      await click(buttonIn(document.querySelector('.project-item-menu'), 'Delete')!);
+      await vi.waitFor(() => expect(q('.toast')).toHaveLength(1));
+      await act(async () => { vi.advanceTimersByTime(5_000); });
+      await openMenu('b');
+      await click(buttonIn(document.querySelector('.project-item-menu'), 'Delete')!);
+      await vi.waitFor(() => expect(q('.toast')).toHaveLength(2));
+
+      await act(async () => { vi.advanceTimersByTime(5_500); });
+      expect(q('.toast .toast-text').map(t => t.textContent)).toEqual(['Deleted "b"']);
+      await act(async () => { vi.advanceTimersByTime(5_000); });
+      expect(q('.toast')).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('offers Undo for a while, then no longer', async () => {
