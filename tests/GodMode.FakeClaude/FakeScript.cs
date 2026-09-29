@@ -22,10 +22,14 @@ public static class FakeClaudeEnvironment
     public const string Record = "GODMODE_FAKE_CLAUDE_RECORD";
 
     /// <summary>
-    /// In <see cref="Record"/>, the session's id: the name of the folder its <c>--mcp-config</c> is
-    /// in (<c>.godmode/sessions/{id}/</c>), or <c>none</c> without one.
+    /// In <see cref="Record"/>, the session's id: the last part of the project ID in its
+    /// <c>--mcp-config</c> (<see cref="ProjectIdHeader"/>, <c>{profile}/{root}/{id}</c>), or <c>none</c> without one.
+    /// Read from the config's content, not its path, so a test can move the file.
     /// </summary>
     public const string SessionPlaceholder = "{session}";
+
+    /// <summary>The header GodMode's MCP entry names its project in (the server's <c>ProjectTokenAuthenticationHandler.ProjectIdHeader</c>).</summary>
+    public const string ProjectIdHeader = "X-GodMode-Project-Id";
 
     public const string ScriptFlag = "--fake-script";
     public const string RecordFlag = "--fake-record";
