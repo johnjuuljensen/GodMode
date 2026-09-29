@@ -92,12 +92,17 @@ public sealed class SessionlessActionTests
         var result = await client.CreateProjectAsync(LifecycleHarness.ProfileName, LifecycleHarness.RootName, null, Inputs("fresh"));
 
         Assert.Equal("Root fresh is ready", result.Message);
-        var progress = client.Received.Where(push => push.Method == nameof(IProjectHubClient.CreationProgress)).ToArray();
-        Assert.Contains(progress, push => push.Message!.StartsWith("made "));
-        var runId = Assert.Single(progress.Select(push => push.ProjectId).Distinct())!;
+        // A script's lines are pushed and logged as they are read, which can be after the script has exited
+        HubPush[] Progress() => client.Received.Where(push => push.Method == nameof(IProjectHubClient.CreationProgress)).ToArray();
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Progress().Length >= 2), null,
+            () => $"the script's two lines were not pushed: {string.Join(" | ", Progress().Select(push => push.Message))}");
+        Assert.Contains(Progress(), push => push.Message!.StartsWith("made "));
+        var runId = Assert.Single(Progress().Select(push => push.ProjectId).Distinct())!;
         Assert.Matches(LifecycleHarness.IdPattern("fresh"), runId);
-        var log = File.ReadAllText(Path.Combine(harness.RootPath, "logs", $"{runId.Split('/')[^1]}.log"));
-        Assert.Contains($"session=[] folder=[] fake=[{harness.ScriptPath}]", log);
+        var log = Path.Combine(harness.RootPath, "logs", $"{runId.Split('/')[^1]}.log");
+        var environment = $"session=[] folder=[] fake=[{harness.ScriptPath}]";
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(LifecycleHarness.ReadShared(log).Contains(environment)), null,
+            () => $"the log has no '{environment}':\n{LifecycleHarness.ReadShared(log)}");
     }
 
     [Fact]
