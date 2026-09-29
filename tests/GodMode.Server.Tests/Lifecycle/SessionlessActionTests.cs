@@ -168,6 +168,61 @@ public sealed class SessionlessActionTests
         Assert.False(Directory.Exists(Path.Combine(harness.RootsDir, "fresh")));
     }
 
+    /// <summary>
+    /// A refused session-less overlay costs its root only that action in the listing: here the trap the
+    /// docs name, a worktree root's base <c>scriptsCreateFolder</c> inherited by an overlay that does not
+    /// turn it off. The root keeps its profile and its other actions, and the refusal is logged.
+    /// </summary>
+    [Fact]
+    public async Task ARefusedOverlay_IsLeftOutOfTheListing_AndTheRootKeepsItsProfileAndOtherActions()
+    {
+        await using var harness = new LifecycleHarness(Waiting(),
+            rootConfig: new Dictionary<string, object> { ["scriptsCreateFolder"] = true, ["create"] = "provision.ps1" });
+        var godModeRoot = Path.Combine(harness.RootPath, ".godmode-root");
+        File.WriteAllText(Path.Combine(godModeRoot, "config.work.json"), """{ "description": "a worktree" }""");
+        File.WriteAllText(Path.Combine(godModeRoot, "config.newroot.json"), """{ "session": false }""");
+        File.WriteAllText(Path.Combine(godModeRoot, "provision.ps1"), ProvisionScript);
+
+        var root = Assert.Single(await harness.Projects.ListProjectRootsAsync());
+
+        Assert.Equal((LifecycleHarness.ProfileName, LifecycleHarness.RootName), (root.ProfileName, root.Name));
+        Assert.Equal(["work"], root.Actions!.Select(action => action.Name));
+        Assert.Contains(harness.Warnings, line => line.Contains("'newroot'") && line.Contains("scriptsCreateFolder") && line.Contains("left out"));
+    }
+
+    /// <summary>A root whose one action (config.json alone) is refused is listed in its profile with no action to create from.</summary>
+    [Fact]
+    public async Task ARefusedSingleAction_LeavesTheRootListedInItsProfile_WithNoActions()
+    {
+        await using var harness = new LifecycleHarness(Waiting(),
+            rootConfig: new Dictionary<string, object> { ["session"] = false, ["sharedFolder"] = true, ["create"] = "provision.ps1" });
+
+        var root = Assert.Single(await harness.Projects.ListProjectRootsAsync());
+
+        Assert.Equal(LifecycleHarness.ProfileName, root.ProfileName);
+        Assert.Empty(root.Actions!);
+    }
+
+    /// <summary>A script's message is untrusted output: the client gets it cut to a length the app shows, and the log never has it.</summary>
+    [Fact]
+    public async Task ALongMessage_IsCut_AndNotLogged()
+    {
+        await using var harness = await ProvisioningHarnessAsync();
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "provision.ps1"), """
+            $ErrorActionPreference = 'Stop'
+            Set-Content -Path $env:GODMODE_RESULT_FILE -Value ("message=secret-" + ('x' * 2000))
+            Start-Sleep -Milliseconds 300
+            """);
+
+        var result = await harness.Connect("c1").CreateProjectAsync(LifecycleHarness.ProfileName, LifecycleHarness.RootName, null, Inputs("fresh"));
+
+        Assert.Equal(ProjectManager.MaxRunMessageLength, result.Message!.Length);
+        Assert.StartsWith("secret-xxx", result.Message);
+        Assert.EndsWith("…", result.Message);
+        Assert.Contains(harness.AllLogs, line => line.Contains($"with a message of {ProjectManager.MaxRunMessageLength} characters"));
+        Assert.DoesNotContain(harness.AllLogs, line => line.Contains("secret-"));
+    }
+
     /// <summary>The same flags on an action that starts a session are its own business, beside one that starts none.</summary>
     [Fact]
     public async Task ARootMayMixBoth_EachActionAsItsConfigSays()

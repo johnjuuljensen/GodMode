@@ -988,6 +988,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// names no project. A script that fails fails the create, and leaves no Error project. The roots are
     /// read again once it has run, so a root it made reaches every client (RootsChanged) at once.
     /// </summary>
+    /// <summary>The longest message a run returns, as long as an attention item's text; a longer one is cut.</summary>
+    internal const int MaxRunMessageLength = Attention.MaxTextLength;
+
     private async Task<CreateProjectResult> RunSessionlessActionAsync(CreateProjectRequest request, ProfileSnapshot snap,
         string rootPath, RootConfig config, CreateAction action)
     {
@@ -1027,8 +1030,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 }
             }
 
-            var message = ReadResultFile(resultFilePath).GetValueOrDefault("message") is { Length: > 0 } said ? said : null;
-            _logger.LogInformation("Action '{Action}' of root '{Root}' ran ({RunId}): {Message}", action.Name, rootName, progressId, message ?? "(no message)");
+            // The script's output is untrusted: its message is cut to a length the app shows, and not logged
+            var message = ReadResultFile(resultFilePath).GetValueOrDefault("message") is { Length: > 0 } said
+                ? said.Length <= MaxRunMessageLength ? said : TextCut.Cut(said, MaxRunMessageLength - 1) + "…"
+                : null;
+            _logger.LogInformation("Action '{Action}' of root '{Root}' ran ({RunId}), {Said}", action.Name, rootName, progressId,
+                message == null ? "with no message" : $"with a message of {message.Length} characters");
             await RefreshRootsAsync();
             return new CreateProjectResult(null, message);
         }

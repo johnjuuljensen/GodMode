@@ -369,7 +369,7 @@ A create script can override the project's `project_path`, `project_name` or `pr
 | `project_name` | The display name, and the id's slug |
 | `project_prompt` | The first prompt |
 | `kind` | The session's kind (`bug`, `feat`, `experiment`, `chat`…): the label the app shows, and the id's kind. Without one, the kind is the action's name. Kept as the id has it: lowercase `[a-z0-9-]`, 12 characters at most |
-| `message` | Only for an action that starts no session: what it made, which the app shows when it has run (see [Actions that start no session](#actions-that-start-no-session)). An action that starts a session ignores it |
+| `message` | Only for an action that starts no session: what it made, which the app shows when it has run (see [Actions that start no session](#actions-that-start-no-session)), cut to 500 characters, and not logged. An action that starts a session ignores it |
 
 For example, an issue script that names the kind from the issue's labels:
 
@@ -402,7 +402,7 @@ New-Item -ItemType Directory -Force (Join-Path $root '.godmode-root') | Out-Null
 - **Of the result file, only `message` is read.** `project_path`, `project_name`, `project_prompt` and `kind` are ignored, and their checks do not apply: nothing is made a project's folder, so a script may name a folder outside the root (the root it made) without being refused.
 - **`CreateProject` returns no project** (`CreateProjectResult.Project` is null) and the script's `message`. The app shows the message, or that the action finished, and stays on the form; it offers no model for such an action (the listed action's `Session` is `false`, its `Model` null and `AllowSkipPermissions` false).
 - **The roots are read again once it has run**, so a root it made reaches every client as `RootsChanged` at once, not at the next poll ([Live roots](#live-roots)).
-- **What would give it a working folder is a config error**, as a bad `permissionMode` is: `"session": false` with `"sharedFolder": true`, with `"scriptsCreateFolder": true`, or with no `create` script. The merged action is checked, so a base `config.json` that sets one of these for its worktree actions needs `false` in the session-less action's overlay. `claudeArgs`, `model`, `permissionMode`, `allowSkipPermissions`, `promptTemplate`, `delete`, `status` and the resume settings mean nothing to it and are ignored, since a base config shares them with every action.
+- **What would give it a working folder is a config error**: `"session": false` with `"sharedFolder": true`, with `"scriptsCreateFolder": true`, or with no `create` script. A create of the action is refused saying why, and the listing leaves that action out, with a warning in the log, as it leaves out an overlay it cannot read: the root keeps its profile and its other actions. The merged action is checked, so a base `config.json` that sets one of these for its worktree actions needs `false` in the session-less action's overlay. `claudeArgs`, `model`, `permissionMode`, `allowSkipPermissions`, `promptTemplate`, `delete`, `status` and the resume settings mean nothing to it and are ignored, since a base config shares them with every action.
 
 ### Environment
 
