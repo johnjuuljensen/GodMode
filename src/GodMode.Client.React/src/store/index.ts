@@ -728,6 +728,14 @@ export const useAppStore = create<AppState>((set, get) => {
       // Every client hears of every created project: list it, and leave the view alone (#170)
       onProjectCreated: (status) => addProject(summaryOf(status)),
       onProjectDeleted: removeProject,
+      // A root added, edited or removed on the host: the server's whole lists. Its sessions that come
+      // or go are pushed as ProjectCreated and ProjectDeleted
+      onRootsChanged: (roots, profiles) => set(state => {
+        const connections = state.serverConnections.map(c =>
+          c.serverInfo.Id === serverId ? { ...c, roots, profiles } : c
+        );
+        return { serverConnections: connections, ...rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy) };
+      }),
       onStatusChanged: (_projectId, status) => {
         set(state => {
           const connections = state.serverConnections.map(c =>

@@ -85,7 +85,13 @@ function collectFilteredData(connections: ServerConnection[], filter: string) {
       if (!itemsByRoot.has(rn)) itemsByRoot.set(rn, []);
       itemsByRoot.get(rn)!.push({ key: projectKey(serverId, p.Id), serverId, project: p });
     }
-    for (const root of conn.roots) {
+    // A project whose root the server no longer lists (removed while its claude runs, or moved to
+    // another profile until it stops) is still shown, under its root's name, with no +
+    const listedRoots = new Set(conn.roots.map(root => rootKey(root.ProfileName, root.Name)));
+    const unlisted: ProjectRootInfo[] = [...itemsByRoot.entries()]
+      .filter(([key]) => !listedRoots.has(key))
+      .map(([, [{ project }]]) => ({ Name: project.RootName ?? 'default', ProfileName: project.ProfileName ?? 'Default', Actions: [] }));
+    for (const root of [...conn.roots, ...unlisted]) {
       const profileName = root.ProfileName ?? 'Default';
       allProfileNames.add(profileName);
       if (filter !== 'All' && profileName.toLowerCase() !== filter.toLowerCase()) continue;
