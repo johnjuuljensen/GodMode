@@ -239,19 +239,19 @@ public class McpEndpointTests
 
         public async Task<string> CreateAsync(string name)
         {
-            var created = await Client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.CreateProject), Profile, Root, null,
+            var created = (await Client.Hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), Profile, Root, null,
                 new Dictionary<string, JsonElement>
                 {
                     ["name"] = JsonSerializer.SerializeToElement(name),
                     ["prompt"] = JsonSerializer.SerializeToElement("Start"),
-                });
+                })).Project!;
             return created.Id;
         }
 
         /// <summary>Waits until the project's first launch satisfies <paramref name="condition"/>.</summary>
         public async Task<FakeLaunch> WaitForLaunchAsync(string projectId, Func<FakeLaunch, bool> condition)
         {
-            var record = Path.Combine(_workDir, "roots", Root, projectId.Split('/')[^1], "fake-claude.jsonl");
+            var record = Path.Combine(ServerProcess.WorkingFolderOf(Path.Combine(_workDir, "roots", Root), projectId), "fake-claude.jsonl");
             FakeLaunch? launch = null;
             Assert.True(await LifecycleHarness.WaitForAsync(() =>
                     Task.FromResult((launch = FakeRecording.Read(record).FirstOrDefault()) is { } l && condition(l))),

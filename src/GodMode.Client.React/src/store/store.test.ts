@@ -153,10 +153,10 @@ describe('a project created elsewhere (#170)', () => {
   });
 
   it('leaves the create page open', () => {
-    useAppStore.getState().setActivePage({ type: 'createProject', context: { serverId: 'B', rootName: 'work' } });
+    useAppStore.getState().setActivePage({ type: 'createProject', context: { serverId: 'B', profileName: 'Default', rootName: 'work' } });
     hubA.callbacks.onProjectCreated?.(created);
     const s = useAppStore.getState();
-    expect(s.activePage).toEqual({ type: 'createProject', context: { serverId: 'B', rootName: 'work' } });
+    expect(s.activePage).toEqual({ type: 'createProject', context: { serverId: 'B', profileName: 'Default', rootName: 'work' } });
     expect(s.selectedProject).toBeNull();
   });
 });
@@ -168,7 +168,7 @@ describe('a project this client created (#170)', () => {
     ['before', true],
     ['after', false],
   ])('opens once its own call returns, with the broadcast arriving %s', (_when, broadcastFirst) => {
-    useAppStore.getState().setActivePage({ type: 'createProject', context: { serverId: 'A', rootName: 'work' } });
+    useAppStore.getState().setActivePage({ type: 'createProject', context: { serverId: 'A', profileName: 'Default', rootName: 'work' } });
     if (broadcastFirst) hubA.callbacks.onProjectCreated?.(created);
     useAppStore.getState().openCreatedProject('A', created);
     if (!broadcastFirst) hubA.callbacks.onProjectCreated?.(created);

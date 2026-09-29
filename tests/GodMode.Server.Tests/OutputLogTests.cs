@@ -10,18 +10,17 @@ namespace GodMode.Server.Tests;
 /// </summary>
 public sealed class OutputLogTests : IDisposable
 {
-    private readonly string _projectPath = ServerProcess.CreateWorkDir("outputlog");
+    private readonly string _statePath = ServerProcess.CreateWorkDir("outputlog");
     private readonly ITestOutputHelper _output;
 
     public OutputLogTests(ITestOutputHelper output)
     {
         _output = output;
-        Directory.CreateDirectory(Path.Combine(_projectPath, ".godmode"));
     }
 
-    public void Dispose() => ServerProcess.DeleteWorkDir(_projectPath);
+    public void Dispose() => ServerProcess.DeleteWorkDir(_statePath);
 
-    private string FilePath => OutputLog.PathOf(_projectPath);
+    private string FilePath => OutputLog.PathOf(_statePath);
 
     private void WriteFile(string text) => File.WriteAllBytes(FilePath, Encoding.UTF8.GetBytes(text));
 
@@ -30,7 +29,7 @@ public sealed class OutputLogTests : IDisposable
     private async Task<(long Offset, string Json)[]> ReadAllAsync(long from)
     {
         var lines = new List<(long, string)>();
-        await foreach (var batch in OutputLog.ReadBatchesAsync(_projectPath, from))
+        await foreach (var batch in OutputLog.ReadBatchesAsync(_statePath, from))
             lines.AddRange(batch.Select(l => (l.Offset, l.RawJson)));
         return [.. lines];
     }
@@ -38,7 +37,7 @@ public sealed class OutputLogTests : IDisposable
     [Fact]
     public async Task Writer_ReturnsTheByteOffsetAfterEachLine_ForNonAscii()
     {
-        await using (var writer = OutputLog.OpenWriter(_projectPath))
+        await using (var writer = OutputLog.OpenWriter(_statePath))
         {
             Assert.Equal(Bytes("{\"a\":\"æø 🚀\"}\n"), await writer.AppendAsync("{\"a\":\"æø 🚀\"}"));
             Assert.Equal(Bytes("{\"a\":\"æø 🚀\"}\n{\"b\":1}\n"), await writer.AppendAsync("{\"b\":1}"));
@@ -46,7 +45,7 @@ public sealed class OutputLogTests : IDisposable
 
         Assert.Equal(new[] { (Bytes("{\"a\":\"æø 🚀\"}\n"), "{\"a\":\"æø 🚀\"}"), (Bytes("{\"a\":\"æø 🚀\"}\n{\"b\":1}\n"), "{\"b\":1}") },
             await ReadAllAsync(0));
-        Assert.Equal(new FileInfo(FilePath).Length, OutputLog.End(_projectPath));
+        Assert.Equal(new FileInfo(FilePath).Length, OutputLog.End(_statePath));
     }
 
     [Fact]
@@ -57,7 +56,7 @@ public sealed class OutputLogTests : IDisposable
         var lines = await ReadAllAsync(0);
 
         Assert.Equal(new[] { (Bytes("{\"a\":\"é\"}\r\n"), "{\"a\":\"é\"}"), (Bytes("{\"a\":\"é\"}\r\n{\"b\":2}\r\n"), "{\"b\":2}") }, lines);
-        Assert.Equal(lines[0].Offset, await OutputLog.StartAsync(_projectPath, lines[0].Offset));
+        Assert.Equal(lines[0].Offset, await OutputLog.StartAsync(_statePath, lines[0].Offset));
         Assert.Equal(new[] { lines[1] }, await ReadAllAsync(lines[0].Offset));
     }
 
@@ -69,7 +68,7 @@ public sealed class OutputLogTests : IDisposable
 
         // Inside a multi-byte character, inside the line, and on the \n itself
         foreach (var inside in new[] { 7L, 3L, boundary - 1 })
-            Assert.Equal(boundary, await OutputLog.StartAsync(_projectPath, inside));
+            Assert.Equal(boundary, await OutputLog.StartAsync(_statePath, inside));
     }
 
     [Fact]
@@ -77,7 +76,7 @@ public sealed class OutputLogTests : IDisposable
     {
         WriteFile("{\"a\":1}\n");
 
-        Assert.Equal(0, await OutputLog.StartAsync(_projectPath, 1000));
+        Assert.Equal(0, await OutputLog.StartAsync(_statePath, 1000));
     }
 
     [Fact]
@@ -85,10 +84,10 @@ public sealed class OutputLogTests : IDisposable
     {
         WriteFile("{\"a\":1}\n{\"cut");
 
-        Assert.Equal(Bytes("{\"a\":1}\n"), OutputLog.End(_projectPath));
+        Assert.Equal(Bytes("{\"a\":1}\n"), OutputLog.End(_statePath));
         Assert.Equal(new[] { (Bytes("{\"a\":1}\n"), "{\"a\":1}") }, await ReadAllAsync(0));
 
-        await using (var writer = OutputLog.OpenWriter(_projectPath))
+        await using (var writer = OutputLog.OpenWriter(_statePath))
             await writer.AppendAsync("{\"b\":2}");
 
         Assert.Equal(new[] { "{\"a\":1}", "{\"cut", "{\"b\":2}" }, (await ReadAllAsync(0)).Select(l => l.Json));
@@ -100,7 +99,7 @@ public sealed class OutputLogTests : IDisposable
         WriteFile(string.Concat(Enumerable.Range(0, 2500).Select(i => $"{{\"i\":{i}}}\n")));
 
         var batches = new List<int>();
-        await foreach (var batch in OutputLog.ReadBatchesAsync(_projectPath, 0))
+        await foreach (var batch in OutputLog.ReadBatchesAsync(_statePath, 0))
             batches.Add(batch.Count);
 
         Assert.Equal(new[] { OutputLog.MaxBatchLines, OutputLog.MaxBatchLines, 500 }, batches);
@@ -111,12 +110,12 @@ public sealed class OutputLogTests : IDisposable
     [Fact]
     public async Task Generation_OfAFolderFromBeforeGenerations_IsWrittenOnTheFirstRead_AndKept()
     {
-        Assert.False(File.Exists(OutputLog.GenerationPathOf(_projectPath)));
+        Assert.False(File.Exists(OutputLog.GenerationPathOf(_statePath)));
 
-        var first = await OutputLog.GenerationAsync(_projectPath);
+        var first = await OutputLog.GenerationAsync(_statePath);
 
-        Assert.Equal(first, File.ReadAllText(OutputLog.GenerationPathOf(_projectPath)));
-        Assert.Equal(first, await OutputLog.GenerationAsync(_projectPath));
+        Assert.Equal(first, File.ReadAllText(OutputLog.GenerationPathOf(_statePath)));
+        Assert.Equal(first, await OutputLog.GenerationAsync(_statePath));
     }
 
     [Fact]
@@ -125,20 +124,20 @@ public sealed class OutputLogTests : IDisposable
         // On Windows a read racing the first read's rename used to meet a sharing violation
         for (var round = 0; round < 50; round++)
         {
-            File.Delete(OutputLog.GenerationPathOf(_projectPath));
+            File.Delete(OutputLog.GenerationPathOf(_statePath));
 
-            var generations = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => OutputLog.GenerationAsync(_projectPath))));
+            var generations = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() => OutputLog.GenerationAsync(_statePath))));
 
             Assert.Single(generations.Distinct());
-            Assert.Equal(generations[0], File.ReadAllText(OutputLog.GenerationPathOf(_projectPath)));
-            Assert.Equal([OutputLog.GenerationPathOf(_projectPath)], Directory.GetFiles(Path.GetDirectoryName(FilePath)!, "output-generation*"));
+            Assert.Equal(generations[0], File.ReadAllText(OutputLog.GenerationPathOf(_statePath)));
+            Assert.Equal([OutputLog.GenerationPathOf(_statePath)], Directory.GetFiles(Path.GetDirectoryName(FilePath)!, "output-generation*"));
         }
     }
 
     [Fact]
     public async Task Generation_OfAProjectWithoutAGodModeFolder_IsOneForNoOutput_AndNothingIsWritten()
     {
-        var folderless = Path.Combine(_projectPath, "never-made");
+        var folderless = Path.Combine(_statePath, "never-made");
 
         var generation = await OutputLog.GenerationAsync(folderless).WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -149,12 +148,12 @@ public sealed class OutputLogTests : IDisposable
     [Fact]
     public async Task StartGeneration_ReplacesTheGeneration()
     {
-        var before = await OutputLog.GenerationAsync(_projectPath);
+        var before = await OutputLog.GenerationAsync(_statePath);
 
-        var started = OutputLog.StartGeneration(_projectPath);
+        var started = OutputLog.StartGeneration(_statePath);
 
         Assert.NotEqual(before, started);
-        Assert.Equal(started, await OutputLog.GenerationAsync(_projectPath));
+        Assert.Equal(started, await OutputLog.GenerationAsync(_statePath));
     }
 
     // ── The last turns (tail mode) ──
@@ -205,7 +204,7 @@ public sealed class OutputLogTests : IDisposable
         foreach (var turns in new long[] { 1, 2, 3, 5 })
         {
             var expected = TailStartByDefinition(bytes, turns);
-            var start = await OutputLog.StartAsync(_projectPath, -turns);
+            var start = await OutputLog.StartAsync(_statePath, -turns);
             Assert.True(expected == start, $"{file}, the last {turns} turns: start at {start}, not {expected}");
         }
     }

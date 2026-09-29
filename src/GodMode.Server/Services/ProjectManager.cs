@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.SignalR;
 using GodMode.Server.Hubs;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Microsoft.Extensions.Primitives;
 using ProjectFiles = GodMode.ProjectFiles;
 
 namespace GodMode.Server.Services;
@@ -53,7 +54,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private readonly IRootConfigReader _rootConfigReader;
     private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
-    private readonly ProfileFileManager _profileFileManager;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
     private readonly IServer? _server;
@@ -87,11 +87,91 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         remove => _lifecycle.OnProjectCompleted -= value;
     }
 
+    /// <summary>The server's configuration, where its roots and profiles are read from on every rebuild (<see cref="RootSources"/>).</summary>
+    private readonly IConfiguration _configuration;
+
+    /// <summary>The roots skipped for a clash, and the explicit roots whose folder is missing, by full path: each logged once while it lasts.</summary>
+    private readonly HashSet<string> _loggedClashes = new(PathComparer);
+    private readonly HashSet<string> _loggedMissingRoots = new(PathComparer);
+
     /// <summary>
-    /// Optional directory to scan for autodiscovered roots.
-    /// Null when autodiscovery is disabled.
+    /// The generated API key's file, when the server has one (<see cref="AuthSettings.KeyFilePath"/>):
+    /// no root source whose tree holds it is used. The start refuses one; this keeps out one added by a
+    /// config reload later. Each left out is logged once, by folder, while it lasts.
     /// </summary>
-    private readonly string? _projectRootsDir;
+    private readonly string? _keyFilePath;
+    private readonly HashSet<string> _loggedKeyFileFolders = new(PathComparer);
+
+    /// <summary>Which server this is, in the roots it holds and in the logs: <c>Instance</c>, <c>default</c> unless configured.</summary>
+    public const string InstanceSetting = "Instance";
+    public const string DefaultInstance = "default";
+    private readonly string _instance;
+
+    /// <summary>
+    /// The roots this server manages, by full path: it holds each one's <see cref="RootLock"/>, from
+    /// the rebuild that first found it free until the root is gone or the server stops. Only the
+    /// snapshot's rebuild (under <see cref="_profileLock"/>) changes them.
+    /// </summary>
+    private readonly Dictionary<string, RootLock> _heldRoots = new(PathComparer);
+
+    /// <summary>The roots another live server holds, by full path, each logged once while it is held.</summary>
+    private readonly HashSet<string> _skippedRoots = new(PathComparer);
+
+    /// <summary>Set once the server has stopped and let its roots go: it takes no root after that.</summary>
+    private bool _rootsReleased;
+
+    /// <summary>
+    /// How often the roots are read again, so a root added, edited or removed on the host shows up
+    /// without a reconnect, where a file watcher would miss it (a network drive). 0 turns the poll
+    /// off; a reload of the config, and every list of roots or profiles, still read them.
+    /// </summary>
+    public const string RootsPollSetting = "RootsPollSeconds";
+    private readonly TimeSpan _rootsPoll;
+
+    /// <summary>How long a refresh waits for a session's lock to let the session go (<see cref="TryForgetAsync"/>).</summary>
+    private static readonly TimeSpan ForgetLockWait = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// How long a trashed session (a shared session's delete, <c>.godmode/trash/{id}/</c>) stays there
+    /// for an undo, and how often the trash is purged of those older: at the start, then on this schedule
+    /// (0 turns the schedule off; the start still purges).
+    /// </summary>
+    public const string TrashRetentionSetting = "TrashRetentionSeconds";
+    public const string TrashPurgeSetting = "TrashPurgeSeconds";
+    private readonly TimeSpan _trashRetention;
+    private readonly TimeSpan _trashPurge;
+
+    /// <summary>
+    /// One refresh of the roots at a time (<see cref="RefreshRootsAsync"/>), the startup's recovery
+    /// included: what each changes (the fields below, the tracked sessions of roots that come and go)
+    /// and what it pushes follow one another.
+    /// </summary>
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+
+    /// <summary>Set once the startup's recovery has run: from then on a refresh brings the tracked sessions in line with the roots.</summary>
+    private bool _liveRoots;
+
+    /// <summary>The roots whose sessions have been recovered, by full path, with the profile and name they were recovered under.</summary>
+    private readonly Dictionary<string, (string Profile, string Root)> _recoveredRoots = new(PathComparer);
+
+    /// <summary>
+    /// The tracked sessions whose root's folder the last refresh found under another profile or name,
+    /// or not at all ("" then), by ID: what it found. One refresh is not enough to act on: a
+    /// config.json saved half-written reads as the default config, in another profile.
+    /// </summary>
+    private readonly Dictionary<string, string> _unbound = new();
+
+    /// <summary>The roots and profiles the last refresh made, and what they serialize to, which says whether they changed.</summary>
+    private sealed record RootsView(ProjectRootInfo[] Roots, ProfileInfo[] Profiles, string Json);
+    private RootsView? _rootsView;
+
+    /// <summary>What a refresh pushes, in order, not waited for (<see cref="ClientSends"/>).</summary>
+    private readonly ClientSends _rootsSends = new();
+
+    /// <summary>The poll and the config reload's subscription, started once the startup's recovery has run.</summary>
+    private readonly CancellationTokenSource _watchStop = new();
+    private IDisposable? _configReload;
+    private int _watching;
 
     /// <summary>
     /// Lock for rebuilding the profile snapshot.
@@ -104,14 +184,21 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private volatile ProfileSnapshot _snapshot;
 
+    /// <summary>The roots the last snapshot logged, so it is logged only when they changed (under <see cref="_profileLock"/>).</summary>
+    private string? _snapshotDescribed;
+
     /// <summary>
-    /// Immutable snapshot of merged profile and root lookup state.
+    /// Immutable snapshot of merged profile and root lookup state. <paramref name="RootConfigs"/> is each
+    /// found root's config, by full path, as the rebuild read it: its profile, its profile's description
+    /// and the lists clients get all come from that one read, so an edit saved during a rebuild is in
+    /// all of them or in none.
     /// </summary>
     private sealed record ProfileSnapshot(
         Dictionary<string, ProfileConfig> Profiles,
         Dictionary<(string, string), string> RootLookup,
         Dictionary<string, (string, string)> PathToProfileRoot,
-        ProjectFiles.ProjectManager ProjectFiles);
+        ProjectFiles.ProjectManager ProjectFiles,
+        IReadOnlyDictionary<string, RootConfig> RootConfigs);
 
     public ProjectManager(
         ProjectLifecycle lifecycle,
@@ -119,18 +206,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         IRootConfigReader rootConfigReader,
         IScriptRunner scriptRunner,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
-        ProfileFileManager profileFileManager,
         IConfiguration configuration,
         IHostApplicationLifetime lifetime,
         ILogger<ProjectManager> logger,
-        IServer? server = null)
+        IServer? server = null,
+        AuthSettings? authSettings = null)
     {
         _lifecycle = lifecycle;
         _statusUpdater = statusUpdater;
         _rootConfigReader = rootConfigReader;
         _scriptRunner = scriptRunner;
         _hubContext = hubContext;
-        _profileFileManager = profileFileManager;
         _logger = logger;
         _server = server;
         _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -139,20 +225,30 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         _exitBeforeShutdownWindow = TimeSpan.FromSeconds(configuration.GetValue(ExitBeforeShutdownWindowSetting, 5.0));
         _pullRequests = new PullRequestPoller(CheckPullRequestAsync,
             TimeSpan.FromSeconds(configuration.GetValue(PullRequestPollSetting, 600.0)), logger);
+        _rootsPoll = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(RootsPollSetting, 5.0)));
+        _trashRetention = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(TrashRetentionSetting, TimeSpan.FromDays(1).TotalSeconds)));
+        _trashPurge = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(TrashPurgeSetting, TimeSpan.FromHours(1).TotalSeconds)));
         _lifecycle.StatusNotified += OnStatusNotifiedAsync;
 
-        // Read optional autodiscovery directory (normalize empty/whitespace to null)
-        var rawDir = configuration["ProjectRootsDir"];
-        _projectRootsDir = string.IsNullOrWhiteSpace(rawDir) ? null : rawDir;
+        _instance = configuration[InstanceSetting] is { Length: > 0 } instance ? instance : DefaultInstance;
+        _logger.LogInformation("Server instance {Instance}", _instance);
 
-        if (_projectRootsDir != null)
-            _logger.LogInformation("Autodiscovery enabled: scanning {ProjectRootsDir} for .godmode-root/ directories", _projectRootsDir);
+        _configuration = configuration;
+        _keyFilePath = authSettings?.KeyFilePath is { } keyFile ? Path.GetFullPath(keyFile) : null;
+        foreach (var (setting, folder) in RootSources.From(configuration).Folders)
+            _logger.LogInformation("Roots from {Setting}: {Folder}", setting, folder);
+        foreach (var retired in RootSources.RetiredSettings(configuration))
+            _logger.LogWarning("{Retired}", retired);
 
-        // Build initial profile/root snapshot
-        _snapshot = BuildSnapshot();
+        // Build initial profile/root snapshot, taking the roots no other server holds
+        lock (_profileLock) _snapshot = BuildSnapshot();
 
         _stopping = lifetime.ApplicationStopping;
+        // Latest registration first: the roots are no longer watched, then the projects are
+        // stopped, then the roots are let go
+        lifetime.ApplicationStopping.Register(ReleaseRoots);
         lifetime.ApplicationStopping.Register(StopProjectsOnShutdown);
+        lifetime.ApplicationStopping.Register(StopWatchingRoots);
     }
 
     /// <summary>
@@ -214,50 +310,33 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Builds an immutable snapshot of all profile/root state: the profiles in .profiles/, with the
-    /// roots autodiscovered in ProjectRootsDir. Thread-safe — can be called from any thread.
+    /// Builds an immutable snapshot of all profile/root state: the roots its config names
+    /// (<see cref="RootSources"/>), read fresh, grouped by profile, each profile with its settings.
+    /// Thread-safe — can be called from any thread.
     /// </summary>
     private ProfileSnapshot BuildSnapshot()
     {
-        // Layer 1: File-based profiles from .profiles/ directory
+        var sources = RootSources.From(_configuration);
         var merged = new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (name, data) in _profileFileManager.ReadAllProfiles())
+        var configs = new Dictionary<string, RootConfig>(PathComparer);
+        foreach (var root in FindRoots(sources))
         {
-            merged[name] = new ProfileConfig
+            configs[FullPath(root.Path)] = root.Config;
+            if (!merged.TryGetValue(root.Profile, out var profile))
             {
-                Roots = new Dictionary<string, string>(),
-                Environment = data.Environment,
-                Description = data.Description
-            };
+                sources.Profiles.TryGetValue(root.Profile, out var settings);
+                merged[root.Profile] = profile = new ProfileConfig
+                {
+                    Roots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                    Environment = settings is { Environment.Count: > 0 } ? new Dictionary<string, string>(settings.Environment) : null,
+                    Description = settings?.Description ?? root.Config.Description,
+                };
+            }
+            profile.Roots[root.Name] = root.Path;
         }
 
-        // Layer 2: Autodiscovered roots from ProjectRootsDir
-        if (_projectRootsDir != null)
-        {
-            var discovered = DiscoverProfiles(_projectRootsDir);
-            foreach (var (profileName, profileConfig) in discovered)
-            {
-                if (merged.TryGetValue(profileName, out var existing))
-                {
-                    // Explicit profiles take precedence — merge only new root names
-                    var mergedRoots = new Dictionary<string, string>(existing.Roots, StringComparer.OrdinalIgnoreCase);
-                    foreach (var (rootName, rootPath) in profileConfig.Roots)
-                    {
-                        mergedRoots.TryAdd(rootName, rootPath);
-                    }
-                    merged[profileName] = new ProfileConfig
-                    {
-                        Roots = mergedRoots,
-                        Environment = existing.Environment,
-                        Description = existing.Description ?? profileConfig.Description
-                    };
-                }
-                else
-                {
-                    merged[profileName] = profileConfig;
-                }
-            }
-        }
+        // One server per root: before the default, so a server all of whose roots are held elsewhere has what a server with no roots has
+        HoldRoots(merged);
 
         // If still empty after discovery, create a default
         if (merged.Count == 0)
@@ -278,88 +357,209 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
         var projectFiles = new ProjectFiles.ProjectManager(compositeRoots);
 
-        _logger.LogInformation("Profile snapshot: {ProfileCount} profiles, {RootCount} total roots: {Roots}",
-            merged.Count,
-            rootLookup.Count,
-            string.Join(", ", rootLookup.Select(kvp => $"{kvp.Key.Item1}/{kvp.Key.Item2}={kvp.Value}")));
+        // Said when it changed, not on every rebuild: the poll rebuilds every few seconds
+        var described = string.Join(", ", rootLookup.Select(kvp => $"{kvp.Key.Item1}/{kvp.Key.Item2}={kvp.Value}"));
+        if (described != _snapshotDescribed)
+        {
+            _snapshotDescribed = described;
+            _logger.LogInformation("Profile snapshot: {ProfileCount} profiles, {RootCount} total roots: {Roots}",
+                merged.Count, rootLookup.Count, described);
+        }
 
-        return new ProfileSnapshot(merged, rootLookup, pathToProfileRoot, projectFiles);
+        return new ProfileSnapshot(merged, rootLookup, pathToProfileRoot, projectFiles, configs);
     }
 
     /// <summary>
-    /// Rebuilds the profile snapshot atomically.
-    /// Uses a lock to prevent concurrent rebuilds from wasting work.
+    /// One server per root: removes from <paramref name="profiles"/> every root another live server
+    /// holds, and takes the lock on each one that is free. A root held elsewhere is logged once, with
+    /// its holder where that can be read, and tried again on every rebuild; a root this server holds
+    /// stays held across rebuilds, and is let go once it is no longer found and no project of this
+    /// server's is in it (one being created included) until the server stops. A root whose folder does
+    /// not exist holds nothing yet, and is kept. A profile left with no root by this is not listed either.
     /// </summary>
-    private void RebuildSnapshot()
+    private void HoldRoots(Dictionary<string, ProfileConfig> profiles)
+    {
+        var found = new HashSet<string>(PathComparer);
+        foreach (var (profileName, config) in profiles.ToArray())
+        {
+            var hadRoots = config.Roots.Count > 0;
+            foreach (var (rootName, rootPath) in config.Roots.ToArray())
+            {
+                var path = FullPath(rootPath);
+                if (!Directory.Exists(path)) continue;
+                found.Add(path);
+                if (_heldRoots.ContainsKey(path)) continue;
+                if (!_rootsReleased && TryHoldRoot(path) is { } held)
+                {
+                    _heldRoots[path] = held;
+                    if (_skippedRoots.Remove(path))
+                        _logger.LogInformation("Root {Profile}/{Root} at {Path} is free again: this server ({Instance}) now holds it",
+                            profileName, rootName, path, _instance);
+                    continue;
+                }
+
+                config.Roots.Remove(rootName);
+                if (!_rootsReleased && _skippedRoots.Add(path))
+                {
+                    var holder = RootLock.ReadHolder(path);
+                    _logger.LogWarning("Root {Profile}/{Root} at {Path} is held by another server ({Holder}): skipped until it is let go",
+                        profileName, rootName, path, holder is null ? "unknown" : $"instance {holder.Instance}, process {holder.ProcessId}");
+                }
+            }
+            if (hadRoots && config.Roots.Count == 0) profiles.Remove(profileName);
+        }
+
+        // Not found by one rebuild is not gone: a config.json saved mid-edit, or a folder that blinks.
+        // A root with a project of this server's in it stays held, so no other server takes its sessions
+        foreach (var gone in _heldRoots.Keys.Where(path => !found.Contains(path) && !HasProjectIn(path)).ToArray())
+        {
+            _heldRoots.Remove(gone, out var held);
+            held!.Dispose();
+        }
+        _skippedRoots.IntersectWith(found);
+    }
+
+    /// <summary>Whether a project this server tracks, or one it is creating, is in the root at <paramref name="rootPath"/>.</summary>
+    private bool HasProjectIn(string rootPath) =>
+        _projects.Values.Select(project => project.ProjectPath).Concat(CreatingPaths())
+            .Any(path => WhyNotAProjectFolderOf(rootPath, path) is null);
+
+    /// <summary>The folders creates in progress have claimed, copied under their lock.</summary>
+    private string[] CreatingPaths()
+    {
+        lock (_creatingPathsLock) return [.. _creatingPaths.Keys];
+    }
+
+    /// <summary>The lock on the root at <paramref name="path"/>, or null when another server holds it or it cannot be taken.</summary>
+    private RootLock? TryHoldRoot(string path)
+    {
+        try
+        {
+            return RootLock.TryAcquire(path, _instance);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not take the lock on root {Path}", path);
+            return null;
+        }
+    }
+
+    /// <summary>Lets every root go, once the server has stopped its projects: another server may take them from here.</summary>
+    private void ReleaseRoots()
     {
         lock (_profileLock)
         {
-            _snapshot = BuildSnapshot();
+            _rootsReleased = true;
+            foreach (var held in _heldRoots.Values) held.Dispose();
+            _heldRoots.Clear();
         }
     }
 
-    /// <summary>
-    /// Scans a directory for subdirectories containing .godmode-root/ and builds profiles from them.
-    /// Roots with the same profileName in config.json are grouped into one profile.
-    /// Roots without profileName become their own single-root profile (named after the directory).
-    /// </summary>
-    private Dictionary<string, ProfileConfig> DiscoverProfiles(string rootsDir)
+    /// <summary>Rebuilds the profile snapshot, and returns it.</summary>
+    private ProfileSnapshot RebuildSnapshot()
     {
-        var fullPath = Path.GetFullPath(rootsDir);
-        if (!Directory.Exists(fullPath))
+        lock (_profileLock) return _snapshot = BuildSnapshot();
+    }
+
+    /// <summary>A root as its source found it, with the profile it goes in and the config that read gave.</summary>
+    private sealed record FoundRoot(string Name, string Path, string Profile, RootConfig Config, string Source);
+
+    /// <summary>
+    /// The roots <paramref name="sources"/> name: the explicit ones, then each scan folder's, in ordinal
+    /// order of their keys. One name, one root per server, and one folder, one root: an explicit root
+    /// wins a clash, and between scan folders the first key does. Each loser is logged once, with both
+    /// paths, while the clash lasts. A root's profile is its config.json's <c>profileName</c>, else its
+    /// explicit entry's <c>Profile</c>, else <c>Default</c>.
+    /// </summary>
+    private List<FoundRoot> FindRoots(RootSources sources)
+    {
+        var roots = new List<FoundRoot>();
+        var byName = new Dictionary<string, FoundRoot>(StringComparer.OrdinalIgnoreCase);
+        var byPath = new Dictionary<string, FoundRoot>(PathComparer);
+        var clashes = new HashSet<string>(PathComparer);
+        var holdingTheKey = new HashSet<string>(PathComparer);
+
+        // Where sessions work, the key file never is: a source added since the start that holds it is left out
+        bool HoldsTheKeyFile(string folder, string setting)
         {
-            _logger.LogDebug("ProjectRootsDir {RootsDir} does not exist, skipping autodiscovery", fullPath);
-            return new Dictionary<string, ProfileConfig>();
+            if (_keyFilePath is null || !ApiKeyFile.IsUnder(folder, _keyFilePath)) return false;
+            holdingTheKey.Add(folder);
+            if (_loggedKeyFileFolders.Add(folder))
+                _logger.LogWarning("{Setting} ({Folder}) is left out: the server's API key file, {KeyFile}, is in its tree, where sessions would work. " +
+                    "Name a folder without it, or move the key file (Authentication:ApiKeyFile)", setting, folder, _keyFilePath);
+            return true;
         }
 
-        var profiles = new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var subDir in Directory.GetDirectories(fullPath))
+        void Add(string name, string path, string? entryProfile, string source)
         {
-            var godModeRootDir = Path.Combine(subDir, ProjectFiles.ProjectFolder.RootConfigFolderName);
-            if (!Directory.Exists(godModeRootDir))
-                continue;
-
-            var dirName = Path.GetFileName(subDir);
+            // The same folder found again under the same name (an explicit root in a scan folder) is that root
+            if (byPath.TryGetValue(path, out var samePath) && string.Equals(samePath.Name, name, StringComparison.OrdinalIgnoreCase))
+                return;
+            if ((byName.TryGetValue(name, out var winner) ? winner : byPath.GetValueOrDefault(path)) is { } taken)
+            {
+                clashes.Add(path);
+                if (_loggedClashes.Add(path))
+                    _logger.LogWarning("Root {Name} at {Path} ({Source}) is skipped: it clashes with the root {Winner} at {WinnerPath} ({WinnerSource}), " +
+                        "which wins. A server has one root per name and per folder",
+                        name, path, source, taken.Name, taken.Path, taken.Source);
+                return;
+            }
             try
             {
-                var config = _rootConfigReader.ReadConfig(subDir);
-                var profileName = config.ProfileName ?? "Default";
-
-                if (!profiles.TryGetValue(profileName, out var existingProfile))
-                {
-                    existingProfile = new ProfileConfig
-                    {
-                        Roots = new Dictionary<string, string>(),
-                        Description = config.Description
-                    };
-                    profiles[profileName] = existingProfile;
-                }
-
-                existingProfile.Roots[dirName] = subDir;
-                _logger.LogDebug("Discovered root '{RootName}' → profile '{ProfileName}' at {Path}", dirName, profileName, subDir);
+                var config = _rootConfigReader.ReadConfig(path);
+                var root = new FoundRoot(name, path, config.ProfileName ?? entryProfile ?? "Default", config, source);
+                roots.Add(root);
+                byName[name] = root;
+                byPath[path] = root;
+                _logger.LogDebug("Found root '{RootName}' → profile '{ProfileName}' at {Path} ({Source})", name, root.Profile, path, source);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to read config for discovered root at {Path}, skipping", subDir);
+                _logger.LogWarning(ex, "Failed to read config for root at {Path}, skipping", path);
             }
         }
 
-        return profiles;
+        foreach (var root in sources.ExplicitRoots)
+        {
+            var setting = $"{RootSources.ExplicitSection}:{root.Name}";
+            if (HoldsTheKeyFile(root.Path, $"{setting}:Path")) continue;
+            if (Directory.Exists(root.Path))
+                Add(root.Name, root.Path, root.Profile, setting);
+            else if (_loggedMissingRoots.Add(root.Path))
+                _logger.LogWarning("Root {Name} at {Path} ({Setting}:Path) does not exist: skipped until it does", root.Name, root.Path, setting);
+        }
+        foreach (var scan in sources.ScanFolders)
+        {
+            var setting = $"{RootSources.ScanSection}:{scan.Key}";
+            if (HoldsTheKeyFile(scan.Folder, setting)) continue;
+            if (!Directory.Exists(scan.Folder))
+            {
+                _logger.LogDebug("Scan folder {Folder} ({Setting}) does not exist, skipping it", scan.Folder, setting);
+                continue;
+            }
+            foreach (var subDir in Directory.GetDirectories(scan.Folder).Order(StringComparer.Ordinal))
+                if (Directory.Exists(Path.Combine(subDir, ProjectFiles.ProjectFolder.RootConfigFolderName)))
+                    Add(Path.GetFileName(subDir), FullPath(subDir), null, setting);
+        }
+
+        _loggedClashes.IntersectWith(clashes);
+        _loggedKeyFileFolders.IntersectWith(holdingTheKey);
+        _loggedMissingRoots.IntersectWith(sources.ExplicitRoots.Select(root => root.Path).Where(path => !Directory.Exists(path)));
+        return roots;
     }
 
     private static (Dictionary<(string, string), string>, Dictionary<string, (string, string)>) BuildRootLookups(
         Dictionary<string, ProfileConfig> profiles)
     {
         var rootLookup = new Dictionary<(string, string), string>(TupleComparer.Instance);
-        var pathLookup = new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
+        var pathLookup = new Dictionary<string, (string, string)>(PathComparer);
 
         foreach (var (profileName, config) in profiles)
         {
             foreach (var (rootName, rootPath) in config.Roots)
             {
                 rootLookup[(profileName, rootName)] = rootPath;
-                pathLookup[Path.GetFullPath(rootPath)] = (profileName, rootName);
+                pathLookup[FullPath(rootPath)] = (profileName, rootName);
             }
         }
 
@@ -384,11 +584,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private static string CompositeKey(string profile, string root) => $"{profile}/{root}";
 
     /// <summary>
-    /// A project's ID: <c>{profile}/{root}/{folder}</c>, where it lives, so a folder name used in two
-    /// roots is two projects. Clients treat it as opaque; it is never parsed. It is derived again
-    /// from the folder's location on every recovery, not trusted from status.json.
+    /// A session's opaque ID: <c>{profile}/{root}/{id}</c>, its id being unique within its root, so one
+    /// id in two roots is two sessions. Clients treat it as opaque; it is never parsed. It is derived again
+    /// from where its state folder is on every recovery, not trusted from status.json.
     /// </summary>
-    private static string ProjectId(string profile, string root, string folder) => $"{CompositeKey(profile, root)}/{folder}";
+    private static string ProjectId(string profile, string root, string sessionId) => $"{CompositeKey(profile, root)}/{sessionId}";
 
     /// <summary>Every root with its profile and root names as configured, and its full path.</summary>
     private static IEnumerable<(string Profile, string Root, string Path)> AllRoots(ProfileSnapshot snap) =>
@@ -438,40 +638,30 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return resolved;
     }
 
-    public Task<ProfileInfo[]> ListProfilesAsync()
+    // Each reads the roots again, to pick up roots added on the host or in config, as a poll does
+    public async Task<ProfileInfo[]> ListProfilesAsync() => (await RefreshRootsAsync()).Profiles;
+
+    public async Task<ProjectRootInfo[]> ListProjectRootsAsync() => (await RefreshRootsAsync()).Roots;
+
+    /// <summary>
+    /// The roots and profiles of <paramref name="snap"/> as the hub lists them, each root with its
+    /// actions as the snapshot's rebuild read them: a second read here could find an edit the first did
+    /// not, and give a root that does not match its profile, pushed again once the next rebuild agrees.
+    /// </summary>
+    private RootsView BuildRootsView(ProfileSnapshot snap)
     {
-        // Rebuild to pick up newly added autodiscovered roots
-        if (_projectRootsDir != null)
-            RebuildSnapshot();
-
-        var snap = _snapshot;
-        var profiles = snap.Profiles.Select(kvp =>
-            new ProfileInfo(kvp.Key, kvp.Value.Description)
-        ).ToArray();
-
-        return Task.FromResult(profiles);
-    }
-
-    public Task<ProjectRootInfo[]> ListProjectRootsAsync()
-    {
-        // Rebuild to pick up newly added autodiscovered roots
-        if (_projectRootsDir != null)
-            RebuildSnapshot();
-
-        var snap = _snapshot;
-        var roots = snap.RootLookup.Select(kvp =>
+        var profiles = snap.Profiles.Select(kvp => new ProfileInfo(kvp.Key, kvp.Value.Description)).ToArray();
+        var roots = AllRoots(snap).Select(root =>
         {
-            var (profileName, rootName) = kvp.Key;
-            var rootPath = kvp.Value;
-            var resolvedPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, rootName));
-            var config = _rootConfigReader.ReadConfig(resolvedPath);
+            // The default root, there when no source names one, was found by no read
+            var config = snap.RootConfigs.GetValueOrDefault(FullPath(root.Path)) ?? _rootConfigReader.ReadConfig(root.Path);
             var actions = config.GetEffectiveActions()
-                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Model, a.AllowSkipPermissions))
+                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Session ? a.Model : null,
+                    a.Session && a.AllowSkipPermissions, a.Session, a.Session && a.Transient))
                 .ToArray();
-            return new ProjectRootInfo(rootName, config.Description, actions, ProfileName: profileName);
+            return new ProjectRootInfo(root.Root, config.Description, actions, ProfileName: root.Profile);
         }).ToArray();
-
-        return Task.FromResult(roots);
+        return new RootsView(roots, profiles, JsonSerializer.Serialize(new { roots, profiles }, JsonDefaults.Options));
     }
 
     public async Task<ProjectSummary[]> ListProjectsAsync()
@@ -491,7 +681,10 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 ProfileName: project.ProfileName ?? s.ProfileName,
                 PendingPermission: s.PendingPermission,
                 PendingQuestion: s.PendingQuestion,
-                PullRequest: s.PullRequest
+                PullRequest: s.PullRequest,
+                Kind: s.Kind,
+                ActionName: s.ActionName,
+                SharedFolder: s.SharedFolder
             ));
         }
 
@@ -511,14 +704,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return project.Status;
     }
 
-    public async Task<ProjectStatus> CreateProjectAsync(CreateProjectRequest request)
+    public async Task<CreateProjectResult> CreateProjectAsync(CreateProjectRequest request)
     {
         // A create that fails leaves an Error project behind, which needs the user
         try { return await CreateProjectCoreAsync(request); }
         finally { await PushAttentionIfChangedAsync(); }
     }
 
-    private async Task<ProjectStatus> CreateProjectCoreAsync(CreateProjectRequest request)
+    private async Task<CreateProjectResult> CreateProjectCoreAsync(CreateProjectRequest request)
     {
         _logger.LogInformation("Creating project in profile '{Profile}' root '{Root}' action '{Action}' with inputs: {InputKeys}",
             request.ProfileName, request.ProjectRootName, request.ActionName ?? "(default)", string.Join(", ", request.Inputs.Keys));
@@ -542,6 +735,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
         var action = config.ResolveAction(request.ActionName)
             ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
+
+        if (!action.Session)
+            return await RunSessionlessActionAsync(request, snap, rootPath, config, action);
 
         // Skipping permissions is the root's to allow: a create cannot ask for what its root forbids
         var skipPermissions = GetBool(request.Inputs, "skipPermissions");
@@ -568,7 +764,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                             reuse.ValueKind == System.Text.Json.JsonValueKind.True;
         var autoSuffix = request.Inputs.TryGetValue("__autoSuffix", out var suffix) &&
                          suffix.ValueKind == System.Text.Json.JsonValueKind.True;
-        var suffixed = !action.ScriptsCreateFolder && !reuseExisting && autoSuffix && Directory.Exists(Path.Combine(rootPath, folder));
+        // A shared folder is used as it is: that is what sharing it means
+        var suffixed = !action.ScriptsCreateFolder && !action.SharedFolder && !reuseExisting && autoSuffix && Directory.Exists(Path.Combine(rootPath, folder));
         if (suffixed)
         {
             // Auto-suffix: find next available _N
@@ -588,24 +785,34 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var projectPath = Path.Combine(rootPath, folder);
 
         var (profileName, rootName) = ConfiguredNames(snap, request.ProfileName, request.ProjectRootName);
-        var projectId = ProjectId(profileName, rootName, folder);
 
-        // One project per ID and per folder: a tracked project's claude would be orphaned, and its
-        // files overwritten. Claimed before a folder is reused or any script runs, until registered
-        using var claims = new CreateClaims(this);
+        // The session's id, yymmdd-{kind}-{slug}-{suffix}, unique within its root. Until the create
+        // script has run its kind is the action's name, and its slug the name so far: the script's
+        // result may name another of either, and the date and suffix stay
+        var createdOn = DateTime.Now;
+        var kind = ProjectFiles.SessionState.Kind(action.Name);
+        var sessionId = FreeSessionId(snap, compositeKey, profileName, rootName,
+            suffix => ProjectFiles.SessionState.Id(createdOn, kind, name, suffix));
+        var projectId = ProjectId(profileName, rootName, sessionId);
+
+        // One project per ID, and per folder unless its action shares folders: a tracked project's
+        // claude would be orphaned, and its files overwritten, and a delete of either would remove
+        // the other's. Claimed before a folder is reused or any script runs, until registered
+        using var claims = new CreateClaims(this, action.SharedFolder);
         claims.Claim(projectId, projectPath);
 
-        // Unless the scripts create the project directory (e.g. git worktree add)
+        // Unless the scripts create the project directory (e.g. git worktree add). Its session's
+        // state is made once the scripts have run, when its id is final
+        // A shared folder is made if missing and used if there, so two creates making it at once both have it
+        var madeSharedFolder = false;
         if (!action.ScriptsCreateFolder)
         {
             if (reuseExisting)
-                // Reuse existing folder — reinitialize .godmode state
-                ProjectFiles.ProjectFolder.Reuse(rootPath, folder, name);
-            else if (suffixed)
-                ProjectFiles.ProjectFolder.Create(rootPath, folder, name);
+                ProjectFiles.ProjectFolder.Reuse(rootPath, folder);
+            else if (action.SharedFolder)
+                madeSharedFolder = ProjectFiles.ProjectFolder.CreateShared(rootPath, folder).Made;
             else
-                // Server creates the project folder via ProjectFiles
-                snap.ProjectFiles.CreateProject(compositeKey, name);
+                ProjectFiles.ProjectFolder.Create(rootPath, folder);
         }
 
         var now = DateTime.UtcNow;
@@ -623,15 +830,23 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 Tests: null,
                 OutputOffset: 0,
                 RootName: rootName,
-                ProfileName: profileName
+                ProfileName: profileName,
+                Kind: kind,
+                ActionName: action.Name,
+                SharedFolder: action.SharedFolder
             ),
             ProjectPath = projectPath,
+            RootPath = FullPath(rootPath),
+            SessionId = sessionId,
             ActionName = action.Name,
             ProfileName = profileName,
+            SharedFolder = action.SharedFolder,
+            MadeSharedFolder = madeSharedFolder,
         };
 
-        // Result file — scripts can write key=value pairs to override project path/name
-        var resultFilePath = GetResultFilePath(rootPath, folder);
+        // Result file — scripts can write key=value pairs to override project path/name. It and the
+        // script log are the session's, by its id: sessions that share a folder have one each
+        var resultFilePath = GetResultFilePath(rootPath, sessionId);
         if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
 
         // Build environment variables for scripts (profile env merged in)
@@ -639,7 +854,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             request.ProfileName, config.StripEnvVarProfile);
 
         // Script log file — at root level so it persists regardless of what scripts do
-        var logFilePath = GetScriptLogPath(rootPath, folder);
+        var logFilePath = GetScriptLogPath(rootPath, sessionId);
 
         // Run prepare scripts (always runs in root directory)
         if (action.Prepare is { Length: > 0 })
@@ -685,7 +900,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             }
         }
 
-        // Apply script result overrides (project_path, project_name)
+        // Apply script result overrides (project_path, project_name, kind)
         var scriptResults = ReadResultFile(resultFilePath);
         if (scriptResults.TryGetValue("project_path", out var overridePath) && !string.IsNullOrWhiteSpace(overridePath))
         {
@@ -693,7 +908,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             {
                 (projectPath, folder) = ValidateScriptProjectPath(overridePath, rootPath);
                 // Nor may a script's folder be a tracked project's
-                claims.Claim(ProjectId(profileName, rootName, folder), projectPath);
+                claims.Claim(projectId, projectPath);
             }
             catch (Exception ex) when (ex is ArgumentException or ProjectInUseException)
             {
@@ -702,14 +917,45 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 RegisterFailedCreate(project, ex.Message);
                 throw;
             }
-            projectId = ProjectId(profileName, rootName, folder);
             project.ProjectPath = projectPath;
-            _logger.LogInformation("Script overrode project path to {ProjectPath} (id: {ProjectId})", projectPath, projectId);
+            _logger.LogInformation("Script overrode project path to {ProjectPath}", projectPath);
         }
         if (scriptResults.TryGetValue("project_name", out var overrideName) && !string.IsNullOrWhiteSpace(overrideName))
         {
             name = overrideName;
             _logger.LogInformation("Script overrode project name to '{ProjectName}'", name);
+        }
+        if (scriptResults.TryGetValue("kind", out var scriptKind) && !string.IsNullOrWhiteSpace(scriptKind))
+        {
+            kind = ProjectFiles.SessionState.Kind(scriptKind);
+            _logger.LogInformation("Script named the session's kind '{Kind}'", kind);
+        }
+
+        // The id as the script's result leaves it: its kind and name, with the date and suffix it had
+        var finalId = ProjectFiles.SessionState.Id(createdOn, kind, name, sessionId[^ProjectFiles.SessionState.SuffixLength..]);
+        if (finalId != sessionId)
+        {
+            try
+            {
+                finalId = FreeSessionId(snap, compositeKey, profileName, rootName,
+                    suffix => ProjectFiles.SessionState.Id(createdOn, kind, name, suffix), finalId);
+                claims.Claim(ProjectId(profileName, rootName, finalId), projectPath);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ProjectInUseException)
+            {
+                _logger.LogError("Project {ProjectId} could not have the id {SessionId}: {Message}", projectId, finalId, ex.Message);
+                RegisterFailedCreate(project, ex.Message);
+                throw;
+            }
+            // The log and result file follow the id, so they are found by the id the session keeps.
+            // Replacing is safe: the final id is free (FreeSessionId) and claimed above, so no other
+            // create or session has files under it
+            MoveScriptFile(logFilePath, GetScriptLogPath(rootPath, finalId), projectId);
+            MoveScriptFile(resultFilePath, GetResultFilePath(rootPath, finalId), projectId);
+            sessionId = finalId;
+            projectId = ProjectId(profileName, rootName, sessionId);
+            project.SessionId = sessionId;
+            _logger.LogInformation("The session's id is {ProjectId}", projectId);
         }
         if (scriptResults.TryGetValue("project_prompt", out var overridePrompt) && !string.IsNullOrWhiteSpace(overridePrompt))
         {
@@ -720,18 +966,19 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Persisted in status.json so resumes keep using the same model even if the
         // root config changes or the machine-wide Claude default differs.
         var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
-        project.Status = project.Status with { Id = projectId, Name = name, Model = model };
+        project.Status = project.Status with { Id = projectId, Name = name, Model = model, Kind = kind };
 
-        // Ensure .godmode directory exists (scripts may have created the project dir without it)
-        EnsureGodModeDirectory(projectPath);
+        // The session's state folder, now its id is final (scripts may have created the project dir without .godmode)
+        CreateSessionState(project);
 
         // Save project settings (persists across restarts, includes action name for delete/resume).
         // The permission mode is kept with the project, as its model is, so its resumes keep it
         var settings = new ProjectFiles.ProjectSettings(
             DangerouslySkipPermissions: skipPermissions,
             ActionName: action.Name,
-            PermissionMode: action.PermissionMode);
-        settings.Save(projectPath);
+            PermissionMode: action.PermissionMode,
+            SharedFolder: action.SharedFolder);
+        settings.Save(project.StatePath);
 
         // Save initial status
         await _statusUpdater.SaveStatusAsync(project);
@@ -764,7 +1011,73 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             resumeLock.Release();
         }
 
-        return project.Status;
+        return new CreateProjectResult(project.Status);
+    }
+
+    /// <summary>The longest message a run returns, as long as an attention item's text; a longer one is cut.</summary>
+    internal const int MaxRunMessageLength = Attention.MaxTextLength;
+
+    /// <summary>
+    /// An action that starts no session (<c>"session": false</c>): its prepare and create scripts run in
+    /// the root, with the root's environment and inputs as a create's do, and that is all. No folder is
+    /// made, nothing is tracked, no claude starts, and of the result file only <c>message</c> is read:
+    /// there is no project for a <c>project_path</c>, name, kind or prompt to be. The run has an id as a
+    /// session would, for its log and result file (<c>{root}/logs/{id}.log</c>) and its progress, which
+    /// names no project. A script that fails fails the create, and leaves no Error project. The roots are
+    /// read again once it has run, so a root it made reaches every client (RootsChanged) at once.
+    /// </summary>
+    private async Task<CreateProjectResult> RunSessionlessActionAsync(CreateProjectRequest request, ProfileSnapshot snap,
+        string rootPath, RootConfig config, CreateAction action)
+    {
+        var compositeKey = CompositeKey(request.ProfileName, request.ProjectRootName);
+        var (profileName, rootName) = ConfiguredNames(snap, request.ProfileName, request.ProjectRootName);
+        var name = ResolveProjectName(action, request.Inputs);
+        var kind = ProjectFiles.SessionState.Kind(action.Name);
+        var createdOn = DateTime.Now;
+        var runId = FreeSessionId(snap, compositeKey, profileName, rootName,
+            suffix => ProjectFiles.SessionState.Id(createdOn, kind, string.IsNullOrWhiteSpace(name) ? action.Name : name, suffix));
+        var progressId = ProjectId(profileName, rootName, runId);
+        // Its id alone, so no other run or create takes it for its log; no folder is claimed, since none is made
+        if (!_creatingIds.TryAdd(progressId, 0))
+            throw new ProjectInUseException(progressId, "another create is making it");
+        try
+        {
+            _logger.LogInformation("Running action '{Action}' of root '{Root}', which starts no session, as {RunId}", action.Name, rootName, progressId);
+            snap.Profiles.TryGetValue(request.ProfileName, out var profileConfig);
+            var resultFilePath = GetResultFilePath(rootPath, runId);
+            if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
+            var scriptEnv = BuildScriptEnvironment(rootPath, null, action, request.Inputs, profileConfig?.Environment, resultFilePath,
+                request.ProfileName, config.StripEnvVarProfile);
+            var logFilePath = GetScriptLogPath(rootPath, runId);
+
+            foreach (var (scripts, what) in new[] { (action.Prepare, "Prepare"), (action.Create, "Create") })
+            {
+                if (scripts is not { Length: > 0 }) continue;
+                try
+                {
+                    await _scriptRunner.RunAsync(scripts, rootPath, rootPath, scriptEnv,
+                        msg => _hubContext.Clients.All.CreationProgress(progressId, msg), logFilePath);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "{What} script failed for {RunId}, which starts no session. See log: {LogPath}", what, progressId, logFilePath);
+                    throw;
+                }
+            }
+
+            // The script's output is untrusted: its message is cut to a length the app shows, and not logged
+            var message = ReadResultFile(resultFilePath).GetValueOrDefault("message") is { Length: > 0 } said
+                ? said.Length <= MaxRunMessageLength ? said : TextCut.Cut(said, MaxRunMessageLength - 1) + "…"
+                : null;
+            _logger.LogInformation("Action '{Action}' of root '{Root}' ran ({RunId}), {Said}", action.Name, rootName, progressId,
+                message == null ? "with no message" : $"with a message of {message.Length} characters");
+            await RefreshRootsAsync();
+            return new CreateProjectResult(null, message);
+        }
+        finally
+        {
+            _creatingIds.TryRemove(progressId, out _);
+        }
     }
 
     /// <summary>
@@ -778,9 +1091,13 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             _logger.LogWarning("Project {ProjectId} failed to create, and another has its ID", project.Status.Id);
     }
 
-    /// <summary>The IDs and folders (full paths) that creates in progress have claimed: see <see cref="CreateClaims"/>.</summary>
+    /// <summary>
+    /// The IDs and folders (full paths) that creates in progress have claimed: see <see cref="CreateClaims"/>.
+    /// A folder's claim says whether it is shared, and how many creates share it; it is changed under <see cref="_creatingPathsLock"/>.
+    /// </summary>
     private readonly ConcurrentDictionary<string, byte> _creatingIds = new();
-    private readonly ConcurrentDictionary<string, byte> _creatingPaths = new(PathComparer);
+    private readonly Dictionary<string, (bool Shared, int Creates)> _creatingPaths = new(PathComparer);
+    private readonly Lock _creatingPathsLock = new();
 
     /// <summary>Paths compared as the OS compares them: on Windows, <c>Fix</c> is the folder <c>fix</c>.</summary>
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -790,16 +1107,19 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>
     /// What one create has claimed, so no two creates make one project and none makes a tracked one:
     /// from before anything is written until the project is registered or the create has failed.
-    /// Disposing it gives the claims up.
+    /// The ID is always the create's alone. The folder is too, unless the create's action shares
+    /// folders (<paramref name="shared"/>): then other creates and sessions may have it, as long as
+    /// they all share it. Disposing it gives the claims up.
     /// </summary>
-    private sealed class CreateClaims(ProjectManager manager) : IDisposable
+    private sealed class CreateClaims(ProjectManager manager, bool shared) : IDisposable
     {
         private readonly List<string> _ids = [];
         private readonly List<string> _paths = [];
 
         /// <summary>
         /// Claims the ID and folder, or throws <see cref="ProjectInUseException"/> when a tracked
-        /// project has either, or another create has claimed it.
+        /// project has the ID, or another create has claimed it, or the folder is in use
+        /// (<see cref="WhyFolderIsInUse"/>).
         /// </summary>
         public void Claim(string projectId, string projectPath)
         {
@@ -812,23 +1132,58 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             }
             if (!_paths.Contains(path, PathComparer))
             {
-                if (!manager._creatingPaths.TryAdd(path, 0))
-                    throw new ProjectInUseException(projectId, $"another create is making {path}");
+                lock (manager._creatingPathsLock)
+                {
+                    var claimed = manager._creatingPaths.TryGetValue(path, out var claim);
+                    if (claimed && !(shared && claim.Shared))
+                        throw new ProjectInUseException(projectId, $"another create is making {path}");
+                    manager._creatingPaths[path] = (shared, claimed ? claim.Creates + 1 : 1);
+                }
                 _paths.Add(path);
             }
             if (manager._projects.ContainsKey(projectId))
                 throw new ProjectInUseException(projectId, "a project with this ID exists");
-            if (manager._projects.Values.FirstOrDefault(p => PathComparer.Equals(FullPath(p.ProjectPath), path)) is { } tracked)
-                throw new ProjectInUseException(projectId, $"project {tracked.Status.Id} is in {path}");
+            if (manager.WhyFolderIsInUse(path, shared) is { } reason)
+                throw new ProjectInUseException(projectId, reason);
         }
 
         public void Dispose()
         {
             foreach (var id in _ids) manager._creatingIds.TryRemove(id, out _);
-            foreach (var path in _paths) manager._creatingPaths.TryRemove(path, out _);
+            lock (manager._creatingPathsLock)
+            {
+                foreach (var path in _paths)
+                {
+                    if (manager._creatingPaths.TryGetValue(path, out var claim) && claim.Creates > 1)
+                        manager._creatingPaths[path] = claim with { Creates = claim.Creates - 1 };
+                    else
+                        manager._creatingPaths.Remove(path);
+                }
+            }
             _ids.Clear();
             _paths.Clear();
         }
+    }
+
+    /// <summary>
+    /// Why a new session cannot have the working folder <paramref name="path"/> (a full path), or null
+    /// when it can. A session that does not share its folder needs one no other session has, tracked
+    /// or only on disk in its <c>.godmode/sessions/</c>: its delete removes the folder. One that shares
+    /// it (<paramref name="shared"/>) may join sessions that share it too, and no other kind.
+    /// </summary>
+    private string? WhyFolderIsInUse(string path, bool shared)
+    {
+        var tracked = _projects.Values.Where(p => PathComparer.Equals(FullPath(p.ProjectPath), path)).ToArray();
+        if (tracked.FirstOrDefault(p => !shared || !p.SharedFolder) is { } holder)
+            return holder.SharedFolder
+                ? $"project {holder.Status.Id} is in {path}, which its sessions share, and this create's action does not share folders (sharedFolder)"
+                : $"project {holder.Status.Id} is in {path}";
+
+        // A session's state left on disk and not tracked (not recovered) is the folder's too
+        var untracked = ProjectFiles.SessionState.List(path).Where(id => !tracked.Any(p => p.SessionId == id));
+        return untracked.FirstOrDefault(id => !shared || !ProjectFiles.ProjectSettings.Load(ProjectFiles.SessionState.PathOf(path, id)).SharedFolder) is { } other
+            ? $"session {other} has its state in {path}"
+            : null;
     }
 
     public async Task SendInputAsync(string projectId, string input)
@@ -861,7 +1216,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         // One reply at a time decides whether to resume: two would launch two processes. The wait
         // for the session to start comes after the lock, so a stop is not held behind it
-        var reply = await WithResumeLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false));
+        var reply = await WithTrackedLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false));
         if (reply.SessionStart is { } sessionStart) await sessionStart;
     }
 
@@ -933,6 +1288,24 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private static Task WithResumeLockAsync(ProjectInfo project, Func<Task> action) =>
         WithResumeLockAsync(project, async () => { await action(); return true; });
 
+    /// <summary>
+    /// <see cref="WithResumeLockAsync{T}"/> for a call on a project it looked up by its ID: once the lock is held, the
+    /// project must still be the one tracked under that ID, or the call fails as for a project not found. A refresh may
+    /// have let it go while the call waited (<see cref="TryForgetAsync"/>, which takes the lock too), and a launch then
+    /// would run a claude that nothing tracks, stops at shutdown or holds its root for.
+    /// </summary>
+    private Task<T> WithTrackedLockAsync<T>(ProjectInfo project, Func<Task<T>> action) =>
+        WithResumeLockAsync(project, () => IsTracked(project)
+            ? action()
+            : throw new KeyNotFoundException($"Project {project.Status.Id} not found: it left the list while this waited"));
+
+    private Task WithTrackedLockAsync(ProjectInfo project, Func<Task> action) =>
+        WithTrackedLockAsync(project, async () => { await action(); return true; });
+
+    /// <summary>Whether <paramref name="project"/> is the one tracked under its ID.</summary>
+    private bool IsTracked(ProjectInfo project) =>
+        _projects.TryGetValue(project.Status.Id, out var tracked) && ReferenceEquals(tracked, project);
+
     /// <summary>Sends to the process just launched; 0 when it has exited already (a fresh session may take its place).</summary>
     private async Task<int> TrySendInputAsync(ProjectInfo project, string text)
     {
@@ -981,7 +1354,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         try
         {
             var snap = _snapshot;
-            var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
+            var rootPath = project.RootPath;
             var config = _rootConfigReader.ReadConfig(rootPath);
             if (config.ResolveAction(project.ActionName) is not { Status: { } status } action) return unchanged;
             script = status;
@@ -1026,9 +1399,19 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (project.Status.PullRequest is { IsOpen: true }) _pullRequests.CheckNow(project.Status.Id);
     }
 
-    public async ValueTask DisposeAsync() => await _pullRequests.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        StopWatchingRoots();
+        await _pullRequests.DisposeAsync();
+        ReleaseRoots();
+    }
 
-    public void Dispose() => _pullRequests.Dispose();
+    public void Dispose()
+    {
+        StopWatchingRoots();
+        _pullRequests.Dispose();
+        ReleaseRoots();
+    }
 
     /// <summary>
     /// Pushes the attention list to every client when it differs from the one last pushed. The list
@@ -1157,21 +1540,21 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         // Before a launch or after it, never in the middle of one
-        await WithResumeLockAsync(project, () => _lifecycle.StopAsync(project));
+        await WithTrackedLockAsync(project, () => _lifecycle.StopAsync(project));
         await NotifyStatusChanged(project);
     }
 
-    public async Task DeleteProjectAsync(string projectId, bool force = false)
+    public async Task<DeleteProjectResult> DeleteProjectAsync(string projectId, bool force = false)
     {
         if (!_projects.TryGetValue(projectId, out var project))
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        await WithResumeLockAsync(project, () => DeleteLockedAsync(project, force));
+        return await WithTrackedLockAsync(project, () => DeleteLockedAsync(project, force));
     }
 
-    private async Task DeleteLockedAsync(ProjectInfo project, bool force)
+    private async Task<DeleteProjectResult> DeleteLockedAsync(ProjectInfo project, bool force)
     {
         var projectId = project.Status.Id;
         _logger.LogInformation("Deleting project {ProjectId} ({Name}), force={Force}", projectId, project.Status.Name, force);
@@ -1189,22 +1572,27 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
         var snap = _snapshot;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
+        var othersInFolder = OthersInFolder(project);
+        var sharedFolder = project.SharedFolder || othersInFolder;
         try
         {
             if (project.Status.RootName != null && profileName != null)
             {
-                var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
+                var rootPath = project.RootPath;
                 var config = _rootConfigReader.ReadConfig(rootPath);
                 var action = config.ResolveAction(project.ActionName);
+                // An action that shares folders now shares this one too, whatever the session was created as
+                sharedFolder |= action?.SharedFolder == true;
 
                 if (action?.Delete is { Length: > 0 })
                 {
-                    snap.Profiles.TryGetValue(profileName, out var profileCfg);
-                    var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+                    var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), ProfileEnvironment(snap, profileName),
                         profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
 
                     if (force)
                         scriptEnv["GODMODE_FORCE"] = "true";
+                    // A shared folder stays: the script leaves it, and whatever the other sessions use, alone
+                    scriptEnv[SharedFolderVariable] = sharedFolder ? "true" : "false";
 
                     await _scriptRunner.RunAsync(
                         action.Delete,
@@ -1227,12 +1615,41 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await project.Process.CloseAsync();
         await _pullRequests.ForgetAsync(projectId);
 
-        // Delete project folder — use robust deletion to handle locked/read-only files
-        // (common with .git directories on Windows after git init or process shutdown)
-        await DeleteDirectoryRobustAsync(project.ProjectPath);
+        // A session that shares its folder takes only its own state with it, into the folder's trash for
+        // an undo; a create that failed before it had its state, and made the folder, takes the folder
+        // when nobody else has come into it. Otherwise the folder is its own: use robust deletion to
+        // handle locked/read-only files (common with .git directories on Windows after git init or
+        // process shutdown)
+        var trashed = false;
+        var folderGoes = !sharedFolder
+            || (project.MadeSharedFolder && !othersInFolder && !Directory.Exists(project.StatePath) && !IsClaimedByCreate(project.ProjectPath)
+                && ProjectFiles.SessionState.ListTrashed(project.ProjectPath).Count == 0);
+        if (folderGoes)
+            await DeleteDirectoryRobustAsync(project.ProjectPath, project.RootPath);
+        else
+            trashed = await TrashSessionStateAsync(project);
 
-        _logger.LogInformation("Project {ProjectId} deleted successfully", projectId);
+        _logger.LogInformation("Project {ProjectId} deleted successfully{Kept}", projectId,
+            folderGoes ? "" : $"; its working folder {project.ProjectPath} is shared, and stays{(trashed ? ", with its state in the trash" : "")}");
         await PushAttentionIfChangedAsync();
+        return new DeleteProjectResult(trashed);
+    }
+
+    /// <summary>
+    /// A profile's environment, for the scripts of a session under it: the snapshot's, else the
+    /// configuration's. A session whose root has left the profile (moved to another, or removed) while
+    /// its claude ran is still that profile's, and the snapshot lists only profiles with roots.
+    /// </summary>
+    private Dictionary<string, string>? ProfileEnvironment(ProfileSnapshot snap, string profileName) =>
+        snap.Profiles.TryGetValue(profileName, out var profile) ? profile.Environment
+        : RootSources.From(_configuration).Profiles.TryGetValue(profileName, out var settings) && settings.Environment.Count > 0
+            ? new Dictionary<string, string>(settings.Environment)
+            : null;
+
+    /// <summary>Whether a create in progress has claimed the folder at <paramref name="path"/>.</summary>
+    private bool IsClaimedByCreate(string path)
+    {
+        lock (_creatingPathsLock) return _creatingPaths.ContainsKey(FullPath(path));
     }
 
     public async Task ResumeProjectAsync(string projectId)
@@ -1242,7 +1659,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        await WithResumeLockAsync(project, async () =>
+        await WithTrackedLockAsync(project, async () =>
         {
             // Check if process is actually still running (regardless of reported state)
             await _lifecycle.SettleAsync(project);
@@ -1295,7 +1712,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
         if (!claimed) return false;
 
-        _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}", projectId, project.SessionId);
+        _logger.LogInformation("Resuming project {ProjectId} with session {SessionId}", projectId, project.ClaudeSessionId);
         try
         {
             // Cancels the previous launch's token and gives this one its own
@@ -1401,100 +1818,487 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await Task.CompletedTask;
     }
 
+    /// <summary>What a script is told whether the session shares its working folder with, <c>true</c> or <c>false</c>.</summary>
+    public const string SharedFolderVariable = "GODMODE_SHARED_FOLDER";
+
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
     public async Task RecoverProjectsAsync()
     {
-        // Rebuild snapshot to include autodiscovered roots before recovery
-        if (_projectRootsDir != null)
-            RebuildSnapshot();
+        await _refreshLock.WaitAsync();
+        try
+        {
+            // Rebuild to pick up roots added on the host or in config
+            var snap = RebuildSnapshot();
+            // The trash a stop left, before anything can be restored from it
+            await PurgeTrashLockedAsync(snap);
+            _logger.LogInformation("Recovering projects from all project roots");
+            var roots = RootsOf(snap);
+            await RecoverRootsAsync(snap, roots);
+            foreach (var root in roots) _recoveredRoots[root.Path] = (root.Profile, root.Root);
+            _liveRoots = true;
+            await PublishRootsViewAsync(snap);
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+        await PushAttentionIfChangedAsync();
+        StartWatchingRoots();
+    }
 
-        var recoverSnap = _snapshot;
-        _logger.LogInformation("Recovering projects from all project roots");
+    /// <summary>Every root of <paramref name="snap"/>, its path full.</summary>
+    private static (string Profile, string Root, string Path)[] RootsOf(ProfileSnapshot snap) =>
+        AllRoots(snap).Select(root => (root.Profile, root.Root, FullPath(root.Path))).ToArray();
 
-        // Each root's own folders, so the root is known exactly: "root" is not a prefix match for
-        // "root2". A folder two roots share (two profiles naming one path) is recovered once
-        var seen = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        var projectPaths = AllRoots(recoverSnap)
-            .SelectMany(root => recoverSnap.ProjectFiles.ListProjectPaths(CompositeKey(root.Profile, root.Root))
-                .Select(path => (Path: path, root.Profile, root.Root)))
-            .Where(project => seen.Add(project.Path))
+    // ── Live roots: a root added, edited or removed shows up without a restart or a reconnect ──
+
+    /// <summary>
+    /// Reads the roots again and brings what follows from them up to date: the root locks
+    /// (<see cref="HoldRoots"/>), the lists clients hold (<see cref="IProjectHubClient.RootsChanged"/>,
+    /// pushed only when they changed) and, once the startup's recovery has run, the tracked sessions
+    /// (<see cref="ReconcileSessionsAsync"/>). Every list of roots or profiles, the poll
+    /// (<see cref="RootsPollSetting"/>) and a reload of the config call it, one at a time.
+    /// </summary>
+    private async Task<RootsView> RefreshRootsAsync()
+    {
+        (RootsView View, ProfileSnapshot Snap, bool SessionsChanged) refreshed;
+        await _refreshLock.WaitAsync();
+        try
+        {
+            refreshed = await RefreshLockedAsync();
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+        if (refreshed.SessionsChanged) await PushAttentionIfChangedAsync();
+        return refreshed.View;
+    }
+
+    /// <summary><see cref="RefreshRootsAsync"/>'s work, under <see cref="_refreshLock"/>: the snapshot it made, and whether sessions came or went.</summary>
+    private async Task<(RootsView View, ProfileSnapshot Snap, bool SessionsChanged)> RefreshLockedAsync()
+    {
+        var snap = RebuildSnapshot();
+        var view = await PublishRootsViewAsync(snap);
+        var sessionsChanged = _liveRoots && !_lifecycle.ShuttingDown && await ReconcileSessionsAsync(snap);
+        return (view, snap, sessionsChanged);
+    }
+
+    // ── The trash: a shared session's delete, undone until it is purged ──
+
+    public async Task<ProjectStatus> RestoreProjectAsync(string projectId)
+    {
+        ProjectInfo restored;
+        await _refreshLock.WaitAsync();
+        try
+        {
+            // The roots as they are now: a root removed or renamed since the delete is not this ID's any more
+            var (_, snap, _) = await RefreshLockedAsync();
+            restored = await RestoreLockedAsync(snap, projectId);
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+
+        var status = restored.Status;
+        await PushAsync(() => _hubContext.Clients.All.ProjectCreated(status), $"project {status.Id} restored");
+        await PushAttentionIfChangedAsync();
+        return status;
+    }
+
+    /// <summary>
+    /// Restores <paramref name="projectId"/> from the trash of its root in <paramref name="snap"/>, under
+    /// that ID: the root is the one listed under the profile and name the ID begins with, compared as
+    /// written, so a root since removed, moved to another profile or renamed is none, and the restore
+    /// fails rather than bring the session back under another ID. Its folder must take it back as a
+    /// create into it would (<see cref="CreateClaims"/>, as a shared session), and no state folder or
+    /// tracked session may have its ID. Changes nothing when it fails.
+    /// </summary>
+    private async Task<ProjectInfo> RestoreLockedAsync(ProfileSnapshot snap, string projectId)
+    {
+        if (_projects.ContainsKey(projectId))
+            throw new InvalidOperationException($"Project {projectId} is in the list: there is nothing to restore");
+
+        var root = snap.RootLookup.Keys
+            .Select(key => (Profile: key.Item1, Root: key.Item2, Prefix: CompositeKey(key.Item1, key.Item2) + "/"))
+            .Where(key => projectId.StartsWith(key.Prefix, StringComparison.Ordinal) && ProjectFiles.SessionState.IsId(projectId[key.Prefix.Length..]))
+            .Select(key => (key.Profile, key.Root, SessionId: projectId[key.Prefix.Length..]))
+            .FirstOrDefault();
+        if (root.SessionId is not { } sessionId)
+            throw new KeyNotFoundException(
+                $"Project {projectId} cannot be restored: this server lists no root under the profile and name its ID has (the root was removed, or its profile or name changed), so it would not keep its ID");
+
+        var compositeKey = CompositeKey(root.Profile, root.Root);
+        var rootPath = FullPath(snap.ProjectFiles.GetProjectRootPath(compositeKey));
+        var folders = snap.ProjectFiles.ListTrashed(compositeKey).Where(trashed => trashed.SessionId == sessionId).Select(trashed => trashed.WorkingFolder).ToArray();
+        if (folders.Length == 0)
+            throw new KeyNotFoundException($"Project {projectId} is not in the trash: it was purged, or its delete removed its working folder");
+        if (folders.Length > 1)
+            _logger.LogWarning("Session {ProjectId} is in the trash of {Folders}: the first is restored", projectId, string.Join(", ", folders));
+        var folder = folders[0];
+        if (snap.ProjectFiles.ListSessions(compositeKey).Any(session => session.SessionId == sessionId))
+            throw new InvalidOperationException($"Project {projectId} cannot be restored: a session of its id has its state in the root");
+
+        // As a create into the folder would claim it: no create in progress has the ID or owns the
+        // folder, and no session that owns the folder is in it now
+        using (var claims = new CreateClaims(this, shared: true))
+        {
+            claims.Claim(projectId, folder);
+            var statePath = ProjectFiles.SessionState.Restore(folder, sessionId);
+            // It was deleted as a session that shares its folder, and stays one: a later delete leaves the folder
+            if (ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings) && !settings.SharedFolder)
+                (settings with { SharedFolder = true }).Save(statePath);
+        }
+
+        var project = await RecoverSessionAsync(folder, sessionId, root.Profile, root.Root, rootPath)
+            ?? throw new InvalidOperationException($"Project {projectId} is back in {folder}, but could not be recovered from its files: see the server log");
+        _logger.LogInformation("Project {ProjectId} was restored from the trash of {Folder}", projectId, folder);
+        return project;
+    }
+
+    /// <summary>
+    /// Deletes every trashed session older than <see cref="TrashRetentionSetting"/> in the working folders
+    /// of <paramref name="snap"/>'s roots, under <see cref="_refreshLock"/>, so a restore is not purged
+    /// while it moves. A folder that cannot be deleted is logged and tried again at the next purge.
+    /// </summary>
+    private async Task PurgeTrashLockedAsync(ProfileSnapshot snap)
+    {
+        var before = DateTime.UtcNow - _trashRetention;
+        foreach (var (profile, root, rootPath) in RootsOf(snap))
+        {
+            foreach (var (folder, sessionId) in snap.ProjectFiles.ListTrashed(CompositeKey(profile, root)))
+            {
+                if (ProjectFiles.SessionState.TrashedAt(folder, sessionId) > before) continue;
+                var trashed = ProjectFiles.SessionState.TrashedPathOf(folder, sessionId);
+                try
+                {
+                    await DeleteDirectoryRobustAsync(trashed, rootPath);
+                    _logger.LogInformation("Purged {ProjectId} from the trash of {Folder}", ProjectId(profile, root, sessionId), folder);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Could not purge {Path} from the trash, tried again at the next purge: {Reason}", trashed, ex.Message);
+                }
+            }
+        }
+    }
+
+    /// <summary>The purge on its schedule (<see cref="TrashPurgeSetting"/>), started after the startup's, which recovery runs.</summary>
+    private async Task PurgeTrashPeriodicallyAsync(CancellationToken stop)
+    {
+        using var timer = new PeriodicTimer(_trashPurge);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stop))
+            {
+                await _refreshLock.WaitAsync(stop);
+                try { await PurgeTrashLockedAsync(_snapshot); }
+                catch (Exception ex) { _logger.LogError(ex, "Could not purge the trash"); }
+                finally { _refreshLock.Release(); }
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    /// <summary>The lists of <paramref name="snap"/>, pushed to every client when they differ from the last ones made (the first ones are listed, not pushed).</summary>
+    private async Task<RootsView> PublishRootsViewAsync(ProfileSnapshot snap)
+    {
+        var view = BuildRootsView(snap);
+        var last = _rootsView;
+        _rootsView = view;
+        if (last != null && last.Json != view.Json)
+        {
+            _logger.LogInformation("The roots changed: {Roots}", string.Join(", ", view.Roots.Select(root => $"{root.ProfileName}/{root.Name}")));
+            await PushAsync(() => _hubContext.Clients.All.RootsChanged(view.Roots, view.Profiles), "the roots");
+        }
+        return view;
+    }
+
+    /// <summary>A push of a refresh, in order with its others, and not waited for.</summary>
+    private Task PushAsync(Func<Task> push, string what) =>
+        _rootsSends.SendAsync(push, ex => _logger.LogError(ex, "Error pushing {What}", what));
+
+    /// <summary>
+    /// Brings the tracked sessions in line with the roots of <paramref name="snap"/>. A session is its
+    /// root's by folder (<see cref="ProjectInfo.RootPath"/>). When two refreshes in a row find that
+    /// folder under another profile or name (its <c>profileName</c> edited, its explicit entry renamed),
+    /// or not at all (the root removed, or beaten by a new root of its name), a session without a claude
+    /// is no longer tracked, its files left as they are, and, when its folder is still a root, it is
+    /// recovered again under the ID it has there: <c>{profile}/{root}/{id}</c> names both. One whose
+    /// claude runs or launches carries on under its ID until claude exits, and its root's config and
+    /// scripts are read from its folder all along. Then every root whose sessions were not recovered
+    /// under its profile and name (one that appeared) has them recovered, as at the start. Each session
+    /// that goes is pushed as ProjectDeleted, and each that comes as ProjectCreated. Says whether any did.
+    /// </summary>
+    private async Task<bool> ReconcileSessionsAsync(ProfileSnapshot snap)
+    {
+        var gone = new List<string>();
+        var again = new HashSet<string>(PathComparer);
+        foreach (var project in _projects.Values.ToArray())
+        {
+            var id = project.Status.Id;
+            var foundAs = snap.PathToProfileRoot.TryGetValue(project.RootPath, out var key) ? CompositeKey(key.Item1, key.Item2) : "";
+            var trackedAs = CompositeKey(project.ProfileName ?? project.Status.ProfileName ?? "", project.Status.RootName ?? "");
+            if (string.Equals(foundAs, trackedAs, StringComparison.OrdinalIgnoreCase))
+            {
+                _unbound.Remove(id);
+                continue;
+            }
+            if (!_unbound.TryGetValue(id, out var before) || !string.Equals(before, foundAs, StringComparison.OrdinalIgnoreCase))
+            {
+                _unbound[id] = foundAs;
+                _logger.LogInformation("Project {ProjectId}: its root's folder {RootPath} is {Found}. Without a claude it leaves the list once the next read of the roots agrees; with one it carries on until claude exits",
+                    id, project.RootPath, foundAs == "" ? "no root now" : $"the root {foundAs} now");
+                continue;
+            }
+            if (!await TryForgetAsync(project)) continue;
+
+            _unbound.Remove(id);
+            gone.Add(id);
+            if (foundAs == "")
+                _logger.LogInformation("Project {ProjectId} left the list: its root at {RootPath} is gone. Its files stay, and it is back if the root is", id, project.RootPath);
+            else
+            {
+                _logger.LogInformation("Project {ProjectId} is no longer tracked under that ID: its root at {RootPath} is {Root} now, and it is recovered under that", id, project.RootPath, foundAs);
+                again.Add(project.RootPath);
+            }
+        }
+        foreach (var id in _unbound.Keys.Where(id => !_projects.ContainsKey(id)).ToArray()) _unbound.Remove(id);
+
+        var roots = RootsOf(snap);
+        foreach (var path in _recoveredRoots.Keys.Where(path => !roots.Any(root => PathComparer.Equals(root.Path, path))).ToArray())
+            _recoveredRoots.Remove(path);
+        var toRecover = roots.Where(root => again.Contains(root.Path)
+            || !_recoveredRoots.TryGetValue(root.Path, out var was) || !TupleComparer.Instance.Equals(was, (root.Profile, root.Root))).ToArray();
+        var recovered = toRecover.Length == 0 ? [] : await RecoverRootsAsync(snap, toRecover);
+        foreach (var root in toRecover) _recoveredRoots[root.Path] = (root.Profile, root.Root);
+
+        foreach (var id in gone)
+            await PushAsync(() => _hubContext.Clients.All.ProjectDeleted(id), $"project {id} leaving the list");
+        foreach (var project in recovered)
+        {
+            var status = project.Status;
+            await PushAsync(() => _hubContext.Clients.All.ProjectCreated(status), $"project {status.Id} joining the list");
+        }
+        return gone.Count > 0 || recovered.Count > 0;
+    }
+
+    /// <summary>
+    /// Stops tracking a session that has no claude, running or launching, leaving its files as they
+    /// are; false when it has one, or is not tracked. Under its resume lock, so no launch starts
+    /// meanwhile; false too when another holds the lock longer than <see cref="ForgetLockWait"/> (a
+    /// delete whose script runs long), so a refresh waits that long at most on one session, not until
+    /// the script ends: the next refresh tries again.
+    /// </summary>
+    private async Task<bool> TryForgetAsync(ProjectInfo project)
+    {
+        var id = project.Status.Id;
+        var resumeLock = project.Process.ResumeLock;
+        if (!await resumeLock.WaitAsync(ForgetLockWait))
+        {
+            _logger.LogInformation("Project {ProjectId} is busy (a delete, stop or launch holds it): it leaves the list at a later read of the roots", id);
+            return false;
+        }
+        bool forgotten;
+        try
+        {
+            await _lifecycle.SettleAsync(project);
+            forgotten = !project.Process.Launching && !_lifecycle.IsRunning(project)
+                && _projects.TryRemove(new KeyValuePair<string, ProjectInfo>(id, project));
+        }
+        finally { resumeLock.Release(); }
+        if (!forgotten) return false;
+        await project.Process.CloseAsync();
+        await _pullRequests.ForgetAsync(id);
+        return true;
+    }
+
+    /// <summary>Starts the poll and the config reload's refresh, once: after the startup's recovery, so every root that appears is one to recover.</summary>
+    private void StartWatchingRoots()
+    {
+        if (Interlocked.Exchange(ref _watching, 1) == 1 || _watchStop.IsCancellationRequested) return;
+        _configReload = ChangeToken.OnChange(_configuration.GetReloadToken, () => _ = RefreshInBackgroundAsync("the config was reloaded"));
+        if (_rootsPoll > TimeSpan.Zero) _ = PollRootsAsync(_watchStop.Token);
+        if (_trashPurge > TimeSpan.Zero) _ = PurgeTrashPeriodicallyAsync(_watchStop.Token);
+        _logger.LogInformation("Roots are read again on a config reload{Poll}",
+            _rootsPoll > TimeSpan.Zero ? $" and every {_rootsPoll.TotalSeconds:0.##}s ({RootsPollSetting})" : $"; the poll is off ({RootsPollSetting} is 0)");
+        // Stopped while this started: what it started is stopped too
+        if (_watchStop.IsCancellationRequested) _configReload.Dispose();
+    }
+
+    private void StopWatchingRoots()
+    {
+        _watchStop.Cancel();
+        _configReload?.Dispose();
+    }
+
+    private async Task PollRootsAsync(CancellationToken stop)
+    {
+        using var timer = new PeriodicTimer(_rootsPoll);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stop))
+                await RefreshInBackgroundAsync("the poll");
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    /// <summary>A refresh nobody waits on: a failure is logged, and the next one tries again.</summary>
+    private async Task RefreshInBackgroundAsync(string trigger)
+    {
+        if (_watchStop.IsCancellationRequested) return;
+        try
+        {
+            await RefreshRootsAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not read the roots again ({Trigger})", trigger);
+        }
+    }
+
+    /// <summary>
+    /// Recovers the sessions of <paramref name="roots"/> from their files, leaving those tracked
+    /// already: at the start every root's, then a root's that has appeared, or whose sessions have
+    /// another ID now. Returns those recovered.
+    /// </summary>
+    private async Task<IReadOnlyList<ProjectInfo>> RecoverRootsAsync(ProfileSnapshot recoverSnap, IReadOnlyList<(string Profile, string Root, string Path)> roots)
+    {
+        // A session tracked already, under the ID it has, is left as it is: one whose claude runs on
+        // after its root moved profile, say
+        var tracked = new HashSet<string>(_projects.Values.Select(project => FullPath(project.StatePath)), PathComparer);
+
+        // Each root's own working folders, so the root is known exactly: "root" is not a prefix match
+        // for "root2". A folder two roots share (two profiles naming one path) is recovered once. The
+        // sessions are the state folders in .godmode/sessions/; a flat .godmode/status.json is none
+        var seen = new HashSet<string>(PathComparer);
+        var sessions = roots
+            .SelectMany(root => recoverSnap.ProjectFiles.ListSessions(CompositeKey(root.Profile, root.Root))
+                .Select(session => (session.WorkingFolder, session.SessionId, root.Profile, root.Root, RootPath: root.Path)))
+            .Where(session => FullPath(ProjectFiles.SessionState.PathOf(session.WorkingFolder, session.SessionId)) is var statePath
+                && seen.Add(statePath) && !tracked.Contains(statePath))
             .ToList();
 
-        // Process all projects in parallel for faster startup
-        await Parallel.ForEachAsync(projectPaths, async (found, ct) =>
+        // An id is unique within its root: one found in two working folders (a folder copied) is the
+        // first folder's, in ordinal order, and the other is left on disk, untracked
+        var unique = sessions
+            .GroupBy(session => ProjectId(session.Profile, session.Root, session.SessionId))
+            .Select(same =>
+            {
+                var ordered = same.OrderBy(session => session.WorkingFolder, StringComparer.Ordinal).ToArray();
+                foreach (var other in ordered.Skip(1))
+                    _logger.LogWarning("Session {ProjectId} is in {Folder} and in {Other}: the second is not recovered, since an id is unique within its root",
+                        same.Key, ordered[0].WorkingFolder, other.WorkingFolder);
+                return ordered[0];
+            })
+            .ToList();
+
+        // Process all sessions in parallel for faster startup
+        var recovered = new ConcurrentBag<ProjectInfo>();
+        await Parallel.ForEachAsync(unique, async (found, ct) =>
         {
-            var (projectPath, profileName, rootName) = found;
-            try
-            {
-                var godModePath = Path.Combine(projectPath, ".godmode");
-                var statusPath = Path.Combine(godModePath, "status.json");
-                if (!File.Exists(statusPath))
-                {
-                    return;
-                }
-
-                var json = await File.ReadAllTextAsync(statusPath, ct);
-                var status = JsonSerializer.Deserialize<ProjectStatus>(json, CaseInsensitiveOptions);
-
-                if (status == null) return;
-
-                // Check if state needs to be corrected (was running when server stopped)
-                var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission;
-                // A permission prompt ended with the process that asked: its call to the MCP endpoint failed with the server
-                status = status with { PendingPermission = null, PendingQuestion = null };
-                // status.json is the project folder's, which its session can write: a pull request
-                // link is kept only if it is one the status script's output could have set
-                if (status.PullRequest is { } pr && !PullRequestScript.IsValidUrl(pr.Url))
-                {
-                    _logger.LogWarning("Project at {Path} had a pull request URL that is not http(s); it is dropped", projectPath);
-                    status = status with { PullRequest = null };
-                }
-
-                // The ID is where the folder is. A status.json that says otherwise (its root moved
-                // profile, or the folder moved) is rewritten below. Nothing else in .godmode holds the ID
-                var id = ProjectId(profileName, rootName, Path.GetFileName(projectPath));
-                var idChanged = status.Id != id;
-                if (idChanged)
-                    _logger.LogInformation("Project at {Path} had ID {OldId}; it is now {ProjectId}", projectPath, status.Id, id);
-
-                // The offset is output.jsonl's, not status.json's, which is saved less often than output is written
-                var outputOffset = OutputLog.End(projectPath);
-                var correctedStatus = stateChanged
-                    ? status with { Id = id, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
-                    : status with { Id = id, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };
-
-                var project = new ProjectInfo
-                {
-                    Status = correctedStatus,
-                    ProjectPath = projectPath,
-                    ProfileName = profileName
-                };
-
-                // Load action name from settings
-                var settings = ProjectFiles.ProjectSettings.Load(projectPath);
-                project.ActionName = settings.ActionName;
-
-                project.SessionId = await SessionIdFile.ReadAsync(projectPath, _logger, ct);
-
-                _projects[project.Status.Id] = project;
-
-                // Only save if state or ID changed
-                if (stateChanged || idChanged)
-                {
-                    await _statusUpdater.SaveStatusAsync(project);
-                }
-                ResumeChecks(project);
-
-                _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Status.Id, project.Status.Name);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to recover project from {Path}", projectPath);
-            }
+            if (await RecoverSessionAsync(found.WorkingFolder, found.SessionId, found.Profile, found.Root, found.RootPath, ct) is { } project)
+                recovered.Add(project);
         });
+        return recovered.ToArray();
+    }
 
-        await PushAttentionIfChangedAsync();
+    /// <summary>
+    /// Tracks the session <paramref name="sessionId"/> of <paramref name="projectPath"/>, in the root at
+    /// <paramref name="rootPath"/>, from its files, under the ID they give it there, Stopped if it was
+    /// active: recovery's, for one session. Null when it is not recovered (no status.json, one that cannot
+    /// be read, or an ID another session has), logged.
+    /// </summary>
+    private async Task<ProjectInfo?> RecoverSessionAsync(string projectPath, string sessionId, string profileName, string rootName, string rootPath,
+        CancellationToken ct = default)
+    {
+        var statePath = ProjectFiles.SessionState.PathOf(projectPath, sessionId);
+        try
+        {
+            var statusPath = Path.Combine(statePath, ProjectFiles.SessionState.StatusFileName);
+            if (!File.Exists(statusPath))
+            {
+                return null;
+            }
+
+            var json = await File.ReadAllTextAsync(statusPath, ct);
+            var status = JsonSerializer.Deserialize<ProjectStatus>(json, CaseInsensitiveOptions);
+
+            if (status == null) return null;
+
+            // Check if state needs to be corrected (was running when server stopped)
+            var stateChanged = status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission;
+            // A permission prompt ended with the process that asked: its call to the MCP endpoint failed with the server
+            status = status with { PendingPermission = null, PendingQuestion = null };
+            // status.json is the project folder's, which its session can write: a pull request
+            // link is kept only if it is one the status script's output could have set
+            if (status.PullRequest is { } pr && !PullRequestScript.IsValidUrl(pr.Url))
+            {
+                _logger.LogWarning("Session at {Path} had a pull request URL that is not http(s); it is dropped", statePath);
+                status = status with { PullRequest = null };
+            }
+
+            // Load action name from settings. One that cannot be read may be a shared session's:
+            // it is taken as shared, so its delete removes only its state, never the folder
+            var settingsRead = ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings);
+            if (!settingsRead)
+                _logger.LogWarning("Session at {Path} has no settings.json that can be read: it is taken as sharing its folder, so a delete leaves the folder", statePath);
+
+            // The ID is where the state folder is: its root, and its id. A status.json that says
+            // otherwise (its root moved profile) is rewritten below. Nothing else in .godmode holds
+            // the ID. Its kind is a label, kept as the id has kinds: lowercase [a-z0-9-]
+            var id = ProjectId(profileName, rootName, sessionId);
+            var kind = ProjectFiles.SessionState.Kind(status.Kind ?? settings.ActionName);
+            var idChanged = status.Id != id || status.Kind != kind;
+            if (status.Id != id)
+                _logger.LogInformation("Session at {Path} had ID {OldId}; it is now {ProjectId}", statePath, status.Id, id);
+
+            // The offset is output.jsonl's, not status.json's, which is saved less often than output is written
+            var outputOffset = OutputLog.End(statePath);
+            // What the app is told of the session's settings is settings.json's, not status.json's
+            var sharedFolder = !settingsRead || settings.SharedFolder;
+            var fromSettings = status with { ActionName = settings.ActionName, SharedFolder = sharedFolder };
+            var correctedStatus = stateChanged
+                ? fromSettings with { Id = id, Kind = kind, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
+                : fromSettings with { Id = id, Kind = kind, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };
+
+            var project = new ProjectInfo
+            {
+                Status = correctedStatus,
+                ProjectPath = projectPath,
+                RootPath = rootPath,
+                SessionId = sessionId,
+                ProfileName = profileName,
+                ActionName = settings.ActionName,
+                SharedFolder = sharedFolder,
+            };
+
+            project.ClaudeSessionId = await SessionIdFile.ReadAsync(statePath, _logger, ct);
+
+            // An ID another session has (its old root's, running on under it) is that session's
+            if (!_projects.TryAdd(project.Status.Id, project))
+            {
+                _logger.LogWarning("Session at {Path} is not recovered: session {ProjectId} is tracked already, in another folder", statePath, project.Status.Id);
+                return null;
+            }
+
+            // Only save if state or ID changed
+            if (stateChanged || idChanged)
+            {
+                await _statusUpdater.SaveStatusAsync(project);
+            }
+            ResumeChecks(project);
+
+            _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Status.Id, project.Status.Name);
+            return project;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to recover project from {Path}", statePath);
+            return null;
+        }
     }
 
     public async Task ResumeInterruptedProjectsAsync()
@@ -1583,8 +2387,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (project.Status.RootName == null || profileName == null) return new CreateAction("Create");
         try
         {
-            var rootPath = _snapshot.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
-            return _rootConfigReader.ReadConfig(rootPath).ResolveAction(project.ActionName) ?? new CreateAction("Create");
+            return _rootConfigReader.ReadConfig(project.RootPath).ResolveAction(project.ActionName) ?? new CreateAction("Create");
         }
         catch (Exception ex)
         {
@@ -1597,13 +2400,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>
     /// Robustly deletes a directory, handling read-only files and retrying on lock conflicts.
     /// Git directories on Windows often have read-only or temporarily locked files.
-    /// Refused, and nothing deleted, unless the path is a project folder of a known root
-    /// (<see cref="WhyNotAProjectFolderOf"/>): a project whose folder is elsewhere is forgotten, its folder left be.
+    /// Refused, and nothing deleted, unless the path is a project folder of the project's root, the
+    /// root it was created or recovered in (<see cref="WhyNotAProjectFolderOf"/>): a project whose
+    /// folder is elsewhere is forgotten, its folder left be.
     /// </summary>
-    private async Task DeleteDirectoryRobustAsync(string path)
+    private async Task DeleteDirectoryRobustAsync(string path, string rootPath)
     {
         if (!Directory.Exists(path)) return;
-        if (!AllRoots(_snapshot).Any(root => WhyNotAProjectFolderOf(root.Path, path) is null))
+        if (WhyNotAProjectFolderOf(rootPath, path) is not null)
             throw new InvalidOperationException($"The project folder '{path}' is not inside a project root, so it is not deleted.");
 
         for (int attempt = 0; attempt < 3; attempt++)
@@ -1631,38 +2435,114 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Ensures the .godmode directory and its .gitignore exist in a project folder, and starts its
-    /// output's generation. Called after scripts run, which may have created the project dir without
-    /// .godmode, or checked out one that has a .godmode without its .gitignore.
+    /// Whether a session other than <paramref name="project"/> has its working folder: tracked, or
+    /// only its state on disk. Its delete then leaves the folder, whatever it was created as.
     /// </summary>
-    private static void EnsureGodModeDirectory(string projectPath)
+    private bool OthersInFolder(ProjectInfo project)
     {
-        ProjectFiles.ProjectFolder.EnsureGitIgnore(projectPath);
+        var path = FullPath(project.ProjectPath);
+        return _projects.Values.Any(p => p != project && PathComparer.Equals(FullPath(p.ProjectPath), path))
+            || ProjectFiles.SessionState.List(path).Any(id => id != project.SessionId);
+    }
+
+    /// <summary>
+    /// Moves a session's state, <c>.godmode/sessions/{id}/</c>, to its working folder's
+    /// <c>.godmode/trash/{id}/</c>, and nothing else of the folder: the delete of a session that shares
+    /// its folder, which <see cref="RestoreProjectAsync"/> undoes until the trash is purged
+    /// (<see cref="PurgeTrashAsync"/>). A move a file lock refuses is tried again, as a robust delete
+    /// is. False when the session had no state folder (a create that failed before it was made).
+    /// Refused, and nothing moved, unless the folder is a project folder of the session's root.
+    /// </summary>
+    private async Task<bool> TrashSessionStateAsync(ProjectInfo project)
+    {
+        if (!Directory.Exists(project.StatePath)) return false;
+        if (WhyNotAProjectFolderOf(project.RootPath, project.StatePath) is not null)
+            throw new InvalidOperationException($"The session's state '{project.StatePath}' is not inside a project root, so it is not moved.");
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return ProjectFiles.SessionState.Trash(project.ProjectPath, project.SessionId, DateTime.UtcNow);
+            }
+            catch (Exception ex) when (attempt < 2 && ex is UnauthorizedAccessException or IOException)
+            {
+                _logger.LogWarning("Moving {Path} to the trash failed (attempt {Attempt}): {Message}. Retrying...", project.StatePath, attempt + 1, ex.Message);
+                await Task.Delay(500 * (attempt + 1));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Makes the session's state folder, <c>.godmode/sessions/{id}/</c>, with the working folder's
+    /// <c>.godmode/.gitignore</c>, and starts its output's generation. Called after scripts run, which
+    /// may have created the project dir without .godmode, or checked out one that has a .godmode
+    /// without its .gitignore.
+    /// </summary>
+    private static void CreateSessionState(ProjectInfo project)
+    {
+        ProjectFiles.SessionState.Create(project.ProjectPath, project.SessionId);
 
         // A new one each time: an ID created again starts a new generation, so no client resumes into it from an old offset
-        OutputLog.StartGeneration(projectPath);
+        OutputLog.StartGeneration(project.StatePath);
+    }
+
+    /// <summary>
+    /// A session id no session of the root has: <paramref name="first"/> when it is free, else
+    /// <paramref name="idWith"/> a new random suffix, tried a few times. Taken means a tracked
+    /// session's, one a create in progress claimed, or a state folder on disk in one of the root's
+    /// working folders. Throws <see cref="InvalidOperationException"/> when none is free.
+    /// </summary>
+    private string FreeSessionId(ProfileSnapshot snap, string compositeKey, string profileName, string rootName,
+        Func<string, string> idWith, string? first = null)
+    {
+        const int attempts = 8;
+        var id = first ?? idWith(ProjectFiles.SessionState.NewSuffix());
+        for (var attempt = 1; ; attempt++)
+        {
+            var projectId = ProjectId(profileName, rootName, id);
+            if (!_projects.ContainsKey(projectId) && !_creatingIds.ContainsKey(projectId) && !snap.ProjectFiles.HasSession(compositeKey, id))
+                return id;
+            if (attempt == attempts)
+                throw new InvalidOperationException($"No free session id in root '{rootName}' after {attempts} tries (last {id}).");
+            id = idWith(ProjectFiles.SessionState.NewSuffix());
+        }
     }
 
     /// <summary>
     /// Returns a log file path at the root level for script output.
-    /// Uses {rootPath}/logs/{folder}.log so it survives create script's project dir delete.
+    /// Uses {rootPath}/logs/{id}.log, the session's id: it survives create script's project dir
+    /// delete, and sessions that share a working folder have one each.
     /// </summary>
-    private static string GetScriptLogPath(string rootPath, string folder)
+    private static string GetScriptLogPath(string rootPath, string sessionId) => ScriptFilePath(rootPath, $"{sessionId}.log");
+
+    /// <summary>
+    /// Returns a result file path for script-to-server communication, {rootPath}/logs/{id}.result.
+    /// Scripts can write key=value pairs (e.g. project_path, project_name) to override defaults.
+    /// </summary>
+    private static string GetResultFilePath(string rootPath, string sessionId) => ScriptFilePath(rootPath, $"{sessionId}.result");
+
+    private static string ScriptFilePath(string rootPath, string fileName)
     {
         var logsDir = Path.Combine(rootPath, ProjectFiles.ProjectFolder.ScriptLogsFolderName);
         Directory.CreateDirectory(logsDir);
-        return Path.Combine(logsDir, $"{folder}.log");
+        return Path.Combine(logsDir, fileName);
     }
 
     /// <summary>
-    /// Returns a result file path for script-to-server communication.
-    /// Scripts can write key=value pairs (e.g. project_path, project_name) to override defaults.
+    /// Moves a script log or result file to <paramref name="to"/>, replacing one there; nothing when there
+    /// is none. One that cannot be moved (a Windows file lock) stays where it is, logged: the scripts have
+    /// run, and a log under the first id is no reason to leave the create unregistered.
     /// </summary>
-    private static string GetResultFilePath(string rootPath, string folder)
+    private void MoveScriptFile(string from, string to, string projectId)
     {
-        var logsDir = Path.Combine(rootPath, ProjectFiles.ProjectFolder.ScriptLogsFolderName);
-        Directory.CreateDirectory(logsDir);
-        return Path.Combine(logsDir, $"{folder}.result");
+        try
+        {
+            if (File.Exists(from)) File.Move(from, to, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Project {ProjectId}: {From} could not be moved to {To}, and stays: {Reason}", projectId, from, to, ex.Message);
+        }
     }
 
     /// <summary>
@@ -1845,15 +2725,15 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private ClaudeLaunchSpec BuildLaunchSpec(ProjectInfo project)
     {
         var snap = _snapshot;
-        var settings = ProjectFiles.ProjectSettings.Load(project.ProjectPath);
+        var settings = ProjectFiles.ProjectSettings.Load(project.StatePath);
         // Recovery reads the action name from settings too; a project created before it was saved has none
         project.ActionName ??= settings.ActionName;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
         snap.Profiles.TryGetValue(profileName ?? "", out var profile);
 
-        var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(snap, project, profileName);
+        var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(project, profileName);
         var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
-        var (env, args) = BuildClaudeConfig(project.ProjectPath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project)),
+        var (env, args) = BuildClaudeConfig(project.ProjectPath, project.StatePath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project)),
             project.Status.Model ?? action.Model, profile?.Environment, profileName, stripEnvVarProfile);
         return new ClaudeLaunchSpec(env ?? new Dictionary<string, string>(), args);
     }
@@ -1893,25 +2773,26 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return (skip, mode);
     }
 
-    /// <summary>The launch warnings said so far, by project folder and what they are about: each is said once.</summary>
+    /// <summary>The launch warnings said so far, by session state folder and what they are about: each is said once.</summary>
     private readonly ConcurrentDictionary<string, byte> _launchWarnings = new(PathComparer);
 
     private bool FirstLaunchWarning(ProjectInfo project, string about) =>
-        _launchWarnings.TryAdd($"{FullPath(project.ProjectPath)}\n{about}", 0);
+        _launchWarnings.TryAdd($"{FullPath(project.StatePath)}\n{about}", 0);
 
     /// <summary>
     /// The project's action in its root's config (the default action for a project with no root), and
-    /// whether every action of the root allows skip-permissions.
+    /// whether every action of the root allows skip-permissions. The root is the project's by its
+    /// folder (<see cref="ProjectInfo.RootPath"/>), not by the name it has now.
     /// Throws <see cref="LaunchConfigException"/> when the config cannot be read or lacks the action.
     /// </summary>
-    private (CreateAction Action, bool StripEnvVarProfile, bool RootAllowsSkip) ResolveLaunchAction(ProfileSnapshot snap, ProjectInfo project, string? profileName)
+    private (CreateAction Action, bool StripEnvVarProfile, bool RootAllowsSkip) ResolveLaunchAction(ProjectInfo project, string? profileName)
     {
         if (project.Status.RootName == null || profileName == null) return (new CreateAction("Create"), false, false);
 
         RootConfig config;
         try
         {
-            config = _rootConfigReader.ReadConfigStrict(snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName)));
+            config = _rootConfigReader.ReadConfigStrict(project.RootPath);
         }
         catch (Exception ex)
         {
@@ -1928,7 +2809,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// Claude Code's own settings, the permission mode, or skip-permissions, allow it.
     /// </summary>
     private static (Dictionary<string, string>? Env, string[] Args) BuildClaudeConfig(
-        string projectPath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
+        string projectPath, string statePath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
         string? model = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
@@ -1962,7 +2843,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // It holds the project token, so every launch first makes sure git ignores it
         ProjectFiles.ProjectFolder.EnsureGitIgnore(projectPath);
         args.Add("--mcp-config");
-        args.Add(McpConfigFile.Write(projectPath, mcpConfigJson));
+        args.Add(McpConfigFile.Write(statePath, mcpConfigJson));
 
         return (env, args.ToArray());
     }
@@ -2004,7 +2885,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private static Dictionary<string, string> BuildScriptEnvironment(
         string rootPath,
-        ProjectInfo project,
+        ProjectInfo? project,
         CreateAction action,
         Dictionary<string, JsonElement> inputs,
         Dictionary<string, string>? profileEnv = null,
@@ -2017,10 +2898,20 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         // GODMODE_* vars always win
         env["GODMODE_ROOT_PATH"] = rootPath;
-        env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
-        // Scripts name branches and folders after it. It is not the project's ID, {profile}/{root}/{folder}
-        env["GODMODE_PROJECT_FOLDER"] = Path.GetFileName(project.ProjectPath);
-        env["GODMODE_PROJECT_NAME"] = project.Status.Name;
+        // An action that starts no session has no project: its scripts get the root, the inputs and the result file
+        if (project != null)
+        {
+            env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
+            // Scripts name branches and folders after it. It is not the session's ID, {profile}/{root}/{id}
+            env["GODMODE_PROJECT_FOLDER"] = Path.GetFileName(project.ProjectPath);
+            env["GODMODE_PROJECT_NAME"] = project.Status.Name;
+            // The session's id, yymmdd-{kind}-{slug}-{suffix}: its state is in .godmode/sessions/{id}/. During a create, the id
+            // as the action makes it; a kind or project_name in the result file gives the session its final one
+            env["GODMODE_SESSION_ID"] = project.SessionId;
+            // Whether the session shares its working folder with others (its action's sharedFolder): a
+            // script then keys what it makes by the session's id, not the folder, and removes no folder
+            env[SharedFolderVariable] = project.SharedFolder ? "true" : "false";
+        }
 
         if (resultFilePath != null)
             env["GODMODE_RESULT_FILE"] = resultFilePath;

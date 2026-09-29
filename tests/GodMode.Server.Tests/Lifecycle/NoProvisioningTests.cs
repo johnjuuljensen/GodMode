@@ -9,7 +9,7 @@ namespace GodMode.Server.Tests.Lifecycle;
 /// <summary>
 /// GodMode provisions nothing: a session gets one MCP server, GodMode's own, and none of its tools
 /// is pre-approved. A repo brings its MCP servers in its own <c>.mcp.json</c>, and user-scoped ones
-/// live in the profile's <c>CLAUDE_CONFIG_DIR</c>. MCP config a root or profile still carries is
+/// live in the profile's <c>CLAUDE_CONFIG_DIR</c>. MCP config a root still carries is
 /// logged once as ignored, and a root's leftover <c>.archived</c> folder is not a project.
 /// </summary>
 public class NoProvisioningTests
@@ -21,10 +21,10 @@ public class NoProvisioningTests
     };
 
     [Fact]
-    public async Task McpConfig_HoldsOnlyGodModesOwnServer_WhateverTheRootAndProfileStillCarry()
+    public async Task McpConfig_HoldsOnlyGodModesOwnServer_WhateverTheRootStillCarries()
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin(), rootConfig: RootMcpServers);
-        await WriteActionAndProfileMcpServersAsync(harness);
+        WriteActionMcpServers(harness);
 
         var created = await harness.CreateProjectAsync();
         var launch = await harness.WaitForStdinAsync(created.Id);
@@ -36,7 +36,7 @@ public class NoProvisioningTests
     /// <summary>
     /// No <c>--allowedTools</c>: every MCP tool that needs approval reaches the permission prompt,
     /// unless Claude Code's own settings allow it. Not even when the profile's Claude config dir, or
-    /// what the root and profile still carry, lists MCP servers.
+    /// what the root still carries, lists MCP servers.
     /// </summary>
     [Fact]
     public async Task NothingIsPreApproved_EvenWhenTheProfilesClaudeConfigListsMcpServers()
@@ -48,7 +48,7 @@ public class NoProvisioningTests
             File.WriteAllText(Path.Combine(configDir, ".claude.json"), """{ "mcpServers": { "from-user-scope": { "command": "user-cmd" } } }""");
             await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin(), rootConfig: RootMcpServers,
                 profileEnvironment: new Dictionary<string, string> { ["CLAUDE_CONFIG_DIR"] = configDir });
-            await WriteActionAndProfileMcpServersAsync(harness);
+            WriteActionMcpServers(harness);
 
             var created = await harness.CreateProjectAsync();
             var launch = await harness.WaitForStdinAsync(created.Id);
@@ -86,23 +86,6 @@ public class NoProvisioningTests
         await harness.WaitForStateAsync(created.Id, ProjectState.Running);
     }
 
-    [Fact]
-    public async Task ProfileWithAnMcpFolder_IsLoggedOnceAsIgnored()
-    {
-        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
-        var mcpDir = Path.Combine(harness.RootsDir, ".profiles", LifecycleHarness.ProfileName, "mcp");
-        Directory.CreateDirectory(mcpDir);
-        File.WriteAllText(Path.Combine(mcpDir, "from-profile.json"), """{ "command": "profile-cmd" }""");
-
-        await harness.Projects.ListProfilesAsync();
-        await harness.Projects.ListProjectRootsAsync();
-        await harness.Projects.RecoverProjectsAsync();
-
-        var warning = Assert.Single(harness.Warnings, line => line.Contains("mcp folder"));
-        Assert.Contains(" Warning ProfileFileManager: ", warning);
-        Assert.Contains(mcpDir, warning);
-    }
-
     /// <summary>
     /// The server archives nothing, so a root's <c>.archived</c> folder is just a folder: a start
     /// recovers nothing under it, says nothing about it, and leaves it as it was.
@@ -122,28 +105,17 @@ public class NoProvisioningTests
         Assert.Equal(before, Tree(archiveDir));
     }
 
-    /// <summary>
-    /// MCP servers where GodMode once read them beside the root's: an overlay for the root's one
-    /// action, and the profile's mcp folder. The profiles are listed again, as a client would, so
-    /// the server has read the folder before the launch.
-    /// </summary>
-    private static async Task WriteActionAndProfileMcpServersAsync(LifecycleHarness harness)
-    {
+    /// <summary>MCP servers where GodMode once read them beside the root's: an overlay for the root's one action.</summary>
+    private static void WriteActionMcpServers(LifecycleHarness harness) =>
         File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "config.Create.json"),
             """{ "mcpServers": { "from-action": { "url": "https://mcp.example.test/mcp" } } }""");
-        var profileMcp = Path.Combine(harness.RootsDir, ".profiles", LifecycleHarness.ProfileName, "mcp");
-        Directory.CreateDirectory(profileMcp);
-        File.WriteAllText(Path.Combine(profileMcp, "from-profile.json"), """{ "command": "profile-cmd" }""");
-        await harness.Projects.ListProfilesAsync();
-    }
 
-    /// <summary>A project folder as an older server archived it: its .godmode state, and archive.json beside it.</summary>
+    /// <summary>A project folder as an older server archived it: its session's state, and archive.json beside it.</summary>
     private static void WriteArchivedProject(string folder)
     {
-        var godMode = Path.Combine(folder, ".godmode");
-        Directory.CreateDirectory(godMode);
+        var godMode = LifecycleHarness.PlantSession(folder);
         var now = DateTime.UtcNow;
-        var status = new ProjectStatus(Path.GetFileName(folder), "Old one", ProjectState.Stopped, now, now, null,
+        var status = new ProjectStatus(LifecycleHarness.PlantedId(), "Old one", ProjectState.Stopped, now, now, null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0);
         File.WriteAllText(Path.Combine(godMode, "status.json"), JsonSerializer.Serialize(status, JsonDefaults.Options));
         File.WriteAllText(Path.Combine(godMode, "archive.json"), """{ "ArchivedAt": "2026-01-01T00:00:00Z", "Name": "Old one" }""");

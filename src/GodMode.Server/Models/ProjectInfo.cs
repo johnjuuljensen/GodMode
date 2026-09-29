@@ -12,12 +12,45 @@ public class ProjectInfo
     public required ProjectStatus Status { get; set; }
 
     /// <summary>
-    /// The project directory path. This is also the working directory for Claude.
+    /// The working folder: Claude's working directory, where the session's state is too (<see cref="StatePath"/>).
     /// May be updated after create scripts run (scripts can override via result file).
     /// </summary>
     public required string ProjectPath { get; set; }
 
-    public string? SessionId { get; set; }
+    /// <summary>
+    /// The folder (full path) of the root the session is in, as it was when the session was created or
+    /// recovered. Its config and scripts are read there, whatever the root is called now: a root name
+    /// that comes to name another folder (a new explicit root that wins the clash) is not this root.
+    /// </summary>
+    public required string RootPath { get; init; }
+
+    /// <summary>
+    /// The session's id, <c>yymmdd-{kind}-{slug}-{suffix}</c> (<see cref="ProjectFiles.SessionState"/>): the
+    /// last part of its opaque ID, and the name of its state folder. Unique within its root.
+    /// </summary>
+    public required string SessionId { get; set; }
+
+    /// <summary>The session's state folder, <c>{ProjectPath}/.godmode/sessions/{SessionId}/</c>: status.json, output.jsonl and the rest.</summary>
+    public string StatePath => ProjectFiles.SessionState.PathOf(ProjectPath, SessionId);
+
+    /// <summary>
+    /// Whether the session shares its working folder with others (its action's <c>sharedFolder</c>,
+    /// kept in its settings.json): its delete removes only <see cref="StatePath"/>, never the folder.
+    /// </summary>
+    public bool SharedFolder { get; set; }
+
+    /// <summary>
+    /// Whether this session's create made its shared working folder, which did not exist before: the
+    /// delete of a create that failed before the session had its state removes that folder too, when
+    /// no other session has joined it. In memory only, as such a create is (it has no status.json).
+    /// </summary>
+    public bool MadeSharedFolder { get; set; }
+
+    /// <summary>
+    /// claude's session GUID (<c>--session-id</c>, <c>--resume</c>), kept in <c>session-id</c> in the state folder.
+    /// Not the session's id: GodMode replaces it when a resume finds no conversation.
+    /// </summary>
+    public string? ClaudeSessionId { get; set; }
 
     /// <summary>
     /// The name of the create action used to create this project.

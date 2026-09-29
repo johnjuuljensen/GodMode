@@ -1,6 +1,10 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using GodMode.FakeClaude;
+using SessionState = GodMode.ProjectFiles.SessionState;
+using GodMode.Server.Auth;
 using GodMode.Server.Models;
 using GodMode.Server.Services;
 using GodMode.Shared;
@@ -23,7 +27,8 @@ namespace GodMode.Server.Tests.Lifecycle;
 /// roots dir with one root, <see cref="RootName"/>, whose minimal <c>.godmode-root/config.json</c>
 /// names its profile and tells the fake where its script and sidecar are, and any extra roots asked for,
 /// configured the same way. Every project launched from them plays the script last passed to
-/// <see cref="UseScript"/> and records to <c>fake-claude.jsonl</c> in its own folder.
+/// <see cref="UseScript"/> and records to <c>fake-claude-{id}.jsonl</c> in its working folder, one
+/// file per session, so sessions that share a folder record apart.
 /// </summary>
 internal sealed class LifecycleHarness : IAsyncDisposable
 {
@@ -33,7 +38,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <summary>Long enough for a slow CI box; each wait returns as soon as its condition holds.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);
 
-    private const string RecordFileName = "fake-claude.jsonl";
+    private const string RecordFileName = $"fake-claude-{FakeClaudeEnvironment.SessionPlaceholder}.jsonl";
 
     private readonly string _workDir;
     private ServiceProvider _services;
@@ -42,11 +47,16 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private readonly List<string> _projectIds = [];
     private readonly CapturingLoggerProvider _logs = new();
     private readonly McpHost? _mcp;
+    private readonly AuthSettings? _auth;
+    private readonly Func<IRootConfigReader, IRootConfigReader>? _rootConfigReader;
+
+    /// <summary>The setting of the harness's scan folder, <see cref="RootsDir"/>.</summary>
+    public const string ScanSetting = $"{RootSources.ScanSection}:test";
 
     /// <summary>The temp dir everything the harness and the server write lives under.</summary>
     public string WorkDir => _workDir;
 
-    /// <summary>The server's <c>ProjectRootsDir</c>: one subdirectory per root.</summary>
+    /// <summary>The server's one scan folder (<see cref="ScanSetting"/>): one subdirectory per root.</summary>
     public string RootsDir { get; }
 
     public string RootPath { get; }
@@ -55,6 +65,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     /// <summary>The server's warnings and errors so far, across restarts.</summary>
     public IReadOnlyCollection<string> Warnings => _logs.Lines;
+
+    /// <summary>Everything the server logged so far, at any level, across restarts.</summary>
+    public IReadOnlyCollection<string> AllLogs => _logs.AllLines;
 
     /// <summary>Every push the server makes to its hub clients (since the last <see cref="RestartAsync"/>).</summary>
     public RecordingHubContext Hub { get; private set; } = new();
@@ -67,16 +80,24 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <param name="rootConfig">Extra top-level properties for the root's config.json (for example <c>claudeArgs</c>).</param>
     /// <param name="settings">Extra server configuration, applied over the harness defaults.</param>
     /// <param name="extraRoots">More roots beside <see cref="RootName"/>, each in the profile given, configured as it is.</param>
-    /// <param name="profileEnvironment">The environment of <see cref="ProfileName"/>, in its <c>.profiles/</c> env.json.</param>
+    /// <param name="profileEnvironment">The environment of <see cref="ProfileName"/>, in the server's <c>Profiles:&lt;name&gt;:Environment</c>.</param>
     /// <param name="mcpEndpoint">Serve the MCP endpoint (<see cref="McpHost"/>), so a fake's <c>permission</c> step reaches the server.</param>
+    /// <param name="configFiles">JSON config files after the settings, in order, as the instance's file comes after appsettings.</param>
+    /// <param name="auth">The server's authentication settings, as the start resolved them (its key file, say); none when null.</param>
+    /// <param name="rootConfigReader">Wraps the server's reader of root configs, so a test can act between two of its reads.</param>
     public LifecycleHarness(
         FakeScript script,
         IReadOnlyDictionary<string, object>? rootConfig = null,
         IReadOnlyDictionary<string, string?>? settings = null,
         IReadOnlyList<(string Root, string Profile)>? extraRoots = null,
         IReadOnlyDictionary<string, string>? profileEnvironment = null,
-        bool mcpEndpoint = false)
+        bool mcpEndpoint = false,
+        IReadOnlyList<string>? configFiles = null,
+        AuthSettings? auth = null,
+        Func<IRootConfigReader, IRootConfigReader>? rootConfigReader = null)
     {
+        _auth = auth;
+        _rootConfigReader = rootConfigReader;
         _workDir = ServerProcess.CreateWorkDir("lifecycle");
         RootsDir = Path.Combine(_workDir, "roots");
         RootPath = Path.Combine(RootsDir, RootName);
@@ -85,18 +106,13 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         WriteRootConfig(RootPath, ProfileName, rootConfig);
         foreach (var (root, profile) in extraRoots ?? [])
             WriteRootConfig(Path.Combine(RootsDir, root), profile, rootConfig);
-        if (profileEnvironment != null)
-        {
-            var profileDir = Path.Combine(RootsDir, ".profiles", ProfileName);
-            Directory.CreateDirectory(profileDir);
-            File.WriteAllText(Path.Combine(profileDir, "env.json"), JsonSerializer.Serialize(profileEnvironment));
-        }
-
         var configuration = new Dictionary<string, string?>
         {
-            ["ProjectRootsDir"] = RootsDir,
+            [ScanSetting] = RootsDir,
             [ClaudeProcessManager.ExecutableSetting] = FakeClaudePath,
         };
+        foreach (var (variable, value) in profileEnvironment ?? new Dictionary<string, string>())
+            configuration[$"{RootSources.ProfilesSection}:{ProfileName}:Environment:{variable}"] = value;
         if (mcpEndpoint)
         {
             _mcp = new McpHost(() => Projects!, _logs);
@@ -105,8 +121,10 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
             configuration[key] = value;
 
-        _configuration = new ConfigurationBuilder().AddInMemoryCollection(configuration).Build();
-        _services = BuildServices(_configuration, _logs, Hub);
+        var builder = new ConfigurationBuilder().AddInMemoryCollection(configuration);
+        foreach (var file in configFiles ?? []) builder.AddJsonFile(file, optional: false);
+        _configuration = builder.Build();
+        _services = BuildServices(_configuration, _logs, Hub, _auth, _rootConfigReader);
         Projects = _services.GetRequiredService<IProjectManager>();
     }
 
@@ -121,11 +139,14 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         StopHost();
         _stopped.Add(_services);
         Hub = new RecordingHubContext();
-        _services = BuildServices(_configuration, _logs, Hub);
+        _services = BuildServices(_configuration, _logs, Hub, _auth, _rootConfigReader);
         Projects = _services.GetRequiredService<IProjectManager>();
         await Projects.RecoverProjectsAsync();
         if (resume) await Projects.ResumeInterruptedProjectsAsync();
     }
+
+    /// <summary>Reads the configuration's sources again, as a reload of the instance's config file does.</summary>
+    public void ReloadConfiguration() => ((IConfigurationRoot)_configuration).Reload();
 
     /// <summary>Replaces the script that the next launch plays. Running fakes keep the one they loaded.</summary>
     public void UseScript(FakeScript script) => script.Save(ScriptPath);
@@ -149,9 +170,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         File.WriteAllText(Path.Combine(godModeRoot, "config.json"), JsonSerializer.Serialize(config));
     }
 
-    private static ServiceProvider BuildServices(IConfiguration configuration, ILoggerProvider logs, RecordingHubContext hub)
+    private static ServiceProvider BuildServices(IConfiguration configuration, ILoggerProvider logs, RecordingHubContext hub, AuthSettings? auth,
+        Func<IRootConfigReader, IRootConfigReader>? wrapRootConfigReader)
     {
         var services = new ServiceCollection();
+        if (auth != null) services.AddSingleton(auth);
         services.AddLogging(logging => logging.AddProvider(logs));
         services.AddSignalR();
         services.AddSingleton<IHubContext<ProjectHub, IProjectHubClient>>(hub);
@@ -163,9 +186,10 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         services.AddSingleton<FailingSaves>();
         services.AddSingleton<IStatusUpdater>(provider => provider.GetRequiredService<FailingSaves>());
         services.AddSingleton<ProjectLifecycle>();
-        services.AddSingleton<IRootConfigReader, RootConfigReader>();
+        services.AddSingleton<RootConfigReader>();
+        services.AddSingleton<IRootConfigReader>(provider =>
+            wrapRootConfigReader is null ? provider.GetRequiredService<RootConfigReader>() : wrapRootConfigReader(provider.GetRequiredService<RootConfigReader>()));
         services.AddSingleton<IScriptRunner, ScriptRunner>();
-        services.AddSingleton<ProfileFileManager>();
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();
@@ -187,17 +211,61 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         };
         foreach (var (key, value) in inputs ?? new Dictionary<string, object>())
             request[key] = JsonSerializer.SerializeToElement(value);
-        var status = await Projects.CreateProjectAsync(new CreateProjectRequest(profile, root, request));
+        var status = (await Projects.CreateProjectAsync(new CreateProjectRequest(profile, root, request))).Project
+            ?? throw new InvalidOperationException("the create made no project: its action starts no session");
         _projectIds.Add(status.Id);
+        Session(status.Id);
         return status;
     }
 
+    /// <summary>The working folder and id of each session seen tracked, so a deleted one's are still known.</summary>
+    private readonly ConcurrentDictionary<string, (string ProjectPath, string SessionId)> _sessions = new();
+
     /// <summary>
-    /// The folder of a project: <c>{profile}/{root}/{folder}</c> is found in its root's directory
-    /// (a discovered root's name is its directory's); a bare folder name in <see cref="RootPath"/>.
+    /// The working folder of a session, as the server tracks it, or as it did: its ID,
+    /// <c>{profile}/{root}/{id}</c>, does not say where its folder is.
     /// </summary>
-    public string ProjectPath(string projectId) =>
-        projectId.Split('/') is [.., var root, var folder] ? Path.Combine(RootsDir, root, folder) : Path.Combine(RootPath, projectId);
+    public string ProjectPath(string projectId) => Session(projectId).ProjectPath;
+
+    /// <summary>The session's state folder, <c>{working folder}/.godmode/sessions/{id}/</c>.</summary>
+    public string StatePath(string projectId) =>
+        Session(projectId) is var (projectPath, sessionId) ? SessionState.PathOf(projectPath, sessionId) : throw new UnreachableException();
+
+    /// <summary>
+    /// The pattern of the ID of a session created today in <paramref name="root"/> from
+    /// <paramref name="kind"/> (the harness's one action, <c>Create</c>, unless a script names one), named
+    /// <paramref name="slug"/>: <c>{profile}/{root}/yymmdd-{kind}-{slug}-{suffix}</c>.
+    /// </summary>
+    public static string IdPattern(string slug, string kind = "create", string root = RootName, string profile = ProfileName) =>
+        $"^{Regex.Escape($"{profile}/{root}/{DateTime.Now:yyMMdd}-{kind}-{slug}-")}[a-z2-7]{{4}}$";
+
+    /// <summary>An id as the server makes them, for a session a test writes to disk itself.</summary>
+    public const string PlantedSessionId = "260101-create-planted-abcd";
+
+    /// <summary>The ID the server recovers a session planted in this harness's root under.</summary>
+    public static string PlantedId(string sessionId = PlantedSessionId) => $"{ProfileName}/{RootName}/{sessionId}";
+
+    /// <summary>
+    /// Makes the state folder of session <paramref name="sessionId"/> in <paramref name="folder"/>, as a
+    /// server leaves it (<c>.godmode/sessions/{id}/</c>), with <paramref name="status"/> in it when given;
+    /// returns the state folder.
+    /// </summary>
+    public static string PlantSession(string folder, string sessionId = PlantedSessionId, ProjectStatus? status = null)
+    {
+        var state = SessionState.PathOf(folder, sessionId);
+        Directory.CreateDirectory(state);
+        if (status != null)
+            File.WriteAllText(Path.Combine(state, "status.json"), JsonSerializer.Serialize(status, JsonDefaults.Options));
+        return state;
+    }
+
+    private (string ProjectPath, string SessionId) Session(string projectId)
+    {
+        if (((ProjectManager)Projects).Tracked(projectId) is { } tracked)
+            return _sessions[projectId] = (tracked.ProjectPath, tracked.SessionId);
+        return _sessions.TryGetValue(projectId, out var seen) ? seen
+            : throw new InvalidOperationException($"session {projectId} is not tracked, and has not been");
+    }
 
     public IClaudeProcessManager ProcessManager => _services.GetRequiredService<IClaudeProcessManager>();
 
@@ -211,6 +279,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// started, until <see cref="LaunchHold.Release"/>.
     /// </summary>
     public LaunchHold HoldNextLaunch() => _services.GetRequiredService<HoldingProcessManager>().HoldNext();
+
+    /// <summary>How many launches (creates' and resumes') of the project have been asked of the process manager, whether or not their process has started yet.</summary>
+    public int LaunchesAsked(string projectId) => _services.GetRequiredService<HoldingProcessManager>().Asked(projectId);
 
     /// <summary>Opens a client connection to the hub.</summary>
     public HarnessConnection Connect(string connectionId) =>
@@ -265,7 +336,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// </summary>
     public ProjectStatus ReadStatusFile(string projectId)
     {
-        var path = Path.Combine(ProjectPath(projectId), ".godmode", "status.json");
+        var path = Path.Combine(StatePath(projectId), "status.json");
         return Retried(() => JsonSerializer.Deserialize<ProjectStatus>(ReadShared(path), JsonDefaults.Options)!);
     }
 
@@ -274,7 +345,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// Windows the file cannot be opened while it is being replaced; that is retried.
     /// </summary>
     public string ReadSessionIdFile(string projectId) =>
-        Retried(() => ReadShared(Path.Combine(ProjectPath(projectId), ".godmode", "session-id")));
+        Retried(() => ReadShared(Path.Combine(StatePath(projectId), "session-id")));
 
     private static T Retried<T>(Func<T> read)
     {
@@ -286,7 +357,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     }
 
     public string ReadOutputFile(string projectId) =>
-        ReadShared(Path.Combine(ProjectPath(projectId), ".godmode", "output.jsonl"));
+        ReadShared(Path.Combine(StatePath(projectId), "output.jsonl"));
 
     /// <summary>Reads a file the server may still hold open for writing (output.jsonl, errs.txt, status.json).</summary>
     internal static string ReadShared(string path)
@@ -298,7 +369,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     // ── What the fake saw ──
 
     public IReadOnlyList<FakeLaunch> Launches(string projectId) =>
-        FakeRecording.Read(Path.Combine(ProjectPath(projectId), RecordFileName));
+        Session(projectId) is var (projectPath, sessionId)
+            ? FakeRecording.Read(Path.Combine(projectPath, RecordFileName.Replace(FakeClaudeEnvironment.SessionPlaceholder, sessionId)))
+            : throw new UnreachableException();
 
     /// <summary>Waits until the project's launch number <paramref name="index"/> satisfies <paramref name="condition"/>.</summary>
     public async Task<FakeLaunch> WaitForLaunchAsync(string projectId, Func<FakeLaunch, bool> condition, int index = 0,
@@ -352,7 +425,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <summary>Everything a failed wait needs to be diagnosed from the test output alone.</summary>
     public string Describe(string projectId)
     {
-        var godMode = Path.Combine(ProjectPath(projectId), ".godmode");
+        var godMode = StatePath(projectId);
         string Read(string file) => File.Exists(Path.Combine(godMode, file)) ? ReadShared(Path.Combine(godMode, file)) : "(none)";
         var launches = Launches(projectId);
         return $"""
@@ -373,8 +446,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private sealed class HoldingProcessManager(ClaudeProcessManager inner) : IClaudeProcessManager
     {
         private LaunchHold? _next;
+        private readonly ConcurrentQueue<string> _asked = new();
 
         public LaunchHold HoldNext() => _next = new LaunchHold();
+
+        public int Asked(string projectId) => _asked.Count(id => id == projectId);
 
         private async Task PassAsync()
         {
@@ -384,6 +460,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         public async Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
             Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null)
         {
+            _asked.Enqueue(project.Status.Id);
             await PassAsync();
             return await inner.StartClaudeProcessAsync(project, initialPrompt, cancellationToken, extraEnvironment, extraArgs);
         }
@@ -391,6 +468,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         public async Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken,
             Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null)
         {
+            _asked.Enqueue(project.Status.Id);
             await PassAsync();
             return await inner.ResumeClaudeProcessAsync(project, cancellationToken, extraEnvironment, extraArgs);
         }

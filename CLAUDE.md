@@ -42,8 +42,12 @@ The solution build needs the VoiceBot submodule (`external/VoiceBot`, VoiceBot's
 # Build server (no React: it serves no page, and needs no npm)
 dotnet build src/GodMode.Server/GodMode.Server.csproj
 
-# Run server (http://127.0.0.1:31337; with no Authentication:ApiKey it generates a key on its first start and prints it)
+# Run server (http://127.0.0.1:31337; with no Authentication:ApiKey it generates a key on its first start and prints it).
+# With no config file it is a dev server: appsettings only, an empty `roots` folder under the working directory
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
+
+# Run the server you use on its own config file (Instance, Roots, Profiles, ...): --config <path> or GODMODE_CONFIG
+dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.godmode-server/main.json
 
 # Build MAUI app (requires MAUI workload; builds the React client into it)
 dotnet build src/GodMode.Maui/GodMode.Maui.csproj
@@ -59,6 +63,8 @@ cd src/GodMode.Client.React && npm test && npm run lint
 ```
 
 **Running/Debugging**: The server and MAUI app are separate processes. The server manages Claude Code processes and serves the hub; it serves no page. The MAUI app connects to one or more servers via its local proxy. To see a React change, rebuild and run the Windows app against a running server (add the server there with its key): the app's build rebuilds the client when its sources changed (`npm ci` first, when `node_modules` is missing or older than `package-lock.json`). Its WebView2 has DevTools enabled (F12). There is no Vite dev server.
+
+**A dev server beside the main one**: config belongs to a server instance, never to the user. The server reads no user secrets and no per-user file, only `appsettings.json`, `appsettings.{Environment}.json`, the instance's config file (`--config`/`GODMODE_CONFIG`), environment variables and the command line, in that order. So a worktree's `dotnet run` never finds the main server's roots: give it another port (`-- --Urls=http://127.0.0.1:31338`) and its own config file, or none. And if it is pointed at the same roots anyway, it leaves every root the main server holds alone: a server holds `{root}/logs/server.lock` open exclusively on each root it manages, and skips (and logs, with the holder's `Instance`) a root another live server holds, until that server has gone. Never point a test server at your real roots.
 
 ## Architecture
 
@@ -87,9 +93,11 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of `GodMode.Client.React.csproj` (GodMode.Maui's reference, or the solution) (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
 
 **Config-Driven Project Roots (Multi-File)**
-- A root is a subdirectory of `ProjectRootsDir` (appsettings, default `roots`) that contains a `.godmode-root/` folder with config files
-- `config.json` defines base/shared config (profileName, prepare, delete, status, environment, claudeArgs, model, permissionMode, allowSkipPermissions)
-- Roots and profiles (`{ProjectRootsDir}/.profiles/`) are maintained by hand on the host: no hub method writes config, and the server archives nothing
+- A root is a folder with a `.godmode-root/` folder of config files in it. The server's config names where they are, as keyed maps (so sources merge entry by entry): scan folders (`Roots:Scan:<key>`, each immediate subfolder with `.godmode-root/` is a root; appsettings' `default` is `roots`) and explicit roots anywhere on disk (`Roots:Explicit:<name>:Path`, optional `:Profile`). One name, one root per server: an explicit root wins a clash, then the first scan key in ordinal order
+- A root's profile is its `config.json`'s `profileName`, else its explicit entry's `Profile`, else `Default`. A profile's description and environment are `Profiles:<name>:Description` and `Profiles:<name>:Environment:<VAR>` (the root's `environment` wins a clash); secrets stay in environment variables (`Profiles__<name>__Environment__<VAR>`). `ProjectRootsDir` and `.profiles/` are gone
+- `config.json` defines base/shared config (profileName, prepare, delete, status, environment, claudeArgs, model, permissionMode, allowSkipPermissions, sharedFolder, session)
+- An action with `"session": false` starts no session: its prepare and create scripts run in the root, with its environment, and nothing is tracked, no folder made and no claude started. A provisioning root's action makes a new root as a sibling in its scan folder, and its result file's `message=` is what the app shows; `CreateProject` returns a `CreateProjectResult` with no `Project`. With `sharedFolder`, `scriptsCreateFolder` or no create script it is a config error
+- Roots and profiles are maintained by hand on the host (the instance's config file, the roots' folders): no hub method writes config, and the server archives nothing
 - GodMode gives a session one MCP server, the server's own `/mcp` endpoint, whose only tool is the permission prompt, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
 - `config.{action}.json` files define per-action overlays (merged with base)
 - `{actionName}/schema.json` provides input schema by convention (falls back to default name+prompt)
@@ -106,33 +114,37 @@ cd src/GodMode.Client.React && npm test && npm run lint
 
 **Process Management**
 - `ClaudeProcessManager` uses `System.Diagnostics.Process` directly (not CliWrap) for proper stdin handling
-- `--dangerously-skip-permissions` is passed only when the project asks for it (`.godmode/settings.json`) and its root's config, read at that launch, allows it (`allowSkipPermissions`, default false, for every action of the root). Otherwise the project's stored `permissionMode` (else the root's, e.g. `auto`) applies, and approvals go to the permission prompt
-- `ClaudeProcessManager` appends each process's stdout to `.godmode/output.jsonl`, which backfills clients that subscribe later
+- `--dangerously-skip-permissions` is passed only when the project asks for it (its session's `settings.json`) and its root's config, read at that launch, allows it (`allowSkipPermissions`, default false, for every action of the root). Otherwise the project's stored `permissionMode` (else the root's, e.g. `auto`) applies, and approvals go to the permission prompt
+- `ClaudeProcessManager` appends each process's stdout to its session's `output.jsonl` (`.godmode/sessions/{id}/`), which backfills clients that subscribe later
 
 **Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
 - Every request needs a credential, loopback included. One mode per run: codespace (`CODESPACES=true`: a GitHub token of `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`) or API key
-- The key is `Authentication:ApiKey`, else one the server generates on its first start into an owner-only key file in its own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key`, `~/.local/share/GodMode.Server/api-key`; never under `ProjectRootsDir`), prints once, and reuses on every start
+- The key is `Authentication:ApiKey`, else one the server generates on its first start into an owner-only key file in its own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key`, `~/.local/share/GodMode.Server/api-key`; never under a scan folder or explicit root), prints once, and reuses on every start
 - Any request with an `Origin` gets 403, whatever it names (the server's own bindings included; no setting allows one): no browser is a client. A request with no `Origin` (the MAUI relay, the attention service, a session's claude) needs its credential alone
 - Only `/health` is anonymous. `/`, with the key, answers `{"service":"GodMode.Server",…}`; nothing serves a page
-- Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them; a credential they need goes in the root's `environment`
+- Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them; a credential they need goes in the root's `environment`, or its profile's
 
 ### Project Folder Structure
 ```
-/root/{project-folder}/
+/root/{project-folder}/            # A session's working folder
 ├── .godmode/
-│   ├── status.json      # Current state, metrics
-│   ├── settings.json    # Per-project settings (skip-permissions, etc.)
-│   ├── input.jsonl      # User input log
-│   ├── output.jsonl     # Claude output stream
-│   ├── session-id       # Claude session ID for resumption
-│   ├── output-generation  # Changes when output.jsonl starts over, so clients drop what they hold
-│   └── .gitignore       # Excludes .godmode state from git
-└── (project files)      # Working directory for Claude
+│   ├── .gitignore                 # "*": all of .godmode stays out of git
+│   └── sessions/
+│       └── {id}/                  # One session's state; id yymmdd-{kind}-{slug}-{suffix}, e.g. 260929-feat-left-list-k7q2
+│           ├── status.json        # Current state, metrics, kind
+│           ├── settings.json      # The session's settings (action, permission mode, skip-permissions asked for, shared folder)
+│           ├── input.jsonl        # User input log
+│           ├── output.jsonl       # Claude output stream (GodMode's own; Claude's transcripts are not read)
+│           ├── output-generation  # Changes when output.jsonl starts over, so clients drop what they hold
+│           ├── session-id         # Claude's session GUID for --resume (not the id)
+│           └── mcp-config.json    # While claude runs: the session's MCP config, with its token
+└── (project files)                # Working directory for Claude
 ```
+The same layout for every kind of root: a worktree is a working folder with one session, and an assistant's workspace one with several. Several sessions share a folder only when their action says `"sharedFolder": true`: a create into a folder another session uses is refused otherwise, and shared and unshared sessions never mix in one folder. Each has its own state, output, MCP token, claude and create log (`{root}/logs/{id}.log`, `{id}.result`); deleting one removes only its `sessions/{id}/`, never the folder or its files. A session's opaque ID is `{profile}/{root}/{id}`, the id unique within its root. Its kind (`ProjectStatus.Kind`, the app's label) is the create script's `kind=` result, else the action's name. The old flat `.godmode/status.json` is not read or migrated.
 
 ### Project Root Config
 ```
-{ProjectRootsDir}/root-name/
+{scan folder}/root-name/         # or an explicit root anywhere
 ├── .godmode-root/               # Root config and scripts (optional)
 │   ├── config.json              # Base/shared config (prepare, delete, env, claudeArgs)
 │   ├── config.freeform.json     # Per-action overlay (merged with base)
@@ -147,7 +159,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 │       ├── prepare.ps1
 │       ├── delete.ps1
 │       └── status.ps1           # Optional: reports the project's pull request as JSON
-└── {project-folder}/            # Project folders (ID {profile}/{root}/{project-folder})
+└── {project-folder}/            # Working folders, each with its session in .godmode/sessions/{id}/ (ID {profile}/{root}/{id})
 ```
 
 ### Script Constraints (Server Deployment)
@@ -195,7 +207,7 @@ The `.devcontainer/godmode-server/devcontainer.json` provisions a codespace with
 
 - **Binary**: `/opt/godmode-server/` (root-owned, read-only)
 - **Config**: `/opt/godmode-server/appsettings.json` (via `--contentRoot`)
-- **Roots**: `~/roots/` (`--ProjectRootsDir roots`, server CWD is `$HOME`), copied from `.devcontainer/godmode-server/roots/` in the repo
+- **Roots**: `~/roots/` (`--Roots:Scan:default=roots`, server CWD is `$HOME`), copied from `.devcontainer/godmode-server/roots/` in the repo
 - **Projects**: inside their root, `~/roots/<root>/<project-folder>/`
 - **Logs**: `~/.godmode-logs/`
 - **Claude Code**: `~/.local/bin/claude` (added to PATH in postStartCommand)

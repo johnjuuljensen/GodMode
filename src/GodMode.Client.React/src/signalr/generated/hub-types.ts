@@ -127,6 +127,37 @@ export interface CreateActionInfo {
    * `skipPermissions`, and only then does the server accept it.
    */
   AllowSkipPermissions: boolean;
+  /**
+   * Whether the action starts a session. One that does not only runs its scripts: the create form offers no
+   * model for it, and its create returns no project to open (CreateProjectResult).
+   */
+  Session: boolean;
+  /** Whether the action's sessions are short-lived (CreateAction.Transient): the app folds them sooner. */
+  Transient: boolean;
+}
+
+/**
+ * What a create made. An action that starts a session gives its project; one that starts none
+ * (CreateAction.Session off) gives none, and may say what its script made instead.
+ */
+export interface CreateProjectResult {
+  /** The session created, or null when the action starts none. */
+  Project?: ProjectStatus | null;
+  /**
+   * For an action that starts no session: its create script's `message` result (the result file's
+   * `message=`), for the app to show; null when it wrote none. Always null with a project.
+   */
+  Message?: string | null;
+}
+
+/** What a delete did with the session's files. */
+export interface DeleteProjectResult {
+  /**
+   * The session shared its working folder: only its state went, moved to the folder's `.godmode/trash/`, and
+   * IProjectHub.RestoreProject brings it back until the trash is purged. False when the delete removed the
+   * working folder, which nothing brings back.
+   */
+  Trashed: boolean;
 }
 
 /** Git status information for a project. */
@@ -248,8 +279,9 @@ export interface ProjectRootInfo {
 /** Detailed status information about a project. */
 export interface ProjectStatus {
   /**
-   * The project identifier, `{profile}/{root}/{folder}`: where its folder is. Opaque to clients, which pass
-   * it back as received; not the folder name.
+   * The session's identifier, `{profile}/{root}/{id}`, with its id (`260929-feat-left-list-k7q2`), the name
+   * of its state folder, `.godmode/sessions/{id}/`. Opaque to clients, which pass it back as received; not
+   * the folder name.
    */
   Id: string;
   /** The project name. */
@@ -310,12 +342,28 @@ export interface ProjectStatus {
    * when the project was not active then, was stopped by the user, or has been launched or resumed since.
    */
   StateAtShutdown?: ProjectState | null;
+  /**
+   * What kind of session it is (`bug`, `feat`, `experiment`, `chat`…): its create script's `kind`, else its
+   * action's name, as its id has it (lowercase `[a-z0-9-]`). The app labels the session with it.
+   */
+  Kind?: string | null;
+  /**
+   * The action the session was created with, as its `settings.json` says: the app finds the action's
+   * CreateActionInfo.Transient by it.
+   */
+  ActionName?: string | null;
+  /**
+   * Whether the session shares its working folder (its `settings.json`'s `sharedFolder`, or one that cannot
+   * be read): its delete removes only its state, into the folder's trash, and IProjectHub.RestoreProject can
+   * bring it back. Otherwise the delete removes the working folder.
+   */
+  SharedFolder: boolean;
 }
 
 /** Summary information about a project. */
 export interface ProjectSummary {
   /**
-   * The project identifier, `{profile}/{root}/{folder}`: where its folder is. Opaque to clients, which pass
+   * The session's identifier, `{profile}/{root}/{id}`, as in ProjectStatus.Id. Opaque to clients, which pass
    * it back as received; not the folder name.
    */
   Id: string;
@@ -335,6 +383,12 @@ export interface ProjectSummary {
   PendingQuestion?: PendingQuestion | null;
   /** The project's pull request, as in ProjectStatus.PullRequest. */
   PullRequest?: PullRequestStatus | null;
+  /** The session's kind, its label, as in ProjectStatus.Kind. */
+  Kind?: string | null;
+  /** The session's action, as in ProjectStatus.ActionName. */
+  ActionName?: string | null;
+  /** Whether its delete removes only its state, as in ProjectStatus.SharedFolder. */
+  SharedFolder: boolean;
 }
 
 /**
@@ -410,7 +464,7 @@ export interface IProjectHub {
   /** Gets the status of a specific project. */
   GetStatus(projectId: string): Promise<ProjectStatus>;
   /** Creates a new project using config-driven workflow. */
-  CreateProject(profileName: string, projectRootName: string, actionName: string | null, inputs: Record<string, unknown>): Promise<ProjectStatus>;
+  CreateProject(profileName: string, projectRootName: string, actionName: string | null, inputs: Record<string, unknown>): Promise<CreateProjectResult>;
   /** Sends input to a project. */
   SendInput(projectId: string, input: string): Promise<void>;
   /** Stops a running project. */
@@ -464,8 +518,21 @@ export interface IProjectHub {
   SubscribeProject(projectId: string, fromOffset: number, subscriptionId: string, generation: string | null): Promise<void>;
   /** Unsubscribes from output events from a project. */
   UnsubscribeProject(projectId: string): Promise<void>;
-  /** Deletes a project, running teardown scripts and removing all files. */
-  DeleteProject(projectId: string, force?: boolean): Promise<void>;
+  /**
+   * Deletes a project: stops it, runs its root's delete script (force is passed to it as `GODMODE_FORCE`),
+   * which may refuse, and then removes its files. A session that shares its working folder loses only its
+   * state, moved to the folder's `.godmode/trash/` (DeleteProjectResult.Trashed); any other loses its working
+   * folder.
+   */
+  DeleteProject(projectId: string, force?: boolean): Promise<DeleteProjectResult>;
+  /**
+   * Undoes a delete that trashed the session (DeleteProjectResult.Trashed): its state goes back to
+   * `.godmode/sessions/` and it is tracked again, Stopped, under the same ID, pushed as
+   * IProjectHubClient.ProjectCreated. Its delete script is not undone. It fails, and changes nothing, when
+   * the session is not in the trash (purged, or never trashed), when its root is no longer listed under the
+   * profile and name in its ID (removed, or renamed), or when its folder no longer takes it.
+   */
+  RestoreProject(projectId: string): Promise<ProjectStatus>;
   /**
    * Checks whether a CLI command is available on the server (in PATH). Returns the resolved path if found,
    * null if not.
@@ -507,8 +574,20 @@ export interface IProjectHubClient {
   AttentionChanged(items: AttentionItem[]): void;
   /** Called when a new project is created. */
   ProjectCreated(status: ProjectStatus): void;
-  /** Called during project creation to stream script progress to the client. */
+  /**
+   * Called during project creation to stream script progress to the client. The ID is the session's; for an
+   * action that starts no session, the run's own, `{profile}/{root}/{id}`, which names no project. The stream
+   * ends when the create returns: it has no last message.
+   */
   CreationProgress(projectId: string, message: string): void;
   /** Called when a project is deleted. */
   ProjectDeleted(projectId: string): void;
+  /**
+   * The server's roots or profiles changed: roots and profiles are the whole lists, as
+   * IProjectHub.ListProjectRoots and IProjectHub.ListProfiles return them. Pushed only when they differ from
+   * the last lists the server made: a root added, edited (its profile, description, actions or schemas) or
+   * removed on the host or in its config. Sessions that come or go with a root are pushed as
+   * IProjectHubClient.ProjectCreated and IProjectHubClient.ProjectDeleted.
+   */
+  RootsChanged(roots: ProjectRootInfo[], profiles: ProfileInfo[]): void;
 }

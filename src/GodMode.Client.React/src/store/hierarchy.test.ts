@@ -7,12 +7,12 @@ import type { ConnectionState, GodModeHub } from '../signalr/hub';
 import type { ProjectRootInfo, ProjectState, ProjectSummary } from '../signalr/types';
 import { rebuildHierarchy, type ServerConnection, type SidebarGroupBy } from './hierarchy';
 
-const issue = [{ Name: 'issue', AllowSkipPermissions: false }];
+const issue = [{ Name: 'issue', AllowSkipPermissions: false, Session: true, Transient: false }];
 
 const rootOf = (name: string, profile: string, actions = issue): ProjectRootInfo => ({ Name: name, ProfileName: profile, Actions: actions });
 
 const projectOf = (id: string, profile: string, root: string, state: ProjectState, updatedAt: string): ProjectSummary =>
-  ({ Id: `${profile}/${root}/${id}`, Name: id, State: state, UpdatedAt: updatedAt, RootName: root, ProfileName: profile });
+  ({ Id: `${profile}/${root}/${id}`, Name: id, State: state, UpdatedAt: updatedAt, RootName: root, ProfileName: profile, SharedFolder: false });
 
 const server = (id: string, roots: ProjectRootInfo[], projects: ProjectSummary[], connectionState: ConnectionState = 'connected'): ServerConnection => ({
   serverInfo: { Id: id, Name: `Server ${id}` } as ServerConnection['serverInfo'],

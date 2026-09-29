@@ -75,7 +75,7 @@ ENV PowerShell__Executable=/usr/bin/pwsh
 ENV Claude__Executable=/usr/bin/claude
 
 # The server stays root's, read-only to godmode: a session could otherwise rewrite them.
-# godmode owns only what the server writes: the roots (ProjectRootsDir, /app/roots by default, where
+# godmode owns only what the server writes: the roots (appsettings' scan folder Roots:Scan:default, /app/roots, where
 # a volume goes), the default root's projects when no root is configured, /data, and its home.
 WORKDIR /app
 COPY --from=dotnet-build /app/publish .

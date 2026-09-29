@@ -28,6 +28,8 @@ export interface SidebarItem {
   project: ProjectSummary;
   /** The server's name, set when another connected server has a project of the same name. */
   serverLabel?: string;
+  /** Its action is transient (CreateActionInfo.Transient), as its root lists it: it folds sooner. */
+  transient?: boolean;
 }
 
 export interface RootGroup {
@@ -85,11 +87,20 @@ function collectFilteredData(connections: ServerConnection[], filter: string) {
       if (!itemsByRoot.has(rn)) itemsByRoot.set(rn, []);
       itemsByRoot.get(rn)!.push({ key: projectKey(serverId, p.Id), serverId, project: p });
     }
-    for (const root of conn.roots) {
+    // A project whose root the server no longer lists (removed while its claude runs, or moved to
+    // another profile until it stops) is still shown, under its root's name, with no +
+    const listedRoots = new Set(conn.roots.map(root => rootKey(root.ProfileName, root.Name)));
+    const unlisted: ProjectRootInfo[] = [...itemsByRoot.entries()]
+      .filter(([key]) => !listedRoots.has(key))
+      .map(([, [{ project }]]) => ({ Name: project.RootName ?? 'default', ProfileName: project.ProfileName ?? 'Default', Actions: [] }));
+    for (const root of [...conn.roots, ...unlisted]) {
       const profileName = root.ProfileName ?? 'Default';
       allProfileNames.add(profileName);
       if (filter !== 'All' && profileName.toLowerCase() !== filter.toLowerCase()) continue;
-      allRoots.push({ root, items: itemsByRoot.get(rootKey(root.ProfileName, root.Name)) ?? [], conn, profileName });
+      const items = itemsByRoot.get(rootKey(root.ProfileName, root.Name)) ?? [];
+      const transient = new Set((root.Actions ?? []).filter(a => a.Transient).map(a => a.Name));
+      for (const item of items) item.transient = item.project.ActionName != null && transient.has(item.project.ActionName);
+      allRoots.push({ root, items, conn, profileName });
       representedServerIds.add(serverId);
     }
   }
@@ -194,4 +205,34 @@ export function computeTotalWaiting(
     }
   }
   return total;
+}
+
+// ── Folding (#325): a root with many sessions stays readable. Nothing is deleted by it ──
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * How long a session may have been idle before it folds under "N older": a week, so the list is this
+ * week's work, and a day for a transient action's (a chat, an experiment), which is yesterday's once it
+ * has gone quiet. Its last activity is UpdatedAt, which every change of state moves.
+ */
+export const FOLD_AFTER_MS = 7 * DAY_MS;
+export const TRANSIENT_FOLD_AFTER_MS = 1 * DAY_MS;
+
+/** A session with a claude (working, waiting on the user, or idle between turns) never folds, however old. */
+const LIVE_STATES = new Set(['Running', 'WaitingInput', 'WaitingPermission', 'Idle']);
+
+/** Whether the item folds at `now`: no claude, nothing the caller keeps it for (it needs the user, it is open), and quiet long enough. */
+export function folds(item: SidebarItem, now: number, keep: (item: SidebarItem) => boolean): boolean {
+  if (LIVE_STATES.has(String(item.project.State ?? 'Idle')) || keep(item)) return false;
+  const quiet = now - new Date(item.project.UpdatedAt).getTime();
+  return quiet > (item.transient ? TRANSIENT_FOLD_AFTER_MS : FOLD_AFTER_MS);
+}
+
+/** A group's items split in two, each in the order it had: those shown, and those folded under "N older". */
+export function foldItems(items: SidebarItem[], now: number, keep: (item: SidebarItem) => boolean): { shown: SidebarItem[]; older: SidebarItem[] } {
+  const shown: SidebarItem[] = [];
+  const older: SidebarItem[] = [];
+  for (const item of items) (folds(item, now, keep) ? older : shown).push(item);
+  return { shown, older };
 }

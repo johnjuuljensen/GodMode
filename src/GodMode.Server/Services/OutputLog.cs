@@ -30,19 +30,19 @@ public static class OutputLog
     private const byte NewLine = (byte)'\n';
     private static readonly UTF8Encoding Utf8 = new(false);
 
-    public static string PathOf(string projectPath) => Path.Combine(projectPath, ".godmode", "output.jsonl");
+    public static string PathOf(string statePath) => Path.Combine(statePath, "output.jsonl");
 
-    public static string GenerationPathOf(string projectPath) => Path.Combine(projectPath, ".godmode", "output-generation");
+    public static string GenerationPathOf(string statePath) => Path.Combine(statePath, "output-generation");
 
     /// <summary>
     /// Starts a new generation of the project's output, replacing any it had, and returns it. The
     /// project's <c>.godmode</c> is set up with one, so an ID that is deleted and created again gets
     /// a new one: a client's offset from before is then not taken for an offset in the new file.
     /// </summary>
-    public static string StartGeneration(string projectPath)
+    public static string StartGeneration(string statePath)
     {
         var generation = NewGenerationId();
-        AtomicFile.WriteAllText(GenerationPathOf(projectPath), generation);
+        AtomicFile.WriteAllText(GenerationPathOf(statePath), generation);
         return generation;
     }
 
@@ -53,9 +53,9 @@ public static class OutputLog
     /// <c>.godmode</c> (a create that failed before its script made the folder) has no output: any
     /// generation is right for that, and none is written where the project has no folder.
     /// </summary>
-    public static async Task<string> GenerationAsync(string projectPath, CancellationToken ct = default)
+    public static async Task<string> GenerationAsync(string statePath, CancellationToken ct = default)
     {
-        var path = GenerationPathOf(projectPath);
+        var path = GenerationPathOf(statePath);
         try
         {
             if (await ReadGenerationAsync(path, ct) is { } generation) return generation;
@@ -70,7 +70,7 @@ public static class OutputLog
             finally { File.Delete(temp); }
 
             // A file there but blank (edited by hand) names no generation: this one starts one
-            return await ReadGenerationAsync(path, ct) ?? StartGeneration(projectPath);
+            return await ReadGenerationAsync(path, ct) ?? StartGeneration(statePath);
         }
         catch (DirectoryNotFoundException)
         {
@@ -111,9 +111,9 @@ public static class OutputLog
     /// The offset after the file's last complete line: what a client that has seen everything
     /// resumes from. A trailing line without its <c>\n</c> (a write cut short) is not counted.
     /// </summary>
-    public static long End(string projectPath)
+    public static long End(string statePath)
     {
-        var path = PathOf(projectPath);
+        var path = PathOf(statePath);
         if (!File.Exists(path)) return 0;
         using var stream = OpenRead(path);
         return LastLineEnd(stream);
@@ -130,9 +130,9 @@ public static class OutputLog
     /// The file is read from its end, back only as far as those turns go.</item>
     /// </list>
     /// </summary>
-    public static async Task<long> StartAsync(string projectPath, long fromOffset, CancellationToken ct = default)
+    public static async Task<long> StartAsync(string statePath, long fromOffset, CancellationToken ct = default)
     {
-        var path = PathOf(projectPath);
+        var path = PathOf(statePath);
         if (fromOffset == 0 || !File.Exists(path)) return 0;
 
         await using var stream = OpenRead(path);
@@ -158,10 +158,10 @@ public static class OutputLog
     /// file as it is now, in batches of at most <see cref="MaxBatchLines"/> lines or about
     /// <see cref="MaxBatchBytes"/> bytes. Blank lines are skipped; a line still being written is not read.
     /// </summary>
-    public static async IAsyncEnumerable<IReadOnlyList<OutputLine>> ReadBatchesAsync(string projectPath, long fromOffset,
+    public static async IAsyncEnumerable<IReadOnlyList<OutputLine>> ReadBatchesAsync(string statePath, long fromOffset,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var path = PathOf(projectPath);
+        var path = PathOf(statePath);
         if (!File.Exists(path)) yield break;
 
         await using var stream = OpenRead(path);
@@ -191,8 +191,8 @@ public static class OutputLog
     /// line starts where the last whole one ended. <paramref name="wrap"/> puts a stream of its own
     /// between the writer and the file (a test's, to make a write fail).
     /// </summary>
-    public static Writer OpenWriter(string projectPath, long? end = null, Func<Stream, Stream>? wrap = null) =>
-        new(PathOf(projectPath), end, wrap);
+    public static Writer OpenWriter(string statePath, long? end = null, Func<Stream, Stream>? wrap = null) =>
+        new(PathOf(statePath), end, wrap);
 
     /// <summary>Appends lines and knows the offset after the last one.</summary>
     public sealed class Writer : IAsyncDisposable

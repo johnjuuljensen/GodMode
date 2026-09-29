@@ -24,6 +24,13 @@ public class ScriptRunner : IScriptRunner
     private const int MaxStderrLines = 20;
 
     /// <summary>
+    /// How long a script run for its effect waits after its exit for its stdout and stderr to end, so
+    /// the lines it wrote last are logged and reported before the run goes on. It does not wait for
+    /// them to end: a child the script started in the background can hold its pipes for as long as it lives.
+    /// </summary>
+    internal static readonly TimeSpan DrainAfterExit = TimeSpan.FromSeconds(2);
+
+    /// <summary>
     /// Configuration key for the PowerShell 7 executable that runs <c>.ps1</c> scripts (a name on PATH
     /// or a full path). The Docker image names its own, so a <c>pwsh</c> the session writes into a
     /// directory on PATH is never the one run.
@@ -48,29 +55,13 @@ public class ScriptRunner : IScriptRunner
         string? logFilePath = null,
         CancellationToken cancellationToken = default)
     {
-        StreamWriter? logWriter = null;
-        if (logFilePath != null)
+        using var log = new ScriptLog(logFilePath);
+        foreach (var script in scripts)
         {
-            var logDir = Path.GetDirectoryName(logFilePath);
-            if (logDir != null)
-                Directory.CreateDirectory(logDir);
-            logWriter = new StreamWriter(logFilePath, append: true, Encoding.UTF8) { AutoFlush = true };
-        }
-
-        try
-        {
-            foreach (var script in scripts)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var scriptPath = ResolveScriptPath(script, rootPath);
-                await onProgress($"Running: {Path.GetFileName(scriptPath)}");
-                await RunScriptAsync(script, scriptPath, workingDirectory, environment, onProgress, logWriter, forOutput: false, cancellationToken);
-            }
-        }
-        finally
-        {
-            if (logWriter != null)
-                await logWriter.DisposeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            var scriptPath = ResolveScriptPath(script, rootPath);
+            await onProgress($"Running: {Path.GetFileName(scriptPath)}");
+            await RunScriptAsync(script, scriptPath, workingDirectory, environment, onProgress, log, forOutput: false, cancellationToken);
         }
     }
 
@@ -98,7 +89,7 @@ public class ScriptRunner : IScriptRunner
 
         try
         {
-            await RunScriptAsync(script, scriptPath, workingDirectory, environment, Collect, logWriter: null, forOutput: true, tooMuch.Token);
+            await RunScriptAsync(script, scriptPath, workingDirectory, environment, Collect, ScriptLog.None, forOutput: true, tooMuch.Token);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -117,13 +108,13 @@ public class ScriptRunner : IScriptRunner
         string workingDirectory,
         Dictionary<string, string> environment,
         Func<string, Task> onProgress,
-        StreamWriter? logWriter,
+        ScriptLog log,
         bool forOutput,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation("Running script: {Script}", scriptPath);
-        await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] === Running: {scriptPath} ===");
-        await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Working directory: {workingDirectory}");
+        log.WriteLine($"[{DateTime.UtcNow:O}] === Running: {scriptPath} ===");
+        log.WriteLine($"[{DateTime.UtcNow:O}] Working directory: {workingDirectory}");
 
         var (fileName, args) = GetShellCommand(scriptPath);
 
@@ -151,18 +142,18 @@ public class ScriptRunner : IScriptRunner
 
         process.Exited += (_, _) => exitTcs.TrySetResult(process.ExitCode);
 
-        async void OnStdout(string? line)
+        // Each on its stream's own thread, which logs a line before it reads the next
+        void OnStdout(string? line)
         {
             if (line != null)
             {
-                await LogLineAsync(logWriter, $"[stdout] {line}");
-                try { await onProgress(line); }
-                catch { /* swallow callback errors */ }
+                log.WriteLine($"[stdout] {line}");
+                _ = ReportAsync(onProgress, line);
             }
         }
 
         var stderrLines = new List<string>();
-        async void OnStderr(string? line)
+        void OnStderr(string? line)
         {
             if (line != null)
             {
@@ -171,7 +162,7 @@ public class ScriptRunner : IScriptRunner
                     stderrLines.Add(line);
                     if (forOutput && stderrLines.Count > MaxStderrLines) stderrLines.RemoveAt(0);
                 }
-                await LogLineAsync(logWriter, $"[stderr] {line}");
+                log.WriteLine($"[stderr] {line}");
             }
         }
 
@@ -191,8 +182,13 @@ public class ScriptRunner : IScriptRunner
         // Killed: the exit code says only that
         cancellationToken.ThrowIfCancellationRequested();
         if (forOutput) await read.WaitAsync(cancellationToken);
+        else
+        {
+            try { await read.WaitAsync(DrainAfterExit, cancellationToken); }
+            catch (TimeoutException) { _logger.LogDebug("Script {Script} exited with its output still open", scriptPath); }
+        }
 
-        await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Exit code: {exitCode}");
+        log.WriteLine($"[{DateTime.UtcNow:O}] Exit code: {exitCode}");
 
         if (exitCode != 0)
         {
@@ -204,20 +200,59 @@ public class ScriptRunner : IScriptRunner
 
             // Run for its output, the caller says what the failure means
             if (!forOutput) _logger.LogError("{Message}", message);
-            await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] FAILED: {message}");
+            log.WriteLine($"[{DateTime.UtcNow:O}] FAILED: {message}");
             throw new InvalidOperationException(message);
         }
 
         _logger.LogInformation("Script completed: {Script}", scriptPath);
-        await LogLineAsync(logWriter, $"[{DateTime.UtcNow:O}] Completed: {scriptPath}");
+        log.WriteLine($"[{DateTime.UtcNow:O}] Completed: {scriptPath}");
     }
 
-    private static async Task LogLineAsync(StreamWriter? writer, string line)
+    private static async Task ReportAsync(Func<string, Task> onProgress, string line)
     {
-        if (writer != null)
+        try { await onProgress(line); }
+        catch { /* swallow callback errors */ }
+    }
+
+    /// <summary>
+    /// A run's log file, written from its scripts' stdout and stderr threads at once, and from the run:
+    /// one line at a time under its lock, as a <see cref="StreamWriter"/> takes no two writes at once.
+    /// Best effort: a script never fails over its log, and a line read once it is disposed (after
+    /// <see cref="DrainAfterExit"/>) is dropped.
+    /// </summary>
+    private sealed class ScriptLog : IDisposable
+    {
+        /// <summary>No log: every line is dropped.</summary>
+        public static readonly ScriptLog None = new(null);
+
+        private readonly Lock _gate = new();
+        private StreamWriter? _writer;
+
+        public ScriptLog(string? path)
         {
-            try { await writer.WriteLineAsync(line); }
-            catch { /* best effort — don't fail scripts over log I/O */ }
+            if (path == null) return;
+            if (Path.GetDirectoryName(path) is { Length: > 0 } directory)
+                Directory.CreateDirectory(directory);
+            _writer = new StreamWriter(path, append: true, Encoding.UTF8) { AutoFlush = true };
+        }
+
+        public void WriteLine(string line)
+        {
+            lock (_gate)
+            {
+                try { _writer?.WriteLine(line); }
+                catch { /* best effort — don't fail scripts over log I/O */ }
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_gate)
+            {
+                try { _writer?.Dispose(); }
+                catch { /* best effort */ }
+                _writer = null;
+            }
         }
     }
 

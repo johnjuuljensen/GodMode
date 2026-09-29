@@ -5,7 +5,7 @@ namespace GodMode.Shared.Models;
 /// <summary>
 /// Detailed status information about a project.
 /// </summary>
-/// <param name="Id">The project identifier, <c>{profile}/{root}/{folder}</c>: where its folder is. Opaque to clients, which pass it back as received; not the folder name.</param>
+/// <param name="Id">The session's identifier, <c>{profile}/{root}/{id}</c>, with its id (<c>260929-feat-left-list-k7q2</c>), the name of its state folder, <c>.godmode/sessions/{id}/</c>. Opaque to clients, which pass it back as received; not the folder name.</param>
 /// <param name="Name">The project name.</param>
 /// <param name="State">The current state of the project.</param>
 /// <param name="CreatedAt">The timestamp when the project was created.</param>
@@ -26,6 +26,13 @@ namespace GodMode.Shared.Models;
 /// <see cref="ProjectState.WaitingInput"/> or <see cref="ProjectState.WaitingPermission"/>), so the next
 /// start carries on with it. Null when the project was not active then, was stopped by the user, or
 /// has been launched or resumed since.
+/// </param>
+/// <param name="Kind">What kind of session it is (<c>bug</c>, <c>feat</c>, <c>experiment</c>, <c>chat</c>…): its create script's <c>kind</c>, else its action's name, as its id has it (lowercase <c>[a-z0-9-]</c>). The app labels the session with it.</param>
+/// <param name="ActionName">The action the session was created with, as its <c>settings.json</c> says: the app finds the action's <see cref="CreateActionInfo.Transient"/> by it.</param>
+/// <param name="SharedFolder">
+/// Whether the session shares its working folder (its <c>settings.json</c>'s <c>sharedFolder</c>, or one
+/// that cannot be read): its delete removes only its state, into the folder's trash, and
+/// <see cref="Hubs.IProjectHub.RestoreProject"/> can bring it back. Otherwise the delete removes the working folder.
 /// </param>
 public record ProjectStatus(
     string Id,
@@ -49,5 +56,8 @@ public record ProjectStatus(
     DateTime? QuestionAt = null,
     DateTime? SeenAt = null,
     PullRequestStatus? PullRequest = null,
-    ProjectState? StateAtShutdown = null
+    ProjectState? StateAtShutdown = null,
+    string? Kind = null,
+    string? ActionName = null,
+    bool SharedFolder = false
 );

@@ -23,16 +23,16 @@ vi.mock('../../services/hostApi', () => ({
   getHubOptions: () => ({}),
 }));
 
-const rootNamed = (name: string): ProjectRootInfo => ({
-  Name: name, ProfileName: 'Default',
-  Actions: [{ Name: 'issue', AllowSkipPermissions: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
+const rootNamed = (name: string, profile = 'Default'): ProjectRootInfo => ({
+  Name: name, ProfileName: profile,
+  Actions: [{ Name: 'issue', AllowSkipPermissions: false, Session: true, Transient: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
 });
 
 /** A root whose schema has the Skip Permissions toggle, defaulting on as the dev root's once did; allowed or not by the root. */
 const rootWithSkip = (allowSkipPermissions: boolean): ProjectRootInfo => ({
   Name: 'work', ProfileName: 'Default',
   Actions: [{
-    Name: 'issue', AllowSkipPermissions: allowSkipPermissions,
+    Name: 'issue', AllowSkipPermissions: allowSkipPermissions, Session: true, Transient: false,
     InputSchema: {
       type: 'object',
       properties: {
@@ -57,8 +57,9 @@ const shownServer = () => view!.container.querySelector('.selected-root-server')
 const rootCard = (name: string) => [...view!.container.querySelectorAll<HTMLElement>('.root-picker-card')]
   .find(el => el.querySelector('.root-picker-card-name')?.textContent === name)!;
 const openPage = (page: ActivePage | null) => act(async () => useAppStore.getState().setActivePage(page));
-/** A root's "+": the create page for that root. */
-const openFor = (serverId: string, rootName: string) => openPage({ type: 'createProject', context: { serverId, rootName } });
+/** A root's "+": the create page for that root, in its profile. */
+const openFor = (serverId: string, rootName: string, profileName = 'Default') =>
+  openPage({ type: 'createProject', context: { serverId, profileName, rootName } });
 
 beforeEach(() => {
   useAppStore.setState(initialState, true);
@@ -89,7 +90,7 @@ describe('with a second server connecting late', () => {
     expect(shownServer()).toBe('on Server B');
     expect(titleField().value).toBe('Fix the login');
     await click(button('Create'));
-    expect(hubB.created).toEqual([{ rootName: 'work', actionName: 'issue', inputs: { model: 'opus', title: 'Fix the login' } }]);
+    expect(hubB.created).toEqual([{ profileName: 'Default', rootName: 'work', actionName: 'issue', inputs: { model: 'opus', title: 'Fix the login' } }]);
     expect(hubA.created).toEqual([]);
   });
 });
@@ -117,7 +118,7 @@ describe('on one server with two roots', () => {
     await click(button('Change'));
     await click(rootCard('play'));
     await typeInto(titleField(), 'Play draft');
-    expect(location.hash).toBe('#/create/A/play');
+    expect(location.hash).toBe('#/create/A/Default/play');
 
     await reload();
 
@@ -140,6 +141,37 @@ describe('on one server with two roots', () => {
   });
 });
 
+describe('two profiles with a root of one name', () => {
+  let hub: FakeHub;
+
+  beforeEach(async () => {
+    hub = new FakeHub([], [rootNamed('work', 'Private'), rootNamed('work', 'Mega')]);
+    await connectServers({ A: hub });
+    view = await render(<Shell />);
+  });
+
+  it("creates in the + root's own profile", async () => {
+    await openFor('A', 'work', 'Mega');
+    expect(location.hash).toBe('#/create/A/Mega/work');
+    await typeInto(titleField(), 'Fix the login');
+    await click(button('Create'));
+
+    expect(hub.created).toEqual([{ profileName: 'Mega', rootName: 'work', actionName: 'issue', inputs: { model: 'opus', title: 'Fix the login' } }]);
+  });
+
+  it("keeps a draft for each profile's root", async () => {
+    await openFor('A', 'work', 'Mega');
+    await typeInto(titleField(), 'Mega draft');
+
+    await openFor('A', 'work', 'Private');
+    expect(titleField().value).toBe('');
+    await typeInto(titleField(), 'Private draft');
+
+    await openFor('A', 'work', 'Mega');
+    expect(titleField().value).toBe('Mega draft');
+  });
+});
+
 describe('the Skip Permissions toggle (#233)', () => {
   async function openFormOf(root: ProjectRootInfo) {
     const hub = new FakeHub([], [root]);
@@ -155,7 +187,7 @@ describe('the Skip Permissions toggle (#233)', () => {
 
     expect(skipToggle()).toBeNull();
     await click(button('Create'));
-    expect(hub.created).toEqual([{ rootName: 'work', actionName: 'issue', inputs: { model: 'opus', title: 'Fix the login' } }]);
+    expect(hub.created).toEqual([{ profileName: 'Default', rootName: 'work', actionName: 'issue', inputs: { model: 'opus', title: 'Fix the login' } }]);
   });
 
   it('is shown unchecked where the root allows it, whatever the schema defaults it to', async () => {
@@ -176,10 +208,59 @@ describe('the Skip Permissions toggle (#233)', () => {
   });
 });
 
+describe('an action that starts no session (#324)', () => {
+  /** A provisioning root: its action only runs a script, which makes a new root. */
+  const provisioning: ProjectRootInfo = {
+    Name: 'experiments', ProfileName: 'Default',
+    Actions: [{ Name: 'new-root', AllowSkipPermissions: false, Session: false, Transient: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
+  };
+  const finishedView = () => view!.container.querySelector('.form-success')?.textContent ?? null;
+  const modelPicker = () => [...view!.container.querySelectorAll('.form-group')].find(g => g.querySelector('label')?.textContent === 'Model') ?? null;
+
+  async function openProvisioning(message: string | null) {
+    const hub = new FakeHub([], [provisioning]);
+    hub.createResult = { Project: null, Message: message };
+    await connectServers({ A: hub });
+    view = await render(<Shell />);
+    await openFor('A', 'experiments');
+    await typeInto(titleField(), 'Try it');
+    return hub;
+  }
+
+  it('offers no model, and runs with what was typed', async () => {
+    const hub = await openProvisioning('Root try-it is ready');
+
+    expect(modelPicker()).toBeNull();
+    await click(button('Run'));
+    expect(hub.created).toEqual([{ profileName: 'Default', rootName: 'experiments', actionName: 'new-root', inputs: { title: 'Try it' } }]);
+  });
+
+  it('shows the message and stays where it was, with the form back to its defaults', async () => {
+    await openProvisioning('Root try-it is ready');
+
+    await click(button('Run'));
+
+    expect(finishedView()).toBe('Root try-it is ready');
+    expect(useAppStore.getState().selectedProject).toBeNull();
+    expect(useAppStore.getState().activePage).toEqual({ type: 'createProject', context: { serverId: 'A', profileName: 'Default', rootName: 'experiments' } });
+    expect(shownRoot()).toBe('experiments');
+    expect(titleField().value).toBe('');
+  });
+
+  it('says the action finished when its script gave no message', async () => {
+    await openProvisioning(null);
+
+    await click(button('Run'));
+
+    expect(finishedView()).toBe('new-root finished.');
+    expect(useAppStore.getState().selectedProject).toBeNull();
+  });
+});
+
 it('leaving the page discards the drafts', async () => {
   const hub = new FakeHub([], [rootNamed('work')]);
   await connectServers({ A: hub });
-  const context = { serverId: 'A', rootName: 'work' };
+  const context = { serverId: 'A', profileName: 'Default', rootName: 'work' };
   await openPage({ type: 'createProject', context });
   // Without the Shell, so leaving touches no history
   view = await render(<CreateProject context={context} />);

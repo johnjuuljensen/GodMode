@@ -5,7 +5,7 @@
 import * as signalR from '@microsoft/signalr';
 import type {
   ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, PermissionDetail, AttentionItem,
-  IProjectHub, IProjectHubClient,
+  CreateProjectResult, DeleteProjectResult, IProjectHub, IProjectHubClient,
 } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
@@ -34,6 +34,8 @@ export interface HubCallbacks {
   onProjectCreated?: (status: ProjectStatus) => void;
   onCreationProgress?: (projectId: string, message: string) => void;
   onProjectDeleted?: (projectId: string) => void;
+  /** The server's roots or profiles changed: both are its whole lists, as listProjectRoots and listProfiles return them. */
+  onRootsChanged?: (roots: ProjectRootInfo[], profiles: ProfileInfo[]) => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -130,6 +132,10 @@ export class GodModeHub {
 
     this.on(connection, 'ProjectDeleted', (projectId) => {
       this.callbacks.onProjectDeleted?.(projectId);
+    });
+
+    this.on(connection, 'RootsChanged', (roots, profiles) => {
+      this.callbacks.onRootsChanged?.(roots, profiles);
     });
 
     const link: Link = { connection, retries: 0, timer: null, attemptSince: null, wanted: false };
@@ -261,7 +267,7 @@ export class GodModeHub {
     projectRootName: string,
     actionName: string | null,
     inputs: Record<string, unknown>,
-  ): Promise<ProjectStatus> {
+  ): Promise<CreateProjectResult> {
     return await this.invoke('CreateProject', profileName, projectRootName, actionName, inputs);
   }
 
@@ -325,8 +331,14 @@ export class GodModeHub {
     await this.invoke('UnsubscribeProject', projectId);
   }
 
-  async deleteProject(projectId: string, force: boolean = false): Promise<void> {
-    await this.invoke('DeleteProject', projectId, force);
+  /** Deletes the project: its working folder, or, for a session that shares it, only its state, into the folder's trash (Trashed). */
+  async deleteProject(projectId: string, force: boolean = false): Promise<DeleteProjectResult> {
+    return await this.invoke('DeleteProject', projectId, force);
+  }
+
+  /** Undoes a delete that trashed the session: it is back under the same ID, and pushed as ProjectCreated. */
+  async restoreProject(projectId: string): Promise<ProjectStatus> {
+    return await this.invoke('RestoreProject', projectId);
   }
 
   // ── Utility ──

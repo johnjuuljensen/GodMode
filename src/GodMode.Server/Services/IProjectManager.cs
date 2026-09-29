@@ -29,9 +29,10 @@ public interface IProjectManager
     Task<ProjectStatus> GetStatusAsync(string projectId);
 
     /// <summary>
-    /// Creates a new project using the config-driven workflow.
+    /// Creates a new project using the config-driven workflow, or, for an action that starts no
+    /// session, runs its scripts and tracks nothing (<see cref="CreateProjectResult.Project"/> null).
     /// </summary>
-    Task<ProjectStatus> CreateProjectAsync(CreateProjectRequest request);
+    Task<CreateProjectResult> CreateProjectAsync(CreateProjectRequest request);
 
     /// <summary>
     /// Sends input to a running project.
@@ -81,9 +82,16 @@ public interface IProjectManager
     Task UnsubscribeProjectAsync(string projectId, string connectionId);
 
     /// <summary>
-    /// Deletes a project, running teardown scripts and removing all files.
+    /// Deletes a project: stops it, runs its delete script, and removes its working folder, or, for a
+    /// session that shares its folder, moves only its state to the folder's trash (<see cref="DeleteProjectResult.Trashed"/>).
     /// </summary>
-    Task DeleteProjectAsync(string projectId, bool force = false);
+    Task<DeleteProjectResult> DeleteProjectAsync(string projectId, bool force = false);
+
+    /// <summary>
+    /// Brings a trashed session back under the same ID, Stopped, and pushes it as ProjectCreated: see
+    /// <see cref="GodMode.Shared.Hubs.IProjectHub.RestoreProject"/> for when it refuses.
+    /// </summary>
+    Task<ProjectStatus> RestoreProjectAsync(string projectId);
 
     /// <summary>
     /// Cleans up resources for a disconnected client.
@@ -91,7 +99,10 @@ public interface IProjectManager
     Task CleanupConnectionAsync(string connectionId);
 
     /// <summary>
-    /// Recovers projects from disk on startup.
+    /// Recovers projects from disk on startup, then keeps the roots live: from then on a poll
+    /// (<c>RootsPollSeconds</c>) and a reload of the config read them again, push
+    /// <c>RootsChanged</c> when they changed, recover the sessions of a root that appears and let those
+    /// of a root that goes leave the list once they have no claude.
     /// </summary>
     Task RecoverProjectsAsync();
 
