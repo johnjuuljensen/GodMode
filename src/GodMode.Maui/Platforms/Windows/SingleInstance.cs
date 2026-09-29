@@ -63,7 +63,7 @@ internal static class SingleInstance
         HandOff(args, logger);
         return false;
 #else
-        logger.LogInformation("Single instance: not in this build (debug), so it runs alongside any other");
+        logger.LogInformation("Single instance: this build takes no mutex (a debug build, or SingleInstance=false), so it runs alongside any other");
         return true;
 #endif
     }
