@@ -2,6 +2,7 @@ using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
+using GodMode.Server.Services;
 
 namespace GodMode.Server.Auth;
 
@@ -9,7 +10,7 @@ namespace GodMode.Server.Auth;
 /// The API key of a server with none configured: 256 random bits, generated on its first start into a
 /// file only the server's user can read, and read from there on every later start. The file lives in
 /// the server's own data directory (<see cref="DefaultPath"/>, or <c>Authentication:ApiKeyFile</c>),
-/// never under <c>ProjectRootsDir</c>, where sessions work.
+/// never under a root's folder (a scan folder or an explicit root, <see cref="RootSources"/>), where sessions work.
 /// </summary>
 public static class ApiKeyFile
 {
@@ -27,7 +28,7 @@ public static class ApiKeyFile
             ? Path.Combine(dir, DirectoryName, FileName)
             : null;
 
-    /// <summary>The key file's full path: <c>Authentication:ApiKeyFile</c>, else <see cref="DefaultPath"/>, and not under <c>ProjectRootsDir</c>.</summary>
+    /// <summary>The key file's full path: <c>Authentication:ApiKeyFile</c>, else <see cref="DefaultPath"/>, and under no scan folder or explicit root.</summary>
     public static string PathFrom(IConfiguration config)
     {
         var path = (config[PathSetting] is { Length: > 0 } configured ? configured : DefaultPath())
@@ -36,12 +37,14 @@ public static class ApiKeyFile
                 $"directory to keep a generated one in. Set {AuthModeSelector.ApiKeySetting}, or {PathSetting} to a file this user can write.");
         path = Path.GetFullPath(path);
 
-        var rootsDir = Path.GetFullPath(config["ProjectRootsDir"] is { Length: > 0 } dir ? dir : "roots");
-        var relative = Path.GetRelativePath(rootsDir, path);
-        if (relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar) && !Path.IsPathRooted(relative))
-            throw new StartupConfigurationException(
-                $"GodMode.Server will not start: its API key file, {path}, would be under ProjectRootsDir ({rootsDir}), " +
-                $"where sessions work. Set {PathSetting} to a file outside it, or set {AuthModeSelector.ApiKeySetting}.");
+        foreach (var (setting, folder) in RootSources.From(config).Folders)
+        {
+            var relative = Path.GetRelativePath(folder, path);
+            if (relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar) && !Path.IsPathRooted(relative))
+                throw new StartupConfigurationException(
+                    $"GodMode.Server will not start: its API key file, {path}, would be under {setting} ({folder}), " +
+                    $"where sessions work. Set {PathSetting} to a file outside every root, or set {AuthModeSelector.ApiKeySetting}.");
+        }
         return path;
     }
 

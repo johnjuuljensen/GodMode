@@ -56,7 +56,7 @@ internal sealed class ServerProcess : IDisposable
     /// With <paramref name="ownTerminal"/> the server has a console of its own (Windows) or a session
     /// and process group of its own (<c>setsid</c>, Linux), as a server run in a terminal does: what
     /// a keypress there reaches, a test can reach without reaching itself. Without
-    /// <paramref name="rootsOnCommandLine"/> the server is not told its <c>ProjectRootsDir</c>, and has
+    /// <paramref name="rootsOnCommandLine"/> the server is not told its scan folder (<c>Roots:Scan:default</c>), and has
     /// what its config gives it; <paramref name="arguments"/> go on its command line after the rest.
     /// </summary>
     public static ServerProcess Start(
@@ -83,7 +83,7 @@ internal sealed class ServerProcess : IDisposable
         };
         if (setsid) psi.ArgumentList.Add(dotnet);
         psi.ArgumentList.Add(serverDll);
-        if (rootsOnCommandLine) psi.ArgumentList.Add($"--ProjectRootsDir={rootsDir}");
+        if (rootsOnCommandLine) psi.ArgumentList.Add($"--Roots:Scan:default={rootsDir}");
         psi.ArgumentList.Add($"--Urls={urls}");
         psi.ArgumentList.Add($"--Authentication:ApiKey={apiKey ?? ""}");
         psi.ArgumentList.Add($"--Authentication:ApiKeyFile={KeyFilePath(workDir)}");

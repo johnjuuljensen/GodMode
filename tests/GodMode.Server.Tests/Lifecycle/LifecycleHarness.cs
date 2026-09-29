@@ -43,10 +43,13 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     private readonly CapturingLoggerProvider _logs = new();
     private readonly McpHost? _mcp;
 
+    /// <summary>The setting of the harness's scan folder, <see cref="RootsDir"/>.</summary>
+    public const string ScanSetting = $"{RootSources.ScanSection}:test";
+
     /// <summary>The temp dir everything the harness and the server write lives under.</summary>
     public string WorkDir => _workDir;
 
-    /// <summary>The server's <c>ProjectRootsDir</c>: one subdirectory per root.</summary>
+    /// <summary>The server's one scan folder (<see cref="ScanSetting"/>): one subdirectory per root.</summary>
     public string RootsDir { get; }
 
     public string RootPath { get; }
@@ -67,15 +70,17 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <param name="rootConfig">Extra top-level properties for the root's config.json (for example <c>claudeArgs</c>).</param>
     /// <param name="settings">Extra server configuration, applied over the harness defaults.</param>
     /// <param name="extraRoots">More roots beside <see cref="RootName"/>, each in the profile given, configured as it is.</param>
-    /// <param name="profileEnvironment">The environment of <see cref="ProfileName"/>, in its <c>.profiles/</c> env.json.</param>
+    /// <param name="profileEnvironment">The environment of <see cref="ProfileName"/>, in the server's <c>Profiles:&lt;name&gt;:Environment</c>.</param>
     /// <param name="mcpEndpoint">Serve the MCP endpoint (<see cref="McpHost"/>), so a fake's <c>permission</c> step reaches the server.</param>
+    /// <param name="configFiles">JSON config files after the settings, in order, as the instance's file comes after appsettings.</param>
     public LifecycleHarness(
         FakeScript script,
         IReadOnlyDictionary<string, object>? rootConfig = null,
         IReadOnlyDictionary<string, string?>? settings = null,
         IReadOnlyList<(string Root, string Profile)>? extraRoots = null,
         IReadOnlyDictionary<string, string>? profileEnvironment = null,
-        bool mcpEndpoint = false)
+        bool mcpEndpoint = false,
+        IReadOnlyList<string>? configFiles = null)
     {
         _workDir = ServerProcess.CreateWorkDir("lifecycle");
         RootsDir = Path.Combine(_workDir, "roots");
@@ -85,18 +90,13 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         WriteRootConfig(RootPath, ProfileName, rootConfig);
         foreach (var (root, profile) in extraRoots ?? [])
             WriteRootConfig(Path.Combine(RootsDir, root), profile, rootConfig);
-        if (profileEnvironment != null)
-        {
-            var profileDir = Path.Combine(RootsDir, ".profiles", ProfileName);
-            Directory.CreateDirectory(profileDir);
-            File.WriteAllText(Path.Combine(profileDir, "env.json"), JsonSerializer.Serialize(profileEnvironment));
-        }
-
         var configuration = new Dictionary<string, string?>
         {
-            ["ProjectRootsDir"] = RootsDir,
+            [ScanSetting] = RootsDir,
             [ClaudeProcessManager.ExecutableSetting] = FakeClaudePath,
         };
+        foreach (var (variable, value) in profileEnvironment ?? new Dictionary<string, string>())
+            configuration[$"{RootSources.ProfilesSection}:{ProfileName}:Environment:{variable}"] = value;
         if (mcpEndpoint)
         {
             _mcp = new McpHost(() => Projects!, _logs);
@@ -105,7 +105,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         foreach (var (key, value) in settings ?? new Dictionary<string, string?>())
             configuration[key] = value;
 
-        _configuration = new ConfigurationBuilder().AddInMemoryCollection(configuration).Build();
+        var builder = new ConfigurationBuilder().AddInMemoryCollection(configuration);
+        foreach (var file in configFiles ?? []) builder.AddJsonFile(file, optional: false);
+        _configuration = builder.Build();
         _services = BuildServices(_configuration, _logs, Hub);
         Projects = _services.GetRequiredService<IProjectManager>();
     }
@@ -165,7 +167,6 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
-        services.AddSingleton<ProfileFileManager>();
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();

@@ -87,7 +87,6 @@ builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
 builder.Services.AddSingleton<ProjectLifecycle>();
 builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
-builder.Services.AddSingleton<ProfileFileManager>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
 // GodMode's MCP endpoint, for its sessions' claude: the permission prompt is its only tool. Stateless:

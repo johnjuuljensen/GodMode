@@ -14,7 +14,7 @@ namespace GodMode.Server.Tests;
 /// </summary>
 public class InstanceConfigTests
 {
-    /// <summary>The <c>UserSecretsId</c> the server had: every developer machine keeps its <c>ProjectRootsDir</c> under it.</summary>
+    /// <summary>The <c>UserSecretsId</c> the server had: every developer machine kept its <c>ProjectRootsDir</c> under it.</summary>
     private const string FormerUserSecretsId = "eff7560e-7e44-46f7-b010-7ca1368e1689";
 
     private static void WriteRoot(string rootsDir, string name, string profile)
@@ -53,8 +53,8 @@ public class InstanceConfigTests
         {
             WriteRoot(Path.Combine(workDir, "appsettings-roots"), "from-appsettings", "p");
             WriteRoot(Path.Combine(workDir, "config-roots"), "from-config", "p");
-            WriteJson(Path.Combine(workDir, "appsettings.json"), new { ProjectRootsDir = "appsettings-roots", Instance = "appsettings" });
-            WriteJson(Path.Combine(workDir, "instances", "main.json"), new { ProjectRootsDir = Path.Combine(workDir, "config-roots"), Instance = "main" });
+            WriteJson(Path.Combine(workDir, "appsettings.json"), new { Roots = new { Scan = new { @default = "appsettings-roots" } }, Instance = "appsettings" });
+            WriteJson(Path.Combine(workDir, "instances", "main.json"), new { Roots = new { Scan = new { @default = Path.Combine(workDir, "config-roots") } }, Instance = "main" });
 
             using var server = ServerProcess.Start(workDir, "http://127.0.0.1:0", rootsOnCommandLine: false,
                 arguments: ["--config", Path.Combine("instances", "main.json")]);
@@ -111,7 +111,7 @@ public class InstanceConfigTests
 
     /// <summary>
     /// A dev server run as <c>dotnet run</c> runs (Development) with no config file: the user secrets
-    /// every worktree once shared, and their <c>ProjectRootsDir</c>, are not read. It runs on the
+    /// every worktree once shared, and the roots they name, are not read. It runs on the
     /// server's own appsettings.
     /// </summary>
     [Fact]
@@ -125,7 +125,7 @@ public class InstanceConfigTests
             WriteRoot(usersRoots, "users-root", "user");
             var appData = Path.Combine(workDir, "appdata");
             WriteJson(Path.Combine(appData, "Microsoft", "UserSecrets", FormerUserSecretsId, "secrets.json"),
-                new Dictionary<string, string> { ["ProjectRootsDir"] = usersRoots });
+                new Dictionary<string, string> { ["ProjectRootsDir"] = usersRoots, ["Roots:Scan:user"] = usersRoots });
 
             using var server = ServerProcess.Start(workDir, "http://127.0.0.1:0", rootsOnCommandLine: false,
                 environment: new Dictionary<string, string> { ["ASPNETCORE_ENVIRONMENT"] = "Development", ["APPDATA"] = appData });
@@ -133,7 +133,7 @@ public class InstanceConfigTests
 
             Assert.DoesNotContain(roots, root => root.Name == "users-root");
             Assert.Contains("Config file: none", server.Output);
-            Assert.Contains("scanning roots for", server.Output);
+            Assert.Contains($"Roots from Roots:Scan:default: {Path.Combine(workDir, "roots")}", server.Output);
         }
         finally
         {
@@ -159,7 +159,7 @@ public class InstanceConfigTests
             Assert.Contains(await ListRootsAsync(await StartAsync(main)), root => root.Name == "shared");
 
             using var dev = ServerProcess.Start(devDir, "http://127.0.0.1:0", rootsOnCommandLine: false,
-                arguments: ["--Instance=dev", $"--ProjectRootsDir={Path.Combine(mainDir, "roots")}"]);
+                arguments: ["--Instance=dev", $"--Roots:Scan:default={Path.Combine(mainDir, "roots")}"]);
             var devUrl = await StartAsync(dev);
 
             Assert.DoesNotContain(await ListRootsAsync(devUrl), root => root.Name == "shared");

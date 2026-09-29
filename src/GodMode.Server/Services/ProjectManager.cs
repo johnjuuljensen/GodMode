@@ -53,7 +53,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private readonly IRootConfigReader _rootConfigReader;
     private readonly IScriptRunner _scriptRunner;
     private readonly IHubContext<ProjectHub, IProjectHubClient> _hubContext;
-    private readonly ProfileFileManager _profileFileManager;
     private readonly ILogger<ProjectManager> _logger;
     private readonly ConcurrentDictionary<string, ProjectInfo> _projects = new();
     private readonly IServer? _server;
@@ -87,11 +86,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         remove => _lifecycle.OnProjectCompleted -= value;
     }
 
-    /// <summary>
-    /// Optional directory to scan for autodiscovered roots.
-    /// Null when autodiscovery is disabled.
-    /// </summary>
-    private readonly string? _projectRootsDir;
+    /// <summary>The server's configuration, where its roots and profiles are read from on every rebuild (<see cref="RootSources"/>).</summary>
+    private readonly IConfiguration _configuration;
+
+    /// <summary>The roots skipped for a clash, and the explicit roots whose folder is missing, by full path: each logged once while it lasts.</summary>
+    private readonly HashSet<string> _loggedClashes = new(PathComparer);
+    private readonly HashSet<string> _loggedMissingRoots = new(PathComparer);
 
     /// <summary>Which server this is, in the roots it holds and in the logs: <c>Instance</c>, <c>default</c> unless configured.</summary>
     public const string InstanceSetting = "Instance";
@@ -137,7 +137,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         IRootConfigReader rootConfigReader,
         IScriptRunner scriptRunner,
         IHubContext<ProjectHub, IProjectHubClient> hubContext,
-        ProfileFileManager profileFileManager,
         IConfiguration configuration,
         IHostApplicationLifetime lifetime,
         ILogger<ProjectManager> logger,
@@ -148,7 +147,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         _rootConfigReader = rootConfigReader;
         _scriptRunner = scriptRunner;
         _hubContext = hubContext;
-        _profileFileManager = profileFileManager;
         _logger = logger;
         _server = server;
         _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -162,12 +160,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         _instance = configuration[InstanceSetting] is { Length: > 0 } instance ? instance : DefaultInstance;
         _logger.LogInformation("Server instance {Instance}", _instance);
 
-        // Read optional autodiscovery directory (normalize empty/whitespace to null)
-        var rawDir = configuration["ProjectRootsDir"];
-        _projectRootsDir = string.IsNullOrWhiteSpace(rawDir) ? null : rawDir;
-
-        if (_projectRootsDir != null)
-            _logger.LogInformation("Autodiscovery enabled: scanning {ProjectRootsDir} for .godmode-root/ directories", _projectRootsDir);
+        _configuration = configuration;
+        foreach (var (setting, folder) in RootSources.From(configuration).Folders)
+            _logger.LogInformation("Roots from {Setting}: {Folder}", setting, folder);
 
         // Build initial profile/root snapshot, taking the roots no other server holds
         lock (_profileLock) _snapshot = BuildSnapshot();
@@ -237,49 +232,27 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Builds an immutable snapshot of all profile/root state: the profiles in .profiles/, with the
-    /// roots autodiscovered in ProjectRootsDir. Thread-safe — can be called from any thread.
+    /// Builds an immutable snapshot of all profile/root state: the roots its config names
+    /// (<see cref="RootSources"/>), read fresh, grouped by profile, each profile with its settings.
+    /// Thread-safe — can be called from any thread.
     /// </summary>
     private ProfileSnapshot BuildSnapshot()
     {
-        // Layer 1: File-based profiles from .profiles/ directory
+        var sources = RootSources.From(_configuration);
         var merged = new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (name, data) in _profileFileManager.ReadAllProfiles())
+        foreach (var root in FindRoots(sources))
         {
-            merged[name] = new ProfileConfig
+            if (!merged.TryGetValue(root.Profile, out var profile))
             {
-                Roots = new Dictionary<string, string>(),
-                Environment = data.Environment,
-                Description = data.Description
-            };
-        }
-
-        // Layer 2: Autodiscovered roots from ProjectRootsDir
-        if (_projectRootsDir != null)
-        {
-            var discovered = DiscoverProfiles(_projectRootsDir);
-            foreach (var (profileName, profileConfig) in discovered)
-            {
-                if (merged.TryGetValue(profileName, out var existing))
+                sources.Profiles.TryGetValue(root.Profile, out var settings);
+                merged[root.Profile] = profile = new ProfileConfig
                 {
-                    // Explicit profiles take precedence — merge only new root names
-                    var mergedRoots = new Dictionary<string, string>(existing.Roots, StringComparer.OrdinalIgnoreCase);
-                    foreach (var (rootName, rootPath) in profileConfig.Roots)
-                    {
-                        mergedRoots.TryAdd(rootName, rootPath);
-                    }
-                    merged[profileName] = new ProfileConfig
-                    {
-                        Roots = mergedRoots,
-                        Environment = existing.Environment,
-                        Description = existing.Description ?? profileConfig.Description
-                    };
-                }
-                else
-                {
-                    merged[profileName] = profileConfig;
-                }
+                    Roots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                    Environment = settings is { Environment.Count: > 0 } ? new Dictionary<string, string>(settings.Environment) : null,
+                    Description = settings?.Description ?? root.Description,
+                };
             }
+            profile.Roots[root.Name] = root.Path;
         }
 
         // One server per root: before the default, so a server all of whose roots are held elsewhere has what a server with no roots has
@@ -404,54 +377,76 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
     }
 
+    /// <summary>A root as its source found it, with the profile it goes in.</summary>
+    private sealed record FoundRoot(string Name, string Path, string Profile, string? Description, string Source);
+
     /// <summary>
-    /// Scans a directory for subdirectories containing .godmode-root/ and builds profiles from them.
-    /// Roots with the same profileName in config.json are grouped into one profile.
-    /// Roots without profileName become their own single-root profile (named after the directory).
+    /// The roots <paramref name="sources"/> name: the explicit ones, then each scan folder's, in ordinal
+    /// order of their keys. One name, one root per server, and one folder, one root: an explicit root
+    /// wins a clash, and between scan folders the first key does. Each loser is logged once, with both
+    /// paths, while the clash lasts. A root's profile is its config.json's <c>profileName</c>, else its
+    /// explicit entry's <c>Profile</c>, else <c>Default</c>.
     /// </summary>
-    private Dictionary<string, ProfileConfig> DiscoverProfiles(string rootsDir)
+    private List<FoundRoot> FindRoots(RootSources sources)
     {
-        var fullPath = Path.GetFullPath(rootsDir);
-        if (!Directory.Exists(fullPath))
+        var roots = new List<FoundRoot>();
+        var byName = new Dictionary<string, FoundRoot>(StringComparer.OrdinalIgnoreCase);
+        var byPath = new Dictionary<string, FoundRoot>(PathComparer);
+        var clashes = new HashSet<string>(PathComparer);
+
+        void Add(string name, string path, string? entryProfile, string source)
         {
-            _logger.LogDebug("ProjectRootsDir {RootsDir} does not exist, skipping autodiscovery", fullPath);
-            return new Dictionary<string, ProfileConfig>();
-        }
-
-        var profiles = new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var subDir in Directory.GetDirectories(fullPath))
-        {
-            var godModeRootDir = Path.Combine(subDir, ProjectFiles.ProjectFolder.RootConfigFolderName);
-            if (!Directory.Exists(godModeRootDir))
-                continue;
-
-            var dirName = Path.GetFileName(subDir);
+            // The same folder found again under the same name (an explicit root in a scan folder) is that root
+            if (byPath.TryGetValue(path, out var samePath) && string.Equals(samePath.Name, name, StringComparison.OrdinalIgnoreCase))
+                return;
+            if ((byName.TryGetValue(name, out var winner) ? winner : byPath.GetValueOrDefault(path)) is { } taken)
+            {
+                clashes.Add(path);
+                if (_loggedClashes.Add(path))
+                    _logger.LogWarning("Root {Name} at {Path} ({Source}) is skipped: it clashes with the root {Winner} at {WinnerPath} ({WinnerSource}), " +
+                        "which wins. A server has one root per name and per folder",
+                        name, path, source, taken.Name, taken.Path, taken.Source);
+                return;
+            }
             try
             {
-                var config = _rootConfigReader.ReadConfig(subDir);
-                var profileName = config.ProfileName ?? "Default";
-
-                if (!profiles.TryGetValue(profileName, out var existingProfile))
-                {
-                    existingProfile = new ProfileConfig
-                    {
-                        Roots = new Dictionary<string, string>(),
-                        Description = config.Description
-                    };
-                    profiles[profileName] = existingProfile;
-                }
-
-                existingProfile.Roots[dirName] = subDir;
-                _logger.LogDebug("Discovered root '{RootName}' → profile '{ProfileName}' at {Path}", dirName, profileName, subDir);
+                var config = _rootConfigReader.ReadConfig(path);
+                var root = new FoundRoot(name, path, config.ProfileName ?? entryProfile ?? "Default", config.Description, source);
+                roots.Add(root);
+                byName[name] = root;
+                byPath[path] = root;
+                _logger.LogDebug("Found root '{RootName}' → profile '{ProfileName}' at {Path} ({Source})", name, root.Profile, path, source);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to read config for discovered root at {Path}, skipping", subDir);
+                _logger.LogWarning(ex, "Failed to read config for root at {Path}, skipping", path);
             }
         }
 
-        return profiles;
+        foreach (var root in sources.ExplicitRoots)
+        {
+            var setting = $"{RootSources.ExplicitSection}:{root.Name}";
+            if (Directory.Exists(root.Path))
+                Add(root.Name, root.Path, root.Profile, setting);
+            else if (_loggedMissingRoots.Add(root.Path))
+                _logger.LogWarning("Root {Name} at {Path} ({Setting}:Path) does not exist: skipped until it does", root.Name, root.Path, setting);
+        }
+        foreach (var scan in sources.ScanFolders)
+        {
+            var setting = $"{RootSources.ScanSection}:{scan.Key}";
+            if (!Directory.Exists(scan.Folder))
+            {
+                _logger.LogDebug("Scan folder {Folder} ({Setting}) does not exist, skipping it", scan.Folder, setting);
+                continue;
+            }
+            foreach (var subDir in Directory.GetDirectories(scan.Folder).Order(StringComparer.Ordinal))
+                if (Directory.Exists(Path.Combine(subDir, ProjectFiles.ProjectFolder.RootConfigFolderName)))
+                    Add(Path.GetFileName(subDir), FullPath(subDir), null, setting);
+        }
+
+        _loggedClashes.IntersectWith(clashes);
+        _loggedMissingRoots.IntersectWith(sources.ExplicitRoots.Select(root => root.Path).Where(path => !Directory.Exists(path)));
+        return roots;
     }
 
     private static (Dictionary<(string, string), string>, Dictionary<string, (string, string)>) BuildRootLookups(
@@ -546,9 +541,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     public Task<ProfileInfo[]> ListProfilesAsync()
     {
-        // Rebuild to pick up newly added autodiscovered roots
-        if (_projectRootsDir != null)
-            RebuildSnapshot();
+        // Rebuild to pick up roots added on the host or in config
+        RebuildSnapshot();
 
         var snap = _snapshot;
         var profiles = snap.Profiles.Select(kvp =>
@@ -560,9 +554,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     public Task<ProjectRootInfo[]> ListProjectRootsAsync()
     {
-        // Rebuild to pick up newly added autodiscovered roots
-        if (_projectRootsDir != null)
-            RebuildSnapshot();
+        // Rebuild to pick up roots added on the host or in config
+        RebuildSnapshot();
 
         var snap = _snapshot;
         var roots = snap.RootLookup.Select(kvp =>
@@ -1519,9 +1512,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     public async Task RecoverProjectsAsync()
     {
-        // Rebuild snapshot to include autodiscovered roots before recovery
-        if (_projectRootsDir != null)
-            RebuildSnapshot();
+        // Rebuild to pick up roots added on the host or in config
+        RebuildSnapshot();
 
         var recoverSnap = _snapshot;
         _logger.LogInformation("Recovering projects from all project roots");

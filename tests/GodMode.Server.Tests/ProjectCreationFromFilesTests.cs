@@ -10,8 +10,8 @@ using Microsoft.Extensions.DependencyInjection;
 namespace GodMode.Server.Tests;
 
 /// <summary>
-/// Configuration is edited as files on the host. A root laid out on disk, with a profile under
-/// .profiles/, must still list its custom schema and run its create script, without any in-app
+/// Configuration is edited as files on the host. A root laid out on disk, in a profile the server's
+/// config describes, must still list its custom schema and run its create script, without any in-app
 /// editor having touched it.
 /// </summary>
 public class ProjectCreationFromFilesTests
@@ -72,15 +72,11 @@ public class ProjectCreationFromFilesTests
     }
 
     /// <summary>
-    /// One root, "shipit", in profile "team" (a profile directory with a description), with an
-    /// "issue" action that has its own schema.json and create script.
+    /// One root, "shipit", in profile "team", with an "issue" action that has its own schema.json
+    /// and create script.
     /// </summary>
     private static void WriteRootAndProfile(string rootsDir)
     {
-        var profileDir = Path.Combine(rootsDir, ".profiles", "team");
-        Directory.CreateDirectory(profileDir);
-        File.WriteAllText(Path.Combine(profileDir, "profile.json"), """{ "description": "The team's roots" }""");
-
         var godModeRoot = Path.Combine(rootsDir, "shipit", ".godmode-root");
         Directory.CreateDirectory(Path.Combine(godModeRoot, "issue"));
         File.WriteAllText(Path.Combine(godModeRoot, "config.json"), """
@@ -114,7 +110,8 @@ public class ProjectCreationFromFilesTests
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ProjectRootsDir"] = Path.Combine(workDir, "roots"),
+            ["Roots:Scan:test"] = Path.Combine(workDir, "roots"),
+            ["Profiles:team:Description"] = "The team's roots",
         }).Build();
 
         var services = new ServiceCollection();
@@ -127,7 +124,6 @@ public class ProjectCreationFromFilesTests
         services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
-        services.AddSingleton<ProfileFileManager>();
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();

@@ -95,7 +95,7 @@ public class ProjectResumeBridgeTests
         return File.ReadAllText(args[index + 1]);
     }
 
-    /// <summary>The root <c>work</c> in the server's ProjectRootsDir: a <c>.godmode-root</c> with no config, so the default action.</summary>
+    /// <summary>The root <c>work</c> in the server's scan folder: a <c>.godmode-root</c> with no config, so the default action.</summary>
     private static string WriteRoot(string workDir)
     {
         var rootPath = Path.Combine(workDir, "roots", "work");
@@ -118,7 +118,7 @@ public class ProjectResumeBridgeTests
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ProjectRootsDir"] = Path.Combine(workDir, "roots"),
+            ["Roots:Scan:test"] = Path.Combine(workDir, "roots"),
         }).Build();
 
         var services = new ServiceCollection();
@@ -131,7 +131,6 @@ public class ProjectResumeBridgeTests
         services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
-        services.AddSingleton<ProfileFileManager>();
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();

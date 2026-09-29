@@ -18,7 +18,7 @@ public class OneServerPerRootTests
     private static Dictionary<string, string?> Instance(string name, string? rootsDir = null)
     {
         var settings = new Dictionary<string, string?> { [ProjectManager.InstanceSetting] = name };
-        if (rootsDir != null) settings["ProjectRootsDir"] = rootsDir;
+        if (rootsDir != null) settings[LifecycleHarness.ScanSetting] = rootsDir;
         return settings;
     }
 
