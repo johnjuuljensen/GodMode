@@ -422,7 +422,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>Whether a project this server tracks, or one it is creating, is in the root at <paramref name="rootPath"/>.</summary>
     private bool HasProjectIn(string rootPath) =>
         _projects.Values.Select(project => project.ProjectPath).Concat(CreatingPaths())
-            .Any(path => WhyNotAProjectFolderOf(rootPath, path) is null);
+            .Any(path => WhyNotAWorkingFolderOf(rootPath, path, shared: true) is null);
 
     /// <summary>The folders creates in progress have claimed, copied under their lock.</summary>
     private string[] CreatingPaths()
@@ -603,7 +603,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// or null when it can. It must be strictly under the root, links followed on both where the OS
     /// allows (a link in the root to a folder elsewhere is that folder), and its first folder under the
     /// root must be no folder the root keeps for itself (<c>{root}/.godmode-root/scripts</c> is the root's).
-    /// A delete of the project deletes its folder recursively.
+    /// A delete of the project deletes its folder recursively, so the root itself is never one: a folder
+    /// of its own is the only kind a delete removes (<see cref="DeleteDirectoryRobustAsync"/>).
     /// </summary>
     private static string? WhyNotAProjectFolderOf(string rootPath, string path)
     {
@@ -614,6 +615,41 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             ? "is inside a folder the project root uses for itself"
             : null;
     }
+
+    /// <summary>
+    /// Why <paramref name="path"/> cannot be the working folder of a session of the root at
+    /// <paramref name="rootPath"/>, or null when it can: a project folder of the root
+    /// (<see cref="WhyNotAProjectFolderOf"/>), or, for a session that shares its folder
+    /// (<paramref name="shared"/>), the root itself too. A root is then its own workspace: an existing
+    /// repo whose sessions run at its top level, and whose delete never removes a folder.
+    /// </summary>
+    private static string? WhyNotAWorkingFolderOf(string rootPath, string path, bool shared) =>
+        IsTheRoot(rootPath, path)
+            ? shared ? null : "is the project root itself, which only an action that shares its folder (\"sharedFolder\": true) may work in"
+            : WhyNotAProjectFolderOf(rootPath, path);
+
+    /// <summary>
+    /// Why <paramref name="path"/> is not GodMode's state in the working folder <paramref name="workingFolder"/>
+    /// of the root at <paramref name="rootPath"/>, or null when it is: the folder is a working folder of
+    /// the root (the root itself included, <see cref="WhyNotAWorkingFolderOf"/>), and the path, links
+    /// followed, is in its <c>.godmode/</c> where it seems: a link at <c>.godmode</c> or below it (to a
+    /// folder outside the root, say) is refused, so a move or delete of the state takes nothing elsewhere.
+    /// </summary>
+    private static string? WhyNotStateOf(string rootPath, string workingFolder, string path)
+    {
+        if (WhyNotAWorkingFolderOf(rootPath, workingFolder, shared: true) is { } reason)
+            return $"its working folder {workingFolder} {reason}";
+        var relative = Path.GetRelativePath(FullPath(workingFolder), FullPath(path));
+        if (relative.Split(Path.DirectorySeparatorChar)[0] != ProjectFiles.ProjectFolder.GodModeDirectoryName || relative.Split(Path.DirectorySeparatorChar).Contains(".."))
+            return $"is not in {workingFolder}'s {ProjectFiles.ProjectFolder.GodModeDirectoryName}";
+        return PathComparer.Equals(ResolveLinks(path), FullPath(Path.Join(ResolveLinks(workingFolder), relative)))
+            ? null
+            : $"is reached through a link in {workingFolder}'s {ProjectFiles.ProjectFolder.GodModeDirectoryName}";
+    }
+
+    /// <summary>Whether <paramref name="path"/> is the root at <paramref name="rootPath"/> itself, links followed on both.</summary>
+    private static bool IsTheRoot(string rootPath, string path) =>
+        Path.GetRelativePath(ResolveLinks(rootPath), ResolveLinks(path)) == ".";
 
     /// <summary>
     /// The full path of <paramref name="path"/> with every link along it followed, as far as it exists
@@ -798,7 +834,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // One project per ID, and per folder unless its action shares folders: a tracked project's
         // claude would be orphaned, and its files overwritten, and a delete of either would remove
         // the other's. Claimed before a folder is reused or any script runs, until registered
-        using var claims = new CreateClaims(this, action.SharedFolder);
+        using var claims = new CreateClaims(this, action.SharedFolder, rootPath);
         claims.Claim(projectId, projectPath);
 
         // Unless the scripts create the project directory (e.g. git worktree add). Its session's
@@ -906,7 +942,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         {
             try
             {
-                (projectPath, folder) = ValidateScriptProjectPath(overridePath, rootPath);
+                (projectPath, folder) = ValidateScriptProjectPath(overridePath, rootPath, action.SharedFolder);
                 // Nor may a script's folder be a tracked project's
                 claims.Claim(projectId, projectPath);
             }
@@ -917,6 +953,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 RegisterFailedCreate(project, ex.Message);
                 throw;
             }
+            // The folder this create made is not the session's any more: a delete of the create, should
+            // it fail, never takes the script's folder (the root itself, say) for one it made
+            if (!PathComparer.Equals(FullPath(project.ProjectPath), projectPath)) project.MadeSharedFolder = false;
             project.ProjectPath = projectPath;
             _logger.LogInformation("Script overrode project path to {ProjectPath}", projectPath);
         }
@@ -1109,9 +1148,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// from before anything is written until the project is registered or the create has failed.
     /// The ID is always the create's alone. The folder is too, unless the create's action shares
     /// folders (<paramref name="shared"/>): then other creates and sessions may have it, as long as
-    /// they all share it. Disposing it gives the claims up.
+    /// they all share it. The folder is in the root at <paramref name="rootPath"/>. Disposing it gives the claims up.
     /// </summary>
-    private sealed class CreateClaims(ProjectManager manager, bool shared) : IDisposable
+    private sealed class CreateClaims(ProjectManager manager, bool shared, string rootPath) : IDisposable
     {
         private readonly List<string> _ids = [];
         private readonly List<string> _paths = [];
@@ -1143,7 +1182,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             }
             if (manager._projects.ContainsKey(projectId))
                 throw new ProjectInUseException(projectId, "a project with this ID exists");
-            if (manager.WhyFolderIsInUse(path, shared) is { } reason)
+            if (manager.WhyFolderIsInUse(path, shared, rootPath) is { } reason)
                 throw new ProjectInUseException(projectId, reason);
         }
 
@@ -1169,10 +1208,16 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// Why a new session cannot have the working folder <paramref name="path"/> (a full path), or null
     /// when it can. A session that does not share its folder needs one no other session has, tracked
     /// or only on disk in its <c>.godmode/sessions/</c>: its delete removes the folder. One that shares
-    /// it (<paramref name="shared"/>) may join sessions that share it too, and no other kind.
+    /// it (<paramref name="shared"/>) may join sessions that share it too, and no other kind. Nor may
+    /// one that does not share its folder have any folder in the root at <paramref name="rootPath"/>
+    /// while the root is its own workspace (<see cref="WhyRootIsAWorkspace"/>): its folders are the
+    /// repo's, and the session's delete would remove the one it has.
     /// </summary>
-    private string? WhyFolderIsInUse(string path, bool shared)
+    private string? WhyFolderIsInUse(string path, bool shared, string rootPath)
     {
+        if (!shared && WhyRootIsAWorkspace(rootPath) is { } workspace)
+            return $"the root {rootPath} is its own workspace ({workspace}), so a session of an action that does not share its folder (sharedFolder) may have no folder in it: its delete would remove {path}";
+
         var tracked = _projects.Values.Where(p => PathComparer.Equals(FullPath(p.ProjectPath), path)).ToArray();
         if (tracked.FirstOrDefault(p => !shared || !p.SharedFolder) is { } holder)
             return holder.SharedFolder
@@ -1185,6 +1230,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             ? $"session {other} has its state in {path}"
             : null;
     }
+
+    /// <summary>
+    /// Why the root at <paramref name="rootPath"/> is its own workspace, or null when it is not: a
+    /// session works in the root itself, tracked, or with its state or trash in the root's own
+    /// <c>.godmode/</c>.
+    /// </summary>
+    private string? WhyRootIsAWorkspace(string rootPath) =>
+        _projects.Values.FirstOrDefault(p => IsTheRoot(rootPath, p.ProjectPath)) is { } tracked ? $"session {tracked.Status.Id} works in it"
+        : ProjectFiles.SessionState.List(rootPath).FirstOrDefault() is { } onDisk ? $"session {onDisk} has its state in it"
+        : ProjectFiles.SessionState.ListTrashed(rootPath).FirstOrDefault() is { } trashed ? $"session {trashed} is in its trash"
+        : null;
 
     public async Task SendInputAsync(string projectId, string input)
     {
@@ -1573,7 +1629,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var snap = _snapshot;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
         var othersInFolder = OthersInFolder(project);
-        var sharedFolder = project.SharedFolder || othersInFolder;
+        // A session in the root itself shares the root's folder, whatever its settings say: the root is never deleted
+        var inTheRoot = IsTheRoot(project.RootPath, project.ProjectPath);
+        var sharedFolder = project.SharedFolder || othersInFolder || inTheRoot;
         try
         {
             if (project.Status.RootName != null && profileName != null)
@@ -1622,10 +1680,10 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // process shutdown)
         var trashed = false;
         var folderGoes = !sharedFolder
-            || (project.MadeSharedFolder && !othersInFolder && !Directory.Exists(project.StatePath) && !IsClaimedByCreate(project.ProjectPath)
-                && ProjectFiles.SessionState.ListTrashed(project.ProjectPath).Count == 0);
+            || (project.MadeSharedFolder && !inTheRoot && !othersInFolder && !Directory.Exists(project.StatePath) && !IsClaimedByCreate(project.ProjectPath)
+                && ProjectFiles.SessionState.ListTrashed(project.ProjectPath).Count == 0 && HoldsNothingButGodMode(project.ProjectPath));
         if (folderGoes)
-            await DeleteDirectoryRobustAsync(project.ProjectPath, project.RootPath);
+            await DeleteDirectoryRobustAsync(project.ProjectPath, WhyNotAProjectFolderOf(project.RootPath, project.ProjectPath));
         else
             trashed = await TrashSessionStateAsync(project);
 
@@ -1645,6 +1703,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         : RootSources.From(_configuration).Profiles.TryGetValue(profileName, out var settings) && settings.Environment.Count > 0
             ? new Dictionary<string, string>(settings.Environment)
             : null;
+
+    /// <summary>
+    /// Whether the folder at <paramref name="path"/> is empty but for its <c>.godmode</c>, or gone: a
+    /// folder a failed create made goes with its delete only then, never with what came into it since.
+    /// </summary>
+    private static bool HoldsNothingButGodMode(string path) =>
+        !Directory.Exists(path) || Directory.EnumerateFileSystemEntries(path)
+            .All(entry => string.Equals(Path.GetFileName(entry), ProjectFiles.ProjectFolder.GodModeDirectoryName, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Whether a create in progress has claimed the folder at <paramref name="path"/>.</summary>
     private bool IsClaimedByCreate(string path)
@@ -1943,7 +2009,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         // As a create into the folder would claim it: no create in progress has the ID or owns the
         // folder, and no session that owns the folder is in it now
-        using (var claims = new CreateClaims(this, shared: true))
+        using (var claims = new CreateClaims(this, shared: true, rootPath))
         {
             claims.Claim(projectId, folder);
             var statePath = ProjectFiles.SessionState.Restore(folder, sessionId);
@@ -1974,7 +2040,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 var trashed = ProjectFiles.SessionState.TrashedPathOf(folder, sessionId);
                 try
                 {
-                    await DeleteDirectoryRobustAsync(trashed, rootPath);
+                    await DeleteDirectoryRobustAsync(trashed, WhyNotStateOf(rootPath, folder, trashed));
                     _logger.LogInformation("Purged {ProjectId} from the trash of {Folder}", ProjectId(profile, root, sessionId), folder);
                 }
                 catch (Exception ex)
@@ -2258,7 +2324,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             // The offset is output.jsonl's, not status.json's, which is saved less often than output is written
             var outputOffset = OutputLog.End(statePath);
             // What the app is told of the session's settings is settings.json's, not status.json's
-            var sharedFolder = !settingsRead || settings.SharedFolder;
+            // A session in the root itself shares it, whatever its settings say: its delete never takes the root
+            var sharedFolder = !settingsRead || settings.SharedFolder || IsTheRoot(rootPath, projectPath);
             var fromSettings = status with { ActionName = settings.ActionName, SharedFolder = sharedFolder };
             var correctedStatus = stateChanged
                 ? fromSettings with { Id = id, Kind = kind, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
@@ -2400,15 +2467,16 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>
     /// Robustly deletes a directory, handling read-only files and retrying on lock conflicts.
     /// Git directories on Windows often have read-only or temporarily locked files.
-    /// Refused, and nothing deleted, unless the path is a project folder of the project's root, the
-    /// root it was created or recovered in (<see cref="WhyNotAProjectFolderOf"/>): a project whose
-    /// folder is elsewhere is forgotten, its folder left be.
+    /// Refused, and nothing deleted, when the caller has a reason it may not go (<paramref name="whyNot"/>):
+    /// a project's folder that is no project folder of the root it was created or recovered in
+    /// (<see cref="WhyNotAProjectFolderOf"/>, which the root itself never is), whose project is forgotten
+    /// and its folder left be; or a trashed state folder whose working folder is none of its root's.
     /// </summary>
-    private async Task DeleteDirectoryRobustAsync(string path, string rootPath)
+    private async Task DeleteDirectoryRobustAsync(string path, string? whyNot)
     {
         if (!Directory.Exists(path)) return;
-        if (WhyNotAProjectFolderOf(rootPath, path) is not null)
-            throw new InvalidOperationException($"The project folder '{path}' is not inside a project root, so it is not deleted.");
+        if (whyNot is not null)
+            throw new InvalidOperationException($"The folder '{path}' is not inside a project root as a folder of its own ({whyNot}), so it is not deleted.");
 
         for (int attempt = 0; attempt < 3; attempt++)
         {
@@ -2451,13 +2519,15 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// its folder, which <see cref="RestoreProjectAsync"/> undoes until the trash is purged
     /// (<see cref="PurgeTrashAsync"/>). A move a file lock refuses is tried again, as a robust delete
     /// is. False when the session had no state folder (a create that failed before it was made).
-    /// Refused, and nothing moved, unless the folder is a project folder of the session's root.
+    /// Refused, and nothing moved, unless the state folder and its place in the trash are where they
+    /// seem, in a working folder of the session's root (<see cref="WhyNotStateOf"/>).
     /// </summary>
     private async Task<bool> TrashSessionStateAsync(ProjectInfo project)
     {
         if (!Directory.Exists(project.StatePath)) return false;
-        if (WhyNotAProjectFolderOf(project.RootPath, project.StatePath) is not null)
-            throw new InvalidOperationException($"The session's state '{project.StatePath}' is not inside a project root, so it is not moved.");
+        var trashedPath = ProjectFiles.SessionState.TrashedPathOf(project.ProjectPath, project.SessionId);
+        if ((WhyNotStateOf(project.RootPath, project.ProjectPath, project.StatePath) ?? WhyNotStateOf(project.RootPath, project.ProjectPath, trashedPath)) is { } reason)
+            throw new InvalidOperationException($"The session's state '{project.StatePath}' is not inside a project root ({reason}), so it is not moved.");
         for (var attempt = 0; ; attempt++)
         {
             try
@@ -2547,16 +2617,19 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     /// <summary>
     /// The full path and folder name of a create script's <c>project_path</c>. Refused unless it is a
-    /// project folder of its own root (<see cref="WhyNotAProjectFolderOf"/>), and its folder name is a
-    /// folder of its own (<c>x/..</c> is not): a delete of the project would delete that recursively.
+    /// working folder of its own root for the action (<see cref="WhyNotAWorkingFolderOf"/>: a project
+    /// folder of the root, or the root itself for an action that shares its folder), and a project
+    /// folder's name is a folder of its own (<c>x/..</c> is not): a delete of the project would delete
+    /// that recursively.
     /// </summary>
-    private static (string Path, string Folder) ValidateScriptProjectPath(string projectPath, string rootPath)
+    private static (string Path, string Folder) ValidateScriptProjectPath(string projectPath, string rootPath, bool shared)
     {
         var fullPath = FullPath(projectPath);
-        if (WhyNotAProjectFolderOf(rootPath, fullPath) is { } reason)
+        if (WhyNotAWorkingFolderOf(rootPath, fullPath, shared) is { } reason)
             throw new ArgumentException($"The create script's project_path '{projectPath}' {reason}.");
         var folder = Path.GetFileName(fullPath);
-        ProjectFiles.ProjectFolder.ValidateFolderName(folder, "project_path");
+        if (!IsTheRoot(rootPath, fullPath))
+            ProjectFiles.ProjectFolder.ValidateFolderName(folder, "project_path");
         return (fullPath, folder);
     }
 

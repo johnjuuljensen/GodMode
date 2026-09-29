@@ -368,7 +368,7 @@ A create script can override the project's `project_path`, `project_name` or `pr
 
 | Key | What it sets |
 |-----|--------------|
-| `project_path` | The working folder, strictly inside the root (see [Project Folder Structure](#project-folder-structure)) |
+| `project_path` | The working folder, strictly inside the root, or the root itself for an action with `"sharedFolder": true` (see [Project Folder Structure](#project-folder-structure) and [A root as its own workspace](#a-root-as-its-own-workspace)) |
 | `project_name` | The display name, and the id's slug |
 | `project_prompt` | The first prompt |
 | `kind` | The session's kind (`bug`, `feat`, `experiment`, `chat`…): the label the app shows, and the id's kind. Without one, the kind is the action's name. Kept as the id has it: lowercase `[a-z0-9-]`, 12 characters at most |
@@ -485,7 +485,7 @@ A project's state follows claude, whatever else fails:
 
 ## Project Folder Structure
 
-Every session has a working folder under its root, and keeps its state in that folder's `.godmode/sessions/<id>/`. The same layout serves every kind of root: a worktree is a working folder with one session, and an assistant's workspace a working folder with several ([below](#several-sessions-in-one-folder)).
+Every session has a working folder in its root, and keeps its state in that folder's `.godmode/sessions/<id>/`. The same layout serves every kind of root: a worktree is a working folder with one session, and an assistant's workspace a working folder with several ([below](#several-sessions-in-one-folder)), which may be the root itself ([A root as its own workspace](#a-root-as-its-own-workspace)).
 
 ```
 {root}/{folder}/
@@ -526,6 +526,34 @@ New-Item -ItemType Directory -Force $workspace | Out-Null
 - **Recovery** finds every session in the folder, as it finds any other. A session whose `settings.json` is missing or cannot be read is taken as sharing its folder, so its delete removes only its state.
 - **The sessions can read each other's state.** It is all inside their shared working directory: another session's `output.jsonl`, and its `mcp-config.json` with its token while its claude runs. That token only lets a session ask permission prompts as the other one, never answer them. Put sessions that must not see each other in separate folders.
 
+### A root as its own workspace
+
+An existing repo can be a root without moving it: a `.godmode-root/` in the repo, and an action whose sessions share their folder and whose create script returns **the root itself** as `project_path`. Its sessions run at the repo's top level, several at once, as in any shared folder. There is no flag: a `project_path` equal to the root is accepted for an action with `"sharedFolder": true`, and refused for any other ("is the project root itself, which only an action that shares its folder may work in"), whose delete would remove the folder.
+
+```json
+{ "sharedFolder": true, "scriptsCreateFolder": true, "create": "scripts/create.ps1" }
+```
+
+```powershell
+# .godmode-root/scripts/create.ps1
+$ErrorActionPreference = 'Stop'
+"project_path=$env:GODMODE_ROOT_PATH`nkind=chat" | Set-Content $env:GODMODE_RESULT_FILE
+```
+
+- **`scriptsCreateFolder: true`.** Without it the server makes a folder for the session's name in the root before the create script runs, as it does for every action whose scripts make no folder, and a `project_path` naming the root leaves that folder behind, empty, in the repo.
+- **What the server keeps in the root:** `.godmode/` (the sessions' state and trash, with its own `.gitignore` of `*`) and `logs/` (the create logs and result files, and the root's lock, with a `.gitignore` of `*` too). Both stay out of git on their own. `.godmode-root/` is yours: to keep it out of git without a commit, add it to the repo's local exclude, `.git/info/exclude`, where the server writes nothing:
+
+  ```
+  .godmode-root/
+  ```
+
+  Then `git status` in the repo shows nothing of GodMode's. A repo that tracks a `logs/` or `.godmode/` of its own gives it to the server: the server appends `*` to that folder's `.gitignore`, and git then ignores every new file in it.
+- **A delete never removes the root, or any of its files.** A session in the root is always taken as sharing it, whatever its `settings.json` says, its action says now, or `GODMODE_FORCE` is: the delete script runs with `GODMODE_SHARED_FOLDER=true`, and the server moves only `.godmode/sessions/<id>/` to `.godmode/trash/<id>/`. A create into the root that failed takes nothing with its delete but a folder the create made for its name, and only while that folder is still empty but for its `.godmode`. The purge deletes only `.godmode/trash/<id>/`, and neither follows a link at `.godmode` or below it.
+- **A delete script is told `GODMODE_PROJECT_PATH` = the root.** One that removes its project's folder must check `GODMODE_SHARED_FOLDER` first, or it deletes the repo; a root that is its own workspace needs no delete script at all.
+- **Recovery** finds the root's sessions in its own `.godmode/sessions/`, as it finds any working folder's.
+- **The root's `.godmode` is its own**: no session is given a folder of that name ([below](#project-folder-structure)), so no "Reuse folder" can take the root's sessions.
+- **No session that owns its folder, while the root is its own workspace.** As long as a session works in the root (tracked, or with its state or trash in the root's `.godmode/`), a create for an action that does not share its folder is refused ("is its own workspace"), reused or new, before anything is written: its folder would be one of the repo's, and its delete would remove it. That holds for the default action too, which a missing `config.json`, or a typo in `sharedFolder`, falls back to.
+
 ### The trash, and folding
 
 A session that shares its folder is deleted at once in the app, with "Deleted · Undo" for 10 seconds: its delete is undone, not confirmed. A worktree's delete removes the folder, which nothing brings back, so the app asks first.
@@ -540,7 +568,7 @@ A session that shares its folder is deleted at once in the app, with "Deleted ·
 
 **`.godmode/.gitignore` ignores everything in `.godmode`**, which holds the MCP config with the session's token while claude runs. The server makes sure of it when it sets up the session and on every launch, before it writes that config: it writes the file when missing (a checkout can bring a `.godmode/` without one), and appends the `*` rule to one that lacks it, keeping its lines.
 
-**A session is a folder in `.godmode/sessions/`** of a working folder directly inside its root, named as an id is (below), with a `status.json` in it. A folder the root keeps for itself (below) is no working folder: a `logs/.godmode/sessions/…` from before those names were refused is not recovered, so it is never listed, resumed or deleted. Nothing deeper is recovered, and the server moves no folder anywhere. **The old flat layout is not read:** a `.godmode/status.json` directly in `.godmode/` is no session, and nothing migrates it. An id found in two working folders of one root (a folder copied) is recovered from the first, in ordinal order, and the other is logged and left untracked.
+**A session is a folder in `.godmode/sessions/`** of the root itself or of a working folder directly inside it, named as an id is (below), with a `status.json` in it. A folder the root keeps for itself (below) is no working folder: a `logs/.godmode/sessions/…` from before those names were refused is not recovered, so it is never listed, resumed or deleted. Nothing deeper is recovered, and the server moves no folder anywhere. **The old flat layout is not read:** a `.godmode/status.json` directly in `.godmode/` is no session, and nothing migrates it. An id found in two working folders of one root (a folder copied) is recovered from the first, in ordinal order, and the other is logged and left untracked.
 
 **Session ID.** A session's id is GodMode's own, `yymmdd-<kind>-<slug>-<suffix>`: the server's local date when it was created, its kind, a slug of its name (lowercase `[a-z0-9-]`, with `æ`/`ø`/`å` spelled `ae`/`oe`/`aa` and other accents dropped, at most 24 characters, and left out when the name has none), and 4 random base32 characters. It is short, for Windows' path limits, and unique within its root: a create picks another suffix when a tracked session, a create in progress, or a state folder on disk in one of the root's working folders has it. It is not Claude's session GUID, which is in `session-id`: GodMode replaces that when a resume finds no conversation.
 
@@ -548,11 +576,11 @@ A session that shares its folder is deleted at once in the app, with "Deleted ·
 
 The folder name comes from the project's name: spaces become underscores, characters that are invalid in a file name are dropped, and so are trailing dots, which Windows drops from a folder name (`foo.` is the folder `foo`). A name that leaves no folder of its own (empty, `.`, `..`, or dots only) is refused before anything is created or run. So is a folder name, reused or returned by a script, that ends in a dot or a space, and a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, with or without an extension: `nul.txt`), on every OS, so a root's projects are the same on every host.
 
-A create script's `project_path` must be strictly inside the script's own root: not the root, not above it, not in a sibling root or anywhere else. Links are followed where the OS allows, so a link in the root to a folder elsewhere is that folder, and refused.
+A create script's `project_path` must be strictly inside the script's own root: not above it, not in a sibling root or anywhere else, and not the root itself unless its action shares its folder ([A root as its own workspace](#a-root-as-its-own-workspace)). Links are followed where the OS allows, so a link in the root to a folder elsewhere is that folder, and refused.
 
-A root keeps some folders for itself at its top level, and no project may be one of them or inside one, whether named in the create dialog, reused (`__reuseExisting`), or returned as a create script's `project_path` (`{root}/.godmode-root/scripts` is refused): `.godmode-root` (the root's config and scripts), `logs` (its script logs and result files) and `.archived` (left over from archiving, which is gone). A delete of such a project would delete that folder. They are compared ignoring case and trailing dots and spaces, as Windows compares folder names, on every OS. A refused name creates nothing; a refused `project_path` leaves the create `Error` in the folder it was given.
+A root keeps some folders for itself at its top level, and no project may be one of them or inside one, whether named in the create dialog, reused (`__reuseExisting`), or returned as a create script's `project_path` (`{root}/.godmode-root/scripts` is refused): `.godmode-root` (the root's config and scripts), `logs` (its script logs and result files), `.godmode` (the state of the sessions that work in the root itself) and `.archived` (left over from archiving, which is gone). A delete of such a project would delete that folder. They are compared ignoring case and trailing dots and spaces, as Windows compares folder names, on every OS. A refused name creates nothing; a refused `project_path` leaves the create `Error` in the folder it was given.
 
-**A delete removes only a project folder inside a root.** Before it deletes a project's folder, the server checks it as it checks a `project_path`: strictly inside a configured root, links followed, not in a folder the root keeps for itself. A folder that is not (its root was removed from the config while the project was tracked, or the folder was replaced by a link) is left on disk; the delete fails saying so, after the delete scripts ran and the project was forgotten.
+**A delete removes only a project folder inside a root, never the root.** Before it deletes a project's folder, the server checks it as it checks a `project_path` of an action that does not share its folder: strictly inside a configured root, links followed, not in a folder the root keeps for itself. A folder that is not (its root was removed from the config while the project was tracked, or the folder was replaced by a link) is left on disk; the delete fails saying so, after the delete scripts ran and the project was forgotten.
 
 **`session-id` is only ever a GUID**, which is what the server asks for (`--session-id`) and what claude reports in `system/init`. The session can write the file itself, and the value is the argument after `--resume`, so a saved value that is not a GUID (`--settings=x` would be read as a flag) is logged and treated as no session: the resume starts a fresh session on a new GUID, told to carry on from the work in the folder, as it does when claude has no conversation for the session. A `system/init` reporting a session that is not a GUID is logged and ignored.
 
