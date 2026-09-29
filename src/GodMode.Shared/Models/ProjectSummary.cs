@@ -14,6 +14,8 @@ namespace GodMode.Shared.Models;
 /// <param name="PendingQuestion">The AskUserQuestion waiting for an answer, as in <see cref="ProjectStatus.PendingQuestion"/>.</param>
 /// <param name="PullRequest">The project's pull request, as in <see cref="ProjectStatus.PullRequest"/>.</param>
 /// <param name="Kind">The session's kind, its label, as in <see cref="ProjectStatus.Kind"/>.</param>
+/// <param name="ActionName">The session's action, as in <see cref="ProjectStatus.ActionName"/>.</param>
+/// <param name="SharedFolder">Whether its delete removes only its state, as in <see cref="ProjectStatus.SharedFolder"/>.</param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -25,5 +27,7 @@ public record ProjectSummary(
     PendingPermission? PendingPermission = null,
     PendingQuestion? PendingQuestion = null,
     PullRequestStatus? PullRequest = null,
-    string? Kind = null
+    string? Kind = null,
+    string? ActionName = null,
+    bool SharedFolder = false
 );

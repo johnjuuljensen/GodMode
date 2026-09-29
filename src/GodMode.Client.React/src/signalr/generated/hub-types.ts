@@ -132,6 +132,8 @@ export interface CreateActionInfo {
    * model for it, and its create returns no project to open (CreateProjectResult).
    */
   Session: boolean;
+  /** Whether the action's sessions are short-lived (CreateAction.Transient): the app folds them sooner. */
+  Transient: boolean;
 }
 
 /**
@@ -146,6 +148,16 @@ export interface CreateProjectResult {
    * `message=`), for the app to show; null when it wrote none. Always null with a project.
    */
   Message?: string | null;
+}
+
+/** What a delete did with the session's files. */
+export interface DeleteProjectResult {
+  /**
+   * The session shared its working folder: only its state went, moved to the folder's `.godmode/trash/`, and
+   * IProjectHub.RestoreProject brings it back until the trash is purged. False when the delete removed the
+   * working folder, which nothing brings back.
+   */
+  Trashed: boolean;
 }
 
 /** Git status information for a project. */
@@ -335,6 +347,17 @@ export interface ProjectStatus {
    * action's name, as its id has it (lowercase `[a-z0-9-]`). The app labels the session with it.
    */
   Kind?: string | null;
+  /**
+   * The action the session was created with, as its `settings.json` says: the app finds the action's
+   * CreateActionInfo.Transient by it.
+   */
+  ActionName?: string | null;
+  /**
+   * Whether the session shares its working folder (its `settings.json`'s `sharedFolder`, or one that cannot
+   * be read): its delete removes only its state, into the folder's trash, and IProjectHub.RestoreProject can
+   * bring it back. Otherwise the delete removes the working folder.
+   */
+  SharedFolder: boolean;
 }
 
 /** Summary information about a project. */
@@ -362,6 +385,10 @@ export interface ProjectSummary {
   PullRequest?: PullRequestStatus | null;
   /** The session's kind, its label, as in ProjectStatus.Kind. */
   Kind?: string | null;
+  /** The session's action, as in ProjectStatus.ActionName. */
+  ActionName?: string | null;
+  /** Whether its delete removes only its state, as in ProjectStatus.SharedFolder. */
+  SharedFolder: boolean;
 }
 
 /**
@@ -491,8 +518,21 @@ export interface IProjectHub {
   SubscribeProject(projectId: string, fromOffset: number, subscriptionId: string, generation: string | null): Promise<void>;
   /** Unsubscribes from output events from a project. */
   UnsubscribeProject(projectId: string): Promise<void>;
-  /** Deletes a project, running teardown scripts and removing all files. */
-  DeleteProject(projectId: string, force?: boolean): Promise<void>;
+  /**
+   * Deletes a project: stops it, runs its root's delete script (force is passed to it as `GODMODE_FORCE`),
+   * which may refuse, and then removes its files. A session that shares its working folder loses only its
+   * state, moved to the folder's `.godmode/trash/` (DeleteProjectResult.Trashed); any other loses its working
+   * folder.
+   */
+  DeleteProject(projectId: string, force?: boolean): Promise<DeleteProjectResult>;
+  /**
+   * Undoes a delete that trashed the session (DeleteProjectResult.Trashed): its state goes back to
+   * `.godmode/sessions/` and it is tracked again, Stopped, under the same ID, pushed as
+   * IProjectHubClient.ProjectCreated. Its delete script is not undone. It fails, and changes nothing, when
+   * the session is not in the trash (purged, or never trashed), when its root is no longer listed under the
+   * profile and name in its ID (removed, or renamed), or when its folder no longer takes it.
+   */
+  RestoreProject(projectId: string): Promise<ProjectStatus>;
   /**
    * Checks whether a CLI command is available on the server (in PATH). Returns the resolved path if found,
    * null if not.

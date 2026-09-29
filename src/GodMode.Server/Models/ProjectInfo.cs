@@ -40,6 +40,13 @@ public class ProjectInfo
     public bool SharedFolder { get; set; }
 
     /// <summary>
+    /// Whether this session's create made its shared working folder, which did not exist before: the
+    /// delete of a create that failed before the session had its state removes that folder too, when
+    /// no other session has joined it. In memory only, as such a create is (it has no status.json).
+    /// </summary>
+    public bool MadeSharedFolder { get; set; }
+
+    /// <summary>
     /// claude's session GUID (<c>--session-id</c>, <c>--resume</c>), kept in <c>session-id</c> in the state folder.
     /// Not the session's id: GodMode replaces it when a resume finds no conversation.
     /// </summary>

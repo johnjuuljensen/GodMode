@@ -96,6 +96,8 @@ Live root updates start once the startup's recovery has run: from then on every 
 - **A root that goes** (its folder or `.godmode-root/` removed, its entry taken out of the config, or it loses a name clash): its sessions without a claude, running or launching, leave the list (`ProjectDeleted`), their files left as they are, and come back if the root does. A session whose claude runs carries on, under its root's config as it was read from its folder, and leaves once claude has exited. The server holds the root's lock until its last session has left, so no other server takes it meanwhile.
 - **A root's `profileName` edited, or its explicit entry renamed**: its sessions' IDs (`{profile}/{root}/{id}`) name the profile and the root, so each session takes the ID the root has now, as a restart would give it. One without a claude does so at once: its old ID is pushed as `ProjectDeleted`, its new one as `ProjectCreated`, and its `status.json` is rewritten. One whose claude runs keeps its ID, which its MCP config carries, until claude exits, then does the same.
 - **Two reads in a row** must agree before a session leaves or changes its ID: a `config.json` saved half-written reads as the default config, in the `Default` profile, and a folder can blink.
+- **A busy session waits for a later read.** A read lets a session go under its lock, which a delete, stop or launch of it holds: it waits 2 seconds at most, then leaves it for the next read, so a delete script that runs long holds up no read of the roots.
+- **A delete script gets its session's profile environment** even once the root has left that profile (moved to another, or removed) while claude ran: from the snapshot while the profile has roots, else from the config's `Profiles:<name>:Environment`.
 
 ### Executables
 
@@ -247,6 +249,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `promptTemplate` | Derive initial prompt from inputs |
 | `scriptsCreateFolder` | If true, create scripts are responsible for creating the project directory |
 | `sharedFolder` | If true, the action's sessions share their working folder (an assistant's workspace): a create may go into a folder other sessions of shared actions use, and a delete removes only the session's state, never the folder. Default `false`: a folder another session uses is refused. See [Several sessions in one folder](#several-sessions-in-one-folder) |
+| `transient` | Whether the action's sessions are short-lived (chats, experiments): the app folds them under "N older" after a day of quiet, not a week. Default `false`. In `config.json` it is every action's; an overlay sets it for its action. Nothing is deleted by it. See [The trash, and folding](#the-trash-and-folding) |
 | `session` | Whether the action starts a session. Default `true`. `false`: its scripts run, and nothing more, as a provisioning action does. See [Actions that start no session](#actions-that-start-no-session) |
 | `resumeOnRestart` | Whether a project that was active when the server stopped carries on when it starts again. Default `true`: see [Resuming after a restart](#resuming-after-a-restart) |
 | `resumePrompt` | What a project that was working when the server stopped is told when it is resumed. Default `"The GodMode server restarted and interrupted you. Continue where you left off."` |
@@ -488,6 +491,8 @@ Every session has a working folder under its root, and keeps its state in that f
 {root}/{folder}/
 ├── .godmode/
 │   ├── .gitignore               # "*": everything in .godmode is out of git
+│   ├── trash/
+│   │   └── {id}/                # A deleted shared session's state, until RestoreProject or the purge
 │   └── sessions/
 │       └── {id}/                # One session's state, e.g. 260929-feat-left-list-k7q2
 │           ├── status.json      # Current state
@@ -516,9 +521,22 @@ New-Item -ItemType Directory -Force $workspace | Out-Null
 
 - **Opt-in per action.** Without `sharedFolder`, a create whose folder another session uses, tracked or only its state on disk, is refused ("is in use"): that keeps a worktree root from two sessions in one worktree. Shared and unshared never mix: a shared create may not join a session that owns its folder (its delete would remove the folder), and an unshared one may not join a folder that sessions share.
 - **Each session is its own.** Its state in `.godmode/sessions/<id>/`, its `output.jsonl`, its MCP config and token, its claude process, and its create log and result file (`{root}/logs/<id>.log`, `.result`). A create's claim is its ID's; creates into one shared folder at once share the folder's. The claude processes run in the same working folder; Claude Code keeps a transcript per session, so their histories do not collide, and edits to the same files at once are the user's to avoid.
-- **A delete removes only the session's state.** The delete script runs with `GODMODE_SESSION_ID` and `GODMODE_SHARED_FOLDER=true`, then the server removes `.godmode/sessions/<id>/` and nothing else: never the folder or its files, not even with the folder's last session. A session counts as sharing when its `settings.json` says it was created so (`sharedFolder`, kept there so a config changed later does not turn a workspace into one a delete removes), its action shares folders now, or another session has the folder. The folder-removal rules below are for folders one session owns.
+- **A delete removes only the session's state, into the trash.** The delete script runs with `GODMODE_SESSION_ID` and `GODMODE_SHARED_FOLDER=true`, then the server moves `.godmode/sessions/<id>/` to `.godmode/trash/<id>/` and touches nothing else: never the folder or its files, not even with the folder's last session. `RestoreProject` undoes it ([below](#the-trash-and-folding)). A shared create that failed before its session had its state, in a folder that create made and no other session has come into, takes that folder with its delete. A session counts as sharing when its `settings.json` says it was created so (`sharedFolder`, kept there so a config changed later does not turn a workspace into one a delete removes), its action shares folders now, or another session has the folder. The folder-removal rules below are for folders one session owns.
+- **A shared folder that is missing is made**, and one that is there is used as it is, so two creates making one new workspace at once both have it.
 - **Recovery** finds every session in the folder, as it finds any other. A session whose `settings.json` is missing or cannot be read is taken as sharing its folder, so its delete removes only its state.
 - **The sessions can read each other's state.** It is all inside their shared working directory: another session's `output.jsonl`, and its `mcp-config.json` with its token while its claude runs. That token only lets a session ask permission prompts as the other one, never answer them. Put sessions that must not see each other in separate folders.
+
+### The trash, and folding
+
+A session that shares its folder is deleted at once in the app, with "Deleted · Undo" for 10 seconds: its delete is undone, not confirmed. A worktree's delete removes the folder, which nothing brings back, so the app asks first.
+
+- **The trash.** The delete of a session that shares its folder moves its state, whole, to `.godmode/trash/<id>/` in its working folder, with a `trashed-at` file (UTC, round-trip). `DeleteProject` says so (`DeleteProjectResult.Trashed`). Nothing in the trash is a session: it is not recovered, listed or resumed. Its id stays taken in its root, so no new session gets it while it can be restored.
+- **Restore.** `RestoreProject(projectId)` moves the state back to `.godmode/sessions/<id>/` and tracks it again, `Stopped`, **under the same ID**, pushed to every client as `ProjectCreated`. Its settings then say it shares its folder, so its next delete trashes it again. The delete script is not undone. It reads the roots first and fails, changing nothing, when:
+  - the ID's `{profile}/{root}/` names no root the server lists now, compared as written: the root was removed, its `profileName` changed or it was renamed, and it would come back under another ID;
+  - the session is not in that root's trash (purged, or its delete removed its folder), or a session of its id has its state there;
+  - the folder no longer takes it: a create into it is in progress that owns it, or a session that owns its folder is in it now.
+- **The purge.** The server deletes trashed sessions older than `TrashRetentionSeconds` (86400, a day) at every start, before recovery, and every `TrashPurgeSeconds` (3600; `0` leaves only the start's). A trash without its `trashed-at` is dated by its folder. The app offers Undo for 10 seconds; the day is for a restart in between, and a restore by hand.
+- **Folding** is the app's alone: nothing on the server hides or deletes a session. It folds a session under "N older" in its root when it has no claude (`Stopped` or `Error`), needs nothing of the user, is not open, and has been quiet (`UpdatedAt`) a week, or a day when its action is `transient` (`ProjectSummary.ActionName`, and `CreateActionInfo.Transient` of its root's listed action).
 
 **`.godmode/.gitignore` ignores everything in `.godmode`**, which holds the MCP config with the session's token while claude runs. The server makes sure of it when it sets up the session and on every launch, before it writes that config: it writes the file when missing (a checkout can bring a `.godmode/` without one), and appends the `*` rule to one that lacks it, keeping its lines.
 
@@ -585,7 +603,8 @@ Projects:
 - `Task ResumeProject(projectId)` — Resume stopped project; it is `Idle` until the user writes
 - `Task SubscribeProject(projectId, fromOffset, subscriptionId, generation)` — Replay `output.jsonl` from `fromOffset` (the byte offset after the last line the client has; 0 for all, `-N` for the last N turns) in `OutputBatch` messages, then `OutputReplayComplete`, then live `OutputReceived` lines, each line once and in order. `subscriptionId` is the client's own, echoed by this subscription's batches and complete; `generation` is the output generation `fromOffset` is in (null when the client holds none), and a positive offset in any other replays from 0
 - `Task UnsubscribeProject(projectId)` — Unsubscribe from output
-- `Task DeleteProject(projectId, force)` — Stop the project, run delete scripts and remove it; a refused delete leaves it `Stopped`
+- `Task<DeleteProjectResult> DeleteProject(projectId, force)` — Stop the project, run delete scripts and remove it; a refused delete leaves it `Stopped`. A session that shares its folder is moved to the folder's trash (`Trashed`), any other loses its working folder
+- `Task<ProjectStatus> RestoreProject(projectId)` — Undo a delete that trashed the session: back under the same ID, `Stopped`, pushed as `ProjectCreated`; fails when its root is not listed under its ID's profile and name now, or it is not in the trash (see [The trash, and folding](#the-trash-and-folding))
 
 Attention:
 - `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Review`, `Finished`), oldest first, with a short plain `Text`; the same after a restart
