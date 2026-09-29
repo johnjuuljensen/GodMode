@@ -1,7 +1,9 @@
 using System.Security.Claims;
+using System.Text.Json;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
 using GodMode.Shared.Hubs;
+using GodMode.Shared.Models;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -37,6 +39,10 @@ internal sealed class HarnessConnection
         Hub().SubscribeProject(projectId, outputOffset, subscriptionId, generation);
 
     public Task UnsubscribeAsync(string projectId) => Hub().UnsubscribeProject(projectId);
+
+    /// <summary>Creates as the app's Create project does, through the hub, which announces a project it made (ProjectCreated).</summary>
+    public Task<CreateProjectResult> CreateProjectAsync(string profileName, string rootName, string? actionName, Dictionary<string, JsonElement> inputs) =>
+        Hub().CreateProject(profileName, rootName, actionName, inputs);
 
     /// <summary>The connection drops: the hub hears it, and SignalR takes it out of its groups.</summary>
     public async Task DisconnectAsync()
