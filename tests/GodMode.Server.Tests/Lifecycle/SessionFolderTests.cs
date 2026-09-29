@@ -205,7 +205,7 @@ public class SessionFolderTests
         Assert.True(File.Exists(McpConfigPath(harness, created.Id)), "the MCP config is not there while claude runs");
         var status = Git(harness.ProjectPath(created.Id), "status --porcelain --untracked-files=all");
         // The fake records its launches in the folder it runs in; that is the fake's, not GodMode's
-        Assert.Equal([], status.Where(line => !line.EndsWith("fake-claude.jsonl", StringComparison.Ordinal)));
+        Assert.Equal([], status.Where(line => !(line.Contains("fake-claude-", StringComparison.Ordinal) && line.EndsWith(".jsonl", StringComparison.Ordinal))));
     }
 
     private static string McpConfigPath(LifecycleHarness harness, string projectId) =>

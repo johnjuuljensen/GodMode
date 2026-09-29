@@ -95,7 +95,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 **Config-Driven Project Roots (Multi-File)**
 - A root is a folder with a `.godmode-root/` folder of config files in it. The server's config names where they are, as keyed maps (so sources merge entry by entry): scan folders (`Roots:Scan:<key>`, each immediate subfolder with `.godmode-root/` is a root; appsettings' `default` is `roots`) and explicit roots anywhere on disk (`Roots:Explicit:<name>:Path`, optional `:Profile`). One name, one root per server: an explicit root wins a clash, then the first scan key in ordinal order
 - A root's profile is its `config.json`'s `profileName`, else its explicit entry's `Profile`, else `Default`. A profile's description and environment are `Profiles:<name>:Description` and `Profiles:<name>:Environment:<VAR>` (the root's `environment` wins a clash); secrets stay in environment variables (`Profiles__<name>__Environment__<VAR>`). `ProjectRootsDir` and `.profiles/` are gone
-- `config.json` defines base/shared config (profileName, prepare, delete, status, environment, claudeArgs, model, permissionMode, allowSkipPermissions)
+- `config.json` defines base/shared config (profileName, prepare, delete, status, environment, claudeArgs, model, permissionMode, allowSkipPermissions, sharedFolder)
 - Roots and profiles are maintained by hand on the host (the instance's config file, the roots' folders): no hub method writes config, and the server archives nothing
 - GodMode gives a session one MCP server, the server's own `/mcp` endpoint, whose only tool is the permission prompt, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
 - `config.{action}.json` files define per-action overlays (merged with base)
@@ -131,7 +131,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 │   └── sessions/
 │       └── {id}/                  # One session's state; id yymmdd-{kind}-{slug}-{suffix}, e.g. 260929-feat-left-list-k7q2
 │           ├── status.json        # Current state, metrics, kind
-│           ├── settings.json      # The session's settings (action, permission mode, skip-permissions asked for)
+│           ├── settings.json      # The session's settings (action, permission mode, skip-permissions asked for, shared folder)
 │           ├── input.jsonl        # User input log
 │           ├── output.jsonl       # Claude output stream (GodMode's own; Claude's transcripts are not read)
 │           ├── output-generation  # Changes when output.jsonl starts over, so clients drop what they hold
@@ -139,7 +139,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 │           └── mcp-config.json    # While claude runs: the session's MCP config, with its token
 └── (project files)                # Working directory for Claude
 ```
-The same layout for every kind of root: a worktree is a working folder with one session (one per folder for now). A session's opaque ID is `{profile}/{root}/{id}`, the id unique within its root. Its kind (`ProjectStatus.Kind`, the app's label) is the create script's `kind=` result, else the action's name. The old flat `.godmode/status.json` is not read or migrated.
+The same layout for every kind of root: a worktree is a working folder with one session, and an assistant's workspace one with several. Several sessions share a folder only when their action says `"sharedFolder": true`: a create into a folder another session uses is refused otherwise, and shared and unshared sessions never mix in one folder. Each has its own state, output, MCP token, claude and create log (`{root}/logs/{id}.log`, `{id}.result`); deleting one removes only its `sessions/{id}/`, never the folder or its files. A session's opaque ID is `{profile}/{root}/{id}`, the id unique within its root. Its kind (`ProjectStatus.Kind`, the app's label) is the create script's `kind=` result, else the action's name. The old flat `.godmode/status.json` is not read or migrated.
 
 ### Project Root Config
 ```

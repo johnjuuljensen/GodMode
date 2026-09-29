@@ -27,7 +27,8 @@ namespace GodMode.Server.Tests.Lifecycle;
 /// roots dir with one root, <see cref="RootName"/>, whose minimal <c>.godmode-root/config.json</c>
 /// names its profile and tells the fake where its script and sidecar are, and any extra roots asked for,
 /// configured the same way. Every project launched from them plays the script last passed to
-/// <see cref="UseScript"/> and records to <c>fake-claude.jsonl</c> in its own folder.
+/// <see cref="UseScript"/> and records to <c>fake-claude-{id}.jsonl</c> in its working folder, one
+/// file per session, so sessions that share a folder record apart.
 /// </summary>
 internal sealed class LifecycleHarness : IAsyncDisposable
 {
@@ -37,7 +38,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <summary>Long enough for a slow CI box; each wait returns as soon as its condition holds.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);
 
-    private const string RecordFileName = "fake-claude.jsonl";
+    private const string RecordFileName = $"fake-claude-{FakeClaudeEnvironment.SessionPlaceholder}.jsonl";
 
     private readonly string _workDir;
     private ServiceProvider _services;
@@ -354,7 +355,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     // ── What the fake saw ──
 
     public IReadOnlyList<FakeLaunch> Launches(string projectId) =>
-        FakeRecording.Read(Path.Combine(ProjectPath(projectId), RecordFileName));
+        Session(projectId) is var (projectPath, sessionId)
+            ? FakeRecording.Read(Path.Combine(projectPath, RecordFileName.Replace(FakeClaudeEnvironment.SessionPlaceholder, sessionId)))
+            : throw new UnreachableException();
 
     /// <summary>Waits until the project's launch number <paramref name="index"/> satisfies <paramref name="condition"/>.</summary>
     public async Task<FakeLaunch> WaitForLaunchAsync(string projectId, Func<FakeLaunch, bool> condition, int index = 0,

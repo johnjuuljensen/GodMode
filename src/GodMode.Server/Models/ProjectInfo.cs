@@ -27,6 +27,12 @@ public class ProjectInfo
     public string StatePath => ProjectFiles.SessionState.PathOf(ProjectPath, SessionId);
 
     /// <summary>
+    /// Whether the session shares its working folder with others (its action's <c>sharedFolder</c>,
+    /// kept in its settings.json): its delete removes only <see cref="StatePath"/>, never the folder.
+    /// </summary>
+    public bool SharedFolder { get; set; }
+
+    /// <summary>
     /// claude's session GUID (<c>--session-id</c>, <c>--resume</c>), kept in <c>session-id</c> in the state folder.
     /// Not the session's id: GodMode replaces it when a resume finds no conversation.
     /// </summary>

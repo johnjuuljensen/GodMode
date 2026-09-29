@@ -236,6 +236,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `nameTemplate` | Derive project name from inputs, e.g. `"issue_{issueNumber}"` |
 | `promptTemplate` | Derive initial prompt from inputs |
 | `scriptsCreateFolder` | If true, create scripts are responsible for creating the project directory |
+| `sharedFolder` | If true, the action's sessions share their working folder (an assistant's workspace): a create may go into a folder other sessions of shared actions use, and a delete removes only the session's state, never the folder. Default `false`: a folder another session uses is refused. See [Several sessions in one folder](#several-sessions-in-one-folder) |
 | `resumeOnRestart` | Whether a project that was active when the server stopped carries on when it starts again. Default `true`: see [Resuming after a restart](#resuming-after-a-restart) |
 | `resumePrompt` | What a project that was working when the server stopped is told when it is resumed. Default `"The GodMode server restarted and interrupted you. Continue where you left off."` |
 | `stripEnvVarProfile` | If true (`config.json` only), server env vars prefixed with the profile name reach sessions without the prefix: `MEGA_GITHUB_TOKEN` → `GITHUB_TOKEN` for profile `mega` |
@@ -340,10 +341,11 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 | `GODMODE_PROJECT_PATH` | Project directory path |
 | `GODMODE_PROJECT_FOLDER` | The project's folder name, the last segment of `GODMODE_PROJECT_PATH`. Not the session's ID, which is `{profile}/{root}/{id}` (see below); no script is given that |
 | `GODMODE_PROJECT_NAME` | Display name |
-| `GODMODE_SESSION_ID` | The session's id, `yymmdd-<kind>-<slug>-<suffix>` (see [Project Folder Structure](#project-folder-structure)): its state is in `$GODMODE_PROJECT_PATH/.godmode/sessions/<id>/`. A create script is given the id as its action makes it (the action's name as the kind, the name as it was asked for); a `kind` or `project_name` in its result gives the session its final one, with the same date and suffix |
+| `GODMODE_SESSION_ID` | The session's id, `yymmdd-<kind>-<slug>-<suffix>` (see [Project Folder Structure](#project-folder-structure)): its state is in `$GODMODE_PROJECT_PATH/.godmode/sessions/<id>/`. A create script is given the id as its action makes it (the action's name as the kind, the name as it was asked for); a `kind` or `project_name` in its result gives the session its final one, with the same date and suffix, which every later script (delete, status) is given. So the id a create script sees is final only when its result names neither: a create script that keys something by the id (in a shared folder, where the folder names no session) returns no `kind` or `project_name`, or leaves the keying to a script that runs later |
 | `GODMODE_INPUT_*` | All form inputs (key in upper snake case, e.g. `GODMODE_INPUT_ISSUE_NUMBER`) |
 | `GODMODE_RESULT_FILE` | Create scripts only: a file the script can write `key=value` lines to (see below) |
 | `GODMODE_FORCE` | Delete scripts only: `true` when the user forced the delete |
+| `GODMODE_SHARED_FOLDER` | `true` when the session shares its working folder with others (its action's `sharedFolder`), else `false`. A delete script is told `true` also when the folder has another session, or its action shares folders now: it must then leave the folder, and whatever the other sessions use, alone, since the server removes only `.godmode/sessions/<id>/`. See [Several sessions in one folder](#several-sessions-in-one-folder) |
 | *(from `environment`)* | All vars from the profile's `Profiles:<name>:Environment` and the config's `environment` block, which wins a clash |
 
 See [Environment](#environment) for everything else a script gets.
@@ -364,7 +366,7 @@ $kind = if ($labels -contains 'epic') { 'epic' } elseif ($labels -contains 'bug'
 "kind=$kind" | Add-Content $env:GODMODE_RESULT_FILE
 ```
 
-Script stdout is streamed to the client as creation progress. Non-zero exit code aborts creation.
+Script stdout is streamed to the client as creation progress, and a create's prepare and create scripts log to `{root}/logs/<id>.log`, their result file being `{root}/logs/<id>.result`: the session's own, by the id it keeps (renamed when the result gives it its final id), so two sessions of one folder never share one. Non-zero exit code aborts creation.
 
 ### Environment
 
@@ -411,7 +413,7 @@ Sessions are off the server's console (see [Stopping a Session](#stopping-a-sess
 
 A project has at most one claude process at a time.
 
-- **A create does not make a project that is there.** It is refused ("is in use") when a tracked project has its ID or its folder (on Windows compared as Windows compares paths, so `Fix` is the folder `fix`), before a folder is reused or any script runs, and nothing is written. So is a create script's `project_path` that is a tracked project's folder: the create is then `Error`, under its own ID, saying why, and the project in that folder keeps its claude and its files. "Reuse folder" (`__reuseExisting`) is for a folder no tracked project uses. A create that failed leaves its `Error` project, with its ID: delete it before creating it again.
+- **A create does not make a project that is there.** It is refused ("is in use") when a tracked project has its ID, or its folder unless both share it (`sharedFolder`, [below](#several-sessions-in-one-folder)) (on Windows compared as Windows compares paths, so `Fix` is the folder `fix`), before a folder is reused or any script runs, and nothing is written. So is a create script's `project_path` that is a tracked project's folder: the create is then `Error`, under its own ID, saying why, and the project in that folder keeps its claude and its files. "Reuse folder" (`__reuseExisting`) is for a folder no session uses: one with a session's state on disk in `.godmode/sessions/`, tracked or not, is in use too. A create that failed leaves its `Error` project, with its ID: delete it before creating it again.
 - **One launch or stop at a time.** Create, resume, a reply that resumes (`ReplyAndResume`), stop, delete and the start carrying on after a restart take the project's lock, so a stop comes before a launch or after it, never in the middle of one, and two resumes launch one claude. A launch still starting, or a claude whose exit is not handled yet, is waited for, never taken for a stale `Running`.
 - **A resume with nothing to say is `Idle`.** `ResumeProject` on a stopped project starts claude on its session, and claude writes nothing until it has input: the project is `Idle` ("resumed, waiting for you") until the user writes, rather than `Running` with nothing happening.
 - **A launch that does not start says why.** A missing executable, a root config the launch cannot use, or a create script that failed leaves the project `Error` with `LastError`.
@@ -444,7 +446,7 @@ A project's state follows claude, whatever else fails:
 
 ## Project Folder Structure
 
-Every session has a working folder under its root, and keeps its state in that folder's `.godmode/sessions/<id>/`. The same layout serves every kind of root: a worktree is a working folder with one session. There is one session per working folder for now.
+Every session has a working folder under its root, and keeps its state in that folder's `.godmode/sessions/<id>/`. The same layout serves every kind of root: a worktree is a working folder with one session, and an assistant's workspace a working folder with several ([below](#several-sessions-in-one-folder)).
 
 ```
 {root}/{folder}/
@@ -453,7 +455,7 @@ Every session has a working folder under its root, and keeps its state in that f
 │   └── sessions/
 │       └── {id}/                # One session's state, e.g. 260929-feat-left-list-k7q2
 │           ├── status.json      # Current state
-│           ├── settings.json    # The session's settings (action, permission mode, skip-permissions asked for)
+│           ├── settings.json    # The session's settings (action, permission mode, skip-permissions asked for, shared folder)
 │           ├── input.jsonl      # User input log
 │           ├── output.jsonl     # Claude output log (GodMode's own; Claude's transcripts are not read)
 │           ├── output-generation # A GUID, new on each create: which output.jsonl a client's offset is in
@@ -461,6 +463,26 @@ Every session has a working folder under its root, and keeps its state in that f
 │           └── mcp-config.json  # While claude runs: the session's MCP config, with its token
 └── (project files)              # Working directory for Claude
 ```
+
+### Several sessions in one folder
+
+An assistant root runs several sessions in one workspace: its action says `"sharedFolder": true`, and its create script returns the same `project_path` for every session, a folder strictly inside the root such as `{root}/workspace` (with `scriptsCreateFolder`, the script makes it; without a script, sessions of one name share the folder of that name).
+
+```json
+{ "sharedFolder": true, "scriptsCreateFolder": true, "create": "chat/create.ps1" }
+```
+
+```powershell
+$workspace = Join-Path $env:GODMODE_ROOT_PATH 'workspace'
+New-Item -ItemType Directory -Force $workspace | Out-Null
+"project_path=$workspace`nkind=chat" | Set-Content $env:GODMODE_RESULT_FILE
+```
+
+- **Opt-in per action.** Without `sharedFolder`, a create whose folder another session uses, tracked or only its state on disk, is refused ("is in use"): that keeps a worktree root from two sessions in one worktree. Shared and unshared never mix: a shared create may not join a session that owns its folder (its delete would remove the folder), and an unshared one may not join a folder that sessions share.
+- **Each session is its own.** Its state in `.godmode/sessions/<id>/`, its `output.jsonl`, its MCP config and token, its claude process, and its create log and result file (`{root}/logs/<id>.log`, `.result`). A create's claim is its ID's; creates into one shared folder at once share the folder's. The claude processes run in the same working folder; Claude Code keeps a transcript per session, so their histories do not collide, and edits to the same files at once are the user's to avoid.
+- **A delete removes only the session's state.** The delete script runs with `GODMODE_SESSION_ID` and `GODMODE_SHARED_FOLDER=true`, then the server removes `.godmode/sessions/<id>/` and nothing else: never the folder or its files, not even with the folder's last session. A session counts as sharing when its `settings.json` says it was created so (`sharedFolder`, kept there so a config changed later does not turn a workspace into one a delete removes), its action shares folders now, or another session has the folder. The folder-removal rules below are for folders one session owns.
+- **Recovery** finds every session in the folder, as it finds any other. A session whose `settings.json` is missing or cannot be read is taken as sharing its folder, so its delete removes only its state.
+- **The sessions can read each other's state.** It is all inside their shared working directory: another session's `output.jsonl`, and its `mcp-config.json` with its token while its claude runs. That token only lets a session ask permission prompts as the other one, never answer them. Put sessions that must not see each other in separate folders.
 
 **`.godmode/.gitignore` ignores everything in `.godmode`**, which holds the MCP config with the session's token while claude runs. The server makes sure of it when it sets up the session and on every launch, before it writes that config: it writes the file when missing (a checkout can bring a `.godmode/` without one), and appends the `*` rule to one that lacks it, keeping its lines.
 
@@ -593,7 +615,7 @@ Utility:
 ### Scripts Failing
 
 - Check a script with a matching extension exists for your OS (a `.ps1` needs `pwsh` on the `PATH`)
-- Check stderr output in the server logs
+- Check stderr output in the server logs, and the create's own log, `{root}/logs/<id>.log`
 - Ensure environment variables are correct
 
 ### SignalR Connection Failures

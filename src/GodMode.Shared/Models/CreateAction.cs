@@ -20,6 +20,12 @@ namespace GodMode.Shared.Models;
 /// The claude permission mode (<c>--permission-mode</c>) a project of this action is created with,
 /// as claude spells it; null for claude's own default. Never <c>bypassPermissions</c>.
 /// </param>
+/// <param name="SharedFolder">
+/// Whether sessions of this action share their working folder (an assistant's workspace): a create
+/// may then go into a folder other sessions use, if they share it too, and a delete removes only the
+/// session's state (<c>.godmode/sessions/{id}/</c>), never the folder. Off: a folder another session
+/// uses is refused, and a delete removes the folder.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -37,7 +43,8 @@ public record CreateAction(
     bool ResumeOnRestart = true,
     string ResumePrompt = CreateAction.DefaultResumePrompt,
     bool AllowSkipPermissions = false,
-    string? PermissionMode = null
+    string? PermissionMode = null,
+    bool SharedFolder = false
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";

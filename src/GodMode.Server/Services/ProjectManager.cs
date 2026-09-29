@@ -349,8 +349,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     /// <summary>Whether a project this server tracks, or one it is creating, is in the root at <paramref name="rootPath"/>.</summary>
     private bool HasProjectIn(string rootPath) =>
-        _projects.Values.Select(project => project.ProjectPath).Concat(_creatingPaths.Keys)
+        _projects.Values.Select(project => project.ProjectPath).Concat(CreatingPaths())
             .Any(path => WhyNotAProjectFolderOf(rootPath, path) is null);
+
+    /// <summary>The folders creates in progress have claimed, copied under their lock.</summary>
+    private string[] CreatingPaths()
+    {
+        lock (_creatingPathsLock) return [.. _creatingPaths.Keys];
+    }
 
     /// <summary>The lock on the root at <paramref name="path"/>, or null when another server holds it or it cannot be taken.</summary>
     private RootLock? TryHoldRoot(string path)
@@ -695,7 +701,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                             reuse.ValueKind == System.Text.Json.JsonValueKind.True;
         var autoSuffix = request.Inputs.TryGetValue("__autoSuffix", out var suffix) &&
                          suffix.ValueKind == System.Text.Json.JsonValueKind.True;
-        var suffixed = !action.ScriptsCreateFolder && !reuseExisting && autoSuffix && Directory.Exists(Path.Combine(rootPath, folder));
+        // A shared folder is used as it is: that is what sharing it means
+        var suffixed = !action.ScriptsCreateFolder && !action.SharedFolder && !reuseExisting && autoSuffix && Directory.Exists(Path.Combine(rootPath, folder));
         if (suffixed)
         {
             // Auto-suffix: find next available _N
@@ -725,16 +732,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             suffix => ProjectFiles.SessionState.Id(createdOn, kind, name, suffix));
         var projectId = ProjectId(profileName, rootName, sessionId);
 
-        // One project per ID and per folder: a tracked project's claude would be orphaned, and its
-        // files overwritten. Claimed before a folder is reused or any script runs, until registered
-        using var claims = new CreateClaims(this);
+        // One project per ID, and per folder unless its action shares folders: a tracked project's
+        // claude would be orphaned, and its files overwritten, and a delete of either would remove
+        // the other's. Claimed before a folder is reused or any script runs, until registered
+        using var claims = new CreateClaims(this, action.SharedFolder);
         claims.Claim(projectId, projectPath);
 
         // Unless the scripts create the project directory (e.g. git worktree add). Its session's
         // state is made once the scripts have run, when its id is final
         if (!action.ScriptsCreateFolder)
         {
-            if (reuseExisting)
+            if (reuseExisting || (action.SharedFolder && Directory.Exists(projectPath)))
                 ProjectFiles.ProjectFolder.Reuse(rootPath, folder);
             else
                 ProjectFiles.ProjectFolder.Create(rootPath, folder);
@@ -762,10 +770,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             SessionId = sessionId,
             ActionName = action.Name,
             ProfileName = profileName,
+            SharedFolder = action.SharedFolder,
         };
 
-        // Result file — scripts can write key=value pairs to override project path/name
-        var resultFilePath = GetResultFilePath(rootPath, folder);
+        // Result file — scripts can write key=value pairs to override project path/name. It and the
+        // script log are the session's, by its id: sessions that share a folder have one each
+        var resultFilePath = GetResultFilePath(rootPath, sessionId);
         if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
 
         // Build environment variables for scripts (profile env merged in)
@@ -773,7 +783,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             request.ProfileName, config.StripEnvVarProfile);
 
         // Script log file — at root level so it persists regardless of what scripts do
-        var logFilePath = GetScriptLogPath(rootPath, folder);
+        var logFilePath = GetScriptLogPath(rootPath, sessionId);
 
         // Run prepare scripts (always runs in root directory)
         if (action.Prepare is { Length: > 0 })
@@ -866,6 +876,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 RegisterFailedCreate(project, ex.Message);
                 throw;
             }
+            // The log and result file follow the id, so they are found by the id the session keeps.
+            // Replacing is safe: the final id is free (FreeSessionId) and claimed above, so no other
+            // create or session has files under it
+            MoveScriptFile(logFilePath, GetScriptLogPath(rootPath, finalId));
+            MoveScriptFile(resultFilePath, GetResultFilePath(rootPath, finalId));
             sessionId = finalId;
             projectId = ProjectId(profileName, rootName, sessionId);
             project.SessionId = sessionId;
@@ -890,7 +905,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var settings = new ProjectFiles.ProjectSettings(
             DangerouslySkipPermissions: skipPermissions,
             ActionName: action.Name,
-            PermissionMode: action.PermissionMode);
+            PermissionMode: action.PermissionMode,
+            SharedFolder: action.SharedFolder);
         settings.Save(project.StatePath);
 
         // Save initial status
@@ -938,9 +954,13 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             _logger.LogWarning("Project {ProjectId} failed to create, and another has its ID", project.Status.Id);
     }
 
-    /// <summary>The IDs and folders (full paths) that creates in progress have claimed: see <see cref="CreateClaims"/>.</summary>
+    /// <summary>
+    /// The IDs and folders (full paths) that creates in progress have claimed: see <see cref="CreateClaims"/>.
+    /// A folder's claim says whether it is shared, and how many creates share it; it is changed under <see cref="_creatingPathsLock"/>.
+    /// </summary>
     private readonly ConcurrentDictionary<string, byte> _creatingIds = new();
-    private readonly ConcurrentDictionary<string, byte> _creatingPaths = new(PathComparer);
+    private readonly Dictionary<string, (bool Shared, int Creates)> _creatingPaths = new(PathComparer);
+    private readonly Lock _creatingPathsLock = new();
 
     /// <summary>Paths compared as the OS compares them: on Windows, <c>Fix</c> is the folder <c>fix</c>.</summary>
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -950,16 +970,19 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>
     /// What one create has claimed, so no two creates make one project and none makes a tracked one:
     /// from before anything is written until the project is registered or the create has failed.
-    /// Disposing it gives the claims up.
+    /// The ID is always the create's alone. The folder is too, unless the create's action shares
+    /// folders (<paramref name="shared"/>): then other creates and sessions may have it, as long as
+    /// they all share it. Disposing it gives the claims up.
     /// </summary>
-    private sealed class CreateClaims(ProjectManager manager) : IDisposable
+    private sealed class CreateClaims(ProjectManager manager, bool shared) : IDisposable
     {
         private readonly List<string> _ids = [];
         private readonly List<string> _paths = [];
 
         /// <summary>
         /// Claims the ID and folder, or throws <see cref="ProjectInUseException"/> when a tracked
-        /// project has either, or another create has claimed it.
+        /// project has the ID, or another create has claimed it, or the folder is in use
+        /// (<see cref="WhyFolderIsInUse"/>).
         /// </summary>
         public void Claim(string projectId, string projectPath)
         {
@@ -972,23 +995,58 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             }
             if (!_paths.Contains(path, PathComparer))
             {
-                if (!manager._creatingPaths.TryAdd(path, 0))
-                    throw new ProjectInUseException(projectId, $"another create is making {path}");
+                lock (manager._creatingPathsLock)
+                {
+                    var claimed = manager._creatingPaths.TryGetValue(path, out var claim);
+                    if (claimed && !(shared && claim.Shared))
+                        throw new ProjectInUseException(projectId, $"another create is making {path}");
+                    manager._creatingPaths[path] = (shared, claimed ? claim.Creates + 1 : 1);
+                }
                 _paths.Add(path);
             }
             if (manager._projects.ContainsKey(projectId))
                 throw new ProjectInUseException(projectId, "a project with this ID exists");
-            if (manager._projects.Values.FirstOrDefault(p => PathComparer.Equals(FullPath(p.ProjectPath), path)) is { } tracked)
-                throw new ProjectInUseException(projectId, $"project {tracked.Status.Id} is in {path}");
+            if (manager.WhyFolderIsInUse(path, shared) is { } reason)
+                throw new ProjectInUseException(projectId, reason);
         }
 
         public void Dispose()
         {
             foreach (var id in _ids) manager._creatingIds.TryRemove(id, out _);
-            foreach (var path in _paths) manager._creatingPaths.TryRemove(path, out _);
+            lock (manager._creatingPathsLock)
+            {
+                foreach (var path in _paths)
+                {
+                    if (manager._creatingPaths.TryGetValue(path, out var claim) && claim.Creates > 1)
+                        manager._creatingPaths[path] = claim with { Creates = claim.Creates - 1 };
+                    else
+                        manager._creatingPaths.Remove(path);
+                }
+            }
             _ids.Clear();
             _paths.Clear();
         }
+    }
+
+    /// <summary>
+    /// Why a new session cannot have the working folder <paramref name="path"/> (a full path), or null
+    /// when it can. A session that does not share its folder needs one no other session has, tracked
+    /// or only on disk in its <c>.godmode/sessions/</c>: its delete removes the folder. One that shares
+    /// it (<paramref name="shared"/>) may join sessions that share it too, and no other kind.
+    /// </summary>
+    private string? WhyFolderIsInUse(string path, bool shared)
+    {
+        var tracked = _projects.Values.Where(p => PathComparer.Equals(FullPath(p.ProjectPath), path)).ToArray();
+        if (tracked.FirstOrDefault(p => !shared || !p.SharedFolder) is { } holder)
+            return holder.SharedFolder
+                ? $"project {holder.Status.Id} is in {path}, which its sessions share, and this create's action does not share folders (sharedFolder)"
+                : $"project {holder.Status.Id} is in {path}";
+
+        // A session's state left on disk and not tracked (not recovered) is the folder's too
+        var untracked = ProjectFiles.SessionState.List(path).Where(id => !tracked.Any(p => p.SessionId == id));
+        return untracked.FirstOrDefault(id => !shared || !ProjectFiles.ProjectSettings.Load(ProjectFiles.SessionState.PathOf(path, id)).SharedFolder) is { } other
+            ? $"session {other} has its state in {path}"
+            : null;
     }
 
     public async Task SendInputAsync(string projectId, string input)
@@ -1357,6 +1415,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Use rootPath as working directory to avoid Windows CWD lock on project folder
         var snap = _snapshot;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
+        var sharedFolder = project.SharedFolder || OthersInFolder(project);
         try
         {
             if (project.Status.RootName != null && profileName != null)
@@ -1364,6 +1423,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 var rootPath = snap.ProjectFiles.GetProjectRootPath(CompositeKey(profileName, project.Status.RootName));
                 var config = _rootConfigReader.ReadConfig(rootPath);
                 var action = config.ResolveAction(project.ActionName);
+                // An action that shares folders now shares this one too, whatever the session was created as
+                sharedFolder |= action?.SharedFolder == true;
 
                 if (action?.Delete is { Length: > 0 })
                 {
@@ -1373,6 +1434,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
                     if (force)
                         scriptEnv["GODMODE_FORCE"] = "true";
+                    // A shared folder stays: the script leaves it, and whatever the other sessions use, alone
+                    scriptEnv[SharedFolderVariable] = sharedFolder ? "true" : "false";
 
                     await _scriptRunner.RunAsync(
                         action.Delete,
@@ -1395,11 +1458,16 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await project.Process.CloseAsync();
         await _pullRequests.ForgetAsync(projectId);
 
-        // Delete project folder — use robust deletion to handle locked/read-only files
-        // (common with .git directories on Windows after git init or process shutdown)
-        await DeleteDirectoryRobustAsync(project.ProjectPath);
+        // A session that shares its folder takes only its own state with it. Otherwise the folder is
+        // its own: use robust deletion to handle locked/read-only files (common with .git directories
+        // on Windows after git init or process shutdown)
+        if (sharedFolder)
+            await RemoveSessionStateAsync(project);
+        else
+            await DeleteDirectoryRobustAsync(project.ProjectPath);
 
-        _logger.LogInformation("Project {ProjectId} deleted successfully", projectId);
+        _logger.LogInformation("Project {ProjectId} deleted successfully{Kept}", projectId,
+            sharedFolder ? $"; its working folder {project.ProjectPath} is shared, and stays" : "");
         await PushAttentionIfChangedAsync();
     }
 
@@ -1569,6 +1637,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         await Task.CompletedTask;
     }
 
+    /// <summary>What a script is told whether the session shares its working folder with, <c>true</c> or <c>false</c>.</summary>
+    public const string SharedFolderVariable = "GODMODE_SHARED_FOLDER";
+
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
     public async Task RecoverProjectsAsync()
@@ -1633,8 +1704,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                     status = status with { PullRequest = null };
                 }
 
-                // Load action name from settings
-                var settings = ProjectFiles.ProjectSettings.Load(statePath);
+                // Load action name from settings. One that cannot be read may be a shared session's:
+                // it is taken as shared, so its delete removes only its state, never the folder
+                var settingsRead = ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings);
+                if (!settingsRead)
+                    _logger.LogWarning("Session at {Path} has no settings.json that can be read: it is taken as sharing its folder, so a delete leaves the folder", statePath);
 
                 // The ID is where the state folder is: its root, and its id. A status.json that says
                 // otherwise (its root moved profile) is rewritten below. Nothing else in .godmode holds
@@ -1658,6 +1732,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                     SessionId = sessionId,
                     ProfileName = profileName,
                     ActionName = settings.ActionName,
+                    SharedFolder = !settingsRead || settings.SharedFolder,
                 };
 
                 project.ClaudeSessionId = await SessionIdFile.ReadAsync(statePath, _logger, ct);
@@ -1815,6 +1890,24 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Whether a session other than <paramref name="project"/> has its working folder: tracked, or
+    /// only its state on disk. Its delete then leaves the folder, whatever it was created as.
+    /// </summary>
+    private bool OthersInFolder(ProjectInfo project)
+    {
+        var path = FullPath(project.ProjectPath);
+        return _projects.Values.Any(p => p != project && PathComparer.Equals(FullPath(p.ProjectPath), path))
+            || ProjectFiles.SessionState.List(path).Any(id => id != project.SessionId);
+    }
+
+    /// <summary>
+    /// Removes a session's state, <c>.godmode/sessions/{id}/</c>, and nothing else of its working
+    /// folder: the delete of a session that shares its folder. The one place that does, so undo can
+    /// move it to <c>.godmode/trash/</c> here instead (#325).
+    /// </summary>
+    private Task RemoveSessionStateAsync(ProjectInfo project) => DeleteDirectoryRobustAsync(project.StatePath);
+
+    /// <summary>
     /// Makes the session's state folder, <c>.godmode/sessions/{id}/</c>, with the working folder's
     /// <c>.godmode/.gitignore</c>, and starts its output's generation. Called after scripts run, which
     /// may have created the project dir without .godmode, or checked out one that has a .godmode
@@ -1852,24 +1945,28 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Returns a log file path at the root level for script output.
-    /// Uses {rootPath}/logs/{folder}.log so it survives create script's project dir delete.
+    /// Uses {rootPath}/logs/{id}.log, the session's id: it survives create script's project dir
+    /// delete, and sessions that share a working folder have one each.
     /// </summary>
-    private static string GetScriptLogPath(string rootPath, string folder)
-    {
-        var logsDir = Path.Combine(rootPath, ProjectFiles.ProjectFolder.ScriptLogsFolderName);
-        Directory.CreateDirectory(logsDir);
-        return Path.Combine(logsDir, $"{folder}.log");
-    }
+    private static string GetScriptLogPath(string rootPath, string sessionId) => ScriptFilePath(rootPath, $"{sessionId}.log");
 
     /// <summary>
-    /// Returns a result file path for script-to-server communication.
+    /// Returns a result file path for script-to-server communication, {rootPath}/logs/{id}.result.
     /// Scripts can write key=value pairs (e.g. project_path, project_name) to override defaults.
     /// </summary>
-    private static string GetResultFilePath(string rootPath, string folder)
+    private static string GetResultFilePath(string rootPath, string sessionId) => ScriptFilePath(rootPath, $"{sessionId}.result");
+
+    private static string ScriptFilePath(string rootPath, string fileName)
     {
         var logsDir = Path.Combine(rootPath, ProjectFiles.ProjectFolder.ScriptLogsFolderName);
         Directory.CreateDirectory(logsDir);
-        return Path.Combine(logsDir, $"{folder}.result");
+        return Path.Combine(logsDir, fileName);
+    }
+
+    /// <summary>Moves a script log or result file to <paramref name="to"/>, replacing one there; nothing when there is none.</summary>
+    private static void MoveScriptFile(string from, string to)
+    {
+        if (File.Exists(from)) File.Move(from, to, overwrite: true);
     }
 
     /// <summary>
@@ -2231,6 +2328,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // The session's id, yymmdd-{kind}-{slug}-{suffix}: its state is in .godmode/sessions/{id}/. During a create, the id
         // as the action makes it; a kind or project_name in the result file gives the session its final one
         env["GODMODE_SESSION_ID"] = project.SessionId;
+        // Whether the session shares its working folder with others (its action's sharedFolder): a
+        // script then keys what it makes by the session's id, not the folder, and removes no folder
+        env[SharedFolderVariable] = project.SharedFolder ? "true" : "false";
 
         if (resultFilePath != null)
             env["GODMODE_RESULT_FILE"] = resultFilePath;

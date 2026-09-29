@@ -237,7 +237,8 @@ public class RootConfigReader : IRootConfigReader
         ScriptsCreateFolder = overlay.ScriptsCreateFolder ?? baseConfig.ScriptsCreateFolder,
         Model = overlay.Model ?? baseConfig.Model,
         AllowSkipPermissions = overlay.AllowSkipPermissions ?? baseConfig.AllowSkipPermissions,
-        PermissionMode = overlay.PermissionMode ?? baseConfig.PermissionMode
+        PermissionMode = overlay.PermissionMode ?? baseConfig.PermissionMode,
+        SharedFolder = overlay.SharedFolder ?? baseConfig.SharedFolder
     };
 
     /// <summary>
@@ -264,7 +265,8 @@ public class RootConfigReader : IRootConfigReader
             ResumeOnRestart: raw.ResumeOnRestart ?? true,
             ResumePrompt: raw.ResumePrompt is { Length: > 0 } resumePrompt ? resumePrompt : CreateAction.DefaultResumePrompt,
             AllowSkipPermissions: raw.AllowSkipPermissions ?? false,
-            PermissionMode: raw.PermissionMode
+            PermissionMode: raw.PermissionMode,
+            SharedFolder: raw.SharedFolder ?? false
         );
     }
 
@@ -362,6 +364,7 @@ public class RootConfigReader : IRootConfigReader
         public string? Model { get; init; }
         public bool? AllowSkipPermissions { get; init; }
         public string? PermissionMode { get; init; }
+        public bool? SharedFolder { get; init; }
 
         /// <summary>Keys this reader does not know, such as a leftover MCP server config.</summary>
         [JsonExtensionData]
