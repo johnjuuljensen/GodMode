@@ -547,11 +547,12 @@ $ErrorActionPreference = 'Stop'
   .godmode-root/
   ```
 
-  Then `git status` in the repo shows nothing of GodMode's.
-- **A delete never removes the root, or any of its files.** A session in the root is always taken as sharing it, whatever its `settings.json` says, its action says now, or `GODMODE_FORCE` is: the delete script runs with `GODMODE_SHARED_FOLDER=true`, and the server moves only `.godmode/sessions/<id>/` to `.godmode/trash/<id>/`. A create into the root that failed takes nothing with its delete but a folder the create made for its name. The purge deletes only `.godmode/trash/<id>/`.
+  Then `git status` in the repo shows nothing of GodMode's. A repo that tracks a `logs/` or `.godmode/` of its own gives it to the server: the server appends `*` to that folder's `.gitignore`, and git then ignores every new file in it.
+- **A delete never removes the root, or any of its files.** A session in the root is always taken as sharing it, whatever its `settings.json` says, its action says now, or `GODMODE_FORCE` is: the delete script runs with `GODMODE_SHARED_FOLDER=true`, and the server moves only `.godmode/sessions/<id>/` to `.godmode/trash/<id>/`. A create into the root that failed takes nothing with its delete but a folder the create made for its name, and only while that folder is still empty but for its `.godmode`. The purge deletes only `.godmode/trash/<id>/`, and neither follows a link at `.godmode` or below it.
+- **A delete script is told `GODMODE_PROJECT_PATH` = the root.** One that removes its project's folder must check `GODMODE_SHARED_FOLDER` first, or it deletes the repo; a root that is its own workspace needs no delete script at all.
 - **Recovery** finds the root's sessions in its own `.godmode/sessions/`, as it finds any working folder's.
 - **The root's `.godmode` is its own**: no session is given a folder of that name ([below](#project-folder-structure)), so no "Reuse folder" can take the root's sessions.
-- **An action of the same root that does not share its folder** works in a folder of its name inside the root, which is the repo's tree: its delete removes that folder, so "Reuse folder" on one of the repo's folders (`src`) gives it to the session to delete. Give such a root no such action, or keep it to folders the repo does not have.
+- **No session that owns its folder, while the root is its own workspace.** As long as a session works in the root (tracked, or with its state or trash in the root's `.godmode/`), a create for an action that does not share its folder is refused ("is its own workspace"), reused or new, before anything is written: its folder would be one of the repo's, and its delete would remove it. That holds for the default action too, which a missing `config.json`, or a typo in `sharedFolder`, falls back to.
 
 ### The trash, and folding
 
