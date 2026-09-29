@@ -102,12 +102,17 @@ public static partial class SessionState
     {
         if (string.IsNullOrEmpty(text)) return "";
         var plain = new StringBuilder(text.Length);
-        foreach (var c in text.Normalize(NormalizationForm.FormD))
+        foreach (var c in Spelled(text).Normalize(NormalizationForm.FormD))
             if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
                 plain.Append(char.ToLowerInvariant(c));
         var slug = NotSlug().Replace(plain.ToString(), "-").Trim('-');
         return slug.Length <= maxLength ? slug : slug[..maxLength].TrimEnd('-');
     }
+
+    /// <summary>The letters that are no letter with an accent spelled as Danish and German spell them without: <c>æ</c> is <c>ae</c>, <c>ø</c> <c>oe</c>, <c>å</c> <c>aa</c>.</summary>
+    private static string Spelled(string text) => text
+        .Replace("æ", "ae").Replace("Æ", "Ae").Replace("ø", "oe").Replace("Ø", "Oe")
+        .Replace("å", "aa").Replace("Å", "Aa").Replace("ß", "ss");
 
     private static string Join(params string[] parts) => string.Join('-', parts.Where(part => part.Length > 0));
 

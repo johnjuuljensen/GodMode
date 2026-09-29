@@ -71,7 +71,7 @@ function summaryOf(status: ProjectStatus): ProjectSummary {
     UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
     RootName: status.RootName, ProfileName: status.ProfileName,
     PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
-    PullRequest: status.PullRequest,
+    PullRequest: status.PullRequest, Kind: status.Kind,
   };
 }
 

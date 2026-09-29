@@ -248,8 +248,9 @@ export interface ProjectRootInfo {
 /** Detailed status information about a project. */
 export interface ProjectStatus {
   /**
-   * The project identifier, `{profile}/{root}/{folder}`: where its folder is. Opaque to clients, which pass
-   * it back as received; not the folder name.
+   * The session's identifier, `{profile}/{root}/{id}`, with its id (`260929-feat-left-list-k7q2`), the name
+   * of its state folder, `.godmode/sessions/{id}/`. Opaque to clients, which pass it back as received; not
+   * the folder name.
    */
   Id: string;
   /** The project name. */
@@ -310,12 +311,17 @@ export interface ProjectStatus {
    * when the project was not active then, was stopped by the user, or has been launched or resumed since.
    */
   StateAtShutdown?: ProjectState | null;
+  /**
+   * What kind of session it is (`bug`, `feat`, `experiment`, `chat`…): its create script's `kind`, else its
+   * action's name, as its id has it (lowercase `[a-z0-9-]`). The app labels the session with it.
+   */
+  Kind?: string | null;
 }
 
 /** Summary information about a project. */
 export interface ProjectSummary {
   /**
-   * The project identifier, `{profile}/{root}/{folder}`: where its folder is. Opaque to clients, which pass
+   * The session's identifier, `{profile}/{root}/{id}`, as in ProjectStatus.Id. Opaque to clients, which pass
    * it back as received; not the folder name.
    */
   Id: string;
@@ -335,6 +341,8 @@ export interface ProjectSummary {
   PendingQuestion?: PendingQuestion | null;
   /** The project's pull request, as in ProjectStatus.PullRequest. */
   PullRequest?: PullRequestStatus | null;
+  /** The session's kind, its label, as in ProjectStatus.Kind. */
+  Kind?: string | null;
 }
 
 /**

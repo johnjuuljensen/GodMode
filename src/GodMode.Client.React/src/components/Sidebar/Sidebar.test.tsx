@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectRootInfo } from '../../signalr/types';
-import { FakeHub, connectServers } from '../../test/fakeHub';
+import { FakeHub, connectServers, project, status } from '../../test/fakeHub';
 import { render, click, type Rendered } from '../../test/render';
 import { useAppStore, loadGroupBy } from '../../store';
 import { Shell } from '../Shell';
@@ -168,5 +168,19 @@ describe('the stored group-by', () => {
 
   it('none gives Root', () => {
     expect(loadGroupBy()).toBe('root');
+  });
+});
+
+describe("a session's kind", () => {
+  it('is a label on its row, from the list and from a status pushed later', async () => {
+    const hub = new FakeHub([{ ...project('Default/work/260929-feat-left-list-k7q2', 'Left list', 'Running', new Date().toISOString()), Kind: 'feat' }], [rootNamed('work')]);
+    await connectServers({ A: hub });
+    view = await render(<Shell />);
+
+    const row = (name: string) => q('.project-item').find(r => r.querySelector('.project-name')?.textContent === name);
+    expect(row('Left list')?.querySelector('.kind-label')?.textContent).toBe('feat');
+
+    hub.callbacks.onProjectCreated?.({ ...status('Default/work/260929-bug-crash-abcd', 'Running'), Name: 'Crash', Kind: 'bug' });
+    await vi.waitFor(() => expect(row('Crash')?.querySelector('.kind-label')?.textContent).toBe('bug'));
   });
 });
