@@ -165,7 +165,6 @@ public class RootWorkspaceTests
         File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "delete.ps1"),
             "if ($env:GODMODE_FORCE -ne 'true') { exit 1 }");
         WriteRepo(harness);
-        var files = RootFiles(harness);
         var (first, second) = await TwoInTheRootAsync(harness);
         await harness.Projects.DeleteProjectAsync(second.Id, force: true);
         // As a tracked session whose settings say it owns its folder, and is the root's only one, in a
@@ -175,6 +174,7 @@ public class RootWorkspaceTests
         var rootConfig = Path.Combine(harness.RootPath, ".godmode-root", "config.json");
         File.WriteAllText(rootConfig, File.ReadAllText(rootConfig).Replace("\"sharedFolder\":true", "\"sharedFolder\":false"));
         Assert.Contains("\"sharedFolder\":false", File.ReadAllText(rootConfig));
+        var files = RootFiles(harness);
 
         await Assert.ThrowsAnyAsync<Exception>(() => harness.Projects.DeleteProjectAsync(first.Id));
         Assert.True((await harness.Projects.DeleteProjectAsync(first.Id, force: true)).Trashed, "the forced delete did not trash the state");
