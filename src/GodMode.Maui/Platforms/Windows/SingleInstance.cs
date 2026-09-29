@@ -76,12 +76,12 @@ internal static class SingleInstance
             pipe.Connect(ConnectWait);
             // Windows lets the running app take the foreground only if this start, the one the user just made, allows it
             var pid = GetNamedPipeServerProcessId(pipe.SafePipeHandle, out var serverPid) ? serverPid : 0;
-            if (pid != 0)
-                AllowSetForegroundWindow(pid);
+            var foreground = pid != 0 && AllowSetForegroundWindow(pid);
             JsonSerializer.Serialize(pipe, args);
             pipe.WaitForPipeDrain();
-            logger.LogInformation("Single instance: the app is running (process {Pid}); handed off this start [{Args}], exiting",
-                pid, string.Join(' ', args));
+            logger.LogInformation(
+                "Single instance: the app is running (process {Pid}, may take the foreground: {Foreground}); handed off this start [{Args}], exiting",
+                pid, foreground, string.Join(' ', args));
         }
         catch (Exception ex) when (ex is TimeoutException or IOException)
         {
@@ -126,7 +126,8 @@ internal static class SingleInstance
         if (window.AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
         window.Activate();
-        if (!SetForegroundWindow(WinRT.Interop.WindowNative.GetWindowHandle(window)))
+        var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
+        if (!SetForegroundWindow(handle) || GetForegroundWindow() != handle)
             logger.LogInformation("Single instance: Windows kept the foreground from the window");
     }
 
@@ -141,4 +142,7 @@ internal static class SingleInstance
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetForegroundWindow(nint window);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
 }

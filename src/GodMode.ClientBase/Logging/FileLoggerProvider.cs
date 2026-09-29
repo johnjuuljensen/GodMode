@@ -53,7 +53,9 @@ public sealed class FileLoggerProvider : ILoggerProvider
                 _ => "???"
             };
             var shortCategory = category.Contains('.') ? category[(category.LastIndexOf('.') + 1)..] : category;
-            _writer!.WriteLine($"{now:HH:mm:ss.fff} [{shortLevel}] {shortCategory}: {message}");
+            // Each process has its own position in the file: without this, the next line of one overwrites the other's
+            _writer!.BaseStream.Seek(0, SeekOrigin.End);
+            _writer.WriteLine($"{now:HH:mm:ss.fff} [{shortLevel}] {shortCategory}: {message}");
         }
     }
 
