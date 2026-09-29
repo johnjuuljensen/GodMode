@@ -39,6 +39,13 @@ public static class MauiProgram
         var logger = LoggerFactory.CreateLogger("GodMode.Maui");
         logger.LogInformation("Starting GodMode MAUI app");
 
+#if WINDOWS
+        // Before the relay, voice or a window: a release build that finds the app running hands off to it and exits
+        // (issue #339). Building the container above starts none of them
+        if (!SingleInstance.Claim(Environment.GetCommandLineArgs()[1..], logger))
+            Environment.Exit(0);
+#endif
+
         var relay = Services.GetRequiredService<LocalServer>();
         relay.Start();
         logger.LogInformation("LocalServer listening on {BaseUrl}", relay.BaseUrl);

@@ -36,7 +36,10 @@ public sealed class FileLoggerProvider : ILoggerProvider
             {
                 _writer?.Dispose();
                 var path = Path.Combine(_logDir, $"godmode-{dateStr}.log");
-                _writer = new StreamWriter(path, append: true) { AutoFlush = true };
+                // Shared for writing: a second app process (a debug build beside the installed app, or a release
+                // start handing off to the running one) appends to the same day's log
+                _writer = new StreamWriter(new FileStream(path, FileMode.Append, FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete)) { AutoFlush = true };
                 _currentDate = dateStr;
             }
             var shortLevel = level switch
