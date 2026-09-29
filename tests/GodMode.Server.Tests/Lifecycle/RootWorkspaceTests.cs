@@ -1,4 +1,5 @@
 using GodMode.FakeClaude;
+using GodMode.Server.Models;
 using GodMode.Server.Services;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
@@ -312,5 +313,154 @@ public class RootWorkspaceTests
         Assert.Contains("uses for itself", refused.Message);
         Assert.Equal(created.Id, Assert.Single(await harness.Projects.ListProjectsAsync()).Id);
         Assert.True(Directory.Exists(harness.StatePath(created.Id)));
+    }
+
+    /// <summary>
+    /// A shared create that failed, in a folder it made for its name, leaves that folder with its delete
+    /// once anything has come into it (a session in the root, the user, a pull): only a folder still
+    /// empty but for its <c>.godmode</c> goes.
+    /// </summary>
+    [Fact]
+    public async Task FailedCreate_WhoseMadeFolderGotContent_ItsDeleteLeavesTheFolderAndTheContent()
+    {
+        var config = InTheRoot();
+        config["scriptsCreateFolder"] = false;
+        await using var harness = NewHarness(config);
+        WriteRepo(harness);
+        var made = Path.Combine(harness.RootPath, "notes");
+        Assert.False(Directory.Exists(made));
+        await Assert.ThrowsAnyAsync<Exception>(() => harness.CreateProjectAsync("notes", inputs: new Dictionary<string, object> { ["fail"] = "yes" }));
+        var failed = Assert.Single(await harness.Projects.ListProjectsAsync());
+        Assert.True(Directory.Exists(made), "the create made no folder for its name");
+        var draft = Path.Combine(made, "draft.md");
+        File.WriteAllText(draft, "came in since");
+        var files = RootFiles(harness);
+
+        await harness.Projects.DeleteProjectAsync(failed.Id, force: true);
+
+        Assert.True(File.Exists(draft), "the folder the failed create made went with what came into it since");
+        Assert.Equal(files, RootFiles(harness));
+        Assert.Empty(await harness.Projects.ListProjectsAsync());
+    }
+
+    /// <summary>
+    /// While the root is its own workspace (a session works in it, tracked, or with its state or trash in
+    /// the root's <c>.godmode/</c>), an action that does not share its folder gets no folder in it, reused
+    /// or new: its delete would remove one of the repo's folders. The root's config falling back to the
+    /// default action, which does not share (a typo in <c>sharedFolder</c>, a missing config.json), is
+    /// the way there. Nothing is written, and the repo's folder stays.
+    /// </summary>
+    [Theory]
+    [InlineData("typo", "tracked", true)]
+    [InlineData("typo", "tracked", false)]
+    [InlineData("missing", "tracked", true)]
+    [InlineData("missing", "tracked", false)]
+    [InlineData("typo", "on disk", true)]
+    [InlineData("typo", "trashed", true)]
+    public async Task NonSharedCreate_InARootThatIsItsOwnWorkspace_IsRefused(string config, string workspace, bool reuseExisting)
+    {
+        await using var harness = NewHarness();
+        WriteRepo(harness);
+        var web = Path.Combine(harness.RootPath, "web01");
+        Directory.CreateDirectory(web);
+        File.WriteAllText(Path.Combine(web, "index.html"), "the repo's own");
+        if (workspace == "on disk")
+            LifecycleHarness.PlantSession(harness.RootPath, status: PlantedStatus());
+        else
+        {
+            var created = await harness.CreateProjectAsync("chat");
+            await harness.WaitForStdinAsync(created.Id);
+            if (workspace == "trashed")
+                Assert.True((await harness.Projects.DeleteProjectAsync(created.Id)).Trashed);
+        }
+        var configFile = Path.Combine(harness.RootPath, ".godmode-root", "config.json");
+        var profile = LifecycleHarness.ProfileName;
+        if (config == "typo")
+            File.WriteAllText(configFile, File.ReadAllText(configFile).Replace("\"sharedFolder\":true", "\"sharedFoldr\":true"));
+        else
+        {
+            File.Delete(configFile);
+            profile = "Default";
+            await harness.Projects.ListProjectRootsAsync();
+        }
+        var files = RootFiles(harness);
+        var before = (await harness.Projects.ListProjectsAsync()).Select(p => p.Id).ToArray();
+
+        var refused = await Assert.ThrowsAsync<ProjectInUseException>(() => harness.Projects.CreateProjectAsync(new CreateProjectRequest(
+            profile, LifecycleHarness.RootName, new Dictionary<string, System.Text.Json.JsonElement>
+            {
+                ["name"] = System.Text.Json.JsonSerializer.SerializeToElement(reuseExisting ? "web01" : "fresh"),
+                ["prompt"] = System.Text.Json.JsonSerializer.SerializeToElement("hi"),
+                ["__reuseExisting"] = System.Text.Json.JsonSerializer.SerializeToElement(reuseExisting),
+            })));
+
+        Assert.Contains("its own workspace", refused.Message);
+        Assert.Equal(before, (await harness.Projects.ListProjectsAsync()).Select(p => p.Id).ToArray());
+        Assert.False(Directory.Exists(Path.Combine(harness.RootPath, "fresh")), "the refused create made a folder");
+        Assert.Equal(files, RootFiles(harness));
+    }
+
+    /// <summary>
+    /// A link in the root's <c>.godmode</c> (at <c>.godmode</c> itself, or at its <c>trash</c>) to a folder
+    /// outside the root is not followed: the purge deletes nothing there, whatever it holds that looks
+    /// like trash, and a delete moves no state there.
+    /// </summary>
+    [Theory]
+    [InlineData(".godmode")]
+    [InlineData(".godmode/trash")]
+    public async Task ALinkInTheRootsGodModeFolder_ToOutside_TakesNothingThere(string linkAt)
+    {
+        await using var harness = NewHarness(settings: new Dictionary<string, string?>
+        {
+            [ProjectManager.RootsPollSetting] = "0",
+            [ProjectManager.TrashRetentionSetting] = "0",
+        });
+        var outside = Path.Combine(harness.WorkDir, "outside");
+        // What the link reaches looks like trash: at the link's trash/, an old session-named folder
+        var outsideTrash = linkAt == ".godmode" ? Path.Combine(outside, SessionState.TrashFolderName) : outside;
+        var victim = Path.Combine(outsideTrash, "260101-chat-old-aaaa");
+        Directory.CreateDirectory(victim);
+        File.WriteAllText(Path.Combine(victim, "marker.txt"), "not the root's");
+        File.WriteAllText(Path.Combine(victim, SessionState.TrashedAtFileName), DateTime.UtcNow.AddDays(-2).ToString("O"));
+        var link = Path.Combine(harness.RootPath, linkAt.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(link)!);
+        MakeLink(link, outside);
+        Assert.Equal(["260101-chat-old-aaaa"], SessionState.ListTrashed(harness.RootPath));
+
+        await harness.RestartAsync(resume: false);
+
+        Assert.True(File.Exists(Path.Combine(victim, "marker.txt")), "the purge deleted a folder outside the root through a link");
+        Assert.Contains(harness.Warnings, line => line.Contains("Could not purge") && line.Contains("link"));
+
+        if (linkAt == ".godmode") return;
+        // A delete moves the state of a session in the root into the trash only where it seems
+        var created = await harness.CreateProjectAsync("chat");
+        await harness.WaitForStdinAsync(created.Id);
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Projects.DeleteProjectAsync(created.Id));
+        Assert.Contains("link", refused.Message);
+        Assert.False(Directory.Exists(Path.Combine(outside, IdOf(created.Id))), "the delete moved the state outside the root");
+        Assert.True(Directory.Exists(harness.StatePath(created.Id)), "the state left its place");
+    }
+
+    /// <summary>A junction on Windows, which needs no privilege; a symbolic link elsewhere.</summary>
+    private static void MakeLink(string link, string target)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
+                { RedirectStandardOutput = true, RedirectStandardError = true })!;
+            mklink.WaitForExit();
+            Assert.True(mklink.ExitCode == 0, mklink.StandardError.ReadToEnd());
+        }
+        else
+            Directory.CreateSymbolicLink(link, target);
+        Assert.NotNull(new DirectoryInfo(link).LinkTarget);
+    }
+
+    private static ProjectStatus PlantedStatus()
+    {
+        var now = DateTime.UtcNow;
+        return new ProjectStatus(LifecycleHarness.PlantedId(), "planted", ProjectState.Stopped, now, now, null,
+            new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0);
     }
 }
