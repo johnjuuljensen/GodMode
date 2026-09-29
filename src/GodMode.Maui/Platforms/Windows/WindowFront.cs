@@ -18,6 +18,12 @@ internal static class WindowFront
             logger.LogInformation("Windows: the window is not shown yet, so not brought to the front");
             return;
         }
+        Bring(platform, logger);
+    }
+
+    /// <inheritdoc cref="Bring(Window, ILogger)"/>
+    public static void Bring(Microsoft.UI.Xaml.Window platform, ILogger logger)
+    {
         if (platform.AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
         platform.Activate();

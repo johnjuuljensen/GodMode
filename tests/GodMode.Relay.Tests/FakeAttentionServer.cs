@@ -15,7 +15,7 @@ namespace GodMode.Relay.Tests;
 
 /// <summary>
 /// A stand-in GodMode server's attention side on a random loopback port: /health, and a hub at /hubs/projects
-/// with GetAttention and the AttentionChanged push, using the server's payload conventions (JsonDefaults).
+/// with GetAttention and the AttentionChanged push, and ListProfiles, using the server's payload conventions (JsonDefaults).
 /// </summary>
 internal sealed class FakeAttentionServer : IAsyncDisposable
 {
@@ -81,6 +81,9 @@ internal sealed class FakeAttentionServer : IAsyncDisposable
     /// <summary>Changes the list without a push, as while a client is disconnected.</summary>
     public void SetQuietly(params AttentionItem[] items) => _state.Items = items;
 
+    /// <summary>The profiles ListProfiles answers with.</summary>
+    public void SetProfiles(params string[] names) => _state.Profiles = [.. names.Select(n => new ProfileInfo(n))];
+
     /// <summary>Ends every hub connection from the server side.</summary>
     public void DropConnections()
     {
@@ -97,6 +100,7 @@ internal sealed class FakeAttentionServer : IAsyncDisposable
     private sealed class AttentionState
     {
         public volatile AttentionItem[] Items = [];
+        public volatile ProfileInfo[] Profiles = [];
         public ConcurrentDictionary<string, HubCallerContext> Open { get; } = new();
         public int Connections;
     }
@@ -117,5 +121,7 @@ internal sealed class FakeAttentionServer : IAsyncDisposable
         }
 
         public AttentionItem[] GetAttention() => state.Items;
+
+        public ProfileInfo[] ListProfiles() => state.Profiles;
     }
 }

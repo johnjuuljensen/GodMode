@@ -1,3 +1,4 @@
+using GodMode.ClientBase.Layout;
 using Microsoft.Extensions.Logging;
 
 namespace GodMode.Maui;
@@ -26,8 +27,9 @@ internal static class AppWindows
     /// nothing until it has a TitleBar: this gives it the app's icon and name (#313), in the dark themes' near-black,
     /// and the page's title once it has one ("(2) GodMode — Work", MainPage). Android and iOS have no title bar and
     /// ignore it. The icon is the MauiIcon's own output, appiconLogo.scale-*.png beside the exe, not a second copy.
+    /// On Windows it opens at <paramref name="place"/> when it has one (a restart, #341), and its place is saved from then on.
     /// </summary>
-    public static Window New(string? profile)
+    public static Window New(string? profile, WindowPlace? place = null)
     {
         var title = profile is null ? "GodMode" : $"GodMode — {profile}";
         var page = new MainPage(profile);
@@ -48,10 +50,19 @@ internal static class AppWindows
         window.HandlerChanged += (_, _) =>
         {
             if (window.Handler?.PlatformView is not Microsoft.UI.Xaml.Window platform) return;
+            WindowPlaces.Opened(platform, profile, place);
             platform.Closed += (_, _) =>
             {
                 page.Detach();
-                if (profile is null) Application.Current?.Quit();
+                if (profile is null)
+                {
+                    WindowPlaces.Quitting();
+                    // Each by name: Quit alone has left a profile window open (on another desktop), and the app with it
+                    foreach (var other in Application.Current?.Windows.Where(w => w != window).ToList() ?? [])
+                        Application.Current!.CloseWindow(other);
+                    Application.Current?.Quit();
+                }
+                else WindowPlaces.Closed(platform);
             };
         };
 #endif
@@ -73,6 +84,24 @@ internal static class AppWindows
         Application.Current!.OpenWindow(New(profile));
 #else
         throw new PlatformNotSupportedException("Profile windows are the Windows app's");
+#endif
+    }
+
+    /// <summary>
+    /// The main window, at its saved place, and after it the profile windows the app had when it last closed (#341).
+    /// Android and iOS have the one window, where it always is.
+    /// </summary>
+    public static Window Start()
+    {
+#if WINDOWS
+        var main = New(profile: null, WindowPlaces.MainPlace());
+        _ = WindowPlaces.RestoreProfilesAsync((profile, place) =>
+        {
+            if (WindowOf(profile) is null) Application.Current?.OpenWindow(New(profile, place));
+        });
+        return main;
+#else
+        return New(profile: null);
 #endif
     }
 
