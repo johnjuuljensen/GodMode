@@ -78,4 +78,57 @@ public class SessionStateTests
             ServerProcess.DeleteWorkDir(folder);
         }
     }
+    /// <summary>
+    /// A trashed session is no session of its folder (<see cref="SessionState.List"/>), but keeps its id
+    /// in its root (<see cref="ProjectManager.HasSession"/>) for its undo, which puts it back whole.
+    /// </summary>
+    [Fact]
+    public void Trash_TakesTheSessionOutOfTheFolder_KeepsItsId_AndRestorePutsItBack()
+    {
+        var root = ServerProcess.CreateWorkDir("trash");
+        try
+        {
+            var folder = Path.Combine(root, "workspace");
+            const string id = "260929-chat-x-abcd";
+            var state = SessionState.Create(folder, id);
+            File.WriteAllText(Path.Combine(state, "status.json"), "{}");
+            var files = new ProjectManager(new Dictionary<string, string> { ["p/r"] = root });
+
+            Assert.True(SessionState.Trash(folder, id, DateTime.UtcNow));
+
+            Assert.Empty(SessionState.List(folder));
+            Assert.Empty(files.ListSessions("p/r"));
+            Assert.Equal([(folder, id)], files.ListTrashed("p/r"));
+            Assert.True(files.HasSession("p/r", id), "a trashed session's id is free for a new session");
+            Assert.False(SessionState.Trash(folder, id, DateTime.UtcNow), "a session with no state was trashed");
+
+            SessionState.Restore(folder, id);
+
+            Assert.Equal([id], SessionState.List(folder));
+            Assert.Empty(SessionState.ListTrashed(folder));
+            Assert.False(File.Exists(Path.Combine(state, SessionState.TrashedAtFileName)));
+            Assert.Throws<DirectoryNotFoundException>(() => SessionState.Restore(folder, id));
+        }
+        finally
+        {
+            ServerProcess.DeleteWorkDir(root);
+        }
+    }
+
+    /// <summary>A shared working folder is made when missing and used when there: two creates into one new folder at once both have it.</summary>
+    [Fact]
+    public void CreateShared_MakesTheFolder_OrUsesItWhenItIsThere()
+    {
+        var root = ServerProcess.CreateWorkDir("shared");
+        try
+        {
+            Assert.True(ProjectFolder.CreateShared(root, "workspace").Made);
+            Assert.False(ProjectFolder.CreateShared(root, "workspace").Made);
+            Assert.Throws<IOException>(() => ProjectFolder.Create(root, "workspace"));
+        }
+        finally
+        {
+            ServerProcess.DeleteWorkDir(root);
+        }
+    }
 }

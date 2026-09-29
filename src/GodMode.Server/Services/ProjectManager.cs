@@ -128,6 +128,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     public const string RootsPollSetting = "RootsPollSeconds";
     private readonly TimeSpan _rootsPoll;
 
+    /// <summary>How long a refresh waits for a session's lock to let the session go (<see cref="TryForgetAsync"/>).</summary>
+    private static readonly TimeSpan ForgetLockWait = TimeSpan.FromSeconds(2);
+
     /// <summary>
     /// How long a trashed session (a shared session's delete, <c>.godmode/trash/{id}/</c>) stays there
     /// for an undo, and how often the trash is purged of those older: at the start, then on this schedule
@@ -2085,14 +2088,19 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// <summary>
     /// Stops tracking a session that has no claude, running or launching, leaving its files as they
     /// are; false when it has one, or is not tracked. Under its resume lock, so no launch starts
-    /// meanwhile; false too while another holds the lock (a delete whose script runs long, a reply
-    /// waiting for its claude), so a refresh never waits on one session: the next refresh tries again.
+    /// meanwhile; false too when another holds the lock longer than <see cref="ForgetLockWait"/> (a
+    /// delete whose script runs long), so a refresh waits that long at most on one session, not until
+    /// the script ends: the next refresh tries again.
     /// </summary>
     private async Task<bool> TryForgetAsync(ProjectInfo project)
     {
         var id = project.Status.Id;
         var resumeLock = project.Process.ResumeLock;
-        if (!await resumeLock.WaitAsync(TimeSpan.Zero)) return false;
+        if (!await resumeLock.WaitAsync(ForgetLockWait))
+        {
+            _logger.LogInformation("Project {ProjectId} is busy (a delete, stop or launch holds it): it leaves the list at a later read of the roots", id);
+            return false;
+        }
         bool forgotten;
         try
         {
