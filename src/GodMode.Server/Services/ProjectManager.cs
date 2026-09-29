@@ -630,7 +630,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         {
             var config = _rootConfigReader.ReadConfig(root.Path);
             var actions = config.GetEffectiveActions()
-                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Model, a.AllowSkipPermissions))
+                .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Session ? a.Model : null,
+                    a.Session && a.AllowSkipPermissions, a.Session))
                 .ToArray();
             return new ProjectRootInfo(root.Root, config.Description, actions, ProfileName: root.Profile);
         }).ToArray();
@@ -675,14 +676,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return project.Status;
     }
 
-    public async Task<ProjectStatus> CreateProjectAsync(CreateProjectRequest request)
+    public async Task<CreateProjectResult> CreateProjectAsync(CreateProjectRequest request)
     {
         // A create that fails leaves an Error project behind, which needs the user
         try { return await CreateProjectCoreAsync(request); }
         finally { await PushAttentionIfChangedAsync(); }
     }
 
-    private async Task<ProjectStatus> CreateProjectCoreAsync(CreateProjectRequest request)
+    private async Task<CreateProjectResult> CreateProjectCoreAsync(CreateProjectRequest request)
     {
         _logger.LogInformation("Creating project in profile '{Profile}' root '{Root}' action '{Action}' with inputs: {InputKeys}",
             request.ProfileName, request.ProjectRootName, request.ActionName ?? "(default)", string.Join(", ", request.Inputs.Keys));
@@ -706,6 +707,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
         var action = config.ResolveAction(request.ActionName)
             ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
+
+        if (!action.Session)
+            return await RunSessionlessActionAsync(request, snap, rootPath, config, action);
 
         // Skipping permissions is the root's to allow: a create cannot ask for what its root forbids
         var skipPermissions = GetBool(request.Inputs, "skipPermissions");
@@ -972,7 +976,73 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             resumeLock.Release();
         }
 
-        return project.Status;
+        return new CreateProjectResult(project.Status);
+    }
+
+    /// <summary>
+    /// An action that starts no session (<c>"session": false</c>): its prepare and create scripts run in
+    /// the root, with the root's environment and inputs as a create's do, and that is all. No folder is
+    /// made, nothing is tracked, no claude starts, and of the result file only <c>message</c> is read:
+    /// there is no project for a <c>project_path</c>, name, kind or prompt to be. The run has an id as a
+    /// session would, for its log and result file (<c>{root}/logs/{id}.log</c>) and its progress, which
+    /// names no project. A script that fails fails the create, and leaves no Error project. The roots are
+    /// read again once it has run, so a root it made reaches every client (RootsChanged) at once.
+    /// </summary>
+    /// <summary>The longest message a run returns, as long as an attention item's text; a longer one is cut.</summary>
+    internal const int MaxRunMessageLength = Attention.MaxTextLength;
+
+    private async Task<CreateProjectResult> RunSessionlessActionAsync(CreateProjectRequest request, ProfileSnapshot snap,
+        string rootPath, RootConfig config, CreateAction action)
+    {
+        var compositeKey = CompositeKey(request.ProfileName, request.ProjectRootName);
+        var (profileName, rootName) = ConfiguredNames(snap, request.ProfileName, request.ProjectRootName);
+        var name = ResolveProjectName(action, request.Inputs);
+        var kind = ProjectFiles.SessionState.Kind(action.Name);
+        var createdOn = DateTime.Now;
+        var runId = FreeSessionId(snap, compositeKey, profileName, rootName,
+            suffix => ProjectFiles.SessionState.Id(createdOn, kind, string.IsNullOrWhiteSpace(name) ? action.Name : name, suffix));
+        var progressId = ProjectId(profileName, rootName, runId);
+        // Its id alone, so no other run or create takes it for its log; no folder is claimed, since none is made
+        if (!_creatingIds.TryAdd(progressId, 0))
+            throw new ProjectInUseException(progressId, "another create is making it");
+        try
+        {
+            _logger.LogInformation("Running action '{Action}' of root '{Root}', which starts no session, as {RunId}", action.Name, rootName, progressId);
+            snap.Profiles.TryGetValue(request.ProfileName, out var profileConfig);
+            var resultFilePath = GetResultFilePath(rootPath, runId);
+            if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
+            var scriptEnv = BuildScriptEnvironment(rootPath, null, action, request.Inputs, profileConfig?.Environment, resultFilePath,
+                request.ProfileName, config.StripEnvVarProfile);
+            var logFilePath = GetScriptLogPath(rootPath, runId);
+
+            foreach (var (scripts, what) in new[] { (action.Prepare, "Prepare"), (action.Create, "Create") })
+            {
+                if (scripts is not { Length: > 0 }) continue;
+                try
+                {
+                    await _scriptRunner.RunAsync(scripts, rootPath, rootPath, scriptEnv,
+                        msg => _hubContext.Clients.All.CreationProgress(progressId, msg), logFilePath);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "{What} script failed for {RunId}, which starts no session. See log: {LogPath}", what, progressId, logFilePath);
+                    throw;
+                }
+            }
+
+            // The script's output is untrusted: its message is cut to a length the app shows, and not logged
+            var message = ReadResultFile(resultFilePath).GetValueOrDefault("message") is { Length: > 0 } said
+                ? said.Length <= MaxRunMessageLength ? said : TextCut.Cut(said, MaxRunMessageLength - 1) + "…"
+                : null;
+            _logger.LogInformation("Action '{Action}' of root '{Root}' ran ({RunId}), {Said}", action.Name, rootName, progressId,
+                message == null ? "with no message" : $"with a message of {message.Length} characters");
+            await RefreshRootsAsync();
+            return new CreateProjectResult(null, message);
+        }
+        finally
+        {
+            _creatingIds.TryRemove(progressId, out _);
+        }
     }
 
     /// <summary>
@@ -2572,7 +2642,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private static Dictionary<string, string> BuildScriptEnvironment(
         string rootPath,
-        ProjectInfo project,
+        ProjectInfo? project,
         CreateAction action,
         Dictionary<string, JsonElement> inputs,
         Dictionary<string, string>? profileEnv = null,
@@ -2585,16 +2655,20 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         // GODMODE_* vars always win
         env["GODMODE_ROOT_PATH"] = rootPath;
-        env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
-        // Scripts name branches and folders after it. It is not the session's ID, {profile}/{root}/{id}
-        env["GODMODE_PROJECT_FOLDER"] = Path.GetFileName(project.ProjectPath);
-        env["GODMODE_PROJECT_NAME"] = project.Status.Name;
-        // The session's id, yymmdd-{kind}-{slug}-{suffix}: its state is in .godmode/sessions/{id}/. During a create, the id
-        // as the action makes it; a kind or project_name in the result file gives the session its final one
-        env["GODMODE_SESSION_ID"] = project.SessionId;
-        // Whether the session shares its working folder with others (its action's sharedFolder): a
-        // script then keys what it makes by the session's id, not the folder, and removes no folder
-        env[SharedFolderVariable] = project.SharedFolder ? "true" : "false";
+        // An action that starts no session has no project: its scripts get the root, the inputs and the result file
+        if (project != null)
+        {
+            env["GODMODE_PROJECT_PATH"] = project.ProjectPath;
+            // Scripts name branches and folders after it. It is not the session's ID, {profile}/{root}/{id}
+            env["GODMODE_PROJECT_FOLDER"] = Path.GetFileName(project.ProjectPath);
+            env["GODMODE_PROJECT_NAME"] = project.Status.Name;
+            // The session's id, yymmdd-{kind}-{slug}-{suffix}: its state is in .godmode/sessions/{id}/. During a create, the id
+            // as the action makes it; a kind or project_name in the result file gives the session its final one
+            env["GODMODE_SESSION_ID"] = project.SessionId;
+            // Whether the session shares its working folder with others (its action's sharedFolder): a
+            // script then keys what it makes by the session's id, not the folder, and removes no folder
+            env[SharedFolderVariable] = project.SharedFolder ? "true" : "false";
+        }
 
         if (resultFilePath != null)
             env["GODMODE_RESULT_FILE"] = resultFilePath;

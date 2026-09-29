@@ -55,12 +55,12 @@ public class RestartBridgeTests
                 await first.WaitForHealthyAsync(http);
                 await using var client = new ServerHubClient(baseUrl);
                 await client.StartAsync();
-                var created = await client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.CreateProject), Profile, Root, null,
+                var created = (await client.Hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), Profile, Root, null,
                     new Dictionary<string, JsonElement>
                     {
                         ["name"] = JsonSerializer.SerializeToElement("p1"),
                         ["prompt"] = JsonSerializer.SerializeToElement("Start"),
-                    });
+                    })).Project!;
                 projectId = created.Id;
                 record = Path.Combine(ServerProcess.WorkingFolderOf(Path.Combine(workDir, "roots", Root), projectId), "fake-claude.jsonl");
                 Assert.True(await LifecycleHarness.WaitForAsync(() => Task.FromResult(FakeRecording.Read(record) is [{ Stdin.Count: > 0 }])),

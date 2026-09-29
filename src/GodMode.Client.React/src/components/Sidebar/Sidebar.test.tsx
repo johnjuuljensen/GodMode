@@ -24,7 +24,7 @@ vi.mock('../../services/hostApi', () => ({
 
 const rootNamed = (name: string): ProjectRootInfo => ({
   Name: name, ProfileName: 'Default',
-  Actions: [{ Name: 'issue', AllowSkipPermissions: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } } } }],
+  Actions: [{ Name: 'issue', AllowSkipPermissions: false, Session: true, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } } } }],
 });
 
 // The window's (max-width: 768px), which a test sets before rendering; every other query is as before

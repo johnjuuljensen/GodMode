@@ -189,13 +189,13 @@ public class LaunchPermissionsTests
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
         File.WriteAllText(Path.Combine(GodModeRoot(harness), "config.plain.json"), "{}");
         File.WriteAllText(Path.Combine(GodModeRoot(harness), "config.open.json"), """{ "allowSkipPermissions": true }""");
-        var created = await harness.Projects.CreateProjectAsync(new GodMode.Shared.Models.CreateProjectRequest(
+        var created = (await harness.Projects.CreateProjectAsync(new GodMode.Shared.Models.CreateProjectRequest(
             LifecycleHarness.ProfileName, LifecycleHarness.RootName,
             new Dictionary<string, JsonElement>
             {
                 ["name"] = JsonSerializer.SerializeToElement("p1"),
                 ["prompt"] = JsonSerializer.SerializeToElement("Say hello"),
-            }, "plain"));
+            }, "plain"))).Project!;
         await harness.WaitForStdinAsync(created.Id);
         await StopAsync(harness, created.Id);
         EditSettings(harness, created.Id, settings => settings with { ActionName = "open", DangerouslySkipPermissions = true });

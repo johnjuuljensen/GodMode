@@ -247,6 +247,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `promptTemplate` | Derive initial prompt from inputs |
 | `scriptsCreateFolder` | If true, create scripts are responsible for creating the project directory |
 | `sharedFolder` | If true, the action's sessions share their working folder (an assistant's workspace): a create may go into a folder other sessions of shared actions use, and a delete removes only the session's state, never the folder. Default `false`: a folder another session uses is refused. See [Several sessions in one folder](#several-sessions-in-one-folder) |
+| `session` | Whether the action starts a session. Default `true`. `false`: its scripts run, and nothing more, as a provisioning action does. See [Actions that start no session](#actions-that-start-no-session) |
 | `resumeOnRestart` | Whether a project that was active when the server stopped carries on when it starts again. Default `true`: see [Resuming after a restart](#resuming-after-a-restart) |
 | `resumePrompt` | What a project that was working when the server stopped is told when it is resumed. Default `"The GodMode server restarted and interrupted you. Continue where you left off."` |
 | `stripEnvVarProfile` | If true (`config.json` only), server env vars prefixed with the profile name reach sessions without the prefix: `MEGA_GITHUB_TOKEN` → `GITHUB_TOKEN` for profile `mega` |
@@ -368,6 +369,7 @@ A create script can override the project's `project_path`, `project_name` or `pr
 | `project_name` | The display name, and the id's slug |
 | `project_prompt` | The first prompt |
 | `kind` | The session's kind (`bug`, `feat`, `experiment`, `chat`…): the label the app shows, and the id's kind. Without one, the kind is the action's name. Kept as the id has it: lowercase `[a-z0-9-]`, 12 characters at most |
+| `message` | Only for an action that starts no session: what it made, which the app shows when it has run (see [Actions that start no session](#actions-that-start-no-session)), cut to 500 characters, and not logged. An action that starts a session ignores it |
 
 For example, an issue script that names the kind from the issue's labels:
 
@@ -377,6 +379,30 @@ $kind = if ($labels -contains 'epic') { 'epic' } elseif ($labels -contains 'bug'
 ```
 
 Script stdout is streamed to the client as creation progress, and a create's prepare and create scripts log to `{root}/logs/<id>.log`, their result file being `{root}/logs/<id>.result`: the session's own, by the id it keeps (renamed when the result gives it its final id), so two sessions of one folder never share one. Non-zero exit code aborts creation.
+
+### Actions that start no session
+
+An action with `"session": false` only runs its scripts. A provisioning root uses one to change the host, for instance **New experiment root**, which makes a new root beside it in its scan folder; promoting an experiment to a worktree root is another, given an existing folder. The server writes no config for it (no hub method does): the script does, as a root script may. The same script can be run by an assistant session after a conversation, which needs nothing from GodMode.
+
+```json
+{ "session": false, "create": "new-root/create.ps1" }
+```
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$root = Join-Path (Split-Path $env:GODMODE_ROOT_PATH -Parent) $env:GODMODE_INPUT_NAME
+New-Item -ItemType Directory -Force (Join-Path $root '.godmode-root') | Out-Null
+'{ "profileName": "Experiments" }' | Set-Content (Join-Path $root '.godmode-root/config.json')
+"message=Root $env:GODMODE_INPUT_NAME is ready" | Set-Content $env:GODMODE_RESULT_FILE
+```
+
+- **The scripts run as a create's do:** `prepare`, then `create`, in the root (working directory and `GODMODE_ROOT_PATH`), with the root's and its profile's environment, the form's inputs (`GODMODE_INPUT_*`) and `GODMODE_RESULT_FILE`, from the same environment allowlist. They get no `GODMODE_PROJECT_*`, `GODMODE_SESSION_ID` or `GODMODE_SHARED_FOLDER`: there is no project. Output streams as `CreationProgress`, and a non-zero exit fails the create.
+- **Nothing is tracked, and no claude starts.** No working folder is made, no `.godmode/`, no project is listed or announced (`ProjectCreated`), and a failed script leaves no `Error` project behind: the create fails with its message, and its log stays.
+- **The run has an id as a session would**, `yymmdd-<kind>-<slug>-<suffix>` (the action's name as the kind, the `name` input, if any, as the slug), for its log and result file (`{root}/logs/<id>.log`, `.result`) and its progress, whose ID `{profile}/{root}/<id>` names no project. The progress ends when `CreateProject` returns, which carries the message: no event marks the end.
+- **Of the result file, only `message` is read.** `project_path`, `project_name`, `project_prompt` and `kind` are ignored, and their checks do not apply: nothing is made a project's folder, so a script may name a folder outside the root (the root it made) without being refused.
+- **`CreateProject` returns no project** (`CreateProjectResult.Project` is null) and the script's `message`. The app shows the message, or that the action finished, and stays on the form; it offers no model for such an action (the listed action's `Session` is `false`, its `Model` null and `AllowSkipPermissions` false).
+- **The roots are read again once it has run**, so a root it made reaches every client as `RootsChanged` at once, not at the next poll ([Live roots](#live-roots)).
+- **What would give it a working folder is a config error**: `"session": false` with `"sharedFolder": true`, with `"scriptsCreateFolder": true`, or with no `create` script. A create of the action is refused saying why, and the listing leaves that action out, with a warning in the log, as it leaves out an overlay it cannot read: the root keeps its profile and its other actions. The merged action is checked, so a base `config.json` that sets one of these for its worktree actions needs `false` in the session-less action's overlay. `claudeArgs`, `model`, `permissionMode`, `allowSkipPermissions`, `promptTemplate`, `delete`, `status` and the resume settings mean nothing to it and are ignored, since a base config shares them with every action.
 
 ### Environment
 
@@ -550,7 +576,7 @@ A connection's calls run up to four at a time (`MaximumParallelInvocationsPerCli
 Projects:
 - `Task<ProjectSummary[]> ListProjects()` — Get all projects
 - `Task<ProjectStatus> GetStatus(projectId)` — Get project status
-- `Task<ProjectStatus> CreateProject(profileName, projectRootName, actionName, inputs)` — Create a project with form inputs (`actionName` null = default action)
+- `Task<CreateProjectResult> CreateProject(profileName, projectRootName, actionName, inputs)` — Create a project with form inputs (`actionName` null = default action): its `Project`, or, for an action that starts no session, no project and the script's `Message` ([Actions that start no session](#actions-that-start-no-session))
 - `Task SendInput(projectId, input)` — Send input to Claude (while a permission prompt or question waits, it answers that instead)
 - `Task RespondToPermission(projectId, requestId, decision)` — Allow or deny the project's `PendingPermission`; fails when the request is not pending, another answer to it came first included
 - `Task<PermissionDetail> GetPermissionDetail(projectId, requestId)` — Everything the pending permission request would run, to show before Allow (see [The MCP endpoint](#the-mcp-endpoint))
@@ -581,7 +607,7 @@ Utility:
 - `StatusChanged(projectId, status)` — Project status changed
 - `AttentionChanged(items)` — The whole `GetAttention` list, pushed only when it differs from the last one pushed
 - `ProjectCreated(status)` — New project created, or recovered live from a root that appeared or took another profile (*Live roots*)
-- `CreationProgress(projectId, message)` — Script progress during project creation
+- `CreationProgress(projectId, message)` — Script progress during project creation (for an action that starts no session, under the run's own ID, which names no project); it ends when `CreateProject` returns
 - `ProjectDeleted(projectId)` — Project deleted, or left the list with its root (*Live roots*)
 - `RootsChanged(roots, profiles)` — The whole `ListProjectRoots` and `ListProfiles` lists, pushed only when they differ from the last ones read (*Roots and profiles*, *Live roots*)
 

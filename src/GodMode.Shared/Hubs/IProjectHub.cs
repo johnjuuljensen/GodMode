@@ -35,7 +35,11 @@ public interface IProjectHub
     /// <param name="projectRootName">Name of the project root.</param>
     /// <param name="actionName">Name of the create action to use, or null for the default action.</param>
     /// <param name="inputs">Form inputs from the dynamic form.</param>
-    Task<ProjectStatus> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
+    /// <returns>
+    /// The project created; for an action that starts no session (<c>"session": false</c>), no project
+    /// and the script's message. Progress comes as <c>CreationProgress</c> until this returns.
+    /// </returns>
+    Task<CreateProjectResult> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
 
     /// <summary>
     /// Sends input to a project.

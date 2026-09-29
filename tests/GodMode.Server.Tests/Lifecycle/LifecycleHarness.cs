@@ -65,6 +65,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     /// <summary>The server's warnings and errors so far, across restarts.</summary>
     public IReadOnlyCollection<string> Warnings => _logs.Lines;
 
+    /// <summary>Everything the server logged so far, at any level, across restarts.</summary>
+    public IReadOnlyCollection<string> AllLogs => _logs.AllLines;
+
     /// <summary>Every push the server makes to its hub clients (since the last <see cref="RestartAsync"/>).</summary>
     public RecordingHubContext Hub { get; private set; } = new();
 
@@ -201,7 +204,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         };
         foreach (var (key, value) in inputs ?? new Dictionary<string, object>())
             request[key] = JsonSerializer.SerializeToElement(value);
-        var status = await Projects.CreateProjectAsync(new CreateProjectRequest(profile, root, request));
+        var status = (await Projects.CreateProjectAsync(new CreateProjectRequest(profile, root, request))).Project
+            ?? throw new InvalidOperationException("the create made no project: its action starts no session");
         _projectIds.Add(status.Id);
         Session(status.Id);
         return status;

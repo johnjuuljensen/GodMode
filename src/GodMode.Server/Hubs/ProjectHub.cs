@@ -49,7 +49,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.GetStatusAsync(projectId);
     }
 
-    public async Task<ProjectStatus> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
+    public async Task<CreateProjectResult> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
     {
         _logger.LogInformation("Client {ConnectionId} creating project in profile '{Profile}' root '{Root}' action '{Action}' with {InputCount} inputs",
             Context.ConnectionId, profileName, projectRootName, actionName ?? "(default)", inputs.Count);
@@ -57,9 +57,10 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         try
         {
             var request = new CreateProjectRequest(profileName, projectRootName, inputs, actionName);
-            var status = await _projectManager.CreateProjectAsync(request);
-            await Clients.All.ProjectCreated(status);
-            return status;
+            var result = await _projectManager.CreateProjectAsync(request);
+            // An action that starts no session made no project to list
+            if (result.Project is { } status) await Clients.All.ProjectCreated(status);
+            return result;
         }
         catch (Exception ex)
         {

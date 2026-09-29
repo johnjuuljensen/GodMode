@@ -25,14 +25,14 @@ vi.mock('../../services/hostApi', () => ({
 
 const rootNamed = (name: string, profile = 'Default'): ProjectRootInfo => ({
   Name: name, ProfileName: profile,
-  Actions: [{ Name: 'issue', AllowSkipPermissions: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
+  Actions: [{ Name: 'issue', AllowSkipPermissions: false, Session: true, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
 });
 
 /** A root whose schema has the Skip Permissions toggle, defaulting on as the dev root's once did; allowed or not by the root. */
 const rootWithSkip = (allowSkipPermissions: boolean): ProjectRootInfo => ({
   Name: 'work', ProfileName: 'Default',
   Actions: [{
-    Name: 'issue', AllowSkipPermissions: allowSkipPermissions,
+    Name: 'issue', AllowSkipPermissions: allowSkipPermissions, Session: true,
     InputSchema: {
       type: 'object',
       properties: {
@@ -205,6 +205,55 @@ describe('the Skip Permissions toggle (#233)', () => {
     expect(skipToggle()?.checked).toBe(true);
     await click(button('Create'));
     expect(hub.created.map(c => c.inputs.skipPermissions)).toEqual([true]);
+  });
+});
+
+describe('an action that starts no session (#324)', () => {
+  /** A provisioning root: its action only runs a script, which makes a new root. */
+  const provisioning: ProjectRootInfo = {
+    Name: 'experiments', ProfileName: 'Default',
+    Actions: [{ Name: 'new-root', AllowSkipPermissions: false, Session: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } }, required: ['title'] } }],
+  };
+  const finishedView = () => view!.container.querySelector('.form-success')?.textContent ?? null;
+  const modelPicker = () => [...view!.container.querySelectorAll('.form-group')].find(g => g.querySelector('label')?.textContent === 'Model') ?? null;
+
+  async function openProvisioning(message: string | null) {
+    const hub = new FakeHub([], [provisioning]);
+    hub.createResult = { Project: null, Message: message };
+    await connectServers({ A: hub });
+    view = await render(<Shell />);
+    await openFor('A', 'experiments');
+    await typeInto(titleField(), 'Try it');
+    return hub;
+  }
+
+  it('offers no model, and runs with what was typed', async () => {
+    const hub = await openProvisioning('Root try-it is ready');
+
+    expect(modelPicker()).toBeNull();
+    await click(button('Run'));
+    expect(hub.created).toEqual([{ profileName: 'Default', rootName: 'experiments', actionName: 'new-root', inputs: { title: 'Try it' } }]);
+  });
+
+  it('shows the message and stays where it was, with the form back to its defaults', async () => {
+    await openProvisioning('Root try-it is ready');
+
+    await click(button('Run'));
+
+    expect(finishedView()).toBe('Root try-it is ready');
+    expect(useAppStore.getState().selectedProject).toBeNull();
+    expect(useAppStore.getState().activePage).toEqual({ type: 'createProject', context: { serverId: 'A', profileName: 'Default', rootName: 'experiments' } });
+    expect(shownRoot()).toBe('experiments');
+    expect(titleField().value).toBe('');
+  });
+
+  it('says the action finished when its script gave no message', async () => {
+    await openProvisioning(null);
+
+    await click(button('Run'));
+
+    expect(finishedView()).toBe('new-root finished.');
+    expect(useAppStore.getState().selectedProject).toBeNull();
   });
 });
 

@@ -94,11 +94,9 @@ public class RootConfigReader : IRootConfigReader
             // config.json is the single action (named "Create")
             var merged = baseRaw;
             var schema = LoadSchema(godModeRootPath, null);
-            var action = BuildAction("Create", merged, godModeRootPath, schema);
-            actions = new Dictionary<string, CreateAction>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["Create"] = action
-            };
+            actions = new Dictionary<string, CreateAction>(StringComparer.OrdinalIgnoreCase);
+            if (BuildActionOrSkip("Create", merged, godModeRootPath, schema, strict) is { } action)
+                actions["Create"] = action;
         }
         else
         {
@@ -107,8 +105,8 @@ public class RootConfigReader : IRootConfigReader
             {
                 var merged = MergeRawConfigs(baseRaw, overlayRaw);
                 var schema = LoadSchema(godModeRootPath, actionName);
-                var action = BuildAction(actionName, merged, godModeRootPath, schema);
-                actions[actionName] = action;
+                if (BuildActionOrSkip(actionName, merged, godModeRootPath, schema, strict) is { } action)
+                    actions[actionName] = action;
             }
         }
 
@@ -238,8 +236,26 @@ public class RootConfigReader : IRootConfigReader
         Model = overlay.Model ?? baseConfig.Model,
         AllowSkipPermissions = overlay.AllowSkipPermissions ?? baseConfig.AllowSkipPermissions,
         PermissionMode = overlay.PermissionMode ?? baseConfig.PermissionMode,
-        SharedFolder = overlay.SharedFolder ?? baseConfig.SharedFolder
+        SharedFolder = overlay.SharedFolder ?? baseConfig.SharedFolder,
+        Session = overlay.Session ?? baseConfig.Session
     };
+
+    /// <summary>
+    /// <see cref="BuildAction"/>, or, when the read is not strict, null for an action its config refuses,
+    /// logged: the root keeps its profile and its other actions, as it does when an overlay cannot be read.
+    /// </summary>
+    private CreateAction? BuildActionOrSkip(string name, RawConfig raw, string godModeRootPath, JsonElement? schema, bool strict)
+    {
+        try
+        {
+            return BuildAction(name, raw, godModeRootPath, schema);
+        }
+        catch (InvalidDataException ex) when (!strict)
+        {
+            _logger.LogWarning("{GodModeRoot}: {Reason} The action is left out", godModeRootPath, ex.Message);
+            return null;
+        }
+    }
 
     /// <summary>
     /// Builds a resolved CreateAction from a (merged) RawConfig.
@@ -247,12 +263,16 @@ public class RootConfigReader : IRootConfigReader
     /// </summary>
     private CreateAction BuildAction(string name, RawConfig raw, string godModeRootPath, JsonElement? schema)
     {
+        var create = NormalizeScriptPaths(raw.Create, godModeRootPath);
+        // An action that starts no session is its scripts, and has no working folder: what would give it one is a config error
+        if (raw.Session == false && WhySessionlessCannot(raw, create) is { } reason)
+            throw new InvalidDataException($"Action '{name}' has \"session\": false, {reason}.");
         return new CreateAction(
             Name: name,
             Description: raw.Description,
             InputSchema: schema,
             Prepare: NormalizeScriptPaths(raw.Prepare, godModeRootPath),
-            Create: NormalizeScriptPaths(raw.Create, godModeRootPath),
+            Create: create,
             Delete: NormalizeScriptPaths(raw.Delete, godModeRootPath),
             Environment: raw.Environment,
             ClaudeArgs: raw.ClaudeArgs,
@@ -266,9 +286,17 @@ public class RootConfigReader : IRootConfigReader
             ResumePrompt: raw.ResumePrompt is { Length: > 0 } resumePrompt ? resumePrompt : CreateAction.DefaultResumePrompt,
             AllowSkipPermissions: raw.AllowSkipPermissions ?? false,
             PermissionMode: raw.PermissionMode,
-            SharedFolder: raw.SharedFolder ?? false
+            SharedFolder: raw.SharedFolder ?? false,
+            Session: raw.Session ?? true
         );
     }
+
+    /// <summary>Why an action that starts no session cannot have <paramref name="raw"/>'s settings, or null when it can.</summary>
+    private static string? WhySessionlessCannot(RawConfig raw, string[]? create) =>
+        create is not { Length: > 0 } ? "and no create script: it would run nothing"
+        : raw.SharedFolder == true ? "and \"sharedFolder\": true: it has no working folder to share"
+        : raw.ScriptsCreateFolder == true ? "and \"scriptsCreateFolder\": true: it has no working folder for its scripts to create"
+        : null;
 
     /// <summary>
     /// Loads {actionName}/schema.json from .godmode-root/ if it exists.
@@ -365,6 +393,7 @@ public class RootConfigReader : IRootConfigReader
         public bool? AllowSkipPermissions { get; init; }
         public string? PermissionMode { get; init; }
         public bool? SharedFolder { get; init; }
+        public bool? Session { get; init; }
 
         /// <summary>Keys this reader does not know, such as a leftover MCP server config.</summary>
         [JsonExtensionData]

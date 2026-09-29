@@ -239,12 +239,12 @@ public class McpEndpointTests
 
         public async Task<string> CreateAsync(string name)
         {
-            var created = await Client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.CreateProject), Profile, Root, null,
+            var created = (await Client.Hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), Profile, Root, null,
                 new Dictionary<string, JsonElement>
                 {
                     ["name"] = JsonSerializer.SerializeToElement(name),
                     ["prompt"] = JsonSerializer.SerializeToElement("Start"),
-                });
+                })).Project!;
             return created.Id;
         }
 

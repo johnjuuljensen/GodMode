@@ -7,7 +7,7 @@ import type { ConnectionState, GodModeHub } from '../signalr/hub';
 import type { ProjectRootInfo, ProjectState, ProjectSummary } from '../signalr/types';
 import { rebuildHierarchy, type ServerConnection, type SidebarGroupBy } from './hierarchy';
 
-const issue = [{ Name: 'issue', AllowSkipPermissions: false }];
+const issue = [{ Name: 'issue', AllowSkipPermissions: false, Session: true }];
 
 const rootOf = (name: string, profile: string, actions = issue): ProjectRootInfo => ({ Name: name, ProfileName: profile, Actions: actions });
 
