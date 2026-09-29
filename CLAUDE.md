@@ -46,7 +46,7 @@ dotnet build src/GodMode.Server/GodMode.Server.csproj
 # With no config file it is a dev server: appsettings only, an empty `roots` folder under the working directory
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
-# Run the server you use on its own config file (Instance, ProjectRootsDir, ...): --config <path> or GODMODE_CONFIG
+# Run the server you use on its own config file (Instance, Roots, Profiles, ...): --config <path> or GODMODE_CONFIG
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.godmode-server/main.json
 
 # Build MAUI app (requires MAUI workload; builds the React client into it)
@@ -93,9 +93,10 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of `GodMode.Client.React.csproj` (GodMode.Maui's reference, or the solution) (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
 
 **Config-Driven Project Roots (Multi-File)**
-- A root is a subdirectory of `ProjectRootsDir` (the instance's config file, else appsettings' `roots`) that contains a `.godmode-root/` folder with config files
+- A root is a folder with a `.godmode-root/` folder of config files in it. The server's config names where they are, as keyed maps (so sources merge entry by entry): scan folders (`Roots:Scan:<key>`, each immediate subfolder with `.godmode-root/` is a root; appsettings' `default` is `roots`) and explicit roots anywhere on disk (`Roots:Explicit:<name>:Path`, optional `:Profile`). One name, one root per server: an explicit root wins a clash, then the first scan key in ordinal order
+- A root's profile is its `config.json`'s `profileName`, else its explicit entry's `Profile`, else `Default`. A profile's description and environment are `Profiles:<name>:Description` and `Profiles:<name>:Environment:<VAR>` (the root's `environment` wins a clash); secrets stay in environment variables (`Profiles__<name>__Environment__<VAR>`). `ProjectRootsDir` and `.profiles/` are gone
 - `config.json` defines base/shared config (profileName, prepare, delete, status, environment, claudeArgs, model, permissionMode, allowSkipPermissions)
-- Roots and profiles (`{ProjectRootsDir}/.profiles/`) are maintained by hand on the host: no hub method writes config, and the server archives nothing
+- Roots and profiles are maintained by hand on the host (the instance's config file, the roots' folders): no hub method writes config, and the server archives nothing
 - GodMode gives a session one MCP server, the server's own `/mcp` endpoint, whose only tool is the permission prompt, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
 - `config.{action}.json` files define per-action overlays (merged with base)
 - `{actionName}/schema.json` provides input schema by convention (falls back to default name+prompt)
@@ -117,7 +118,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 
 **Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
 - Every request needs a credential, loopback included. One mode per run: codespace (`CODESPACES=true`: a GitHub token of `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`) or API key
-- The key is `Authentication:ApiKey`, else one the server generates on its first start into an owner-only key file in its own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key`, `~/.local/share/GodMode.Server/api-key`; never under `ProjectRootsDir`), prints once, and reuses on every start
+- The key is `Authentication:ApiKey`, else one the server generates on its first start into an owner-only key file in its own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key`, `~/.local/share/GodMode.Server/api-key`; never under a scan folder or explicit root), prints once, and reuses on every start
 - Any request with an `Origin` gets 403, whatever it names (the server's own bindings included; no setting allows one): no browser is a client. A request with no `Origin` (the MAUI relay, the attention service, a session's claude) needs its credential alone
 - Only `/health` is anonymous. `/`, with the key, answers `{"service":"GodMode.Server",…}`; nothing serves a page
 - Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them; a credential they need goes in the root's `environment`
@@ -138,7 +139,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 
 ### Project Root Config
 ```
-{ProjectRootsDir}/root-name/
+{scan folder}/root-name/         # or an explicit root anywhere
 ├── .godmode-root/               # Root config and scripts (optional)
 │   ├── config.json              # Base/shared config (prepare, delete, env, claudeArgs)
 │   ├── config.freeform.json     # Per-action overlay (merged with base)
@@ -201,7 +202,7 @@ The `.devcontainer/godmode-server/devcontainer.json` provisions a codespace with
 
 - **Binary**: `/opt/godmode-server/` (root-owned, read-only)
 - **Config**: `/opt/godmode-server/appsettings.json` (via `--contentRoot`)
-- **Roots**: `~/roots/` (`--ProjectRootsDir roots`, server CWD is `$HOME`), copied from `.devcontainer/godmode-server/roots/` in the repo
+- **Roots**: `~/roots/` (`--Roots:Scan:default=roots`, server CWD is `$HOME`), copied from `.devcontainer/godmode-server/roots/` in the repo
 - **Projects**: inside their root, `~/roots/<root>/<project-folder>/`
 - **Logs**: `~/.godmode-logs/`
 - **Claude Code**: `~/.local/bin/claude` (added to PATH in postStartCommand)
