@@ -175,13 +175,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private string? _snapshotDescribed;
 
     /// <summary>
-    /// Immutable snapshot of merged profile and root lookup state.
+    /// Immutable snapshot of merged profile and root lookup state. <paramref name="RootConfigs"/> is each
+    /// found root's config, by full path, as the rebuild read it: its profile, its profile's description
+    /// and the lists clients get all come from that one read, so an edit saved during a rebuild is in
+    /// all of them or in none.
     /// </summary>
     private sealed record ProfileSnapshot(
         Dictionary<string, ProfileConfig> Profiles,
         Dictionary<(string, string), string> RootLookup,
         Dictionary<string, (string, string)> PathToProfileRoot,
-        ProjectFiles.ProjectManager ProjectFiles);
+        ProjectFiles.ProjectManager ProjectFiles,
+        IReadOnlyDictionary<string, RootConfig> RootConfigs);
 
     public ProjectManager(
         ProjectLifecycle lifecycle,
@@ -299,8 +303,10 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     {
         var sources = RootSources.From(_configuration);
         var merged = new Dictionary<string, ProfileConfig>(StringComparer.OrdinalIgnoreCase);
+        var configs = new Dictionary<string, RootConfig>(PathComparer);
         foreach (var root in FindRoots(sources))
         {
+            configs[FullPath(root.Path)] = root.Config;
             if (!merged.TryGetValue(root.Profile, out var profile))
             {
                 sources.Profiles.TryGetValue(root.Profile, out var settings);
@@ -308,7 +314,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 {
                     Roots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                     Environment = settings is { Environment.Count: > 0 } ? new Dictionary<string, string>(settings.Environment) : null,
-                    Description = settings?.Description ?? root.Description,
+                    Description = settings?.Description ?? root.Config.Description,
                 };
             }
             profile.Roots[root.Name] = root.Path;
@@ -345,7 +351,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 merged.Count, rootLookup.Count, described);
         }
 
-        return new ProfileSnapshot(merged, rootLookup, pathToProfileRoot, projectFiles);
+        return new ProfileSnapshot(merged, rootLookup, pathToProfileRoot, projectFiles, configs);
     }
 
     /// <summary>
@@ -440,8 +446,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         lock (_profileLock) return _snapshot = BuildSnapshot();
     }
 
-    /// <summary>A root as its source found it, with the profile it goes in.</summary>
-    private sealed record FoundRoot(string Name, string Path, string Profile, string? Description, string Source);
+    /// <summary>A root as its source found it, with the profile it goes in and the config that read gave.</summary>
+    private sealed record FoundRoot(string Name, string Path, string Profile, RootConfig Config, string Source);
 
     /// <summary>
     /// The roots <paramref name="sources"/> name: the explicit ones, then each scan folder's, in ordinal
@@ -486,7 +492,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             try
             {
                 var config = _rootConfigReader.ReadConfig(path);
-                var root = new FoundRoot(name, path, config.ProfileName ?? entryProfile ?? "Default", config.Description, source);
+                var root = new FoundRoot(name, path, config.ProfileName ?? entryProfile ?? "Default", config, source);
                 roots.Add(root);
                 byName[name] = root;
                 byPath[path] = root;
@@ -622,13 +628,18 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     public async Task<ProjectRootInfo[]> ListProjectRootsAsync() => (await RefreshRootsAsync()).Roots;
 
-    /// <summary>The roots and profiles of <paramref name="snap"/> as the hub lists them, each root with its actions read fresh.</summary>
+    /// <summary>
+    /// The roots and profiles of <paramref name="snap"/> as the hub lists them, each root with its
+    /// actions as the snapshot's rebuild read them: a second read here could find an edit the first did
+    /// not, and give a root that does not match its profile, pushed again once the next rebuild agrees.
+    /// </summary>
     private RootsView BuildRootsView(ProfileSnapshot snap)
     {
         var profiles = snap.Profiles.Select(kvp => new ProfileInfo(kvp.Key, kvp.Value.Description)).ToArray();
         var roots = AllRoots(snap).Select(root =>
         {
-            var config = _rootConfigReader.ReadConfig(root.Path);
+            // The default root, there when no source names one, was found by no read
+            var config = snap.RootConfigs.GetValueOrDefault(FullPath(root.Path)) ?? _rootConfigReader.ReadConfig(root.Path);
             var actions = config.GetEffectiveActions()
                 .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Session ? a.Model : null,
                     a.Session && a.AllowSkipPermissions, a.Session))
@@ -979,6 +990,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return new CreateProjectResult(project.Status);
     }
 
+    /// <summary>The longest message a run returns, as long as an attention item's text; a longer one is cut.</summary>
+    internal const int MaxRunMessageLength = Attention.MaxTextLength;
+
     /// <summary>
     /// An action that starts no session (<c>"session": false</c>): its prepare and create scripts run in
     /// the root, with the root's environment and inputs as a create's do, and that is all. No folder is
@@ -988,9 +1002,6 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// names no project. A script that fails fails the create, and leaves no Error project. The roots are
     /// read again once it has run, so a root it made reaches every client (RootsChanged) at once.
     /// </summary>
-    /// <summary>The longest message a run returns, as long as an attention item's text; a longer one is cut.</summary>
-    internal const int MaxRunMessageLength = Attention.MaxTextLength;
-
     private async Task<CreateProjectResult> RunSessionlessActionAsync(CreateProjectRequest request, ProfileSnapshot snap,
         string rootPath, RootConfig config, CreateAction action)
     {

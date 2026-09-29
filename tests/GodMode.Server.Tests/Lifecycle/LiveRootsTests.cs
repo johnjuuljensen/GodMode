@@ -41,6 +41,47 @@ public sealed class LiveRootsTests : IDisposable
         return path;
     }
 
+    /// <summary>Sets the description in the root's config.json, as a save of it by hand would.</summary>
+    private static void EditDescription(LifecycleHarness harness, string description)
+    {
+        var config = Path.Combine(harness.RootPath, ".godmode-root", "config.json");
+        var edited = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllText(config))!;
+        edited["description"] = JsonSerializer.SerializeToElement(description);
+        File.WriteAllText(config, JsonSerializer.Serialize(edited));
+    }
+
+    /// <summary>
+    /// Moves a folder in or out of a root. On Windows a folder with a file open in it cannot be moved,
+    /// and the server opens the root's config for as long as a read of it takes (a refresh, or the pull
+    /// request check a session's stop starts): a move that lands on one is refused, and is tried again.
+    /// </summary>
+    private static async Task MoveAsync(string from, string to)
+    {
+        Exception? refused = null;
+        await LifecycleHarness.WaitUntilAsync(() =>
+        {
+            try
+            {
+                Directory.Move(from, to);
+                return Task.FromResult(true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                refused = ex;
+                return Task.FromResult(false);
+            }
+        }, null, () => $"{from} could not be moved to {to}: {refused?.Message}");
+    }
+
+    /// <summary>
+    /// Reads the roots a few times. Refreshes run one at a time, and each records its push before the
+    /// next starts, so once these return every poll before them has pushed what it found.
+    /// </summary>
+    private static async Task ReadAgainAsync(LifecycleHarness harness)
+    {
+        for (var i = 0; i < 3; i++) await harness.Projects.ListProjectRootsAsync();
+    }
+
     private static Task WaitForRootsPushAsync(LifecycleHarness harness, Func<HubPush, bool> condition, string what) =>
         LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.Hub.RootsPushes.Any(condition)), null,
             () => $"no RootsChanged {what}; pushed: {string.Join(" | ", harness.Hub.RootsPushes.Select(Names))}\n{string.Join("\n", harness.Warnings)}");
@@ -99,18 +140,73 @@ public sealed class LiveRootsTests : IDisposable
         await using var harness = new LifecycleHarness(Waiting(), settings: Poll(0.1));
         await harness.Projects.RecoverProjectsAsync();
 
-        for (var i = 0; i < 3; i++) await harness.Projects.ListProjectRootsAsync();
-        await Task.Delay(TimeSpan.FromSeconds(1));
+        await ReadAgainAsync(harness);
         Assert.Empty(harness.Hub.RootsPushes);
 
-        var config = Path.Combine(harness.RootPath, ".godmode-root", "config.json");
-        var edited = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllText(config))!;
-        edited["description"] = JsonSerializer.SerializeToElement("edited");
-        File.WriteAllText(config, JsonSerializer.Serialize(edited));
+        EditDescription(harness, "edited");
 
         await WaitForRootsPushAsync(harness, push => push.Roots!.Any(root => root.Description == "edited"), "with the edited description");
-        await Task.Delay(TimeSpan.FromSeconds(1));
+        await ReadAgainAsync(harness);
         Assert.Single(harness.Hub.RootsPushes);
+    }
+
+    /// <summary>
+    /// A root's config.json saved while a refresh reads the roots, once the refresh has read it, is
+    /// pushed once, whole, by the next refresh: the root and the profile it describes (a profile
+    /// without its own description takes its root's) as the save has them. A refresh that read the
+    /// file twice pushed a root that did not match its profile, then pushed again.
+    /// </summary>
+    [Fact]
+    public async Task ConfigSavedDuringARefresh_IsPushedOnce_WithTheRootAndItsProfileAgreeing()
+    {
+        EditAfterNextRead? reader = null;
+        await using var harness = new LifecycleHarness(Waiting(), settings: Poll(0), rootConfigReader: inner => reader = new EditAfterNextRead(inner));
+        await harness.Projects.RecoverProjectsAsync();
+
+        reader!.Arm(harness.RootPath, () => EditDescription(harness, "edited"));
+        await harness.Projects.ListProjectRootsAsync();
+        Assert.False(reader.Armed, "the refresh should have read the root's config, and the edit been saved");
+        await ReadAgainAsync(harness);
+
+        var push = Assert.Single(harness.Hub.RootsPushes);
+        Assert.Equal("edited", Assert.Single(push.Roots!).Description);
+        Assert.Equal("edited", Assert.Single(push.Profiles!).Description);
+    }
+
+    /// <summary>Refreshes from every trigger at once, the poll, config reloads and lists, push each edit once, in order.</summary>
+    [Fact]
+    public async Task RefreshesFromThePollReloadsAndListsAtOnce_PushEachEditOnce()
+    {
+        var instanceFile = Elsewhere("instance.json");
+        File.WriteAllText(instanceFile, "{}");
+        await using var harness = new LifecycleHarness(Waiting(), settings: Poll(0.01), configFiles: [instanceFile]);
+        await harness.Projects.RecoverProjectsAsync();
+
+        using var stop = new CancellationTokenSource();
+        var reloads = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                harness.ReloadConfiguration();
+                await Task.Delay(5);
+            }
+        });
+        var lists = Enumerable.Range(0, 3).Select(_ => Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested) await harness.Projects.ListProjectRootsAsync();
+        })).ToArray();
+        const int edits = 5;
+        for (var edit = 1; edit <= edits; edit++)
+        {
+            EditDescription(harness, $"edit {edit}");
+            await WaitForRootsPushAsync(harness, push => push.Roots!.Any(root => root.Description == $"edit {edit}"), $"with edit {edit}");
+        }
+        stop.Cancel();
+        await Task.WhenAll([reloads, .. lists]);
+        await ReadAgainAsync(harness);
+
+        Assert.Equal(Enumerable.Range(1, edits).Select(edit => $"edit {edit}"),
+            harness.Hub.RootsPushes.Select(push => Assert.Single(push.Roots!).Description));
     }
 
     /// <summary>
@@ -129,7 +225,7 @@ public sealed class LiveRootsTests : IDisposable
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0));
         new ProjectSettings(ActionName: "Create").Save(state);
         var arrived = Path.Combine(harness.RootsDir, "arrived");
-        Directory.Move(outside, arrived);
+        await MoveAsync(outside, arrived);
 
         var id = $"{LifecycleHarness.ProfileName}/arrived/{LifecycleHarness.PlantedSessionId}";
         await WaitForPushAsync(harness, nameof(IProjectHubClient.ProjectCreated), id);
@@ -159,12 +255,13 @@ public sealed class LiveRootsTests : IDisposable
         var idleState = harness.StatePath(idle.Id);
 
         var configDir = Path.Combine(harness.RootPath, ".godmode-root");
-        Directory.Move(configDir, configDir + ".away");
+        await MoveAsync(configDir, configDir + ".away");
 
         await WaitForPushAsync(harness, nameof(IProjectHubClient.ProjectDeleted), idle.Id);
         Assert.Contains(harness.Hub.RootsPushes, push => !Lists(push, LifecycleHarness.ProfileName, LifecycleHarness.RootName));
         Assert.True(Directory.Exists(idleState), "a session that leaves the list keeps its files");
-        await Task.Delay(TimeSpan.FromSeconds(1));
+        // Reads that agree the root is gone, after which a session without a claude has left
+        await ReadAgainAsync(harness);
         Assert.True(harness.Lifecycle.IsRunning(harness.Tracked(running.Id)), "its claude runs on");
         Assert.DoesNotContain(harness.Hub.Pushes, p => p.Method == nameof(IProjectHubClient.ProjectDeleted) && p.ProjectId == running.Id);
         using (var taken = RootLock.TryAcquire(harness.RootPath, "another"))
@@ -177,7 +274,7 @@ public sealed class LiveRootsTests : IDisposable
             () => "the root was not let go once its last session had stopped");
         free!.Dispose();
 
-        Directory.Move(configDir + ".away", configDir);
+        await MoveAsync(configDir + ".away", configDir);
         await WaitForPushAsync(harness, nameof(IProjectHubClient.ProjectCreated), idle.Id);
         await WaitForPushAsync(harness, nameof(IProjectHubClient.ProjectCreated), running.Id);
     }
@@ -196,7 +293,7 @@ public sealed class LiveRootsTests : IDisposable
         await harness.WaitForStdinAsync(idle.Id);
         await harness.Projects.StopProjectAsync(idle.Id);
         var configDir = Path.Combine(harness.RootPath, ".godmode-root");
-        Directory.Move(configDir, configDir + ".away");
+        await MoveAsync(configDir, configDir + ".away");
         // The first read that finds the root gone only notes it
         await harness.Projects.ListProjectRootsAsync();
 
@@ -211,8 +308,7 @@ public sealed class LiveRootsTests : IDisposable
         await forget;
         await Assert.ThrowsAsync<KeyNotFoundException>(() => reply);
         Assert.Null(((ProjectManager)harness.Projects).Tracked(idle.Id));
-        await Task.Delay(TimeSpan.FromMilliseconds(500));
-        Assert.Single(harness.Launches(idle.Id));
+        Assert.Equal(1, harness.LaunchesAsked(idle.Id));
     }
 
     /// <summary>
@@ -285,5 +381,29 @@ public sealed class LiveRootsTests : IDisposable
         var listed = await harness.Projects.ListProjectsAsync();
         Assert.Equal([Renamed(idle.Id), Renamed(running.Id)], listed.Select(p => p.Id).Order());
         Assert.All(listed, project => Assert.Equal("renamed", project.ProfileName));
+    }
+}
+
+/// <summary>A reader of root configs that saves an edit once its next read of a root has returned, in the middle of whatever read it.</summary>
+internal sealed class EditAfterNextRead(IRootConfigReader inner) : IRootConfigReader
+{
+    private Pending? _armed;
+
+    private sealed record Pending(string RootPath, Action Edit);
+
+    public bool Armed => Volatile.Read(ref _armed) != null;
+
+    public void Arm(string rootPath, Action edit) => _armed = new Pending(Path.GetFullPath(rootPath), edit);
+
+    public RootConfig ReadConfig(string rootPath) => After(rootPath, inner.ReadConfig(rootPath));
+
+    public RootConfig ReadConfigStrict(string rootPath) => After(rootPath, inner.ReadConfigStrict(rootPath));
+
+    private RootConfig After(string rootPath, RootConfig read)
+    {
+        if (_armed is { } armed && string.Equals(Path.GetFullPath(rootPath), armed.RootPath, StringComparison.OrdinalIgnoreCase)
+            && Interlocked.CompareExchange(ref _armed, null, armed) == armed)
+            armed.Edit();
+        return read;
     }
 }
