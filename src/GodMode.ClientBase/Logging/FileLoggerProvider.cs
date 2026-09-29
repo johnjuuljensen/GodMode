@@ -36,7 +36,10 @@ public sealed class FileLoggerProvider : ILoggerProvider
             {
                 _writer?.Dispose();
                 var path = Path.Combine(_logDir, $"godmode-{dateStr}.log");
-                _writer = new StreamWriter(path, append: true) { AutoFlush = true };
+                // Shared for writing: a second app process (a debug build beside the installed app, or a release
+                // start handing off to the running one) appends to the same day's log
+                _writer = new StreamWriter(new FileStream(path, FileMode.Append, FileAccess.Write,
+                    FileShare.ReadWrite | FileShare.Delete)) { AutoFlush = true };
                 _currentDate = dateStr;
             }
             var shortLevel = level switch
@@ -50,7 +53,9 @@ public sealed class FileLoggerProvider : ILoggerProvider
                 _ => "???"
             };
             var shortCategory = category.Contains('.') ? category[(category.LastIndexOf('.') + 1)..] : category;
-            _writer!.WriteLine($"{now:HH:mm:ss.fff} [{shortLevel}] {shortCategory}: {message}");
+            // Each process has its own position in the file: without this, the next line of one overwrites the other's
+            _writer!.BaseStream.Seek(0, SeekOrigin.End);
+            _writer.WriteLine($"{now:HH:mm:ss.fff} [{shortLevel}] {shortCategory}: {message}");
         }
     }
 

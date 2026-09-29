@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using GodMode.ClientBase;
 using GodMode.ClientBase.Services;
 using GodMode.Maui.Bridge;
@@ -9,7 +10,8 @@ namespace GodMode.Maui.Voice;
 
 /// <summary>
 /// The app's voice session: it belongs to the app, not the page, so a WebView reload (or a new page) finds it running
-/// and gets the conversation so far. Its events go to whichever page is attached now (<see cref="Attach"/>).
+/// and gets the conversation so far. Its events go to every page attached (<see cref="Attach"/>): one per window, so
+/// voice started in one window shows as on in the others (#340).
 /// </summary>
 public sealed class VoiceHost : IVoiceEvents
 {
@@ -23,7 +25,8 @@ public sealed class VoiceHost : IVoiceEvents
     private readonly SemaphoreSlim _switching = new(1, 1);
     private readonly Lock _lock = new();
     private readonly List<VoiceLine> _lines = [];
-    private Action<string, object?>? _send;
+    private readonly ConcurrentDictionary<int, Action<string, object?>> _pages = new();
+    private int _attached;
     private Running? _running;
     private VoiceState _state = VoiceState.Off;
     private VoiceErrorPayload? _error;
@@ -52,8 +55,23 @@ public sealed class VoiceHost : IVoiceEvents
         }
     }
 
-    /// <summary>Events go to this page from now on (the one before it is gone or replaced).</summary>
-    public void Attach(Action<string, object?> send) => _send = send;
+    /// <summary>Events go to this page too, from now on, until the result is disposed (its page is gone or replaced).</summary>
+    public IDisposable Attach(Action<string, object?> send)
+    {
+        var page = Interlocked.Increment(ref _attached);
+        _pages[page] = send;
+        return new Detach(() => _pages.TryRemove(page, out _));
+    }
+
+    private void Send(string type, object? payload)
+    {
+        foreach (var send in _pages.Values) send(type, payload);
+    }
+
+    private sealed class Detach(Action detach) : IDisposable
+    {
+        public void Dispose() => detach();
+    }
 
     public async Task<VoiceStatus> StartAsync()
     {
@@ -185,7 +203,7 @@ public sealed class VoiceHost : IVoiceEvents
         }
     }
 
-    // ── IVoiceEvents: kept for a page that comes later, and sent to the one attached ──
+    // ── IVoiceEvents: kept for a page that comes later, and sent to every one attached ──
 
     public void Transcript(string text, bool partial)
     {
@@ -197,14 +215,14 @@ public sealed class VoiceHost : IVoiceEvents
                 _lines.RemoveAt(_lines.Count - 1);
             Keep(line);
         }
-        _send?.Invoke(ShellMessageTypes.VoiceTranscript, line);
+        Send(ShellMessageTypes.VoiceTranscript, line);
     }
 
     public void Response(string text)
     {
         var line = new VoiceLine(VoiceSpeaker.Bot, text);
         lock (_lock) Keep(line);
-        _send?.Invoke(ShellMessageTypes.VoiceResponse, line);
+        Send(ShellMessageTypes.VoiceResponse, line);
     }
 
     public void StateChanged(VoiceState state)
@@ -214,14 +232,14 @@ public sealed class VoiceHost : IVoiceEvents
             if (_state == state) return;
             _state = state;
         }
-        _send?.Invoke(ShellMessageTypes.VoiceStateChanged, Status);
+        Send(ShellMessageTypes.VoiceStateChanged, Status);
     }
 
     public void Error(SessionService service, SessionErrorKind kind, string message)
     {
         var error = new VoiceErrorPayload(service, kind, message);
         lock (_lock) _error = error;
-        _send?.Invoke(ShellMessageTypes.VoiceError, error);
+        Send(ShellMessageTypes.VoiceError, error);
     }
 
     public void Recovered(SessionService service)
@@ -230,7 +248,7 @@ public sealed class VoiceHost : IVoiceEvents
         {
             if (_error?.Service == service) _error = null;
         }
-        _send?.Invoke(ShellMessageTypes.VoiceRecovered, new VoiceServicePayload(service));
+        Send(ShellMessageTypes.VoiceRecovered, new VoiceServicePayload(service));
     }
 
     private void Keep(VoiceLine line)

@@ -15,7 +15,7 @@ import {
 } from '../services/questionDetection';
 import { projectKey, type ProjectKey } from './projectKey';
 import {
-  rebuildHierarchy, computeTotalWaiting, SIDEBAR_GROUP_ORDER, DEFAULT_GROUP_BY,
+  rebuildHierarchy, computeTotalWaiting, inProfile, SIDEBAR_GROUP_ORDER, DEFAULT_GROUP_BY,
   type ServerConnection, type SidebarGroupBy, type ProfileGroup,
 } from './hierarchy';
 
@@ -23,7 +23,7 @@ export { projectKey, type ProjectKey };
 /** The key of a transcript: a project's ProjectKey. */
 export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
-export { isListed, foldItems } from './hierarchy';
+export { isListed, foldItems, inProfile, profileNameOf, sameProfile } from './hierarchy';
 
 // ── Persisted dismiss tracking ─────────────────────────────────
 // Keyed by ProjectKey; the unversioned key held project IDs alone, which collide across servers
@@ -119,9 +119,10 @@ export interface ServerAttentionItem extends AttentionItem {
  * Replaces one server's items in the merged list, keeping it oldest first and one item per
  * ProjectKey (the last a server lists, should it list a project twice). Oldest by time, not by text:
  * the server writes no trailing zeros in fractional seconds, so `…:00.5Z` is later than `…:00.52Z` as text.
+ * A page locked to a profile (#340) keeps only that profile's: its inbox, and the count in its title.
  */
-function mergeAttention(all: ServerAttentionItem[], serverId: string, items: AttentionItem[]): ServerAttentionItem[] {
-  const fresh = new Map(items.map(i => [i.ProjectId, { ...i, serverId }]));
+function mergeAttention(all: ServerAttentionItem[], serverId: string, items: AttentionItem[], locked: string | null): ServerAttentionItem[] {
+  const fresh = new Map(items.filter(i => inProfile(i.Profile, locked ?? 'All')).map(i => [i.ProjectId, { ...i, serverId }]));
   return [...all.filter(i => i.serverId !== serverId), ...fresh.values()]
     .sort((a, b) => (Date.parse(a.Since) - Date.parse(b.Since))
       || projectKey(a.serverId, a.ProjectId).localeCompare(projectKey(b.serverId, b.ProjectId)));
@@ -200,7 +201,18 @@ interface AppState {
   inactiveServers: ServerConnection[];
   profileFilterOptions: string[];
   profileFilter: string;
+  /** Does nothing in a locked page, whose filter is its profile. */
   setProfileFilter: (filter: string) => void;
+
+  // The window this page is in (#340): the app's main window, unlocked, or a profile's own, locked to it
+  /** The profile this page's window is locked to, by name across every server; null in the main window. */
+  lockedProfile: string | null;
+  /** Whether the app can open a profile in a window of its own (Windows). */
+  canOpenWindows: boolean;
+  /** Asks the app which window this page is in, and locks the page when it is a profile's. */
+  loadWindow: () => Promise<void>;
+  /** Opens the profile in its own window, or brings forward the one it has. */
+  openProfileWindow: (profile: string) => Promise<void>;
 
   // Sidebar grouping
   sidebarGroupBy: SidebarGroupBy;
@@ -456,6 +468,7 @@ export const useAppStore = create<AppState>((set, get) => {
   getHub: (serverId) => get().serverConnections.find(c => c.serverInfo.Id === serverId)?.hub,
 
   setProfileFilter: (filter) => {
+    if (get().lockedProfile !== null) return;
     const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(get().serverConnections, filter, get().sidebarGroupBy);
     set({ profileFilter: filter, profileGroups, inactiveServers, profileFilterOptions });
   },
@@ -471,12 +484,29 @@ export const useAppStore = create<AppState>((set, get) => {
     set({ sidebarGroupBy: next, profileGroups, inactiveServers, profileFilterOptions });
   },
 
+  lockedProfile: null,
+  canOpenWindows: false,
+  loadWindow: async () => {
+    const { Profile, CanOpenWindows } = await api.windowInfo();
+    set(state => {
+      const lockedProfile = Profile ?? null;
+      if (lockedProfile === null) return { canOpenWindows: CanOpenWindows };
+      return {
+        lockedProfile, canOpenWindows: CanOpenWindows, profileFilter: lockedProfile,
+        ...rebuildHierarchy(state.serverConnections, lockedProfile, state.sidebarGroupBy),
+        attention: state.attention.filter(i => inProfile(i.Profile, lockedProfile)),
+      };
+    });
+  },
+  openProfileWindow: (profile) => api.openProfileWindow(profile),
+
   // ── Server lifecycle ──────────────────────────────────────
 
   loadServers: async () => {
     console.info('[store] loadServers: waiting for host API');
     watchWake(() => get().retryServers());
-    await api.waitUntilReady();
+    // Which window this page is in, before any server's list: a locked page never shows another profile's
+    await Promise.all([api.waitUntilReady(), get().loadWindow()]);
     try {
       const servers = await api.fetchServers();
       console.info(`[store] loadServers: fetched ${servers.length} servers:`, servers.map(s => `${s.Name}(${s.State})`));
@@ -719,13 +749,13 @@ export const useAppStore = create<AppState>((set, get) => {
         if (connectionState === 'connected') {
           // A reconnect may have missed pushes: take the whole list again
           conn.hub.getAttention()
-            .then(items => set(state => ({ attention: mergeAttention(state.attention, serverId, items) })))
+            .then(items => set(state => ({ attention: mergeAttention(state.attention, serverId, items, state.lockedProfile) })))
             .catch(err => console.error('[store] getAttention failed:', serverId, err));
         } else if (connectionState === 'disconnected') {
-          set(state => ({ attention: mergeAttention(state.attention, serverId, []) }));
+          set(state => ({ attention: mergeAttention(state.attention, serverId, [], state.lockedProfile) }));
         }
       },
-      onAttentionChanged: (items) => set(state => ({ attention: mergeAttention(state.attention, serverId, items) })),
+      onAttentionChanged: (items) => set(state => ({ attention: mergeAttention(state.attention, serverId, items, state.lockedProfile) })),
       // Every client hears of every created project: list it, and leave the view alone (#170)
       onProjectCreated: (status) => addProject(summaryOf(status)),
       onProjectDeleted: removeProject,

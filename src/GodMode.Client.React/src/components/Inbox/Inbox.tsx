@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useAppStore, projectKey } from '../../store';
+import { useAppStore, projectKey, inProfile } from '../../store';
 import { InboxItem } from './InboxItem';
 import { keepFocus } from '../Project/keepFocus';
 import './Inbox.css';
@@ -18,6 +18,8 @@ interface Props {
 export function Inbox({ variant }: Props) {
   const attention = useAppStore(s => s.attention);
   const serverConnections = useAppStore(s => s.serverConnections);
+  // A locked page's are its profile's (#340): the store keeps only its attention items, and this its running ones
+  const profile = useAppStore(s => s.lockedProfile ?? 'All');
   const selectProject = useAppStore(s => s.selectProject);
   const focus = useAppStore(s => s.inboxFocus);
   const [now, setNow] = useState(Date.now);
@@ -50,9 +52,9 @@ export function Inbox({ variant }: Props) {
   );
   const running = useMemo(
     () => serverConnections.flatMap(c => c.projects
-      .filter(p => p.State === 'Running')
+      .filter(p => p.State === 'Running' && inProfile(p.ProfileName, profile))
       .map(p => ({ serverId: c.serverInfo.Id, serverName: c.serverInfo.Name, project: p }))),
-    [serverConnections],
+    [serverConnections, profile],
   );
 
   const toggle = () => setCollapsed(c => {

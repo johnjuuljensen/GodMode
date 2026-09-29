@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using GodMode.ClientBase.Services;
 using GodMode.ClientBase.Services.Models;
 using GodMode.Maui.Voice;
@@ -12,26 +13,34 @@ namespace GodMode.Maui.Bridge;
 
 /// <summary>
 /// The shell's side of the React ↔ host API (<see cref="ShellMessageTypes"/>): relay info, server management,
-/// and the servers.changed event. Server tokens go into secure storage here and are never sent back.
-/// One is attached at a time: each page gets its own, and the page it replaces (the activity was recreated,
-/// from a notification tap say) lets go of the process-wide events through <see cref="Dispose"/>.
+/// the window the page is in, and the servers.changed event. Server tokens go into secure storage here and are
+/// never sent back.
+/// Each window's page gets its own (#340): the main window's (<see cref="Profile"/> null) and one per profile window.
+/// A page that replaces its window's (the activity was recreated, from a notification tap say) detaches the one
+/// before it, which lets go of the process-wide events through <see cref="Dispose"/>. The main window's bridge takes
+/// the app-wide events (notification taps, the network), and servers.changed goes to every window's page.
 /// </summary>
 public sealed class ShellBridge : IDisposable
 {
-    private static ShellBridge? _attached;
+    /// <summary>The bridge attached in each window, by its profile ("" for the main window), without case.</summary>
+    private static readonly ConcurrentDictionary<string, ShellBridge> Attached = new(StringComparer.OrdinalIgnoreCase);
     private static int _created;
 
     private readonly int _number = Interlocked.Increment(ref _created);
+    private readonly HybridWebView _webView;
     private readonly HostBridge _bridge;
     private readonly LocalServer _relay;
     private readonly IServerDirectory _directory;
     private readonly IServerRegistryService _registry;
     private readonly VoiceHost _voice;
     private readonly ILogger _logger;
+    private IDisposable? _voicePage;
 
-    private ShellBridge(HostBridge bridge, IServiceProvider services, ILogger logger)
+    private ShellBridge(HybridWebView webView, string? profile, IServiceProvider services, ILogger logger)
     {
-        _bridge = bridge;
+        _webView = webView;
+        Profile = profile;
+        _bridge = new HostBridge(webView, logger);
         _relay = services.GetRequiredService<LocalServer>();
         _directory = services.GetRequiredService<IServerDirectory>();
         _registry = services.GetRequiredService<IServerRegistryService>();
@@ -39,27 +48,53 @@ public sealed class ShellBridge : IDisposable
         _logger = logger;
     }
 
-    /// <summary>Connects the WebView's raw-message channel to the shell API, detaching the bridge attached before.</summary>
-    public static ShellBridge Attach(HybridWebView webView, IServiceProvider services)
+    /// <summary>The profile the page's window is locked to, by name across every server; null in the main window.</summary>
+    public string? Profile { get; }
+
+    private bool IsMain => Profile is null;
+
+    /// <summary>
+    /// Connects the WebView's raw-message channel to the shell API, for a page in the main window (no profile) or in a
+    /// profile's, detaching the bridge attached in that window before.
+    /// </summary>
+    public static ShellBridge Attach(HybridWebView webView, string? profile, IServiceProvider services)
     {
         var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger<ShellBridge>();
-        var shell = new ShellBridge(new HostBridge(webView, logger), services, logger);
-        Interlocked.Exchange(ref _attached, shell)?.Dispose();
+        var shell = new ShellBridge(webView, profile, services, logger);
+        ShellBridge? before = null;
+        Attached.AddOrUpdate(profile ?? "", shell, (_, attached) => { before = attached; return shell; });
+        before?.Dispose();
         shell.Register();
-        shell._voice.Attach(shell._bridge.Send);
-        PendingAttentionLink.Arrived += shell.OnAttentionArrived;
-        Connectivity.Current.ConnectivityChanged += shell.OnNetworkChanged;
-        logger.LogInformation("Shell bridge #{Number} attached; bridges listening for notification taps: {Listening}",
-            shell._number, PendingAttentionLink.Listening);
+        shell._voicePage = shell._voice.Attach(shell._bridge.Send);
+        if (shell.IsMain)
+        {
+            // On Windows, should taps come, one belongs in the window holding the item's profile (its bridge's
+            // Profile), and in the main window only when no window holds it. Android has the one window
+            PendingAttentionLink.Arrived += shell.OnAttentionArrived;
+            Connectivity.Current.ConnectivityChanged += shell.OnNetworkChanged;
+        }
+        logger.LogInformation("Shell bridge #{Number} attached for {Window}; windows: {Windows}; bridges listening for notification taps: {Listening}",
+            shell._number, profile ?? "the main window", Attached.Count, PendingAttentionLink.Listening);
         return shell;
     }
 
-    /// <summary>Lets go of the process-wide events, which would otherwise keep this bridge, its WebView and page alive.</summary>
+    /// <summary>
+    /// Lets go of the process-wide events, which would otherwise keep this bridge, its WebView and page alive: its page
+    /// was replaced, or its window closed.
+    /// </summary>
     public void Dispose()
     {
+        Attached.TryRemove(new KeyValuePair<string, ShellBridge>(Profile ?? "", this));
+        _voicePage?.Dispose();
         PendingAttentionLink.Arrived -= OnAttentionArrived;
         Connectivity.Current.ConnectivityChanged -= OnNetworkChanged;
-        _logger.LogInformation("Shell bridge #{Number} detached", _number);
+        _logger.LogInformation("Shell bridge #{Number} detached ({Window})", _number, Profile ?? "the main window");
+    }
+
+    /// <summary>An event for every window's page: the server list is the app's, whichever window changed it.</summary>
+    private static void Broadcast(string type)
+    {
+        foreach (var shell in Attached.Values) shell._bridge.Send(type);
     }
 
     private void Register()
@@ -77,7 +112,14 @@ public sealed class ShellBridge : IDisposable
             PendingAttentionLink.Take() is { } link ? new AttentionLinkPayload(link.ServerId, link.ProjectId) : null));
         _bridge.Handle(ShellMessageTypes.OpenDevTools, () =>
         {
-            MainPage.OpenDevTools();
+            MainPage.OpenDevTools(_webView);
+            return Task.FromResult(true);
+        });
+        _bridge.Handle(ShellMessageTypes.WindowInfo, () => Task.FromResult(new WindowInfo(Profile, AppWindows.CanOpen)));
+        _bridge.Handle<ProfilePayload, bool>(ShellMessageTypes.WindowOpenProfile, p =>
+        {
+            if (string.IsNullOrWhiteSpace(p.Profile)) throw new ArgumentException("Name the profile to open");
+            AppWindows.OpenProfile(p.Profile.Trim());
             return Task.FromResult(true);
         });
 
@@ -111,7 +153,7 @@ public sealed class ShellBridge : IDisposable
 
     private T Changed<T>(T result)
     {
-        _bridge.Send(ShellMessageTypes.ServersChanged);
+        Broadcast(ShellMessageTypes.ServersChanged);
         _voice.ServersChanged();
 #if ANDROID
         AttentionService.Refresh();
@@ -134,7 +176,7 @@ public sealed class ShellBridge : IDisposable
             try
             {
                 var server = (await _directory.ListAllServersAsync()).FirstOrDefault(s => s.Id == serverId);
-                _bridge.Send(ShellMessageTypes.ServersChanged);
+                Broadcast(ShellMessageTypes.ServersChanged);
                 if (server?.State is null or ServerState.Running or ServerState.Stopped)
                     return;
             }
@@ -158,6 +200,6 @@ public sealed class ShellBridge : IDisposable
         _logger.LogInformation("Network changed ({Access}); bridge #{Number} drops the relays", e.NetworkAccess, _number);
         _relay.DropAllRelays();
         _voice.NetworkChanged();
-        _bridge.Send(ShellMessageTypes.ServersChanged);
+        Broadcast(ShellMessageTypes.ServersChanged);
     }
 }

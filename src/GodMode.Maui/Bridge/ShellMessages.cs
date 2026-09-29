@@ -31,7 +31,16 @@ public static class ShellMessageTypes
     /// <summary>Request; opens the WebView's developer tools where the platform has them (Windows).</summary>
     public const string OpenDevTools = "host.openDevTools";
 
-    /// <summary>Event from the shell: the server list or a server's state changed.</summary>
+    /// <summary>Request → <see cref="Bridge.WindowInfo"/>: the window the page is in (#340).</summary>
+    public const string WindowInfo = "window.info";
+
+    /// <summary>
+    /// Request <see cref="ProfilePayload"/>: opens the profile in its own window, or brings forward the window it has.
+    /// Fails where the app opens no windows (<see cref="Bridge.WindowInfo.CanOpenWindows"/>).
+    /// </summary>
+    public const string WindowOpenProfile = "window.openProfile";
+
+    /// <summary>Event from the shell, to every window's page: the server list or a server's state changed.</summary>
     public const string ServersChanged = "servers.changed";
 
     /// <summary>Request → <see cref="AttentionLinkPayload"/>, or null: the item a notification tap opened, once.</summary>
@@ -101,6 +110,15 @@ public sealed record AddServerPayload(
 public sealed record AddServerResult(string Id);
 
 public sealed record ServerIdPayload(string ServerId);
+
+/// <summary>
+/// The window a page is in: the app's main window (<paramref name="Profile"/> null), unlocked, or a profile's own,
+/// locked to that profile by name across every server. <paramref name="CanOpenWindows"/>: the app opens profile
+/// windows here (Windows).
+/// </summary>
+public sealed record WindowInfo(string? Profile, bool CanOpenWindows);
+
+public sealed record ProfilePayload(string Profile);
 
 /// <summary>An attention item to open in the inbox: a project on a server, both IDs as the server gave them.</summary>
 public sealed record AttentionLinkPayload(string ServerId, string ProjectId);

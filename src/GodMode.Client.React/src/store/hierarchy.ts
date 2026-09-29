@@ -64,6 +64,16 @@ type RootEntry = { root: ProjectRootInfo; items: SidebarItem[]; conn: ServerConn
 /** A server whose projects are shown: connected, or reconnecting (shown as it was until it is back). */
 export const isListed = (c: ServerConnection) => c.connectionState === 'connected' || c.connectionState === 'reconnecting';
 
+/**
+ * A profile is a name, across every server, and matched without case (#308): a window locked to one (#340)
+ * shows that name's roots on every server. What names none is in Default.
+ */
+export const profileNameOf = (name: string | null | undefined) => name ?? 'Default';
+export const sameProfile = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+/** Whether a profile passes a filter: 'All', or the one it names. */
+export const inProfile = (name: string | null | undefined, filter: string) =>
+  filter === 'All' || sameProfile(profileNameOf(name), filter);
+
 /** A root is named within its profile: one server may have a root of one name in two profiles. */
 const rootKey = (profileName: string | null | undefined, rootName: string) => `${profileName ?? 'Default'}/${rootName}`;
 
@@ -94,9 +104,9 @@ function collectFilteredData(connections: ServerConnection[], filter: string) {
       .filter(([key]) => !listedRoots.has(key))
       .map(([, [{ project }]]) => ({ Name: project.RootName ?? 'default', ProfileName: project.ProfileName ?? 'Default', Actions: [] }));
     for (const root of [...conn.roots, ...unlisted]) {
-      const profileName = root.ProfileName ?? 'Default';
+      const profileName = profileNameOf(root.ProfileName);
       allProfileNames.add(profileName);
-      if (filter !== 'All' && profileName.toLowerCase() !== filter.toLowerCase()) continue;
+      if (!inProfile(profileName, filter)) continue;
       const items = itemsByRoot.get(rootKey(root.ProfileName, root.Name)) ?? [];
       const transient = new Set((root.Actions ?? []).filter(a => a.Transient).map(a => a.Name));
       for (const item of items) item.transient = item.project.ActionName != null && transient.has(item.project.ActionName);
