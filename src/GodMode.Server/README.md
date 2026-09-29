@@ -52,7 +52,7 @@ A server's settings come from these sources, each overriding the ones before it:
 
 1. `appsettings.json`, next to the server (its content root);
 2. `appsettings.{Environment}.json`, when there is one;
-3. **the instance's config file**, when the server is started with one: `--config <path>`, else the `GODMODE_CONFIG` environment variable. A relative path is resolved against the working directory. It is reloaded when it changes, and its folder is watched for that (recursively): keep it in a folder of its own, such as `~/.godmode-server/`, not directly in your home folder. What the server reads once at startup (`Instance`, `Authentication:*`, `Urls`, and the key file's check against the roots) takes a restart to change; the roots and profiles are read again on every list. A named file that does not exist stops the server at startup;
+3. **the instance's config file**, when the server is started with one: `--config <path>`, else the `GODMODE_CONFIG` environment variable. A relative path is resolved against the working directory. It is reloaded when it changes, and its folder is watched for that (recursively): keep it in a folder of its own, such as `~/.godmode-server/`, not directly in your home folder. What the server reads once at startup (`Instance`, `Authentication:*`, `Urls`) takes a restart to change; the roots and profiles are read again on every list. A named file that does not exist stops the server at startup;
 4. environment variables;
 5. the command line.
 
@@ -117,7 +117,7 @@ Every endpoint and the SignalR hub require authentication, whatever the server i
 | The Docker image | `/home/godmode/.local/share/GodMode.Server/api-key`, in the home of the image's non-root `godmode` user, who owns it |
 
 - **Owner-only.** The file is created readable by the server's user alone: mode 0600 in a 0700 directory on Linux and macOS, an ACL of that user alone on Windows. It is created with those permissions rather than changed afterwards, so a file system that refuses permission changes (Azure Files, other network mounts) does not stop the server; there it is a plain file.
-- **Another place:** `Authentication:ApiKeyFile`. It must not be under any root's folder, a scan folder or an explicit root, where sessions work: the server refuses to start if it is, and names the setting.
+- **Another place:** `Authentication:ApiKeyFile`. It must not be under any root's folder, a scan folder or an explicit root, where sessions work: the server refuses to start if it is, and names the setting. A scan folder or explicit root added to the config while the server runs, whose tree holds the key file, is left out and logged once as a warning, so it never gets that far.
 - **Read it again** with `cat ~/.local/share/GodMode.Server/api-key` (Windows: `type %LOCALAPPDATA%\GodMode.Server\api-key`). Write your own key into it, or delete it for a new one on the next start.
 - **A configured key always wins**, and the key file is then neither read nor written. So does a codespace, which uses no key.
 - **Docker:** a replaced container has a new home, so a new key. Run it with `-e Authentication__ApiKey=<key>`, or keep the key file on a named volume: `-v godmode-key:/home/godmode/.local/share/GodMode.Server`. The image creates that directory, owned by `godmode` with mode 0700, and a new named volume starts with its owner and mode. A bind mount (`-v /srv/godmode-key:…`) keeps the host directory's owner instead, which must be writable by the container's `godmode` user.
