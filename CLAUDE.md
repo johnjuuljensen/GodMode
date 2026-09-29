@@ -113,8 +113,8 @@ cd src/GodMode.Client.React && npm test && npm run lint
 
 **Process Management**
 - `ClaudeProcessManager` uses `System.Diagnostics.Process` directly (not CliWrap) for proper stdin handling
-- `--dangerously-skip-permissions` is passed only when the project asks for it (`.godmode/settings.json`) and its root's config, read at that launch, allows it (`allowSkipPermissions`, default false, for every action of the root). Otherwise the project's stored `permissionMode` (else the root's, e.g. `auto`) applies, and approvals go to the permission prompt
-- `ClaudeProcessManager` appends each process's stdout to `.godmode/output.jsonl`, which backfills clients that subscribe later
+- `--dangerously-skip-permissions` is passed only when the project asks for it (its session's `settings.json`) and its root's config, read at that launch, allows it (`allowSkipPermissions`, default false, for every action of the root). Otherwise the project's stored `permissionMode` (else the root's, e.g. `auto`) applies, and approvals go to the permission prompt
+- `ClaudeProcessManager` appends each process's stdout to its session's `output.jsonl` (`.godmode/sessions/{id}/`), which backfills clients that subscribe later
 
 **Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
 - Every request needs a credential, loopback included. One mode per run: codespace (`CODESPACES=true`: a GitHub token of `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`) or API key
