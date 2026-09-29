@@ -201,7 +201,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         };
         foreach (var (key, value) in inputs ?? new Dictionary<string, object>())
             request[key] = JsonSerializer.SerializeToElement(value);
-        var status = await Projects.CreateProjectAsync(new CreateProjectRequest(profile, root, request));
+        var status = (await Projects.CreateProjectAsync(new CreateProjectRequest(profile, root, request))).Project
+            ?? throw new InvalidOperationException("the create made no project: its action starts no session");
         _projectIds.Add(status.Id);
         Session(status.Id);
         return status;

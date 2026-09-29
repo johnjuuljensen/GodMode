@@ -68,12 +68,12 @@ public class PermissionPromptEndToEndTests
             // ── Allowed with an edited input; the request outlives the client that saw it ──
             await using var first = new ServerHubClient(baseUrl);
             await first.StartAsync();
-            var created = await first.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.CreateProject), Profile, Root, null,
+            var created = (await first.Hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), Profile, Root, null,
                 new Dictionary<string, JsonElement>
                 {
                     ["name"] = JsonSerializer.SerializeToElement("p1"),
                     ["prompt"] = JsonSerializer.SerializeToElement("Push it"),
-                });
+                })).Project!;
             var push = await first.WaitForAsync(created.Id, s => s.PendingPermission != null, server);
             Assert.Equal(ProjectState.WaitingPermission, push.State);
             Assert.Equal("Bash", push.PendingPermission!.ToolName);

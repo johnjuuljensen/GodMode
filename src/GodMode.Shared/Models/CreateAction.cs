@@ -26,6 +26,12 @@ namespace GodMode.Shared.Models;
 /// session's state (<c>.godmode/sessions/{id}/</c>), never the folder. Off: a folder another session
 /// uses is refused, and a delete removes the folder.
 /// </param>
+/// <param name="Session">
+/// Whether the action starts a session. Off (<c>"session": false</c>): its prepare and create scripts
+/// run in the root, as a create's do, and nothing more: no folder, no session, no claude. Such an
+/// action provisions something on the host (a new root, say), and its result file's <c>message</c>
+/// says what it made.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -44,7 +50,8 @@ public record CreateAction(
     string ResumePrompt = CreateAction.DefaultResumePrompt,
     bool AllowSkipPermissions = false,
     string? PermissionMode = null,
-    bool SharedFolder = false
+    bool SharedFolder = false,
+    bool Session = true
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";

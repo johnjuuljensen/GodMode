@@ -57,7 +57,7 @@ public class ProjectCreationFromFilesTests
             {
                 ["issueNumber"] = JsonSerializer.SerializeToElement("42"),
             };
-            var status = await projects.CreateProjectAsync(new CreateProjectRequest("team", "shipit", inputs, "issue"));
+            var status = (await projects.CreateProjectAsync(new CreateProjectRequest("team", "shipit", inputs, "issue"))).Project!;
 
             Assert.Equal("issue_42", status.Name);
             // The kind is the action's, the slug the name's

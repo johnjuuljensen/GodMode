@@ -316,11 +316,11 @@ public class SharedFolderTests
             Directory.GetFiles(logs).Select(Path.GetFileName).Where(f => f!.EndsWith(".log") || f.EndsWith(".result")).Order(StringComparer.Ordinal));
     }
 
-    private static Task<ProjectStatus> CreateAsync(LifecycleHarness harness, string action, string name, bool reuse = false)
+    private static async Task<ProjectStatus> CreateAsync(LifecycleHarness harness, string action, string name, bool reuse = false)
     {
         var inputs = new Dictionary<string, JsonElement> { ["name"] = JsonSerializer.SerializeToElement(name), ["prompt"] = JsonSerializer.SerializeToElement("hi") };
         if (reuse) inputs["__reuseExisting"] = JsonSerializer.SerializeToElement(true);
-        return harness.Projects.CreateProjectAsync(new CreateProjectRequest(LifecycleHarness.ProfileName, LifecycleHarness.RootName, inputs, action));
+        return (await harness.Projects.CreateProjectAsync(new CreateProjectRequest(LifecycleHarness.ProfileName, LifecycleHarness.RootName, inputs, action))).Project!;
     }
 
     private static ProjectStatus PlantedStatus()

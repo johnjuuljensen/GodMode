@@ -54,7 +54,9 @@ public interface IProjectHubClient
     Task ProjectCreated(ProjectStatus status);
 
     /// <summary>
-    /// Called during project creation to stream script progress to the client.
+    /// Called during project creation to stream script progress to the client. The ID is the
+    /// session's; for an action that starts no session, the run's own, <c>{profile}/{root}/{id}</c>,
+    /// which names no project. The stream ends when the create returns: it has no last message.
     /// </summary>
     Task CreationProgress(string projectId, string message);
 

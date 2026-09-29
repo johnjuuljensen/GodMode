@@ -115,8 +115,8 @@ public sealed class RootSourcesTests : IDisposable
             ["Roots:Explicit:solo:Path"] = solo,
         });
 
-        var created = await harness.Projects.CreateProjectAsync(new CreateProjectRequest("solo-profile", "solo",
-            new Dictionary<string, JsonElement> { ["name"] = JsonSerializer.SerializeToElement("in-solo") }));
+        var created = (await harness.Projects.CreateProjectAsync(new CreateProjectRequest("solo-profile", "solo",
+            new Dictionary<string, JsonElement> { ["name"] = JsonSerializer.SerializeToElement("in-solo") }))).Project!;
 
         Assert.Matches(LifecycleHarness.IdPattern("in-solo", root: "solo", profile: "solo-profile"), created.Id);
         Assert.True(Directory.Exists(GodMode.ProjectFiles.SessionState.PathOf(Path.Combine(solo, "in-solo"), created.Id.Split('/')[^1])), "the session's state is not in its folder in the explicit root's folder");

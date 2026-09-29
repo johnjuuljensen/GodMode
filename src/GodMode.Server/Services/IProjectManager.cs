@@ -29,9 +29,10 @@ public interface IProjectManager
     Task<ProjectStatus> GetStatusAsync(string projectId);
 
     /// <summary>
-    /// Creates a new project using the config-driven workflow.
+    /// Creates a new project using the config-driven workflow, or, for an action that starts no
+    /// session, runs its scripts and tracks nothing (<see cref="CreateProjectResult.Project"/> null).
     /// </summary>
-    Task<ProjectStatus> CreateProjectAsync(CreateProjectRequest request);
+    Task<CreateProjectResult> CreateProjectAsync(CreateProjectRequest request);
 
     /// <summary>
     /// Sends input to a running project.
