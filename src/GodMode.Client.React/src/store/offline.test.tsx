@@ -18,6 +18,7 @@ const host = vi.hoisted(() => ({ servers: [] as ServerInfo[] }));
 vi.mock('../signalr/hub', () => ({ GodModeHub: class {} }));
 vi.mock('../services/hostApi', () => ({
   waitUntilReady: async () => {},
+  windowInfo: async () => ({ Profile: null, CanOpenWindows: false }),
   fetchServers: async () => host.servers,
   subscribeEvents: () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,

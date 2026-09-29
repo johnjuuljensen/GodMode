@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useAppStore, type ActivePage } from '../../store';
+import { useAppStore, inProfile, profileNameOf, sameProfile, type ActivePage } from '../../store';
 import type { CreateProjectResult, ProjectRootInfo } from '../../signalr/types';
 import { askConfirm } from '../../confirmDialog';
 import '../settings-common.css';
@@ -96,8 +96,7 @@ ${rootName}
 ${actionName}`;
 
 /** A root's profile as the server lists it: a root that names none is in Default. */
-const profileOf = (root: ProjectRootInfo) => root.ProfileName ?? 'Default';
-const sameProfile = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+const profileOf = (root: ProjectRootInfo) => profileNameOf(root.ProfileName);
 
 type CreateContext = Extract<ActivePage, { type: 'createProject' }>['context'];
 
@@ -113,8 +112,11 @@ export function CreateProject({ context }: { context?: CreateContext }) {
 
   const [draft] = useState(() => (context && readDrafts()[draftKeyOf(context.serverId, context.profileName, context.rootName)]) ?? null);
 
-  // Servers keep their roots while reconnecting, so the form stays up (and filled) through a dropped socket
-  const servers = useMemo(() => serverConnections.filter(c => c.roots.length > 0), [serverConnections]);
+  // Servers keep their roots while reconnecting, so the form stays up (and filled) through a dropped socket.
+  // Only those with a root in the profile filtered to (the window's, in a locked one: #340)
+  const servers = useMemo(
+    () => serverConnections.filter(c => c.roots.some(r => inProfile(r.ProfileName, profileFilter))),
+    [serverConnections, profileFilter]);
 
   // Pinned once known: a server that finishes connecting later must not take the form over (#240)
   const [selectedServerId, setSelectedServerId] = useState(context?.serverId ?? '');
@@ -139,9 +141,7 @@ export function CreateProject({ context }: { context?: CreateContext }) {
 
   // Filter roots by active profile filter
   const roots = useMemo(() => {
-    const allRoots = server?.roots ?? [];
-    if (profileFilter === 'All') return allRoots;
-    return allRoots.filter(r => sameProfile(profileOf(r), profileFilter));
+    return (server?.roots ?? []).filter(r => inProfile(r.ProfileName, profileFilter));
   }, [server, profileFilter]);
 
   const rootsByProfile = useMemo(() => {

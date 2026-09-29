@@ -36,6 +36,18 @@ export interface AttentionLinkPayload {
   ProjectId: string;
 }
 
+/** The window a page is in (#340): the app's main window (Profile null), or a profile's own, locked to it. */
+export interface WindowInfo {
+  /** The profile the window is locked to, by name across every server; null in the main window. */
+  Profile: string | null;
+  /** Whether the app can open a profile in a window of its own (Windows). */
+  CanOpenWindows: boolean;
+}
+
+interface ProfilePayload {
+  Profile: string;
+}
+
 // ── Voice (the Windows app only: voice.state says whether it is Available) ──
 
 export type VoiceStateName = 'Off' | 'Starting' | 'Listening' | 'Thinking' | 'Speaking' | 'Error';
@@ -103,6 +115,9 @@ export interface BridgeRequests {
   'servers.start': [ServerIdPayload, boolean];
   'servers.stop': [ServerIdPayload, boolean];
   'host.openDevTools': [void, boolean];
+  'window.info': [void, WindowInfo];
+  /** Opens the profile in its own window, or brings forward the window it has. Fails where the app has no windows (Android). */
+  'window.openProfile': [ProfilePayload, boolean];
   /** The item the last notification tap opened, once; null when there is none (or it was taken). */
   'attention.take': [void, AttentionLinkPayload | null];
   'voice.state': [void, VoiceStatus];

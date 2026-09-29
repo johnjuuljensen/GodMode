@@ -192,6 +192,33 @@
   border-radius: var(--radius-xs);
 }
 
+/* The profile's own-window button (#340) and its count, at the header's end */
+.profile-group-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.profile-window-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: var(--border-width) var(--border-style) var(--glass-border);
+  border-radius: var(--radius-xs);
+  background: var(--glass);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.profile-window-btn:hover {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+}
+
 /* ── Root Groups ── */
 .root-group {
   margin-bottom: 2px;

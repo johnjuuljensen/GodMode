@@ -18,6 +18,7 @@ import { projectKey } from './projectKey';
 vi.mock('../signalr/hub', () => ({ GodModeHub: class {} }));
 vi.mock('../services/hostApi', () => ({
   waitUntilReady: async () => {},
+  windowInfo: async () => ({ Profile: null, CanOpenWindows: false }),
   fetchServers: async () => [],
   subscribeEvents: () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,

@@ -76,3 +76,21 @@ it('hears when the servers change, and opens the item a notification names', asy
   await emit('servers.changed');
   expect(changed).toHaveBeenCalledTimes(1);
 });
+
+it('asks the app which window the page is in, and opens a profile in its own (#340)', async () => {
+  answer('window.info', { Profile: 'Work', CanOpenWindows: true });
+  answer('window.openProfile', true);
+
+  expect(await api.windowInfo()).toEqual({ Profile: 'Work', CanOpenWindows: true });
+  await api.openProfileWindow('Work');
+
+  expect(sent).toEqual([
+    { Type: 'window.info', Payload: null },
+    { Type: 'window.openProfile', Payload: { Profile: 'Work' } },
+  ]);
+});
+
+it('is the unlocked main window, with no windows to open, where the app does not say', async () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(await api.windowInfo()).toEqual({ Profile: null, CanOpenWindows: false });
+});

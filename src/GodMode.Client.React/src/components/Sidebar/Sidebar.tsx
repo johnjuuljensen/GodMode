@@ -23,12 +23,14 @@ export function SidebarHeader() {
   const setProfileFilter = useAppStore(s => s.setProfileFilter);
   const profileFilterOptions = useAppStore(s => s.profileFilterOptions);
   const featureProfiles = useAppStore(s => s.featureProfiles);
+  // A locked page's filter is its window's profile, fixed (#340)
+  const lockedProfile = useAppStore(s => s.lockedProfile);
   const isTileView = useAppStore(s => s.isTileView);
   const setTileView = useAppStore(s => s.setTileView);
   // Tiles are a wide screen's: on a phone the toggle would only leave the inbox (#218)
   const isMobile = useAppStore(s => s.isMobile);
 
-  const showProfileFilter = featureProfiles && profileFilterOptions.length > 1;
+  const showProfileFilter = featureProfiles && lockedProfile === null && profileFilterOptions.length > 1;
   const hasRoots = serverConnections.some(c => c.roots.length > 0);
 
   return (
@@ -212,11 +214,29 @@ export function SidebarFooter() {
 }
 
 function ProfileSection({ group }: { group: ProfileGroup }) {
+  // Where the app has windows (Windows), and only in the main window: a locked one is the profile's already (#340)
+  const canOpenWindow = useAppStore(s => s.canOpenWindows && s.lockedProfile === null);
+  const openProfileWindow = useAppStore(s => s.openProfileWindow);
   return (
     <div className="profile-group">
       <div className="profile-group-header">
         <span className="profile-group-name">{group.name}</span>
-        <span className="profile-group-count">{group.projectCount}</span>
+        <span className="profile-group-meta">
+          {canOpenWindow && (
+            <button
+              className="profile-window-btn"
+              onClick={() => openProfileWindow(group.name).catch(console.error)}
+              title="Open in its own window"
+              aria-label={`Open ${group.name} in its own window`}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 3h7v7" /><line x1="21" y1="3" x2="11" y2="13" />
+                <path d="M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5" />
+              </svg>
+            </button>
+          )}
+          <span className="profile-group-count">{group.projectCount}</span>
+        </span>
       </div>
       {group.rootGroups.map(rg => (
         <RootSection key={`${rg.serverId ?? ''}:${rg.rootName}`} rootGroup={rg} />
