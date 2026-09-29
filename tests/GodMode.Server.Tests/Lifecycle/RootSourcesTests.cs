@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GodMode.FakeClaude;
+using GodMode.Server.Auth;
 using GodMode.Server.Services;
 using GodMode.Shared.Models;
 
@@ -297,6 +298,53 @@ public sealed class RootSourcesTests : IDisposable
         Assert.Contains(harness.Warnings, line => line.Contains($"ProjectRootsDir ({Elsewhere("old-roots")}) is not read: name the folder as a scan folder, Roots:Scan:<key>"));
         Assert.Contains(harness.Warnings, line => line.Contains(
             "Profiles:Mega:Roots:old-explicit (" + Elsewhere("anywhere", "old-explicit") + ") is not read: name it as an explicit root, Roots:Explicit:old-explicit:Path, with :Profile Mega"));
+    }
+
+    /// <summary>
+    /// The key file is never where sessions work. The start refuses a root source that holds it; one
+    /// added to the config while the server runs (the instance file reloads) is left out, logged once,
+    /// and the roots beside it stay listed.
+    /// </summary>
+    [Fact]
+    public async Task RootSourceAddedLater_WhoseTreeHoldsTheKeyFile_IsLeftOut()
+    {
+        var keyFile = Elsewhere("home", "AppData", "GodMode.Server", "api-key");
+        Directory.CreateDirectory(Path.GetDirectoryName(keyFile)!);
+        File.WriteAllText(keyFile, "the-key");
+        WriteRoot(Elsewhere("home", "AppData", "scanned-with-the-key"), "p");
+        var instanceFile = Elsewhere("instance.json");
+        File.WriteAllText(instanceFile, "{}");
+        await using var harness = new LifecycleHarness(Waiting(),
+            configFiles: [instanceFile],
+            auth: new AuthSettings(AuthMode.ApiKey, "the-key", KeyFilePath: keyFile));
+        Assert.Contains(await harness.Projects.ListProjectRootsAsync(), root => root.Name == LifecycleHarness.RootName);
+
+        // Added while it runs: an explicit root over the key file's tree, a scan folder over it, and one beside it
+        WriteRoot(Elsewhere("elsewhere", "fine"), "p");
+        File.WriteAllText(instanceFile, JsonSerializer.Serialize(new
+        {
+            Roots = new
+            {
+                Scan = new { home = Elsewhere("home", "AppData"), beside = Elsewhere("elsewhere") },
+                Explicit = new { homed = new { Path = Elsewhere("home") } },
+            },
+        }));
+        harness.ReloadConfiguration();
+
+        for (var i = 0; i < 2; i++)
+        {
+            var names = (await harness.Projects.ListProjectRootsAsync()).Select(root => root.Name).ToArray();
+            Assert.DoesNotContain("homed", names);
+            Assert.DoesNotContain("scanned-with-the-key", names);
+            Assert.Contains("fine", names);
+            Assert.Contains(LifecycleHarness.RootName, names);
+        }
+
+        var leftOut = harness.Warnings.Where(line => line.Contains("is left out: the server's API key file")).ToArray();
+        Assert.Equal(2, leftOut.Length);
+        Assert.Contains(leftOut, line => line.Contains($"Roots:Explicit:homed:Path ({Elsewhere("home")})"));
+        Assert.Contains(leftOut, line => line.Contains($"Roots:Scan:home ({Elsewhere("home", "AppData")})"));
+        Assert.All(leftOut, line => Assert.Contains(keyFile, line));
     }
 
     /// <summary>One server per root holds for explicit roots too: a second server naming the same folder leaves it alone.</summary>

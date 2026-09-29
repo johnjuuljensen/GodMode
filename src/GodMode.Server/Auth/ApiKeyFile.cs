@@ -39,14 +39,21 @@ public static class ApiKeyFile
 
         foreach (var (setting, folder) in RootSources.From(config).Folders)
         {
-            var relative = Path.GetRelativePath(folder, path);
-            if (relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar) && !Path.IsPathRooted(relative))
+            if (IsUnder(folder, path))
                 throw new StartupConfigurationException(
                     $"GodMode.Server will not start: its API key file, {path}, would be under {setting} ({folder}), " +
                     $"where sessions work. Set {PathSetting} to a file outside every root, or set {AuthModeSelector.ApiKeySetting}.");
         }
         return path;
     }
+
+    /// <summary>
+    /// Whether <paramref name="path"/> is <paramref name="folder"/> or in its tree: the start refuses a
+    /// key file there, and a rebuild leaves out a root source added later whose tree holds it.
+    /// </summary>
+    public static bool IsUnder(string folder, string path) =>
+        Path.GetRelativePath(folder, path) is var relative
+        && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar) && !Path.IsPathRooted(relative);
 
     /// <summary>The key in <paramref name="path"/>, or a new one written there (owner-only) when it has none.</summary>
     public static (string Key, bool Created) LoadOrCreate(string path)

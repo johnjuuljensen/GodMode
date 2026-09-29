@@ -93,6 +93,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     private readonly HashSet<string> _loggedClashes = new(PathComparer);
     private readonly HashSet<string> _loggedMissingRoots = new(PathComparer);
 
+    /// <summary>
+    /// The generated API key's file, when the server has one (<see cref="AuthSettings.KeyFilePath"/>):
+    /// no root source whose tree holds it is used. The start refuses one; this keeps out one added by a
+    /// config reload later. Each left out is logged once, by folder, while it lasts.
+    /// </summary>
+    private readonly string? _keyFilePath;
+    private readonly HashSet<string> _loggedKeyFileFolders = new(PathComparer);
+
     /// <summary>Which server this is, in the roots it holds and in the logs: <c>Instance</c>, <c>default</c> unless configured.</summary>
     public const string InstanceSetting = "Instance";
     public const string DefaultInstance = "default";
@@ -140,7 +148,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         IConfiguration configuration,
         IHostApplicationLifetime lifetime,
         ILogger<ProjectManager> logger,
-        IServer? server = null)
+        IServer? server = null,
+        AuthSettings? authSettings = null)
     {
         _lifecycle = lifecycle;
         _statusUpdater = statusUpdater;
@@ -161,6 +170,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         _logger.LogInformation("Server instance {Instance}", _instance);
 
         _configuration = configuration;
+        _keyFilePath = authSettings?.KeyFilePath is { } keyFile ? Path.GetFullPath(keyFile) : null;
         foreach (var (setting, folder) in RootSources.From(configuration).Folders)
             _logger.LogInformation("Roots from {Setting}: {Folder}", setting, folder);
         foreach (var retired in RootSources.RetiredSettings(configuration))
@@ -395,6 +405,18 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         var byName = new Dictionary<string, FoundRoot>(StringComparer.OrdinalIgnoreCase);
         var byPath = new Dictionary<string, FoundRoot>(PathComparer);
         var clashes = new HashSet<string>(PathComparer);
+        var holdingTheKey = new HashSet<string>(PathComparer);
+
+        // Where sessions work, the key file never is: a source added since the start that holds it is left out
+        bool HoldsTheKeyFile(string folder, string setting)
+        {
+            if (_keyFilePath is null || !ApiKeyFile.IsUnder(folder, _keyFilePath)) return false;
+            holdingTheKey.Add(folder);
+            if (_loggedKeyFileFolders.Add(folder))
+                _logger.LogWarning("{Setting} ({Folder}) is left out: the server's API key file, {KeyFile}, is in its tree, where sessions would work. " +
+                    "Name a folder without it, or move the key file (Authentication:ApiKeyFile)", setting, folder, _keyFilePath);
+            return true;
+        }
 
         void Add(string name, string path, string? entryProfile, string source)
         {
@@ -428,6 +450,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         foreach (var root in sources.ExplicitRoots)
         {
             var setting = $"{RootSources.ExplicitSection}:{root.Name}";
+            if (HoldsTheKeyFile(root.Path, $"{setting}:Path")) continue;
             if (Directory.Exists(root.Path))
                 Add(root.Name, root.Path, root.Profile, setting);
             else if (_loggedMissingRoots.Add(root.Path))
@@ -436,6 +459,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         foreach (var scan in sources.ScanFolders)
         {
             var setting = $"{RootSources.ScanSection}:{scan.Key}";
+            if (HoldsTheKeyFile(scan.Folder, setting)) continue;
             if (!Directory.Exists(scan.Folder))
             {
                 _logger.LogDebug("Scan folder {Folder} ({Setting}) does not exist, skipping it", scan.Folder, setting);
@@ -447,6 +471,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         _loggedClashes.IntersectWith(clashes);
+        _loggedKeyFileFolders.IntersectWith(holdingTheKey);
         _loggedMissingRoots.IntersectWith(sources.ExplicitRoots.Select(root => root.Path).Where(path => !Directory.Exists(path)));
         return roots;
     }
