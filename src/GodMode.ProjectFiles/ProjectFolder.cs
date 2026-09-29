@@ -182,11 +182,16 @@ public sealed class ProjectFolder : IDisposable
     /// config holds the project token while claude runs): written if missing, and the rule appended,
     /// keeping its lines, to one that lacks it (a checkout's own). Creates <c>.godmode</c> if need be.
     /// </summary>
-    public static void EnsureGitIgnore(string projectPath)
+    public static void EnsureGitIgnore(string projectPath) => EnsureIgnoredByGit(Path.Combine(projectPath, GodModeDirectoryName));
+
+    /// <summary>
+    /// Keeps <paramref name="folder"/> and everything in it out of git: its <c>.gitignore</c> ignores
+    /// everything, written if missing and the rule appended to one that lacks it. Creates the folder if need be.
+    /// </summary>
+    public static void EnsureIgnoredByGit(string folder)
     {
-        var godModePath = Path.Combine(projectPath, GodModeDirectoryName);
-        Directory.CreateDirectory(godModePath);
-        var gitIgnorePath = Path.Combine(godModePath, GitIgnoreFileName);
+        Directory.CreateDirectory(folder);
+        var gitIgnorePath = Path.Combine(folder, GitIgnoreFileName);
         if (!File.Exists(gitIgnorePath))
         {
             File.WriteAllText(gitIgnorePath, GitIgnoreContent, Encoding.UTF8);

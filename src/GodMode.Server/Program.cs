@@ -13,6 +13,20 @@ if (args is [SessionProcessTree.ConsoleBreakFlag, ..])
 
 var builder = WebApplication.CreateBuilder(args);
 
+// This instance's own config file, if one is named (--config, GODMODE_CONFIG): nothing per user is read.
+// The server reads no user secrets either (it has no UserSecretsId), so every worktree's dev server
+// starts on appsettings alone, with its own scratch roots, unless it is given a file of its own
+string? instanceConfigFile;
+try
+{
+    instanceConfigFile = InstanceConfig.AddTo(builder.Configuration, builder.Configuration, builder.Environment.EnvironmentName);
+}
+catch (StartupConfigurationException ex)
+{
+    Console.Error.WriteLine(ex.Message);
+    return 1;
+}
+
 builder.Host.UseSerilog((context, configuration) =>
     configuration
         .ReadFrom.Configuration(context.Configuration)
@@ -108,6 +122,7 @@ app.MapHub<ProjectHub>(GodModeAuthExtensions.HubPath).RequireAuthorization();
 
 app.MapMcp(McpEndpointUrl.Path).RequireAuthorization(GodModeAuthExtensions.ProjectPolicy);
 
+app.Logger.LogInformation("Config file: {ConfigFile}", instanceConfigFile ?? "none (appsettings only)");
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authSettings.Mode);
 if (authSettings is { KeyFilePath: { } keyFile, KeyFileCreated: false })
     app.Logger.LogInformation("No API key is configured: using the one in {KeyFile}", keyFile);

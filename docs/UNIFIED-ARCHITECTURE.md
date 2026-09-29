@@ -482,7 +482,7 @@ Contains only infrastructure config — not domain data:
 }
 ```
 
-An empty `Authentication:ApiKey` means the key file's (Section 4.4). Every key can also be set as an environment variable (`Authentication__ApiKey`) or a command-line argument (`--ProjectRootsDir=...`). Domain data (profiles, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
+An empty `Authentication:ApiKey` means the key file's (Section 4.4). The sources, each over the ones before: `appsettings.json`, `appsettings.{Environment}.json`, the instance's config file (`--config <path>` or `GODMODE_CONFIG`, reloaded on change), environment variables (`Authentication__ApiKey`), and the command line (`--ProjectRootsDir=...`). Config belongs to a server instance, named when it starts: there is no per-user file and no user secrets, so a server started without one runs on appsettings, with a scratch `roots` folder of its own. `Instance` (default `default`) names the server in the lock it holds on each root (`{root}/logs/server.lock`, open exclusively while it runs), and a root another live server holds is skipped (the server README has the details). Domain data (profiles, roots) lives in the file tree under `ProjectRootsDir`, not in appsettings.json.
 
 ---
 

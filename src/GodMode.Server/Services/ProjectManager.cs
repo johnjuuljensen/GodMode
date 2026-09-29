@@ -93,6 +93,24 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private readonly string? _projectRootsDir;
 
+    /// <summary>Which server this is, in the roots it holds and in the logs: <c>Instance</c>, <c>default</c> unless configured.</summary>
+    public const string InstanceSetting = "Instance";
+    public const string DefaultInstance = "default";
+    private readonly string _instance;
+
+    /// <summary>
+    /// The roots this server manages, by full path: it holds each one's <see cref="RootLock"/>, from
+    /// the rebuild that first found it free until the root is gone or the server stops. Only the
+    /// snapshot's rebuild (under <see cref="_profileLock"/>) changes them.
+    /// </summary>
+    private readonly Dictionary<string, RootLock> _heldRoots = new(PathComparer);
+
+    /// <summary>The roots another live server holds, by full path, each logged once while it is held.</summary>
+    private readonly HashSet<string> _skippedRoots = new(PathComparer);
+
+    /// <summary>Set once the server has stopped and let its roots go: it takes no root after that.</summary>
+    private bool _rootsReleased;
+
     /// <summary>
     /// Lock for rebuilding the profile snapshot.
     /// </summary>
@@ -141,6 +159,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             TimeSpan.FromSeconds(configuration.GetValue(PullRequestPollSetting, 600.0)), logger);
         _lifecycle.StatusNotified += OnStatusNotifiedAsync;
 
+        _instance = configuration[InstanceSetting] is { Length: > 0 } instance ? instance : DefaultInstance;
+        _logger.LogInformation("Server instance {Instance}", _instance);
+
         // Read optional autodiscovery directory (normalize empty/whitespace to null)
         var rawDir = configuration["ProjectRootsDir"];
         _projectRootsDir = string.IsNullOrWhiteSpace(rawDir) ? null : rawDir;
@@ -148,10 +169,12 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (_projectRootsDir != null)
             _logger.LogInformation("Autodiscovery enabled: scanning {ProjectRootsDir} for .godmode-root/ directories", _projectRootsDir);
 
-        // Build initial profile/root snapshot
-        _snapshot = BuildSnapshot();
+        // Build initial profile/root snapshot, taking the roots no other server holds
+        lock (_profileLock) _snapshot = BuildSnapshot();
 
         _stopping = lifetime.ApplicationStopping;
+        // Latest registration first: the roots are let go once their projects are stopped
+        lifetime.ApplicationStopping.Register(ReleaseRoots);
         lifetime.ApplicationStopping.Register(StopProjectsOnShutdown);
     }
 
@@ -259,6 +282,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             }
         }
 
+        // One server per root: before the default, so a server all of whose roots are held elsewhere has what a server with no roots has
+        HoldRoots(merged);
+
         // If still empty after discovery, create a default
         if (merged.Count == 0)
         {
@@ -284,6 +310,86 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             string.Join(", ", rootLookup.Select(kvp => $"{kvp.Key.Item1}/{kvp.Key.Item2}={kvp.Value}")));
 
         return new ProfileSnapshot(merged, rootLookup, pathToProfileRoot, projectFiles);
+    }
+
+    /// <summary>
+    /// One server per root: removes from <paramref name="profiles"/> every root another live server
+    /// holds, and takes the lock on each one that is free. A root held elsewhere is logged once, with
+    /// its holder where that can be read, and tried again on every rebuild; a root this server holds
+    /// stays held across rebuilds, and is let go once it is no longer found and no project of this
+    /// server's is in it (one being created included) until the server stops. A root whose folder does
+    /// not exist holds nothing yet, and is kept. A profile left with no root by this is not listed either.
+    /// </summary>
+    private void HoldRoots(Dictionary<string, ProfileConfig> profiles)
+    {
+        var found = new HashSet<string>(PathComparer);
+        foreach (var (profileName, config) in profiles.ToArray())
+        {
+            var hadRoots = config.Roots.Count > 0;
+            foreach (var (rootName, rootPath) in config.Roots.ToArray())
+            {
+                var path = FullPath(rootPath);
+                if (!Directory.Exists(path)) continue;
+                found.Add(path);
+                if (_heldRoots.ContainsKey(path)) continue;
+                if (!_rootsReleased && TryHoldRoot(path) is { } held)
+                {
+                    _heldRoots[path] = held;
+                    if (_skippedRoots.Remove(path))
+                        _logger.LogInformation("Root {Profile}/{Root} at {Path} is free again: this server ({Instance}) now holds it",
+                            profileName, rootName, path, _instance);
+                    continue;
+                }
+
+                config.Roots.Remove(rootName);
+                if (!_rootsReleased && _skippedRoots.Add(path))
+                {
+                    var holder = RootLock.ReadHolder(path);
+                    _logger.LogWarning("Root {Profile}/{Root} at {Path} is held by another server ({Holder}): skipped until it is let go",
+                        profileName, rootName, path, holder is null ? "unknown" : $"instance {holder.Instance}, process {holder.ProcessId}");
+                }
+            }
+            if (hadRoots && config.Roots.Count == 0) profiles.Remove(profileName);
+        }
+
+        // Not found by one rebuild is not gone: a config.json saved mid-edit, or a folder that blinks.
+        // A root with a project of this server's in it stays held, so no other server takes its sessions
+        foreach (var gone in _heldRoots.Keys.Where(path => !found.Contains(path) && !HasProjectIn(path)).ToArray())
+        {
+            _heldRoots.Remove(gone, out var held);
+            held!.Dispose();
+        }
+        _skippedRoots.IntersectWith(found);
+    }
+
+    /// <summary>Whether a project this server tracks, or one it is creating, is in the root at <paramref name="rootPath"/>.</summary>
+    private bool HasProjectIn(string rootPath) =>
+        _projects.Values.Select(project => project.ProjectPath).Concat(_creatingPaths.Keys)
+            .Any(path => WhyNotAProjectFolderOf(rootPath, path) is null);
+
+    /// <summary>The lock on the root at <paramref name="path"/>, or null when another server holds it or it cannot be taken.</summary>
+    private RootLock? TryHoldRoot(string path)
+    {
+        try
+        {
+            return RootLock.TryAcquire(path, _instance);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not take the lock on root {Path}", path);
+            return null;
+        }
+    }
+
+    /// <summary>Lets every root go, once the server has stopped its projects: another server may take them from here.</summary>
+    private void ReleaseRoots()
+    {
+        lock (_profileLock)
+        {
+            _rootsReleased = true;
+            foreach (var held in _heldRoots.Values) held.Dispose();
+            _heldRoots.Clear();
+        }
     }
 
     /// <summary>
@@ -1026,9 +1132,17 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (project.Status.PullRequest is { IsOpen: true }) _pullRequests.CheckNow(project.Status.Id);
     }
 
-    public async ValueTask DisposeAsync() => await _pullRequests.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await _pullRequests.DisposeAsync();
+        ReleaseRoots();
+    }
 
-    public void Dispose() => _pullRequests.Dispose();
+    public void Dispose()
+    {
+        _pullRequests.Dispose();
+        ReleaseRoots();
+    }
 
     /// <summary>
     /// Pushes the attention list to every client when it differs from the one last pushed. The list

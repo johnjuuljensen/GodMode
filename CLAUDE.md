@@ -42,8 +42,12 @@ The solution build needs the VoiceBot submodule (`external/VoiceBot`, VoiceBot's
 # Build server (no React: it serves no page, and needs no npm)
 dotnet build src/GodMode.Server/GodMode.Server.csproj
 
-# Run server (http://127.0.0.1:31337; with no Authentication:ApiKey it generates a key on its first start and prints it)
+# Run server (http://127.0.0.1:31337; with no Authentication:ApiKey it generates a key on its first start and prints it).
+# With no config file it is a dev server: appsettings only, an empty `roots` folder under the working directory
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
+
+# Run the server you use on its own config file (Instance, ProjectRootsDir, ...): --config <path> or GODMODE_CONFIG
+dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.godmode-server/main.json
 
 # Build MAUI app (requires MAUI workload; builds the React client into it)
 dotnet build src/GodMode.Maui/GodMode.Maui.csproj
@@ -59,6 +63,8 @@ cd src/GodMode.Client.React && npm test && npm run lint
 ```
 
 **Running/Debugging**: The server and MAUI app are separate processes. The server manages Claude Code processes and serves the hub; it serves no page. The MAUI app connects to one or more servers via its local proxy. To see a React change, rebuild and run the Windows app against a running server (add the server there with its key): the app's build rebuilds the client when its sources changed (`npm ci` first, when `node_modules` is missing or older than `package-lock.json`). Its WebView2 has DevTools enabled (F12). There is no Vite dev server.
+
+**A dev server beside the main one**: config belongs to a server instance, never to the user. The server reads no user secrets and no per-user file, only `appsettings.json`, `appsettings.{Environment}.json`, the instance's config file (`--config`/`GODMODE_CONFIG`), environment variables and the command line, in that order. So a worktree's `dotnet run` never finds the main server's roots: give it another port (`-- --Urls=http://127.0.0.1:31338`) and its own config file, or none. And if it is pointed at the same roots anyway, it leaves every root the main server holds alone: a server holds `{root}/logs/server.lock` open exclusively on each root it manages, and skips (and logs, with the holder's `Instance`) a root another live server holds, until that server has gone. Never point a test server at your real roots.
 
 ## Architecture
 
@@ -87,7 +93,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of `GodMode.Client.React.csproj` (GodMode.Maui's reference, or the solution) (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
 
 **Config-Driven Project Roots (Multi-File)**
-- A root is a subdirectory of `ProjectRootsDir` (appsettings, default `roots`) that contains a `.godmode-root/` folder with config files
+- A root is a subdirectory of `ProjectRootsDir` (the instance's config file, else appsettings' `roots`) that contains a `.godmode-root/` folder with config files
 - `config.json` defines base/shared config (profileName, prepare, delete, status, environment, claudeArgs, model, permissionMode, allowSkipPermissions)
 - Roots and profiles (`{ProjectRootsDir}/.profiles/`) are maintained by hand on the host: no hub method writes config, and the server archives nothing
 - GodMode gives a session one MCP server, the server's own `/mcp` endpoint, whose only tool is the permission prompt, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
