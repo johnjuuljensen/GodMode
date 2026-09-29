@@ -174,9 +174,9 @@ The hub is the session loop plus reading profiles and roots:
 | Profiles | `ListProfiles` |
 | Utility | `CheckCommand` |
 
-| `IProjectHubClient` (8 callbacks) |
+| `IProjectHubClient` (9 callbacks) |
 |---|
-| `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted` |
+| `OutputReceived`, `OutputBatch`, `OutputReplayComplete`, `StatusChanged`, `AttentionChanged`, `ProjectCreated`, `CreationProgress`, `ProjectDeleted`, `RootsChanged` |
 
 **A session's ID is `{profile}/{root}/{id}`**, its id being GodMode's own, `yymmdd-{kind}-{slug}-{suffix}` (`260929-feat-left-list-k7q2`), unique within its root and the name of its state folder (4.3). Every hub method and callback that names a project takes or gives this ID (`ProjectStatus.Id`, `ProjectSummary.Id`). Clients treat it as opaque and pass it back as they received it; the server derives it from where the state folder is on every recovery. Root scripts get the id as `GODMODE_SESSION_ID` and the folder name as `GODMODE_PROJECT_FOLDER`. The session's kind (`ProjectStatus.Kind`, `ProjectSummary.Kind`), which the app shows as a label, is its create script's `kind` result, else its action's name.
 
@@ -189,7 +189,13 @@ When adding a new hub method:
 
 ### 4.2 Config-Driven Project Roots
 
-A root is a folder with a `.godmode-root/` in it, and the server's config says where its roots are (Section 6): each **scan folder** (`Roots:Scan:<key>`) makes a root of every immediate subfolder that has a `.godmode-root/`, named after it, and an **explicit root** (`Roots:Explicit:<name>:Path`) is one named folder, anywhere on disk. The server reads its sources and scans its folders again on each list of profiles or roots, so a root added on the host, or in the instance's config file, shows up on the next refresh. A server has one root per name and per folder: an explicit root wins a clash, then the first scan key in ordinal order, and each loser is logged with both paths.
+A root is a folder with a `.godmode-root/` in it, and the server's config says where its roots are (Section 6): each **scan folder** (`Roots:Scan:<key>`) makes a root of every immediate subfolder that has a `.godmode-root/`, named after it, and an **explicit root** (`Roots:Explicit:<name>:Path`) is one named folder, anywhere on disk. The server reads its sources and scans its folders again on each list of profiles or roots, on each reload of the config, and every `RootsPollSeconds` (5; a file watcher misses changes on a network drive). A server has one root per name and per folder: an explicit root wins a clash, then the first scan key in ordinal order, and each loser is logged with both paths.
+
+**Live roots.** Once the startup's recovery has run, a root added, edited (its `profileName` included) or removed on the host, or in the instance's config file, reaches every client as `RootsChanged` (the whole lists of roots and profiles), sent only when they differ from the last ones read, so the app shows it without a reconnect. What follows for sessions:
+- A root that appears has its sessions recovered as at the start, each pushed as `ProjectCreated`.
+- A session is its root's by folder (`ProjectInfo.RootPath`): its delete, status, launch and restart read that folder's config and scripts, whatever the root is called now, so a root name that comes to name another folder is another root to it.
+- When a session's root folder is gone, or is listed under another profile or name, a session without a claude leaves the list (`ProjectDeleted`, its files kept), and is recovered again under the ID the folder gives it now, if the folder is still a root. One whose claude runs carries on under its ID, which its MCP config carries, until claude exits. Two reads in a row must agree first, since a half-saved `config.json` reads as the default. The root stays locked while a session of the server's is in it.
+- The server README (*Live roots*) has the details.
 
 ```
 root-name/
@@ -481,7 +487,7 @@ Every target separates the **server binary** from the **workspace data**:
 ~/.godmode-logs/              # Server logs (relative to the working directory)
 ```
 
-**Key principle**: Server updates replace the binary without touching workspace data. The server reads its scan folders and explicit roots from config to find it. On startup it recovers the projects it finds there.
+**Key principle**: Server updates replace the binary without touching workspace data. The server reads its scan folders and explicit roots from config to find it. On startup it recovers the projects it finds there, and from then on those of any root that appears (4.2).
 
 ---
 
