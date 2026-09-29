@@ -24,6 +24,14 @@ public class LaunchPermissionsTests
 
     private static Dictionary<string, object> AskingForSkip(object value) => new() { ["skipPermissions"] = value };
 
+    /// <summary>The root holds its config, and the server's own logs folder with only its lock in it: nothing of a project.</summary>
+    private static void AssertNothingIsCreated(LifecycleHarness harness)
+    {
+        Assert.Equal([".godmode-root", "logs"], Directory.GetFileSystemEntries(harness.RootPath).Select(Path.GetFileName).Order());
+        Assert.Equal([".gitignore", Services.RootLock.HolderFileName, Services.RootLock.LockFileName],
+            Directory.GetFileSystemEntries(Path.Combine(harness.RootPath, "logs")).Select(Path.GetFileName).Order());
+    }
+
     private static string GodModeRoot(LifecycleHarness harness) => Path.Combine(harness.RootPath, ".godmode-root");
 
     /// <summary>Changes the root's config.json as the host would, keeping the harness's own keys.</summary>
@@ -74,7 +82,7 @@ public class LaunchPermissionsTests
 
         Assert.Contains("allowSkipPermissions", refused.Message);
         Assert.Empty(await harness.Projects.ListProjectsAsync());
-        Assert.Equal([".godmode-root"], Directory.GetFileSystemEntries(harness.RootPath).Select(Path.GetFileName));
+        AssertNothingIsCreated(harness);
     }
 
     [Theory]
@@ -246,7 +254,7 @@ public class LaunchPermissionsTests
 
         Assert.Contains($"config.work.json: permissionMode '{mode}' {reason}", refused.Message);
         Assert.Empty(await harness.Projects.ListProjectsAsync());
-        Assert.Equal([".godmode-root"], Directory.GetFileSystemEntries(harness.RootPath).Select(Path.GetFileName));
+        AssertNothingIsCreated(harness);
     }
 
     /// <summary>The kept mode is checked again at each launch: a settings.json that asks for bypassPermissions gets no mode at all.</summary>
