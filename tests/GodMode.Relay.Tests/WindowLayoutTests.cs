@@ -166,6 +166,30 @@ public sealed class WindowLayoutTests : IDisposable
     [Fact]
     public void With_no_screens_known_the_bounds_stay() =>
         Assert.Equal(Three.Windows[1].Bounds, WindowPlacer.OnScreen(Three.Windows[1].Bounds, []));
+
+    [Fact]
+    public void A_build_that_is_not_single_instance_keeps_its_layout_apart_from_the_installed_apps()
+    {
+        Assert.Equal(Path.Combine(_dir, WindowLayout.FileName), WindowLayout.PathFor(_dir, singleInstance: true));
+        Assert.NotEqual(WindowLayout.PathFor(_dir, singleInstance: true), WindowLayout.PathFor(_dir, singleInstance: false));
+    }
+
+    [Fact]
+    public void A_build_that_is_not_single_instance_never_reads_or_writes_the_installed_apps_file()
+    {
+        var release = WindowLayout.PathFor(_dir, singleInstance: true);
+        Three.Save(release);
+        var before = System.IO.File.ReadAllBytes(release);
+        var debug = WindowLayout.PathFor(_dir, singleInstance: false);
+
+        // A debug build starts with no layout of its own, then saves (a window closed, the app quit)
+        Assert.Null(WindowLayout.Load(debug, NullLogger.Instance));
+        new WindowLayout([Three.Windows[0]]).Save(debug);
+
+        Assert.Equal(before, System.IO.File.ReadAllBytes(release));
+        Assert.Single(WindowLayout.Load(debug, NullLogger.Instance)!.Windows);
+        Assert.Equal(Three.Windows, WindowLayout.Load(release, NullLogger.Instance)!.Windows);
+    }
 }
 
 /// <summary>The census that decides a profile no longer exists: every server's ListProfiles, over direct connections.</summary>

@@ -11,7 +11,7 @@ using Windows.Graphics;
 namespace GodMode.Maui;
 
 /// <summary>
-/// Where the app's windows are, kept in <c>~/.godmode/windows.json</c> (#341), and put back on a restart: the main
+/// Where the app's windows are, kept in <c>~/.godmode/windows.json</c> (#341; a debug build keeps its own, #350), and put back on a restart: the main
 /// window at once, the profile windows once the servers have said which profiles there are (<see cref="ProfileCensus"/>).
 /// Each window's place is read every <see cref="PollInterval"/> and the file is written when any of it changed (a move,
 /// a resize, maximising, another desktop), when a window opens or closes, and when the app closes.
@@ -20,7 +20,14 @@ internal static class WindowPlaces
 {
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
 
-    private static readonly string FilePath = Path.Combine(GodModePaths.AppDataDirectory, WindowLayout.FileName);
+#if SINGLE_INSTANCE
+    private const bool SingleInstanceBuild = true;
+#else
+    private const bool SingleInstanceBuild = false;
+#endif
+
+    /// <summary>windows.json, or windows.debug.json in a build that runs beside the installed app (#350).</summary>
+    private static readonly string FilePath = WindowLayout.PathFor(GodModePaths.AppDataDirectory, SingleInstanceBuild);
     private static readonly ILogger Logger = MauiProgram.LoggerFactory.CreateLogger(typeof(WindowPlaces));
 
     /// <summary>The windows open now, the main window first, then in the order they opened. UI thread only.</summary>

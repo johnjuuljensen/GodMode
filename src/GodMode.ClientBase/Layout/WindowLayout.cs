@@ -18,6 +18,16 @@ public sealed record WindowLayout(IReadOnlyList<SavedWindow> Windows)
 {
     public const string FileName = "windows.json";
 
+    /// <summary>
+    /// A build without SINGLE_INSTANCE (a debug build) runs beside the installed app, so it keeps its own layout (#350):
+    /// it never restores the installed app's windows, nor changes or deletes them.
+    /// </summary>
+    public const string DebugFileName = "windows.debug.json";
+
+    /// <summary>The layout file in <paramref name="directory"/> for a build that is single-instance or not.</summary>
+    public static string PathFor(string directory, bool singleInstance) =>
+        Path.Combine(directory, singleInstance ? FileName : DebugFileName);
+
     private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
