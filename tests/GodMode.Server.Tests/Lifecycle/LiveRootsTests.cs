@@ -183,6 +183,39 @@ public sealed class LiveRootsTests : IDisposable
     }
 
     /// <summary>
+    /// A reply that waits on a session's resume lock while a refresh lets the session go (its root
+    /// removed) fails as for a session not found, and launches nothing: a claude started then would be
+    /// one the server does not track, stop at shutdown or hold the root for.
+    /// </summary>
+    [Fact]
+    public async Task ReplyThatWaitedWhileItsSessionLeftTheList_LaunchesNothing()
+    {
+        await using var harness = new LifecycleHarness(Waiting(), settings: Poll(0), extraRoots: [("other", "other")]);
+        await harness.Projects.RecoverProjectsAsync();
+        var idle = await harness.CreateProjectAsync("idle");
+        await harness.WaitForStdinAsync(idle.Id);
+        await harness.Projects.StopProjectAsync(idle.Id);
+        var configDir = Path.Combine(harness.RootPath, ".godmode-root");
+        Directory.Move(configDir, configDir + ".away");
+        // The first read that finds the root gone only notes it
+        await harness.Projects.ListProjectRootsAsync();
+
+        // Held, so the forget of the second read, then the reply, queue behind it, in that order
+        var resumeLock = harness.Tracked(idle.Id).Process.ResumeLock;
+        await resumeLock.WaitAsync();
+        var forget = harness.Projects.ListProjectRootsAsync();
+        Assert.False(forget.IsCompleted, "the second read should wait on the session's resume lock to let it go");
+        var reply = harness.Projects.ReplyAndResumeAsync(idle.Id, "carry on");
+        resumeLock.Release();
+
+        await forget;
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => reply);
+        Assert.Null(((ProjectManager)harness.Projects).Tracked(idle.Id));
+        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        Assert.Single(harness.Launches(idle.Id));
+    }
+
+    /// <summary>
     /// The overseer's note on #323: a root name that comes to name another folder (a new explicit root
     /// wins the clash) while a session of the old folder runs. The session is its root's by folder: its
     /// delete runs its own root's script, not the new root's.

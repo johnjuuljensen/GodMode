@@ -171,6 +171,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// </summary>
     private volatile ProfileSnapshot _snapshot;
 
+    /// <summary>The roots the last snapshot logged, so it is logged only when they changed (under <see cref="_profileLock"/>).</summary>
+    private string? _snapshotDescribed;
+
     /// <summary>
     /// Immutable snapshot of merged profile and root lookup state.
     /// </summary>
@@ -333,10 +336,14 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
         var projectFiles = new ProjectFiles.ProjectManager(compositeRoots);
 
-        _logger.LogInformation("Profile snapshot: {ProfileCount} profiles, {RootCount} total roots: {Roots}",
-            merged.Count,
-            rootLookup.Count,
-            string.Join(", ", rootLookup.Select(kvp => $"{kvp.Key.Item1}/{kvp.Key.Item2}={kvp.Value}")));
+        // Said when it changed, not on every rebuild: the poll rebuilds every few seconds
+        var described = string.Join(", ", rootLookup.Select(kvp => $"{kvp.Key.Item1}/{kvp.Key.Item2}={kvp.Value}"));
+        if (described != _snapshotDescribed)
+        {
+            _snapshotDescribed = described;
+            _logger.LogInformation("Profile snapshot: {ProfileCount} profiles, {RootCount} total roots: {Roots}",
+                merged.Count, rootLookup.Count, described);
+        }
 
         return new ProfileSnapshot(merged, rootLookup, pathToProfileRoot, projectFiles);
     }
@@ -1104,7 +1111,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
         // One reply at a time decides whether to resume: two would launch two processes. The wait
         // for the session to start comes after the lock, so a stop is not held behind it
-        var reply = await WithResumeLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false));
+        var reply = await WithTrackedLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false));
         if (reply.SessionStart is { } sessionStart) await sessionStart;
     }
 
@@ -1175,6 +1182,24 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 
     private static Task WithResumeLockAsync(ProjectInfo project, Func<Task> action) =>
         WithResumeLockAsync(project, async () => { await action(); return true; });
+
+    /// <summary>
+    /// <see cref="WithResumeLockAsync{T}"/> for a call on a project it looked up by its ID: once the lock is held, the
+    /// project must still be the one tracked under that ID, or the call fails as for a project not found. A refresh may
+    /// have let it go while the call waited (<see cref="TryForgetAsync"/>, which takes the lock too), and a launch then
+    /// would run a claude that nothing tracks, stops at shutdown or holds its root for.
+    /// </summary>
+    private Task<T> WithTrackedLockAsync<T>(ProjectInfo project, Func<Task<T>> action) =>
+        WithResumeLockAsync(project, () => IsTracked(project)
+            ? action()
+            : throw new KeyNotFoundException($"Project {project.Status.Id} not found: it left the list while this waited"));
+
+    private Task WithTrackedLockAsync(ProjectInfo project, Func<Task> action) =>
+        WithTrackedLockAsync(project, async () => { await action(); return true; });
+
+    /// <summary>Whether <paramref name="project"/> is the one tracked under its ID.</summary>
+    private bool IsTracked(ProjectInfo project) =>
+        _projects.TryGetValue(project.Status.Id, out var tracked) && ReferenceEquals(tracked, project);
 
     /// <summary>Sends to the process just launched; 0 when it has exited already (a fresh session may take its place).</summary>
     private async Task<int> TrySendInputAsync(ProjectInfo project, string text)
@@ -1410,7 +1435,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         // Before a launch or after it, never in the middle of one
-        await WithResumeLockAsync(project, () => _lifecycle.StopAsync(project));
+        await WithTrackedLockAsync(project, () => _lifecycle.StopAsync(project));
         await NotifyStatusChanged(project);
     }
 
@@ -1421,7 +1446,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        await WithResumeLockAsync(project, () => DeleteLockedAsync(project, force));
+        await WithTrackedLockAsync(project, () => DeleteLockedAsync(project, force));
     }
 
     private async Task DeleteLockedAsync(ProjectInfo project, bool force)
@@ -1505,7 +1530,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
-        await WithResumeLockAsync(project, async () =>
+        await WithTrackedLockAsync(project, async () =>
         {
             // Check if process is actually still running (regardless of reported state)
             await _lifecycle.SettleAsync(project);
