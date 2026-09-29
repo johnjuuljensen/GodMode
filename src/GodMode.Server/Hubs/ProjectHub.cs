@@ -49,7 +49,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return await _projectManager.GetStatusAsync(projectId);
     }
 
-    public async Task<ProjectStatus> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
+    public async Task<CreateProjectResult> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs)
     {
         _logger.LogInformation("Client {ConnectionId} creating project in profile '{Profile}' root '{Root}' action '{Action}' with {InputCount} inputs",
             Context.ConnectionId, profileName, projectRootName, actionName ?? "(default)", inputs.Count);
@@ -57,9 +57,10 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         try
         {
             var request = new CreateProjectRequest(profileName, projectRootName, inputs, actionName);
-            var status = await _projectManager.CreateProjectAsync(request);
-            await Clients.All.ProjectCreated(status);
-            return status;
+            var result = await _projectManager.CreateProjectAsync(request);
+            // An action that starts no session made no project to list
+            if (result.Project is { } status) await Clients.All.ProjectCreated(status);
+            return result;
         }
         catch (Exception ex)
         {
@@ -179,14 +180,15 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.UnsubscribeProjectAsync(projectId, Context.ConnectionId);
     }
 
-    public async Task DeleteProject(string projectId, bool force = false)
+    public async Task<DeleteProjectResult> DeleteProject(string projectId, bool force = false)
     {
         _logger.LogInformation("Client {ConnectionId} deleting project {ProjectId} (force={Force})",
             Context.ConnectionId, projectId, force);
 
+        DeleteProjectResult result;
         try
         {
-            await _projectManager.DeleteProjectAsync(projectId, force);
+            result = await _projectManager.DeleteProjectAsync(projectId, force);
         }
         catch (Exception ex)
         {
@@ -197,6 +199,22 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         }
 
         await Clients.All.ProjectDeleted(projectId);
+        return result;
+    }
+
+    public async Task<ProjectStatus> RestoreProject(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} restoring project {ProjectId} from the trash", Context.ConnectionId, projectId);
+        try
+        {
+            // Pushed as ProjectCreated to every client, this one included
+            return await _projectManager.RestoreProjectAsync(projectId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Project {ProjectId} was not restored: {Reason}", projectId, ex.Message);
+            throw new HubException(ex.Message);
+        }
     }
 
     public async Task<string?> CheckCommand(string command)

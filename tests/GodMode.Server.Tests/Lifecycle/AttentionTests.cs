@@ -77,7 +77,7 @@ public class AttentionTests
         var third = await WaitForAttentionPushAsync(harness, 3);
 
         Assert.Equal(["[asking:Question]", "[asking:Question, permitting:Permission]", "[asking:Question]"],
-            new[] { first, second, third }.Select(items => Describe(items).Replace($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/", "")));
+            new[] { first, second, third }.Select(items => Describe(items).Replace(asking.Id, "asking").Replace(permitting.Id, "permitting")));
         Assert.Equal(3, harness.Hub.AttentionPushes.Count);
     }
 

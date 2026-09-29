@@ -23,10 +23,10 @@ public class StatusUpdater : IStatusUpdater
 
     public async Task SaveStatusAsync(ProjectInfo project)
     {
-        // A project without one has nowhere to keep its status: a create that failed before its
-        // script made the folder, or a folder removed outside GodMode. Making it would make the
+        // A project without its state folder has nowhere to keep its status: a create that failed before
+        // its script made the folder, or a folder removed outside GodMode. Making it would make the
         // folder, which a create script expects not to find. Its status is in memory until it is deleted
-        var godModePath = Path.Combine(project.ProjectPath, ".godmode");
+        var godModePath = project.StatePath;
         if (!Directory.Exists(godModePath))
         {
             _logger.LogDebug("Project {ProjectId} has no {Path}; its status is not saved", project.Status.Id, godModePath);
@@ -111,14 +111,14 @@ public class StatusUpdater : IStatusUpdater
                 // The session claude keeps is the one it reports, which a resume must name
                 if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string reported && !SessionIdFile.IsValid(reported))
                     _logger.LogWarning("Project {ProjectId} reported a session id that is not a GUID; it keeps {SessionId}",
-                        project.Status.Id, project.SessionId);
-                else if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string sessionId && sessionId != project.SessionId)
+                        project.Status.Id, project.ClaudeSessionId);
+                else if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string sessionId && sessionId != project.ClaudeSessionId)
                 {
                     _logger.LogInformation("Project {ProjectId} runs session {SessionId} (asked for {Requested})",
-                        project.Status.Id, sessionId, project.SessionId);
-                    project.SessionId = sessionId;
+                        project.Status.Id, sessionId, project.ClaudeSessionId);
+                    project.ClaudeSessionId = sessionId;
                     // A write that fails is not the session failing: it is written again on the next init
-                    try { await SessionIdFile.WriteAsync(project.ProjectPath, sessionId); }
+                    try { await SessionIdFile.WriteAsync(project.StatePath, sessionId); }
                     catch (Exception ex) { _logger.LogError(ex, "Could not save the session id of project {ProjectId}", project.Status.Id); }
                 }
                 // The session (re)started - project is running

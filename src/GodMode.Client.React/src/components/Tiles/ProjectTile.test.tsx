@@ -77,3 +77,16 @@ it('clips a long reply to what a tile shows, and a failed result to its first li
   expect(reply.textContent).toBe(LONG.slice(0, 400));
   expect(el.querySelector('.tile-status-error .tile-status-text')?.textContent).toBe('Failed');
 });
+
+it("shows the session's kind as a label beside its name, and none when it has none", async () => {
+  view = await render(
+    <ProjectTile project={{ ...project('p1', 'Crash on start', 'Running', new Date().toISOString()), Kind: 'bug' }} serverId="A" messages={[]} isLoading={false} isSelected={false} onSelect={() => {}} />,
+  );
+  const label = view.container.querySelector('.tile-header .kind-label');
+  expect(label?.textContent).toBe('bug');
+  expect(label?.previousElementSibling?.textContent).toBe('Crash on start');
+  view.unmount();
+
+  const container = await tile([]);
+  expect(container.querySelector('.kind-label')).toBeNull();
+});

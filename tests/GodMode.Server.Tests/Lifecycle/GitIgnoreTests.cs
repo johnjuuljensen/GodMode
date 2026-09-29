@@ -4,8 +4,8 @@ using GodMode.Server.Services;
 namespace GodMode.Server.Tests.Lifecycle;
 
 /// <summary>
-/// A project's <c>.godmode/</c> holds its MCP config, and the project token in it, for as long as
-/// claude runs: its <c>.gitignore</c> keeps all of it out of a session's commits. Every launch makes
+/// A working folder's <c>.godmode/</c> holds its sessions' state, their MCP config and the project token in it
+/// among it, for as long as claude runs: its <c>.gitignore</c> keeps all of it out of a session's commits. Every launch makes
 /// sure of that file, whoever made the folder.
 /// </summary>
 public class GitIgnoreTests

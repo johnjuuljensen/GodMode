@@ -350,7 +350,7 @@ public class ProjectLifecycleTests
         await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
         var sessionId = (await harness.WaitForStdinAsync(created.Id)).ArgValue("--session-id");
         await harness.Projects.StopProjectAsync(created.Id);
-        var configPath = McpConfigFile.PathFor(harness.ProjectPath(created.Id));
+        var configPath = McpConfigFile.PathFor(harness.StatePath(created.Id));
         var pushedBefore = harness.Hub.StatusPushes(created.Id).Count;
 
         await harness.Projects.ResumeProjectAsync(created.Id);

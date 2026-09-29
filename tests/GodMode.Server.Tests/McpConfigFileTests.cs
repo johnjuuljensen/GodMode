@@ -3,21 +3,21 @@ using GodMode.Server.Services;
 namespace GodMode.Server.Tests;
 
 /// <summary>
-/// The MCP config a launch gets is written into the project's .godmode folder rather than the
+/// The MCP config a launch gets is written into the session's state folder rather than the
 /// shared temp directory, owner-only where the OS has modes, and deleted when the process that
 /// used it is gone.
 /// </summary>
 public class McpConfigFileTests
 {
     [Fact]
-    public void Write_PutsTheConfigInTheProjectsGodModeFolder()
+    public void Write_PutsTheConfigInTheSessionsStateFolder()
     {
         var workDir = ServerProcess.CreateWorkDir("mcpcfg");
         try
         {
             var path = McpConfigFile.Write(workDir, """{"mcpServers":{}}""");
 
-            Assert.Equal(Path.Combine(workDir, ".godmode", "mcp-config.json"), path);
+            Assert.Equal(Path.Combine(workDir, "mcp-config.json"), path);
             Assert.Equal("""{"mcpServers":{}}""", File.ReadAllText(path));
         }
         finally

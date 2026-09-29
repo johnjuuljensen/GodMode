@@ -18,8 +18,9 @@ namespace GodMode.Server.Tests;
 /// </summary>
 public class ProjectResumeBridgeTests
 {
-    /// <summary>proj1 in the root <c>work</c>, whose config names no profile, so it is the Default profile's.</summary>
-    private const string ProjectId = "Default/work/proj1";
+    /// <summary>A session in proj1 in the root <c>work</c>, whose config names no profile, so it is the Default profile's.</summary>
+    private const string SessionId = "260101-create-proj1-abcd";
+    private const string ProjectId = "Default/work/" + SessionId;
 
     [Fact]
     public async Task ResumeAfterRestart_LaunchesWithTheMcpEndpointAndATokenTheServerAccepts()
@@ -29,7 +30,7 @@ public class ProjectResumeBridgeTests
         {
             var rootPath = WriteRoot(workDir);
             var projectPath = Path.Combine(rootPath, "proj1");
-            WriteStoppedProject(projectPath, "proj1");
+            WriteStoppedProject(projectPath, ProjectId);
 
             // A fresh ProjectManager is what a restarted server has: nothing in memory.
             await using var services = BuildServices(workDir);
@@ -62,7 +63,7 @@ public class ProjectResumeBridgeTests
         try
         {
             var rootPath = WriteRoot(workDir);
-            WriteStoppedProject(Path.Combine(rootPath, "proj1"), "proj1");
+            WriteStoppedProject(Path.Combine(rootPath, "proj1"), ProjectId);
 
             await using var services = BuildServices(workDir);
             var projects = services.GetRequiredService<IProjectManager>();
@@ -91,11 +92,11 @@ public class ProjectResumeBridgeTests
         Assert.NotNull(args);
         var index = Array.IndexOf(args!, "--mcp-config");
         Assert.True(index >= 0 && index + 1 < args!.Length, $"no --mcp-config in: {string.Join(' ', args!)}");
-        // --mcp-config takes a file path; the server writes the JSON to .godmode/mcp-config.json
+        // --mcp-config takes a file path; the server writes the JSON to mcp-config.json in the session's state folder
         return File.ReadAllText(args[index + 1]);
     }
 
-    /// <summary>The root <c>work</c> in the server's ProjectRootsDir: a <c>.godmode-root</c> with no config, so the default action.</summary>
+    /// <summary>The root <c>work</c> in the server's scan folder: a <c>.godmode-root</c> with no config, so the default action.</summary>
     private static string WriteRoot(string workDir)
     {
         var rootPath = Path.Combine(workDir, "roots", "work");
@@ -105,7 +106,7 @@ public class ProjectResumeBridgeTests
 
     private static void WriteStoppedProject(string projectPath, string id)
     {
-        var godMode = Path.Combine(projectPath, ".godmode");
+        var godMode = GodMode.ProjectFiles.SessionState.PathOf(projectPath, SessionId);
         Directory.CreateDirectory(godMode);
         var now = DateTime.UtcNow;
         var status = new ProjectStatus(id, id, ProjectState.Stopped, now, now, null,
@@ -118,7 +119,7 @@ public class ProjectResumeBridgeTests
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ProjectRootsDir"] = Path.Combine(workDir, "roots"),
+            ["Roots:Scan:test"] = Path.Combine(workDir, "roots"),
         }).Build();
 
         var services = new ServiceCollection();
@@ -131,7 +132,6 @@ public class ProjectResumeBridgeTests
         services.AddSingleton<ProjectLifecycle>();
         services.AddSingleton<IRootConfigReader, RootConfigReader>();
         services.AddSingleton<IScriptRunner, ScriptRunner>();
-        services.AddSingleton<ProfileFileManager>();
         services.AddSingleton<IHostApplicationLifetime, ApplicationLifetime>();
         services.AddSingleton<IProjectManager, ProjectManager>();
         return services.BuildServiceProvider();

@@ -35,7 +35,11 @@ public interface IProjectHub
     /// <param name="projectRootName">Name of the project root.</param>
     /// <param name="actionName">Name of the create action to use, or null for the default action.</param>
     /// <param name="inputs">Form inputs from the dynamic form.</param>
-    Task<ProjectStatus> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
+    /// <returns>
+    /// The project created; for an action that starts no session (<c>"session": false</c>), no project
+    /// and the script's message. Progress comes as <c>CreationProgress</c> until this returns.
+    /// </returns>
+    Task<CreateProjectResult> CreateProject(string profileName, string projectRootName, string? actionName, Dictionary<string, JsonElement> inputs);
 
     /// <summary>
     /// Sends input to a project.
@@ -118,9 +122,22 @@ public interface IProjectHub
     Task UnsubscribeProject(string projectId);
 
     /// <summary>
-    /// Deletes a project, running teardown scripts and removing all files.
+    /// Deletes a project: stops it, runs its root's delete script (<paramref name="force"/> is passed
+    /// to it as <c>GODMODE_FORCE</c>), which may refuse, and then removes its files. A session that
+    /// shares its working folder loses only its state, moved to the folder's <c>.godmode/trash/</c>
+    /// (<see cref="DeleteProjectResult.Trashed"/>); any other loses its working folder.
     /// </summary>
-    Task DeleteProject(string projectId, bool force = false);
+    Task<DeleteProjectResult> DeleteProject(string projectId, bool force = false);
+
+    /// <summary>
+    /// Undoes a delete that trashed the session (<see cref="DeleteProjectResult.Trashed"/>): its state
+    /// goes back to <c>.godmode/sessions/</c> and it is tracked again, Stopped, under the same ID, pushed
+    /// as <see cref="IProjectHubClient.ProjectCreated"/>. Its delete script is not undone. It fails, and
+    /// changes nothing, when the session is not in the trash (purged, or never trashed), when its root
+    /// is no longer listed under the profile and name in its ID (removed, or renamed), or when its
+    /// folder no longer takes it.
+    /// </summary>
+    Task<ProjectStatus> RestoreProject(string projectId);
 
     // ── Utility ──
 

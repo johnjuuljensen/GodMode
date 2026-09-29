@@ -47,14 +47,14 @@ if (string.IsNullOrEmpty(scriptPath) || string.IsNullOrEmpty(recordPath))
         $"(or pass {FakeClaudeEnvironment.ScriptFlag} and {FakeClaudeEnvironment.RecordFlag}).");
     return 2;
 }
-recordPath = Path.GetFullPath(recordPath);
+// Read at start, as claude reads it: the process manager deletes the file when the process exits
+var mcpConfig = ArgValue("--mcp-config") is { } mcpConfigPath && File.Exists(mcpConfigPath) ? File.ReadAllText(mcpConfigPath) : null;
+recordPath = Path.GetFullPath(recordPath.Replace(FakeClaudeEnvironment.SessionPlaceholder, SessionOf(mcpConfig)));
 
 var pid = Environment.ProcessId;
 var environment = Environment.GetEnvironmentVariables()
     .Cast<DictionaryEntry>()
     .ToDictionary(e => (string)e.Key, e => (string?)e.Value ?? "");
-// Read at start, as claude reads it: the process manager deletes the file when the process exits
-var mcpConfig = ArgValue("--mcp-config") is { } mcpConfigPath && File.Exists(mcpConfigPath) ? File.ReadAllText(mcpConfigPath) : null;
 FakeRecording.Append(recordPath, new RecordLine(RecordLine.Start, pid, Argv: args, Environment: environment, McpConfig: mcpConfig));
 McpClient? permissionServer = null;
 
@@ -243,6 +243,16 @@ async Task<string> AskPermissionAsync(ScriptStep.AskPermission ask)
     ArgValue("--permission-prompt-tool")?.Split("__") is ["mcp", var server, var tool]
         ? (server, tool)
         : throw new InvalidOperationException("no --permission-prompt-tool mcp__<server>__<tool>");
+
+// The session's id: the last part of the project ID its MCP config calls GodMode with, "none" without one
+static string SessionOf(string? mcpConfig)
+{
+    if (mcpConfig == null) return "none";
+    using var config = JsonDocument.Parse(mcpConfig);
+    return config.RootElement.GetProperty("mcpServers").EnumerateObject()
+        .Select(server => server.Value.TryGetProperty("headers", out var headers) && headers.TryGetProperty(FakeClaudeEnvironment.ProjectIdHeader, out var id) ? id.GetString() : null)
+        .FirstOrDefault(id => id != null)?.Split('/')[^1] ?? "none";
+}
 
 // A streamable HTTP client on the server's entry in the MCP config (its url and headers), listing
 // its tools first as claude does when it connects

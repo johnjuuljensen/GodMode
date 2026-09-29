@@ -24,6 +24,14 @@ public class LaunchPermissionsTests
 
     private static Dictionary<string, object> AskingForSkip(object value) => new() { ["skipPermissions"] = value };
 
+    /// <summary>The root holds its config, and the server's own logs folder with only its lock in it: nothing of a project.</summary>
+    private static void AssertNothingIsCreated(LifecycleHarness harness)
+    {
+        Assert.Equal([".godmode-root", "logs"], Directory.GetFileSystemEntries(harness.RootPath).Select(Path.GetFileName).Order());
+        Assert.Equal([".gitignore", Services.RootLock.HolderFileName, Services.RootLock.LockFileName],
+            Directory.GetFileSystemEntries(Path.Combine(harness.RootPath, "logs")).Select(Path.GetFileName).Order());
+    }
+
     private static string GodModeRoot(LifecycleHarness harness) => Path.Combine(harness.RootPath, ".godmode-root");
 
     /// <summary>Changes the root's config.json as the host would, keeping the harness's own keys.</summary>
@@ -43,8 +51,8 @@ public class LaunchPermissionsTests
     /// <summary>Changes the project's settings.json, as the session in it could.</summary>
     private static void EditSettings(LifecycleHarness harness, string projectId, Func<ProjectSettings, ProjectSettings> edit)
     {
-        var folder = harness.ProjectPath(projectId);
-        edit(ProjectSettings.Load(folder)).Save(folder);
+        var state = harness.StatePath(projectId);
+        edit(ProjectSettings.Load(state)).Save(state);
     }
 
     private static async Task StopAsync(LifecycleHarness harness, string projectId)
@@ -74,7 +82,7 @@ public class LaunchPermissionsTests
 
         Assert.Contains("allowSkipPermissions", refused.Message);
         Assert.Empty(await harness.Projects.ListProjectsAsync());
-        Assert.Equal([".godmode-root"], Directory.GetFileSystemEntries(harness.RootPath).Select(Path.GetFileName));
+        AssertNothingIsCreated(harness);
     }
 
     [Theory]
@@ -122,7 +130,7 @@ public class LaunchPermissionsTests
         var created = await harness.CreateProjectAsync(inputs: AskingForSkip(true));
         var create = await harness.WaitForStdinAsync(created.Id);
 
-        Assert.True(ProjectSettings.Load(harness.ProjectPath(created.Id)).DangerouslySkipPermissions, "the create did not ask for skip");
+        Assert.True(ProjectSettings.Load(harness.StatePath(created.Id)).DangerouslySkipPermissions, "the create did not ask for skip");
         Assert.DoesNotContain(Skip, create.Argv);
         Assert.Equal(1, WarningsAbout(harness, "asks to skip permissions"));
     }
@@ -181,13 +189,13 @@ public class LaunchPermissionsTests
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
         File.WriteAllText(Path.Combine(GodModeRoot(harness), "config.plain.json"), "{}");
         File.WriteAllText(Path.Combine(GodModeRoot(harness), "config.open.json"), """{ "allowSkipPermissions": true }""");
-        var created = await harness.Projects.CreateProjectAsync(new GodMode.Shared.Models.CreateProjectRequest(
+        var created = (await harness.Projects.CreateProjectAsync(new GodMode.Shared.Models.CreateProjectRequest(
             LifecycleHarness.ProfileName, LifecycleHarness.RootName,
             new Dictionary<string, JsonElement>
             {
                 ["name"] = JsonSerializer.SerializeToElement("p1"),
                 ["prompt"] = JsonSerializer.SerializeToElement("Say hello"),
-            }, "plain"));
+            }, "plain"))).Project!;
         await harness.WaitForStdinAsync(created.Id);
         await StopAsync(harness, created.Id);
         EditSettings(harness, created.Id, settings => settings with { ActionName = "open", DangerouslySkipPermissions = true });
@@ -219,7 +227,7 @@ public class LaunchPermissionsTests
 
         Assert.Equal("auto", create.ArgValue(Mode));
         Assert.Equal("auto", resume.ArgValue(Mode));
-        Assert.Equal("auto", ProjectSettings.Load(harness.ProjectPath(created.Id)).PermissionMode);
+        Assert.Equal("auto", ProjectSettings.Load(harness.StatePath(created.Id)).PermissionMode);
     }
 
     /// <summary>A root with no mode passes none: claude's own settings decide, as before.</summary>
@@ -246,7 +254,7 @@ public class LaunchPermissionsTests
 
         Assert.Contains($"config.work.json: permissionMode '{mode}' {reason}", refused.Message);
         Assert.Empty(await harness.Projects.ListProjectsAsync());
-        Assert.Equal([".godmode-root"], Directory.GetFileSystemEntries(harness.RootPath).Select(Path.GetFileName));
+        AssertNothingIsCreated(harness);
     }
 
     /// <summary>The kept mode is checked again at each launch: a settings.json that asks for bypassPermissions gets no mode at all.</summary>

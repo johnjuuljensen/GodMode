@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectRootInfo } from '../../signalr/types';
-import { FakeHub, connectServers } from '../../test/fakeHub';
+import { FakeHub, connectServers, project, status } from '../../test/fakeHub';
 import { render, click, type Rendered } from '../../test/render';
 import { useAppStore, loadGroupBy } from '../../store';
 import { Shell } from '../Shell';
@@ -24,7 +24,7 @@ vi.mock('../../services/hostApi', () => ({
 
 const rootNamed = (name: string): ProjectRootInfo => ({
   Name: name, ProfileName: 'Default',
-  Actions: [{ Name: 'issue', AllowSkipPermissions: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } } } }],
+  Actions: [{ Name: 'issue', AllowSkipPermissions: false, Session: true, Transient: false, InputSchema: { type: 'object', properties: { title: { type: 'string', title: 'Title' } } } }],
 });
 
 // The window's (max-width: 768px), which a test sets before rendering; every other query is as before
@@ -70,9 +70,22 @@ describe("a root's +", () => {
     ['play', 'A', 'play', 'on Server A'],
   ])('%s opens Create project on that server and root', async (header, serverId, rootName, shownServer) => {
     await click(plusOf(header)!);
-    expect(useAppStore.getState().activePage).toEqual({ type: 'createProject', context: { serverId, rootName } });
+    expect(useAppStore.getState().activePage).toEqual({ type: 'createProject', context: { serverId, profileName: 'Default', rootName } });
     expect(view!.container.querySelector('.selected-root-name')?.textContent).toBe(rootName);
     expect(view!.container.querySelector('.selected-root-server')?.textContent).toBe(shownServer);
+  });
+});
+
+describe("a root's + in a profile of its own", () => {
+  it('passes the profile with the root name', async () => {
+    const mega: ProjectRootInfo = { ...rootNamed('work'), ProfileName: 'Mega' };
+    await connectServers({ A: new FakeHub([], [rootNamed('work'), mega]) });
+    view = await render(<Shell />);
+
+    const megaGroup = q('.profile-group').find(g => g.querySelector('.profile-group-name')?.textContent === 'Mega')!;
+    await click(megaGroup.querySelector<HTMLButtonElement>('.root-action-btn')!);
+
+    expect(useAppStore.getState().activePage).toEqual({ type: 'createProject', context: { serverId: 'A', profileName: 'Mega', rootName: 'work' } });
   });
 });
 
@@ -155,5 +168,19 @@ describe('the stored group-by', () => {
 
   it('none gives Root', () => {
     expect(loadGroupBy()).toBe('root');
+  });
+});
+
+describe("a session's kind", () => {
+  it('is a label on its row, from the list and from a status pushed later', async () => {
+    const hub = new FakeHub([{ ...project('Default/work/260929-feat-left-list-k7q2', 'Left list', 'Running', new Date().toISOString()), Kind: 'feat' }], [rootNamed('work')]);
+    await connectServers({ A: hub });
+    view = await render(<Shell />);
+
+    const row = (name: string) => q('.project-item').find(r => r.querySelector('.project-name')?.textContent === name);
+    expect(row('Left list')?.querySelector('.kind-label')?.textContent).toBe('feat');
+
+    hub.callbacks.onProjectCreated?.({ ...status('Default/work/260929-bug-crash-abcd', 'Running'), Name: 'Crash', Kind: 'bug' });
+    await vi.waitFor(() => expect(row('Crash')?.querySelector('.kind-label')?.textContent).toBe('bug'));
   });
 });

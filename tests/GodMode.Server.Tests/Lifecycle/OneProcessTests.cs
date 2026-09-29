@@ -86,9 +86,11 @@ public class OneProcessTests
 
         Assert.Contains("is in use", refused.Message);
         await AssertUntouchedAsync(harness, created, launch, output);
-        var failed = await harness.Projects.GetStatusAsync($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p2");
+        var failed = Assert.Single(await harness.Projects.ListProjectsAsync(), p => p.Id != created.Id);
+        Assert.Matches(LifecycleHarness.IdPattern("p2"), failed.Id);
+        var lastError = (await harness.Projects.GetStatusAsync(failed.Id)).LastError;
         Assert.Equal(ProjectState.Error, failed.State);
-        Assert.Contains("is in use", failed.LastError);
+        Assert.Contains("is in use", lastError);
     }
 
     /// <summary>
@@ -204,8 +206,8 @@ public class OneProcessTests
             rootConfig: new Dictionary<string, object> { ["scriptsCreateFolder"] = true, ["create"] = "make.ps1" });
         File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "make.ps1"),
             "if ($env:GODMODE_INPUT_FAIL) { exit 1 }\nNew-Item -ItemType Directory -Force $env:GODMODE_PROJECT_PATH | Out-Null");
-        var projectId = $"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p1";
         await Assert.ThrowsAnyAsync<Exception>(() => harness.CreateProjectAsync(inputs: new Dictionary<string, object> { ["fail"] = true }));
+        var projectId = Assert.Single(await harness.Projects.ListProjectsAsync()).Id;
         Assert.Equal(ProjectState.Error, (await harness.Projects.GetStatusAsync(projectId)).State);
         Assert.False(Directory.Exists(harness.ProjectPath(projectId)));
 
@@ -213,9 +215,9 @@ public class OneProcessTests
 
         Assert.DoesNotContain(await harness.Projects.ListProjectsAsync(), p => p.Id == projectId);
         var created = await harness.CreateProjectAsync();
-        Assert.Equal(projectId, created.Id);
+        Assert.Matches(LifecycleHarness.IdPattern("p1"), created.Id);
         await harness.WaitForStdinAsync(created.Id);
-        Assert.Equal(ProjectState.Running, (await harness.Projects.GetStatusAsync(projectId)).State);
+        Assert.Equal(ProjectState.Running, (await harness.Projects.GetStatusAsync(created.Id)).State);
     }
 
     /// <summary>
@@ -230,7 +232,7 @@ public class OneProcessTests
         var created = await harness.CreateProjectAsync();
         await harness.WaitForStdinAsync(created.Id);
         await harness.Projects.StopProjectAsync(created.Id);
-        var statusPath = Path.Combine(harness.ProjectPath(created.Id), ".godmode", "status.json");
+        var statusPath = Path.Combine(harness.StatePath(created.Id), "status.json");
         File.Delete(statusPath);
         Directory.CreateDirectory(statusPath);
 
@@ -256,9 +258,8 @@ public class OneProcessTests
         var missing = Path.Combine(Path.GetTempPath(), $"godmode-no-claude-{Guid.NewGuid():N}", OperatingSystem.IsWindows() ? "claude.exe" : "claude");
         await using var harness = new LifecycleHarness(Waiting(),
             settings: new Dictionary<string, string?> { [ClaudeProcessManager.ExecutableSetting] = missing });
-        var projectId = $"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p1";
-
         await Assert.ThrowsAnyAsync<Exception>(() => harness.CreateProjectAsync());
+        var projectId = Assert.Single(await harness.Projects.ListProjectsAsync()).Id;
 
         var status = await harness.Projects.GetStatusAsync(projectId);
         Assert.Equal(ProjectState.Error, status.State);

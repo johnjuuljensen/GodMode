@@ -9,9 +9,9 @@ using GodMode.Shared.Models;
 namespace GodMode.Server.Tests.Lifecycle;
 
 /// <summary>
-/// A project is identified by <c>{profile}/{root}/{name}</c>, not by its folder name alone: two
-/// projects of one name in different roots are tracked, run and broadcast apart, a name that is
-/// no folder of its own is refused, and folders from before the ID changed recover under it.
+/// A session is identified by <c>{profile}/{root}/{id}</c>, not by its folder name: two sessions of
+/// one name in different roots are tracked, run and broadcast apart, a name that is no folder of its
+/// own is refused, and a session recovers under the ID of where its state is.
 /// </summary>
 public class ProjectIdentityTests
 {
@@ -36,8 +36,8 @@ public class ProjectIdentityTests
         Assert.False(LifecycleHarness.IsProcessAlive(launchA.Pid), $"A's fake (pid {launchA.Pid}) is still running after A was stopped");
         Assert.True(LifecycleHarness.IsProcessAlive(launchB.Pid), $"B's fake (pid {launchB.Pid}) was stopped with A");
         Assert.NotEqual(a.Id, b.Id);
-        Assert.Equal($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/same", a.Id);
-        Assert.Equal($"{LifecycleHarness.ProfileName}/{SecondRoot}/same", b.Id);
+        Assert.Matches(LifecycleHarness.IdPattern("same"), a.Id);
+        Assert.Matches(LifecycleHarness.IdPattern("same", root: SecondRoot), b.Id);
         Assert.Equal(ProjectState.Stopped, (await harness.Projects.GetStatusAsync(a.Id)).State);
         Assert.Equal(ProjectState.Idle, (await harness.Projects.GetStatusAsync(b.Id)).State);
 
@@ -160,7 +160,7 @@ public class ProjectIdentityTests
         await Assert.ThrowsAsync<ArgumentException>(() => harness.CreateProjectAsync("p1"));
         var project = Assert.Single(await harness.Projects.ListProjectsAsync());
         Assert.Equal(ProjectState.Error, project.State);
-        Assert.Equal($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p1", project.Id);
+        Assert.Matches(LifecycleHarness.IdPattern("p1"), project.Id);
 
         await harness.Projects.DeleteProjectAsync(project.Id);
 
@@ -200,7 +200,7 @@ public class ProjectIdentityTests
         Assert.Contains("uses for itself", refused.Message);
         var project = Assert.Single(await harness.Projects.ListProjectsAsync());
         Assert.Equal(ProjectState.Error, project.State);
-        Assert.Equal($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p1", project.Id);
+        Assert.Matches(LifecycleHarness.IdPattern("p1"), project.Id);
 
         await harness.Projects.DeleteProjectAsync(project.Id);
 
@@ -227,7 +227,7 @@ public class ProjectIdentityTests
         var refused = await Assert.ThrowsAsync<ArgumentException>(() => harness.CreateProjectAsync("p1"));
         Assert.Contains("not inside its project root", refused.Message);
         var project = Assert.Single(await harness.Projects.ListProjectsAsync());
-        Assert.Equal($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/p1", project.Id);
+        Assert.Matches(LifecycleHarness.IdPattern("p1"), project.Id);
 
         await harness.Projects.DeleteProjectAsync(project.Id);
 
@@ -283,7 +283,7 @@ public class ProjectIdentityTests
     }
 
     /// <summary>
-    /// A root's own folder with a <c>status.json</c> (written before such names were refused) is not
+    /// A root's own folder with a session in it (written before such names were refused) is not
     /// recovered: it is never listed, resumed or deleted as a project.
     /// </summary>
     [Theory]
@@ -293,13 +293,13 @@ public class ProjectIdentityTests
     public async Task FolderTheRootUses_WithAStatusFile_IsNotRecovered(string folder)
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
-        WriteOldShapeProject(Path.Combine(harness.RootPath, folder), folder, Guid.NewGuid().ToString(), skipPermissions: false);
-        WriteOldShapeProject(Path.Combine(harness.RootPath, "real"), "real", Guid.NewGuid().ToString(), skipPermissions: false);
+        WriteSession(Path.Combine(harness.RootPath, folder), folder, Guid.NewGuid().ToString(), skipPermissions: false, stateId: "260101-create-reserved-abcd");
+        WriteSession(Path.Combine(harness.RootPath, "real"), "real", Guid.NewGuid().ToString(), skipPermissions: false);
 
         await harness.Projects.RecoverProjectsAsync();
 
         var summary = Assert.Single(await harness.Projects.ListProjectsAsync());
-        Assert.Equal($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/real", summary.Id);
+        Assert.Equal(LifecycleHarness.PlantedId(), summary.Id);
     }
 
     /// <summary>
@@ -313,7 +313,7 @@ public class ProjectIdentityTests
 
         var project = await harness.CreateProjectAsync("foo.");
 
-        Assert.Equal($"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/foo", project.Id);
+        Assert.Matches(LifecycleHarness.IdPattern("foo"), project.Id);
         Assert.Equal("foo", Path.GetFileName(harness.Tracked(project.Id).ProjectPath));
         await harness.RestartAsync(resume: false);
         Assert.Equal(project.Id, Assert.Single(await harness.Projects.ListProjectsAsync()).Id);
@@ -417,19 +417,20 @@ public class ProjectIdentityTests
     }
 
     /// <summary>
-    /// A folder written before the ID changed (status.json <c>Id</c> the bare folder name) recovers
-    /// under the new ID, which is written back to status.json. Its settings and session are kept:
-    /// they never held the ID. The old bare ID no longer finds it. Its root allows skip-permissions, so
-    /// the setting it kept is honoured.
+    /// A session whose status.json has another ID (its root was in another profile) recovers under the
+    /// ID of where its state is, <c>{profile}/{root}/{id}</c>, which is written back to status.json.
+    /// Its settings and claude session are kept: they never held the ID. The ID it had no longer finds
+    /// it. Its root allows skip-permissions, so the setting it kept is honoured.
     /// </summary>
     [Fact]
-    public async Task FolderFromBeforeTheIdChanged_IsRecoveredUnderTheNewId_WithItsSettingsAndSession()
+    public async Task SessionWithAnotherId_IsRecoveredUnderTheIdOfWhereItIs_WithItsSettingsAndSession()
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().EmitAssistant("Resumed.").EmitResult(),
             rootConfig: new Dictionary<string, object> { ["allowSkipPermissions"] = true });
         const string sessionId = "0f8fad5b-d9cb-469f-a165-70867728950e";
-        WriteOldShapeProject(Path.Combine(harness.RootPath, "old-one"), "old-one", sessionId, skipPermissions: true);
-        var id = $"{LifecycleHarness.ProfileName}/{LifecycleHarness.RootName}/old-one";
+        const string oldId = "Elsewhere/moved/" + LifecycleHarness.PlantedSessionId;
+        WriteSession(Path.Combine(harness.RootPath, "old-one"), oldId, sessionId, skipPermissions: true);
+        var id = LifecycleHarness.PlantedId();
 
         await harness.Projects.RecoverProjectsAsync();
 
@@ -439,7 +440,7 @@ public class ProjectIdentityTests
         Assert.Equal(LifecycleHarness.ProfileName, summary.ProfileName);
         Assert.Equal(ProjectState.Stopped, (await harness.Projects.GetStatusAsync(id)).State);
         Assert.Equal(id, harness.ReadStatusFile(id).Id);
-        await Assert.ThrowsAsync<KeyNotFoundException>(() => harness.Projects.GetStatusAsync("old-one"));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => harness.Projects.GetStatusAsync(oldId));
 
         await harness.Projects.ResumeProjectAsync(id);
 
@@ -452,7 +453,7 @@ public class ProjectIdentityTests
         await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadOutputFile(id).Contains("Resumed.")), null,
             () => $"the resumed turn is not in output.jsonl.\n{harness.Describe(id)}");
         await harness.WaitForStateAsync(id, ProjectState.Idle);
-        Assert.Contains("Before the ID changed.", harness.ReadOutputFile(id));
+        Assert.Contains("Before the restart.", harness.ReadOutputFile(id));
     }
 
     /// <summary>A root whose name begins with another root's name keeps its own projects.</summary>
@@ -462,31 +463,29 @@ public class ProjectIdentityTests
         const string root = LifecycleHarness.RootName + "2";
         const string profile = "other";
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin(), extraRoots: [(root, profile)]);
-        WriteOldShapeProject(Path.Combine(harness.RootsDir, root, "x"), "x", Guid.NewGuid().ToString(), skipPermissions: false);
+        WriteSession(Path.Combine(harness.RootsDir, root, "x"), "x", Guid.NewGuid().ToString(), skipPermissions: false);
 
         await harness.Projects.RecoverProjectsAsync();
 
         var summary = Assert.Single(await harness.Projects.ListProjectsAsync());
-        Assert.Equal($"{profile}/{root}/x", summary.Id);
+        Assert.Equal($"{profile}/{root}/{LifecycleHarness.PlantedSessionId}", summary.Id);
         Assert.Equal(root, summary.RootName);
         Assert.Equal(profile, summary.ProfileName);
     }
 
-    /// <summary>A project folder as the server wrote it before project IDs carried the profile and root.</summary>
-    private static void WriteOldShapeProject(string folder, string id, string sessionId, bool skipPermissions)
+    /// <summary>A session's state as a server leaves it, Running, with <paramref name="id"/> in its status.json.</summary>
+    private static void WriteSession(string folder, string id, string sessionId, bool skipPermissions, string stateId = LifecycleHarness.PlantedSessionId)
     {
-        var godMode = Path.Combine(folder, ".godmode");
-        Directory.CreateDirectory(godMode);
+        var state = LifecycleHarness.PlantSession(folder, stateId);
         var now = DateTime.UtcNow;
         var status = new ProjectStatus(id, "Old one", ProjectState.Running, now, now, null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0);
-        File.WriteAllText(Path.Combine(godMode, "status.json"), JsonSerializer.Serialize(status, JsonDefaults.Options));
-        new GodMode.ProjectFiles.ProjectSettings(skipPermissions, "Create").Save(folder);
-        File.WriteAllText(Path.Combine(godMode, "session-id"), sessionId);
-        File.WriteAllText(Path.Combine(godMode, "output.jsonl"),
-            JsonSerializer.Serialize(new { type = "assistant", message = new { content = new[] { new { type = "text", text = "Before the ID changed." } } } }) + "\n");
+        File.WriteAllText(Path.Combine(state, "status.json"), JsonSerializer.Serialize(status, JsonDefaults.Options));
+        new GodMode.ProjectFiles.ProjectSettings(skipPermissions, "Create").Save(state);
+        File.WriteAllText(Path.Combine(state, "session-id"), sessionId);
+        File.WriteAllText(Path.Combine(state, "output.jsonl"),
+            JsonSerializer.Serialize(new { type = "assistant", message = new { content = new[] { new { type = "text", text = "Before the restart." } } } }) + "\n");
     }
-
     private static string[] OutputPushes(LifecycleHarness harness, string projectId) =>
         harness.Hub.Pushes.Where(p => p.Method == nameof(IProjectHubClient.OutputReceived) && p.ProjectId == projectId)
             .Select(p => p.RawJson!).ToArray();
