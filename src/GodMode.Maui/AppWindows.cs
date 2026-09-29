@@ -43,11 +43,16 @@ internal static class AppWindows
             },
         };
 #if WINDOWS
-        // The main window is the app: closing it closes the profile windows too. A profile window closes alone
-        window.Destroying += (_, _) =>
+        // The main window is the app: closing it closes the profile windows too. A profile window closes alone.
+        // WinUI's Closed, not MAUI's Destroying: with other windows open, closing one doesn't raise Destroying
+        window.HandlerChanged += (_, _) =>
         {
-            if (profile is null) Application.Current?.Quit();
-            else page.Detach();
+            if (window.Handler?.PlatformView is not Microsoft.UI.Xaml.Window platform) return;
+            platform.Closed += (_, _) =>
+            {
+                page.Detach();
+                if (profile is null) Application.Current?.Quit();
+            };
         };
 #endif
         return window;
