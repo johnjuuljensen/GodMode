@@ -34,6 +34,8 @@ export interface HubCallbacks {
   onProjectCreated?: (status: ProjectStatus) => void;
   onCreationProgress?: (projectId: string, message: string) => void;
   onProjectDeleted?: (projectId: string) => void;
+  /** The server's roots or profiles changed: both are its whole lists, as listProjectRoots and listProfiles return them. */
+  onRootsChanged?: (roots: ProjectRootInfo[], profiles: ProfileInfo[]) => void;
   onStateChanged?: (state: ConnectionState) => void;
 }
 
@@ -130,6 +132,10 @@ export class GodModeHub {
 
     this.on(connection, 'ProjectDeleted', (projectId) => {
       this.callbacks.onProjectDeleted?.(projectId);
+    });
+
+    this.on(connection, 'RootsChanged', (roots, profiles) => {
+      this.callbacks.onRootsChanged?.(roots, profiles);
     });
 
     const link: Link = { connection, retries: 0, timer: null, attemptSince: null, wanted: false };

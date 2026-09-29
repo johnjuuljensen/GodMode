@@ -42,7 +42,7 @@ A server's roots, and what its profiles carry, come from its config. Each is a *
 - **One name, one root per server, and one folder, one root.** An explicit root wins a clash, and between scan folders the first key in ordinal order does. Each loser is logged once as a warning, with both paths and the settings they came from. An explicit root in a scan folder under its own name is the one root, and no clash.
 - **An entry set to `""`** is none, so a later source can turn off one an earlier source set (`"Roots": { "Scan": { "default": "" } }`). An explicit root whose folder does not exist is logged once, and listed once it does.
 - **Relative folders** resolve against the working directory.
-- **Read fresh on every list** of profiles or roots, from the config as it is then. So a root added on the host, or a scan folder, explicit root or profile added to the instance's config file, appears on the next refresh without a restart.
+- **Live.** The roots are read again, from the config as it is then, on every list of profiles or roots, on every reload of the config (the instance's file reloads when it changes), and every `RootsPollSeconds` (default 5; `0` turns the poll off). The poll is there because a file watcher misses changes on a network drive. When the roots or profiles differ from the last ones read (a root added, edited or removed, a `profileName` changed, an explicit root added to the config file), every client gets them pushed (`RootsChanged`), so the app shows them without a reconnect (*Live roots*, below).
 - **A root's own `environment` wins** over its profile's.
 - **`ProjectRootsDir` and `.profiles/` are gone,** and neither is read. A `ProjectRootsDir`, or a profile's `Roots` (`Profiles:<p>:Roots:<name>`, explicit roots before March 2026), still set in a config source is logged at startup as a warning that names what takes its place. Profiles and roots are maintained by hand on the host: the server reads their config and never writes it.
 
@@ -85,7 +85,17 @@ A secret a profile's sessions need can stay out of the file: `Profiles__Work__En
 
 A server holds a lock on every root it manages: `{root}/logs/server.lock`, kept open exclusively for as long as the server runs. The operating system lets it go when the server exits, however it exits (a crash or a kill included), so it never goes stale. Beside it, `{root}/logs/server.json` names the holder (`instance` and `processId`). `{root}/logs/` is the server's own folder, and the server keeps a `.gitignore` of `*` in it, so neither shows in `git status` when the root's folder is under source control.
 
-A root another live server holds is skipped: it is not listed, and none of its projects is recovered. The server logs it once as a warning, with the holder's instance and process when `server.json` can be read, and tries again every time it rebuilds its roots (on each list of profiles or roots). Once the other server has gone, the root is listed on the next rebuild. Its existing projects are picked up at the server's next start; picking them up live comes with live root updates (#323). A root a rebuild no longer finds is let go only when no project of the server's is in it: a root that blinks (a folder replaced by an editor, a share that drops out) while its sessions run stays held. A server lets its roots go once it has stopped its projects at shutdown.
+A root another live server holds is skipped: it is not listed, and none of its projects is recovered. The server logs it once as a warning, with the holder's instance and process when `server.json` can be read, and tries again every time it rebuilds its roots (on each list of profiles or roots). Once the other server has gone, the root is listed on the next rebuild, and its sessions are recovered then, as those of any root that appears. A root a rebuild no longer finds is let go only when no project of the server's is in it: a root that blinks (a folder replaced by an editor, a share that drops out) while its sessions run stays held. A server lets its roots go once it has stopped its projects at shutdown.
+
+### Live roots
+
+Live root updates start once the startup's recovery has run: from then on every read of the roots (above) also brings the tracked sessions in line with them.
+
+- **A root that appears** (a folder with a `.godmode-root/` in a scan folder, an explicit root added to the config, a root another server let go) has its sessions recovered as the start recovers them, each pushed as `ProjectCreated` after the `RootsChanged` that lists its root. One the last shutdown interrupted is not resumed: that is the start's alone.
+- **A session is its root's by folder.** Its delete, status, launch and restart read the config and scripts of the root folder it was created or recovered in, whatever that root is called now. A root name that comes to name another folder (a new explicit root that wins the clash with a scanned one) is another root: the sessions of the old folder never run its scripts.
+- **A root that goes** (its folder or `.godmode-root/` removed, its entry taken out of the config, or it loses a name clash): its sessions without a claude, running or launching, leave the list (`ProjectDeleted`), their files left as they are, and come back if the root does. A session whose claude runs carries on, under its root's config as it was read from its folder, and leaves once claude has exited. The server holds the root's lock until its last session has left, so no other server takes it meanwhile.
+- **A root's `profileName` edited, or its explicit entry renamed**: its sessions' IDs (`{profile}/{root}/{id}`) name the profile and the root, so each session takes the ID the root has now, as a restart would give it. One without a claude does so at once: its old ID is pushed as `ProjectDeleted`, its new one as `ProjectCreated`, and its `status.json` is rewritten. One whose claude runs keeps its ID, which its MCP config carries, until claude exits, then does the same.
+- **Two reads in a row** must agree before a session leaves or changes its ID: a `config.json` saved half-written reads as the default config, in the `Default` profile, and a folder can blink.
 
 ### Executables
 
@@ -570,9 +580,10 @@ Utility:
 - `OutputReplayComplete(projectId, subscriptionId, generation, offset)` — The subscription's replay is done at `offset`, in `generation`; live lines follow
 - `StatusChanged(projectId, status)` — Project status changed
 - `AttentionChanged(items)` — The whole `GetAttention` list, pushed only when it differs from the last one pushed
-- `ProjectCreated(status)` — New project created
+- `ProjectCreated(status)` — New project created, or recovered live from a root that appeared or took another profile (*Live roots*)
 - `CreationProgress(projectId, message)` — Script progress during project creation
-- `ProjectDeleted(projectId)` — Project deleted
+- `ProjectDeleted(projectId)` — Project deleted, or left the list with its root (*Live roots*)
+- `RootsChanged(roots, profiles)` — The whole `ListProjectRoots` and `ListProfiles` lists, pushed only when they differ from the last ones read (*Roots and profiles*, *Live roots*)
 
 ### HTTP Endpoints
 

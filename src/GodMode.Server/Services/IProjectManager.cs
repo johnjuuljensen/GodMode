@@ -91,7 +91,10 @@ public interface IProjectManager
     Task CleanupConnectionAsync(string connectionId);
 
     /// <summary>
-    /// Recovers projects from disk on startup.
+    /// Recovers projects from disk on startup, then keeps the roots live: from then on a poll
+    /// (<c>RootsPollSeconds</c>) and a reload of the config read them again, push
+    /// <c>RootsChanged</c> when they changed, recover the sessions of a root that appears and let those
+    /// of a root that goes leave the list once they have no claude.
     /// </summary>
     Task RecoverProjectsAsync();
 

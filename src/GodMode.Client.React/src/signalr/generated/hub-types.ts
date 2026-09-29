@@ -519,4 +519,12 @@ export interface IProjectHubClient {
   CreationProgress(projectId: string, message: string): void;
   /** Called when a project is deleted. */
   ProjectDeleted(projectId: string): void;
+  /**
+   * The server's roots or profiles changed: roots and profiles are the whole lists, as
+   * IProjectHub.ListProjectRoots and IProjectHub.ListProfiles return them. Pushed only when they differ from
+   * the last lists the server made: a root added, edited (its profile, description, actions or schemas) or
+   * removed on the host or in its config. Sessions that come or go with a root are pushed as
+   * IProjectHubClient.ProjectCreated and IProjectHubClient.ProjectDeleted.
+   */
+  RootsChanged(roots: ProjectRootInfo[], profiles: ProfileInfo[]): void;
 }
