@@ -4,7 +4,7 @@ A .NET 10 class library for the files GodMode keeps on disk: a root's working fo
 
 ## Project Folder Structure
 
-Every session has a working folder inside its root, where Claude works, and GodMode keeps the session's state in that folder's `.godmode/sessions/<id>/`. The same layout serves every kind of root: a worktree is a working folder with one session. The session's opaque ID, on the server, is `{profile}/{root}/{id}`.
+Every session has a working folder inside its root, where Claude works, and GodMode keeps the session's state in that folder's `.godmode/sessions/<id>/`. The same layout serves every kind of root: a worktree is a working folder with one session, and an assistant's workspace one with several (an action's `sharedFolder`), each in its own `sessions/<id>/`. The session's opaque ID, on the server, is `{profile}/{root}/{id}`.
 
 ```
 {root}/{project-folder}/
@@ -13,7 +13,7 @@ Every session has a working folder inside its root, where Claude works, and GodM
 │   └── sessions/
 │       └── {id}/                # e.g. 260929-feat-left-list-k7q2
 │           ├── status.json      # Current state, metadata, metrics, kind
-│           ├── settings.json    # The session's settings (skip-permissions, permission mode, action)
+│           ├── settings.json    # The session's settings (skip-permissions, permission mode, action, shared folder)
 │           ├── input.jsonl      # Append-only log of user inputs
 │           ├── output.jsonl     # Append-only log of Claude outputs
 │           ├── output-generation # Changes when output.jsonl starts over
@@ -32,7 +32,7 @@ Where a session's state is, and its id:
 - `SessionState.Id(createdAt, kind, name, suffix)`: `yymmdd-{kind}-{slug}-{suffix}`. The kind and slug are lowercase `[a-z0-9-]` (`Kind`, `Slug`; `æ`/`ø`/`å` spelled `ae`/`oe`/`aa`, other accents dropped), the kind at most 12 characters (`session` when it has none), the slug at most 24 (left out when the name has none), the suffix 4 random base32 characters (`NewSuffix`). The id is unique only by chance: the server checks its root.
 - `SessionState.IsId(id)`: whether a folder name is an id in that form. No other folder in `sessions/` is a session.
 - `SessionState.PathOf(workingFolder, id)`: `.godmode/sessions/{id}/`.
-- `SessionState.List(workingFolder)`: the ids of the sessions in a working folder, each folder in `sessions/` that is an id and has a `status.json`.
+- `SessionState.List(workingFolder)`: the ids of the sessions in a working folder, each folder in `sessions/` that is an id and has a `status.json`. A folder whose sessions share it has several.
 - `SessionState.Create(workingFolder, id)`: makes the state folder, with the folder's `.godmode/.gitignore` first and empty `input.jsonl` and `output.jsonl`.
 
 ```csharp
