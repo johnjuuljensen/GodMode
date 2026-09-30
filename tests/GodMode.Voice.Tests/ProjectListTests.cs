@@ -17,7 +17,8 @@ public sealed class ProjectListTests
     [Fact]
     public async Task A_session_created_after_voice_started_is_listed_and_answered_by_its_root()
     {
-        var servers = new FakeServers();
+        // The server is there when voice starts, with no projects yet
+        var servers = new FakeServers(ServerA);
         var model = new ScriptedModel()
             .CallTool(VoiceTools.ListProjects).Respond("1 projekt: testing.")
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "Assistent", [VoiceTools.TextParameter] = "Skift til outbound profil." })

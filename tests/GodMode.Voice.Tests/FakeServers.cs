@@ -8,10 +8,11 @@ namespace GodMode.Voice.Tests;
 /// Servers in memory: attention lists and projects a test sets, pushed as the hub pushes them, and the replies and
 /// seen marks voice sends.
 /// </summary>
-internal sealed class FakeServers : IGodModeServers
+internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
 {
     private readonly ConcurrentDictionary<string, (string Name, AttentionItem[] Items)> _lists = new();
     private readonly ConcurrentDictionary<ProjectRef, ProjectStatus> _statuses = new();
+    private readonly ConcurrentDictionary<string, byte> _servers = new(serverIds.Select(id => KeyValuePair.Create(id, (byte)0)));
 
     public event Action<string, string, IReadOnlyList<AttentionItem>>? AttentionChanged;
     public event Action<string, string, IReadOnlyList<ProjectSummary>>? ProjectsChanged;
@@ -32,7 +33,7 @@ internal sealed class FakeServers : IGodModeServers
     /// <summary>What a connection to every server hears first: each one's projects (VoiceSession's connect).</summary>
     public Task ConnectAsync(CancellationToken ct)
     {
-        foreach (var serverId in _statuses.Keys.Select(p => p.ServerId).Distinct())
+        foreach (var serverId in _servers.Keys)
             PushProjects(serverId);
         return Task.CompletedTask;
     }
@@ -81,8 +82,11 @@ internal sealed class FakeServers : IGodModeServers
         new(projectId, name, "Default", "root", AttentionKind.Permission, DateTime.UtcNow.AddMinutes(-minutesAgo), summary,
             Permission: new PendingPermission("req-1", "Bash", summary, DateTime.UtcNow));
 
-    private void PushProjects(string serverId) =>
+    private void PushProjects(string serverId)
+    {
+        _servers.TryAdd(serverId, 0);
         ProjectsChanged?.Invoke(serverId, serverId, [.. _statuses.Where(s => s.Key.ServerId == serverId).Select(s => Summary(s.Value))]);
+    }
 
     private static ProjectSummary Summary(ProjectStatus s) =>
         new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission, Kind: s.Kind);
