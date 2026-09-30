@@ -313,6 +313,42 @@ public sealed class VoiceSessionTests
         Assert.Equal([.. GodModeGraph.CommandWords, "Assistant", "Outbound", "kappe"], voice.Session.SttKeyterms);
     }
 
+    /// <summary>
+    /// Each new set of terms is a new ElevenLabs connection: a status update reorders the projects, not their names, so
+    /// two sessions updating in turn renew nothing, and only a session added or deleted does, once.
+    /// </summary>
+    [Fact]
+    public async Task Status_updates_that_only_reorder_the_keyterms_do_not_renew_them()
+    {
+        const string vonage = "Work/server-configs/260930-feat-vonage-a1", kappe = "Outbound/Assistant/260930-chat-kappe-b2";
+        var servers = new FakeServers();
+        void Update(string server, string id) => servers.AddProject(server, id, id == vonage ? "feature/vonage-trunk" : "Kappe",
+            root: id == vonage ? "server-configs" : "Assistant", kind: id == vonage ? "feat" : "chat", profile: id == vonage ? "Work" : "Outbound");
+        Update(ServerA, vonage);
+        Update(ServerB, kappe);
+        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient());
+        var sent = voice.Session.SttKeyterms;
+
+        for (var i = 0; i < 4; i++)
+        {
+            Update(ServerA, vonage);
+            Assert.NotEqual(sent, VoiceSession.Keyterms(voice.Session.Projects.Projects, voice.Session.Handles));   // reordered
+            Update(ServerB, kappe);
+        }
+        Assert.Same(sent, voice.Session.SttKeyterms);
+
+        servers.AddProject(ServerB, "Outbound/Assistant/260930-chat-budget-c3", "Budget", root: "Assistant", kind: "chat", profile: "Outbound");
+        var added = voice.Session.SttKeyterms;
+        Assert.NotSame(sent, added);
+        Assert.Contains("budget", added);
+        Update(ServerA, vonage);
+        Assert.Same(added, voice.Session.SttKeyterms);
+
+        servers.DeleteProject(ServerB, "Outbound/Assistant/260930-chat-budget-c3");
+        Assert.NotSame(added, voice.Session.SttKeyterms);
+        Assert.DoesNotContain("budget", voice.Session.SttKeyterms);
+    }
+
     /// <summary>VoiceBot stops announcing for good when its formatter throws (johnjuuljensen/VoiceBot#27).</summary>
     [Fact]
     public void A_formatter_that_throws_once_does_not_end_the_announcements()

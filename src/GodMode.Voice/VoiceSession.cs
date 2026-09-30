@@ -88,7 +88,7 @@ public sealed class VoiceSession : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly ElevenLabsSttKeyterms? _keyterms;
     private readonly Lock _keytermsLock = new();
-    private IReadOnlyList<string>? _keytermsLogged;
+    private HashSet<string>? _keytermsSent;
     private Task _run = Task.CompletedTask;
 
     private VoiceSession(ServiceProvider services, AsyncServiceScope scope, VoiceBotSession session, VoiceStateTracker state,
@@ -228,17 +228,18 @@ public sealed class VoiceSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gives speech recognition the terms of the projects as they are now, and logs them when they change. ElevenLabs
-    /// takes them on a new connection, which it opens at the next pause in speech (VoiceBot#51).
+    /// Gives speech recognition the terms of the projects as they are now, and logs them, when they are other terms.
+    /// ElevenLabs takes them on a new connection, which it opens at the next pause in speech (VoiceBot#51), so the same
+    /// terms in another order change nothing: every status update of a project reorders them.
     /// </summary>
     private void RefreshKeyterms()
     {
         lock (_keytermsLock)
         {
             var terms = Keyterms(Projects.Projects, Handles);
-            if (_keytermsLogged is not null && _keytermsLogged.SequenceEqual(terms, StringComparer.Ordinal)) return;
+            if (_keytermsSent?.SetEquals(terms) == true) return;
             _keyterms?.Set(terms);
-            _keytermsLogged = terms;
+            _keytermsSent = new HashSet<string>(terms, StringComparer.Ordinal);
             _logger.LogInformation("Voice keyterms ({Count}): {Keyterms}", terms.Count, string.Join(" | ", terms));
         }
     }
