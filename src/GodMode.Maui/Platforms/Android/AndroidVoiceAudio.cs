@@ -9,10 +9,11 @@ namespace GodMode.Maui;
 
 /// <summary>
 /// The phone's microphone and speaker for voice, through VoiceBot.Providers.Android (voice-communication capture and
-/// playback, so the platform's echo cancellation applies). Around them the app does what VoiceBot leaves to its host
-/// (johnjuuljensen/VoiceBot#31): the microphone foreground service (<see cref="VoiceService"/>), which keeps listening
-/// with the screen off; the audio mode and the communication device, set while voice is on and put back after; and
-/// audio focus, whose loss to a call stops voice.
+/// playback, so the platform's echo cancellation applies). Around them the app does what VoiceBot leaves to its host:
+/// the microphone foreground service (<see cref="VoiceService"/>), which keeps listening with the screen off; and audio
+/// focus, whose loss to a call stops voice. It also sets the audio mode and the communication device itself, in place of
+/// the sink's own (johnjuuljensen/VoiceBot#31), which picks the route once: the app's prefers a headset, and picks
+/// again when one comes or goes.
 /// </summary>
 public sealed class AndroidVoiceAudio : IVoiceAudio
 {
@@ -55,7 +56,7 @@ public sealed class AndroidVoiceAudio : IVoiceAudio
             route = AudioRoute.Take(manager, logger);
             focus = Focus.Take(manager, request.Lost, logger);
             source = new AndroidAudioSource();
-            var sink = new AndroidAudioSink();
+            var sink = new AndroidAudioSink(communicationMode: false, logger: MauiProgram.LoggerFactory.CreateLogger<AndroidAudioSink>());
             logger.LogInformation("Android voice audio open: echo canceller {Echo}, noise suppressor {Noise}",
                 source.EchoCancellerEnabled ? "on" : "not available", source.NoiseSuppressorEnabled ? "on" : "not available");
             return new AndroidVoiceAudio(manager, route, focus, source, sink);

@@ -61,12 +61,12 @@ public sealed record VoiceSessionSetup
 public sealed class VoiceSession : IAsyncDisposable
 {
     /// <summary>
-    /// Speech-recognition ghost words to drop. None that could be an answer: a dropped "ja" is an answer the session
-    /// never gets. VoiceBot's Danish list has "tak", which answers "shall I …?" as well as it thanks.
+    /// Speech-recognition ghost words to drop: VoiceBot's for the session's languages. None that could be an answer
+    /// (<see cref="AnswerWords"/>): a dropped "ja" is an answer the session never gets.
     /// </summary>
-    public static readonly IReadOnlyList<string> NoiseWords = ["hmm", "øh", "ah", "oh", "hej", "hey"];
+    public static IReadOnlyList<string> NoiseWords(SessionLanguages languages) => StringResources.GetWordList(languages, "noiseWords");
 
-    /// <summary>Words that are answers, never noise, in the session's languages.</summary>
+    /// <summary>Words that are answers, or say something, never noise, in the session's languages.</summary>
     public static readonly IReadOnlySet<string> AnswerWords =
         new HashSet<string>(["ja", "nej", "jo", "tak", "nej tak", "ja tak", "okay", "ok", "yes", "no", "yeah", "nope"], StringComparer.OrdinalIgnoreCase);
 
@@ -161,7 +161,7 @@ public sealed class VoiceSession : IAsyncDisposable
                 Options = new SessionOptions
                 {
                     LogDirectory = setup.LogDirectory,
-                    NoiseWords = NoiseWords,
+                    NoiseWords = NoiseWords(languages),
                 },
             });
 

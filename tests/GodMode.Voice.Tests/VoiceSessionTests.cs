@@ -235,9 +235,18 @@ public sealed class VoiceSessionTests
             () => $"the session to listen; it is {voice.Session.State}, after {string.Join(", ", voice.Events.States)}");
     }
 
+    [Theory]
+    [InlineData(VoiceSettings.DefaultLanguage)]
+    [InlineData("da-DK")]
+    [InlineData("en")]
+    public void No_noise_word_is_an_answer(string language) =>
+        Assert.DoesNotContain(VoiceSession.NoiseWords(VoiceSettings.ParseLanguages(language)), VoiceSession.AnswerWords.Contains);
+
+    /// <summary>VoiceBot's lists, since "tak" left its Danish one (johnjuuljensen/VoiceBot#47), are the ones GodMode kept.</summary>
     [Fact]
-    public void No_noise_word_is_an_answer() =>
-        Assert.DoesNotContain(VoiceSession.NoiseWords, VoiceSession.AnswerWords.Contains);
+    public void A_Danish_session_with_English_drops_the_Danish_and_English_ghost_words() =>
+        Assert.Equal(["ah", "hej", "hey", "hmm", "oh", "øh"],
+            VoiceSession.NoiseWords(VoiceSettings.Default.Languages).Order(StringComparer.Ordinal));
 
     /// <summary>VoiceBot stops announcing for good when its formatter throws (johnjuuljensen/VoiceBot#27).</summary>
     [Fact]
