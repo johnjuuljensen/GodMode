@@ -1,3 +1,7 @@
+using GodMode.Shared.Enums;
+using GodMode.Shared.Models;
+using VoiceBot.Providers.ElevenLabs;
+
 namespace GodMode.Voice.Tests;
 
 /// <summary>Numbers said in Danish, and the short names projects are spoken of by.</summary>
@@ -159,16 +163,31 @@ public sealed class HandleTests
     }
 
     [Fact]
-    public void Keyterms_are_the_command_words_and_word_handles_within_ElevenLabs_limits()
+    public void Keyterms_are_the_command_words_then_the_roots_profiles_and_handles_within_ElevenLabs_limits()
     {
-        var handles = Enumerable.Range(0, 80).Select(i => $"handle{i}").Prepend("283").Append("a-very-long-handle-over-twenty-characters");
+        var handles = new ProjectHandles();
+        var now = DateTime.UtcNow;
+        ServerProject Project(int minutesAgo, string id, string name, string root, string profile) =>
+            new("a", "a", new ProjectSummary(id, name, ProjectState.Idle, now.AddMinutes(-minutesAgo), RootName: root, ProfileName: profile, Kind: "chat"));
+        List<ServerProject> projects =
+        [
+            Project(0, "Outbound/Assistant/1", "Kappe", "Assistant", "Outbound"),
+            Project(1, "Work/server-configs/2", "feature/283-voice", "server-configs", "Work"),
+            Project(2, "Work/a-root-name-over-twenty-characters/3", "Vonage", "a-root-name-over-twenty-characters", "Work"),
+            .. Enumerable.Range(0, 60).Select(i => Project(10 + i, $"Outbound/Assistant/x{i}", $"handle{(char)('a' + i / 26)}{(char)('a' + i % 26)}", "Assistant", "Outbound")),
+        ];
+        foreach (var p in projects) handles.For(p.Ref, p.Project.Name, p.Project.RootName, p.Project.Kind);
 
-        var keyterms = VoiceSession.Keyterms(handles);
+        var keyterms = VoiceSession.Keyterms(projects, handles);
 
-        Assert.True(keyterms.Count <= VoiceBot.Providers.ElevenLabs.ElevenLabsLanguageOptions.MaxRealtimeKeyterms);
-        Assert.All(keyterms, t => Assert.True(t.Length <= VoiceBot.Providers.ElevenLabs.ElevenLabsLanguageOptions.MaxRealtimeKeytermLength, t));
-        Assert.Equal(GodModeGraph.CommandWords, keyterms.Take(GodModeGraph.CommandWords.Count));
+        Assert.Equal(ElevenLabsLanguageOptions.MaxRealtimeKeyterms, keyterms.Count);
+        Assert.All(keyterms, t => Assert.True(t.Length <= ElevenLabsLanguageOptions.MaxRealtimeKeytermLength, t));
+        Assert.Equal(
+            [.. GodModeGraph.CommandWords, "Assistant", "server-configs", "Outbound", "Work", "kappe", "vonage", "handleaa"],
+            keyterms.Take(GodModeGraph.CommandWords.Count + 7));
+        // A handle that is a number is recognized as it is; a name too long to be a keyterm is left out, not cut
         Assert.DoesNotContain("283", keyterms);
-        Assert.Contains("handle0", keyterms);
+        Assert.DoesNotContain(keyterms, t => t.StartsWith("a-root-name", StringComparison.Ordinal));
+        Assert.Equal(keyterms.Count, keyterms.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 }

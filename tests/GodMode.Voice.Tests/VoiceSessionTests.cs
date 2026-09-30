@@ -259,11 +259,59 @@ public sealed class VoiceSessionTests
     public void No_noise_word_is_an_answer(string language) =>
         Assert.DoesNotContain(VoiceSession.NoiseWords(VoiceSettings.ParseLanguages(language)), VoiceSession.AnswerWords.Contains);
 
-    /// <summary>VoiceBot's lists, since "tak" left its Danish one (johnjuuljensen/VoiceBot#47), are the ones GodMode kept.</summary>
+    /// <summary>
+    /// VoiceBot's lists (ah, hej, hey, hmm, oh, øh for da-DK+en, since "tak" left its Danish one,
+    /// johnjuuljensen/VoiceBot#47), without the greetings: "Hej" is said on purpose.
+    /// </summary>
     [Fact]
-    public void A_Danish_session_with_English_drops_the_Danish_and_English_ghost_words() =>
-        Assert.Equal(["ah", "hej", "hey", "hmm", "oh", "øh"],
+    public void A_Danish_session_with_English_drops_the_ghost_words_but_not_the_greetings() =>
+        Assert.Equal(["ah", "hmm", "oh", "øh"],
             VoiceSession.NoiseWords(VoiceSettings.Default.Languages).Order(StringComparer.Ordinal));
+
+    [Theory]
+    [InlineData(VoiceSettings.DefaultLanguage)]
+    [InlineData("da-DK")]
+    [InlineData("en")]
+    public void No_noise_word_is_a_greeting(string language) =>
+        Assert.DoesNotContain(VoiceSession.NoiseWords(VoiceSettings.ParseLanguages(language)), VoiceSession.Greetings.Contains);
+
+    [Fact]
+    public async Task Hej_is_heard_not_filtered_as_noise()
+    {
+        var model = new ScriptedChatClient().Respond("Hej. Hvad kan jeg gøre?");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.AddFinal("Hej.");
+
+        await voice.Events.SaidAsync("Hej. Hvad kan jeg gøre?");
+    }
+
+    /// <summary>
+    /// Speech recognition is biased towards the names the servers have now: a project created after the start brings
+    /// its root, profile and handle, and one deleted takes its handle along (VoiceBot#51 renews a running session's terms).
+    /// </summary>
+    [Fact]
+    public async Task The_keyterms_follow_the_roots_profiles_and_sessions_as_they_come_and_go()
+    {
+        var servers = new FakeServers();
+        servers.AddProject(ServerA, "Work/server-configs/260930-feat-vonage-a1", "feature/vonage-trunk", root: "server-configs", kind: "feat", profile: "Work");
+        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient());
+
+        Assert.Equal(voice.Session.SttKeyterms, voice.Providers.Language!.SttKeyterms);
+        Assert.Contains("server-configs", voice.Session.SttKeyterms);
+        Assert.Contains("Work", voice.Session.SttKeyterms);
+        Assert.Contains("vonage", voice.Session.SttKeyterms);
+        Assert.DoesNotContain("Assistant", voice.Session.SttKeyterms);
+
+        servers.AddProject(ServerB, "Outbound/Assistant/260930-chat-kappe-b2", "Kappe", root: "Assistant", kind: "chat", profile: "Outbound");
+        Assert.Equal(
+            [.. GodModeGraph.CommandWords, "Assistant", "server-configs", "Outbound", "Work", "kappe", "vonage"],
+            voice.Session.SttKeyterms);
+
+        servers.DeleteProject(ServerA, "Work/server-configs/260930-feat-vonage-a1");
+        Assert.Equal([.. GodModeGraph.CommandWords, "Assistant", "Outbound", "kappe"], voice.Session.SttKeyterms);
+    }
 
     /// <summary>VoiceBot stops announcing for good when its formatter throws (johnjuuljensen/VoiceBot#27).</summary>
     [Fact]

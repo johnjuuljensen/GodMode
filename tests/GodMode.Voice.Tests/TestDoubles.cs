@@ -95,6 +95,8 @@ internal sealed class OfflineProviders(ScriptedChatClient model, FixedPcmSynthes
         services.AddSingleton<ISpeechSynthesizer>(synthesizer);
         services.AddSingleton<ITranscriptionCleaner, PassthroughCleaner>();
         services.AddSingleton<IInferenceProvider>(model);
+        // The session's keyterms, as AddVoiceBotElevenLabs registers them
+        services.AddScoped(_ => new ElevenLabsSttKeyterms(language.SttKeyterms));
         // Heard only by a session fed from a microphone (TranscriptionInput.FromAudio)
         services.AddTransient<ISpeechEngine, DeafSpeechEngine>();
     }
