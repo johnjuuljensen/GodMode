@@ -142,7 +142,7 @@ public class ProjectResumeBridgeTests
         public List<(Dictionary<string, string>? Env, string[]? Args, string Token)> Launches { get; } = [];
         public bool Running { get; set; }
 
-        public Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
+        public Task<int> StartClaudeProcessAsync(ProjectInfo project, string? initialPrompt, CancellationToken cancellationToken,
             Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null) => Record(extraEnvironment, extraArgs);
 
         public Task<int> ResumeClaudeProcessAsync(ProjectInfo project, CancellationToken cancellationToken,

@@ -13,13 +13,13 @@ public interface IClaudeProcessManager
     /// Starts a new Claude process with an initial prompt and new session ID.
     /// </summary>
     /// <param name="project">The project info.</param>
-    /// <param name="initialPrompt">The initial prompt to send.</param>
+    /// <param name="initialPrompt">The initial prompt to send; with none, claude waits on stdin for its first message.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <param name="extraEnvironment">Additional environment variables to set on the process.</param>
     /// <param name="extraArgs">Additional CLI arguments to append.</param>
     Task<int> StartClaudeProcessAsync(
         ProjectInfo project,
-        string initialPrompt,
+        string? initialPrompt,
         CancellationToken cancellationToken,
         Dictionary<string, string>? extraEnvironment = null,
         string[]? extraArgs = null);

@@ -771,6 +771,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
         var action = config.ResolveAction(request.ActionName)
             ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
+        RequireInputs(action, request.Inputs);
 
         if (!action.Session)
             return await RunSessionlessActionAsync(request, snap, rootPath, config, action);
@@ -1005,7 +1006,15 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         // Persisted in status.json so resumes keep using the same model even if the
         // root config changes or the machine-wide Claude default differs.
         var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
-        project.Status = project.Status with { Id = projectId, Name = name, Model = model, Kind = kind };
+        // No prompt from the form, a template or a script: claude starts with no input and waits on
+        // stdin, and the project is Idle, waiting for its first message, which needs nothing of the
+        // user until they write it. Claude is never sent an empty turn
+        if (string.IsNullOrWhiteSpace(prompt)) prompt = null;
+        project.Status = project.Status with
+        {
+            Id = projectId, Name = name, Model = model, Kind = kind,
+            State = prompt == null ? ProjectState.Idle : project.Status.State,
+        };
 
         // The session's state folder, now its id is final (scripts may have created the project dir without .godmode)
         CreateSessionState(project);
@@ -1035,7 +1044,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             // Start Claude process, configured from what is saved above, exactly as a resume will be
             try
             {
-                await _lifecycle.StartAsync(project, prompt ?? "Hello", BuildLaunchSpec(project));
+                await _lifecycle.StartAsync(project, prompt, BuildLaunchSpec(project));
             }
             catch (Exception ex)
             {
@@ -1734,7 +1743,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 _logger.LogInformation("Project {ProjectId} already has a running process with PID {ProcessId} (state: {State})",
                     projectId, project.Process.ProcessId, project.Status.State);
 
-                if (project.Status.State == ProjectState.Idle)
+                // A session with no conversation yet waits for its first message: a "Continue" would be a
+                // first turn the user did not write
+                if (project.Status.State == ProjectState.Idle && !project.HasConversation)
+                    _logger.LogInformation("Project {ProjectId} is idle waiting for its first message; nothing is sent", projectId);
+                else if (project.Status.State == ProjectState.Idle)
                 {
                     _logger.LogInformation("Project {ProjectId} is idle with running process, sending continue prompt", projectId);
                     await _lifecycle.SendInputAsync(project, "Continue");
@@ -2708,6 +2721,30 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         return TemplateResolver.GetString(inputs, "name");
+    }
+
+    /// <summary>
+    /// Refuses a create that leaves out a field its action's schema requires, as the form does: a
+    /// required field missing, null, or a string of only whitespace. Before anything is written or run.
+    /// </summary>
+    private static void RequireInputs(CreateAction action, Dictionary<string, JsonElement> inputs)
+    {
+        if (action.InputSchema is not { ValueKind: JsonValueKind.Object } schema
+            || !schema.TryGetProperty("required", out var required) || required.ValueKind != JsonValueKind.Array)
+            return;
+
+        var missing = required.EnumerateArray()
+            .Where(field => field.ValueKind == JsonValueKind.String)
+            .Select(field => field.GetString()!)
+            .Where(field => !inputs.TryGetValue(field, out var value) || value.ValueKind switch
+            {
+                JsonValueKind.Undefined or JsonValueKind.Null => true,
+                JsonValueKind.String => string.IsNullOrWhiteSpace(value.GetString()),
+                _ => false,
+            })
+            .ToList();
+        if (missing.Count > 0)
+            throw new ArgumentException($"Action '{action.Name}' requires {string.Join(", ", missing.Select(field => $"'{field}'"))}.");
     }
 
     /// <summary>

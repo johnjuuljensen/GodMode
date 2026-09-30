@@ -23,6 +23,9 @@ public class ClaudeProcessManager : IClaudeProcessManager
     /// <summary>Configuration key for the Claude Code executable (a name on PATH or a full path).</summary>
     public const string ExecutableSetting = "Claude:Executable";
 
+    /// <summary>The type of the line each line of claude's stderr is logged to output.jsonl as: claude's own stdout has no such type.</summary>
+    internal const string StderrEventType = "error";
+
     /// <summary>What claude writes to stderr, then exits, when <c>--resume</c> names a session it has no conversation for.</summary>
     private const string NoConversationError = "No conversation found with session ID:";
 
@@ -89,7 +92,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
     public async Task<int> StartClaudeProcessAsync(
         ProjectInfo project,
-        string initialPrompt,
+        string? initialPrompt,
         CancellationToken cancellationToken,
         Dictionary<string, string>? extraEnvironment = null,
         string[]? extraArgs = null)
@@ -119,7 +122,17 @@ public class ClaudeProcessManager : IClaudeProcessManager
         {
             _logger.LogWarning("Project {ProjectId} has no session to resume. Starting fresh session.", project.Status.Id);
             project.ClaudeSessionId = Guid.NewGuid().ToString();
-            return await StartFreshSessionAsync(project, cancellationToken, extraEnvironment, extraArgs);
+            return await StartFreshSessionAsync(project, project.HasConversation, cancellationToken, extraEnvironment, extraArgs);
+        }
+
+        // No conversation yet (created with no prompt, never sent a message): nothing to resume, so the
+        // session starts on its id with no input, waiting for its first message. Decided before the
+        // launch: a reply sent to a doomed --resume would be logged before it exited
+        if (!project.HasConversation)
+        {
+            _logger.LogInformation("Project {ProjectId} was never sent a message: starting its session {SessionId} afresh",
+                project.Status.Id, sessionId);
+            return await StartFreshSessionAsync(project, carryOn: false, cancellationToken, extraEnvironment, extraArgs);
         }
 
         _logger.LogInformation("Resuming Claude process for project {ProjectId} with session {SessionId}",
@@ -139,7 +152,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
                     project.Status.Id, project.ClaudeSessionId);
                 try
                 {
-                    await StartFreshSessionAsync(project, cancellationToken, extraEnvironment, extraArgs);
+                    await StartFreshSessionAsync(project, carryOn: true, cancellationToken, extraEnvironment, extraArgs);
                     return true;
                 }
                 catch (Exception ex)
@@ -150,13 +163,18 @@ public class ClaudeProcessManager : IClaudeProcessManager
             });
     }
 
-    /// <summary>A new session on the project's session ID, told to carry on from the work in its folder.</summary>
-    private async Task<int> StartFreshSessionAsync(ProjectInfo project, CancellationToken cancellationToken,
+    /// <summary>
+    /// A new session on the project's session ID. With <paramref name="carryOn"/> (a conversation
+    /// there was is lost) it is told to carry on from the work in its folder; without, it starts with
+    /// no input, waiting for its first message.
+    /// </summary>
+    private async Task<int> StartFreshSessionAsync(ProjectInfo project, bool carryOn, CancellationToken cancellationToken,
         Dictionary<string, string>? extraEnvironment, string[]? extraArgs)
     {
         await SessionIdFile.WriteAsync(project.StatePath, project.ClaudeSessionId!, cancellationToken);
         return await RunClaudeProcessAsync(project, BuildArgs(["--session-id", project.ClaudeSessionId!], extraArgs),
-            "Continue from where we left off. Review the codebase and previous work.", cancellationToken, extraEnvironment);
+            carryOn ? "Continue from where we left off. Review the codebase and previous work." : null,
+            cancellationToken, extraEnvironment);
     }
 
     private static string[] BuildArgs(string[] additionalArgs, string[]? extraArgs = null)
@@ -264,7 +282,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
                 // pipeline so they persist to output.jsonl for backfill on refresh. They do not
                 // change the project's state: the exit and error results do.
                 if (line.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
-                    output.TryWrite(new PipelineItem.Line(JsonSerializer.Serialize(new { type = "error", error = line })));
+                    output.TryWrite(new PipelineItem.Line(JsonSerializer.Serialize(new { type = StderrEventType, error = line })));
             }
             catch (Exception ex)
             {
@@ -413,7 +431,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             await launch.Process.StandardInput.WriteLineAsync(json);
             await launch.Process.StandardInput.FlushAsync();
 
-            var inputPath = Path.Combine(project.StatePath, "input.jsonl");
+            var inputPath = Path.Combine(project.StatePath, ProjectFiles.SessionState.InputFileName);
             await LogInputAsync(inputPath, input, CancellationToken.None);
         }
         finally

@@ -62,3 +62,28 @@ it("an Error project's input is enabled and sends through ReplyAndResume", async
   expect(hub.replies).toEqual([{ projectId: 'p1', text: 'The migration failed; retry it' }]);
   expect(input.value).toBe('');
 });
+
+// Created with no prompt (#352): claude waits for the first message, and Resume has nothing to do
+it('a session that has had no turn asks for its first message, and offers no Resume', async () => {
+  const freshHub = new FakeHub([project('p2', 'outbound', 'Idle', '2026-09-24T12:00:00Z')], [root]);
+  await connectServers({ B: freshHub });
+  useAppStore.getState().selectProject('B', 'p2');
+  const fresh = await render(<ProjectView serverId="B" projectId="p2" />);
+  try {
+    const el = fresh.container;
+    // Until its output is replayed, an empty transcript may be one not loaded yet
+    expect(el.querySelector('.project-messages-empty')?.textContent).toBe('Loading...');
+    await act(async () => freshHub.lastReplay('p2').answer(0, []));
+    expect(el.querySelector('.project-messages-empty')?.textContent).toBe('Send the first message to start.');
+    expect(el.querySelector<HTMLTextAreaElement>('textarea.project-input')!.placeholder).toBe('Type the first message...');
+    expect(el.querySelector('.project-status-action')).toBeNull();
+    expect(el.querySelector<HTMLButtonElement>('.project-status-btn')!.disabled).toBe(true);
+
+    const input = el.querySelector<HTMLTextAreaElement>('textarea.project-input')!;
+    await typeInto(input, 'Draft the mail to the supplier');
+    await keyDown(input, 'Enter');
+    expect(freshHub.replies).toEqual([{ projectId: 'p2', text: 'Draft the mail to the supplier' }]);
+  } finally {
+    fresh.unmount();
+  }
+});
