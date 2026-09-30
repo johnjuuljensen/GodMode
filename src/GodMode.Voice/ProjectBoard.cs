@@ -6,7 +6,8 @@ namespace GodMode.Voice;
 /// <summary>
 /// Every server's projects as last heard, for as long as the session runs: each has a handle from the moment it is
 /// heard of (at the start, or when it is created later, from the app or anywhere else), and a project that is deleted,
-/// or whose server is let go of, is forgotten along with its handle.
+/// or whose server is let go of, is forgotten along with its handle. It is the only one that gives handles: the rest
+/// of voice looks them up (<see cref="ProjectHandles.Of"/>), so no project it has not heard of gets one.
 /// </summary>
 public sealed class ProjectBoard
 {
@@ -19,6 +20,9 @@ public sealed class ProjectBoard
         _handles = handles;
         servers.ProjectsChanged += Update;
     }
+
+    /// <summary>A server's projects changed, and the handles with them.</summary>
+    public event Action? Changed;
 
     /// <summary>Every server's projects, as last heard: the one changed last first.</summary>
     public IReadOnlyList<ServerProject> Projects =>
@@ -41,5 +45,6 @@ public sealed class ProjectBoard
             foreach (var project in now)
                 _handles.For(project.Ref, project.Project.Name, project.Project.RootName, project.Project.Kind);
         }
+        Changed?.Invoke();
     }
 }

@@ -85,6 +85,19 @@ public sealed class HandleTests
         Assert.Equal(invoices, handles.Resolve("invoices"));
     }
 
+    /// <summary>A number after a stem no handle has is no numbered handle: "issue 283" is 283, as its words say.</summary>
+    [Fact]
+    public void A_number_after_a_word_no_handle_has_names_the_project_with_that_number()
+    {
+        var handles = new ProjectHandles();
+        var voice = new ProjectRef("a", "Work/godmode/283");
+        handles.For(voice, "feature/283-voice-on-windows", "godmode", "issue");
+        handles.For(new ProjectRef("a", "Outbound/Assistant/260930-chat-chat-a1"), "chat", "Assistant", "chat");
+
+        Assert.Equal(voice, handles.Resolve("issue 283"));
+        Assert.Null(handles.Resolve("chat 283"));
+    }
+
     [Fact]
     public void Handles_are_unique_across_servers_and_stable_for_the_session()
     {

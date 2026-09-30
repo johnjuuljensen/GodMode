@@ -65,9 +65,10 @@ public sealed class NeverThrowingFormatter(IAnnouncementFormatter inner, ILogger
 }
 
 /// <summary>
-/// The attention lists of every server as last heard, with a handle for each project in them. Each item is announced
-/// once: when it first appears (at the start, everything waiting then), and not again when a connection is made again.
-/// An item is the same while its project needs the same thing since the same time.
+/// The attention lists of every server as last heard. Each item is announced once, by its project's handle: when it
+/// first appears (at the start, everything waiting then), and not again when a connection is made again. An item is
+/// the same while its project needs the same thing since the same time. Handles are the <see cref="ProjectBoard"/>'s
+/// to give: an item of a project it has not heard of (yet, or any more) is announced once it has, and never before.
 /// </summary>
 public sealed class AttentionBoard
 {
@@ -78,11 +79,16 @@ public sealed class AttentionBoard
     private Action<ServerAttentionItem, string>? _announce;
     private readonly List<ServerAttentionItem> _unannounced = [];
 
-    public AttentionBoard(IGodModeServers servers, ProjectHandles handles)
+    public AttentionBoard(IGodModeServers servers, ProjectHandles handles, ProjectBoard projects)
     {
         _handles = handles;
         servers.AttentionChanged += (serverId, serverName, items) =>
             Update(serverId, [.. items.Select(i => new ServerAttentionItem(serverId, serverName, i))]);
+        // A project heard of now may have an item that waited for its handle
+        projects.Changed += () =>
+        {
+            foreach (var list in _lists.Values) Announce(list);
+        };
     }
 
     /// <summary>Every server's items, as last heard.</summary>
@@ -106,15 +112,23 @@ public sealed class AttentionBoard
             _unannounced.Clear();
         }
         foreach (var item in waiting)
-            announce(item, _handles.For(item.Project, item.Item.ProjectName));
+        {
+            if (_handles.Of(item.Project) is { } handle)
+                announce(item, handle);
+        }
     }
 
     private void Update(string serverId, IReadOnlyList<ServerAttentionItem> items)
     {
         _lists[serverId] = items;
+        Announce(items);
+    }
+
+    private void Announce(IReadOnlyList<ServerAttentionItem> items)
+    {
         foreach (var item in items)
         {
-            var handle = _handles.For(item.Project, item.Item.ProjectName);
+            if (_handles.Of(item.Project) is not { } handle) continue;
             if (!_announced.TryAdd(Key(item), 0)) continue;
 
             Action<ServerAttentionItem, string>? announce;

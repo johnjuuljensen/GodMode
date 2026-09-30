@@ -17,7 +17,9 @@ public sealed record ProjectRef(string ServerId, string ProjectId)
 /// Short spoken names for projects: the issue number in the project's name ("283"), else a distinctive word of it
 /// ("vonage", "testing"), else its kind ("chat"); when that is taken too, the first of them with the lowest free
 /// number after it ("chat 2"). A project keeps its handle while it exists, and no two projects have one, across
-/// servers. A project that is gone is forgotten (<see cref="Forget"/>), and its handle is free again.
+/// servers. A project that is gone is forgotten (<see cref="Forget"/>), but its handle is retired, not freed: for the
+/// rest of the session it names nothing and is given to no other project, so a handle said from an earlier list never
+/// reaches another project. Only the same session coming back under a new ID (its profile renamed) gets it again.
 /// </summary>
 public sealed partial class ProjectHandles
 {
@@ -34,6 +36,7 @@ public sealed partial class ProjectHandles
     private readonly Lock _lock = new();
     private readonly Dictionary<ProjectRef, Entry> _byProject = [];
     private readonly Dictionary<string, ProjectRef> _byHandle = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (ProjectRef Project, Entry Entry)> _retired = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>What a handle was given for: the project's name, and its root and kind once known.</summary>
     private sealed record Entry(string Handle, string Name, string? Root, string? Kind);
@@ -60,7 +63,9 @@ public sealed partial class ProjectHandles
                 return known.Handle;
             }
 
-            var handle = Candidates(name, kind).FirstOrDefault(c => !_byHandle.ContainsKey(c)) ?? Numbered(name, kind);
+            var handle = Returning(project, root)
+                ?? Candidates(name, kind).FirstOrDefault(Free) ?? Numbered(name, kind);
+            _retired.Remove(handle);
             _byProject[project] = new Entry(handle, name, root, kind);
             _byHandle[handle] = project;
             return handle;
@@ -73,14 +78,22 @@ public sealed partial class ProjectHandles
         lock (_lock) return _byProject.TryGetValue(project, out var known) ? known.Handle : null;
     }
 
-    /// <summary>The project is gone: it names nothing any more, and its handle may be given again.</summary>
+    /// <summary>The project is gone: it names nothing any more, and its handle is retired.</summary>
     public void Forget(ProjectRef project)
     {
         lock (_lock)
         {
-            if (_byProject.Remove(project, out var known))
-                _byHandle.Remove(known.Handle);
+            if (!_byProject.Remove(project, out var known)) return;
+            _byHandle.Remove(known.Handle);
+            _retired[known.Handle] = (project, known);
         }
+    }
+
+    /// <summary>Whether the reference is the handle of a project that is gone ("chat 2 was deleted").</summary>
+    public bool IsRetired(string spoken)
+    {
+        var reference = Clean(spoken);
+        lock (_lock) return Retired(reference);
     }
 
     /// <summary>
@@ -100,6 +113,12 @@ public sealed partial class ProjectHandles
                 return byNumber;
             if (_byHandle.TryGetValue(reference, out var byHandle))
                 return byHandle;
+            // A numbered handle said with its number in words ("chat to") is that handle; one no project has, or of a
+            // project that is gone, names none: never the project with its stem ("chat"), nor one close to it ("chat 3")
+            if (NumberedForm(reference) is { } numbered)
+                return _byHandle.GetValueOrDefault(numbered);
+            if (Retired(reference))
+                return null;
 
             var words = Words(reference).ToList();
             var named = _byProject
@@ -129,6 +148,49 @@ public sealed partial class ProjectHandles
         }
     }
 
+    private bool Retired(string reference) =>
+        _retired.ContainsKey(NumberedForm(reference) ?? reference)
+        || (DanishNumbers.Parse(reference) is { } number && _retired.ContainsKey(number.ToString()));
+
+    /// <summary>
+    /// "stem n" for a stem some handle has, live or retired ("chat" of "chat", "chat 3"): words, then a number in
+    /// digits or Danish words, as <see cref="Numbered"/> makes them. It is the handle as <see cref="Numbered"/> writes
+    /// it ("chat to" is "chat 2"), or null when the reference is none: a number as a whole (that is looked up as one),
+    /// or with a stem no handle has ("issue 283", left to the other steps).
+    /// </summary>
+    private string? NumberedForm(string reference)
+    {
+        if (DanishNumbers.Parse(reference) is not null) return null;
+        var words = reference.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (var tail = 1; tail < words.Length; tail++)
+        {
+            var stem = string.Join(' ', words[..^tail]);
+            if (DanishNumbers.Parse(string.Join(' ', words[^tail..])) is { } number && DanishNumbers.Parse(stem) is null
+                && _byHandle.Keys.Concat(_retired.Keys).Any(h => Same(StemOf(h), stem)))
+                return $"{stem} {number}";
+        }
+        return null;
+    }
+
+    /// <summary>A handle without the number <see cref="Numbered"/> put after it: "chat" of "chat 2".</summary>
+    private static string StemOf(string handle) =>
+        handle.LastIndexOf(' ') is > 0 and var space && handle[(space + 1)..].All(char.IsAsciiDigit) ? handle[..space] : handle;
+
+    /// <summary>
+    /// The handle a project had that is back under a new ID: the same server, root and session id (its ID's last
+    /// part), as when its profile is renamed and its sessions are deleted and created again.
+    /// </summary>
+    private string? Returning(ProjectRef project, string? root) =>
+        _retired.Where(r => r.Value.Project.ServerId == project.ServerId
+                && string.Equals(r.Value.Entry.Root, root, StringComparison.OrdinalIgnoreCase)
+                && SessionId(r.Value.Project.ProjectId) == SessionId(project.ProjectId))
+            .Select(r => r.Key)
+            .FirstOrDefault();
+
+    private static string SessionId(string projectId) => projectId.Split('/')[^1];
+
+    private bool Free(string handle) => !_byHandle.ContainsKey(handle) && !_retired.ContainsKey(handle);
+
     private static bool Same(string? name, string reference) =>
         name is not null && name.Equals(reference, StringComparison.OrdinalIgnoreCase);
 
@@ -155,7 +217,7 @@ public sealed partial class ProjectHandles
         for (var n = 2; ; n++)
         {
             var handle = $"{stem} {n}";
-            if (!_byHandle.ContainsKey(handle)) return handle;
+            if (Free(handle)) return handle;
         }
     }
 

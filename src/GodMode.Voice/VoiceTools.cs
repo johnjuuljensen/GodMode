@@ -56,7 +56,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     public async Task<string> WhatNeedsMeAsync(CancellationToken ct)
     {
-        var items = await servers.GetAttentionAsync(ct);
+        // Those of projects voice knows: an item of one it has not heard of (yet, or any more) has no handle to say
+        var items = (await servers.GetAttentionAsync(ct)).Where(i => handles.Of(i.Project) is not null).ToList();
         // What was read out is what the conversation is about now: one project, or none to answer unnamed
         conversation.Current = items is [var only] ? only.Project : null;
         if (items.Count == 0)
@@ -64,7 +65,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
         var text = new StringBuilder($"{items.Count} need the user:\n");
         foreach (var item in items)
-            text.AppendLine($"- {handles.For(item.Project, item.Item.ProjectName)}: {Describe(item.Item)}");
+            text.AppendLine($"- {handles.Of(item.Project)}: {Describe(item.Item)}");
         return text.ToString().TrimEnd();
     }
 
@@ -84,12 +85,11 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     public async Task<string> ProjectStatusAsync(string? reference, CancellationToken ct)
     {
-        if (Target(reference) is not { } target)
+        if (Target(reference) is not { } target || handles.Of(target) is not { } handle)
             return await UnknownAsync(reference, ct);
 
         var status = await servers.GetStatusAsync(target, ct);
         conversation.Current = target;
-        var handle = handles.For(target, status.Name, status.RootName, status.Kind);
         var text = new StringBuilder($"{handle} ({Where(status.Name, status.RootName, status.ProfileName, status.Kind)}): {status.State}.");
         if (board.ItemOf(target) is { } item)
             text.Append($" Needs the user: {Describe(item.Item)}");
@@ -104,11 +104,10 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     {
         if (string.IsNullOrWhiteSpace(answer))
             return "No answer given: ask the user what to answer.";
-        if (Target(reference) is not { } target)
+        if (Target(reference) is not { } target || handles.Of(target) is not { } handle)
             return await UnknownAsync(reference, ct);
 
         var status = await servers.GetStatusAsync(target, ct);
-        var handle = handles.For(target, status.Name, status.RootName, status.Kind);
         if (status.PendingPermission is { } permission)
         {
             conversation.Current = target;
@@ -142,21 +141,23 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     private async Task<string> UnknownAsync(string? reference, CancellationToken ct)
     {
-        var waiting = (await servers.GetAttentionAsync(ct)).Select(i => handles.For(i.Project, i.Item.ProjectName, i.Item.Root)).ToList();
+        var waiting = (await servers.GetAttentionAsync(ct)).Select(i => handles.Of(i.Project)).OfType<string>().ToList();
         var which = waiting.Count > 0 ? $" Waiting now: {string.Join(", ", waiting)}." : " Nothing needs the user now.";
         var all = projects.Projects;
         var options = all.Count == 0 ? " No projects on any server."
             : $" Projects: {string.Join("; ", all.Take(OptionsListed).Select(Line))}{(all.Count > OptionsListed ? $"; {all.Count - OptionsListed} more" : "")}.";
         return string.IsNullOrWhiteSpace(reference)
             ? $"No project is being talked about: ask the user which one.{which}{options}"
-            : $"Unknown project '{reference}'.{which}{options}";
+            : handles.IsRetired(reference)
+                ? $"Unknown project '{reference}': that project was deleted. Nothing was done.{which}{options}"
+                : $"Unknown project '{reference}'.{which}{options}";
     }
 
     /// <summary>"testing (testing, Assistant, Outbound, chat): Idle".</summary>
     private string Line(ServerProject project)
     {
         var p = project.Project;
-        return $"{handles.For(project.Ref, p.Name, p.RootName, p.Kind)} ({Where(p.Name, p.RootName, p.ProfileName, p.Kind)}): {p.State}";
+        return $"{handles.Of(project.Ref) ?? p.Name} ({Where(p.Name, p.RootName, p.ProfileName, p.Kind)}): {p.State}";
     }
 
     /// <summary>The project's name, then its root, profile and kind, those it has.</summary>

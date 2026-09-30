@@ -118,8 +118,8 @@ public sealed class VoiceSession : IAsyncDisposable
         var languages = setup.Settings.Languages;
         var phrases = new VoicePhrases(languages);
         var handles = new ProjectHandles();
-        var board = new AttentionBoard(setup.Servers, handles);
         var projects = new ProjectBoard(setup.Servers, handles);
+        var board = new AttentionBoard(setup.Servers, handles, projects);
         var conversation = new VoiceConversation();
 
         await setup.ConnectAsync(ct);

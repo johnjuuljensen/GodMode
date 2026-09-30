@@ -30,6 +30,13 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         AttentionChanged?.Invoke(serverId, serverId, items);
     }
 
+    /// <summary>Pushes an attention list alone, its projects unknown to the server's project list (a list on its own queue).</summary>
+    public void PushAttention(string serverId, params AttentionItem[] items)
+    {
+        _lists[serverId] = (serverId, items);
+        AttentionChanged?.Invoke(serverId, serverId, items);
+    }
+
     /// <summary>What a connection to every server hears first: each one's projects (VoiceSession's connect).</summary>
     public Task ConnectAsync(CancellationToken ct)
     {
