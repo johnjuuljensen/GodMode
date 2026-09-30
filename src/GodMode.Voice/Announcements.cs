@@ -23,8 +23,9 @@ public sealed class VoiceConversation
 }
 
 /// <summary>
-/// GodMode's wording of the announcements queued up to a pause: one as it is, several after "3 venter på dig:". What
-/// it says is what the conversation is about next (<see cref="VoiceConversation"/>).
+/// GodMode's wording of the announcements queued up to a pause: one as it is, several after "3 venter på dig:". The
+/// project it names is what the conversation is about next (<see cref="VoiceConversation"/>), none when it names several.
+/// An announcement of no project (a create's outcome) leaves the conversation as it is, said alone.
 /// </summary>
 public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConversation conversation) : IAnnouncementFormatter
 {
@@ -32,7 +33,8 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
     {
         string[] texts = [.. announcements.Select(a => a.Text.Trim().TrimEnd('.')).Where(t => t.Length > 0)];
         var projects = announcements.Select(a => a.Source).Distinct().ToList();
-        conversation.Current = projects is [var only] ? ProjectRef.FromKey(only) : null;
+        if (projects is not [null])
+            conversation.Current = projects is [var only] ? ProjectRef.FromKey(only) : null;
 
         return texts switch
         {

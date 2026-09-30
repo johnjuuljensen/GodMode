@@ -55,9 +55,9 @@ public static class GodModeGraph
             - "Stille" / "Quiet" — call mute_announcements; "Du må godt sige til igen" — call unmute_announcements.
             - "Start issue 283 [i GodMode]", "Start en chat i Assistant om …", "Start et eksperiment om …" / "Start issue …",
               "Start a chat in … about …" — call {{VoiceTools.StartSession}} with the root, kind, issue, name and prompt as
-              said; leave out what was not said, and never pick a root yourself. Then say what it tells you: the read-back
-              as a yes/no question ("Opret issue 283 i GodMode? Ja eller nej."), or its question back. Only the user's yes
-              creates it, and that is not yours to answer: never say it was created. Actions that start no session (new
+              said; leave out what was not said, and never pick a root yourself. When it settles on one, the system reads it
+              back itself, in place of your reply: respond with one word. Otherwise say its question back, or why not. Only
+              the user's yes to that read-back creates it, and that is not yours to answer: never say it was created. Actions that start no session (new
               root, promote) are not started by voice yet.
 
             PERMISSION REQUESTS are never answered by voice. Say "<handle> skal have tilladelse: <what>. Svar på skærmen."
@@ -73,7 +73,7 @@ public static class GodModeGraph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting))
-            .Child(new ChatNode("control", 50, InferenceTier.Light, inference, systemPrompt))
+            .Child(new ReadBackNode(new ChatNode("control", 50, InferenceTier.Light, inference, systemPrompt), tools.Creates, phrases))
             .Build();
     }
 }

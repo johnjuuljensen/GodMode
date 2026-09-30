@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using GodMode.Shared.Models;
@@ -8,8 +9,20 @@ namespace GodMode.Voice;
 /// <summary>What the user asked to start, in their words, as the model gave them: all optional.</summary>
 public sealed record CreateAsk(string? Root, string? Action, string? Issue, string? Name, string? Prompt);
 
-/// <summary>A create voice read back and waits on a yes for: the root, its action, and the form's values.</summary>
-public sealed record CreateRequest(ServerRoot Root, CreateActionInfo Action, IReadOnlyDictionary<string, string> Inputs, string What);
+/// <summary>
+/// A create voice settled on: the root, its action, the form's values, and what the read-back names (the issue, or the
+/// name and whether there is a prompt; <paramref name="WithPrompt"/> is null for a form with no prompt).
+/// </summary>
+public sealed record CreateRequest(ServerRoot Root, CreateActionInfo Action, IReadOnlyDictionary<string, string> Inputs, string What,
+    string? Issue = null, string? Name = null, bool? WithPrompt = null, bool SeveralServers = false)
+{
+    /// <summary>What is being made, as one key: the same create confirmed twice is one create.</summary>
+    public string Key => string.Join("\n", new[] { Root.ServerId, Root.Profile, Root.Root.Name, Action.Name }
+        .Concat(Inputs.OrderBy(i => i.Key, StringComparer.Ordinal).Select(i => $"{i.Key}={i.Value}")));
+}
+
+/// <summary>A read-back playing, or played: the create it is for, its text, and when it started playing.</summary>
+public sealed record ArmedCreate(CreateRequest Request, string ReadBack, DateTimeOffset At);
 
 /// <summary>What a create made: the new session and its handle, or why there is none.</summary>
 public sealed record CreateOutcome(CreateRequest Request, ProjectRef? Project, string? Handle, string? Error);
@@ -17,11 +30,13 @@ public sealed record CreateOutcome(CreateRequest Request, ProjectRef? Project, s
 /// <summary>
 /// Voice's creates (issue #354). <see cref="Propose"/> works out, from what the user said, which root and action, and
 /// fills the action's form (an issue number or key, a name, a prompt): it never guesses a root, and asks back when more
-/// than one fits. What it settles on is only read back: it is created on the user's yes (<see cref="ConfirmCreateNode"/>,
-/// <see cref="Confirm"/>), never by the model, and anything else cancels it. The new session is given its handle at once,
-/// and is what the conversation is about.
+/// than one fits. What it settles on is only read back, in the code's fixed words (<see cref="ReadBackNode"/>,
+/// <see cref="VoicePhrases.ReadBack"/>), not the model's. The yes it waits on is to that read-back alone: it is armed
+/// when the read-back starts playing (<see cref="Spoken"/>), and any other speech of the bot's drops it, as does
+/// <see cref="ConfirmWindow"/> passing. Only a yes said after it started confirms it (<see cref="ConfirmCreateNode"/>).
+/// The new session is given its handle at once and announced by it; what the conversation is about stays as it is.
 /// </summary>
-public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandles handles, VoiceConversation conversation)
+public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandles handles, TimeProvider? time = null)
 {
     /// <summary>How long a failure is when said: the rest is on screen.</summary>
     private const int ErrorSaid = 160;
@@ -32,12 +47,34 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
     private static readonly HashSet<string> Filler = new(StringComparer.OrdinalIgnoreCase)
         { "i", "in", "på", "on", "the", "til", "to", "en", "et", "a", "an", "root", "roden", "profil", "profile", "profilen" };
 
-    private CreateRequest? _pending;
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly Lock _lock = new();
+    private readonly ConcurrentDictionary<string, byte> _inFlight = new();
+    private CreateRequest? _proposed;
+    private (CreateRequest Request, string ReadBack)? _toSay;
+    private ArmedCreate? _armed;
+    private bool _dropped;
     private Action<CreateOutcome>? _announce;
     private Task _running = Task.CompletedTask;
 
-    /// <summary>The create read back, waiting on the user's yes.</summary>
-    public CreateRequest? Pending => Volatile.Read(ref _pending);
+    /// <summary>How long after its read-back started playing a create waits on the yes.</summary>
+    public TimeSpan ConfirmWindow { get; init; } = TimeSpan.FromSeconds(20);
+
+    public DateTimeOffset Now => _time.GetUtcNow();
+
+    /// <summary>The create whose read-back is playing or played, waiting on the user's yes; null once dropped or expired.</summary>
+    public ArmedCreate? Armed
+    {
+        get
+        {
+            lock (_lock)
+            {
+                if (_armed is { } armed && Now - armed.At > ConfirmWindow)
+                    Drop();
+                return _armed;
+            }
+        }
+    }
 
     /// <summary>The creates confirmed, until each has finished and been announced.</summary>
     public Task Running => Volatile.Read(ref _running);
@@ -45,13 +82,73 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
     /// <summary>From now on, each create's outcome goes to <paramref name="announce"/>.</summary>
     public void Attach(Action<CreateOutcome> announce) => _announce = announce;
 
+    /// <summary>The create settled on in this evaluation, for its read-back to be said (<see cref="ReadBackNode"/>).</summary>
+    public CreateRequest? TakeProposed()
+    {
+        lock (_lock)
+        {
+            var proposed = _proposed;
+            _proposed = null;
+            return proposed;
+        }
+    }
+
+    /// <summary><paramref name="readBack"/> is what the bot says next, for <paramref name="request"/>: it arms it when it starts playing.</summary>
+    public void ReadingBack(CreateRequest request, string readBack)
+    {
+        lock (_lock) _toSay = (request, readBack.Trim());
+    }
+
     /// <summary>
-    /// What voice makes of <paramref name="ask"/> among <paramref name="roots"/>, for the model to say: a read-back to
-    /// confirm (and the create waits on the yes), or a question back, or why voice cannot create it.
+    /// The bot started saying <paramref name="text"/> (<c>ISessionEventSink.OnResponseAsync</c>): the read-back arms its
+    /// create; anything else, an announcement or a reply, drops the create that waits.
+    /// </summary>
+    public void Spoken(string text)
+    {
+        lock (_lock)
+        {
+            if (_toSay is { } toSay && toSay.ReadBack == text.Trim())
+            {
+                _armed = new ArmedCreate(toSay.Request, toSay.ReadBack, Now);
+                _toSay = null;
+                _dropped = false;
+            }
+            else if (_toSay is not null || _armed is not null)
+                Drop();
+        }
+    }
+
+    /// <summary>Whether a create was read back and dropped unanswered since (it expired, or the bot said something else); asking forgets it.</summary>
+    public bool TakeDropped()
+    {
+        lock (_lock)
+        {
+            var dropped = _dropped;
+            _dropped = false;
+            return dropped;
+        }
+    }
+
+    private void Drop()
+    {
+        _toSay = null;
+        _armed = null;
+        _dropped = true;
+    }
+
+    /// <summary>
+    /// What voice makes of <paramref name="ask"/> among <paramref name="roots"/>, for the model: that the read-back is
+    /// said in its place (and the create waits on the yes), or a question back, or why voice cannot create it.
     /// </summary>
     public string Propose(IReadOnlyList<ServerRoot> roots, CreateAsk ask)
     {
-        Interlocked.Exchange(ref _pending, null);
+        lock (_lock)
+        {
+            _proposed = null;
+            _toSay = null;
+            _armed = null;
+            _dropped = false;
+        }
         var sessionRoots = roots.Where(r => r.Root.Actions?.Any(a => a.Session) == true).ToList();
         if (sessionRoots.Count == 0)
             return "No root on any server can start a session. Nothing was created.";
@@ -110,25 +207,55 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
             return $"{where} needs {string.Join(" and ", missing)}: ask the user for it. Nothing was created yet.";
 
         var what = form.Describe(inputs);
-        Volatile.Write(ref _pending, new CreateRequest(chosen, chosenAction, inputs, $"{what} in {where}"));
-        return $"Read back and ask for a yes: create {what} in {where}. Nothing is created until the user says yes; " +
-            "anything else cancels it.";
+        var request = new CreateRequest(chosen, chosenAction, inputs, $"{what} in {where}", form.Issue(inputs), form.Name(inputs),
+            form.WithPrompt(inputs), severalServers);
+        if (_inFlight.ContainsKey(request.Key))
+            return $"{what} in {where} is being created already, from an earlier yes: nothing more was done. It is announced when it is done.";
+        lock (_lock) _proposed = request;
+        return $"Settled: create {what} in {where}. The system reads it back to the user in place of your reply, and waits on " +
+            "their yes: respond with one word only, and never say it was created.";
     }
 
-    /// <summary>The create read back is dropped: the user said anything but yes.</summary>
-    public CreateRequest? Cancel() => Interlocked.Exchange(ref _pending, null);
-
-    /// <summary>The user said yes: the create read back starts, and its outcome is announced when it is done. Null when none waits.</summary>
-    public CreateRequest? Confirm()
+    /// <summary>The create read back is dropped: the user said anything but yes. The one dropped, or null when none waited.</summary>
+    public CreateRequest? Cancel()
     {
-        if (Interlocked.Exchange(ref _pending, null) is not { } request)
-            return null;
+        lock (_lock)
+        {
+            var armed = _armed;
+            _armed = null;
+            _toSay = null;
+            return armed?.Request;
+        }
+    }
+
+    /// <summary>
+    /// The user said yes to <paramref name="armed"/>: its create starts, and its outcome is announced when it is done.
+    /// Null when it no longer waits (dropped, or read back again since).
+    /// </summary>
+    public CreateRequest? Confirm(ArmedCreate armed)
+    {
+        lock (_lock)
+        {
+            if (_armed != armed)
+                return null;
+            _armed = null;
+        }
+        var request = armed.Request;
+        if (!_inFlight.TryAdd(request.Key, 0))
+            return request;
         var previous = Running;
         Volatile.Write(ref _running, Task.Run(async () =>
         {
             await previous;
-            var outcome = await CreateAsync(request);
-            _announce?.Invoke(outcome);
+            try
+            {
+                var outcome = await CreateAsync(request);
+                _announce?.Invoke(outcome);
+            }
+            finally
+            {
+                _inFlight.TryRemove(request.Key, out _);
+            }
         }));
         return request;
     }
@@ -142,8 +269,8 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
                 return new CreateOutcome(request, null, null, null);
             var project = new ProjectRef(request.Root.ServerId, status.Id);
             // As the project board names it when the hub pushes it: the same handle, whichever comes first
+            // What the conversation is about stays as it is: a slow create does not take a later answer to itself
             var handle = handles.For(project, status.Name, status.RootName, status.Kind);
-            conversation.Current = project;
             return new CreateOutcome(request, project, handle, null);
         }
         catch (Exception ex)
@@ -242,6 +369,17 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
             }
             return (inputs, missing);
         }
+
+        public string? Issue(IReadOnlyDictionary<string, string> inputs) => ValueOf(inputs, Role.IssueNumber, Role.IssueKey);
+
+        public string? Name(IReadOnlyDictionary<string, string> inputs) => ValueOf(inputs, Role.Name);
+
+        /// <summary>Whether a prompt is given; null for a form with no prompt.</summary>
+        public bool? WithPrompt(IReadOnlyDictionary<string, string> inputs) =>
+            Fields.FirstOrDefault(f => f.Role == Role.Prompt) is { } prompt ? inputs.ContainsKey(prompt.Key) : null;
+
+        private string? ValueOf(IReadOnlyDictionary<string, string> inputs, params Role[] roles) =>
+            Fields.Where(f => roles.Contains(f.Role)).Select(f => inputs.GetValueOrDefault(f.Key)).FirstOrDefault(v => v is not null);
 
         /// <summary>"issue 283", "the name 'backup job' and the prompt '…'", "the name 'backup job', with no prompt".</summary>
         public string Describe(IReadOnlyDictionary<string, string> inputs)

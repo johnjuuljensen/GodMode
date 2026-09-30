@@ -32,6 +32,34 @@ public sealed class VoicePhrases
         (AttentionKind.Finished, false) => $"{handle} is done",
     };
 
+    /// <summary>
+    /// A create read back, as the question its yes answers: the root, its profile (and server, when there are several),
+    /// the action, and what will be made. It holds no yes-word (<see cref="ConfirmCreateNode.HoldsYes"/>), so its echo
+    /// can never answer it.
+    /// </summary>
+    public string ReadBack(CreateRequest request)
+    {
+        var root = request.Root;
+        var where = _danish
+            ? $"i {root.Root.Name}, profil {root.Profile}{(request.SeveralServers ? $", server {root.ServerName}" : "")}, som {request.Action.Name}"
+            : $"in {root.Root.Name}, profile {root.Profile}{(request.SeveralServers ? $", server {root.ServerName}" : "")}, as {request.Action.Name}";
+        var what = (request.Issue, request.Name, request.WithPrompt, _danish) switch
+        {
+            ({ } issue, _, _, _) => $"issue {issue}",
+            (null, { } name, true, true) => $"{name} med beskrivelse",
+            (null, { } name, false, true) => $"{name} uden beskrivelse",
+            (null, { } name, true, false) => $"{name} with a description",
+            (null, { } name, false, false) => $"{name} with no description",
+            (null, { } name, null, _) => name,
+            (null, null, _, true) => "en session",
+            (null, null, _, false) => "a session",
+        };
+        return _danish ? $"Skal jeg oprette {what} {where}?" : $"Shall I create {what} {where}?";
+    }
+
+    /// <summary>A yes after the read-back it would have answered was dropped (it timed out, or the bot said something else).</summary>
+    public string NothingToConfirm => _danish ? "Der venter ingen oprettelse. Sig start igen." : "Nothing waits to be created. Say start again.";
+
     /// <summary>The user said yes to a create read back: it runs, and <see cref="Created"/> says when it is done.</summary>
     public string Creating => _danish ? "Opretter." : "Creating.";
 

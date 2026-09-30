@@ -37,7 +37,19 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         return this;
     }
 
-    public Task<IReadOnlyList<ServerRoot>> ListRootsAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<ServerRoot>>([.. _roots]);
+    /// <summary>What listing the roots waits on, as a slow server's answer; done at once when unset.</summary>
+    public Task RootsGate { get; set; } = Task.CompletedTask;
+
+    /// <summary>How many times the roots were asked for.</summary>
+    public int RootsListed => Volatile.Read(ref _rootsListed);
+    private int _rootsListed;
+
+    public async Task<IReadOnlyList<ServerRoot>> ListRootsAsync(CancellationToken ct)
+    {
+        Interlocked.Increment(ref _rootsListed);
+        await RootsGate;
+        return [.. _roots];
+    }
 
     /// <summary>As the server creates: the session named as its action's templates name it, pushed as ProjectCreated.</summary>
     public async Task<CreateProjectResult> CreateAsync(ServerRoot root, string actionName, IReadOnlyDictionary<string, string> inputs, CancellationToken ct)

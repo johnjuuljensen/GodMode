@@ -11,7 +11,7 @@ namespace GodMode.Voice;
 /// never answered here: that is the screen's (issue #285).
 /// </summary>
 public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, ProjectBoard projects, ProjectHandles handles,
-    VoiceConversation conversation)
+    VoiceConversation conversation, TimeProvider? time = null)
 {
     public const string WhatNeedsMe = "what_needs_me";
     public const string ListProjects = "list_projects";
@@ -29,7 +29,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string PromptParameter = "prompt";
 
     /// <summary>The creates voice reads back, and makes on the user's yes.</summary>
-    public SessionCreates Creates { get; } = new(servers, handles, conversation);
+    public SessionCreates Creates { get; } = new(servers, handles, time);
 
     /// <summary>How many projects a reference to none lists, as the options the model offers.</summary>
     private const int OptionsListed = 8;

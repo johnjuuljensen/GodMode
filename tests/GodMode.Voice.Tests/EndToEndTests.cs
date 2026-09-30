@@ -124,13 +124,13 @@ public sealed class EndToEndTests
                 [VoiceTools.NameParameter] = "backup job",
                 [VoiceTools.PromptParameter] = "Find ud af hvorfor backup-jobbet fejler.",
             })
-            .Respond("Opret backup job i voice? Ja eller nej.");
+            .Respond("Ok.");
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Start en chat i voice om hvorfor backup-jobbet fejler");
-        await voice.Events.SaidAsync("Opret backup job i voice? Ja eller nej.");
+        await voice.Events.SaidAsync($"Skal jeg oprette backup job med beskrivelse i {TestServer.Root}, profil {TestServer.Profile}, som Create?");
         Assert.Contains($"in {TestServer.Root} (profile {TestServer.Profile}), action Create", Assert.Single(model.ToolResults));
 
         voice.Transcriptions.SayAsRecognized("Ja");
