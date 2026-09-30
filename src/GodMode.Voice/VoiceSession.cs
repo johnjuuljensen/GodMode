@@ -310,7 +310,15 @@ public sealed class VoiceSession : IAsyncDisposable
 
         public Task OnErrorAsync(SessionError error)
         {
-            // A refused key does not come right by itself: the user has to change it
+            // A refused key does not come right by itself: the user has to change it. Nor does a microphone that failed
+            // (VoiceBot#64: AudioInput, which the app names as the session's own failure; on Windows FollowingAudio
+            // keeps the session's source going, so this is Android's)
+            if (error.Service == SessionService.AudioInput)
+            {
+                state.Hold(VoiceState.Error);
+                events.Error(SessionService.Session, SessionErrorKind.ServiceError, $"The microphone stopped: {error.Message}");
+                return Task.CompletedTask;
+            }
             if (error.Kind == SessionErrorKind.Authentication) state.Hold(VoiceState.Error);
             events.Error(error.Service, error.Kind, error.Message);
             return Task.CompletedTask;

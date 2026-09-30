@@ -252,6 +252,26 @@ public sealed class VoiceSessionTests
         Assert.Equal(VoiceState.Off, voice.Events.States.Last());
     }
 
+    /// <summary>
+    /// VoiceBot#64 reports a microphone that fails while the session runs (its AudioInput): the app hears it as the voice
+    /// session's failure, which it names, and voice shows the error until it is stopped, since nothing brings it back.
+    /// </summary>
+    [Fact]
+    public async Task A_microphone_that_fails_is_reported_and_held_as_an_error()
+    {
+        var microphone = new FailingMicrophone();
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(), microphone: microphone);
+        await voice.Events.SaidAsync("Klar.");
+
+        microphone.Fail();
+
+        await Eventually.UntilAsync(() => !voice.Events.Errors.IsEmpty, () => "the microphone's failure to be reported");
+        Assert.Equal((SessionService.Session, SessionErrorKind.ServiceError, "The microphone stopped: The microphone stopped delivering audio"),
+            Assert.Single(voice.Events.Errors));
+        await Eventually.UntilAsync(() => voice.Events.States.LastOrDefault() == VoiceState.Error,
+            () => $"voice to show the error; its states: {string.Join(", ", voice.Events.States)}");
+    }
+
     [Theory]
     [InlineData(VoiceSettings.DefaultLanguage)]
     [InlineData("da-DK")]
