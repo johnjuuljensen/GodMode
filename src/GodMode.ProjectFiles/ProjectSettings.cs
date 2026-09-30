@@ -17,11 +17,16 @@ namespace GodMode.ProjectFiles;
 /// (<c>sharedFolder</c>): its delete then removes only its state, never the folder. Kept here so a
 /// root config that changes later does not turn a shared workspace into one a delete removes.
 /// </param>
+/// <param name="Adopted">
+/// Whether the session was adopted: its working folder was there before it, and not made by its create.
+/// Its delete follows its root's rules as any session's does; the app offers Forget, which keeps the folder, beside it.
+/// </param>
 public record ProjectSettings(
     bool DangerouslySkipPermissions = false,
     string? ActionName = null,
     string? PermissionMode = null,
-    bool SharedFolder = false
+    bool SharedFolder = false,
+    bool Adopted = false
 )
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

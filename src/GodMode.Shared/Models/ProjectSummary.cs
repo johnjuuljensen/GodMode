@@ -16,6 +16,7 @@ namespace GodMode.Shared.Models;
 /// <param name="Kind">The session's kind, its label, as in <see cref="ProjectStatus.Kind"/>.</param>
 /// <param name="ActionName">The session's action, as in <see cref="ProjectStatus.ActionName"/>.</param>
 /// <param name="SharedFolder">Whether its delete removes only its state, as in <see cref="ProjectStatus.SharedFolder"/>.</param>
+/// <param name="Adopted">Whether the session was adopted, as in <see cref="ProjectStatus.Adopted"/>: the app offers Forget beside its delete.</param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -29,5 +30,6 @@ public record ProjectSummary(
     PullRequestStatus? PullRequest = null,
     string? Kind = null,
     string? ActionName = null,
-    bool SharedFolder = false
+    bool SharedFolder = false,
+    bool Adopted = false
 );

@@ -34,6 +34,11 @@ namespace GodMode.Shared.Models;
 /// that cannot be read): its delete removes only its state, into the folder's trash, and
 /// <see cref="Hubs.IProjectHub.RestoreProject"/> can bring it back. Otherwise the delete removes the working folder.
 /// </param>
+/// <param name="Adopted">
+/// Whether the session was adopted (<see cref="Hubs.IProjectHub.AdoptFolder"/>, its <c>settings.json</c>'s
+/// <c>adopted</c>): its folder was there before it, so the app offers <see cref="Hubs.IProjectHub.ForgetProject"/>
+/// beside its delete, which keeps the folder.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -59,5 +64,6 @@ public record ProjectStatus(
     ProjectState? StateAtShutdown = null,
     string? Kind = null,
     string? ActionName = null,
-    bool SharedFolder = false
+    bool SharedFolder = false,
+    bool Adopted = false
 );

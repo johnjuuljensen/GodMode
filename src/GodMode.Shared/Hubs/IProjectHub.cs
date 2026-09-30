@@ -139,6 +139,38 @@ public interface IProjectHub
     /// </summary>
     Task<ProjectStatus> RestoreProject(string projectId);
 
+    // ── Adopting folders ──
+
+    /// <summary>
+    /// The folders of a root that GodMode does not manage, read now (nothing is cached): its <c>list</c>
+    /// script's candidates, or, with none, its immediate subfolders but its own and the hidden ones. A
+    /// folder a session works in (tracked, or with its state in <c>.godmode/sessions/</c>) is never one.
+    /// Fails, saying why, when the root is not listed, or its script fails, times out or prints anything
+    /// but the documented JSON.
+    /// </summary>
+    Task<UnmanagedFolder[]> ListUnmanaged(string profileName, string projectRootName);
+
+    /// <summary>
+    /// Makes a session of a folder that exists in the root (<see cref="UnmanagedFolder.Path"/>), as it is:
+    /// no folder is made, and nothing in it is changed but its <c>.godmode/</c>. With an action that says
+    /// <c>"adopt": true</c> its create script alone runs, with <c>GODMODE_ADOPT=true</c>, to name the
+    /// session (<c>project_name</c>, <c>kind</c>, <c>project_prompt</c>); with any other action, or none,
+    /// no script runs, and the session is <paramref name="inputs"/>' <c>name</c> (else the folder's) and
+    /// <c>kind</c> (else the action's). With no prompt it starts idle, waiting for its first message.
+    /// Refused, changing nothing, for a path that is not an immediate subfolder of the root, or a folder
+    /// a session is in. Pushed as <see cref="IProjectHubClient.ProjectCreated"/>.
+    /// </summary>
+    /// <param name="actionName">The root's action the session is of (its environment, arguments and delete), or null for its first.</param>
+    Task<ProjectStatus> AdoptFolder(string profileName, string projectRootName, string path, string? actionName, Dictionary<string, JsonElement>? inputs);
+
+    /// <summary>
+    /// Takes the session out of GodMode and leaves its folder be: it is stopped, no delete script runs,
+    /// and only its state moves to the folder's <c>.godmode/trash/</c>, which
+    /// <see cref="RestoreProject"/> brings back, as it was, until the trash is purged. Pushed as
+    /// <see cref="IProjectHubClient.ProjectDeleted"/>.
+    /// </summary>
+    Task<DeleteProjectResult> ForgetProject(string projectId);
+
     // ── Utility ──
 
     /// <summary>

@@ -37,6 +37,11 @@ namespace GodMode.Shared.Models;
 /// its list sooner. Nothing is deleted by it. Set in <c>config.json</c> for every action of the root,
 /// or in an action's overlay for that action.
 /// </param>
+/// <param name="Adopt">
+/// Whether the action's create script knows how to adopt a folder that exists (<c>"adopt": true</c>): an
+/// adopt of a folder with it runs the create script alone, with <c>GODMODE_ADOPT=true</c> and the folder
+/// as the project's, to name the session and nothing more. An adopt with any other action runs no script.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -57,7 +62,8 @@ public record CreateAction(
     string? PermissionMode = null,
     bool SharedFolder = false,
     bool Session = true,
-    bool Transient = false
+    bool Transient = false,
+    bool Adopt = false
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";

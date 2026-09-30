@@ -6,11 +6,18 @@ namespace GodMode.Shared.Models;
 /// config.json (base) + config.{action}.json (per-action overlays).
 /// All merging logic lives in RootConfigReader — this is the final resolved output.
 /// </summary>
+/// <param name="List">
+/// The root's <c>list</c> script (<c>config.json</c>'s, rootPath-relative), which prints the folders it
+/// offers to adopt; null when it has none, and its immediate subfolders are offered.
+/// </param>
+/// <param name="Environment">The environment in <c>config.json</c> itself, which the <c>list</c> script runs with; no action's overlay.</param>
 public record RootConfig(
     string? Description = null,
     IReadOnlyDictionary<string, CreateAction>? Actions = null,
     string? ProfileName = null,
-    bool StripEnvVarProfile = false)
+    bool StripEnvVarProfile = false,
+    string? List = null,
+    Dictionary<string, string>? Environment = null)
 {
     /// <summary>
     /// Resolves a specific action by name (case-insensitive).

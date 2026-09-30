@@ -115,7 +115,10 @@ public class RootConfigReader : IRootConfigReader
             Description: baseRaw.Description,
             Actions: actions,
             ProfileName: baseRaw.ProfileName,
-            StripEnvVarProfile: baseRaw.StripEnvVarProfile ?? false);
+            StripEnvVarProfile: baseRaw.StripEnvVarProfile ?? false,
+            // One script: its output is the answer, as a status script's is
+            List: NormalizeScriptPaths(baseRaw.List, godModeRootPath) is [var list] ? list : null,
+            Environment: baseRaw.Environment);
     }
 
     private static RootConfig BuildDefaultConfig() =>
@@ -239,7 +242,8 @@ public class RootConfigReader : IRootConfigReader
         PermissionMode = overlay.PermissionMode ?? baseConfig.PermissionMode,
         SharedFolder = overlay.SharedFolder ?? baseConfig.SharedFolder,
         Session = overlay.Session ?? baseConfig.Session,
-        Transient = overlay.Transient ?? baseConfig.Transient
+        Transient = overlay.Transient ?? baseConfig.Transient,
+        Adopt = overlay.Adopt ?? baseConfig.Adopt
     };
 
     /// <summary>
@@ -290,7 +294,8 @@ public class RootConfigReader : IRootConfigReader
             PermissionMode: raw.PermissionMode,
             SharedFolder: raw.SharedFolder ?? false,
             Session: raw.Session ?? true,
-            Transient: raw.Transient ?? false
+            Transient: raw.Transient ?? false,
+            Adopt: raw.Adopt ?? false
         );
     }
 
@@ -398,6 +403,9 @@ public class RootConfigReader : IRootConfigReader
         public bool? SharedFolder { get; init; }
         public bool? Session { get; init; }
         public bool? Transient { get; init; }
+        public bool? Adopt { get; init; }
+        /// <summary>The root's list script: read from config.json alone, never an action's overlay.</summary>
+        public JsonElement? List { get; init; }
 
         /// <summary>Keys this reader does not know, such as a leftover MCP server config.</summary>
         [JsonExtensionData]

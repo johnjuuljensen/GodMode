@@ -19,7 +19,7 @@ namespace GodMode.Server.Services;
 /// Manages project folders, lifecycle, and state.
 /// Uses config-driven workflow: reads .godmode-root/config.json, runs scripts, starts Claude.
 /// </summary>
-public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
+public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 {
     /// <summary>How long server shutdown waits for the projects' processes to be stopped and marked Stopped.</summary>
     private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
@@ -720,7 +720,8 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 PullRequest: s.PullRequest,
                 Kind: s.Kind,
                 ActionName: s.ActionName,
-                SharedFolder: s.SharedFolder
+                SharedFolder: s.SharedFolder,
+                Adopted: s.Adopted
             ));
         }
 
@@ -972,52 +973,20 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         // The id as the script's result leaves it: its kind and name, with the date and suffix it had
-        var finalId = ProjectFiles.SessionState.Id(createdOn, kind, name, sessionId[^ProjectFiles.SessionState.SuffixLength..]);
-        if (finalId != sessionId)
+        try
         {
-            try
-            {
-                finalId = FreeSessionId(snap, compositeKey, profileName, rootName,
-                    suffix => ProjectFiles.SessionState.Id(createdOn, kind, name, suffix), finalId);
-                claims.Claim(ProjectId(profileName, rootName, finalId), projectPath);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or ProjectInUseException)
-            {
-                _logger.LogError("Project {ProjectId} could not have the id {SessionId}: {Message}", projectId, finalId, ex.Message);
-                RegisterFailedCreate(project, ex.Message);
-                throw;
-            }
-            // The log and result file follow the id, so they are found by the id the session keeps.
-            // Replacing is safe: the final id is free (FreeSessionId) and claimed above, so no other
-            // create or session has files under it
-            MoveScriptFile(logFilePath, GetScriptLogPath(rootPath, finalId), projectId);
-            MoveScriptFile(resultFilePath, GetResultFilePath(rootPath, finalId), projectId);
-            sessionId = finalId;
-            projectId = ProjectId(profileName, rootName, sessionId);
-            project.SessionId = sessionId;
-            _logger.LogInformation("The session's id is {ProjectId}", projectId);
+            projectId = FinalizeSessionId(snap, claims, project, compositeKey, profileName, rootName, rootPath, createdOn, kind, name, logFilePath, resultFilePath);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ProjectInUseException)
+        {
+            RegisterFailedCreate(project, ex.Message);
+            throw;
         }
         if (scriptResults.TryGetValue("project_prompt", out var overridePrompt) && !string.IsNullOrWhiteSpace(overridePrompt))
         {
             prompt = overridePrompt;
             _logger.LogInformation("Script overrode project prompt ({Length} chars)", prompt.Length);
         }
-        // Resolve model: user input overrides action config default.
-        // Persisted in status.json so resumes keep using the same model even if the
-        // root config changes or the machine-wide Claude default differs.
-        var model = TemplateResolver.GetString(request.Inputs, "model") ?? action.Model;
-        // No prompt from the form, a template or a script: claude starts with no input and waits on
-        // stdin, and the project is Idle, waiting for its first message, which needs nothing of the
-        // user until they write it. Claude is never sent an empty turn
-        if (string.IsNullOrWhiteSpace(prompt)) prompt = null;
-        project.Status = project.Status with
-        {
-            Id = projectId, Name = name, Model = model, Kind = kind,
-            State = prompt == null ? ProjectState.Idle : project.Status.State,
-        };
-
-        // The session's state folder, now its id is final (scripts may have created the project dir without .godmode)
-        CreateSessionState(project);
 
         // Save project settings (persists across restarts, includes action name for delete/resume).
         // The permission mode is kept with the project, as its model is, so its resumes keep it
@@ -1026,6 +995,69 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             ActionName: action.Name,
             PermissionMode: action.PermissionMode,
             SharedFolder: action.SharedFolder);
+        return new CreateProjectResult(await LaunchNewSessionAsync(project, action, request.Inputs, name, kind, prompt, settings));
+    }
+
+    /// <summary>
+    /// The session's id as its create script's result leaves it (its <paramref name="kind"/> and
+    /// <paramref name="name"/>, with the date and suffix it had), claimed, with its log and result file
+    /// moved to it. Returns its ID. Throws <see cref="InvalidOperationException"/> or
+    /// <see cref="ProjectInUseException"/> when it cannot have it, logged.
+    /// </summary>
+    private string FinalizeSessionId(ProfileSnapshot snap, CreateClaims claims, ProjectInfo project, string compositeKey, string profileName, string rootName,
+        string rootPath, DateTime createdOn, string kind, string name, string logFilePath, string resultFilePath)
+    {
+        var sessionId = project.SessionId;
+        var projectId = ProjectId(profileName, rootName, sessionId);
+        var finalId = ProjectFiles.SessionState.Id(createdOn, kind, name, sessionId[^ProjectFiles.SessionState.SuffixLength..]);
+        if (finalId == sessionId) return projectId;
+        try
+        {
+            finalId = FreeSessionId(snap, compositeKey, profileName, rootName,
+                suffix => ProjectFiles.SessionState.Id(createdOn, kind, name, suffix), finalId);
+            claims.Claim(ProjectId(profileName, rootName, finalId), project.ProjectPath);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ProjectInUseException)
+        {
+            _logger.LogError("Project {ProjectId} could not have the id {SessionId}: {Message}", projectId, finalId, ex.Message);
+            throw;
+        }
+        // The log and result file follow the id, so they are found by the id the session keeps.
+        // Replacing is safe: the final id is free (FreeSessionId) and claimed above, so no other
+        // create or session has files under it
+        MoveScriptFile(logFilePath, GetScriptLogPath(rootPath, finalId), projectId);
+        MoveScriptFile(resultFilePath, GetResultFilePath(rootPath, finalId), projectId);
+        project.SessionId = finalId;
+        projectId = ProjectId(profileName, rootName, finalId);
+        _logger.LogInformation("The session's id is {ProjectId}", projectId);
+        return projectId;
+    }
+
+    /// <summary>
+    /// The last of a create or an adopt, once the session's id is final: its state folder, its
+    /// <paramref name="settings"/> and status are written, and it is tracked and its claude started, with
+    /// <paramref name="prompt"/> or, with none, idle, waiting for its first message. Returns its status.
+    /// </summary>
+    private async Task<ProjectStatus> LaunchNewSessionAsync(ProjectInfo project, CreateAction action, Dictionary<string, JsonElement> inputs,
+        string name, string kind, string? prompt, ProjectFiles.ProjectSettings settings)
+    {
+        var projectId = ProjectId(project.ProfileName!, project.Status.RootName!, project.SessionId);
+        // Resolve model: user input overrides action config default.
+        // Persisted in status.json so resumes keep using the same model even if the
+        // root config changes or the machine-wide Claude default differs.
+        var model = TemplateResolver.GetString(inputs, "model") ?? action.Model;
+        // No prompt from the form, a template or a script: claude starts with no input and waits on
+        // stdin, and the project is Idle, waiting for its first message, which needs nothing of the
+        // user until they write it. Claude is never sent an empty turn
+        if (string.IsNullOrWhiteSpace(prompt)) prompt = null;
+        project.Status = project.Status with
+        {
+            Id = projectId, Name = name, Model = model, Kind = kind, Adopted = settings.Adopted,
+            State = prompt == null ? ProjectState.Idle : project.Status.State,
+        };
+
+        // The session's state folder, now its id is final (scripts may have created the project dir without .godmode)
+        CreateSessionState(project);
         settings.Save(project.StatePath);
 
         // Save initial status
@@ -1059,7 +1091,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             resumeLock.Release();
         }
 
-        return new CreateProjectResult(project.Status);
+        return project.Status;
     }
 
     /// <summary>The longest message a run returns, as long as an attention item's text; a longer one is cut.</summary>
@@ -2020,14 +2052,21 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         if (snap.ProjectFiles.ListSessions(compositeKey).Any(session => session.SessionId == sessionId))
             throw new InvalidOperationException($"Project {projectId} cannot be restored: a session of its id has its state in the root");
 
+        // A forgotten session left its folder as it was, and comes back as it was: one that owns its
+        // folder owns it again, so no other session may be in it now. Any other was deleted as sharing it
+        var forgotten = ProjectFiles.SessionState.WasForgotten(folder, sessionId);
+        var shared = !forgotten
+            || !ProjectFiles.ProjectSettings.TryLoad(ProjectFiles.SessionState.TrashedPathOf(folder, sessionId), out var trashedSettings)
+            || trashedSettings.SharedFolder;
+
         // As a create into the folder would claim it: no create in progress has the ID or owns the
         // folder, and no session that owns the folder is in it now
-        using (var claims = new CreateClaims(this, shared: true, rootPath))
+        using (var claims = new CreateClaims(this, shared, rootPath))
         {
             claims.Claim(projectId, folder);
             var statePath = ProjectFiles.SessionState.Restore(folder, sessionId);
             // It was deleted as a session that shares its folder, and stays one: a later delete leaves the folder
-            if (ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings) && !settings.SharedFolder)
+            if (!forgotten && ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings) && !settings.SharedFolder)
                 (settings with { SharedFolder = true }).Save(statePath);
         }
 
@@ -2339,7 +2378,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             // What the app is told of the session's settings is settings.json's, not status.json's
             // A session in the root itself shares it, whatever its settings say: its delete never takes the root
             var sharedFolder = !settingsRead || settings.SharedFolder || IsTheRoot(rootPath, projectPath);
-            var fromSettings = status with { ActionName = settings.ActionName, SharedFolder = sharedFolder };
+            var fromSettings = status with { ActionName = settings.ActionName, SharedFolder = sharedFolder, Adopted = settings.Adopted };
             var correctedStatus = stateChanged
                 ? fromSettings with { Id = id, Kind = kind, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
                 : fromSettings with { Id = id, Kind = kind, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };
@@ -2535,7 +2574,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
     /// Refused, and nothing moved, unless the state folder and its place in the trash are where they
     /// seem, in a working folder of the session's root (<see cref="WhyNotStateOf"/>).
     /// </summary>
-    private async Task<bool> TrashSessionStateAsync(ProjectInfo project)
+    private async Task<bool> TrashSessionStateAsync(ProjectInfo project, bool forgotten = false)
     {
         if (!Directory.Exists(project.StatePath)) return false;
         var trashedPath = ProjectFiles.SessionState.TrashedPathOf(project.ProjectPath, project.SessionId);
@@ -2545,7 +2584,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         {
             try
             {
-                return ProjectFiles.SessionState.Trash(project.ProjectPath, project.SessionId, DateTime.UtcNow);
+                return ProjectFiles.SessionState.Trash(project.ProjectPath, project.SessionId, DateTime.UtcNow, forgotten);
             }
             catch (Exception ex) when (attempt < 2 && ex is UnauthorizedAccessException or IOException)
             {
