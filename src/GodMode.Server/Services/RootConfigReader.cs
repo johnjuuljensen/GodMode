@@ -33,7 +33,8 @@ public class RootConfigReader : IRootConfigReader
 
     /// <summary>
     /// Default input schema with name and prompt fields.
-    /// Used when no schema.json file exists for an action.
+    /// Used when no schema.json file exists for an action. Only the name is required: a session
+    /// created with no prompt starts idle, waiting for its first message.
     /// </summary>
     private static readonly JsonElement DefaultSchema = JsonSerializer.Deserialize<JsonElement>("""
         {
@@ -43,7 +44,7 @@ public class RootConfigReader : IRootConfigReader
             "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
             "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions; otherwise tool calls that need approval wait for you", "default": false }
           },
-          "required": ["name", "prompt"]
+          "required": ["name"]
         }
         """);
 

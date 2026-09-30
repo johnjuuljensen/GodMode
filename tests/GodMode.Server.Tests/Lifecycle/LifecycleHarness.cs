@@ -457,7 +457,7 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             if (Interlocked.Exchange(ref _next, null) is { } hold) await hold.WaitAsync();
         }
 
-        public async Task<int> StartClaudeProcessAsync(ProjectInfo project, string initialPrompt, CancellationToken cancellationToken,
+        public async Task<int> StartClaudeProcessAsync(ProjectInfo project, string? initialPrompt, CancellationToken cancellationToken,
             Dictionary<string, string>? extraEnvironment = null, string[]? extraArgs = null)
         {
             _asked.Enqueue(project.Status.Id);

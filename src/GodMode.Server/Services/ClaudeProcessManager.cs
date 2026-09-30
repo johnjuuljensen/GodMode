@@ -89,7 +89,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
 
     public async Task<int> StartClaudeProcessAsync(
         ProjectInfo project,
-        string initialPrompt,
+        string? initialPrompt,
         CancellationToken cancellationToken,
         Dictionary<string, string>? extraEnvironment = null,
         string[]? extraArgs = null)
@@ -150,14 +150,23 @@ public class ClaudeProcessManager : IClaudeProcessManager
             });
     }
 
-    /// <summary>A new session on the project's session ID, told to carry on from the work in its folder.</summary>
+    /// <summary>
+    /// A new session on the project's session ID, told to carry on from the work in its folder. A
+    /// session that was never sent a message (created with no prompt) has nothing to carry on from:
+    /// it starts with no input, waiting for its first message.
+    /// </summary>
     private async Task<int> StartFreshSessionAsync(ProjectInfo project, CancellationToken cancellationToken,
         Dictionary<string, string>? extraEnvironment, string[]? extraArgs)
     {
         await SessionIdFile.WriteAsync(project.StatePath, project.ClaudeSessionId!, cancellationToken);
         return await RunClaudeProcessAsync(project, BuildArgs(["--session-id", project.ClaudeSessionId!], extraArgs),
-            "Continue from where we left off. Review the codebase and previous work.", cancellationToken, extraEnvironment);
+            HadInput(project) ? "Continue from where we left off. Review the codebase and previous work." : null,
+            cancellationToken, extraEnvironment);
     }
+
+    /// <summary>Whether the session was ever sent a message: <see cref="SendInputAsync"/> logs each to its input.jsonl.</summary>
+    private static bool HadInput(ProjectInfo project) =>
+        new FileInfo(Path.Combine(project.StatePath, ProjectFiles.SessionState.InputFileName)) is { Exists: true, Length: > 0 };
 
     private static string[] BuildArgs(string[] additionalArgs, string[]? extraArgs = null)
     {
@@ -413,7 +422,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             await launch.Process.StandardInput.WriteLineAsync(json);
             await launch.Process.StandardInput.FlushAsync();
 
-            var inputPath = Path.Combine(project.StatePath, "input.jsonl");
+            var inputPath = Path.Combine(project.StatePath, ProjectFiles.SessionState.InputFileName);
             await LogInputAsync(inputPath, input, CancellationToken.None);
         }
         finally

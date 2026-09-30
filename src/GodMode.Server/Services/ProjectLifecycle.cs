@@ -54,7 +54,7 @@ public sealed class ProjectLifecycle
 
     // ── Process ──
 
-    public Task StartAsync(ProjectInfo project, string initialPrompt, ClaudeLaunchSpec launch) =>
+    public Task StartAsync(ProjectInfo project, string? initialPrompt, ClaudeLaunchSpec launch) =>
         LaunchAsync(project, cancel => _processManager.StartClaudeProcessAsync(project, initialPrompt, cancel, launch.Environment, launch.Args));
 
     public Task ResumeAsync(ProjectInfo project, ClaudeLaunchSpec launch) =>
