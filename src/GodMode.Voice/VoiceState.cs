@@ -1,6 +1,4 @@
-using Microsoft.Extensions.AI;
-using VoiceBot.Core.AI;
-using VoiceBot.Core.Audio;
+using VoiceBot.Core.Pipeline;
 
 namespace GodMode.Voice;
 
@@ -17,25 +15,15 @@ public enum VoiceState
 }
 
 /// <summary>
-/// Works out <see cref="VoiceState"/> from what the session does, since VoiceBot reports no such state: speaking
-/// while the audio sent to the sink plays, thinking while the model works (and a moment after, across its tool calls),
-/// listening otherwise. Raises <see cref="Changed"/> when it changes.
+/// Works out <see cref="VoiceState"/>: the session's <see cref="SessionActivity"/> while it runs normally, unless a state
+/// is held over it (<see cref="Hold"/>). Raises <see cref="Changed"/> when it changes.
 /// </summary>
-public sealed class VoiceStateTracker : IAsyncDisposable
+public sealed class VoiceStateTracker
 {
-    /// <summary>How long it stays thinking after the model answers, so a tool call between rounds is not a flicker.</summary>
-    public static readonly TimeSpan ThinkingLinger = TimeSpan.FromMilliseconds(600);
-
     private readonly Lock _lock = new();
-    private readonly PeriodicTimer _timer = new(TimeSpan.FromMilliseconds(100));
-    private readonly Task _loop;
-    private int _inference;
-    private long _thinkingUntil;
-    private long _speakingUntil;
+    private SessionActivity _activity = SessionActivity.Listening;
     private VoiceState _held = VoiceState.Starting;
     private VoiceState _reported = VoiceState.Starting;
-
-    public VoiceStateTracker() => _loop = TickAsync();
 
     public event Action<VoiceState>? Changed;
 
@@ -64,62 +52,21 @@ public sealed class VoiceStateTracker : IAsyncDisposable
         Report();
     }
 
-    /// <summary>The user finished saying something: the model gets it next.</summary>
-    public void UserSpoke()
+    /// <summary>The session reported what it is doing (<see cref="ISessionEventSink.OnActivityAsync"/>).</summary>
+    public void Activity(SessionActivity activity)
     {
-        lock (_lock) _thinkingUntil = Math.Max(_thinkingUntil, Environment.TickCount64 + (long)ThinkingLinger.TotalMilliseconds);
+        lock (_lock) _activity = activity;
         Report();
     }
 
-    public void InferenceStarted()
-    {
-        lock (_lock) _inference++;
-        Report();
-    }
-
-    public void InferenceEnded()
-    {
-        lock (_lock)
+    private VoiceState Compute() =>
+        _held is VoiceState.Off or VoiceState.Error or VoiceState.Starting ? _held
+        : _activity switch
         {
-            _inference--;
-            _thinkingUntil = Environment.TickCount64 + (long)ThinkingLinger.TotalMilliseconds;
-        }
-        Report();
-    }
-
-    /// <summary>Audio of this length went to the sink: it plays after what is queued there already.</summary>
-    public void AudioSent(TimeSpan duration)
-    {
-        lock (_lock)
-        {
-            var now = Environment.TickCount64;
-            _speakingUntil = Math.Max(_speakingUntil, now) + (long)duration.TotalMilliseconds;
-        }
-        Report();
-    }
-
-    /// <summary>The sink dropped what it had queued (barge-in).</summary>
-    public void Interrupted()
-    {
-        lock (_lock) _speakingUntil = 0;
-        Report();
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        _timer.Dispose();
-        await _loop;
-    }
-
-    private VoiceState Compute()
-    {
-        if (_held is VoiceState.Off or VoiceState.Error or VoiceState.Starting)
-            return _held;
-        var now = Environment.TickCount64;
-        return now < _speakingUntil ? VoiceState.Speaking
-            : _inference > 0 || now < _thinkingUntil ? VoiceState.Thinking
-            : VoiceState.Listening;
-    }
+            SessionActivity.Thinking => VoiceState.Thinking,
+            SessionActivity.Speaking => VoiceState.Speaking,
+            _ => VoiceState.Listening,
+        };
 
     private void Report()
     {
@@ -131,50 +78,5 @@ public sealed class VoiceStateTracker : IAsyncDisposable
             _reported = state;
         }
         Changed?.Invoke(state);
-    }
-
-    private async Task TickAsync()
-    {
-        while (await _timer.WaitForNextTickAsync())
-            Report();
-    }
-}
-
-/// <summary>An audio sink that tells the <see cref="VoiceStateTracker"/> how long what it was sent plays.</summary>
-public sealed class ObservedAudioSink(IAudioSink inner, VoiceStateTracker state) : IAudioSink
-{
-    public AudioFormat Format => inner.Format;
-
-    public async Task SendAudioAsync(ReadOnlyMemory<byte> audio, CancellationToken ct)
-    {
-        await inner.SendAudioAsync(audio, ct);
-        state.AudioSent(TimeSpan.FromSeconds((double)audio.Length / Format.BytesPerSecond));
-    }
-
-    public Task SendStatusAsync(string message, CancellationToken ct) => inner.SendStatusAsync(message, ct);
-
-    public async Task InterruptAsync(CancellationToken ct)
-    {
-        await inner.InterruptAsync(ct);
-        state.Interrupted();
-    }
-}
-
-/// <summary>An inference provider that tells the <see cref="VoiceStateTracker"/> while the model works.</summary>
-public sealed class ObservedInference(IInferenceProvider inner, VoiceStateTracker state) : IInferenceProvider
-{
-    public IChatClient GetClient(InferenceTier tier) => inner.GetClient(tier);
-
-    public async Task<ChatResponse> CompleteAsync(InferenceTier tier, IList<ChatMessage> messages, ChatOptions? options = null, CancellationToken ct = default)
-    {
-        state.InferenceStarted();
-        try
-        {
-            return await inner.CompleteAsync(tier, messages, options, ct);
-        }
-        finally
-        {
-            state.InferenceEnded();
-        }
     }
 }

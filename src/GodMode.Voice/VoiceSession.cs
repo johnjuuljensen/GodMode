@@ -148,13 +148,13 @@ public sealed class VoiceSession : IAsyncDisposable
             await setup.Providers.InitializeAsync(services, setup.Settings);
             scope = services.CreateAsyncScope();
 
-            var inference = new ObservedInference(scope.ServiceProvider.GetRequiredService<IInferenceProvider>(), state);
+            var inference = scope.ServiceProvider.GetRequiredService<IInferenceProvider>();
             var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
                 GodModeGraph.Build(inference, languages, tools, phrases),
                 setup.Transcription,
-                new ObservedAudioSink(setup.AudioSink, state),
+                setup.AudioSink,
                 new EventSink(setup.Events, state))
             {
                 AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation), logger),
@@ -175,7 +175,6 @@ public sealed class VoiceSession : IAsyncDisposable
         }
         catch
         {
-            await state.DisposeAsync();
             await scope.DisposeAsync();
             await services.DisposeAsync();
             throw;
@@ -207,7 +206,6 @@ public sealed class VoiceSession : IAsyncDisposable
         }
         await _session.DisposeAsync();
         _state.Hold(VoiceState.Off);
-        await _state.DisposeAsync();
         await _scope.DisposeAsync();
         await _services.DisposeAsync();
         _stop.Dispose();
@@ -232,7 +230,6 @@ public sealed class VoiceSession : IAsyncDisposable
     {
         public Task OnTranscriptionAsync(TranscriptionEvent evt, string? cleanedText)
         {
-            if (!evt.IsPartial) state.UserSpoke();
             events.Transcript(cleanedText ?? evt.Text, evt.IsPartial);
             return Task.CompletedTask;
         }
@@ -259,6 +256,12 @@ public sealed class VoiceSession : IAsyncDisposable
         {
             state.Release();
             events.Recovered(service);
+            return Task.CompletedTask;
+        }
+
+        public Task OnActivityAsync(SessionActivity activity)
+        {
+            state.Activity(activity);
             return Task.CompletedTask;
         }
     }

@@ -20,10 +20,13 @@
     <!-- The end-to-end test launches the real server from this output directory, and it launches the fake claude -->
     <ProjectReference Include="..\..\src\GodMode.Server\GodMode.Server.csproj" />
     <ProjectReference Include="..\GodMode.FakeClaude\GodMode.FakeClaude.csproj" />
+    <!-- VoiceBot's session test doubles, from the submodule -->
+    <ProjectReference Include="..\..\external\VoiceBot\src\VoiceBot.Testing\VoiceBot.Testing.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="VoiceBot.Testing" />
   </ItemGroup>
 
 </Project>

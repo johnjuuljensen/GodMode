@@ -1,11 +1,9 @@
 using System.Collections.Concurrent;
-using System.Threading.Channels;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VoiceBot.Core.AI;
-using VoiceBot.Core.Audio;
 using VoiceBot.Core.Pipeline;
 using VoiceBot.Core.Speech;
 using VoiceBot.Providers.ElevenLabs;
@@ -29,124 +27,34 @@ internal static class Eventually
     }
 }
 
-/// <summary>Text in place of speech recognition: each <see cref="Say"/> is a final transcription.</summary>
-internal sealed class TextTranscriptions : ITranscriptionSource
+/// <summary>What GodMode's tests read off VoiceBot.Testing's doubles.</summary>
+internal static class TestingExtensions
 {
-    private readonly Channel<TranscriptionEvent> _channel = Channel.CreateUnbounded<TranscriptionEvent>();
-
-    public ChannelReader<TranscriptionEvent> Transcriptions => _channel.Reader;
-
-    public void Say(string text) => _channel.Writer.TryWrite(new TranscriptionEvent { Text = text, IsPartial = false });
-
-    /// <summary>What ElevenLabs' realtime recognizer sends for an utterance: a partial, then the final with the same text.</summary>
-    public void SayAsRecognized(string text)
+    extension(ListTranscriptionSource transcriptions)
     {
-        _channel.Writer.TryWrite(new TranscriptionEvent { Text = text, IsPartial = true });
-        Say(text);
+        /// <summary>What ElevenLabs' realtime recognizer sends for an utterance: a partial, then the final with the same text.</summary>
+        public void SayAsRecognized(string text)
+        {
+            transcriptions.AddPartial(text);
+            transcriptions.AddFinal(text);
+        }
     }
 
-    public Task StartAsync(string language, CancellationToken ct) => Task.CompletedTask;
-
-    public ValueTask DisposeAsync()
+    extension(ScriptedChatClient model)
     {
-        _channel.Writer.TryComplete();
-        return ValueTask.CompletedTask;
+        /// <summary>The user texts the model was given, in order.</summary>
+        public IReadOnlyList<string> UserTexts =>
+            [.. model.Requests.Select(r => r.Last(m => m.Role == ChatRole.User).Text).Distinct()];
+
+        /// <summary>Every tool result the model was given.</summary>
+        public IReadOnlyList<string> ToolResults =>
+            [.. model.Requests.SelectMany(r => r).SelectMany(m => m.Contents).OfType<FunctionResultContent>()
+                .Select(c => c.Result?.ToString() ?? "").Distinct()];
     }
 }
 
-/// <summary>A synthesizer that makes a short silence of anything, and keeps what it was asked to say.</summary>
-internal sealed class SilentSynthesizer : ISpeechSynthesizer
-{
-    private static readonly AudioFormat Format = AudioFormat.Pcm16kHz;
-    private readonly byte[] _pcm = new byte[Format.BytesPerSecond / 20]; // 50 ms
-
-    public ConcurrentQueue<string> Texts { get; } = new();
-
-    public Task<AudioSegment> SynthesizeAsync(string text, string language, CancellationToken ct)
-    {
-        Texts.Enqueue(text);
-        return Task.FromResult(new AudioSegment { PcmData = _pcm, Format = Format, OriginalText = text });
-    }
-}
-
-/// <summary>A speaker that plays nothing and counts what it was sent.</summary>
-internal sealed class SilentSink : IAudioSink
-{
-    public AudioFormat Format => AudioFormat.Pcm16kHz;
-    public int Chunks;
-
-    public Task SendAudioAsync(ReadOnlyMemory<byte> audio, CancellationToken ct)
-    {
-        ct.ThrowIfCancellationRequested();
-        Interlocked.Increment(ref Chunks);
-        return Task.CompletedTask;
-    }
-
-    public Task SendStatusAsync(string message, CancellationToken ct) => Task.CompletedTask;
-    public Task InterruptAsync(CancellationToken ct) => Task.CompletedTask;
-}
-
-/// <summary>
-/// A model that plays a script: each call takes the next step, which calls a tool or answers with ChatNode's
-/// "respond" tool. It keeps every request, so a test can read what the tools gave it. Out of script, it throws.
-/// </summary>
-internal sealed class ScriptedModel : IInferenceProvider, IChatClient
-{
-    private readonly ConcurrentQueue<Func<ChatResponse>> _steps = new();
-    private int _calls;
-
-    public ConcurrentQueue<IReadOnlyList<ChatMessage>> Requests { get; } = new();
-
-    /// <summary>How many times the model was called.</summary>
-    public int Calls => Volatile.Read(ref _calls);
-
-    public ScriptedModel CallTool(string name, Dictionary<string, object?>? arguments = null)
-    {
-        _steps.Enqueue(() => Reply(new FunctionCallContent($"call-{_calls}", name, arguments ?? [])));
-        return this;
-    }
-
-    public ScriptedModel Respond(string text)
-    {
-        _steps.Enqueue(() => Reply(new FunctionCallContent($"call-{_calls}", "respond",
-            new Dictionary<string, object?> { ["response_text"] = text })));
-        return this;
-    }
-
-    /// <summary>The user texts the model was given, in order.</summary>
-    public IReadOnlyList<string> UserTexts =>
-        [.. Requests.Select(r => r.Last(m => m.Role == ChatRole.User).Text).Distinct()];
-
-    /// <summary>Every tool result the model was given.</summary>
-    public IReadOnlyList<string> ToolResults =>
-        [.. Requests.SelectMany(r => r).SelectMany(m => m.Contents).OfType<FunctionResultContent>()
-            .Select(c => c.Result?.ToString() ?? "").Distinct()];
-
-    public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
-    {
-        Interlocked.Increment(ref _calls);
-        Requests.Enqueue([.. messages]);
-        return _steps.TryDequeue(out var step)
-            ? Task.FromResult(step())
-            : throw new InvalidOperationException("The scripted model ran out of script");
-    }
-
-    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
-
-    public object? GetService(Type serviceType, object? serviceKey = null) => null;
-    public void Dispose() { }
-
-    IChatClient IInferenceProvider.GetClient(InferenceTier tier) => this;
-
-    Task<ChatResponse> IInferenceProvider.CompleteAsync(InferenceTier tier, IList<ChatMessage> messages, ChatOptions? options, CancellationToken ct) =>
-        GetResponseAsync(messages, options, ct);
-
-    private static ChatResponse Reply(FunctionCallContent call) => new(new ChatMessage(ChatRole.Assistant, [call]));
-}
-
-/// <summary>The session's services without a network: the scripted model and the silent synthesizer.</summary>
-internal sealed class OfflineProviders(ScriptedModel model, SilentSynthesizer synthesizer) : IVoiceProviders
+/// <summary>The session's services without a network: the scripted model and a synthesizer of silence.</summary>
+internal sealed class OfflineProviders(ScriptedChatClient model, FixedPcmSynthesizer synthesizer) : IVoiceProviders
 {
     public ElevenLabsLanguageOptions? Language { get; private set; }
 
@@ -184,23 +92,26 @@ internal sealed class OfflineVoice : IAsyncDisposable
 {
     private readonly string _logDirectory = Path.Combine(Path.GetTempPath(), $"godmode-voice-{Guid.NewGuid():N}");
 
-    public TextTranscriptions Transcriptions { get; } = new();
-    public SilentSynthesizer Synthesizer { get; } = new();
+    public ListTranscriptionSource Transcriptions { get; } = new();
+    public FixedPcmSynthesizer Synthesizer { get; }
     public RecordingEvents Events { get; } = new();
-    public ScriptedModel Model { get; }
+    public ScriptedChatClient Model { get; }
     public OfflineProviders Providers { get; }
     public VoiceSession Session { get; private set; } = null!;
 
-    private OfflineVoice(ScriptedModel model)
+    private OfflineVoice(ScriptedChatClient model, TimeSpan speech)
     {
+        Synthesizer = new FixedPcmSynthesizer(speech);
         Model = model;
         Providers = new OfflineProviders(model, Synthesizer);
     }
 
-    public static async Task<OfflineVoice> StartAsync(IGodModeServers servers, ScriptedModel model,
-        Func<CancellationToken, Task>? connect = null, VoiceSettings? settings = null, ILoggerFactory? loggerFactory = null)
+    public static async Task<OfflineVoice> StartAsync(IGodModeServers servers, ScriptedChatClient model,
+        Func<CancellationToken, Task>? connect = null, VoiceSettings? settings = null, ILoggerFactory? loggerFactory = null,
+        TimeSpan? speech = null)
     {
-        var voice = new OfflineVoice(model);
+        // How long anything the bot says plays: short, unless a test watches it speak
+        var voice = new OfflineVoice(model, speech ?? TimeSpan.FromMilliseconds(50));
         voice.Session = await VoiceSession.StartAsync(new VoiceSessionSetup
         {
             Settings = settings ?? VoiceSettings.Default,
@@ -212,7 +123,7 @@ internal sealed class OfflineVoice : IAsyncDisposable
                 if (connect is not null) await connect(ct);
             },
             Transcription = TranscriptionInput.FromSource(voice.Transcriptions),
-            AudioSink = new SilentSink(),
+            AudioSink = new RecordingAudioSink(),
             Providers = voice.Providers,
             Events = voice.Events,
             LoggerFactory = loggerFactory ?? NullLoggerFactory.Instance,
