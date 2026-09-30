@@ -199,16 +199,14 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     /// <summary>
     /// Creates a project (the default "Create" action) in the harness root, or in
-    /// <paramref name="root"/> of <paramref name="profile"/>, and returns its status.
+    /// <paramref name="root"/> of <paramref name="profile"/>, and returns its status. A null
+    /// <paramref name="prompt"/> sends none, as the form does with the description left empty.
     /// </summary>
-    public async Task<ProjectStatus> CreateProjectAsync(string name = "p1", string prompt = "Say hello",
+    public async Task<ProjectStatus> CreateProjectAsync(string name = "p1", string? prompt = "Say hello",
         string root = RootName, string profile = ProfileName, IReadOnlyDictionary<string, object>? inputs = null)
     {
-        var request = new Dictionary<string, JsonElement>
-        {
-            ["name"] = JsonSerializer.SerializeToElement(name),
-            ["prompt"] = JsonSerializer.SerializeToElement(prompt),
-        };
+        var request = new Dictionary<string, JsonElement> { ["name"] = JsonSerializer.SerializeToElement(name) };
+        if (prompt != null) request["prompt"] = JsonSerializer.SerializeToElement(prompt);
         foreach (var (key, value) in inputs ?? new Dictionary<string, object>())
             request[key] = JsonSerializer.SerializeToElement(value);
         var status = (await Projects.CreateProjectAsync(new CreateProjectRequest(profile, root, request))).Project
