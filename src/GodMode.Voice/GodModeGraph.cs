@@ -10,7 +10,8 @@ namespace GodMode.Voice;
 /// GodMode's voice graph, after VoiceBot's VoiceControlGraph: a terse control loop in Danish protocol words, over
 /// the hub (<see cref="VoiceTools"/>) instead of its fake system. A greeting, then one chat node with the tools, and
 /// help (<see cref="HelpNode"/>) above it, which says what they are on the first partial that asks, and the yes a create
-/// waits on (<see cref="ConfirmCreateNode"/>) between them.
+/// waits on (<see cref="ConfirmCreateNode"/>) between them. The chat is told when a final was heard more than one way
+/// (<see cref="HeardNode"/>): its tools then act on nothing.
 /// </summary>
 public static class GodModeGraph
 {
@@ -20,8 +21,9 @@ public static class GodModeGraph
     public static readonly IReadOnlyList<string> CommandWords =
         ["hvad venter", "projekter", "status","svar", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review", "start issue", "opret"];
 
-    /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
-    public static ToolSet AddTools(ToolSet set, VoiceTools tools) => tools.AddTo(set).AddAnnouncementTools();
+    /// <summary>The graph's tools: the hub's, and muting announcements, which acts too (<see cref="VoiceTools.Acting"/>).</summary>
+    public static ToolSet AddTools(ToolSet set, VoiceTools tools) =>
+        tools.AddTo(set).Add(tools.Acting(AnnouncementTools.Mute)).Add(tools.Acting(AnnouncementTools.Unmute));
 
     public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases)
     {
@@ -60,6 +62,10 @@ public static class GodModeGraph
               the user's yes to that read-back creates it, and that is not yours to answer: never say it was created. Actions that start no session (new
               root, promote) are not started by voice yet.
 
+            EARLIER READINGS: when the user's message lists earlier readings, act on an earlier reading only by asking.
+            {{VoiceTools.Answer}}, {{VoiceTools.MarkSeen}} and muting do nothing then: ask which they meant as a closed
+            question naming the project ("Mente du ja eller nej til 283?"), and act on their next answer.
+
             PERMISSION REQUESTS are never answered by voice. Say "<handle> skal have tilladelse: <what>. Svar på skærmen."
 
             PROTOCOL WORDS you use yourself: "Klar" (ready), "Sendt" (the answer was sent), "Ukendt" (no such project),
@@ -73,7 +79,7 @@ public static class GodModeGraph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting))
-            .Child(new ReadBackNode(new ChatNode("control", 50, InferenceTier.Light, inference, systemPrompt), tools.Creates, phrases))
+            .Child(new ReadBackNode(new HeardNode(new ChatNode("control", 50, InferenceTier.Light, inference, systemPrompt), tools.Conversation), tools.Creates, phrases))
             .Build();
     }
 }

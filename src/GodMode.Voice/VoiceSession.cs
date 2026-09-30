@@ -263,8 +263,8 @@ public sealed class VoiceSession : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // A microphone that failed mid-session faults its transcription source's teardown (VoiceBot's
-            // SpeechEngineTranscriptionSource rethrows it): the rest is let go of all the same
+            // VoiceBot logs a failing teardown step rather than throwing it (VoiceBot#64); should one throw even so,
+            // the rest is let go of all the same
             _logger.LogWarning(ex, "Voice session's teardown failed");
         }
         _state.Hold(VoiceState.Off);
@@ -315,18 +315,18 @@ public sealed class VoiceSession : IAsyncDisposable
             // keeps the session's source going, so this is Android's)
             if (error.Service == SessionService.AudioInput)
             {
-                state.Hold(VoiceState.Error);
+                state.Hold(VoiceState.Error, SessionService.AudioInput);
                 events.Error(SessionService.Session, SessionErrorKind.ServiceError, $"The microphone stopped: {error.Message}");
                 return Task.CompletedTask;
             }
-            if (error.Kind == SessionErrorKind.Authentication) state.Hold(VoiceState.Error);
+            if (error.Kind == SessionErrorKind.Authentication) state.Hold(VoiceState.Error, error.Service);
             events.Error(error.Service, error.Kind, error.Message);
             return Task.CompletedTask;
         }
 
         public Task OnRecoveredAsync(SessionService service)
         {
-            state.Release();
+            state.Release(service);
             events.Recovered(service);
             return Task.CompletedTask;
         }

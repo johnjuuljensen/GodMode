@@ -272,6 +272,21 @@ public sealed class VoiceSessionTests
             () => $"voice to show the error; its states: {string.Join(", ", voice.Events.States)}");
     }
 
+    /// <summary>A held error goes only with its own service's recovery: an STT reconnect is no working microphone.</summary>
+    [Fact]
+    public void A_held_error_is_released_by_the_failed_services_recovery_only()
+    {
+        var state = new VoiceStateTracker();
+        state.Release();
+        state.Hold(VoiceState.Error, SessionService.AudioInput);
+
+        state.Release(SessionService.SpeechRecognition);
+        Assert.Equal(VoiceState.Error, state.Current);
+
+        state.Release(SessionService.AudioInput);
+        Assert.Equal(VoiceState.Listening, state.Current);
+    }
+
     [Theory]
     [InlineData(VoiceSettings.DefaultLanguage)]
     [InlineData("da-DK")]

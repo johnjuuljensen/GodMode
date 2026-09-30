@@ -28,6 +28,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string NameParameter = "name";
     public const string PromptParameter = "prompt";
 
+    /// <summary>What the conversation is about, and whether the final being answered was heard more than one way.</summary>
+    public VoiceConversation Conversation => conversation;
+
     /// <summary>The creates voice reads back, and makes on the user's yes.</summary>
     public SessionCreates Creates { get; } = new(servers, handles, time);
 
@@ -81,7 +84,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // Those of projects voice knows: an item of one it has not heard of (yet, or any more) has no handle to say
         var items = (await servers.GetAttentionAsync(ct)).Where(i => handles.Of(i.Project) is not null).ToList();
         // What was read out is what the conversation is about now: one project, or none to answer unnamed
-        conversation.Current = items is [var only] ? only.Project : null;
+        Talked(items is [var only] ? only.Project : null);
         if (items.Count == 0)
             return "Nothing needs the user.";
 
@@ -95,7 +98,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     {
         var all = projects.Projects;
         // As what needs me: one project read out is the one talked about, several leave none
-        conversation.Current = all is [var only] ? only.Ref : null;
+        Talked(all is [var only] ? only.Ref : null);
         if (all.Count == 0)
             return "No projects on any server.";
 
@@ -111,7 +114,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             return await UnknownAsync(reference, ct);
 
         var status = await servers.GetStatusAsync(target, ct);
-        conversation.Current = target;
+        Talked(target);
         var text = new StringBuilder($"{handle} ({Where(status.Name, status.RootName, status.ProfileName, status.Kind)}): {status.State}.");
         if (board.ItemOf(target) is { } item)
             text.Append($" Needs the user: {Describe(item.Item)}");
@@ -124,6 +127,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     public async Task<string> AnswerAsync(string? reference, string? answer, CancellationToken ct)
     {
+        if (NotOnAGuess() is { } refused)
+            return refused;
         if (string.IsNullOrWhiteSpace(answer))
             return "No answer given: ask the user what to answer.";
         if (Target(reference) is not { } target || handles.Of(target) is not { } handle)
@@ -144,12 +149,40 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     public async Task<string> MarkSeenAsync(string? reference, CancellationToken ct)
     {
+        if (NotOnAGuess() is { } refused)
+            return refused;
         if (Target(reference) is not { } target)
             return await UnknownAsync(reference, ct);
 
         await servers.MarkSeenAsync(target, ct);
         conversation.Current = target;
         return $"{handles.Of(target) ?? target.ProjectId} is marked seen.";
+    }
+
+    /// <summary>
+    /// A tool that acts (<paramref name="tool"/>: muting announcements, say), made to do nothing on a final heard more
+    /// than one way, as <see cref="AnswerAsync"/> and <see cref="MarkSeenAsync"/> do.
+    /// </summary>
+    public VoiceTool Acting(VoiceTool tool) => tool with
+    {
+        Handler = (context, args, ct) => NotOnAGuess() is { } refused ? Task.FromResult(refused) : tool.Handler(context, args, ct),
+    };
+
+    /// <summary>
+    /// Why a tool that acts does nothing now: the final being answered was heard more than one way, so what the user
+    /// meant is a guess, and nothing is sent or changed on a guess. Null when it was heard one way.
+    /// </summary>
+    private string? NotOnAGuess() => conversation.Unsure is { } unsure
+        ? $"Nothing was done: the user was heard more than one way, \"{unsure.Final}\" and earlier " +
+          $"{string.Join(", ", unsure.Readings.Select(r => $"\"{r}\""))}. Ask which they meant, as a closed question " +
+          "naming the project (e.g. \"Mente du ja eller nej til 283?\"), and act only on their next answer."
+        : null;
+
+    /// <summary>What the conversation is about from now on, from a tool that read it out; left as it is on a final heard more than one way.</summary>
+    private void Talked(ProjectRef? project)
+    {
+        if (conversation.Unsure is null)
+            conversation.Current = project;
     }
 
     /// <summary>What to read back for a create, or ask, or why there is none (<see cref="SessionCreates.Propose"/>).</summary>
