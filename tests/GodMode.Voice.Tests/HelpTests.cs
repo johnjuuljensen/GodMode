@@ -1,3 +1,4 @@
+using VoiceBot.Core.Speech;
 using VoiceBot.Core.Tools;
 
 namespace GodMode.Voice.Tests;
@@ -75,6 +76,25 @@ public sealed class HelpTests
 
         Assert.Equal(["Hjælp. Kan du høre mig?"], UserTexts(model));
         Assert.Single(voice.Events.Responses, r => r == Danish);
+    }
+
+    /// <summary>
+    /// VoiceBot#61: a final carries the earlier readings it revised, for the model. Help is the final's own words: an
+    /// earlier reading "Hjælp." of a final that says something else goes to the model, with the reading, and help is not said.
+    /// </summary>
+    [Fact]
+    public async Task An_earlier_reading_that_asks_for_help_does_not_trigger_help()
+    {
+        var model = new ScriptedChatClient().Respond("Uklar.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.Add(new TranscriptionEvent { Text = "Kører gør man.", IsPartial = false, Readings = ["Hjælp."] });
+        await voice.Events.SaidAsync("Uklar.");
+
+        Assert.Equal(["Kører gør man.\nEarlier readings of the same utterance, before the transcriber revised them into the text above: \"Hjælp.\""],
+            UserTexts(model));
+        Assert.DoesNotContain(Danish, voice.Events.Responses);
     }
 
     /// <summary>What the user said, in each of the model's requests (the chat node wraps it in its transcription status).</summary>

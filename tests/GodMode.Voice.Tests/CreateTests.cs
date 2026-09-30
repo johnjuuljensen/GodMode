@@ -105,6 +105,43 @@ public sealed class CreateTests
     }
 
     /// <summary>
+    /// VoiceBot#61: a final carries the partials it revised, for the model. The yes is the final's own words: an
+    /// earlier reading "ja" of a final that says something else ("Kører gør man.") is no yes, through the session and
+    /// at the node.
+    /// </summary>
+    [Fact]
+    public async Task An_earlier_reading_yes_of_a_final_that_is_no_yes_cancels()
+    {
+        var servers = Servers();
+        await using var voice = await ReadBack283Async(servers, StartIssue283());
+
+        voice.Transcriptions.AddPartial("Ja.");
+        voice.Transcriptions.AddFinal("Kører gør man.");
+        await voice.Events.SaidAsync("Annulleret. Intet oprettet.");
+
+        Assert.Empty(servers.Creates);
+    }
+
+    [Fact]
+    public async Task A_final_that_is_no_yes_does_not_create_whatever_its_earlier_readings()
+    {
+        var servers = Servers();
+        var clock = new ManualClock();
+        var tools = Tools(servers, out _, clock);
+        var node = new ConfirmCreateNode("confirm-create", 70, tools.Creates, Danish);
+        await Start(tools, root: "GodMode", issue: "283");
+        Arm(tools);
+        clock.Advance(TimeSpan.FromSeconds(2));
+
+        var context = Final("Kører gør man.", clock.GetUtcNow());
+        context.LatestTranscription = context.LatestTranscription! with { Readings = ["Ja.", "ja tak"] };
+
+        Assert.Equal("Annulleret. Intet oprettet.", (await node.EvaluateAsync(context, CancellationToken.None))?.ResponseText);
+        await tools.Creates.Running;
+        Assert.Empty(servers.Creates);
+    }
+
+    /// <summary>
     /// The review's case: "Start issue 283", and a "ja" said while the model still works on it, before the read-back
     /// is said. It is evaluated after the read-back started, and barges in on it, but was said before: it is no answer to it.
     /// </summary>
