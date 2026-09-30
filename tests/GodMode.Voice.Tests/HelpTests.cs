@@ -38,26 +38,48 @@ public sealed class HelpTests
         Assert.Equal(0, model.Calls);
     }
 
-    /// <summary>
-    /// The rest of the utterance is help's: the partials that grow from it and the final (here one that merged the
-    /// next words, as ElevenLabs does, VoiceBot#62) reach neither the model nor help again. The next utterance does.
-    /// </summary>
+    /// <summary>The same words again in the utterance (a later partial, the final) reach neither the model nor help again.</summary>
     [Fact]
-    public async Task Help_claims_the_rest_of_its_utterance_and_the_next_one_goes_to_the_model()
+    public async Task Help_claims_its_own_words_until_the_final()
     {
         var model = new ScriptedChatClient().Respond("Intet venter.");
         await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.AddPartial("Hjælp.");
-        voice.Transcriptions.AddPartial("Hjælp. Kører");
-        voice.Transcriptions.AddFinal("Hjælp. Kører gør man.");
+        voice.Transcriptions.AddPartial("hjælp");
+        voice.Transcriptions.AddFinal("Hjælp!");
         voice.Transcriptions.SayAsRecognized("Hvad venter?");
         await voice.Events.SaidAsync("Intet venter.");
 
-        Assert.Equal(["Hvad venter?"], model.UserTexts.Select(t => t[(t.IndexOf("Text: ") + "Text: ".Length)..]));
+        Assert.Equal(["Hvad venter?"], UserTexts(model));
         Assert.Single(voice.Events.Responses, r => r == Danish);
     }
+
+    /// <summary>
+    /// The voice log of 2026-09-30: ElevenLabs held "Hjælp." open (VoiceBot#62), and 20 s later the same utterance
+    /// grew by the user's next sentence. New words are not help's: the model gets them, with the words before them.
+    /// </summary>
+    [Fact]
+    public async Task New_words_after_help_in_the_same_utterance_go_to_the_model()
+    {
+        var model = new ScriptedChatClient().Respond("Ja.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.AddPartial("Hjælp.");
+        await voice.Events.SaidAsync(Danish);
+        voice.Transcriptions.AddPartial("Hjælp. Kan du høre mig?");
+        voice.Transcriptions.AddFinal("Hjælp. Kan du høre mig?");
+        await voice.Events.SaidAsync("Ja.");
+
+        Assert.Equal(["Hjælp. Kan du høre mig?"], UserTexts(model));
+        Assert.Single(voice.Events.Responses, r => r == Danish);
+    }
+
+    /// <summary>What the user said, in each of the model's requests (the chat node wraps it in its transcription status).</summary>
+    private static IEnumerable<string> UserTexts(ScriptedChatClient model) =>
+        model.UserTexts.Select(t => t[(t.IndexOf("Text: ", StringComparison.Ordinal) + "Text: ".Length)..]);
 
     [Fact]
     public async Task Help_answers_each_time_it_is_asked()

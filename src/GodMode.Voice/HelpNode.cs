@@ -7,8 +7,9 @@ namespace GodMode.Voice;
 /// <summary>
 /// "Hjælp" / "help": says what the user can ask, from the tools the graph has. It answers on the first partial that
 /// is one of its phrases, as VoiceBot's CommandNode answers a command, without waiting for the final, and claims the
-/// rest of that utterance (the partials that grow from it, and the final that ends it), so the chat node never
-/// answers the same words again.
+/// same words when they come again in that utterance (later partials, and the final that ends it), so the chat node
+/// never answers them. New words after them are the user's next sentence (VoiceBot#62 can hold an utterance open):
+/// they release the claim and go on, whole, to the chat node.
 /// Not a CommandNode: on VoiceBot's pin its keywords are single words, so "hvad kan du" never matches, and it claims
 /// only an exact repeat, so "Hjælp. Kører" would say the list again (johnjuuljensen/VoiceBot#65).
 /// </summary>
@@ -50,10 +51,10 @@ public sealed class HelpNode(string id, int priority) : INode
         var text = context.CleanedText ?? transcription.Text;
         var tokens = CommandResolver.Tokenize(text);
 
-        // The utterance help answered, until its final: what grows from it is the same request
+        // The words help answered, until the final: the same words again are the same request, and more are not
         if (context.GraphState.Get<string[]?>(context.StateKey, null) is { } answered)
         {
-            var same = tokens.AsSpan().StartsWith(answered);
+            var same = tokens.AsSpan().SequenceEqual(answered);
             if (!same || !transcription.IsPartial)
                 context.GraphState.Remove(context.StateKey);
             if (same)
