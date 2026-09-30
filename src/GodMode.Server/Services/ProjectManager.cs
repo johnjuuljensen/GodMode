@@ -938,7 +938,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         }
 
         // Apply script result overrides (project_path, project_name, kind)
-        var scriptResults = ReadResultFile(resultFilePath);
+        var scriptResults = ReadResultFile(resultFilePath, _logger);
         if (scriptResults.TryGetValue("project_path", out var overridePath) && !string.IsNullOrWhiteSpace(overridePath))
         {
             try
@@ -1114,7 +1114,7 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
             }
 
             // The script's output is untrusted: its message is cut to a length the app shows, and not logged
-            var message = ReadResultFile(resultFilePath).GetValueOrDefault("message") is { Length: > 0 } said
+            var message = ReadResultFile(resultFilePath, _logger).GetValueOrDefault("message") is { Length: > 0 } said
                 ? said.Length <= MaxRunMessageLength ? said : TextCut.Cut(said, MaxRunMessageLength - 1) + "…"
                 : null;
             _logger.LogInformation("Action '{Action}' of root '{Root}' ran ({RunId}), {Said}", action.Name, rootName, progressId,
@@ -2646,59 +2646,52 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
         return (fullPath, folder);
     }
 
+    /// <summary>The result file's keys that hold one line, read wherever they are before a multi-line key.</summary>
+    private static readonly string[] SingleLineResultKeys = ["project_path", "project_name", "kind"];
+
+    /// <summary>The result file's keys whose value runs from their <c>=</c> to the end of the file.</summary>
+    private static readonly string[] MultiLineResultKeys = ["project_prompt", "message"];
+
+    /// <summary>An ignored key is the script's text: it is logged cut to this length.</summary>
+    private const int MaxIgnoredKeyLength = 40;
+
     /// <summary>
-    /// Reads a result file written by scripts. Format: key=value per line. Ignores blank/comment lines.
-    /// The last key in the file may span multiple lines (everything after the first '=' until EOF).
-    /// This allows scripts to return multiline values (e.g. project_prompt) by placing them last.
-    /// Returns empty dictionary if file doesn't exist.
+    /// Reads a result file written by scripts, empty if there is none. Only its known keys are read: a
+    /// line starts a key only when it begins with one of them followed by <c>=</c>. A single-line key
+    /// (<see cref="SingleLineResultKeys"/>) is that line; a multi-line one (<see cref="MultiLineResultKeys"/>)
+    /// runs from its <c>=</c> to the end of the file, whatever the lines after it hold (<c>a=b</c>, a URL's
+    /// query, a line starting <c>kind=</c>), so a script places it last. Before it, blank and <c>#</c> lines
+    /// are skipped, and any other <c>key=</c> line is ignored, logged once by its keys.
     /// </summary>
-    private static Dictionary<string, string> ReadResultFile(string resultFilePath)
+    internal static IReadOnlyDictionary<string, string> ReadResultFile(string resultFilePath, ILogger logger)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!File.Exists(resultFilePath)) return result;
 
         var lines = File.ReadAllLines(resultFilePath);
-        string? multilineKey = null;
-        List<string>? multilineLines = null;
-
-        foreach (var line in lines)
+        var ignored = new List<string>();
+        for (var i = 0; i < lines.Length; i++)
         {
-            if (multilineKey != null)
-            {
-                // We're accumulating lines for the last key
-                multilineLines!.Add(line);
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#')) continue;
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line) || line.TrimStart().StartsWith('#')) continue;
             var eqIndex = line.IndexOf('=');
             if (eqIndex <= 0) continue;
             var key = line[..eqIndex].Trim();
             var value = line[(eqIndex + 1)..];
-            result[key] = value.Trim();
+            if (MultiLineResultKeys.Contains(key, StringComparer.OrdinalIgnoreCase))
+            {
+                result[key] = string.Join(Environment.NewLine, lines[(i + 1)..].Prepend(value)).Trim();
+                break;
+            }
+            if (SingleLineResultKeys.Contains(key, StringComparer.OrdinalIgnoreCase))
+                result[key] = value.Trim();
+            else
+                ignored.Add(key.Length <= MaxIgnoredKeyLength ? key : TextCut.Cut(key, MaxIgnoredKeyLength - 1) + "…");
         }
 
-        // Find the last key and re-read its value as multiline (everything after key= to EOF)
-        // This lets scripts place a multiline value (like a prompt) as the last entry.
-        for (int i = lines.Length - 1; i >= 0; i--)
-        {
-            if (string.IsNullOrWhiteSpace(lines[i]) || lines[i].StartsWith('#')) continue;
-            var eqIndex = lines[i].IndexOf('=');
-            if (eqIndex <= 0) continue;
-
-            var lastKey = lines[i][..eqIndex].Trim();
-            // Collect all lines from this key's value line to end of file
-            var firstValueLine = lines[i][(eqIndex + 1)..];
-            var valueParts = new List<string> { firstValueLine };
-            for (int j = i + 1; j < lines.Length; j++)
-                valueParts.Add(lines[j]);
-
-            var multiValue = string.Join(Environment.NewLine, valueParts).Trim();
-            if (!string.IsNullOrEmpty(multiValue))
-                result[lastKey] = multiValue;
-            break;
-        }
-
+        if (ignored.Count > 0)
+            logger.LogWarning("The result file {ResultFile} has lines of keys it does not know, ignored: {Keys}",
+                resultFilePath, string.Join(", ", ignored.Distinct(StringComparer.OrdinalIgnoreCase)));
         return result;
     }
 

@@ -368,7 +368,11 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 
 See [Environment](#environment) for everything else a script gets.
 
-A create script can override the project's `project_path`, `project_name` or `project_prompt`, and name the session's `kind`, by writing them to `GODMODE_RESULT_FILE`, one `key=value` per line. The last key may span several lines, which suits a multiline prompt.
+A create script can override the project's `project_path`, `project_name` or `project_prompt`, and name the session's `kind`, by writing them to `GODMODE_RESULT_FILE`, one `key=value` per line. Only the keys below are read: a line starts a key only when it begins with one of them followed by `=`.
+
+- **`project_prompt` and `message` run to the end of the file.** Their value is everything from their `=` to the end, whatever the lines after it hold: `a=b`, code, a URL's `?q=1`, even a line starting `kind=`. So a script writes them last, after the single-line keys, and writes at most one of them (a second is part of the first's value).
+- **`project_path`, `project_name` and `kind` are one line each**, read wherever they are before a multi-line key. Blank lines and lines starting `#` before it are skipped.
+- **Any other `key=` line is ignored**, and logged once as a warning by its keys (cut to 40 characters), never by its values.
 
 | Key | What it sets |
 |-----|--------------|
