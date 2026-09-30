@@ -61,12 +61,12 @@ public sealed record VoiceSessionSetup
 public sealed class VoiceSession : IAsyncDisposable
 {
     /// <summary>
-    /// Speech-recognition ghost words to drop. None that could be an answer: a dropped "ja" is an answer the session
-    /// never gets. VoiceBot's Danish list has "tak", which answers "shall I …?" as well as it thanks.
+    /// Speech-recognition ghost words to drop: VoiceBot's for the session's languages. None that could be an answer
+    /// (<see cref="AnswerWords"/>): a dropped "ja" is an answer the session never gets.
     /// </summary>
-    public static readonly IReadOnlyList<string> NoiseWords = ["hmm", "øh", "ah", "oh", "hej", "hey"];
+    public static IReadOnlyList<string> NoiseWords(SessionLanguages languages) => StringResources.GetWordList(languages, "noiseWords");
 
-    /// <summary>Words that are answers, never noise, in the session's languages.</summary>
+    /// <summary>Words that are answers, or say something, never noise, in the session's languages.</summary>
     public static readonly IReadOnlySet<string> AnswerWords =
         new HashSet<string>(["ja", "nej", "jo", "tak", "nej tak", "ja tak", "okay", "ok", "yes", "no", "yeah", "nope"], StringComparer.OrdinalIgnoreCase);
 
@@ -148,20 +148,20 @@ public sealed class VoiceSession : IAsyncDisposable
             await setup.Providers.InitializeAsync(services, setup.Settings);
             scope = services.CreateAsyncScope();
 
-            var inference = new ObservedInference(scope.ServiceProvider.GetRequiredService<IInferenceProvider>(), state);
+            var inference = scope.ServiceProvider.GetRequiredService<IInferenceProvider>();
             var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
                 GodModeGraph.Build(inference, languages, tools, phrases),
                 setup.Transcription,
-                new ObservedAudioSink(setup.AudioSink, state),
+                setup.AudioSink,
                 new EventSink(setup.Events, state))
             {
                 AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation), logger),
                 Options = new SessionOptions
                 {
                     LogDirectory = setup.LogDirectory,
-                    NoiseWords = NoiseWords,
+                    NoiseWords = NoiseWords(languages),
                 },
             });
 
@@ -175,7 +175,6 @@ public sealed class VoiceSession : IAsyncDisposable
         }
         catch
         {
-            await state.DisposeAsync();
             await scope.DisposeAsync();
             await services.DisposeAsync();
             throw;
@@ -205,9 +204,17 @@ public sealed class VoiceSession : IAsyncDisposable
         {
             _logger.LogWarning(ex, "Voice session ended with an error");
         }
-        await _session.DisposeAsync();
+        try
+        {
+            await _session.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            // A microphone that failed mid-session faults its transcription source's teardown (VoiceBot's
+            // SpeechEngineTranscriptionSource rethrows it): the rest is let go of all the same
+            _logger.LogWarning(ex, "Voice session's teardown failed");
+        }
         _state.Hold(VoiceState.Off);
-        await _state.DisposeAsync();
         await _scope.DisposeAsync();
         await _services.DisposeAsync();
         _stop.Dispose();
@@ -232,7 +239,6 @@ public sealed class VoiceSession : IAsyncDisposable
     {
         public Task OnTranscriptionAsync(TranscriptionEvent evt, string? cleanedText)
         {
-            if (!evt.IsPartial) state.UserSpoke();
             events.Transcript(cleanedText ?? evt.Text, evt.IsPartial);
             return Task.CompletedTask;
         }
@@ -259,6 +265,12 @@ public sealed class VoiceSession : IAsyncDisposable
         {
             state.Release();
             events.Recovered(service);
+            return Task.CompletedTask;
+        }
+
+        public Task OnActivityAsync(SessionActivity activity)
+        {
+            state.Activity(activity);
             return Task.CompletedTask;
         }
     }

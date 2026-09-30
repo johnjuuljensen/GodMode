@@ -19,7 +19,7 @@ public sealed class ProjectListTests
     {
         // The server is there when voice starts, with no projects yet
         var servers = new FakeServers(ServerA);
-        var model = new ScriptedModel()
+        var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ListProjects).Respond("1 projekt: testing.")
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "Assistent", [VoiceTools.TextParameter] = "Skift til outbound profil." })
             .Respond("Sendt til testing.");
@@ -28,11 +28,11 @@ public sealed class ProjectListTests
 
         servers.AddProject(ServerA, Chat, "testing", root: "Assistant", kind: "chat", profile: "Outbound");
 
-        voice.Transcriptions.Say("Hvilke projekter er i gang?");
+        voice.Transcriptions.AddFinal("Hvilke projekter er i gang?");
         await voice.Events.SaidAsync("1 projekt: testing.");
         Assert.Equal("1 projects:\n- testing (testing, Assistant, Outbound, chat): Idle", Assert.Single(model.ToolResults));
 
-        voice.Transcriptions.Say("Sig til Assistent at den skal skifte til outbound profil");
+        voice.Transcriptions.AddFinal("Sig til Assistent at den skal skifte til outbound profil");
         await voice.Events.SaidAsync("Sendt til testing.");
 
         var (project, text) = Assert.Single(servers.Replies);

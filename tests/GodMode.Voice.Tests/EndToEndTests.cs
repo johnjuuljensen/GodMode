@@ -36,7 +36,7 @@ public sealed class EndToEndTests
         var older = await CreateAsync(hub, "101-drop-columns");
         await WaitForAttentionAsync(hub, older.Id);
 
-        var model = new ScriptedModel()
+        var model = new ScriptedChatClient()
             .CallTool(VoiceTools.WhatNeedsMe).Respond("2 venter: 101 og 283 har spørgsmål.")
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "283", [VoiceTools.TextParameter] = Answer }).Respond("Sendt til 283.");
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
@@ -80,7 +80,7 @@ public sealed class EndToEndTests
         await using var hub = HubConnections.Build(new RelayTarget($"{server.Url}/hubs/projects", TestServer.ApiKey));
         await hub.StartAsync();
 
-        var model = new ScriptedModel()
+        var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ListProjects).Respond("1 projekt: testing.")
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = TestServer.Root, [VoiceTools.TextParameter] = Answer }).Respond("Sendt til testing.")
             .CallTool(VoiceTools.ListProjects).Respond("Ingen projekter.");
@@ -95,11 +95,11 @@ public sealed class EndToEndTests
         await Eventually.UntilAsync(() => voice.Session.Projects.Find(new ProjectRef("local", created.Id)) is not null,
             () => $"voice to know testing: {string.Join(", ", voice.Session.Projects.Projects.Select(p => p.Project.Name))}");
 
-        voice.Transcriptions.Say("Hvilke projekter er der?");
+        voice.Transcriptions.AddFinal("Hvilke projekter er der?");
         await voice.Events.SaidAsync("1 projekt: testing.");
         Assert.StartsWith($"1 projects:\n- testing (testing, {TestServer.Root}", Assert.Single(model.ToolResults));
 
-        voice.Transcriptions.Say($"Svar {TestServer.Root} at den skal bruge den eksisterende migration");
+        voice.Transcriptions.AddFinal($"Svar {TestServer.Root} at den skal bruge den eksisterende migration");
         await voice.Events.SaidAsync("Sendt til testing.");
         await Eventually.UntilAsync(() => server.StdinOf(created.Id).Count == 2, () => $"the answer on stdin: {string.Join(" | ", server.StdinOf(created.Id))}\n{server.Output}");
         Assert.Contains(JsonSerializer.Serialize(Answer), server.StdinOf(created.Id)[1]);
@@ -107,7 +107,7 @@ public sealed class EndToEndTests
         await hub.InvokeAsync<DeleteProjectResult>(nameof(IProjectHub.DeleteProject), created.Id, true);
         await Eventually.UntilAsync(() => voice.Session.Projects.Projects.Count == 0 && voice.Session.Handles.All.Count == 0,
             () => $"voice to forget it: {string.Join(", ", voice.Session.Handles.All)}");
-        voice.Transcriptions.Say("Hvilke projekter er der?");
+        voice.Transcriptions.AddFinal("Hvilke projekter er der?");
         await voice.Events.SaidAsync("Ingen projekter.");
         Assert.Equal("No projects on any server.", model.ToolResults[^1]);
     }

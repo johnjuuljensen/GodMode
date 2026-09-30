@@ -15,7 +15,7 @@ public sealed class VoiceSessionTests
     public async Task What_waits_at_the_start_is_announced_after_the_greeting_and_a_new_item_when_it_comes()
     {
         var servers = new FakeServers();
-        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedModel(),
+        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient(),
             connect: _ => { servers.Set(ServerA, Question("p/r/101-cleanup", "101-cleanup", "Skal jeg slette de gamle kolonner?")); return Task.CompletedTask; });
 
         await voice.Events.SaidAsync("101 har et spørgsmål.");
@@ -30,7 +30,7 @@ public sealed class VoiceSessionTests
     {
         var servers = new FakeServers();
         var item = Question("p/r/101", "101-cleanup", "Hvilken branch?");
-        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedModel());
+        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient());
 
         servers.Set(ServerA, item);
         await voice.Events.SaidAsync("101 har et spørgsmål.");
@@ -45,7 +45,7 @@ public sealed class VoiceSessionTests
     public async Task Several_at_once_are_said_after_their_count()
     {
         var servers = new FakeServers();
-        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedModel(), connect: _ =>
+        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient(), connect: _ =>
         {
             servers.Set(ServerA, Question("p/r/101", "101-a", "?"), Question("p/r/102", "102-b", "?"));
             servers.Set(ServerB, Question("p/r/103", "103-c", "?"));
@@ -63,7 +63,7 @@ public sealed class VoiceSessionTests
     public async Task An_answer_that_names_no_project_goes_to_the_one_announced()
     {
         var servers = new FakeServers();
-        var model = new ScriptedModel()
+        var model = new ScriptedChatClient()
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Brug den eksisterende migration." })
             .Respond("Sendt til 283.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
@@ -72,7 +72,7 @@ public sealed class VoiceSessionTests
         servers.Set(ServerB, Question("p/r/283", "283-voice", "Ny migration eller den eksisterende?"));
         await voice.Events.SaidAsync("283 har et spørgsmål.");
 
-        voice.Transcriptions.Say("Svar at den skal bruge den eksisterende migration");
+        voice.Transcriptions.AddFinal("Svar at den skal bruge den eksisterende migration");
         await voice.Events.SaidAsync("Sendt til 283.");
 
         var (project, text) = Assert.Single(servers.Replies);
@@ -84,7 +84,7 @@ public sealed class VoiceSessionTests
     public async Task An_answer_names_a_project_by_its_number_said_in_Danish()
     {
         var servers = new FakeServers();
-        var model = new ScriptedModel()
+        var model = new ScriptedChatClient()
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "hundrede og et", [VoiceTools.TextParameter] = "Ja, slet dem." })
             .Respond("Sendt til 101.");
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: _ =>
@@ -94,7 +94,7 @@ public sealed class VoiceSessionTests
         });
         await voice.Events.SaidAsync("2 venter på dig: 101 har et spørgsmål. 283 har et spørgsmål.");
 
-        voice.Transcriptions.Say("Svar hundrede og et at den skal slette dem");
+        voice.Transcriptions.AddFinal("Svar hundrede og et at den skal slette dem");
         await voice.Events.SaidAsync("Sendt til 101.");
 
         Assert.Equal(new ProjectRef(ServerA, "p/r/101"), Assert.Single(servers.Replies).Project);
@@ -109,14 +109,14 @@ public sealed class VoiceSessionTests
     {
         var servers = new FakeServers();
         servers.AddProject(ServerA, "p/r/28-x", "28-x");
-        var model = new ScriptedModel()
+        var model = new ScriptedChatClient()
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "28", [VoiceTools.TextParameter] = "Kør testene." })
             .Respond("Sendt til 28.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerB, Question("p/r/283", "283-voice", "Migration?")); return Task.CompletedTask; });
         await voice.Events.SaidAsync("283 har et spørgsmål.");
 
-        voice.Transcriptions.Say("Svar 28 at den skal køre testene");
+        voice.Transcriptions.AddFinal("Svar 28 at den skal køre testene");
         await voice.Events.SaidAsync("Sendt til 28.");
 
         Assert.Equal(new ProjectRef(ServerA, "p/r/28-x"), Assert.Single(servers.Replies).Project);
@@ -151,7 +151,7 @@ public sealed class VoiceSessionTests
     public async Task A_permission_request_is_not_answered_by_voice()
     {
         var servers = new FakeServers();
-        var model = new ScriptedModel()
+        var model = new ScriptedChatClient()
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja, gør det." })
             .Respond("283 skal have tilladelse. Svar på skærmen.");
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: _ =>
@@ -161,7 +161,7 @@ public sealed class VoiceSessionTests
         });
         await voice.Events.SaidAsync("283 skal have tilladelse: Bash: rm -rf build. Svar på skærmen.");
 
-        voice.Transcriptions.Say("ja gør det");
+        voice.Transcriptions.AddFinal("ja gør det");
         await voice.Events.SaidAsync("283 skal have tilladelse. Svar på skærmen.");
 
         Assert.Empty(servers.Replies);
@@ -176,7 +176,7 @@ public sealed class VoiceSessionTests
     public async Task The_same_answer_twice_to_two_questions_is_answered_both_times()
     {
         var servers = new FakeServers();
-        var model = new ScriptedModel()
+        var model = new ScriptedChatClient()
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." }).Respond("Sendt til 101.")
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." }).Respond("Sendt til 283.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
@@ -201,19 +201,69 @@ public sealed class VoiceSessionTests
     [InlineData("tak")]
     public async Task A_spoken_yes_or_no_reaches_the_model(string answer)
     {
-        var model = new ScriptedModel().Respond("Klar.");
+        var model = new ScriptedChatClient().Respond("Klar.");
         await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
         await voice.Events.SaidAsync("Klar.");
 
-        voice.Transcriptions.Say(answer);
+        voice.Transcriptions.AddFinal(answer);
 
         await Eventually.UntilAsync(() => model.UserTexts.Any(t => t.EndsWith($"Text: {answer}")),
             () => $"the model to get \"{answer}\"; it got: {string.Join(" | ", model.UserTexts)}");
     }
 
+    /// <summary>The button shows what the session reports it is doing (johnjuuljensen/VoiceBot#35), and off once it stopped.</summary>
     [Fact]
-    public void No_noise_word_is_an_answer() =>
-        Assert.DoesNotContain(VoiceSession.NoiseWords, VoiceSession.AnswerWords.Contains);
+    public async Task The_state_is_what_the_session_is_doing()
+    {
+        var model = new ScriptedChatClient().Respond("Intet venter.");
+        var voice = await OfflineVoice.StartAsync(new FakeServers(), model, speech: TimeSpan.FromMilliseconds(500));
+        await using (voice)
+        {
+            await voice.Events.SaidAsync("Klar.");
+            await ListeningAsync(voice);
+            var before = voice.Events.States.Count;
+
+            voice.Transcriptions.AddFinal("Hvad venter på mig?");
+            await voice.Events.SaidAsync("Intet venter.");
+            await ListeningAsync(voice);
+
+            Assert.Equal([VoiceState.Thinking, VoiceState.Speaking, VoiceState.Listening], voice.Events.States.Skip(before));
+        }
+        Assert.Equal(VoiceState.Off, voice.Events.States.Last());
+
+        static Task ListeningAsync(OfflineVoice voice) => Eventually.UntilAsync(() => voice.Session.State == VoiceState.Listening,
+            () => $"the session to listen; it is {voice.Session.State}, after {string.Join(", ", voice.Events.States)}");
+    }
+
+    /// <summary>
+    /// A microphone that failed mid-session faults the transcription source's teardown (VoiceBot's
+    /// SpeechEngineTranscriptionSource rethrows it): the session is stopped all the same, and shows off.
+    /// </summary>
+    [Fact]
+    public async Task A_session_whose_microphone_failed_stops()
+    {
+        var microphone = new FailingMicrophone();
+        var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(), microphone: microphone);
+        await voice.Events.SaidAsync("Klar.");
+
+        microphone.Fail();
+        await voice.DisposeAsync();
+
+        Assert.Equal(VoiceState.Off, voice.Events.States.Last());
+    }
+
+    [Theory]
+    [InlineData(VoiceSettings.DefaultLanguage)]
+    [InlineData("da-DK")]
+    [InlineData("en")]
+    public void No_noise_word_is_an_answer(string language) =>
+        Assert.DoesNotContain(VoiceSession.NoiseWords(VoiceSettings.ParseLanguages(language)), VoiceSession.AnswerWords.Contains);
+
+    /// <summary>VoiceBot's lists, since "tak" left its Danish one (johnjuuljensen/VoiceBot#47), are the ones GodMode kept.</summary>
+    [Fact]
+    public void A_Danish_session_with_English_drops_the_Danish_and_English_ghost_words() =>
+        Assert.Equal(["ah", "hej", "hey", "hmm", "oh", "øh"],
+            VoiceSession.NoiseWords(VoiceSettings.Default.Languages).Order(StringComparer.Ordinal));
 
     /// <summary>VoiceBot stops announcing for good when its formatter throws (johnjuuljensen/VoiceBot#27).</summary>
     [Fact]
@@ -229,7 +279,7 @@ public sealed class VoiceSessionTests
     public async Task Announcements_go_on_for_the_whole_session()
     {
         var servers = new FakeServers();
-        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedModel());
+        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient());
 
         for (var n = 101; n <= 104; n++)
         {

@@ -1,4 +1,5 @@
 using GodMode.Maui.Voice;
+using Microsoft.Extensions.Logging;
 using VoiceBot.Core.Audio;
 using VoiceBot.Providers.Windows;
 
@@ -10,7 +11,8 @@ namespace GodMode.Maui;
 /// </summary>
 public sealed class WindowsVoiceAudio(bool echoCancellation) : IVoiceAudio
 {
-    private readonly NativeAudioSource _source = new(capture: echoCancellation ? MicCapture.EchoCancelled : MicCapture.WaveIn);
+    private readonly NativeAudioSource _source = new(capture: echoCancellation ? MicCapture.EchoCancelled : MicCapture.WaveIn,
+        logger: MauiProgram.LoggerFactory.CreateLogger<NativeAudioSource>());
     private readonly NativeAudioSink _sink = new();
 
     public IAudioSource Source => _source;

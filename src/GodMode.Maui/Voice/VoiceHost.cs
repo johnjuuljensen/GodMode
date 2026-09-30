@@ -260,8 +260,8 @@ public sealed class VoiceHost : IVoiceEvents
     private sealed record Running(VoiceSession Session, IVoiceAudio Audio, HubServers Servers) : IAsyncDisposable
     {
         /// <summary>
-        /// The audio goes back even when the session's teardown throws (VoiceBot's ElevenLabs engine, disposed twice,
-        /// does): on Android it holds the microphone, the foreground service and the audio mode.
+        /// The audio and the connections go back even if the session's teardown throws: on Android the audio holds the
+        /// microphone, the foreground service and the audio mode.
         /// </summary>
         public async ValueTask DisposeAsync()
         {
