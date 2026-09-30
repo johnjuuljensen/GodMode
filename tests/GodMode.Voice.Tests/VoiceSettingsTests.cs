@@ -93,6 +93,25 @@ public sealed class VoiceSettingsTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(() => _store.UpdateAsync(new VoiceSettingsUpdate(Language: language)));
 
     [Fact]
+    public async Task The_devices_are_Default_until_one_is_chosen_and_a_blank_id_chooses_Default_again()
+    {
+        var headset = new AudioDevice("{0.0.1.00000000}.{headset}", "Headset (Hands-Free)");
+        var speakers = new AudioDevice("{0.0.0.00000000}.{speakers}", "Speakers (Realtek)");
+
+        Assert.Null((await _store.GetViewAsync()).Microphone);
+        var chosen = await _store.UpdateAsync(new VoiceSettingsUpdate(Microphone: headset, Speaker: speakers));
+        var reread = await new VoiceSettingsStore(_dir, _secrets).LoadAsync();
+        var untouched = await _store.UpdateAsync(new VoiceSettingsUpdate(Language: "en-US"));
+        var backToDefault = await _store.UpdateAsync(new VoiceSettingsUpdate(Microphone: new AudioDevice(" ", "")));
+
+        Assert.Equal((headset, speakers), (chosen.Microphone, chosen.Speaker));
+        Assert.Equal((headset, speakers), (reread.Microphone, reread.Speaker));
+        Assert.Equal((headset, speakers), (untouched.Microphone, untouched.Speaker));
+        Assert.Null(backToDefault.Microphone);
+        Assert.Equal(speakers, backToDefault.Speaker);
+    }
+
+    [Fact]
     public async Task A_key_secure_storage_cannot_read_is_no_key()
     {
         _secrets.FailReads = true;

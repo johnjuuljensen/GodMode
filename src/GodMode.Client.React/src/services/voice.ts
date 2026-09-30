@@ -6,10 +6,12 @@
 import { useEffect, useState } from 'react';
 import * as bridge from './hostBridge';
 import type {
-  VoiceError, VoiceLine, VoiceService, VoiceSettingsUpdate, VoiceSettingsView, VoiceStatus,
+  VoiceDeviceList, VoiceError, VoiceLine, VoiceService, VoiceSettingsUpdate, VoiceSettingsView, VoiceStatus,
 } from './hostBridge';
 
-export type { VoiceError, VoiceLine, VoiceSettingsUpdate, VoiceSettingsView, VoiceStatus } from './hostBridge';
+export type {
+  AudioDevice, VoiceDeviceList, VoiceError, VoiceLine, VoiceSettingsUpdate, VoiceSettingsView, VoiceStatus,
+} from './hostBridge';
 
 export const getVoiceStatus = (): Promise<VoiceStatus> => bridge.request('voice.state');
 export const startVoice = (): Promise<VoiceStatus> => bridge.request('voice.start');
@@ -17,6 +19,7 @@ export const stopVoice = (): Promise<VoiceStatus> => bridge.request('voice.stop'
 export const getVoiceSettings = (): Promise<VoiceSettingsView> => bridge.request('voice.settings.get');
 export const setVoiceSettings = (update: VoiceSettingsUpdate): Promise<VoiceSettingsView> =>
   bridge.request('voice.settings.set', update);
+export const getVoiceDevices = (): Promise<VoiceDeviceList> => bridge.request('voice.devices');
 
 const SERVICE_NAMES: Record<VoiceService, string> = {
   SpeechRecognition: 'ElevenLabs (speech recognition)',

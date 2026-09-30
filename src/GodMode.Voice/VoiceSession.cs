@@ -61,14 +61,24 @@ public sealed record VoiceSessionSetup
 public sealed class VoiceSession : IAsyncDisposable
 {
     /// <summary>
-    /// Speech-recognition ghost words to drop: VoiceBot's for the session's languages. None that could be an answer
-    /// (<see cref="AnswerWords"/>): a dropped "ja" is an answer the session never gets.
+    /// Speech-recognition ghost words to drop: VoiceBot's for the session's languages, but none the user says on
+    /// purpose (<see cref="SaidOnPurpose"/>): a dropped "ja" is an answer the session never gets, and a dropped "Hej"
+    /// a greeting it never hears.
     /// </summary>
-    public static IReadOnlyList<string> NoiseWords(SessionLanguages languages) => StringResources.GetWordList(languages, "noiseWords");
+    public static IReadOnlyList<string> NoiseWords(SessionLanguages languages) =>
+        [.. StringResources.GetWordList(languages, "noiseWords").Where(w => !SaidOnPurpose.Contains(w))];
 
     /// <summary>Words that are answers, or say something, never noise, in the session's languages.</summary>
     public static readonly IReadOnlySet<string> AnswerWords =
         new HashSet<string>(["ja", "nej", "jo", "tak", "nej tak", "ja tak", "okay", "ok", "yes", "no", "yeah", "nope"], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Greetings in the session's languages: the user says them to the session, as to anyone.</summary>
+    public static readonly IReadOnlySet<string> Greetings =
+        new HashSet<string>(["hej", "hejsa", "hallo", "goddag", "hey", "hi", "hello"], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>What is never noise: the answers and the greetings.</summary>
+    public static readonly IReadOnlySet<string> SaidOnPurpose =
+        new HashSet<string>(AnswerWords.Concat(Greetings), StringComparer.OrdinalIgnoreCase);
 
     private readonly CancellationTokenSource _stop = new();
     private readonly ServiceProvider _services;
@@ -76,11 +86,15 @@ public sealed class VoiceSession : IAsyncDisposable
     private readonly VoiceBotSession _session;
     private readonly VoiceStateTracker _state;
     private readonly ILogger _logger;
+    private readonly ElevenLabsSttKeyterms? _keyterms;
+    private readonly Lock _keytermsLock = new();
+    private HashSet<string>? _keytermsSent;
     private Task _run = Task.CompletedTask;
 
     private VoiceSession(ServiceProvider services, AsyncServiceScope scope, VoiceBotSession session, VoiceStateTracker state,
-        AttentionBoard board, ProjectBoard projects, ProjectHandles handles, ILogger logger)
+        AttentionBoard board, ProjectBoard projects, ProjectHandles handles, ElevenLabsSttKeyterms? keyterms, ILogger logger)
     {
+        _keyterms = keyterms;
         _services = services;
         _scope = scope;
         _session = session;
@@ -103,6 +117,12 @@ public sealed class VoiceSession : IAsyncDisposable
     public ProjectBoard Projects { get; }
 
     public ProjectHandles Handles { get; }
+
+    /// <summary>
+    /// The terms speech recognition is biased towards now (<see cref="Keyterms"/>); empty when the session's speech
+    /// engine takes none.
+    /// </summary>
+    public IReadOnlyList<string> SttKeyterms => _keyterms?.Current ?? [];
 
     /// <summary>Runs until <see cref="DisposeAsync"/>, or until the session ends by itself.</summary>
     public Task Completion => _run;
@@ -128,7 +148,7 @@ public sealed class VoiceSession : IAsyncDisposable
         {
             SttLanguageCode = ElevenLabsLanguageCode.Primary,
             SttSecondaryLanguages = [.. languages.MixedIn.Select(TwoLetter)],
-            SttKeyterms = Keyterms(handles.All),
+            SttKeyterms = Keyterms(projects.Projects, handles),
             TtsLanguageCode = ElevenLabsLanguageCode.Primary,
         };
 
@@ -165,7 +185,11 @@ public sealed class VoiceSession : IAsyncDisposable
                 },
             });
 
-            var voice = new VoiceSession(services, scope, session, state, board, projects, handles, logger);
+            // The session's own terms (its scope's), renewed as projects come and go (VoiceBot#51)
+            var voice = new VoiceSession(services, scope, session, state, board, projects, handles,
+                scope.ServiceProvider.GetService<ElevenLabsSttKeyterms>(), logger);
+            projects.Changed += voice.RefreshKeyterms;
+            voice.RefreshKeyterms();
             board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(phrases.Announce(handle, item.Item), item.Project.Key)));
             tools.Creates.Attach(outcome => session.Announcements.TryWrite(new Announcement(phrases.Created(outcome), outcome.Project?.Key)));
             state.Release();
@@ -183,19 +207,47 @@ public sealed class VoiceSession : IAsyncDisposable
     }
 
     /// <summary>
-    /// What ElevenLabs is biased towards: the command words, then the handles given so far, as many as it takes
+    /// What ElevenLabs is biased towards: the command words, then GodMode's names, as many as it takes
     /// (<see cref="ElevenLabsLanguageOptions.MaxRealtimeKeyterms"/> of at most <see cref="ElevenLabsLanguageOptions.MaxRealtimeKeytermLength"/>
-    /// characters). A handle that is a number needs none: numbers are recognized as they are.
+    /// characters): the projects' roots ("Assistant"), their profiles ("Outbound"), then their handles ("kappe"), each
+    /// in the order of the projects, the one changed last first. A handle that is a number needs none: numbers are
+    /// recognized as they are. A name too long to be a keyterm is left out, not cut: a cut name is not what is said.
     /// </summary>
-    public static IReadOnlyList<string> Keyterms(IEnumerable<string> handles) =>
-        [.. GodModeGraph.CommandWords.Concat(handles.Where(h => !h.All(char.IsAsciiDigit)))
+    public static IReadOnlyList<string> Keyterms(IEnumerable<ServerProject> projects, ProjectHandles handles)
+    {
+        var list = projects.ToList();
+        IEnumerable<string?> names = [
+            .. list.Select(p => p.Project.RootName),
+            .. list.Select(p => p.Project.ProfileName),
+            .. list.Select(p => handles.Of(p.Ref)).Where(h => h is null || !h.All(char.IsAsciiDigit)),
+        ];
+        return [.. GodModeGraph.CommandWords.Concat(names.OfType<string>())
             .Select(t => t.Trim())
             .Where(t => t.Length is > 0 and <= ElevenLabsLanguageOptions.MaxRealtimeKeytermLength)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(ElevenLabsLanguageOptions.MaxRealtimeKeyterms)];
+    }
+
+    /// <summary>
+    /// Gives speech recognition the terms of the projects as they are now, and logs them, when they are other terms.
+    /// ElevenLabs takes them on a new connection, which it opens at the next pause in speech (VoiceBot#51), so the same
+    /// terms in another order change nothing: every status update of a project reorders them.
+    /// </summary>
+    private void RefreshKeyterms()
+    {
+        lock (_keytermsLock)
+        {
+            var terms = Keyterms(Projects.Projects, Handles);
+            if (_keytermsSent?.SetEquals(terms) == true) return;
+            _keyterms?.Set(terms);
+            _keytermsSent = new HashSet<string>(terms, StringComparer.Ordinal);
+            _logger.LogInformation("Voice keyterms ({Count}): {Keyterms}", terms.Count, string.Join(" | ", terms));
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {
+        Projects.Changed -= RefreshKeyterms;
         await _stop.CancelAsync();
         try
         {
