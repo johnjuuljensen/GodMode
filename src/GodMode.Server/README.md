@@ -331,9 +331,13 @@ Supported JSON Schema types:
     "prompt": { "type": "string", "title": "Task Description", "x-multiline": true },
     "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "default": false }
   },
-  "required": ["name", "prompt"]
+  "required": ["name"]
 }
 ```
+
+The default requires only the name; a root's own `schema.json` may require more, `prompt` included. A create that leaves a required field out (missing, null, or only whitespace) is refused before anything is written or run, by the server as by the app's form.
+
+**A session with no prompt starts idle.** With no prompt from the form, the `promptTemplate` or a create script's `project_prompt`, the session is made as any other (folder, state, settings) and claude is started with no input: it waits on stdin for the first message, and the project is `Idle`, which asks nothing of the user, so it is no attention item. Claude is sent no turn the user did not write: not an empty one, and not a stand-in. The first message the user sends is claude's first turn, in that process. Should that session be resumed before it has had a message (after a stop or a restart), claude has no conversation for it, and the fresh session that takes its place is sent no "continue" either: it waits for the first message still.
 
 Some keys have special meaning: `name` and `prompt` are the project name and initial Claude prompt unless `nameTemplate`/`promptTemplate` override them, `skipPermissions` starts Claude with `--dangerously-skip-permissions` where the root allows it (see [Permissions](#permissions); without it, a tool call that needs approval waits for the user: `WaitingPermission`), and `model` overrides the action's model.
 

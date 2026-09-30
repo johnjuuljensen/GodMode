@@ -7,7 +7,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectRootInfo } from '../../signalr/types';
-import { FakeHub, connectServers } from '../../test/fakeHub';
+import { FakeHub, connectServers, status } from '../../test/fakeHub';
 import { render, typeInto, click, type Rendered } from '../../test/render';
 import { useAppStore, type ActivePage } from '../../store';
 import { Shell } from '../Shell';
@@ -254,6 +254,58 @@ describe('an action that starts no session (#324)', () => {
 
     expect(finishedView()).toBe('new-root finished.');
     expect(useAppStore.getState().selectedProject).toBeNull();
+  });
+});
+
+describe('the default form (#352)', () => {
+  /** An action with no schema.json of its own: the server's default schema, which requires only the name. */
+  const withSchema = (required: string[]): ProjectRootInfo => ({
+    Name: 'assistant', ProfileName: 'Default',
+    Actions: [{
+      Name: 'chat', AllowSkipPermissions: false, Session: true, Transient: false,
+      InputSchema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', title: 'Project Name' },
+          prompt: { type: 'string', title: 'Task Description', 'x-multiline': true },
+        },
+        required,
+      },
+    }],
+  });
+  const field = (title: string) => [...view!.container.querySelectorAll('.form-group')]
+    .find(g => g.querySelector('label')?.textContent?.startsWith(title))!;
+  const formError = () => view!.container.querySelector('.form-error')?.textContent ?? null;
+
+  async function openWith(root: ProjectRootInfo) {
+    const hub = new FakeHub([], [root]);
+    hub.createResult = { Project: status('new1', 'Idle'), Message: null };
+    await connectServers({ A: hub });
+    view = await render(<Shell />);
+    await openFor('A', 'assistant');
+    await typeInto(field('Project Name').querySelector('input')!, 'Outbound');
+    return hub;
+  }
+
+  it('marks only the name required, and creates with the description left empty, opening the session', async () => {
+    const hub = await openWith(withSchema(['name']));
+
+    expect(field('Project Name').querySelector('.form-required')).not.toBeNull();
+    expect(field('Task Description').querySelector('.form-required')).toBeNull();
+    await click(button('Create'));
+
+    expect(formError()).toBeNull();
+    expect(hub.created).toEqual([{ profileName: 'Default', rootName: 'assistant', actionName: 'chat', inputs: { model: 'opus', name: 'Outbound' } }]);
+    expect(useAppStore.getState().selectedProject).toEqual({ serverId: 'A', projectId: 'new1' });
+  });
+
+  it("still refuses an empty description where the root's own schema requires it", async () => {
+    const hub = await openWith(withSchema(['name', 'prompt']));
+
+    await click(button('Create'));
+
+    expect(formError()).toBe('"Task Description" is required');
+    expect(hub.created).toEqual([]);
   });
 });
 
