@@ -8,6 +8,7 @@
 import type { ConnectionState, HubCallbacks, OutputMessage } from '../signalr/hub';
 import type {
   CreateProjectResult, DeleteProjectResult, PermissionDecision, PermissionDetail, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
+  UnmanagedFolder,
 } from '../signalr/types';
 import { parseClaudeMessage } from '../signalr/parseMessage';
 import { useAppStore, type ServerConnection } from '../store';
@@ -174,6 +175,32 @@ export class FakeHub {
     if (this.failRestore) throw new Error(this.failRestore);
     return status(projectId, 'Stopped');
   }
+  /** What listUnmanaged answers, by `{profile}/{root}`; a root not in it has none. */
+  unmanaged: Record<string, UnmanagedFolder[]> = {};
+  /** When set, listUnmanaged rejects with it, as a list script that fails. */
+  failList?: string;
+  /** Every ListUnmanaged, AdoptFolder and ForgetProject, in order. An adopt takes the folder off its root's list, as the server does. */
+  listings: string[] = [];
+  adopted: { profileName: string; rootName: string; path: string; actionName: string | null; inputs: Record<string, unknown> | null }[] = [];
+  forgotten: string[] = [];
+  async listUnmanaged(profileName: string, rootName: string): Promise<UnmanagedFolder[]> {
+    this.invoke();
+    this.listings.push(`${profileName}/${rootName}`);
+    if (this.failList) throw new Error(this.failList);
+    return this.unmanaged[`${profileName}/${rootName}`] ?? [];
+  }
+  async adoptFolder(profileName: string, rootName: string, path: string, actionName: string | null, inputs: Record<string, unknown> | null) {
+    this.invoke();
+    this.adopted.push({ profileName, rootName, path, actionName, inputs });
+    const key = `${profileName}/${rootName}`;
+    this.unmanaged[key] = (this.unmanaged[key] ?? []).filter(folder => folder.Path !== path);
+    return { ...status(`${key}/adopted-${path}`, 'Idle'), Name: path, RootName: rootName, ProfileName: profileName, Adopted: true };
+  }
+  async forgetProject(projectId: string): Promise<DeleteProjectResult> {
+    this.invoke();
+    this.forgotten.push(projectId);
+    return { Trashed: true };
+  }
   async createProject(profileName: string, rootName: string, actionName: string | null, inputs: Record<string, unknown>) {
     this.invoke();
     this.created.push({ profileName, rootName, actionName, inputs });
@@ -185,7 +212,7 @@ export class FakeHub {
 export const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 export const project = (id: string, name: string, state: ProjectState, updatedAt: string): ProjectSummary => ({
-  Id: id, Name: name, State: state, UpdatedAt: updatedAt, RootName: 'work', ProfileName: 'Default', SharedFolder: false,
+  Id: id, Name: name, State: state, UpdatedAt: updatedAt, RootName: 'work', ProfileName: 'Default', SharedFolder: false, Adopted: false,
 });
 export const root: ProjectRootInfo = { Name: 'work', ProfileName: 'Default', Actions: [] } as unknown as ProjectRootInfo;
 export const status = (id: string, state: ProjectState) =>

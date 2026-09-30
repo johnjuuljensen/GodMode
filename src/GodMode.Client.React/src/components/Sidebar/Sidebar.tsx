@@ -6,6 +6,7 @@ import {
 } from '../../store';
 import { projectKey } from '../../store/projectKey';
 import { ProjectItem } from './ProjectItem';
+import { UnmanagedGroup } from './UnmanagedGroup';
 import { Inbox } from '../Inbox/Inbox';
 import './Sidebar.css';
 
@@ -309,6 +310,10 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
           <button className="project-list-older" onClick={() => setShowOlder(!showOlder)} aria-expanded={showOlder}>
             {showOlder ? 'Hide older' : `${older.length} older`}
           </button>
+        )}
+        {/* The root's folders GodMode does not manage, one tap from being sessions (#370) */}
+        {!rootGroup.flat && rootGroup.canCreate && serverId && (
+          <UnmanagedGroup serverId={serverId} profileName={profileName} rootName={rootName} sessionCount={rootGroup.items.length} />
         )}
       </div>
     </div>

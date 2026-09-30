@@ -72,7 +72,7 @@ function summaryOf(status: ProjectStatus): ProjectSummary {
     RootName: status.RootName, ProfileName: status.ProfileName,
     PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
     PullRequest: status.PullRequest, Kind: status.Kind,
-    ActionName: status.ActionName, SharedFolder: status.SharedFolder,
+    ActionName: status.ActionName, SharedFolder: status.SharedFolder, Adopted: status.Adopted,
   };
 }
 

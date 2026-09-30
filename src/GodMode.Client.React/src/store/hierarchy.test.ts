@@ -12,7 +12,7 @@ const issue = [{ Name: 'issue', AllowSkipPermissions: false, Session: true, Tran
 const rootOf = (name: string, profile: string, actions = issue): ProjectRootInfo => ({ Name: name, ProfileName: profile, Actions: actions });
 
 const projectOf = (id: string, profile: string, root: string, state: ProjectState, updatedAt: string): ProjectSummary =>
-  ({ Id: `${profile}/${root}/${id}`, Name: id, State: state, UpdatedAt: updatedAt, RootName: root, ProfileName: profile, SharedFolder: false });
+  ({ Id: `${profile}/${root}/${id}`, Name: id, State: state, UpdatedAt: updatedAt, RootName: root, ProfileName: profile, SharedFolder: false, Adopted: false });
 
 const server = (id: string, roots: ProjectRootInfo[], projects: ProjectSummary[], connectionState: ConnectionState = 'connected'): ServerConnection => ({
   serverInfo: { Id: id, Name: `Server ${id}` } as ServerConnection['serverInfo'],
