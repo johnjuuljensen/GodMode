@@ -91,7 +91,9 @@ public sealed class EndToEndTests
 
         var created = await CreateAsync(hub, "testing");
         await WaitForAttentionAsync(hub, created.Id);
-        await Eventually.UntilAsync(() => voice.Session.Handles.All.Contains("testing"), () => $"voice to know testing: {string.Join(", ", voice.Session.Handles.All)}");
+        // From ProjectCreated, not the attention list, which gives the question a handle too
+        await Eventually.UntilAsync(() => voice.Session.Projects.Find(new ProjectRef("local", created.Id)) is not null,
+            () => $"voice to know testing: {string.Join(", ", voice.Session.Projects.Projects.Select(p => p.Project.Name))}");
 
         voice.Transcriptions.Say("Hvilke projekter er der?");
         await voice.Events.SaidAsync("1 projekt: testing.");
@@ -103,7 +105,8 @@ public sealed class EndToEndTests
         Assert.Contains(JsonSerializer.Serialize(Answer), server.StdinOf(created.Id)[1]);
 
         await hub.InvokeAsync<DeleteProjectResult>(nameof(IProjectHub.DeleteProject), created.Id, true);
-        await Eventually.UntilAsync(() => voice.Session.Handles.All.Count == 0, () => $"voice to forget it: {string.Join(", ", voice.Session.Handles.All)}");
+        await Eventually.UntilAsync(() => voice.Session.Projects.Projects.Count == 0 && voice.Session.Handles.All.Count == 0,
+            () => $"voice to forget it: {string.Join(", ", voice.Session.Handles.All)}");
         voice.Transcriptions.Say("Hvilke projekter er der?");
         await voice.Events.SaidAsync("Ingen projekter.");
         Assert.Equal("No projects on any server.", model.ToolResults[^1]);

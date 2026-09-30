@@ -79,13 +79,14 @@ public sealed class VoiceSession : IAsyncDisposable
     private Task _run = Task.CompletedTask;
 
     private VoiceSession(ServiceProvider services, AsyncServiceScope scope, VoiceBotSession session, VoiceStateTracker state,
-        AttentionBoard board, ProjectHandles handles, ILogger logger)
+        AttentionBoard board, ProjectBoard projects, ProjectHandles handles, ILogger logger)
     {
         _services = services;
         _scope = scope;
         _session = session;
         _state = state;
         Board = board;
+        Projects = projects;
         Handles = handles;
         _logger = logger;
     }
@@ -97,6 +98,9 @@ public sealed class VoiceSession : IAsyncDisposable
 
     /// <summary>The attention lists the session announces from.</summary>
     public AttentionBoard Board { get; }
+
+    /// <summary>Every project the servers have, as the session knows them.</summary>
+    public ProjectBoard Projects { get; }
 
     public ProjectHandles Handles { get; }
 
@@ -161,7 +165,7 @@ public sealed class VoiceSession : IAsyncDisposable
                 },
             });
 
-            var voice = new VoiceSession(services, scope, session, state, board, handles, logger);
+            var voice = new VoiceSession(services, scope, session, state, board, projects, handles, logger);
             board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(phrases.Announce(handle, item.Item), item.Project.Key)));
             state.Release();
             voice._run = voice.RunAsync(languages);
