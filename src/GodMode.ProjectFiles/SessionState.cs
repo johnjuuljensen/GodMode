@@ -25,6 +25,12 @@ public static partial class SessionState
     /// <summary>The file in a trashed state folder that says when it was trashed (round-trip UTC), for the purge.</summary>
     public const string TrashedAtFileName = "trashed-at";
 
+    /// <summary>
+    /// The file in a trashed state folder that says the session was forgotten, not deleted: its folder was
+    /// left as it was, and a restore brings it back as it was, sharing its folder or not as its settings say.
+    /// </summary>
+    public const string ForgottenFileName = "forgotten";
+
     /// <summary>The state file a session's folder has: without it, a folder in <c>sessions/</c> is no session.</summary>
     public const string StatusFileName = "status.json";
 
@@ -111,9 +117,10 @@ public static partial class SessionState
     /// <summary>
     /// Moves session <paramref name="id"/>'s state from <c>sessions/</c> to <c>trash/</c>, and marks
     /// when (<see cref="TrashedAtFileName"/>). One of that id in the trash already is replaced. False
-    /// when the session has no state folder: nothing is moved.
+    /// when the session has no state folder: nothing is moved. A session <paramref name="forgotten"/> is
+    /// marked so (<see cref="ForgottenFileName"/>).
     /// </summary>
-    public static bool Trash(string workingFolder, string id, DateTime at)
+    public static bool Trash(string workingFolder, string id, DateTime at, bool forgotten = false)
     {
         if (!IsId(id)) throw new ArgumentException($"'{id}' is not a session id.", nameof(id));
         var from = PathOf(workingFolder, id);
@@ -123,8 +130,13 @@ public static partial class SessionState
         if (Directory.Exists(to)) Directory.Delete(to, recursive: true);
         Directory.Move(from, to);
         File.WriteAllText(Path.Combine(to, TrashedAtFileName), at.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        if (forgotten) File.WriteAllText(Path.Combine(to, ForgottenFileName), string.Empty);
         return true;
     }
+
+    /// <summary>Whether session <paramref name="id"/> in the trash of <paramref name="workingFolder"/> was forgotten rather than deleted.</summary>
+    public static bool WasForgotten(string workingFolder, string id) =>
+        File.Exists(Path.Combine(TrashedPathOf(workingFolder, id), ForgottenFileName));
 
     /// <summary>
     /// Moves session <paramref name="id"/>'s state back from <c>trash/</c> to <c>sessions/</c>, without
@@ -141,6 +153,7 @@ public static partial class SessionState
         Directory.CreateDirectory(SessionsPathOf(workingFolder));
         Directory.Move(from, to);
         File.Delete(Path.Combine(to, TrashedAtFileName));
+        File.Delete(Path.Combine(to, ForgottenFileName));
         return to;
     }
 

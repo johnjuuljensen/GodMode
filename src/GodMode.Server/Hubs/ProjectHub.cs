@@ -217,6 +217,57 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         }
     }
 
+    public async Task<UnmanagedFolder[]> ListUnmanaged(string profileName, string projectRootName)
+    {
+        _logger.LogInformation("Client {ConnectionId} listing the folders of profile '{Profile}' root '{Root}' GodMode does not manage",
+            Context.ConnectionId, profileName, projectRootName);
+        try
+        {
+            return await _projectManager.ListUnmanagedAsync(profileName, projectRootName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Listing root '{Root}''s unmanaged folders failed: {Reason}", projectRootName, ex.Message);
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task<ProjectStatus> AdoptFolder(string profileName, string projectRootName, string path, string? actionName, Dictionary<string, JsonElement>? inputs)
+    {
+        _logger.LogInformation("Client {ConnectionId} adopting '{Path}' in profile '{Profile}' root '{Root}' with action '{Action}'",
+            Context.ConnectionId, path, profileName, projectRootName, actionName ?? "(default)");
+        ProjectStatus status;
+        try
+        {
+            status = await _projectManager.AdoptFolderAsync(profileName, projectRootName, path, actionName, inputs);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to adopt '{Path}' in root '{Root}'", path, projectRootName);
+            throw new HubException(ex.Message);
+        }
+        await Clients.All.ProjectCreated(status);
+        return status;
+    }
+
+    public async Task<DeleteProjectResult> ForgetProject(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} forgetting project {ProjectId}", Context.ConnectionId, projectId);
+        DeleteProjectResult result;
+        try
+        {
+            result = await _projectManager.ForgetProjectAsync(projectId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to forget project {ProjectId}", projectId);
+            throw new HubException(ex.Message);
+        }
+
+        await Clients.All.ProjectDeleted(projectId);
+        return result;
+    }
+
     public async Task<string?> CheckCommand(string command)
     {
         // Only allow checking simple command names (no paths, no args)

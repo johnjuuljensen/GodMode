@@ -305,6 +305,53 @@
   color: var(--text-secondary);
 }
 
+/* ── A root's folders not in GodMode (#370): folded, each with Adopt ── */
+.unmanaged-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px;
+  padding: 4px 12px;
+  border-radius: var(--radius);
+  opacity: 0.8;
+}
+
+.unmanaged-item:hover {
+  background: var(--glass-hover);
+  opacity: 1;
+}
+
+.unmanaged-adopt-btn {
+  flex-shrink: 0;
+  padding: 2px 10px;
+  border: var(--border-width) var(--border-style) var(--glass-border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.unmanaged-adopt-btn:hover:not(:disabled) {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+}
+
+.unmanaged-adopt-btn:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.unmanaged-error {
+  margin: 0 8px;
+  padding: 4px 12px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ── A row's delete (#325): swipe on a phone, the ⋯ menu or a right-click on a desktop; never a bare button ── */
 .project-item-wrapper {
   position: relative;

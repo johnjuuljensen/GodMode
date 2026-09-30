@@ -156,7 +156,7 @@ export function ProjectItem({ item, isSelected, onSelect }: Props) {
       {menu && createPortal(
         <div ref={menuRef} className="project-item-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={e => e.stopPropagation()}>
           <button className="project-item-menu-item danger" role="menuitem" onClick={handleDelete}>
-            {project.SharedFolder ? 'Delete' : 'Delete…'}
+            {project.SharedFolder && !project.Adopted ? 'Delete' : 'Delete…'}
           </button>
         </div>,
         document.body,

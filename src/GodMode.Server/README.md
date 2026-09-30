@@ -241,6 +241,8 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `create` | Scripts run to create the project (working dir = project, or root if `scriptsCreateFolder`) |
 | `delete` | Scripts run when a project is deleted (working dir = root) |
 | `status` | One script that reports the project's pull request (working dir = project): see [Pull request status](#pull-request-status) |
+| `list` | One script (`config.json` only; an overlay's is ignored) that prints the root's folders to offer for adopting (working dir = root). Without it, the root's immediate subfolders are offered. See [Adopting folders](#adopting-folders) |
+| `adopt` | Whether the action's `create` script knows how to adopt a folder that exists: an adopt with the action runs it, alone, with `GODMODE_ADOPT=true`. Default `false`: an adopt with the action runs no script. See [Adopting folders](#adopting-folders) |
 | `claudeArgs` | Extra CLI arguments appended when starting Claude |
 | `model` | Default `--model` for the action. A `model` form input overrides it |
 | `permissionMode` | claude's `--permission-mode` for the action's projects: `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`. Kept with each project at create. Default: none (claude's own settings decide). See [Permissions](#permissions) |
@@ -363,6 +365,7 @@ Scripts are the abstraction layer for all VCS and setup operations. The server d
 | `GODMODE_INPUT_*` | All form inputs (key in upper snake case, e.g. `GODMODE_INPUT_ISSUE_NUMBER`) |
 | `GODMODE_RESULT_FILE` | Create scripts only: a file the script can write `key=value` lines to (see below) |
 | `GODMODE_FORCE` | Delete scripts only: `true` when the user forced the delete |
+| `GODMODE_ADOPT` | Create scripts only: `true` when the script runs to adopt a folder that exists (an action with `"adopt": true`), with the folder as `GODMODE_PROJECT_PATH`. It must make nothing: see [Adopting folders](#adopting-folders). Unset in a create |
 | `GODMODE_SHARED_FOLDER` | `true` when the session shares its working folder with others (its action's `sharedFolder`), else `false`. A delete script is told `true` also when the folder has another session, or its action shares folders now: it must then leave the folder, and whatever the other sessions use, alone, since the server removes only `.godmode/sessions/<id>/`. See [Several sessions in one folder](#several-sessions-in-one-folder) |
 | *(from `environment`)* | All vars from the profile's `Profiles:<name>:Environment` and the config's `environment` block, which wins a clash |
 
@@ -414,6 +417,50 @@ New-Item -ItemType Directory -Force (Join-Path $root '.godmode-root') | Out-Null
 - **`CreateProject` returns no project** (`CreateProjectResult.Project` is null) and the script's `message`. The app shows the message, or that the action finished, and stays on the form; it offers no model for such an action (the listed action's `Session` is `false`, its `Model` null and `AllowSkipPermissions` false).
 - **The roots are read again once it has run**, so a root it made reaches every client as `RootsChanged` at once, not at the next poll ([Live roots](#live-roots)).
 - **What would give it a working folder is a config error**: `"session": false` with `"sharedFolder": true`, with `"scriptsCreateFolder": true`, or with no `create` script. A create of the action is refused saying why, and the listing leaves that action out, with a warning in the log, as it leaves out an overlay it cannot read: the root keeps its profile and its other actions. The merged action is checked, so a base `config.json` that sets one of these for its worktree actions needs `false` in the session-less action's overlay. `claudeArgs`, `model`, `permissionMode`, `allowSkipPermissions`, `promptTemplate`, `delete`, `status` and the resume settings mean nothing to it and are ignored, since a base config shares them with every action.
+
+### Adopting folders
+
+A root often has folders GodMode did not make: worktrees made before GodMode or beside it, old shares. The app lists them under the root, folded as "Not in GodMode (N)", and **Adopt** makes one a session of the root, as it is. Which folders a root offers is the root's business, so the server stays VCS-agnostic: a `list` script says, and without one the root's subfolders are offered. Nothing is cached: each `ListUnmanaged` reads them again.
+
+**Without a `list` script** the candidates are the root's immediate subfolders, in ordinal order, but the root's own (`.godmode-root`, `logs`, `.godmode`, `.archived`), hidden ones (a name that starts with `.`), a link that leads out of the root, and a name Windows would change. A root that is its own workspace ([below](#a-root-as-its-own-workspace)) offers none: its folders are its repo's. Each is offered under its folder's name, with no kind, action or inputs.
+
+**A `list` script** (`config.json`'s `"list": "scripts/list.ps1"`, one script) runs in the root, with the root's and its profile's environment (`config.json`'s own `environment`, no action's) and `GODMODE_ROOT_PATH`, and prints one JSON array on stdout. Empty output is an empty array. Each item is a candidate:
+
+| Field | | |
+|-------|---|---|
+| `path` | required | The folder: **directly in the root** (sessions are recovered only from there), absolute or relative to the root, and existing. Not one of the root's own folders, and not a link out of it |
+| `name` | optional | What the app shows, and the session's name when no script names it. Default: the folder's name. At most 200 characters |
+| `kind` | optional | What it is (`feat`, `bug`…): the app's label for it, and the session's kind when no script names one |
+| `action` | optional | The root's action that adopts it (its name, as in `config.{action}.json`), which must start a session. Default: the root's first action |
+| `inputs` | optional | An object of strings, numbers and booleans the adopt passes on, as a create form's inputs: the branch, an issue number. The app shows a `branch` input beside a candidate with no `kind` |
+
+```powershell
+# .godmode-root/scripts/list.ps1: each git worktree of the root, with its branch
+$ErrorActionPreference = 'Stop'
+$root = [IO.Path]::GetFullPath($env:GODMODE_ROOT_PATH).TrimEnd('\', '/')
+$items = foreach ($line in git -C $root worktree list --porcelain | Select-String '^worktree ') {
+    $path = [IO.Path]::GetFullPath($line.Line.Substring(9))
+    if ([IO.Path]::GetDirectoryName($path) -ne $root) { continue }   # only folders directly in the root: not the root, nor one elsewhere
+    $branch = git -C $path branch --show-current
+    [ordered]@{ path = $path; name = (Split-Path $path -Leaf); action = 'issue'; inputs = [ordered]@{ branch = $branch } }
+}
+@($items) | ConvertTo-Json -Depth 5 -AsArray
+```
+
+Pipe the array into `ConvertTo-Json -AsArray` (`ConvertTo-Json -AsArray @(...)` with the array as its argument prints an array inside an array), with a `-Depth` of at least 3 for `inputs`.
+
+- **Read strictly.** The output is untrusted: an item with a field not in the table, a `path` that is outside the root, nested, missing or listed twice, an `action` the root does not have, an input that is an object or an array, or anything but one JSON array, fails the whole listing, saying which item and why; so does a script that exits non-zero, prints more than 1 MB, lists more than 1000 folders, or runs longer than `ListScriptTimeoutSeconds` (30). The app shows the reason when the group is opened. A root config that cannot be read fails it too.
+- **A hidden folder or a root of its own is never offered, nor adopted**, whatever the script says: a name that starts with `.` (a worktree list's `.bare`, the bare repository every worktree shares, whose delete would take them all) or a folder with a `.godmode-root` in it. A script's item for one is left out, not an error; an `AdoptFolder` of one is refused.
+- **A folder a session is in is never offered**, whatever the script says: a tracked session works in it, a session has its state in its `.godmode/sessions/` (not recovered, say), or a create is making it. A folder whose only sessions are in its trash (deleted or forgotten) is offered.
+
+**`AdoptFolder(profile, root, path, action, inputs)`** makes a session of the folder `path` (a candidate's `Path`, the folder's name), of `action` (null for the root's first), with `inputs` (the app passes the candidate's `name`, `kind` and `inputs`). The folder is used as it is: no folder is made, nothing in it changes but its `.godmode/`, and no `prepare` script runs.
+
+- **Only an action that says `"adopt": true` runs a script**, its `create` script alone, in the folder, with the environment a create's has, the inputs as `GODMODE_INPUT_*`, **`GODMODE_ADOPT=true`**, and the folder as `GODMODE_PROJECT_PATH`. It must make nothing, no worktree and no branch: it names the session. Of its result file, `project_name`, `kind` and `project_prompt` are read (a `project_prompt` from an issue's title, say); a `project_path` is ignored, logged, since the folder is the one adopted. A script that fails fails the adopt, and nothing is left behind.
+- **Any other action runs no script**: the server adopts the folder itself. The session's name is the input `name`, else the folder's; its kind the input `kind`, else the action's name; its prompt the input `prompt`, if any.
+- **A missing or broken config never runs a create.** A root with no `config.json` adopts with the default action, which has no script. A config that cannot be read refuses the adopt, saying why, before anything is written or run.
+- **Refused, changing nothing**, for a `path` that is not a folder directly in the root (`..`, a path outside it, a nested one, one of the root's own folders, a hidden folder, a root of its own, a folder that does not exist), and for a folder a session is in ("is in use").
+- **The session** is an ordinary session of the root and its action (its environment, arguments, permission mode and delete), with `adopted: true` in its `settings.json` (`ProjectStatus.Adopted`, `ProjectSummary.Adopted`). With no prompt it starts idle, waiting for its first message, which starts a fresh Claude conversation: an earlier one in the folder is not resumed. It is pushed as `ProjectCreated`.
+- **Deleting it** follows its root's rules, as any session's delete: for a worktree root, the delete script runs and the folder is removed. So the app offers **Forget (keep the folder)** beside Delete for an adopted session ([The trash, and folding](#the-trash-and-folding)).
 
 ### Environment
 
@@ -571,6 +618,7 @@ A session that shares its folder is deleted at once in the app, with "Deleted ·
   - the ID's `{profile}/{root}/` names no root the server lists now, compared as written: the root was removed, its `profileName` changed or it was renamed, and it would come back under another ID;
   - the session is not in that root's trash (purged, or its delete removed its folder), or a session of its id has its state there;
   - the folder no longer takes it: a create into it is in progress that owns it, or a session that owns its folder is in it now.
+- **Forget.** `ForgetProject(projectId)` takes any session out of GodMode and leaves its folder be: it stops it, runs **no delete script**, and moves only `.godmode/sessions/<id>/` to the trash, marked `forgotten` beside its `trashed-at`, never the folder or its files, whatever the root's rules for a delete are. It is pushed as `ProjectDeleted`, and says `Trashed`. The folder is then no session's, so it is offered for adopting again. `RestoreProject` undoes it as it undoes a delete, but brings the session back **as it was**: one that owned its folder owns it again (its next delete follows its root's rules, a worktree's folder included), so the restore fails when another session is in the folder now. The app offers Forget in an adopted session's delete, with "Forgot · Undo".
 - **The purge.** The server deletes trashed sessions older than `TrashRetentionSeconds` (86400, a day) at every start, before recovery, and every `TrashPurgeSeconds` (3600; `0` leaves only the start's). A trash without its `trashed-at` is dated by its folder. The app offers Undo for 10 seconds; the day is for a restart in between, and a restore by hand.
 - **Folding** is the app's alone: nothing on the server hides or deletes a session. It folds a session under "N older" in its root when it has no claude (`Stopped` or `Error`), needs nothing of the user, is not open, and has been quiet (`UpdatedAt`) a week, or a day when its action is `transient` (`ProjectSummary.ActionName`, and `CreateActionInfo.Transient` of its root's listed action).
 
@@ -639,8 +687,13 @@ Projects:
 - `Task ResumeProject(projectId)` — Resume stopped project; it is `Idle` until the user writes
 - `Task SubscribeProject(projectId, fromOffset, subscriptionId, generation)` — Replay `output.jsonl` from `fromOffset` (the byte offset after the last line the client has; 0 for all, `-N` for the last N turns) in `OutputBatch` messages, then `OutputReplayComplete`, then live `OutputReceived` lines, each line once and in order. `subscriptionId` is the client's own, echoed by this subscription's batches and complete; `generation` is the output generation `fromOffset` is in (null when the client holds none), and a positive offset in any other replays from 0
 - `Task UnsubscribeProject(projectId)` — Unsubscribe from output
-- `Task<DeleteProjectResult> DeleteProject(projectId, force)` — Stop the project, run delete scripts and remove it; a refused delete leaves it `Stopped`. A session that shares its folder is moved to the folder's trash (`Trashed`), any other loses its working folder
-- `Task<ProjectStatus> RestoreProject(projectId)` — Undo a delete that trashed the session: back under the same ID, `Stopped`, pushed as `ProjectCreated`; fails when its root is not listed under its ID's profile and name now, or it is not in the trash (see [The trash, and folding](#the-trash-and-folding))
+- `Task<DeleteProjectResult> DeleteProject(projectId, force)` — Stop the project, run delete scripts and remove it; a refused delete leaves it `Stopped`. A session that shares its folder is moved to the folder's trash (`Trashed`), any other loses its working folder. A root config that cannot be read refuses the delete of a session that owns its folder (its delete script, which guards the folder, cannot run); `ForgetProject` still works. The app never sends `force` on its own: only after a refusal, as "Force delete…", confirmed
+- `Task<ProjectStatus> RestoreProject(projectId)` — Undo a delete that trashed the session, or a forget: back under the same ID, `Stopped`, pushed as `ProjectCreated`; fails when its root is not listed under its ID's profile and name now, or it is not in the trash (see [The trash, and folding](#the-trash-and-folding))
+
+Adopting folders ([Adopting folders](#adopting-folders)):
+- `Task<UnmanagedFolder[]> ListUnmanaged(profileName, projectRootName)` — The root's folders no session is in, read now: its `list` script's (each `Path`, `Name`, `Kind`, `ActionName`, `Inputs`), else its immediate subfolders; fails, saying why, on a script that fails, times out or prints anything but the documented array
+- `Task<ProjectStatus> AdoptFolder(profileName, projectRootName, path, actionName, inputs)` — Make a session of the folder as it is, running only an `"adopt": true` action's create script (`GODMODE_ADOPT=true`); idle without a prompt; pushed as `ProjectCreated`. Refused, changing nothing, for a path not directly in the root, or a folder a session is in
+- `Task<DeleteProjectResult> ForgetProject(projectId)` — Take the session out of GodMode, its folder kept: no delete script, only its state to the trash, which `RestoreProject` undoes; pushed as `ProjectDeleted`
 
 Attention:
 - `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Review`, `Finished`), oldest first, with a short plain `Text`; the same after a restart

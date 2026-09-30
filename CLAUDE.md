@@ -97,6 +97,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - A root's profile is its `config.json`'s `profileName`, else its explicit entry's `Profile`, else `Default`. A profile's description and environment are `Profiles:<name>:Description` and `Profiles:<name>:Environment:<VAR>` (the root's `environment` wins a clash); secrets stay in environment variables (`Profiles__<name>__Environment__<VAR>`). `ProjectRootsDir` and `.profiles/` are gone
 - `config.json` defines base/shared config (profileName, prepare, delete, status, environment, claudeArgs, model, permissionMode, allowSkipPermissions, sharedFolder, session)
 - An action with `"session": false` starts no session: its prepare and create scripts run in the root, with its environment, and nothing is tracked, no folder made and no claude started. A provisioning root's action makes a new root as a sibling in its scan folder, and its result file's `message=` is what the app shows; `CreateProject` returns a `CreateProjectResult` with no `Project`. With `sharedFolder`, `scriptsCreateFolder` or no create script it is a config error
+- **Adopting folders** (#370): `ListUnmanaged(profile, root)` gives the root's folders no session is in (tracked, or state in `.godmode/sessions/`), read fresh: its `config.json`'s optional `list` script prints them as one JSON array of `{path, name?, kind?, action?, inputs?}` (each `path` a folder directly in the root; read strictly, the whole listing refused on any bad item), else its immediate subfolders but its own and hidden ones. `AdoptFolder(profile, root, path, action?, inputs?)` makes a session of the folder as it is (`adopted: true` in `settings.json`, idle without a prompt): only an action with `"adopt": true` runs a script, its create script alone, with `GODMODE_ADOPT=true`, which must make nothing; any other action, a missing config included, runs none, and a config that cannot be read refuses the adopt. `ForgetProject(id)` takes any session out of GodMode with no delete script, its state to the trash marked `forgotten`, its folder kept; `RestoreProject` brings it back as it was. The server README (*Adopting folders*) has the `list` contract
 - Roots and profiles are maintained by hand on the host (the instance's config file, the roots' folders): no hub method writes config, and the server archives nothing
 - GodMode gives a session one MCP server, the server's own `/mcp` endpoint, whose only tool is the permission prompt, and pre-approves no tool (no `--allowedTools`). A repo brings its MCP servers in its own `.mcp.json`; user-scoped ones live in the profile's `CLAUDE_CONFIG_DIR`
 - `config.{action}.json` files define per-action overlays (merged with base)
@@ -158,7 +159,8 @@ The same layout for every kind of root: a worktree is a working folder with one 
 │   └── scripts/                 # Shared scripts (cross-platform)
 │       ├── prepare.ps1
 │       ├── delete.ps1
-│       └── status.ps1           # Optional: reports the project's pull request as JSON
+│       ├── status.ps1           # Optional: reports the project's pull request as JSON
+│       └── list.ps1             # Optional: the folders to offer for adopting, as a JSON array
 └── {project-folder}/            # Working folders, each with its session in .godmode/sessions/{id}/ (ID {profile}/{root}/{id})
 ```
 

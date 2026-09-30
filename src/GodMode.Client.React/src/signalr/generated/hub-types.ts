@@ -358,6 +358,12 @@ export interface ProjectStatus {
    * bring it back. Otherwise the delete removes the working folder.
    */
   SharedFolder: boolean;
+  /**
+   * Whether the session was adopted (IProjectHub.AdoptFolder, its `settings.json`'s `adopted`): its folder
+   * was there before it, so the app offers IProjectHub.ForgetProject beside its delete, which keeps the
+   * folder.
+   */
+  Adopted: boolean;
 }
 
 /** Summary information about a project. */
@@ -389,6 +395,10 @@ export interface ProjectSummary {
   ActionName?: string | null;
   /** Whether its delete removes only its state, as in ProjectStatus.SharedFolder. */
   SharedFolder: boolean;
+  /**
+   * Whether the session was adopted, as in ProjectStatus.Adopted: the app offers Forget beside its delete.
+   */
+  Adopted: boolean;
 }
 
 /**
@@ -451,6 +461,32 @@ export interface TestStatus {
   Failed: number;
   /** The timestamp when tests were last run. */
   LastRun?: string | null;
+}
+
+/**
+ * A folder in a root that no session works in, which IProjectHub.AdoptFolder can make a session of: one of
+ * the root's `list` script's candidates, or, for a root without one, one of its immediate subfolders.
+ * IProjectHub.ListUnmanaged lists them.
+ */
+export interface UnmanagedFolder {
+  /**
+   * The folder, relative to its root: an immediate subfolder's name. What IProjectHub.AdoptFolder takes back.
+   */
+  Path: string;
+  /**
+   * What the app shows it as, and what a session adopted with no script is called: the script's `name`, else
+   * the folder's name.
+   */
+  Name: string;
+  /** What it is (`feat`, `bug`…), the script's `kind`; null when it gave none. */
+  Kind?: string | null;
+  /** The root's action that adopts it, the script's `action`; null for the root's first action. */
+  ActionName?: string | null;
+  /**
+   * The inputs the adopt passes on (the branch, an issue number), the script's `inputs`; null when it gave
+   * none.
+   */
+  Inputs?: Record<string, unknown> | null;
 }
 
 /** Interface for SignalR hub methods that clients can invoke on the server. */
@@ -533,6 +569,29 @@ export interface IProjectHub {
    * profile and name in its ID (removed, or renamed), or when its folder no longer takes it.
    */
   RestoreProject(projectId: string): Promise<ProjectStatus>;
+  /**
+   * The folders of a root that GodMode does not manage, read now (nothing is cached): its `list` script's
+   * candidates, or, with none, its immediate subfolders but its own and the hidden ones. A folder a session
+   * works in (tracked, or with its state in `.godmode/sessions/`) is never one. Fails, saying why, when the
+   * root is not listed, or its script fails, times out or prints anything but the documented JSON.
+   */
+  ListUnmanaged(profileName: string, projectRootName: string): Promise<UnmanagedFolder[]>;
+  /**
+   * Makes a session of a folder that exists in the root (UnmanagedFolder.Path), as it is: no folder is made,
+   * and nothing in it is changed but its `.godmode/`. With an action that says `"adopt": true` its create
+   * script alone runs, with `GODMODE_ADOPT=true`, to name the session (`project_name`, `kind`,
+   * `project_prompt`); with any other action, or none, no script runs, and the session is inputs' `name`
+   * (else the folder's) and `kind` (else the action's). With no prompt it starts idle, waiting for its first
+   * message. Refused, changing nothing, for a path that is not an immediate subfolder of the root, or a
+   * folder a session is in. Pushed as IProjectHubClient.ProjectCreated.
+   */
+  AdoptFolder(profileName: string, projectRootName: string, path: string, actionName: string | null, inputs: Record<string, unknown> | null): Promise<ProjectStatus>;
+  /**
+   * Takes the session out of GodMode and leaves its folder be: it is stopped, no delete script runs, and only
+   * its state moves to the folder's `.godmode/trash/`, which IProjectHub.RestoreProject brings back, as it
+   * was, until the trash is purged. Pushed as IProjectHubClient.ProjectDeleted.
+   */
+  ForgetProject(projectId: string): Promise<DeleteProjectResult>;
   /**
    * Checks whether a CLI command is available on the server (in PATH). Returns the resolved path if found,
    * null if not.

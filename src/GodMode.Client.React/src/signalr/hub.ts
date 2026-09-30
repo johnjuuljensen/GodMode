@@ -5,7 +5,7 @@
 import * as signalR from '@microsoft/signalr';
 import type {
   ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, PermissionDetail, AttentionItem,
-  CreateProjectResult, DeleteProjectResult, IProjectHub, IProjectHubClient,
+  CreateProjectResult, DeleteProjectResult, IProjectHub, IProjectHubClient, UnmanagedFolder,
 } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
@@ -339,6 +339,23 @@ export class GodModeHub {
   /** Undoes a delete that trashed the session: it is back under the same ID, and pushed as ProjectCreated. */
   async restoreProject(projectId: string): Promise<ProjectStatus> {
     return await this.invoke('RestoreProject', projectId);
+  }
+
+  // ── Adopting folders ──
+
+  /** The root's folders no session works in, read now on the server: its list script's, or its subfolders. Rejects with the script's failure. */
+  async listUnmanaged(profileName: string, rootName: string): Promise<UnmanagedFolder[]> {
+    return await this.invoke('ListUnmanaged', profileName, rootName);
+  }
+
+  /** Makes a session of the folder, as it is; pushed as ProjectCreated. */
+  async adoptFolder(profileName: string, rootName: string, path: string, actionName: string | null, inputs: Record<string, unknown> | null): Promise<ProjectStatus> {
+    return await this.invoke('AdoptFolder', profileName, rootName, path, actionName, inputs);
+  }
+
+  /** Takes the session out of GodMode, no delete script, its folder kept; its state goes to the trash, which restoreProject undoes. */
+  async forgetProject(projectId: string): Promise<DeleteProjectResult> {
+    return await this.invoke('ForgetProject', projectId);
   }
 
   // ── Utility ──

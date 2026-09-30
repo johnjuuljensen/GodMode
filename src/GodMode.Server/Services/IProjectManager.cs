@@ -93,6 +93,15 @@ public interface IProjectManager
     /// </summary>
     Task<ProjectStatus> RestoreProjectAsync(string projectId);
 
+    /// <summary>The root's folders no session works in: see <see cref="GodMode.Shared.Hubs.IProjectHub.ListUnmanaged"/>.</summary>
+    Task<UnmanagedFolder[]> ListUnmanagedAsync(string profileName, string rootName);
+
+    /// <summary>Makes a session of a folder that exists in the root: see <see cref="GodMode.Shared.Hubs.IProjectHub.AdoptFolder"/>.</summary>
+    Task<ProjectStatus> AdoptFolderAsync(string profileName, string rootName, string path, string? actionName, Dictionary<string, System.Text.Json.JsonElement>? inputs);
+
+    /// <summary>Takes the session out of GodMode, its folder kept: see <see cref="GodMode.Shared.Hubs.IProjectHub.ForgetProject"/>.</summary>
+    Task<DeleteProjectResult> ForgetProjectAsync(string projectId);
+
     /// <summary>
     /// Cleans up resources for a disconnected client.
     /// </summary>

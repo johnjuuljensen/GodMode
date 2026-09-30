@@ -44,6 +44,16 @@ internal sealed class HarnessConnection
     public Task<CreateProjectResult> CreateProjectAsync(string profileName, string rootName, string? actionName, Dictionary<string, JsonElement> inputs) =>
         Hub().CreateProject(profileName, rootName, actionName, inputs);
 
+    /// <summary>Adopts as the app's Adopt does, through the hub, which announces the session (ProjectCreated).</summary>
+    public Task<ProjectStatus> AdoptFolderAsync(string profileName, string rootName, string path, string? actionName, Dictionary<string, JsonElement>? inputs) =>
+        Hub().AdoptFolder(profileName, rootName, path, actionName, inputs);
+
+    /// <summary>Forgets as the app's Forget does, through the hub, which announces it (ProjectDeleted).</summary>
+    public Task<DeleteProjectResult> ForgetProjectAsync(string projectId) => Hub().ForgetProject(projectId);
+
+    /// <summary>Lists a root's folders GodMode does not manage, through the hub, which fails with the reason.</summary>
+    public Task<UnmanagedFolder[]> ListUnmanagedAsync(string profileName, string rootName) => Hub().ListUnmanaged(profileName, rootName);
+
     /// <summary>The connection drops: the hub hears it, and SignalR takes it out of its groups.</summary>
     public async Task DisconnectAsync()
     {

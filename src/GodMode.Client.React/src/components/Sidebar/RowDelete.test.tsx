@@ -216,11 +216,39 @@ describe('a session-only delete', () => {
     expect(buttonIn(toast(), 'Undo')).toBeUndefined();
   });
 
-  it('forces a running claude, as the view has always done', async () => {
-    await show([session('notes', { shared: true, state: 'Running' })]);
+  it('never forces on its own, not even a running claude: the server stops it, and the delete script still checks', async () => {
+    await show([session('notes', { shared: true, state: 'Running' }), session('left-list', { state: 'Running' })]);
     await openMenu('notes');
     await click(buttonIn(document.querySelector('.project-item-menu'), 'Delete')!);
-    await vi.waitFor(() => expect(hub.deletes).toEqual([{ projectId: 'Default/work/260929-chat-notes-abcd', force: true }]));
+    await vi.waitFor(() => expect(hub.deletes).toEqual([{ projectId: 'Default/work/260929-chat-notes-abcd', force: false }]));
+
+    await openMenu('left-list');
+    await click(buttonIn(document.querySelector('.project-item-menu'), 'Delete…')!);
+    await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    await click(buttonIn(dialog(), 'Delete')!);
+    await vi.waitFor(() => expect(hub.deletes).toHaveLength(2));
+    expect(hub.deletes[1]).toEqual({ projectId: 'Default/work/260929-chat-left-list-abcd', force: false });
+  });
+
+  it('forces only when chosen after a refusal, and confirmed', async () => {
+    await show([session('left-list')]);
+    hub.failDelete = 'uncommitted work in left-list';
+    await openMenu('left-list');
+    await click(buttonIn(document.querySelector('.project-item-menu'), 'Delete…')!);
+    await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    await click(buttonIn(dialog(), 'Delete')!);
+    await vi.waitFor(() => expect(toast()?.textContent).toContain('uncommitted work in left-list'));
+    expect(hub.deletes).toEqual([{ projectId: 'Default/work/260929-chat-left-list-abcd', force: false }]);
+
+    await click(buttonIn(toast(), 'Force delete…')!);
+    await vi.waitFor(() => expect(dialog()?.querySelector('h2')?.textContent).toBe('Force the delete of "left-list"?'));
+    expect(dialog()!.querySelector('.confirm-dialog-message')?.textContent).toContain('uncommitted work in left-list');
+    expect(hub.deletes).toHaveLength(1);
+    hub.failDelete = undefined;
+    await click(buttonIn(dialog(), 'Force delete')!);
+
+    await vi.waitFor(() => expect(hub.deletes).toHaveLength(2));
+    expect(hub.deletes[1]).toEqual({ projectId: 'Default/work/260929-chat-left-list-abcd', force: true });
   });
 });
 
