@@ -283,8 +283,14 @@ public sealed class VoiceHost : IVoiceEvents
             }
             finally
             {
-                Audio.Dispose();
-                await Servers.DisposeAsync();
+                try
+                {
+                    Audio.Dispose();
+                }
+                finally
+                {
+                    await Servers.DisposeAsync();
+                }
             }
         }
     }

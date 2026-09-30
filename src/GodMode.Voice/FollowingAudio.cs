@@ -191,11 +191,11 @@ public sealed class FollowingAudio : IDisposable
         {
             _logger.LogWarning("Voice: there is no microphone ({Why})", why);
             _current = null;
-            (_source.Use(new NoMicrophone()) as IDisposable)?.Dispose();
+            Release(_source.Use(new NoMicrophone()), "microphone");
             return;
         }
 
-        IMicrophone microphone;
+        IMicrophone? microphone = null;
         try
         {
             microphone = _devices.OpenMicrophone(new AudioDevice(choice.Id, choice.Name), echoCancelled);
@@ -203,13 +203,14 @@ public sealed class FollowingAudio : IDisposable
         }
         catch (Exception ex)
         {
+            Release(microphone, "microphone");
             _openedMicrophone = null;
             _logger.LogError(ex, "Voice: could not open the microphone {Name}", choice.Name);
             return;
         }
 
         _current = microphone;
-        (_source.Use(microphone) as IDisposable)?.Dispose();
+        Release(_source.Use(microphone), "microphone");
         _logger.LogInformation("Voice: microphone {Name} ({Kind}, {Capture}; {Why})",
             choice.Name, choice.Pinned ? "chosen" : "default", microphone.Description, why);
     }
@@ -220,7 +221,7 @@ public sealed class FollowingAudio : IDisposable
         if (choice.Id is null)
         {
             _logger.LogWarning("Voice: there is no speaker ({Why})", why);
-            (_sink.Use(null) as IDisposable)?.Dispose();
+            Release(_sink.Use(null), "speaker");
             return;
         }
 
@@ -236,8 +237,24 @@ public sealed class FollowingAudio : IDisposable
             return;
         }
 
-        (_sink.Use(speaker) as IDisposable)?.Dispose();
+        Release(_sink.Use(speaker), "speaker");
         _logger.LogInformation("Voice: speaker {Name} ({Kind}; {Why})", choice.Name, choice.Pinned ? "chosen" : "default", why);
+    }
+
+    /// <summary>
+    /// Lets go of a device voice no longer uses. One that went away can throw as it is stopped (NAudio's WaveOutEvent and
+    /// WaveInEvent do): that is logged, and never keeps voice from the device it moves to, or from stopping.
+    /// </summary>
+    private void Release(object? device, string kind)
+    {
+        try
+        {
+            (device as IDisposable)?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Voice: letting go of the {Kind} before failed", kind);
+        }
     }
 
     private void LogFallback(string kind, AudioDevice? setting, DeviceChoice choice)
@@ -254,10 +271,10 @@ public sealed class FollowingAudio : IDisposable
             if (_disposed) return;
             _disposed = true;
         }
-        _watch?.Dispose();
+        Release(_watch, "device watcher");
         _settle.Dispose();
-        (_source.Complete() as IDisposable)?.Dispose();
-        (_sink.Use(null) as IDisposable)?.Dispose();
+        Release(_source.Complete(), "microphone");
+        Release(_sink.Use(null), "speaker");
     }
 
     /// <summary>With no microphone at all, the session hears nothing until one comes.</summary>

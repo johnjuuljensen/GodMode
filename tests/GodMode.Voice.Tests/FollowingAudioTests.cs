@@ -134,6 +134,44 @@ public sealed class FollowingAudioTests : IDisposable
         await audio.Source.Audio.Completion.WaitAsync(Eventually.Timeout);
     }
 
+    /// <summary>NAudio's WaveOutEvent and WaveInEvent throw as they are stopped on a device that went away.</summary>
+    [Fact]
+    public async Task Devices_that_throw_as_they_are_let_go_still_leave_voice_on_the_new_pair_and_stopping_still_stops()
+    {
+        _devices.Set([LaptopMic, HeadsetMic], [LaptopSpeakers, HeadsetSpeaker], HeadsetMic, HeadsetSpeaker);
+        _devices.ThrowOnDispose = true;
+        var audio = Open();
+
+        _devices.Set([LaptopMic], [LaptopSpeakers], LaptopMic, LaptopSpeakers);
+        await UntilOpenAsync(audio, LaptopMic, LaptopSpeakers);
+        await audio.Sink.SendAudioAsync(new byte[] { 4 }, CancellationToken.None);
+        _devices.Microphone(LaptopMic).Say(6);
+
+        Assert.Equal(6, await ReadAsync(audio));
+        Assert.Equal([4], _devices.Speaker(LaptopSpeakers).Played);
+        Assert.True(_devices.Microphone(HeadsetMic).Disposed);
+        Assert.True(_devices.Speaker(HeadsetSpeaker).Disposed);
+
+        audio.Dispose();
+        Assert.True(_devices.Microphone(LaptopMic).Disposed);
+        Assert.True(_devices.Speaker(LaptopSpeakers).Disposed);
+        await audio.Source.Audio.Completion.WaitAsync(Eventually.Timeout);
+    }
+
+    [Fact]
+    public async Task A_microphone_switched_to_that_fails_to_start_is_let_go_of_and_the_speaker_still_switches()
+    {
+        _devices.Set([LaptopMic], [LaptopSpeakers], LaptopMic, LaptopSpeakers);
+        var audio = Open();
+        _devices.FailStart = true;
+
+        _devices.Set([LaptopMic, HeadsetMic], [LaptopSpeakers, HeadsetSpeaker], HeadsetMic, HeadsetSpeaker);
+        await Eventually.UntilAsync(() => audio.OpenIds.Speaker == HeadsetSpeaker.Id, () => $"open on {audio.OpenIds}");
+
+        Assert.True(_devices.Microphone(HeadsetMic).Disposed);
+        Assert.Null(audio.OpenIds.Microphone);
+    }
+
     private static Task UntilOpenAsync(FollowingAudio audio, AudioDevice microphone, AudioDevice speaker) =>
         Eventually.UntilAsync(() => audio.OpenIds == (microphone.Id, speaker.Id),
             () => $"open on {audio.OpenIds}, not ({microphone.Id}, {speaker.Id})");
@@ -149,6 +187,12 @@ public sealed class FollowingAudioTests : IDisposable
         public ConcurrentQueue<IFake> Opened { get; } = new();
         public ConcurrentQueue<bool> Listed { get; } = new();
         public bool Watching => _changed is not null;
+
+        /// <summary>Devices opened from now on throw as they are disposed (after marking themselves disposed).</summary>
+        public bool ThrowOnDispose { get; set; }
+
+        /// <summary>Microphones opened from now on throw as they are started.</summary>
+        public bool FailStart { get; set; }
 
         /// <summary>The devices there are now; the watcher hears of it, as Windows' notification client would.</summary>
         public void Set(AudioDevice[] microphones, AudioDevice[] speakers, AudioDevice? defaultMicrophone, AudioDevice? defaultSpeaker)
@@ -172,8 +216,8 @@ public sealed class FollowingAudioTests : IDisposable
             return new Unwatch(() => _changed = null);
         }
 
-        public IMicrophone OpenMicrophone(AudioDevice device, bool echoCancelled) => Keep(new FakeMicrophone(device.Id, echoCancelled));
-        public ISpeaker OpenSpeaker(AudioDevice device) => Keep(new FakeSpeaker(device.Id));
+        public IMicrophone OpenMicrophone(AudioDevice device, bool echoCancelled) => Keep(new FakeMicrophone(device.Id, echoCancelled) { ThrowOnDispose = ThrowOnDispose, FailStart = FailStart });
+        public ISpeaker OpenSpeaker(AudioDevice device) => Keep(new FakeSpeaker(device.Id) { ThrowOnDispose = ThrowOnDispose });
 
         private T Keep<T>(T device) where T : IFake
         {
@@ -205,13 +249,17 @@ public sealed class FollowingAudioTests : IDisposable
         public string Description => echoCancelled ? "echo-cancelled" : "plain";
 
         public void Say(byte value) => _audio.Writer.TryWrite(new[] { value });
+        public bool ThrowOnDispose { get; init; }
+        public bool FailStart { get; init; }
+
         public void End(Exception error) => _audio.Writer.TryComplete(error);
-        public void Start() => Started = true;
+        public void Start() => Started = !FailStart ? true : throw new InvalidOperationException("The microphone would not start");
 
         public void Dispose()
         {
             Disposed = true;
             _audio.Writer.TryComplete();
+            if (ThrowOnDispose) throw new InvalidOperationException("The device went away");
         }
     }
 
@@ -230,6 +278,12 @@ public sealed class FollowingAudioTests : IDisposable
 
         public Task SendStatusAsync(string message, CancellationToken ct) => Task.CompletedTask;
         public Task InterruptAsync(CancellationToken ct) => Task.CompletedTask;
-        public void Dispose() => Disposed = true;
+        public bool ThrowOnDispose { get; init; }
+
+        public void Dispose()
+        {
+            Disposed = true;
+            if (ThrowOnDispose) throw new InvalidOperationException("The device went away");
+        }
     }
 }
