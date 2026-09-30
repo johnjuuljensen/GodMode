@@ -175,7 +175,7 @@ public sealed class VoiceSession : IAsyncDisposable
                 GodModeGraph.Build(inference, languages, tools, phrases),
                 setup.Transcription,
                 setup.AudioSink,
-                new EventSink(setup.Events, state))
+                new EventSink(setup.Events, state, tools.Creates))
             {
                 AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation), logger),
                 Options = new SessionOptions
@@ -191,6 +191,7 @@ public sealed class VoiceSession : IAsyncDisposable
             projects.Changed += voice.RefreshKeyterms;
             voice.RefreshKeyterms();
             board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(phrases.Announce(handle, item.Item), item.Project.Key)));
+            tools.Creates.Attach(outcome => session.Announcements.TryWrite(new Announcement(phrases.Created(outcome))));
             state.Release();
             voice._run = voice.RunAsync(languages);
             logger.LogInformation("Voice session started ({Languages}); {Projects} projects, {Waiting} waiting, {Handles} handles",
@@ -287,7 +288,7 @@ public sealed class VoiceSession : IAsyncDisposable
         System.Globalization.CultureInfo.GetCultureInfo(language).TwoLetterISOLanguageName;
 
     /// <summary>The session's events, to the host and the state.</summary>
-    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state) : ISessionEventSink
+    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates) : ISessionEventSink
     {
         public Task OnTranscriptionAsync(TranscriptionEvent evt, string? cleanedText)
         {
@@ -297,6 +298,8 @@ public sealed class VoiceSession : IAsyncDisposable
 
         public Task OnResponseAsync(string response)
         {
+            // Called as the speech starts: a create's read-back arms it, anything else drops the one that waits
+            creates.Spoken(response);
             events.Response(response);
             return Task.CompletedTask;
         }

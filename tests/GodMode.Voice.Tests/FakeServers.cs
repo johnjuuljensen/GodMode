@@ -1,12 +1,13 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 
 namespace GodMode.Voice.Tests;
 
 /// <summary>
-/// Servers in memory: attention lists and projects a test sets, pushed as the hub pushes them, and the replies and
-/// seen marks voice sends.
+/// Servers in memory: attention lists, projects and roots a test sets, pushed as the hub pushes them, and the replies,
+/// seen marks and creates voice sends.
 /// </summary>
 internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
 {
@@ -19,6 +20,70 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
 
     public ConcurrentQueue<(ProjectRef Project, string Text)> Replies { get; } = new();
     public ConcurrentQueue<ProjectRef> Seen { get; } = new();
+    public ConcurrentQueue<(ServerRoot Root, string Action, IReadOnlyDictionary<string, string> Inputs)> Creates { get; } = new();
+    private readonly ConcurrentQueue<ServerRoot> _roots = new();
+
+    /// <summary>What a create waits on before it returns, as a create script takes its time; done at once when unset.</summary>
+    public Task CreateGate { get; set; } = Task.CompletedTask;
+
+    /// <summary>The server's error for a create, as a create script's failure comes back; none when unset.</summary>
+    public string? CreateError { get; set; }
+
+    /// <summary>A root on a server, with its actions, as <c>ListProjectRoots</c> lists it.</summary>
+    public FakeServers AddRoot(string serverId, string name, string? profile, params CreateActionInfo[] actions)
+    {
+        _roots.Enqueue(new ServerRoot(serverId, serverId, new ProjectRootInfo(name, null, actions, profile)));
+        _servers.TryAdd(serverId, 0);
+        return this;
+    }
+
+    /// <summary>What listing the roots waits on, as a slow server's answer; done at once when unset.</summary>
+    public Task RootsGate { get; set; } = Task.CompletedTask;
+
+    /// <summary>How many times the roots were asked for.</summary>
+    public int RootsListed => Volatile.Read(ref _rootsListed);
+    private int _rootsListed;
+
+    public async Task<IReadOnlyList<ServerRoot>> ListRootsAsync(CancellationToken ct)
+    {
+        Interlocked.Increment(ref _rootsListed);
+        await RootsGate;
+        return [.. _roots];
+    }
+
+    /// <summary>As the server creates: the session named as its action's templates name it, pushed as ProjectCreated.</summary>
+    public async Task<CreateProjectResult> CreateAsync(ServerRoot root, string actionName, IReadOnlyDictionary<string, string> inputs, CancellationToken ct)
+    {
+        Creates.Enqueue((root, actionName, inputs));
+        await CreateGate;
+        if (CreateError is { } error)
+            throw new InvalidOperationException(error);
+        var name = inputs.TryGetValue("issueNumber", out var issue) ? $"issue_{issue}" : inputs.GetValueOrDefault("name", "session");
+        var id = $"{root.Profile}/{root.Root.Name}/260930-{actionName}-{name}-{Creates.Count:x4}";
+        AddProject(root.ServerId, id, name, root: root.Root.Name, kind: actionName, profile: root.Profile);
+        return new CreateProjectResult(_statuses[new ProjectRef(root.ServerId, id)]);
+    }
+
+    /// <summary>An action whose form is <paramref name="schema"/>'s JSON; the server's default form (a name, a prompt) when null.</summary>
+    public static CreateActionInfo Action(string name, string? schema = null, bool session = true) =>
+        new(name, InputSchema: JsonSerializer.Deserialize<JsonElement>(schema ?? DefaultSchema), Session: session);
+
+    public const string DefaultSchema = """
+        { "type": "object", "properties": { "name": { "type": "string", "title": "Project Name" },
+          "prompt": { "type": "string", "title": "Task Description" }, "skipPermissions": { "type": "boolean", "default": false } },
+          "required": ["name"] }
+        """;
+
+    public const string IssueSchema = """
+        { "type": "object", "properties": { "issueNumber": { "type": "string", "title": "Issue Number" },
+          "baseBranch": { "type": "string", "title": "Base Branch" }, "skipPermissions": { "type": "boolean", "default": false } },
+          "required": ["issueNumber"] }
+        """;
+
+    public const string BranchSchema = """
+        { "type": "object", "properties": { "branch": { "type": "string", "title": "Branch" },
+          "prompt": { "type": "string", "title": "Task Description" } }, "required": ["branch", "prompt"] }
+        """;
 
     /// <summary>Sets the server's list and pushes it, as the hub does on a change, with the projects in it.</summary>
     public void Set(string serverId, params AttentionItem[] items)

@@ -33,6 +33,7 @@ public sealed class HelpNode(string id, int priority) : INode
         (VoiceTools.ProjectStatus, "status og et projekt", "status and a project"),
         (VoiceTools.Answer, "svar at og dit svar", "answer that and your answer"),
         (VoiceTools.MarkSeen, "læst", "seen"),
+        (VoiceTools.StartSession, "start issue og et nummer", "start issue and a number"),
         (AnnouncementTools.Mute.Name, "stille", "quiet"),
         (AnnouncementTools.Unmute.Name, "sig til igen", "you can talk again"),
     ];
