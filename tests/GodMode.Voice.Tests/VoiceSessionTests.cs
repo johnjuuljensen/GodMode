@@ -242,11 +242,11 @@ public sealed class VoiceSessionTests
     [Fact]
     public async Task A_session_whose_microphone_failed_stops()
     {
-        var microphone = new FailingMicrophone();
+        var microphone = new ScriptedAudioSource();
         var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(), microphone: microphone);
         await voice.Events.SaidAsync("Klar.");
 
-        microphone.Fail();
+        microphone.Fail(new InvalidOperationException("The microphone stopped delivering audio"));
         await voice.DisposeAsync();
 
         Assert.Equal(VoiceState.Off, voice.Events.States.Last());
@@ -259,11 +259,11 @@ public sealed class VoiceSessionTests
     [Fact]
     public async Task A_microphone_that_fails_is_reported_and_held_as_an_error()
     {
-        var microphone = new FailingMicrophone();
+        var microphone = new ScriptedAudioSource();
         await using var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(), microphone: microphone);
         await voice.Events.SaidAsync("Klar.");
 
-        microphone.Fail();
+        microphone.Fail(new InvalidOperationException("The microphone stopped delivering audio"));
 
         await Eventually.UntilAsync(() => !voice.Events.Errors.IsEmpty, () => "the microphone's failure to be reported");
         Assert.Equal((SessionService.Session, SessionErrorKind.ServiceError, "The microphone stopped: The microphone stopped delivering audio"),
