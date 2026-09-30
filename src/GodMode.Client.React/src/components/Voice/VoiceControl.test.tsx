@@ -137,3 +137,58 @@ it('sends a key the user typed, never shows one, and says only whether each is s
   expect(elevenLabs.value).toBe('');
   expect(elevenLabs.placeholder).toMatch(/^Set/);
 });
+
+it('offers Default and each device, keeps a chosen one that is not connected, and saves the choice', async () => {
+  const laptop = { Id: '{0.0.1}.{laptop}', Name: 'Microphone Array (Realtek)' };
+  const headset = { Id: '{0.0.1}.{headset}', Name: 'Headset (Shokz)' };
+  const usb = { Id: '{0.0.0}.{usb}', Name: 'USB Speaker' };
+  const speakers = { Id: '{0.0.0}.{speakers}', Name: 'Speakers (Realtek)' };
+  const settings = {
+    Language: 'da-DK+en', VoiceId: 'v1', EchoCancellation: false, Microphone: null, Speaker: usb,
+    Models: { Light: 'l', Medium: 'm', Heavy: 'h' }, ElevenLabsKeySet: true, AnthropicKeySet: true,
+  };
+  answer({
+    'voice.settings.get': settings,
+    'voice.settings.set': { ...settings, Microphone: headset, Speaker: null },
+    'voice.devices': {
+      Supported: true, Microphones: [laptop, headset], Speakers: [speakers],
+      DefaultMicrophoneId: laptop.Id.toUpperCase(), DefaultSpeakerId: speakers.Id,
+    },
+  });
+  view = await render(<VoiceSettings />);
+  const picker = (name: string) => container().querySelector<HTMLSelectElement>(`select[aria-label="${name}"]`)!;
+  const options = (name: string) => [...picker(name).options].map(o => o.textContent);
+
+  expect(options('Microphone')).toEqual(['Default (Microphone Array (Realtek))', laptop.Name, headset.Name]);
+  expect(picker('Microphone').value).toBe('');
+  expect(options('Speaker')).toEqual(['Default (Speakers (Realtek))', speakers.Name, 'USB Speaker (not connected)']);
+  expect(picker('Speaker').value).toBe(usb.Id);
+
+  await act(async () => {
+    picker('Microphone').value = headset.Id;
+    picker('Microphone').dispatchEvent(new Event('change', { bubbles: true }));
+    picker('Speaker').value = '';
+    picker('Speaker').dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await click([...container().querySelectorAll('button')].find(b => b.textContent === 'Save')!);
+
+  expect(bridge.request).toHaveBeenCalledWith('voice.settings.set', {
+    VoiceId: 'v1', Language: 'da-DK+en', EchoCancellation: false, Microphone: headset, Speaker: { Id: '', Name: '' },
+  });
+  expect(picker('Microphone').value).toBe(headset.Id);
+  expect(picker('Speaker').value).toBe('');
+});
+
+it('offers no devices where voice picks its own route', async () => {
+  answer({
+    'voice.settings.get': {
+      Language: 'da-DK+en', VoiceId: 'v1', EchoCancellation: false,
+      Models: { Light: 'l', Medium: 'm', Heavy: 'h' }, ElevenLabsKeySet: true, AnthropicKeySet: true,
+    },
+    'voice.devices': { Supported: false, Microphones: [], Speakers: [] },
+  });
+  view = await render(<VoiceSettings />);
+
+  expect(container().querySelector('select')).toBeNull();
+  expect(bridge.request).toHaveBeenCalledWith('voice.devices');
+});

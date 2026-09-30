@@ -39,6 +39,12 @@ public sealed record VoiceSettings
     /// </summary>
     public bool EchoCancellation { get; init; }
 
+    /// <summary>The microphone voice uses: null for Default, which follows Windows' default communications microphone.</summary>
+    public AudioDevice? Microphone { get; init; }
+
+    /// <summary>The speaker voice uses: null for Default, which follows Windows' default communications speaker.</summary>
+    public AudioDevice? Speaker { get; init; }
+
     public VoiceModels Models { get; init; } = VoiceModels.Default;
 
     public static readonly VoiceSettings Default = new();
@@ -72,17 +78,22 @@ public sealed record VoiceSettingsView(
     string Language,
     string VoiceId,
     bool EchoCancellation,
+    AudioDevice? Microphone,
+    AudioDevice? Speaker,
     VoiceModels Models,
     bool ElevenLabsKeySet,
     bool AnthropicKeySet);
 
 /// <summary>
-/// What <c>voice.settings.set</c> changes: a null field is left as it is. A key that is blank removes the key.
+/// What <c>voice.settings.set</c> changes: a null field is left as it is. A key that is blank removes the key, and a
+/// device whose id is blank chooses Default.
 /// </summary>
 public sealed record VoiceSettingsUpdate(
     string? Language = null,
     string? VoiceId = null,
     bool? EchoCancellation = null,
+    AudioDevice? Microphone = null,
+    AudioDevice? Speaker = null,
     VoiceModels? Models = null,
     string? ElevenLabsKey = null,
     string? AnthropicKey = null);
@@ -120,7 +131,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
     {
         var settings = await LoadAsync();
         var keys = await LoadKeysAsync();
-        return new VoiceSettingsView(settings.Language, settings.VoiceId, settings.EchoCancellation, settings.Models,
+        return new VoiceSettingsView(settings.Language, settings.VoiceId, settings.EchoCancellation, settings.Microphone, settings.Speaker, settings.Models,
             ElevenLabsKeySet: !string.IsNullOrEmpty(keys.ElevenLabs),
             AnthropicKeySet: !string.IsNullOrEmpty(keys.Anthropic));
     }
@@ -141,6 +152,8 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
                 Language = update.Language ?? current.Language,
                 VoiceId = update.VoiceId ?? current.VoiceId,
                 EchoCancellation = update.EchoCancellation ?? current.EchoCancellation,
+                Microphone = update.Microphone ?? current.Microphone,
+                Speaker = update.Speaker ?? current.Speaker,
                 Models = update.Models ?? current.Models,
             });
             if (next != current)
@@ -159,7 +172,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
         return await GetViewAsync();
     }
 
-    /// <summary>Blank fields (a hand-edited file, an empty text box) take their defaults.</summary>
+    /// <summary>Blank fields (a hand-edited file, an empty text box) take their defaults; a device with a blank id is Default.</summary>
     private static VoiceSettings Normalized(VoiceSettings settings) => settings with
     {
         Language = Or(settings.Language, VoiceSettings.DefaultLanguage),
@@ -167,7 +180,12 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
         Models = settings.Models is { } models
             ? new VoiceModels(Or(models.Light, VoiceModels.Default.Light), Or(models.Medium, VoiceModels.Default.Medium), Or(models.Heavy, VoiceModels.Default.Heavy))
             : VoiceModels.Default,
+        Microphone = Device(settings.Microphone),
+        Speaker = Device(settings.Speaker),
     };
+
+    private static AudioDevice? Device(AudioDevice? device) =>
+        string.IsNullOrWhiteSpace(device?.Id) ? null : new AudioDevice(device.Id.Trim(), Or(device.Name, device.Id));
 
     private static string Or(string? value, string fallback) => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 

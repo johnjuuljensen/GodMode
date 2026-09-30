@@ -86,21 +86,47 @@ export interface VoiceModels {
   Heavy: string;
 }
 
+/** A microphone or speaker: its endpoint id, and the name the platform shows for it. */
+export interface AudioDevice {
+  Id: string;
+  Name: string;
+}
+
+/**
+ * The microphones and speakers the voice settings can choose, and the default of each (its id). Not Supported where
+ * voice picks its own route (Android), and the lists are empty.
+ */
+export interface VoiceDeviceList {
+  Supported: boolean;
+  Microphones: AudioDevice[];
+  Speakers: AudioDevice[];
+  DefaultMicrophoneId?: string | null;
+  DefaultSpeakerId?: string | null;
+}
+
 /** The voice settings, and whether each key is set. The shell never sends a key back. */
 export interface VoiceSettingsView {
   Language: string;
   VoiceId: string;
   EchoCancellation: boolean;
+  /** Null for Default, which follows the platform's default device. */
+  Microphone?: AudioDevice | null;
+  Speaker?: AudioDevice | null;
   Models: VoiceModels;
   ElevenLabsKeySet: boolean;
   AnthropicKeySet: boolean;
 }
 
-/** What to change: an absent field stays as it is; a key that is an empty string is removed. */
+/**
+ * What to change: an absent field stays as it is; a key that is an empty string is removed; a device whose Id is an
+ * empty string is Default.
+ */
 export interface VoiceSettingsUpdate {
   Language?: string;
   VoiceId?: string;
   EchoCancellation?: boolean;
+  Microphone?: AudioDevice;
+  Speaker?: AudioDevice;
   Models?: VoiceModels;
   ElevenLabsKey?: string;
   AnthropicKey?: string;
@@ -125,7 +151,9 @@ export interface BridgeRequests {
   'voice.start': [void, VoiceStatus];
   'voice.stop': [void, VoiceStatus];
   'voice.settings.get': [void, VoiceSettingsView];
+  /** A running session moves to the devices it chooses now; the other settings apply from voice's next start. */
   'voice.settings.set': [VoiceSettingsUpdate, VoiceSettingsView];
+  'voice.devices': [void, VoiceDeviceList];
 }
 
 /** Event types the shell sends → their payloads. attention.open: a notification was tapped, and attention.take has its item. */
