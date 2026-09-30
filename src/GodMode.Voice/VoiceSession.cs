@@ -79,13 +79,14 @@ public sealed class VoiceSession : IAsyncDisposable
     private Task _run = Task.CompletedTask;
 
     private VoiceSession(ServiceProvider services, AsyncServiceScope scope, VoiceBotSession session, VoiceStateTracker state,
-        AttentionBoard board, ProjectHandles handles, ILogger logger)
+        AttentionBoard board, ProjectBoard projects, ProjectHandles handles, ILogger logger)
     {
         _services = services;
         _scope = scope;
         _session = session;
         _state = state;
         Board = board;
+        Projects = projects;
         Handles = handles;
         _logger = logger;
     }
@@ -97,6 +98,9 @@ public sealed class VoiceSession : IAsyncDisposable
 
     /// <summary>The attention lists the session announces from.</summary>
     public AttentionBoard Board { get; }
+
+    /// <summary>Every project the servers have, as the session knows them.</summary>
+    public ProjectBoard Projects { get; }
 
     public ProjectHandles Handles { get; }
 
@@ -114,7 +118,8 @@ public sealed class VoiceSession : IAsyncDisposable
         var languages = setup.Settings.Languages;
         var phrases = new VoicePhrases(languages);
         var handles = new ProjectHandles();
-        var board = new AttentionBoard(setup.Servers, handles);
+        var projects = new ProjectBoard(setup.Servers, handles);
+        var board = new AttentionBoard(setup.Servers, handles, projects);
         var conversation = new VoiceConversation();
 
         await setup.ConnectAsync(ct);
@@ -144,7 +149,7 @@ public sealed class VoiceSession : IAsyncDisposable
             scope = services.CreateAsyncScope();
 
             var inference = new ObservedInference(scope.ServiceProvider.GetRequiredService<IInferenceProvider>(), state);
-            var tools = new VoiceTools(setup.Servers, board, handles, conversation);
+            var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
                 GodModeGraph.Build(inference, languages, tools, phrases),
@@ -160,12 +165,12 @@ public sealed class VoiceSession : IAsyncDisposable
                 },
             });
 
-            var voice = new VoiceSession(services, scope, session, state, board, handles, logger);
+            var voice = new VoiceSession(services, scope, session, state, board, projects, handles, logger);
             board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(phrases.Announce(handle, item.Item), item.Project.Key)));
             state.Release();
             voice._run = voice.RunAsync(languages);
-            logger.LogInformation("Voice session started ({Languages}); {Waiting} waiting, {Handles} handles",
-                languages, board.Items.Count, handles.All.Count);
+            logger.LogInformation("Voice session started ({Languages}); {Projects} projects, {Waiting} waiting, {Handles} handles",
+                languages, projects.Projects.Count, board.Items.Count, handles.All.Count);
             return voice;
         }
         catch

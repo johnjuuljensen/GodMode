@@ -29,12 +29,16 @@ public interface IGodModeServers
     /// </summary>
     event Action<string, string, IReadOnlyList<AttentionItem>>? AttentionChanged;
 
+    /// <summary>
+    /// A server's whole list of projects: on each connection (what it holds then), each time one is created, changes
+    /// or is deleted (<see cref="IProjectHubClient.ProjectCreated"/>, <see cref="IProjectHubClient.StatusChanged"/>,
+    /// <see cref="IProjectHubClient.ProjectDeleted"/>), and empty when the server is let go of.
+    /// </summary>
+    event Action<string, string, IReadOnlyList<ProjectSummary>>? ProjectsChanged;
+
     /// <summary>What needs the user on every server connected now (<see cref="IProjectHub.GetAttention"/>), oldest first.
     /// A server that fails to answer is left out.</summary>
     Task<IReadOnlyList<ServerAttentionItem>> GetAttentionAsync(CancellationToken ct);
-
-    /// <summary>Every project on every server connected now. A server that fails to answer is left out.</summary>
-    Task<IReadOnlyList<ServerProject>> ListProjectsAsync(CancellationToken ct);
 
     Task<ProjectStatus> GetStatusAsync(ProjectRef project, CancellationToken ct);
 
@@ -54,6 +58,7 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<string, string> _names = new();
     private readonly ConcurrentDictionary<string, byte> _listed = new();
+    private readonly ConcurrentDictionary<string, ServerProjects> _projects = new();
 
     public HubServers(IServerDirectory directory, ILoggerFactory loggerFactory, TimeSpan? retryDelay = null, TimeSpan? maxRetryDelay = null)
     {
@@ -62,6 +67,8 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
     }
 
     public event Action<string, string, IReadOnlyList<AttentionItem>>? AttentionChanged;
+
+    public event Action<string, string, IReadOnlyList<ProjectSummary>>? ProjectsChanged;
 
     /// <summary>Connects to the servers listed now, and lets go of those gone (<see cref="ServerConnections.RefreshAsync"/>).</summary>
     public Task<int> RefreshAsync(CancellationToken ct = default) => _connections.RefreshAsync(ct);
@@ -98,11 +105,6 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
                 .Select(item => new ServerAttentionItem(server.Id, server.Name, item))))
             .OrderBy(i => i.Item.Since)];
 
-    public async Task<IReadOnlyList<ServerProject>> ListProjectsAsync(CancellationToken ct) =>
-        [.. await EachServerAsync(async (server, hub) =>
-            (await hub.InvokeAsync<ProjectSummary[]>(nameof(IProjectHub.ListProjects), ct))
-            .Select(project => new ServerProject(server.Id, server.Name, project)))];
-
     public Task<ProjectStatus> GetStatusAsync(ProjectRef project, CancellationToken ct) =>
         Hub(project).InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), project.ProjectId, ct);
 
@@ -136,13 +138,31 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
         return results.SelectMany(r => r);
     }
 
-    void IServerConnectionHandler.Configure(ConnectedServer server, HubConnection connection) =>
+    void IServerConnectionHandler.Configure(ConnectedServer server, HubConnection connection)
+    {
         connection.On<AttentionItem[]>(nameof(IProjectHubClient.AttentionChanged),
             items => AttentionChanged?.Invoke(server.Id, server.Name, items));
+        connection.On<ProjectStatus>(nameof(IProjectHubClient.ProjectCreated), status => Projects(server).Created(status));
+        connection.On<string, ProjectStatus>(nameof(IProjectHubClient.StatusChanged), (id, status) => Projects(server).StatusChanged(id, status));
+        connection.On<string>(nameof(IProjectHubClient.ProjectDeleted), id => Projects(server).Deleted(id));
+    }
 
     async Task IServerConnectionHandler.OnConnectedAsync(ConnectedServer server, HubConnection connection, CancellationToken ct)
     {
         _names[server.Id] = server.Name;
+        // Projects before attention, so a project's handle is given with its root and kind
+        // What the hub pushes while the list is on its way is made after it, on top of it
+        var list = Projects(server);
+        list.BeginListing();
+        ProjectSummary[]? projects = null;
+        try
+        {
+            projects = await connection.InvokeAsync<ProjectSummary[]>(nameof(IProjectHub.ListProjects), ct);
+        }
+        finally
+        {
+            list.EndListing(projects);
+        }
         var items = await connection.InvokeAsync<AttentionItem[]>(nameof(IProjectHub.GetAttention), ct);
         AttentionChanged?.Invoke(server.Id, server.Name, items);
         _listed[server.Id] = 0;
@@ -151,8 +171,101 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
     void IServerConnectionHandler.OnRemoved(string serverId)
     {
         _listed.TryRemove(serverId, out _);
+        if (_projects.TryRemove(serverId, out var projects))
+            projects.Removed();
         if (_names.TryRemove(serverId, out var name))
             AttentionChanged?.Invoke(serverId, name, []);
+    }
+
+    private ServerProjects Projects(ConnectedServer server) =>
+        _projects.GetOrAdd(server.Id, _ => new ServerProjects(server.Id, server.Name, (id, name, list) => ProjectsChanged?.Invoke(id, name, list)));
+
+    /// <summary>
+    /// One server's projects as last heard, from its list and the hub's events. A change and the list it pushes are
+    /// one step, so the lists are pushed in the order the changes were made. While the server's list is on its way
+    /// (<see cref="BeginListing"/>), changes wait, and are made on top of the list when it comes: a project created or
+    /// deleted meanwhile is neither wiped by the list nor brought back by it.
+    /// </summary>
+    internal sealed class ServerProjects(string serverId, string serverName, Action<string, string, IReadOnlyList<ProjectSummary>> push)
+    {
+        private readonly Lock _lock = new();
+        private readonly Dictionary<string, ProjectSummary> _projects = [];
+        private List<Func<Dictionary<string, ProjectSummary>, bool>>? _waiting;
+        private bool _removed;
+
+        /// <summary><see cref="IProjectHubClient.ProjectCreated"/>.</summary>
+        public void Created(ProjectStatus status) => Change(p =>
+        {
+            p[status.Id] = Summary(status);
+            return true;
+        });
+
+        /// <summary>
+        /// <see cref="IProjectHubClient.StatusChanged"/>, of a project it knows only: a change that comes after the
+        /// project's delete does not bring it back.
+        /// </summary>
+        public void StatusChanged(string id, ProjectStatus status) => Change(p =>
+        {
+            if (!p.ContainsKey(id)) return false;
+            p[id] = Summary(status);
+            return true;
+        });
+
+        /// <summary><see cref="IProjectHubClient.ProjectDeleted"/>.</summary>
+        public void Deleted(string id) => Change(p => p.Remove(id));
+
+        public void BeginListing()
+        {
+            lock (_lock) _waiting ??= [];
+        }
+
+        /// <summary>The list came (or, null, did not): it replaces what was heard, then the changes that waited are made.</summary>
+        public void EndListing(IReadOnlyList<ProjectSummary>? listed)
+        {
+            lock (_lock)
+            {
+                var waiting = _waiting ?? [];
+                _waiting = null;
+                if (_removed) return;
+                if (listed is not null)
+                {
+                    _projects.Clear();
+                    foreach (var project in listed) _projects[project.Id] = project;
+                }
+                foreach (var change in waiting) change(_projects);
+                Push();
+            }
+        }
+
+        /// <summary>The server is let go of: it has no projects, and hears of none any more.</summary>
+        public void Removed()
+        {
+            lock (_lock)
+            {
+                _removed = true;
+                _waiting = null;
+                _projects.Clear();
+                Push();
+            }
+        }
+
+        private void Change(Func<Dictionary<string, ProjectSummary>, bool> change)
+        {
+            lock (_lock)
+            {
+                if (_removed) return;
+                if (_waiting is not null)
+                    _waiting.Add(change);
+                else if (change(_projects))
+                    Push();
+            }
+        }
+
+        private void Push() => push(serverId, serverName, [.. _projects.Values]);
+
+        private static ProjectSummary Summary(ProjectStatus s) =>
+            new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission,
+                s.PendingQuestion, s.PullRequest, s.Kind, s.ActionName, s.SharedFolder);
     }
 
     void IServerConnectionHandler.OnListedCompletely(IReadOnlySet<string> serverIds) { }

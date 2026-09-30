@@ -132,7 +132,8 @@ public sealed class VoiceSessionTests
         var servers = new FakeServers();
         var handles = new ProjectHandles();
         var conversation = new VoiceConversation { Current = new ProjectRef(ServerA, "p/r/101") };
-        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles), handles, conversation);
+        var projects = new ProjectBoard(servers, handles);
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, conversation);
         servers.Set(ServerB, Question("p/r/283", "283-voice", "Migration?"));
 
         await tools.WhatNeedsMeAsync(CancellationToken.None);

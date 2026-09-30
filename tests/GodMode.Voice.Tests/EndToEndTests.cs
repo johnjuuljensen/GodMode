@@ -69,6 +69,49 @@ public sealed class EndToEndTests
             () => $"the session to carry on: {Status(hub, asking.Id)}");
     }
 
+    /// <summary>
+    /// Issue #353: a session created on the server after voice started (from the app, here from another hub
+    /// connection) is known to voice from the hub's events, answered by its root, and forgotten when it is deleted.
+    /// </summary>
+    [Fact]
+    public async Task A_session_created_after_voice_started_is_known_answered_and_forgotten_when_deleted()
+    {
+        await using var server = await TestServer.StartAsync(Asking(Question));
+        await using var hub = HubConnections.Build(new RelayTarget($"{server.Url}/hubs/projects", TestServer.ApiKey));
+        await hub.StartAsync();
+
+        var model = new ScriptedModel()
+            .CallTool(VoiceTools.ListProjects).Respond("1 projekt: testing.")
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = TestServer.Root, [VoiceTools.TextParameter] = Answer }).Respond("Sendt til testing.")
+            .CallTool(VoiceTools.ListProjects).Respond("Ingen projekter.");
+        await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
+        await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
+        await voice.Events.SaidAsync("Klar.");
+        Assert.Empty(voice.Session.Handles.All);
+
+        var created = await CreateAsync(hub, "testing");
+        await WaitForAttentionAsync(hub, created.Id);
+        // From ProjectCreated, not the attention list, which gives the question a handle too
+        await Eventually.UntilAsync(() => voice.Session.Projects.Find(new ProjectRef("local", created.Id)) is not null,
+            () => $"voice to know testing: {string.Join(", ", voice.Session.Projects.Projects.Select(p => p.Project.Name))}");
+
+        voice.Transcriptions.Say("Hvilke projekter er der?");
+        await voice.Events.SaidAsync("1 projekt: testing.");
+        Assert.StartsWith($"1 projects:\n- testing (testing, {TestServer.Root}", Assert.Single(model.ToolResults));
+
+        voice.Transcriptions.Say($"Svar {TestServer.Root} at den skal bruge den eksisterende migration");
+        await voice.Events.SaidAsync("Sendt til testing.");
+        await Eventually.UntilAsync(() => server.StdinOf(created.Id).Count == 2, () => $"the answer on stdin: {string.Join(" | ", server.StdinOf(created.Id))}\n{server.Output}");
+        Assert.Contains(JsonSerializer.Serialize(Answer), server.StdinOf(created.Id)[1]);
+
+        await hub.InvokeAsync<DeleteProjectResult>(nameof(IProjectHub.DeleteProject), created.Id, true);
+        await Eventually.UntilAsync(() => voice.Session.Projects.Projects.Count == 0 && voice.Session.Handles.All.Count == 0,
+            () => $"voice to forget it: {string.Join(", ", voice.Session.Handles.All)}");
+        voice.Transcriptions.Say("Hvilke projekter er der?");
+        await voice.Events.SaidAsync("Ingen projekter.");
+        Assert.Equal("No projects on any server.", model.ToolResults[^1]);
+    }
+
     private static async Task<ProjectStatus> CreateAsync(HubConnection hub, string name) =>
         (await hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), TestServer.Profile, TestServer.Root, null,
             new Dictionary<string, JsonElement>

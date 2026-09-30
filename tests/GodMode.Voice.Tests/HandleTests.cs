@@ -38,6 +38,66 @@ public sealed class HandleTests
         Assert.Equal("recording", handles.For(new ProjectRef("a", "p/r/3"), "fix: recording compliance"));
     }
 
+    /// <summary>
+    /// A chat has no issue number: its name's word, else its kind, then its kind numbered. The date and suffix of its
+    /// id ("260930-chat-testing-lgp2") are never a handle: handles come from the name, not the id.
+    /// </summary>
+    [Fact]
+    public void A_chat_with_no_issue_number_is_named_by_its_name_else_its_kind()
+    {
+        var handles = new ProjectHandles();
+
+        Assert.Equal("testing", handles.For(new ProjectRef("a", "Outbound/Assistant/260930-chat-testing-lgp2"), "testing", "Assistant", "chat"));
+        Assert.Equal("chat", handles.For(new ProjectRef("a", "Outbound/Assistant/260930-chat-chat-k7q2"), "chat", "Assistant", "chat"));
+        Assert.Equal("chat 2", handles.For(new ProjectRef("a", "Outbound/Assistant/260930-chat-chat-m3p9"), "Chat", "Assistant", "chat"));
+        Assert.Equal("testing 2", handles.For(new ProjectRef("b", "Outbound/Assistant/260930-chat-testing-lgp2"), "testing", "Assistant", "chat"));
+        Assert.Equal("experiment", handles.For(new ProjectRef("a", "Private/lab/260930-experiment-x-a1b2"), "x", "lab", "experiment"));
+    }
+
+    [Theory]
+    [InlineData("Assistant")]
+    [InlineData("assistant")]
+    [InlineData("Assistent")]
+    [InlineData("chat")]
+    public void A_root_or_kind_only_one_project_has_names_it(string spoken)
+    {
+        var handles = new ProjectHandles();
+        var chat = new ProjectRef("a", "Outbound/Assistant/260930-chat-testing-lgp2");
+        handles.For(chat, "testing", "Assistant", "chat");
+        handles.For(new ProjectRef("a", "Work/godmode/283"), "feature/283-voice-on-windows", "godmode", "issue");
+
+        Assert.Equal(chat, handles.Resolve(spoken));
+    }
+
+    [Fact]
+    public void A_root_several_projects_have_names_none_but_their_handles_do()
+    {
+        var handles = new ProjectHandles();
+        var testing = new ProjectRef("a", "Outbound/Assistant/260930-chat-testing-lgp2");
+        var invoices = new ProjectRef("a", "Outbound/Assistant/260930-chat-invoices-k7q2");
+        handles.For(testing, "testing", "Assistant", "chat");
+        handles.For(invoices, "invoices", "Assistant", "chat");
+
+        Assert.Null(handles.Resolve("Assistant"));
+        Assert.Null(handles.Resolve("Assistent"));
+        Assert.Null(handles.Resolve("chat"));
+        Assert.Equal(testing, handles.Resolve("testing"));
+        Assert.Equal(invoices, handles.Resolve("invoices"));
+    }
+
+    /// <summary>A number after a stem no handle has is no numbered handle: "issue 283" is 283, as its words say.</summary>
+    [Fact]
+    public void A_number_after_a_word_no_handle_has_names_the_project_with_that_number()
+    {
+        var handles = new ProjectHandles();
+        var voice = new ProjectRef("a", "Work/godmode/283");
+        handles.For(voice, "feature/283-voice-on-windows", "godmode", "issue");
+        handles.For(new ProjectRef("a", "Outbound/Assistant/260930-chat-chat-a1"), "chat", "Assistant", "chat");
+
+        Assert.Equal(voice, handles.Resolve("issue 283"));
+        Assert.Null(handles.Resolve("chat 283"));
+    }
+
     [Fact]
     public void Handles_are_unique_across_servers_and_stable_for_the_session()
     {
