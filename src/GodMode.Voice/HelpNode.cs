@@ -10,8 +10,10 @@ namespace GodMode.Voice;
 /// same words when they come again in that utterance (later partials, and the final that ends it), so the chat node
 /// never answers them. New words after them are the user's next sentence (VoiceBot#62 can hold an utterance open):
 /// they release the claim and go on, whole, to the chat node.
-/// Not a CommandNode: on VoiceBot's pin its keywords are single words, so "hvad kan du" never matches, and it claims
-/// only an exact repeat, so "Hjælp. Kører" would say the list again (johnjuuljensen/VoiceBot#65).
+/// Help decides on the final's own words: the earlier readings a final carries (VoiceBot#61) are the model's, never help's.
+/// Not a CommandNode, even with VoiceBot#65's phrase keywords and claim: a keyword matches anywhere in the utterance, so
+/// "hvad kan du fortælle om 283?" would be help, and the claim takes whatever starts with the words it fired on, so
+/// "Hjælp. Kan du høre mig?" would never reach the chat node (johnjuuljensen/VoiceBot#71).
 /// </summary>
 public sealed class HelpNode(string id, int priority) : INode
 {

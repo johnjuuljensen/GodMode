@@ -5,9 +5,10 @@ namespace GodMode.Voice;
 
 /// <summary>
 /// A microphone the session keeps while the device behind it changes: <see cref="Use"/> puts another source behind it,
-/// and what the session reads goes on from there. VoiceBot's sources are opened on one device for good
-/// (johnjuuljensen/VoiceBot#66), so following a default device, or a pinned one that goes, is
-/// done here. A switch loses at most the audio in flight.
+/// and what the session reads goes on from there. A switch loses at most the audio in flight.
+/// Not VoiceBot.Core's own SwitchingAudioSource (VoiceBot#66): that one switches asynchronously and needs a source to
+/// start with, while <see cref="FollowingAudio"/> switches under one lock and may have no microphone at all; VoiceBot's
+/// follower keeps only the defaults, not a pinned device (johnjuuljensen/VoiceBot#72).
 /// <para>
 /// A source behind it that ends (its device went) does not end this one: it is reported to <c>ended</c>, which picks
 /// another. Only <see cref="Complete"/> ends what the session reads.

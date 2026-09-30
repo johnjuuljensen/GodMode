@@ -48,7 +48,7 @@ public static class VoiceAudio
     /// <summary>The microphones and speakers the settings can choose from (<c>voice.devices</c>): Windows only.</summary>
     public static VoiceDeviceList Devices() =>
 #if WINDOWS
-        WindowsAudioDevices.ListDevices(NAudio.CoreAudioApi.Role.Communications);
+        WindowsAudioDevices.ListDevices(VoiceBot.Providers.Windows.AudioDeviceRole.Communications);
 #else
         VoiceDeviceList.None;
 #endif

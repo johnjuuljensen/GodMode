@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Threading.Channels;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -55,35 +54,6 @@ internal static class TestingExtensions
     }
 }
 
-/// <summary>A speech engine that takes the audio it is given and never recognizes anything.</summary>
-internal sealed class DeafSpeechEngine : ISpeechEngine
-{
-    private readonly Channel<ReadOnlyMemory<byte>> _audio = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
-    private readonly Channel<TranscriptionEvent> _transcriptions = Channel.CreateUnbounded<TranscriptionEvent>();
-
-    public ChannelWriter<ReadOnlyMemory<byte>> AudioInput => _audio.Writer;
-    public ChannelReader<TranscriptionEvent> Transcriptions => _transcriptions.Reader;
-
-    public Task StartAsync(string language, AudioFormat format, CancellationToken ct) => Task.CompletedTask;
-
-    public ValueTask DisposeAsync()
-    {
-        _transcriptions.Writer.TryComplete();
-        return ValueTask.CompletedTask;
-    }
-}
-
-/// <summary>A microphone that fails when told, as Android's and Windows' do when the device goes away: its channel completes with the error.</summary>
-internal sealed class FailingMicrophone : IAudioSource
-{
-    private readonly Channel<ReadOnlyMemory<byte>> _audio = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
-
-    public AudioFormat Format => AudioFormat.Pcm16kHz;
-    public ChannelReader<ReadOnlyMemory<byte>> Audio => _audio.Reader;
-
-    public void Fail() => _audio.Writer.TryComplete(new InvalidOperationException("The microphone stopped delivering audio"));
-}
-
 /// <summary>The session's services without a network: the scripted model and a synthesizer of silence.</summary>
 internal sealed class OfflineProviders(ScriptedChatClient model, FixedPcmSynthesizer synthesizer) : IVoiceProviders
 {
@@ -98,7 +68,7 @@ internal sealed class OfflineProviders(ScriptedChatClient model, FixedPcmSynthes
         // The session's keyterms, as AddVoiceBotElevenLabs registers them
         services.AddScoped(_ => new ElevenLabsSttKeyterms(language.SttKeyterms));
         // Heard only by a session fed from a microphone (TranscriptionInput.FromAudio)
-        services.AddTransient<ISpeechEngine, DeafSpeechEngine>();
+        services.AddTransient<ISpeechEngine, ScriptedSpeechEngine>();
     }
 
     public Task InitializeAsync(IServiceProvider services, VoiceSettings settings) => Task.CompletedTask;

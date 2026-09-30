@@ -242,14 +242,49 @@ public sealed class VoiceSessionTests
     [Fact]
     public async Task A_session_whose_microphone_failed_stops()
     {
-        var microphone = new FailingMicrophone();
+        var microphone = new ScriptedAudioSource();
         var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(), microphone: microphone);
         await voice.Events.SaidAsync("Klar.");
 
-        microphone.Fail();
+        microphone.Fail(new InvalidOperationException("The microphone stopped delivering audio"));
         await voice.DisposeAsync();
 
         Assert.Equal(VoiceState.Off, voice.Events.States.Last());
+    }
+
+    /// <summary>
+    /// VoiceBot#64 reports a microphone that fails while the session runs (its AudioInput): the app hears it as the voice
+    /// session's failure, which it names, and voice shows the error until it is stopped, since nothing brings it back.
+    /// </summary>
+    [Fact]
+    public async Task A_microphone_that_fails_is_reported_and_held_as_an_error()
+    {
+        var microphone = new ScriptedAudioSource();
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(), microphone: microphone);
+        await voice.Events.SaidAsync("Klar.");
+
+        microphone.Fail(new InvalidOperationException("The microphone stopped delivering audio"));
+
+        await Eventually.UntilAsync(() => !voice.Events.Errors.IsEmpty, () => "the microphone's failure to be reported");
+        Assert.Equal((SessionService.Session, SessionErrorKind.ServiceError, "The microphone stopped: The microphone stopped delivering audio"),
+            Assert.Single(voice.Events.Errors));
+        await Eventually.UntilAsync(() => voice.Events.States.LastOrDefault() == VoiceState.Error,
+            () => $"voice to show the error; its states: {string.Join(", ", voice.Events.States)}");
+    }
+
+    /// <summary>A held error goes only with its own service's recovery: an STT reconnect is no working microphone.</summary>
+    [Fact]
+    public void A_held_error_is_released_by_the_failed_services_recovery_only()
+    {
+        var state = new VoiceStateTracker();
+        state.Release();
+        state.Hold(VoiceState.Error, SessionService.AudioInput);
+
+        state.Release(SessionService.SpeechRecognition);
+        Assert.Equal(VoiceState.Error, state.Current);
+
+        state.Release(SessionService.AudioInput);
+        Assert.Equal(VoiceState.Listening, state.Current);
     }
 
     [Theory]

@@ -23,6 +23,7 @@ public sealed class VoiceStateTracker
     private readonly Lock _lock = new();
     private SessionActivity _activity = SessionActivity.Listening;
     private VoiceState _held = VoiceState.Starting;
+    private SessionService? _heldFor;
     private VoiceState _reported = VoiceState.Starting;
 
     public event Action<VoiceState>? Changed;
@@ -34,20 +35,30 @@ public sealed class VoiceStateTracker
 
     /// <summary>
     /// A state that holds whatever the session does, until <see cref="Release"/>: <see cref="VoiceState.Error"/> for a
-    /// refused key, or <see cref="VoiceState.Off"/> once it stopped.
+    /// refused key or a failed microphone, or <see cref="VoiceState.Off"/> once it stopped.
     /// </summary>
-    public void Hold(VoiceState state)
-    {
-        lock (_lock) _held = state;
-        Report();
-    }
-
-    /// <summary>The session runs normally (it started, or a refused service works again).</summary>
-    public void Release()
+    /// <param name="failed">The service whose failure it is: only its own recovery releases it.</param>
+    public void Hold(VoiceState state, SessionService? failed = null)
     {
         lock (_lock)
         {
-            if (_held != VoiceState.Off) _held = VoiceState.Listening;
+            _held = state;
+            _heldFor = failed;
+        }
+        Report();
+    }
+
+    /// <summary>
+    /// The session runs normally: it started (<paramref name="recovered"/> null), or <paramref name="recovered"/> works
+    /// again. An error held for another service stays: an STT reconnect is no working microphone.
+    /// </summary>
+    public void Release(SessionService? recovered = null)
+    {
+        lock (_lock)
+        {
+            if (_held == VoiceState.Off || (recovered is not null && _heldFor is { } failed && failed != recovered)) return;
+            _held = VoiceState.Listening;
+            _heldFor = null;
         }
         Report();
     }

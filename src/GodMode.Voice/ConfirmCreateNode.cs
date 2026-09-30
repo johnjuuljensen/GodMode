@@ -9,7 +9,8 @@ namespace GodMode.Voice;
 /// another sentence, a yes queued before the read-back was heard, or a yes that is a fragment of the read-back itself
 /// (its echo). A create that waits no more (another utterance of the bot's came between, or
 /// <see cref="SessionCreates.ConfirmWindow"/> passed) takes no yes: a yes then is told there is nothing to confirm. The
-/// model never creates: the graph has no tool that does. Partials pass (a "ja" may go on as "ja, men i kappe"), and so
+/// model never creates: the graph has no tool that does. The answer is the final's own words: the earlier readings a
+/// final carries (VoiceBot#61, "ja" revised into "Kører gør man.") never make it a yes. Partials pass (a "ja" may go on as "ja, men i kappe"), and so
 /// does anything while no create waits.
 /// </summary>
 public sealed class ConfirmCreateNode(string id, int priority, SessionCreates creates, VoicePhrases phrases) : INode
