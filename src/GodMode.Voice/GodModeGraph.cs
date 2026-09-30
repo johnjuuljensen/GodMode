@@ -8,7 +8,8 @@ namespace GodMode.Voice;
 
 /// <summary>
 /// GodMode's voice graph, after VoiceBot's VoiceControlGraph: a terse control loop in Danish protocol words, over
-/// the hub (<see cref="VoiceTools"/>) instead of its fake system. A greeting, then one chat node with the tools.
+/// the hub (<see cref="VoiceTools"/>) instead of its fake system. A greeting, then one chat node with the tools, and
+/// help (<see cref="HelpNode"/>) above it, which says what they are on the first partial that asks.
 /// </summary>
 public static class GodModeGraph
 {
@@ -16,7 +17,10 @@ public static class GodModeGraph
 
     /// <summary>What the user says to the bot, besides project handles; ElevenLabs is biased towards them.</summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "projekter", "status","svar", "læst", "stille", "sig til igen", "GodMode", "pull request", "review"];
+        ["hvad venter", "projekter", "status","svar", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review"];
+
+    /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
+    public static ToolSet AddTools(ToolSet set, VoiceTools tools) => tools.AddTo(set).AddAnnouncementTools();
 
     public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases)
     {
@@ -58,7 +62,8 @@ public static class GodModeGraph
             """;
 
         return new CompositeBuilder(Id)
-            .WithTools(t => tools.AddTo(t).AddAnnouncementTools())
+            .WithTools(t => AddTools(t, tools))
+            .Node(new HelpNode("help", 80))
             .Child(new ResponseNode("greeting", phrases.Greeting))
             .Child(new ChatNode("control", 50, InferenceTier.Light, inference, systemPrompt))
             .Build();
