@@ -235,6 +235,23 @@ public sealed class VoiceSessionTests
             () => $"the session to listen; it is {voice.Session.State}, after {string.Join(", ", voice.Events.States)}");
     }
 
+    /// <summary>
+    /// A microphone that failed mid-session faults the transcription source's teardown (VoiceBot's
+    /// SpeechEngineTranscriptionSource rethrows it): the session is stopped all the same, and shows off.
+    /// </summary>
+    [Fact]
+    public async Task A_session_whose_microphone_failed_stops()
+    {
+        var microphone = new FailingMicrophone();
+        var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(), microphone: microphone);
+        await voice.Events.SaidAsync("Klar.");
+
+        microphone.Fail();
+        await voice.DisposeAsync();
+
+        Assert.Equal(VoiceState.Off, voice.Events.States.Last());
+    }
+
     [Theory]
     [InlineData(VoiceSettings.DefaultLanguage)]
     [InlineData("da-DK")]

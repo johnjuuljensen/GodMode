@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using VoiceBot.Core.AI;
+using VoiceBot.Core.Audio;
 using VoiceBot.Core.Pipeline;
 using VoiceBot.Core.Speech;
 using VoiceBot.Providers.ElevenLabs;
@@ -53,6 +55,35 @@ internal static class TestingExtensions
     }
 }
 
+/// <summary>A speech engine that takes the audio it is given and never recognizes anything.</summary>
+internal sealed class DeafSpeechEngine : ISpeechEngine
+{
+    private readonly Channel<ReadOnlyMemory<byte>> _audio = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
+    private readonly Channel<TranscriptionEvent> _transcriptions = Channel.CreateUnbounded<TranscriptionEvent>();
+
+    public ChannelWriter<ReadOnlyMemory<byte>> AudioInput => _audio.Writer;
+    public ChannelReader<TranscriptionEvent> Transcriptions => _transcriptions.Reader;
+
+    public Task StartAsync(string language, AudioFormat format, CancellationToken ct) => Task.CompletedTask;
+
+    public ValueTask DisposeAsync()
+    {
+        _transcriptions.Writer.TryComplete();
+        return ValueTask.CompletedTask;
+    }
+}
+
+/// <summary>A microphone that fails when told, as Android's and Windows' do when the device goes away: its channel completes with the error.</summary>
+internal sealed class FailingMicrophone : IAudioSource
+{
+    private readonly Channel<ReadOnlyMemory<byte>> _audio = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
+
+    public AudioFormat Format => AudioFormat.Pcm16kHz;
+    public ChannelReader<ReadOnlyMemory<byte>> Audio => _audio.Reader;
+
+    public void Fail() => _audio.Writer.TryComplete(new InvalidOperationException("The microphone stopped delivering audio"));
+}
+
 /// <summary>The session's services without a network: the scripted model and a synthesizer of silence.</summary>
 internal sealed class OfflineProviders(ScriptedChatClient model, FixedPcmSynthesizer synthesizer) : IVoiceProviders
 {
@@ -64,6 +95,8 @@ internal sealed class OfflineProviders(ScriptedChatClient model, FixedPcmSynthes
         services.AddSingleton<ISpeechSynthesizer>(synthesizer);
         services.AddSingleton<ITranscriptionCleaner, PassthroughCleaner>();
         services.AddSingleton<IInferenceProvider>(model);
+        // Heard only by a session fed from a microphone (TranscriptionInput.FromAudio)
+        services.AddTransient<ISpeechEngine, DeafSpeechEngine>();
     }
 
     public Task InitializeAsync(IServiceProvider services, VoiceSettings settings) => Task.CompletedTask;
@@ -108,7 +141,7 @@ internal sealed class OfflineVoice : IAsyncDisposable
 
     public static async Task<OfflineVoice> StartAsync(IGodModeServers servers, ScriptedChatClient model,
         Func<CancellationToken, Task>? connect = null, VoiceSettings? settings = null, ILoggerFactory? loggerFactory = null,
-        TimeSpan? speech = null)
+        TimeSpan? speech = null, IAudioSource? microphone = null)
     {
         // How long anything the bot says plays: short, unless a test watches it speak
         var voice = new OfflineVoice(model, speech ?? TimeSpan.FromMilliseconds(50));
@@ -122,7 +155,7 @@ internal sealed class OfflineVoice : IAsyncDisposable
                 if (servers is FakeServers fake) await fake.ConnectAsync(ct);
                 if (connect is not null) await connect(ct);
             },
-            Transcription = TranscriptionInput.FromSource(voice.Transcriptions),
+            Transcription = microphone is null ? TranscriptionInput.FromSource(voice.Transcriptions) : TranscriptionInput.FromAudio(microphone),
             AudioSink = new RecordingAudioSink(),
             Providers = voice.Providers,
             Events = voice.Events,

@@ -6,7 +6,7 @@
     <File Path="src/Directory.Build.props" />
     <File Path=".gitmodules" />
   </Folder>
-  <!-- The VoiceBot submodule, initialised by git submodule update: the projects GodMode.Voice and GodMode.Maui reference -->
+  <!-- The VoiceBot submodule, initialised by git submodule update: the projects GodMode.Voice, its tests and GodMode.Maui reference -->
   <Folder Name="/external/VoiceBot/">
     <Project Path="external/VoiceBot/src/VoiceBot.Core/VoiceBot.Core.csproj" />
     <Project Path="external/VoiceBot/src/VoiceBot.AI/VoiceBot.AI.csproj" />
@@ -14,6 +14,7 @@
     <Project Path="external/VoiceBot/src/Providers/VoiceBot.Providers.ElevenLabs/VoiceBot.Providers.ElevenLabs.csproj" />
     <Project Path="external/VoiceBot/src/Providers/VoiceBot.Providers.Android/VoiceBot.Providers.Android.csproj" />
     <Project Path="external/VoiceBot/src/Providers/VoiceBot.Providers.Windows/VoiceBot.Providers.Windows.csproj" />
+    <Project Path="external/VoiceBot/src/VoiceBot.Testing/VoiceBot.Testing.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/GodMode.Client.React/GodMode.Client.React.csproj" />

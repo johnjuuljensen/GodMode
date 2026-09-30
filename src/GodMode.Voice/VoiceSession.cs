@@ -204,7 +204,16 @@ public sealed class VoiceSession : IAsyncDisposable
         {
             _logger.LogWarning(ex, "Voice session ended with an error");
         }
-        await _session.DisposeAsync();
+        try
+        {
+            await _session.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            // A microphone that failed mid-session faults its transcription source's teardown (VoiceBot's
+            // SpeechEngineTranscriptionSource rethrows it): the rest is let go of all the same
+            _logger.LogWarning(ex, "Voice session's teardown failed");
+        }
         _state.Hold(VoiceState.Off);
         await _scope.DisposeAsync();
         await _services.DisposeAsync();
