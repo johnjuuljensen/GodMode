@@ -1,3 +1,4 @@
+using GodMode.Server.Services;
 using GodMode.Shared.Models;
 
 namespace GodMode.Server.Models;
@@ -34,12 +35,25 @@ public class ProjectInfo
     public string StatePath => ProjectFiles.SessionState.PathOf(ProjectPath, SessionId);
 
     /// <summary>
-    /// Whether claude was ever sent a message in this session: each is logged to its input.jsonl as it
-    /// is sent. A session created with no prompt has none until the user writes its first, and claude
-    /// has no conversation for it until then.
+    /// Whether the session has a conversation: claude was sent a message (each is logged to its
+    /// input.jsonl as it is sent) or wrote output of its own (which it does only once it has read its
+    /// first input; a session from before input.jsonl was kept has output alone). The stderr of a
+    /// claude that failed at its start is logged to output.jsonl too, as <c>error</c> lines, and is no
+    /// conversation. A session created with no prompt has none until the user writes its first
+    /// message, and claude has nothing to resume for it until then.
     /// </summary>
-    public bool HadInput =>
-        new FileInfo(Path.Combine(StatePath, ProjectFiles.SessionState.InputFileName)) is { Exists: true, Length: > 0 };
+    public bool HasConversation =>
+        new FileInfo(Path.Combine(StatePath, ProjectFiles.SessionState.InputFileName)) is { Exists: true, Length: > 0 }
+        || File.Exists(Path.Combine(StatePath, ProjectFiles.SessionState.OutputFileName))
+            && ReadShared(Path.Combine(StatePath, ProjectFiles.SessionState.OutputFileName))
+                .Any(line => !string.IsNullOrWhiteSpace(line) && ProjectLifecycle.ExtractEventType(line) != ClaudeProcessManager.StderrEventType);
+
+    /// <summary>The lines of a log another writer may hold open.</summary>
+    private static IEnumerable<string> ReadShared(string path)
+    {
+        using var reader = new StreamReader(new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+        while (reader.ReadLine() is { } line) yield return line;
+    }
 
     /// <summary>
     /// Whether the session shares its working folder with others (its action's <c>sharedFolder</c>,

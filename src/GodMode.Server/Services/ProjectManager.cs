@@ -1743,9 +1743,9 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 _logger.LogInformation("Project {ProjectId} already has a running process with PID {ProcessId} (state: {State})",
                     projectId, project.Process.ProcessId, project.Status.State);
 
-                // A session never sent a message is waiting for its first: a "Continue" would be a
+                // A session with no conversation yet waits for its first message: a "Continue" would be a
                 // first turn the user did not write
-                if (project.Status.State == ProjectState.Idle && !project.HadInput)
+                if (project.Status.State == ProjectState.Idle && !project.HasConversation)
                     _logger.LogInformation("Project {ProjectId} is idle waiting for its first message; nothing is sent", projectId);
                 else if (project.Status.State == ProjectState.Idle)
                 {

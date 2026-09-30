@@ -23,6 +23,9 @@ public class ClaudeProcessManager : IClaudeProcessManager
     /// <summary>Configuration key for the Claude Code executable (a name on PATH or a full path).</summary>
     public const string ExecutableSetting = "Claude:Executable";
 
+    /// <summary>The type of the line each line of claude's stderr is logged to output.jsonl as: claude's own stdout has no such type.</summary>
+    internal const string StderrEventType = "error";
+
     /// <summary>What claude writes to stderr, then exits, when <c>--resume</c> names a session it has no conversation for.</summary>
     private const string NoConversationError = "No conversation found with session ID:";
 
@@ -119,13 +122,13 @@ public class ClaudeProcessManager : IClaudeProcessManager
         {
             _logger.LogWarning("Project {ProjectId} has no session to resume. Starting fresh session.", project.Status.Id);
             project.ClaudeSessionId = Guid.NewGuid().ToString();
-            return await StartFreshSessionAsync(project, project.HadInput, cancellationToken, extraEnvironment, extraArgs);
+            return await StartFreshSessionAsync(project, project.HasConversation, cancellationToken, extraEnvironment, extraArgs);
         }
 
-        // Never sent a message (created with no prompt): claude has no conversation to resume, so the
+        // No conversation yet (created with no prompt, never sent a message): nothing to resume, so the
         // session starts on its id with no input, waiting for its first message. Decided before the
         // launch: a reply sent to a doomed --resume would be logged before it exited
-        if (!project.HadInput)
+        if (!project.HasConversation)
         {
             _logger.LogInformation("Project {ProjectId} was never sent a message: starting its session {SessionId} afresh",
                 project.Status.Id, sessionId);
@@ -279,7 +282,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
                 // pipeline so they persist to output.jsonl for backfill on refresh. They do not
                 // change the project's state: the exit and error results do.
                 if (line.StartsWith("Error:", StringComparison.OrdinalIgnoreCase))
-                    output.TryWrite(new PipelineItem.Line(JsonSerializer.Serialize(new { type = "error", error = line })));
+                    output.TryWrite(new PipelineItem.Line(JsonSerializer.Serialize(new { type = StderrEventType, error = line })));
             }
             catch (Exception ex)
             {
