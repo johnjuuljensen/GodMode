@@ -112,6 +112,42 @@ public sealed class EndToEndTests
         Assert.Equal("No projects on any server.", model.ToolResults[^1]);
     }
 
+    /// <summary>Issue #354: a session started by voice is read back, created on the server on the yes, as the app creates it, and named by its handle.</summary>
+    [Fact]
+    public async Task A_session_started_by_voice_is_created_on_yes_and_announced_by_its_handle()
+    {
+        await using var server = await TestServer.StartAsync(Asking(Question));
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.StartSession, new()
+            {
+                [VoiceTools.RootParameter] = TestServer.Root,
+                [VoiceTools.NameParameter] = "backup job",
+                [VoiceTools.PromptParameter] = "Find ud af hvorfor backup-jobbet fejler.",
+            })
+            .Respond("Opret backup job i voice? Ja eller nej.");
+        await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
+        await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Start en chat i voice om hvorfor backup-jobbet fejler");
+        await voice.Events.SaidAsync("Opret backup job i voice? Ja eller nej.");
+        Assert.Contains($"in {TestServer.Root} (profile {TestServer.Profile}), action Create", Assert.Single(model.ToolResults));
+
+        voice.Transcriptions.SayAsRecognized("Ja");
+        // With the question the session asks at once, when both come before a pause
+        await Eventually.UntilAsync(() => voice.Events.Responses.Any(r => r.Contains("backup er oprettet")),
+            () => $"the bot to say backup is created; it said: {string.Join(" | ", voice.Events.Responses)}");
+
+        await using var hub = HubConnections.Build(new RelayTarget($"{server.Url}/hubs/projects", TestServer.ApiKey));
+        await hub.StartAsync();
+        var created = Assert.Single(await hub.InvokeAsync<ProjectSummary[]>(nameof(IProjectHub.ListProjects)));
+        Assert.Equal("backup job", created.Name);
+        Assert.Equal(new ProjectRef("local", created.Id), voice.Session.Handles.Resolve("backup"));
+        // Its prompt was its first message
+        await Eventually.UntilAsync(() => server.StdinOf(created.Id).Count == 1, () => $"the prompt on stdin\n{server.Output}");
+        Assert.Contains("backup-jobbet", server.StdinOf(created.Id)[0]);
+    }
+
     private static async Task<ProjectStatus> CreateAsync(HubConnection hub, string name) =>
         (await hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), TestServer.Profile, TestServer.Root, null,
             new Dictionary<string, JsonElement>

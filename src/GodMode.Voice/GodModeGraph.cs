@@ -9,7 +9,8 @@ namespace GodMode.Voice;
 /// <summary>
 /// GodMode's voice graph, after VoiceBot's VoiceControlGraph: a terse control loop in Danish protocol words, over
 /// the hub (<see cref="VoiceTools"/>) instead of its fake system. A greeting, then one chat node with the tools, and
-/// help (<see cref="HelpNode"/>) above it, which says what they are on the first partial that asks.
+/// help (<see cref="HelpNode"/>) above it, which says what they are on the first partial that asks, and the yes a create
+/// waits on (<see cref="ConfirmCreateNode"/>) between them.
 /// </summary>
 public static class GodModeGraph
 {
@@ -17,7 +18,7 @@ public static class GodModeGraph
 
     /// <summary>What the user says to the bot, besides project handles; ElevenLabs is biased towards them.</summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "projekter", "status","svar", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review"];
+        ["hvad venter", "projekter", "status","svar", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review", "start issue", "opret"];
 
     /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
     public static ToolSet AddTools(ToolSet set, VoiceTools tools) => tools.AddTo(set).AddAnnouncementTools();
@@ -52,6 +53,12 @@ public static class GodModeGraph
               or talked about. If the tool says no project is being talked about, ask which, as a closed question.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}.
             - "Stille" / "Quiet" — call mute_announcements; "Du må godt sige til igen" — call unmute_announcements.
+            - "Start issue 283 [i GodMode]", "Start en chat i Assistant om …", "Start et eksperiment om …" / "Start issue …",
+              "Start a chat in … about …" — call {{VoiceTools.StartSession}} with the root, kind, issue, name and prompt as
+              said; leave out what was not said, and never pick a root yourself. Then say what it tells you: the read-back
+              as a yes/no question ("Opret issue 283 i GodMode? Ja eller nej."), or its question back. Only the user's yes
+              creates it, and that is not yours to answer: never say it was created. Actions that start no session (new
+              root, promote) are not started by voice yet.
 
             PERMISSION REQUESTS are never answered by voice. Say "<handle> skal have tilladelse: <what>. Svar på skærmen."
 
@@ -64,6 +71,7 @@ public static class GodModeGraph
         return new CompositeBuilder(Id)
             .WithTools(t => AddTools(t, tools))
             .Node(new HelpNode("help", 80))
+            .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting))
             .Child(new ChatNode("control", 50, InferenceTier.Light, inference, systemPrompt))
             .Build();

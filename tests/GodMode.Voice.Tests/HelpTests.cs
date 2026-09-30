@@ -119,7 +119,7 @@ public sealed class HelpTests
         Assert.Empty(tools.Except(HelpNode.Hints.Select(h => h.Tool)));
         Assert.All(HelpNode.Hints, h => Assert.Contains(h.Danish, Danish));
         Assert.All(HelpNode.Hints, h => Assert.Contains(h.English, English));
-        Assert.Equal("Du kan sige: hvad venter, hvilke projekter er der, status og et projekt, svar at og dit svar, læst, stille eller sig til igen.", Danish);
+        Assert.Equal("Du kan sige: hvad venter, hvilke projekter er der, status og et projekt, svar at og dit svar, læst, start issue og et nummer, stille eller sig til igen.", Danish);
     }
 
     /// <summary>A tool the graph does not have is not offered.</summary>

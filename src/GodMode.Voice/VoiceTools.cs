@@ -7,7 +7,7 @@ namespace GodMode.Voice;
 
 /// <summary>
 /// The graph's tools on the servers: what needs the user, which projects there are, a project's status, answer it,
-/// mark it seen. Their results are for the model, which says them in the user's language. A permission request is
+/// mark it seen, and start one (read back only: the user's yes creates it, <see cref="ConfirmCreateNode"/>). Their results are for the model, which says them in the user's language. A permission request is
 /// never answered here: that is the screen's (issue #285).
 /// </summary>
 public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, ProjectBoard projects, ProjectHandles handles,
@@ -18,9 +18,18 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string ProjectStatus = "project_status";
     public const string Answer = "answer_project";
     public const string MarkSeen = "mark_seen";
+    public const string StartSession = "start_session";
 
     public const string ProjectParameter = "project";
     public const string TextParameter = "text";
+    public const string RootParameter = "root";
+    public const string ActionParameter = "action";
+    public const string IssueParameter = "issue";
+    public const string NameParameter = "name";
+    public const string PromptParameter = "prompt";
+
+    /// <summary>The creates voice reads back, and makes on the user's yes.</summary>
+    public SessionCreates Creates { get; } = new(servers, handles, conversation);
 
     /// <summary>How many projects a reference to none lists, as the options the model offers.</summary>
     private const int OptionsListed = 8;
@@ -52,7 +61,20 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         .Add(MarkSeen,
             "Mark a project's finished result as seen, so it no longer needs the user. Call when the user says they have heard it or it is done with.",
             [ProjectReference],
-            (_, args, ct) => MarkSeenAsync(Argument(args, ProjectParameter), ct));
+            (_, args, ct) => MarkSeenAsync(Argument(args, ProjectParameter), ct))
+        .Add(StartSession,
+            "Prepare a new session (project) in a root: an issue (\"Start issue 283\", \"Start sag BD-123 i api\") or a chat, " +
+            "experiment or other session with a name and a prompt (\"Start en chat i Assistant om backup-jobbet\"). It creates " +
+            "nothing: it says what to read back, or what to ask. Only the user's own yes to the read-back creates it; never say it was created.",
+            [
+                new ToolParameter(RootParameter, "The root or profile as the user named it (\"GodMode\", \"assistenten\", \"kappe\"). Empty when they named none: never guess one.", Required: false),
+                new ToolParameter(ActionParameter, "The kind of session as the user named it (\"issue\", \"chat\", \"experiment\"), or empty.", Required: false),
+                new ToolParameter(IssueParameter, "The issue's number or key as said (\"283\", \"BD-123\"), or empty.", Required: false),
+                new ToolParameter(NameParameter, "A short name for the session, from what the user said it is about (\"backup job\"), or empty for an issue.", Required: false),
+                new ToolParameter(PromptParameter, "What the session should do, in the user's words, or empty when they said nothing more.", Required: false),
+            ],
+            (_, args, ct) => StartSessionAsync(new CreateAsk(Argument(args, RootParameter), Argument(args, ActionParameter),
+                Argument(args, IssueParameter), Argument(args, NameParameter), Argument(args, PromptParameter)), ct));
 
     public async Task<string> WhatNeedsMeAsync(CancellationToken ct)
     {
@@ -129,6 +151,10 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         conversation.Current = target;
         return $"{handles.Of(target) ?? target.ProjectId} is marked seen.";
     }
+
+    /// <summary>What to read back for a create, or ask, or why there is none (<see cref="SessionCreates.Propose"/>).</summary>
+    public async Task<string> StartSessionAsync(CreateAsk ask, CancellationToken ct) =>
+        Creates.Propose(await servers.ListRootsAsync(ct), ask);
 
     /// <summary>
     /// The project named, or the one the conversation is about when none is named, while it is still there. Every

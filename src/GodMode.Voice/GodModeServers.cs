@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using GodMode.ClientBase.Hub;
 using GodMode.ClientBase.Services;
 using GodMode.Shared.Hubs;
@@ -18,6 +19,13 @@ public sealed record ServerAttentionItem(string ServerId, string ServerName, Att
 public sealed record ServerProject(string ServerId, string ServerName, ProjectSummary Project)
 {
     public ProjectRef Ref => new(ServerId, Project.Id);
+}
+
+/// <summary>A project root and the server it is on.</summary>
+public sealed record ServerRoot(string ServerId, string ServerName, ProjectRootInfo Root)
+{
+    /// <summary>The root's profile, as the app names it: <c>Default</c> when it has none.</summary>
+    public string Profile => Root.ProfileName ?? "Default";
 }
 
 /// <summary>What voice does on the servers, through their hubs as they are.</summary>
@@ -46,6 +54,12 @@ public interface IGodModeServers
     Task ReplyAsync(ProjectRef project, string text, CancellationToken ct);
 
     Task MarkSeenAsync(ProjectRef project, CancellationToken ct);
+
+    /// <summary>Every root on every server connected now (<see cref="IProjectHub.ListProjectRoots"/>). A server that fails to answer is left out.</summary>
+    Task<IReadOnlyList<ServerRoot>> ListRootsAsync(CancellationToken ct);
+
+    /// <summary><see cref="IProjectHub.CreateProject"/> in the root, as the app's create form calls it: the form's values as strings.</summary>
+    Task<CreateProjectResult> CreateAsync(ServerRoot root, string actionName, IReadOnlyDictionary<string, string> inputs, CancellationToken ct);
 }
 
 /// <summary>
@@ -114,11 +128,22 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
     public Task MarkSeenAsync(ProjectRef project, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.MarkSeen), project.ProjectId, ct);
 
+    public async Task<IReadOnlyList<ServerRoot>> ListRootsAsync(CancellationToken ct) =>
+        [.. await EachServerAsync(async (server, hub) =>
+            (await hub.InvokeAsync<ProjectRootInfo[]>(nameof(IProjectHub.ListProjectRoots), ct))
+            .Select(root => new ServerRoot(server.Id, server.Name, root)))];
+
+    public Task<CreateProjectResult> CreateAsync(ServerRoot root, string actionName, IReadOnlyDictionary<string, string> inputs, CancellationToken ct) =>
+        Hub(root.ServerId).InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), root.Profile, root.Root.Name, actionName,
+            inputs.ToDictionary(i => i.Key, i => JsonSerializer.SerializeToElement(i.Value)), ct);
+
     public ValueTask DisposeAsync() => _connections.DisposeAsync();
 
-    private HubConnection Hub(ProjectRef project) =>
-        _connections.ConnectionTo(project.ServerId)
-        ?? throw new InvalidOperationException($"Not connected to the server {_names.GetValueOrDefault(project.ServerId, project.ServerId)}");
+    private HubConnection Hub(ProjectRef project) => Hub(project.ServerId);
+
+    private HubConnection Hub(string serverId) =>
+        _connections.ConnectionTo(serverId)
+        ?? throw new InvalidOperationException($"Not connected to the server {_names.GetValueOrDefault(serverId, serverId)}");
 
     /// <summary>The call on every connected server at once; one that fails is logged and left out.</summary>
     private async Task<IEnumerable<T>> EachServerAsync<T>(Func<ConnectedServer, HubConnection, Task<IEnumerable<T>>> call)

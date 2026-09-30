@@ -167,6 +167,7 @@ public sealed class VoiceSession : IAsyncDisposable
 
             var voice = new VoiceSession(services, scope, session, state, board, projects, handles, logger);
             board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(phrases.Announce(handle, item.Item), item.Project.Key)));
+            tools.Creates.Attach(outcome => session.Announcements.TryWrite(new Announcement(phrases.Created(outcome), outcome.Project?.Key)));
             state.Release();
             voice._run = voice.RunAsync(languages);
             logger.LogInformation("Voice session started ({Languages}); {Projects} projects, {Waiting} waiting, {Handles} handles",

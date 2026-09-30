@@ -4,7 +4,7 @@ using VoiceBot.Core.Resources;
 
 namespace GodMode.Voice;
 
-/// <summary>What the bot says itself, not through the model: announcements and the greeting. Danish, else English.</summary>
+/// <summary>What the bot says itself, not through the model: announcements, the greeting and a create's answer. Danish, else English.</summary>
 public sealed class VoicePhrases
 {
     private readonly bool _danish;
@@ -30,6 +30,23 @@ public sealed class VoicePhrases
         (AttentionKind.Review, false) => $"{handle} has changes requested",
         (AttentionKind.Finished, true) => $"{handle} er færdig",
         (AttentionKind.Finished, false) => $"{handle} is done",
+    };
+
+    /// <summary>The user said yes to a create read back: it runs, and <see cref="Created"/> says when it is done.</summary>
+    public string Creating => _danish ? "Opretter." : "Creating.";
+
+    /// <summary>The user said anything but yes to a create read back.</summary>
+    public string CreateCancelled => _danish ? "Annulleret. Intet oprettet." : "Cancelled. Nothing created.";
+
+    /// <summary>A create is done: the new session by its handle, or why it failed.</summary>
+    public string Created(CreateOutcome outcome) => (outcome, _danish) switch
+    {
+        ({ Handle: { } handle }, true) => $"{handle} er oprettet",
+        ({ Handle: { } handle }, false) => $"{handle} is created",
+        ({ Error: { } error }, true) => $"Oprettelsen i {outcome.Request.Root.Root.Name} fejlede: {error}",
+        ({ Error: { } error }, false) => $"Creating in {outcome.Request.Root.Root.Name} failed: {error}",
+        (_, true) => $"Færdig i {outcome.Request.Root.Root.Name}",
+        (_, false) => $"Done in {outcome.Request.Root.Root.Name}",
     };
 
     private static string PermissionSummary(AttentionItem item) => item.Permission?.Summary ?? item.Text;
