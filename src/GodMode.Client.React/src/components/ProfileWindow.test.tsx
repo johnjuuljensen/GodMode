@@ -96,7 +96,7 @@ describe('a page locked to a profile', () => {
   it("keeps only that profile's attention items, in its inbox and in its title count", () => {
     expect(useAppStore.getState().attention.map(i => i.ProjectId).sort()).toEqual(['a-ship', 'b-ship']);
     expect(q('.inbox-item').map(e => e.textContent?.includes('b-ship') || e.textContent?.includes('a-ship'))).toEqual([true, true]);
-    expect(document.title).toBe('(2) GodMode — Work');
+    expect(document.title).toBe('Work (2) - GodMode');
   });
 
   it('hides the profile filter, and a filter set anyway changes nothing', () => {

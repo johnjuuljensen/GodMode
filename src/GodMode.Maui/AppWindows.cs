@@ -25,13 +25,13 @@ internal static class AppWindows
     /// <summary>
     /// A window for the main page (no profile) or a profile's. Windows extends the page into the title bar, which shows
     /// nothing until it has a TitleBar: this gives it the app's icon and name (#313), in the dark themes' near-black,
-    /// and the page's title once it has one ("(2) GodMode — Work", MainPage). Android and iOS have no title bar and
+    /// and the page's title once it has one ("Work (2) - GodMode", MainPage). Android and iOS have no title bar and
     /// ignore it. The icon is the MauiIcon's own output, appiconLogo.scale-*.png beside the exe, not a second copy.
     /// On Windows it opens at <paramref name="place"/> when it has one (a restart, #341), and its place is saved from then on.
     /// </summary>
     public static Window New(string? profile, WindowPlace? place = null)
     {
-        var title = profile is null ? "GodMode" : $"GodMode — {profile}";
+        var title = Title(profile);
         var page = new MainPage(profile);
         var window = new Window(page)
         {
@@ -68,6 +68,13 @@ internal static class AppWindows
 #endif
         return window;
     }
+
+    /// <summary>
+    /// A window's title before its page gives it one: "GodMode", or "Work - GodMode" for the Work profile's, the profile
+    /// first so a narrow taskbar button still shows it (#355). The page's windowTitle (useAttentionTitle.ts) builds
+    /// the same, with the count of what needs the user; a client test holds this one to it.
+    /// </summary>
+    public static string Title(string? profile) => profile is null ? "GodMode" : $"{profile} - GodMode";
 
     /// <summary>Opens the profile in a window of its own, or brings forward the window it has.</summary>
     public static void OpenProfile(string profile)

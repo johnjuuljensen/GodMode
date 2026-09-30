@@ -35,7 +35,7 @@ public partial class MainPage : ContentPage
                 {
                     KeepOnApp.Attach(wv2.CoreWebView2);
                     wv2.CoreWebView2.Settings.AreDevToolsEnabled = true;
-                    // The page's title is the window's: "(2) GodMode — Work", the profile and what needs the user there
+                    // The page's title is the window's: "Work (2) - GodMode", the profile and what needs the user there
                     wv2.CoreWebView2.DocumentTitleChanged += (_, _) => ShowTitle(wv2.CoreWebView2.DocumentTitle);
 
                     var logger = MauiProgram.LoggerFactory.CreateLogger("WebView");
