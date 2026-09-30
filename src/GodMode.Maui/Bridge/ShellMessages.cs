@@ -64,6 +64,12 @@ public static class ShellMessageTypes
     /// <summary>Request <see cref="VoiceSettingsUpdate"/> → <see cref="VoiceSettingsView"/>. Keys go into secure storage.</summary>
     public const string VoiceSettingsSet = "voice.settings.set";
 
+    /// <summary>
+    /// Request → <see cref="VoiceDeviceList"/>: the microphones and speakers the voice settings can choose, and the
+    /// defaults. Not <see cref="VoiceDeviceList.Supported"/> where voice picks its own route (Android).
+    /// </summary>
+    public const string VoiceDevices = "voice.devices";
+
     /// <summary>Event <see cref="VoiceLine"/> (<see cref="VoiceSpeaker.User"/>): what the user said, partial while they speak.</summary>
     public const string VoiceTranscript = "voice.transcript";
 

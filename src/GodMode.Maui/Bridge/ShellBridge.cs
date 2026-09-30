@@ -127,7 +127,8 @@ public sealed class ShellBridge : IDisposable
         _bridge.Handle(ShellMessageTypes.VoiceStart, _voice.StartAsync);
         _bridge.Handle(ShellMessageTypes.VoiceStop, _voice.StopAsync);
         _bridge.Handle(ShellMessageTypes.VoiceSettingsGet, _voice.Settings.GetViewAsync);
-        _bridge.Handle<VoiceSettingsUpdate, VoiceSettingsView>(ShellMessageTypes.VoiceSettingsSet, _voice.Settings.UpdateAsync);
+        _bridge.Handle<VoiceSettingsUpdate, VoiceSettingsView>(ShellMessageTypes.VoiceSettingsSet, _voice.UpdateSettingsAsync);
+        _bridge.Handle(ShellMessageTypes.VoiceDevices, () => Task.Run(VoiceAudio.Devices));
     }
 
     private async Task<AddServerResult> AddServerAsync(AddServerPayload p)

@@ -1,7 +1,40 @@
 import { useEffect, useState } from 'react';
-import { getVoiceSettings, setVoiceSettings, type VoiceSettingsUpdate, type VoiceSettingsView } from '../../services/voice';
+import {
+  getVoiceDevices, getVoiceSettings, setVoiceSettings,
+  type AudioDevice, type VoiceDeviceList, type VoiceSettingsUpdate, type VoiceSettingsView,
+} from '../../services/voice';
 import { Toggle } from '../settings-shared';
 import '../settings-common.css';
+
+const DEFAULT: AudioDevice = { Id: '', Name: '' };
+
+/**
+ * Default (named after the device it is now), each device there is, and a chosen one that is not there now: voice
+ * uses the default in its place until it is back.
+ */
+function DevicePicker({ label, devices, defaultId, chosen, onChange, onOpen }: {
+  label: string;
+  devices: AudioDevice[];
+  defaultId?: string | null;
+  chosen: AudioDevice;
+  onChange: (device: AudioDevice) => void;
+  onOpen: () => void;
+}) {
+  const same = (a: string, b?: string | null) => a.toLowerCase() === b?.toLowerCase();
+  const byDefault = devices.find(d => same(d.Id, defaultId));
+  const missing = chosen.Id && !devices.some(d => same(d.Id, chosen.Id));
+  return (
+    <div className="form-group">
+      <label>{label}</label>
+      <select aria-label={label} value={chosen.Id} onFocus={onOpen}
+        onChange={e => onChange(devices.find(d => d.Id === e.target.value) ?? (e.target.value === chosen.Id ? chosen : DEFAULT))}>
+        <option value="">{byDefault ? `Default (${byDefault.Name})` : 'Default'}</option>
+        {devices.map(d => <option key={d.Id} value={d.Id}>{d.Name}</option>)}
+        {missing && <option value={chosen.Id}>{chosen.Name} (not connected)</option>}
+      </select>
+    </div>
+  );
+}
 
 /**
  * The voice settings, in the Windows app. A key typed here goes to the shell's secure storage and never comes back:
@@ -14,6 +47,9 @@ export function VoiceSettings() {
   const [voiceId, setVoiceId] = useState('');
   const [language, setLanguage] = useState('');
   const [echoCancellation, setEchoCancellation] = useState(false);
+  const [devices, setDevices] = useState<VoiceDeviceList | null>(null);
+  const [microphone, setMicrophone] = useState<AudioDevice>(DEFAULT);
+  const [speaker, setSpeaker] = useState<AudioDevice>(DEFAULT);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
 
@@ -22,12 +58,20 @@ export function VoiceSettings() {
     setVoiceId(settings.VoiceId);
     setLanguage(settings.Language);
     setEchoCancellation(settings.EchoCancellation);
+    setMicrophone(settings.Microphone ?? DEFAULT);
+    setSpeaker(settings.Speaker ?? DEFAULT);
+  };
+
+  // The devices as they are now: read again when a picker opens, so a headset turned on since shows
+  const listDevices = () => {
+    getVoiceDevices().then(list => setDevices(list ?? null)).catch(() => setDevices(null));
   };
 
   useEffect(() => {
     getVoiceSettings()
       .then(show)
       .catch(err => setMessage({ error: true, text: `Could not read the voice settings: ${err instanceof Error ? err.message : err}` }));
+    listDevices();
   }, []);
 
   if (!view) return message && <div className="settings-error" role="alert">{message.text}</div>;
@@ -39,7 +83,7 @@ export function VoiceSettings() {
       show(await setVoiceSettings(update));
       setElevenLabsKey('');
       setAnthropicKey('');
-      setMessage({ error: false, text: 'Saved. A running voice session uses the new settings from its next start.' });
+      setMessage({ error: false, text: 'Saved. A running voice session moves to the devices now, and uses the rest from its next start.' });
     } catch (err) {
       setMessage({ error: true, text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -51,6 +95,7 @@ export function VoiceSettings() {
     VoiceId: voiceId,
     Language: language,
     EchoCancellation: echoCancellation,
+    ...(devices?.Supported && { Microphone: microphone, Speaker: speaker }),
     ...(elevenLabsKey.trim() && { ElevenLabsKey: elevenLabsKey }),
     ...(anthropicKey.trim() && { AnthropicKey: anthropicKey }),
   };
@@ -80,10 +125,19 @@ export function VoiceSettings() {
         <input type="text" value={language} onChange={e => setLanguage(e.target.value)} placeholder="da-DK+en" />
         <div className="form-description">The reply language, then each language mixed in after a +: da-DK+en is Danish with English.</div>
       </div>
+      {devices?.Supported && (
+        <>
+          <DevicePicker label="Microphone" devices={devices.Microphones} defaultId={devices.DefaultMicrophoneId}
+            chosen={microphone} onChange={setMicrophone} onOpen={listDevices} />
+          <DevicePicker label="Speaker" devices={devices.Speakers} defaultId={devices.DefaultSpeakerId}
+            chosen={speaker} onChange={setSpeaker} onOpen={listDevices} />
+          <div className="form-description">Default follows Windows' default communications device, a headset turned on included.</div>
+        </>
+      )}
       <div className="settings-item">
         <div className="settings-item-info">
           <div className="settings-item-name">Echo cancellation</div>
-          <div className="settings-item-desc">For speakers instead of a headset. Off until it is measured to hold up on laptop speakers.</div>
+          <div className="settings-item-desc">For speakers instead of a headset, with Default for both devices. Off until it is measured to hold up on laptop speakers.</div>
         </div>
         <Toggle checked={echoCancellation} onChange={setEchoCancellation} />
       </div>

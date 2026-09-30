@@ -1,6 +1,7 @@
 using Android.Content;
 using Android.Media;
 using GodMode.Maui.Voice;
+using GodMode.Voice;
 using Microsoft.Extensions.Logging;
 using VoiceBot.Core.Audio;
 using VoiceBot.Providers.Android;
@@ -72,6 +73,9 @@ public sealed class AndroidVoiceAudio : IVoiceAudio
     }
 
     public void Start() => _source.Start();
+
+    /// <summary>Android routes voice itself (<see cref="AudioRoute"/>): the settings offer no devices here.</summary>
+    public void UseDevices(AudioDevice? microphone, AudioDevice? speaker) { }
 
     /// <summary>Lets go in the reverse order of taking: audio, focus, route, and the service last.</summary>
     public void Dispose()

@@ -99,7 +99,7 @@ public sealed class VoiceHost : IVoiceEvents
             HubServers? servers = null;
             try
             {
-                audio = await open(new VoiceAudioRequest(settings.EchoCancellation, AudioLost));
+                audio = await open(new VoiceAudioRequest(settings.EchoCancellation, settings.Microphone, settings.Speaker, AudioLost));
                 servers = new HubServers(_directory, _loggerFactory);
                 var hub = servers;
                 var session = await VoiceSession.StartAsync(new VoiceSessionSetup
@@ -162,6 +162,18 @@ public sealed class VoiceHost : IVoiceEvents
         {
             _switching.Release();
         }
+    }
+
+    /// <summary>
+    /// Saves the settings (<c>voice.settings.set</c>). A running session moves to the devices they choose now; the rest
+    /// applies from its next start.
+    /// </summary>
+    public async Task<VoiceSettingsView> UpdateSettingsAsync(VoiceSettingsUpdate update)
+    {
+        var view = await Settings.UpdateAsync(update);
+        if ((update.Microphone ?? update.Speaker) is not null && _running is { } running)
+            running.Audio.UseDevices(view.Microphone, view.Speaker);
+        return view;
     }
 
     /// <summary>The server list changed: connect to new servers and let go of removed ones.</summary>
