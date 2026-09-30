@@ -231,6 +231,70 @@ public sealed class AdoptTests
         Assert.DoesNotContain(await harness.Projects.ListProjectsAsync(), p => p.Adopted);
     }
 
+    /// <summary>
+    /// A worktree list prints <c>.bare</c>, the bare repository every worktree of the root shares: adopted and
+    /// deleted, it would take them all. Neither a hidden folder nor a root of its own is ever offered, by the
+    /// list script or the default listing, nor adopted.
+    /// </summary>
+    [Fact]
+    public async Task AHiddenFolderOrANestedRoot_IsNeverListed_NorAdopted()
+    {
+        await using var harness = ListingRoot();
+        Directory.CreateDirectory(Path.Combine(harness.RootPath, ".bare"));
+        File.WriteAllText(Path.Combine(harness.RootPath, ".bare", "HEAD"), "ref: refs/heads/master");
+        Directory.CreateDirectory(Path.Combine(harness.RootPath, "nested-root", ".godmode-root"));
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "list.ps1"), """
+            $ErrorActionPreference = 'Stop'
+            @(
+                [ordered]@{ path = (Join-Path $env:GODMODE_ROOT_PATH '.bare') },
+                [ordered]@{ path = 'nested-root' },
+                [ordered]@{ path = 'plain-one' }
+            ) | ConvertTo-Json -Depth 5 -AsArray
+            """);
+        await harness.Projects.RecoverProjectsAsync();
+
+        Assert.Equal(["plain-one"], (await harness.Projects.ListUnmanagedAsync(LifecycleHarness.ProfileName, LifecycleHarness.RootName)).Select(f => f.Path));
+        foreach (var path in new[] { ".bare", "nested-root" })
+        {
+            var refused = await Assert.ThrowsAsync<ArgumentException>(() => harness.AdoptAsync(path, "plain"));
+            Assert.Contains("never adopted", refused.Message);
+            Assert.False(Directory.Exists(Path.Combine(harness.RootPath, path, ".godmode")), $"the refused adopt of {path} wrote state");
+        }
+        Assert.True(File.Exists(Path.Combine(harness.RootPath, ".bare", "HEAD")));
+
+        // Nor does a root without a list script offer them
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "config.json"),
+            File.ReadAllText(Path.Combine(harness.RootPath, ".godmode-root", "config.json")).Replace("\"list\":\"list.ps1\",", ""));
+        var listed = (await harness.Projects.ListUnmanagedAsync(LifecycleHarness.ProfileName, LifecycleHarness.RootName)).Select(f => f.Path).ToArray();
+        Assert.Contains("not-listed", listed);
+        Assert.DoesNotContain(".bare", listed);
+        Assert.DoesNotContain("nested-root", listed);
+    }
+
+    /// <summary>
+    /// A delete whose root config cannot be read cannot run the root's delete script, whose checks (work not
+    /// committed, a protected branch) guard the folder: it is refused, the folder kept. Forget still works.
+    /// </summary>
+    [Fact]
+    public async Task Delete_WhenTheRootConfigCannotBeRead_IsRefused_AndKeepsTheFolder_ButForgetStillWorks()
+    {
+        await using var harness = ListingRoot();
+        await harness.Projects.RecoverProjectsAsync();
+        var adopted = await harness.AdoptAsync("plain-one", "plain");
+        var folder = Path.Combine(harness.RootPath, "plain-one");
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "config.json"), """{ "profileName": "lifecycle", """);
+
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Projects.DeleteProjectAsync(adopted.Id, force: true));
+
+        Assert.Contains("cannot be read", refused.Message);
+        Assert.Equal("the work in plain-one", File.ReadAllText(Path.Combine(folder, "work.txt")));
+        Assert.Contains(await harness.Projects.ListProjectsAsync(), p => p.Id == adopted.Id);
+
+        Assert.True((await harness.Projects.ForgetProjectAsync(adopted.Id)).Trashed);
+        Assert.True(File.Exists(Path.Combine(folder, "work.txt")));
+        Assert.DoesNotContain(await harness.Projects.ListProjectsAsync(), p => p.Id == adopted.Id);
+    }
+
     [Fact]
     public async Task Adopt_OfAFolderASessionIsIn_IsRefused()
     {

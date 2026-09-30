@@ -165,12 +165,12 @@ All real-time communication uses strongly-typed SignalR on one hub, `/hubs/proje
 
 The hub is the session loop plus reading profiles and roots:
 
-| `IProjectHub` (19 methods) | |
+| `IProjectHub` (22 methods) | |
 |---|---|
-| Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `RestoreProject` |
+| Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `RestoreProject`, `ForgetProject` |
 | Prompts | `RespondToPermission`, `GetPermissionDetail`, `AnswerQuestion` |
 | Attention | `GetAttention`, `MarkSeen`, `ReplyAndResume` |
-| Roots | `ListProjectRoots` |
+| Roots | `ListProjectRoots`, `ListUnmanaged`, `AdoptFolder` |
 | Profiles | `ListProfiles` |
 | Utility | `CheckCommand` |
 

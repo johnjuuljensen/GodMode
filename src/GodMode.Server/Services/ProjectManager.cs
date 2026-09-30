@@ -1678,7 +1678,24 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             if (project.Status.RootName != null && profileName != null)
             {
                 var rootPath = project.RootPath;
-                var config = _rootConfigReader.ReadConfig(rootPath);
+                // Read strictly: a config that cannot be read would read as the default, which has no delete
+                // script, and the folder would go without the checks the root's script makes (work not
+                // committed, a protected branch). Only a delete that keeps the folder may go on without it
+                RootConfig config;
+                try
+                {
+                    config = _rootConfigReader.ReadConfigStrict(rootPath);
+                }
+                catch (Exception ex) when (!sharedFolder)
+                {
+                    throw new InvalidOperationException(
+                        $"Root '{project.Status.RootName}' has a config that cannot be read ({ex.Message}), so its delete script cannot run and '{project.ProjectPath}' is not deleted. Fix the config, or forget the session to keep the folder.", ex);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Project {ProjectId}: its root config cannot be read ({Reason}); its delete keeps the folder, so it goes on without the delete script", projectId, ex.Message);
+                    config = new RootConfig();
+                }
                 var action = config.ResolveAction(project.ActionName);
                 // An action that shares folders now shares this one too, whatever the session was created as
                 sharedFolder |= action?.SharedFolder == true;

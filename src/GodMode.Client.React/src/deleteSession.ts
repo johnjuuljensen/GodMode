@@ -1,5 +1,5 @@
 // Deleting a session, from its row in the list or from its view (#325). DeleteProject as it is (the
-// root's delete script first, force for a running claude), and then:
+// root's delete script first, never forced unless the user chooses it after a refusal), and then:
 // - a session that shares its working folder loses only its state, into the folder's trash: it goes at
 //   once, and "Deleted · Undo" brings it back (RestoreProject), with no dialog;
 // - any other loses its working folder and every file in it, which nothing brings back: a dialog names
@@ -47,11 +47,25 @@ export async function deleteSession(serverId: string, project: ProjectSummary): 
     && !await confirmAction(`Delete the ${kind} "${project.Name}"?`, 'Delete', { message: worktreeDeleteMessage(project), tone: 'danger' }))
     return false;
 
+  return runDelete(serverId, project, false);
+}
+
+/**
+ * The delete itself. Never forced on its own: the server stops a running claude first, and the delete script
+ * checks what it would lose (work not committed). A refusal says why, with "Force delete…", which asks
+ * before it tells the script to go ahead anyway (GODMODE_FORCE).
+ */
+async function runDelete(serverId: string, project: ProjectSummary, force: boolean): Promise<boolean> {
+  const hub = useAppStore.getState().serverConnections.find(c => c.serverInfo.Id === serverId)?.hub;
   let trashed: boolean;
   try {
-    trashed = (await hub.deleteProject(project.Id, project.State === 'Running')).Trashed;
+    if (!hub) throw new Error('its server is not connected');
+    trashed = (await hub.deleteProject(project.Id, force)).Trashed;
   } catch (err) {
-    showToast({ text: `Could not delete "${project.Name}": ${messageOf(err)}`, tone: 'error' });
+    const reason = messageOf(err);
+    showToast(force
+      ? { text: `Could not delete "${project.Name}": ${reason}`, tone: 'error' }
+      : { text: `Could not delete "${project.Name}": ${reason}`, tone: 'error', action: { label: 'Force delete…', run: () => void forceDelete(serverId, project, reason) } });
     return false;
   }
 
@@ -63,6 +77,15 @@ export async function deleteSession(serverId: string, project: ProjectSummary): 
     ? { text: `Deleted "${project.Name}"`, action: { label: 'Undo', run: () => restoreSession(serverId, project) } }
     : { text: `Deleted "${project.Name}" and its folder` });
   return true;
+}
+
+/** A force delete, only ever chosen: after a refusal, and confirmed with what it may lose. */
+async function forceDelete(serverId: string, project: ProjectSummary, reason: string): Promise<boolean> {
+  if (!await confirmAction(`Force the delete of "${project.Name}"?`, 'Force delete', {
+    message: `The delete was refused: ${reason} A force delete tells the root's delete script to go ahead anyway, and may lose work that is not committed.`,
+    tone: 'danger',
+  })) return false;
+  return runDelete(serverId, project, true);
 }
 
 /** What an adopted session's delete dialog says: what Delete does, as for any session of its root, and that Forget keeps the folder. */

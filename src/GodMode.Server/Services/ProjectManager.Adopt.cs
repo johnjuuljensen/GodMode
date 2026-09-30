@@ -48,7 +48,7 @@ public partial class ProjectManager
             }
             try
             {
-                candidates = UnmanagedList.Parse(output, rootPath, config, WhyNotAnAdoptableFolder);
+                candidates = UnmanagedList.Parse(output, rootPath, config, WhyNotAnAdoptableFolder, path => WhyNeverOffered(path) != null);
             }
             catch (FormatException ex)
             {
@@ -75,7 +75,7 @@ public partial class ProjectManager
         if (!Directory.Exists(rootPath) || WhyRootIsAWorkspace(rootPath) != null) return [];
         return Directory.GetDirectories(rootPath)
             .Select(folder => Path.GetFileName(folder))
-            .Where(name => !name.StartsWith('.') && WhyNotAnAdoptableFolder(rootPath, Path.Combine(rootPath, name)) == null)
+            .Where(name => WhyNotAnAdoptableFolder(rootPath, Path.Combine(rootPath, name)) == null)
             .Order(StringComparer.Ordinal)
             .Select(name => new UnmanagedFolder(name, name))
             .ToArray();
@@ -92,6 +92,8 @@ public partial class ProjectManager
         var full = FullPath(path);
         if (!PathComparer.Equals(Path.GetDirectoryName(full), FullPath(rootPath)))
             return "is not a folder directly in its root";
+        if (WhyNeverOffered(full) is { } never)
+            return never;
         if (WhyNotAProjectFolderOf(rootPath, full) is { } reason)
             return reason;
         try
@@ -104,6 +106,17 @@ public partial class ProjectManager
         }
         return Directory.Exists(full) ? null : "does not exist, and an adopt makes no folder";
     }
+
+    /// <summary>
+    /// Why the folder at <paramref name="path"/> is never offered or adopted, whatever a list script says, or
+    /// null: a hidden one (a name that starts with <c>.</c>), which is the root's machinery and not a working
+    /// folder (<c>.bare</c>, the bare repository every worktree of the root shares, whose delete would take
+    /// them all), or a root of its own (it holds a <c>.godmode-root</c>).
+    /// </summary>
+    private static string? WhyNeverOffered(string path) =>
+        Path.GetFileName(path).StartsWith('.') ? "is a hidden folder (its name starts with '.'), which is never adopted"
+        : Directory.Exists(Path.Combine(path, ProjectFiles.ProjectFolder.RootConfigFolderName)) ? $"is a root of its own (it has a {ProjectFiles.ProjectFolder.RootConfigFolderName}), which is never adopted"
+        : null;
 
     /// <summary>
     /// Why the folder at <paramref name="path"/> is GodMode's already, or null when it is not: a tracked

@@ -39,7 +39,8 @@ public static class UnmanagedList
     /// <paramref name="rootPath"/>. <paramref name="whyNotAdoptable"/> says why a path is no folder the
     /// root can adopt (null when it is). Throws <see cref="FormatException"/> saying what is wrong.
     /// </summary>
-    public static IReadOnlyList<UnmanagedFolder> Parse(string output, string rootPath, RootConfig config, Func<string, string, string?> whyNotAdoptable)
+    public static IReadOnlyList<UnmanagedFolder> Parse(string output, string rootPath, RootConfig config, Func<string, string, string?> whyNotAdoptable,
+        Func<string, bool> neverOffered)
     {
         if (output.Length > MaxOutputChars) throw new FormatException($"the output is longer than {MaxOutputChars} characters");
         if (string.IsNullOrWhiteSpace(output)) return [];
@@ -66,6 +67,8 @@ public static class UnmanagedList
 
                 var path = Text(item, "path", at) ?? throw new FormatException($"{at} has no path");
                 var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(rootPath, path)));
+                // A hidden folder (a worktree list's .bare) or a root of its own is left out, not an error: it is never a candidate
+                if (neverOffered(full)) continue;
                 if (whyNotAdoptable(rootPath, full) is { } reason) throw new FormatException($"{at}'s path '{Cut(path)}' {reason}");
                 var folder = Path.GetFileName(full);
                 if (!seen.Add(folder)) throw new FormatException($"{at}'s path '{Cut(path)}' is listed twice");
