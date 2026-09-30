@@ -216,6 +216,20 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         return status;
     }
 
+    /// <summary>
+    /// Adopts the folder <paramref name="path"/> of the harness root (or <paramref name="root"/>), as the
+    /// app's Adopt does, and returns the session's status.
+    /// </summary>
+    public async Task<ProjectStatus> AdoptAsync(string path, string? action = null, IReadOnlyDictionary<string, object>? inputs = null,
+        string root = RootName, string profile = ProfileName)
+    {
+        var request = (inputs ?? new Dictionary<string, object>()).ToDictionary(input => input.Key, input => JsonSerializer.SerializeToElement(input.Value));
+        var status = await Projects.AdoptFolderAsync(profile, root, path, action, request);
+        _projectIds.Add(status.Id);
+        Session(status.Id);
+        return status;
+    }
+
     /// <summary>The working folder and id of each session seen tracked, so a deleted one's are still known.</summary>
     private readonly ConcurrentDictionary<string, (string ProjectPath, string SessionId)> _sessions = new();
 
