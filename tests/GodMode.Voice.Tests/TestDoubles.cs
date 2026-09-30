@@ -205,7 +205,12 @@ internal sealed class OfflineVoice : IAsyncDisposable
         {
             Settings = settings ?? VoiceSettings.Default,
             Servers = servers,
-            ConnectAsync = connect ?? (_ => Task.CompletedTask),
+            // A fake is connected to as a hub is: its projects first
+            ConnectAsync = async ct =>
+            {
+                if (servers is FakeServers fake) await fake.ConnectAsync(ct);
+                if (connect is not null) await connect(ct);
+            },
             Transcription = TranscriptionInput.FromSource(voice.Transcriptions),
             AudioSink = new SilentSink(),
             Providers = voice.Providers,

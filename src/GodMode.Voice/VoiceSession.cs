@@ -115,6 +115,7 @@ public sealed class VoiceSession : IAsyncDisposable
         var phrases = new VoicePhrases(languages);
         var handles = new ProjectHandles();
         var board = new AttentionBoard(setup.Servers, handles);
+        var projects = new ProjectBoard(setup.Servers, handles);
         var conversation = new VoiceConversation();
 
         await setup.ConnectAsync(ct);
@@ -144,7 +145,7 @@ public sealed class VoiceSession : IAsyncDisposable
             scope = services.CreateAsyncScope();
 
             var inference = new ObservedInference(scope.ServiceProvider.GetRequiredService<IInferenceProvider>(), state);
-            var tools = new VoiceTools(setup.Servers, board, handles, conversation);
+            var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
                 GodModeGraph.Build(inference, languages, tools, phrases),
@@ -164,8 +165,8 @@ public sealed class VoiceSession : IAsyncDisposable
             board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(phrases.Announce(handle, item.Item), item.Project.Key)));
             state.Release();
             voice._run = voice.RunAsync(languages);
-            logger.LogInformation("Voice session started ({Languages}); {Waiting} waiting, {Handles} handles",
-                languages, board.Items.Count, handles.All.Count);
+            logger.LogInformation("Voice session started ({Languages}); {Projects} projects, {Waiting} waiting, {Handles} handles",
+                languages, projects.Projects.Count, board.Items.Count, handles.All.Count);
             return voice;
         }
         catch

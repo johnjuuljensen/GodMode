@@ -16,7 +16,7 @@ public static class GodModeGraph
 
     /// <summary>What the user says to the bot, besides project handles; ElevenLabs is biased towards them.</summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "status", "svar", "læst", "stille", "sig til igen", "GodMode", "pull request", "review"];
+        ["hvad venter", "projekter", "status","svar", "læst", "stille", "sig til igen", "GodMode", "pull request", "review"];
 
     public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases)
     {
@@ -35,6 +35,11 @@ public static class GodModeGraph
 
             COMMANDS (Danish first, English accepted):
             - "Hvad venter?" / "What needs me?" — call {{VoiceTools.WhatNeedsMe}}. Say the count, then each handle and what it needs.
+            - "Hvilke projekter er der?", "Hvad kører?" / "Which projects?" — call {{VoiceTools.ListProjects}}: every project,
+              also those that need nothing. Say the count, then each handle. Never answer which projects there are
+              from {{VoiceTools.WhatNeedsMe}}: it lists only those that need the user.
+            - A project the user names by its root or kind ("Assistant", "chat") is named so to the tools; if the tool
+              says it is unknown, give the handles it lists as options.
             - "Status [handle]", "Læs [handle]", "Hvad spørger [handle] om?" — call {{VoiceTools.ProjectStatus}}; read the
               question or result itself, shortened if long.
             - "Svar [handle] at …", "Svar at …", "Sig til [handle] at …" — call {{VoiceTools.Answer}} with the answer as the
