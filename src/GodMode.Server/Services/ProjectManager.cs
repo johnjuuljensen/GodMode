@@ -1743,7 +1743,11 @@ public class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
                 _logger.LogInformation("Project {ProjectId} already has a running process with PID {ProcessId} (state: {State})",
                     projectId, project.Process.ProcessId, project.Status.State);
 
-                if (project.Status.State == ProjectState.Idle)
+                // A session never sent a message is waiting for its first: a "Continue" would be a
+                // first turn the user did not write
+                if (project.Status.State == ProjectState.Idle && !project.HadInput)
+                    _logger.LogInformation("Project {ProjectId} is idle waiting for its first message; nothing is sent", projectId);
+                else if (project.Status.State == ProjectState.Idle)
                 {
                     _logger.LogInformation("Project {ProjectId} is idle with running process, sending continue prompt", projectId);
                     await _lifecycle.SendInputAsync(project, "Continue");

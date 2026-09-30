@@ -73,32 +73,72 @@ public class EmptyPromptTests
         Assert.Single(harness.Launches(created.Id));
     }
 
+    /// <summary>How a never-messaged session comes to have no process: stopped by the user, by a restart, or by claude failing.</summary>
+    public enum Ended { Stopped, Restarted, Crashed }
+
     /// <summary>
-    /// A session that was never sent a message has no conversation for claude to resume: the fresh
-    /// session that takes its place is sent no "continue" turn, and waits for the first message still.
+    /// A session never sent a message has no conversation for claude to resume: its first message
+    /// starts it on its own id (<c>--session-id</c>, no <c>--resume</c>), and is its only turn, with
+    /// no "continue" before it. A --resume would be rejected here (<see cref="FakeScript.RejectResume"/>).
     /// </summary>
+    [Theory]
+    [InlineData(Ended.Stopped)]
+    [InlineData(Ended.Restarted)]
+    [InlineData(Ended.Crashed)]
+    public async Task TheFirstMessage_ToANeverMessagedSessionWithNoProcess_IsItsOnlyTurn(Ended ended)
+    {
+        await using var harness = new LifecycleHarness(ended == Ended.Crashed
+            ? new FakeScript().Stderr("Error: invalid API key").Exit(1)
+            : new FakeScript().RejectResume().AwaitStdin().EmitInit().EmitAssistant("Hello.").EmitResult());
+        var created = await harness.CreateProjectAsync(prompt: null);
+        var sessionId = (await harness.WaitForLaunchAsync(created.Id, _ => true)).ArgValue("--session-id");
+        switch (ended)
+        {
+            case Ended.Stopped: await harness.Projects.StopProjectAsync(created.Id); break;
+            case Ended.Restarted: await harness.RestartAsync(); break;
+            case Ended.Crashed:
+                await harness.WaitForStateAsync(created.Id, ProjectState.Error);
+                harness.UseScript(new FakeScript().RejectResume().AwaitStdin().EmitInit().EmitAssistant("Hello.").EmitResult());
+                break;
+        }
+        // An idle session was doing nothing the restart carries on with
+        Assert.Single(harness.Launches(created.Id));
+
+        await harness.Projects.ReplyAndResumeAsync(created.Id, "Draft the mail to the supplier");
+
+        var started = await harness.WaitForStdinAsync(created.Id, index: 1);
+        Assert.Equal(sessionId, started.ArgValue("--session-id"));
+        Assert.Null(started.ArgValue("--resume"));
+        Assert.Equal("Draft the mail to the supplier", PromptText(Assert.Single(started.Stdin)));
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        await harness.Projects.StopProjectAsync(created.Id);
+        Assert.Single(harness.Launches(created.Id)[1].Stdin);
+        Assert.Equal(2, harness.Launches(created.Id).Count);
+    }
+
+    /// <summary>Resume (the header's pill) on a never-messaged session sends claude nothing: running, it has nothing to do; stopped, it starts claude waiting.</summary>
     [Fact]
-    public async Task Resuming_ASessionNeverSentAMessage_StartsFresh_WithNoTurn()
+    public async Task Resume_OfANeverMessagedSession_SendsNothing_RunningOrStopped()
     {
         await using var harness = new LifecycleHarness(new FakeScript().RejectResume().AwaitStdin().EmitInit().EmitAssistant("Hello.").EmitResult());
         var created = await harness.CreateProjectAsync(prompt: null);
         var sessionId = (await harness.WaitForLaunchAsync(created.Id, _ => true)).ArgValue("--session-id");
-        await harness.Projects.StopProjectAsync(created.Id);
 
         await harness.Projects.ResumeProjectAsync(created.Id);
 
-        await harness.WaitForLaunchAsync(created.Id, l => l.ExitCode == 1 && l.ArgValue("--resume") == sessionId, index: 1);
-        var fresh = await harness.WaitForLaunchAsync(created.Id, l => l.ArgValue("--session-id") == sessionId, index: 2);
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ProjectInfo(created.Id).Process.ProcessId == fresh.Pid), null,
-            () => $"the fresh session is not the project's process.\n{harness.Describe(created.Id)}");
         Assert.Equal(ProjectState.Idle, (await harness.Projects.GetStatusAsync(created.Id)).State);
+        await harness.Projects.StopProjectAsync(created.Id);
+        Assert.Empty(Assert.Single(harness.Launches(created.Id)).Stdin);
 
-        await harness.Projects.ReplyAndResumeAsync(created.Id, "Now start");
+        await harness.Projects.ResumeProjectAsync(created.Id);
 
-        var answered = await harness.WaitForStdinAsync(created.Id, index: 2);
-        Assert.Equal("Now start", PromptText(Assert.Single(answered.Stdin)));
-        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
-        Assert.Equal(3, harness.Launches(created.Id).Count);
+        var resumed = await harness.WaitForLaunchAsync(created.Id, _ => true, index: 1);
+        Assert.Equal(sessionId, resumed.ArgValue("--session-id"));
+        Assert.Null(resumed.ArgValue("--resume"));
+        Assert.Equal(ProjectState.Idle, (await harness.Projects.GetStatusAsync(created.Id)).State);
+        await harness.Projects.StopProjectAsync(created.Id);
+        Assert.Empty(harness.Launches(created.Id)[1].Stdin);
+        Assert.Equal(2, harness.Launches(created.Id).Count);
     }
 
     [Theory]

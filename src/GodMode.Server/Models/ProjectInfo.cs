@@ -34,6 +34,14 @@ public class ProjectInfo
     public string StatePath => ProjectFiles.SessionState.PathOf(ProjectPath, SessionId);
 
     /// <summary>
+    /// Whether claude was ever sent a message in this session: each is logged to its input.jsonl as it
+    /// is sent. A session created with no prompt has none until the user writes its first, and claude
+    /// has no conversation for it until then.
+    /// </summary>
+    public bool HadInput =>
+        new FileInfo(Path.Combine(StatePath, ProjectFiles.SessionState.InputFileName)) is { Exists: true, Length: > 0 };
+
+    /// <summary>
     /// Whether the session shares its working folder with others (its action's <c>sharedFolder</c>,
     /// kept in its settings.json): its delete removes only <see cref="StatePath"/>, never the folder.
     /// </summary>

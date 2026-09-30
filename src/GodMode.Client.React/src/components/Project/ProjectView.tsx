@@ -75,7 +75,10 @@ export function ProjectView({ serverId, projectId }: Props) {
   );
 
   const state = project?.State ?? 'Idle';
-  const canResume = !notFound && (state === 'Stopped' || state === 'Idle');
+  // Created with no prompt (#352): Idle with its output loaded and empty, claude has had no turn and
+  // waits for the first message. Resume has nothing to do
+  const awaitsFirstMessage = !notFound && state === 'Idle' && phase === 'ready' && outputMessages.length === 0;
+  const canResume = !notFound && (state === 'Stopped' || state === 'Idle' && !awaitsFirstMessage);
   const canStop = !notFound && (state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission');
 
   // What claude is blocked on: a tool call to allow or deny, or AskUserQuestion's questions, asked one at a time
@@ -204,7 +207,8 @@ export function ProjectView({ serverId, projectId }: Props) {
         <div className="project-messages">
           <div className="project-messages-empty">
             {notFound ? 'Project not found'
-              : phase === 'loading' ? 'Loading...' : conn?.connectionState === 'connected' ? 'Waiting for output...' : 'Not connected'}
+              : phase === 'loading' ? 'Loading...' : conn?.connectionState !== 'connected' ? 'Not connected'
+              : awaitsFirstMessage ? 'Send the first message to start.' : 'Waiting for output...'}
           </div>
         </div>
       )}
@@ -242,7 +246,8 @@ export function ProjectView({ serverId, projectId }: Props) {
           onSubmit={handleSendInput}
           // Every state takes a reply: ReplyAndResume resumes a claude that is not running, one that failed
           // too, as the inbox answers an Error item (#240)
-          placeholder={canResume || state === 'Error' ? 'Type to resume...' : 'Type your response...'}
+          placeholder={awaitsFirstMessage ? 'Type the first message...'
+            : canResume || state === 'Error' ? 'Type to resume...' : 'Type your response...'}
           disabled={notFound}
         />
         <button className="btn btn-primary" onClick={handleSendInput} disabled={notFound || !inputText.trim()}>
