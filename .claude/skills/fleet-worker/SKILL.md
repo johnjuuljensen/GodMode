@@ -28,7 +28,8 @@ the GodMode app, nested under it. Everything below holds, with these differences
   - **`SendMessage` to your parent's address first.** It wakes your parent if it is idle, and reaches
     it at its next step if it is working.
   - **When `SendMessage` says it is not reachable** (it runs under another config dir, or it is
-    stopped), use the **`message_parent`** tool (`mcp__godmode__message_parent`) with the same text.
+    stopped), **or that it is held for approval** (you run with permissions skipped, your parent
+    does not, and nobody can approve it in a headless session), use the **`message_parent`** tool (`mcp__godmode__message_parent`) with the same text.
     The server holds it until your parent can take it, on disk if your parent is stopped, and tells
     you whether it was delivered or held. Do not retry a held message: it is kept.
   - `message_parent` refuses a session with no parent, and a parent in another root without a link.

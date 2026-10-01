@@ -6,5 +6,5 @@
   "create": "issue/create",
   "nameTemplate": "issue_{issueNumber}",
   "promptTemplate": "Read GitHub issue #{issueNumber} by running `gh issue view {issueNumber}`. Understand the requirements and implement the changes.",
-  "claudeArgs": ["--settings", "{\"crossSessionInbound\":\"accept\"}", "--allowedTools", "mcp__godmode__message_parent"]
+  "claudeArgs": ["--allowedTools", "mcp__godmode__message_parent"]
 }
