@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "issueNumber": { "type": "string", "title": "Epic Issue Number", "description": "A GitHub issue labelled epic" },
+    "brief": { "type": "string", "title": "Brief", "x-multiline": true, "description": "Optional: added to the overseer's prompt (lanes, decisions already made, who to report to)" }
+  },
+  "required": ["issueNumber"]
+}

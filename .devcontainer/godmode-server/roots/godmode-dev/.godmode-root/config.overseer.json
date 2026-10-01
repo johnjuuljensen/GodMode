@@ -1,0 +1,9 @@
+{
+  "description": "A coordinator overseer: runs issues and epics as GodMode sessions, with the fleet's tools",
+  "fleetTools": true,
+  "sharedFolder": true,
+  "scriptsCreateFolder": true,
+  "create": "overseer/create",
+  "nameTemplate": "overseer_{name}",
+  "claudeArgs": ["--allowedTools", "mcp__godmode-fleet"]
+}
