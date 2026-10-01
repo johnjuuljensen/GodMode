@@ -57,6 +57,10 @@ if ($baseBranch -ne 'origin/master') {
     # A session that does not know it was cut from an epic's branch opens its pull request against the default one
     $prompt += " Your branch, $branch, was cut from ${baseBranch}: open its pull request against $($baseBranch -replace '^origin/', ''), not the default branch."
 }
+# Started by another session (an overseer): say how to report to it, by Claude Code's own channel or the server's
+if ($env:GODMODE_PARENT_ADDRESS) {
+    $prompt += " You report to your parent session, ``$($env:GODMODE_PARENT_ADDRESS)``: with SendMessage to that name, or, when it is not reachable, with the ``message_parent`` tool."
+}
 if ($brief) { $prompt += "`n`n$brief" }
 
 # Write result file so the server picks up the actual path and name; the prompt last, as it may span lines
