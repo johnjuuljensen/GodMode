@@ -292,6 +292,9 @@ describe('the default form (#352)', () => {
 
     expect(field('Project Name').querySelector('.form-required')).not.toBeNull();
     expect(field('Task Description').querySelector('.form-required')).toBeNull();
+    // "x-multiline": true is the documented contract for a text area (#402)
+    expect(field('Task Description').querySelector('textarea')).not.toBeNull();
+    expect(field('Task Description').querySelector('input')).toBeNull();
     await click(button('Create'));
 
     expect(formError()).toBeNull();
