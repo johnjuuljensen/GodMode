@@ -370,9 +370,9 @@ export interface ProjectStatus {
    */
   Adopted: boolean;
   /**
-   * The claude effort level the session was started with, kept and used on resume as Model is. Empty when its
-   * create chose claude's default over its action's level; null when it was never set, and the action's
-   * applies.
+   * The claude effort level the session was started with, kept and used on resume as Model is. Empty when it
+   * was started at claude's own default; null only for a session created before effort was kept, which takes
+   * its action's.
    */
   Effort?: string | null;
 }
