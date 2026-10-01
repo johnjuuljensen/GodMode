@@ -1,5 +1,6 @@
-<!-- Template. Fill every field; delete nothing. Passed to ac-gwt-issue -PromptFile, or as the issue
-     action's `brief` input to start_session. Keep the Report to line that fits how you dispatched. -->
+<!-- Template. Fill every field. There are two Report to lines: keep the one that fits how you
+     dispatched and delete the other; delete nothing else. Passed to ac-gwt-issue -PromptFile (the
+     first Report to), or as the issue action's `brief` input to start_session (the second). -->
 
 Use the `fleet-worker` skill, then implement issue #<N> in this worktree.
 

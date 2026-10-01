@@ -1,6 +1,7 @@
 {
   "description": "An epic overseer: runs an epic's sub-issues on its own epic branch, with the fleet's tools",
   "fleetTools": true,
+  "allowSkipPermissions": false,
   "scriptsCreateFolder": true,
   "create": "epic/create",
   "nameTemplate": "epic_{issueNumber}",

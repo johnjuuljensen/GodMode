@@ -13,8 +13,13 @@ if ($LASTEXITCODE -ne 0) { throw "git fetch failed (exit code $LASTEXITCODE)" }
 if (-not (Test-Path (Join-Path $projectPath '.git'))) {
     if (Test-Path $projectPath) { throw "'$projectPath' is there and is not a worktree: move it away first." }
     Write-Output "Creating the overseers' folder, a detached worktree of origin/master..."
+    # A folder removed by hand is still registered, and git would refuse to add it again
+    git -C $barePath worktree prune
     git -C $barePath worktree add --detach $projectPath origin/master
     if ($LASTEXITCODE -ne 0) { throw "git worktree add failed (exit code $LASTEXITCODE)" }
+} elseif (git -C $projectPath symbolic-ref -q HEAD) {
+    # A worktree with a branch checked out is some session's own, whatever its folder is called
+    throw "'$projectPath' has $(git -C $projectPath symbolic-ref --short HEAD) checked out, so it is not the overseers' folder: move it away first."
 } elseif (git -C $projectPath status --porcelain) {
     Write-Output "The overseers' folder has changes, so it stays where it is: $(git -C $projectPath rev-parse --short HEAD)"
 } else {

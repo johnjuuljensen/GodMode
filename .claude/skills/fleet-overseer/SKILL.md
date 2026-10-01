@@ -88,7 +88,8 @@ picture yourself. Anything you were told is a hint to check, not a finding.
    ID is the `ParentId` your first `start_session` returns); a predecessor's are adopted by their
    issue and pull request ([Adopting](#adopting-a-session-you-did-not-launch)); an epic overseer's
    children are its own. Without the tools, `ListAgents`.
-   It is scoped to this `CLAUDE_CONFIG_DIR`, so every row is yours. A name is the worktree folder
+   `ListAgents` is scoped to this `CLAUDE_CONFIG_DIR`, so every row it shows is yours (not so
+   `list_sessions`, which shows the user's and other overseers' sessions too). A name is the worktree folder
    truncated; `git -C <worktree> rev-parse --abbrev-ref HEAD` gives its branch when the truncation
    hides it. Workers are launched with the `claudeCommand` in `..\.worktree.json`, so you must be
    running under that same config dir or the fleet is invisible to you. GodMode sessions are never
@@ -121,6 +122,10 @@ picture yourself. Anything you were told is a hint to check, not a finding.
 
 Then report the survey and wait. A picture the user corrects in one message is cheaper than a wrong
 dispatch, and it is the only moment where correcting you is cheap.
+
+**Inside GodMode, do not wait:** nobody is at your keyboard, and a turn that ends on a question waits
+on the user's inbox. Put the survey in your turn's output, where the user can read it in the app,
+and go on with what `autoclaude` already covers. A correction reaches you as a message.
 
 ## Read the graph from the API, the order from the prose
 
@@ -320,25 +325,35 @@ GodMode sessions are not in `ListAgents`. It reports through its pull request �
 working, ready when done, a comment when it has pushed a review fix — and through its state in
 `list_sessions`. So nothing wakes you unless you arrange it.
 
+This is for the two modes with the tools. An overseer of `ac-gwt` tabs keeps `notify_when_idle` and
+polls nothing.
+
 **End every turn with a wake armed**, unless the fleet is done. Claude starts a turn of its own when
 a background task it started finishes, in a GodMode session as in a terminal. So arm one with Bash
-`run_in_background`:
+`run_in_background`, **last in the turn**, after your own comments, merges and other GitHub writes
+(armed earlier, your own comment would wake you):
 
 ```bash
 pwsh -NoProfile -File .claude/skills/fleet-overseer/wake.ps1 -Base <your epic branch, or master> -Minutes 20
 ```
 
 It exits — and you wake — when any pull request into that base changes (opened, ready, back to
-draft, a review decision, a push, a comment, merged, closed), or after `-Minutes`. `-PullRequest
-<n>,<m>` narrows it to the ones you are waiting on. On waking, read what changed, then
+draft, a review decision, a review, a comment, a push to one that is ready, merged, closed), or after
+`-Minutes`. A draft's pushes do not wake you: a worker pushes at every boundary. `-PullRequest
+<n>,<m>` narrows it to the ones you are waiting on. Its baseline is the first poll, so a change
+between your last look and the arming is not seen: make a last `gh pr list` part of the turn, just
+before arming. On waking, read what changed, then
 `list_sessions` for your children: one in `Error`, or idle with no ready pull request after its turn
 ended, is yours to look at (`read` it); one that needs a `Permission` or a `Question` is the user's,
 already in their inbox. Then act, and arm the next wake.
 
 - **One wake at a time.** Each finished task is a turn; two armed are two turns.
-- **A wake does not survive its process.** A stop, a server restart, or the user resuming you starts
-  a claude with no background tasks. So the first thing on any turn is: is a wake armed? If not, and
-  the fleet is not done, survey and arm one.
+- **A wake does not survive its process.** After a stop, a server restart or a resume, claude starts
+  with no background tasks, so nothing is armed and you stay idle until the user (or an overseer)
+  sends you something. So the first thing on a turn is: is a wake armed? If not, and the fleet is not
+  done, survey, and arm one at the end of the turn.
+- **An epic branch cut before this skill had `wake.ps1`** loads the old skill: merge `origin/master`
+  into it first, then read the skill again.
 - **Your turn's last line is what the user sees** of you, in the app's list and as your item in their
   inbox. Make it the fleet's state in one line (`IS#43/PR#56 ready, reviewing; IS#44 working`).
   Never end a turn on a question mark: that is read as you asking the user, and waits.

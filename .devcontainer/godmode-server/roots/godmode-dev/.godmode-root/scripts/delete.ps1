@@ -50,7 +50,9 @@ if ($env:GODMODE_FORCE -ne "true") {
 git -C $barePath worktree remove $projectPath --force
 
 # Delete the local branch if it was auto-created (project/*)
-if ($branch -like "project/*" -or $branch -like "issue-*" -or $branch -like "epic/*") {
+# An epic's branch only when nothing on it is unpushed, checked above: a force delete keeps it, as an
+# epic overseer may have merged into it without pushing yet
+if ($branch -like "project/*" -or $branch -like "issue-*" -or ($branch -like "epic/*" -and $env:GODMODE_FORCE -ne "true")) {
     Write-Output "Deleting local branch '$branch'..."
     git -C $barePath branch -D $branch 2>$null
 }
