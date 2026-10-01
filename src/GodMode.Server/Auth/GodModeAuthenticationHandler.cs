@@ -204,6 +204,7 @@ public static class GodModeAuthExtensions
     public const string SchemeName = "GodModeBearer";
     public const string ProjectTokenSchemeName = "GodModeProjectToken";
     public const string ProjectPolicy = "GodModeProject";
+    public const string FleetPolicy = "GodModeFleet";
     public const string ProjectIdClaim = "godmode:project-id";
 
     /// <summary>
@@ -221,7 +222,15 @@ public static class GodModeAuthExtensions
             .AddPolicy(ProjectPolicy, policy => policy
                 .AddAuthenticationSchemes(ProjectTokenSchemeName)
                 .RequireAuthenticatedUser()
-                .RequireClaim(ProjectIdClaim));
+                .RequireClaim(ProjectIdClaim))
+            // The fleet endpoint's: the server's own credential, as the hub's. A project token is no
+            // user (its handler leaves a request naming a project to the project scheme), and a
+            // principal with a project claim is refused even where it is the one being checked (a
+            // tool's [Authorize] on /mcp)
+            .AddPolicy(FleetPolicy, policy => policy
+                .AddAuthenticationSchemes(SchemeName)
+                .RequireAuthenticatedUser()
+                .RequireAssertion(context => !context.User.HasClaim(claim => claim.Type == ProjectIdClaim)));
         return services;
     }
 }
