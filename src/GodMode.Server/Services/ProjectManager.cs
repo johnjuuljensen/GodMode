@@ -1318,8 +1318,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // claude is blocked on a permission prompt and reads no input until it is answered: a reply
         // in the chat answers it. A single question takes it as its answer; anything else is a deny
-        // that tells claude what the user said instead
-        if (project.Process.OldestPending is { } pending)
+        // that tells claude what the user said instead. Only a reply that answers pending requests does:
+        // one that comes after the refusal above is never answered by the fleet's text
+        if (answersPending && project.Process.OldestPending is { } pending)
         {
             var result = pending.Question is { Questions: [var only] }
                 ? PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, new Dictionary<string, string> { [only.Question] = input }))
@@ -2888,7 +2889,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>
     /// Gets a boolean value from inputs. Handles both JsonValueKind.True/False and string "true"/"false".
     /// </summary>
-    private static bool GetBool(Dictionary<string, JsonElement> inputs, string key)
+    internal static bool GetBool(Dictionary<string, JsonElement> inputs, string key)
     {
         if (!inputs.TryGetValue(key, out var value))
             return false;

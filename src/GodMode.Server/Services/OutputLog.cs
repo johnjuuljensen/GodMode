@@ -280,7 +280,8 @@ public static class OutputLog
     /// The session's last <paramref name="turns"/> replies, oldest first, whether or not it needs the user:
     /// the fleet's <c>read</c>, and what voice reads a project's last answer by (#378).
     /// <list type="bullet">
-    /// <item>A turn ends with a <c>result</c> line. Its reply is its last assistant message with text, else the result's text (<see cref="AssistantReply"/>).</item>
+    /// <item>A turn ends with a <c>result</c> line. Its reply is its last assistant message with text, else the result's text (<see cref="AssistantReply"/>).
+    /// A subagent's messages (with a <c>parent_tool_use_id</c>) are not the session's, and are skipped.</item>
     /// <item>Claude's lines after the last result are a turn too, unfinished, once one of its messages has text: what it is saying now, or said before a stop cut the turn short.
     /// One with no text yet (only tool calls, or a resume's <c>system/init</c>) is not counted, so a session that is resumed, or just sent a message, still gives its last reply.</item>
     /// <item>Fewer when the output has fewer; none when it has no output. The file is read from its end, back only as far as those turns go.</item>
@@ -342,7 +343,9 @@ public static class OutputLog
                 return (true,
                     root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.String ? result.GetString() : null,
                     root.TryGetProperty("is_error", out var isError) && isError.ValueKind == JsonValueKind.True);
+            // A subagent's message (parent_tool_use_id, its Task call's) is no reply of the session's: the app nests it under that call
             if (!type.ValueEquals("assistant")
+                || root.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String
                 || !root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
                 || !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
                 return null;

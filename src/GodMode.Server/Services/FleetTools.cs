@@ -29,8 +29,8 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     /// <summary>The most turns <see cref="ReadAsync"/> gives.</summary>
     public const int MaxTurns = 20;
 
-    /// <summary>Create inputs a fleet caller does not set: skip-permissions settles every prompt the user would, and the parent is <c>parent</c>.</summary>
-    private static readonly string[] RefusedInputs = ["skipPermissions", CreateProjectRequest.ParentInput];
+    /// <summary>The create input that would start a session that asks the user nothing: the fleet may not ask for it (false is the schema's default, and fine).</summary>
+    private const string SkipPermissionsInput = "skipPermissions";
 
     /// <summary>One session in <see cref="ListSessionsAsync"/>.</summary>
     /// <param name="Needs">What it needs from the user, as its attention item says; null when nothing.</param>
@@ -87,10 +87,10 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         [Description("The ID of the session this one is a child of; omit for a top-level session")] string? parent = null)
     {
         var values = (inputs ?? []).ToDictionary(input => input.Key, input => JsonSerializer.SerializeToElement(input.Value));
-        if (RefusedInputs.FirstOrDefault(values.ContainsKey) is { } refused)
-            throw new McpException(refused == CreateProjectRequest.ParentInput
-                ? $"Name the parent with parent, not the {refused} input."
-                : $"The fleet cannot start a session with {refused}: its permission prompts are the user's.");
+        if (ProjectManager.GetBool(values, SkipPermissionsInput))
+            throw new McpException($"The fleet cannot start a session with {SkipPermissionsInput}: its permission prompts are the user's.");
+        if (values.ContainsKey(CreateProjectRequest.ParentInput))
+            throw new McpException($"Name the parent with parent, not the {CreateProjectRequest.ParentInput} input.");
         if (model != null) values["model"] = JsonSerializer.SerializeToElement(model);
         if (effort != null) values["effort"] = JsonSerializer.SerializeToElement(effort);
 

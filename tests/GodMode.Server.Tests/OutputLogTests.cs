@@ -282,6 +282,20 @@ public sealed class OutputLogTests : IDisposable
         Assert.Equal([new("Only the result", true), new("It failed", true, IsError: true)], await OutputLog.LastRepliesAsync(_statePath, 2));
     }
 
+    /// <summary>A subagent's messages carry its Task call's id: they are its, not the session's reply.</summary>
+    [Fact]
+    public async Task LastReplies_SkipASubagentsMessages()
+    {
+        var subagent = JsonSerializer.Serialize(new
+        {
+            type = "assistant", parent_tool_use_id = "toolu_task",
+            message = new { role = "assistant", content = new[] { new { type = "text", text = "The subagent's report" } } },
+        });
+        WriteLines(User("one"), Assistant("Asking a subagent."), subagent, ResultLine(""), User("two"), Assistant("Still working"), subagent);
+
+        Assert.Equal([new("Asking a subagent.", true), new("Still working", false)], await OutputLog.LastRepliesAsync(_statePath, 2));
+    }
+
     [Fact]
     public async Task LastReplies_OfNoOutput_AreNone()
     {

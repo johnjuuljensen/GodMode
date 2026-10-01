@@ -115,8 +115,9 @@ public class FleetEndpointTests
         run.Client.Hub.On<ProjectStatus>(nameof(IProjectHubClient.ProjectCreated), created.Enqueue);
         await using var fleet = await run.ConnectFleetAsync();
 
+        // skipPermissions false is the schema's default, which an overseer may fill in: only true is refused
         var parent = await run.CallAsync(fleet, "start_session", new() { ["profile"] = Profile, ["root"] = Root, ["action"] = WorkAction,
-            ["inputs"] = new Dictionary<string, object?> { ["name"] = "overseer", ["prompt"] = "Oversee" } });
+            ["inputs"] = new Dictionary<string, object?> { ["name"] = "overseer", ["prompt"] = "Oversee", ["skipPermissions"] = false } });
         var parentId = parent.GetProperty("Id").GetString()!;
         Assert.False(parent.TryGetProperty("ParentId", out _), "an overseer outside GodMode starts top-level sessions");
 
