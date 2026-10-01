@@ -305,6 +305,77 @@
   color: var(--text-secondary);
 }
 
+/* ── Nesting (#390): a session's children under it, a step in per level, with a line down their side ── */
+.project-children {
+  margin-left: 18px;
+  padding-left: 4px;
+  border-left: var(--border-width) var(--border-style) var(--glass-border);
+}
+
+.project-children-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-body);
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+  transition: background var(--duration-fast), color var(--duration-fast);
+}
+
+.project-children-toggle:hover {
+  background: var(--glass-hover);
+  color: var(--text-primary);
+}
+
+.project-children-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Something under a collapsed parent needs the user */
+.project-children-attention {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  background: var(--warning);
+}
+
+/* A child nested under a parent in another root: its own root, beside its kind */
+.project-own-root {
+  flex-shrink: 0;
+  font-size: 9px;
+  line-height: 1.4;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  border: var(--border-width) dashed var(--glass-border-strong);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.project-started-by {
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 768px) {
+  /* A phone's list is narrow: each level steps in less, so several still fit */
+  .project-children {
+    margin-left: 10px;
+    padding-left: 2px;
+  }
+
+  .project-children-toggle {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
 /* ── A root's folders not in GodMode (#370): folded, each with Adopt ── */
 .unmanaged-item {
   display: flex;

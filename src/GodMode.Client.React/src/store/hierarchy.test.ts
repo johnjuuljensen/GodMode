@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectionState, GodModeHub } from '../signalr/hub';
 import type { ProjectRootInfo, ProjectState, ProjectSummary } from '../signalr/types';
-import { rebuildHierarchy, type ServerConnection, type SidebarGroupBy } from './hierarchy';
+import { foldItems, rebuildHierarchy, type OtherRootChildren, type ServerConnection, type SidebarGroupBy, type SidebarItem } from './hierarchy';
 
 const issue = [{ Name: 'issue', AllowSkipPermissions: false, Session: true, Transient: false }];
 
@@ -128,5 +128,125 @@ describe('two servers sharing a profile name', () => {
   it('labels a project name shown from both with its server', () => {
     const items = rebuildHierarchy([serverA(), serverB()], 'All', 'recent').profileGroups[0].rootGroups[0].items;
     expect(items.filter(i => i.project.Name === 'feat-296').map(i => i.serverLabel)).toEqual(['Server B', 'Server A']);
+  });
+});
+
+// ── Nesting (#390): a session sits under the session that started it, on several levels ──
+
+const childOf = (parent: string, id: string, profile: string, root: string, state: ProjectState = 'Idle', updatedAt = '2026-09-28T09:00:00Z'): ProjectSummary =>
+  ({ ...projectOf(id, profile, root, state, updatedAt), ParentId: parent });
+
+/** The list as text, each child two spaces in from its parent, with its notes: `[root]` its own root, `<- name` started by. */
+function tree(connections: ServerConnection[], groupBy: SidebarGroupBy = 'root', filter = 'All', otherRoot?: OtherRootChildren): string[] {
+  const lines = (i: SidebarItem, depth: number): string[] => [
+    `${'  '.repeat(depth + 2)}${i.project.Name}${i.ownRoot ? ` [${i.ownRoot}]` : ''}${i.startedBy ? ` <- ${i.startedBy}` : ''}`,
+    ...i.children.flatMap(c => lines(c, depth + 1)),
+  ];
+  return rebuildHierarchy(connections, filter, groupBy, otherRoot).profileGroups.flatMap(g => [
+    `${g.name} (${g.projectCount})`,
+    ...g.rootGroups.flatMap(rg => [...(rg.flat ? [] : [`  ${rg.name}`]), ...rg.items.flatMap(i => lines(i, 0))]),
+  ]);
+}
+
+/**
+ * Profile P: an overseer in fleet, its epic overseer, and the epic's workers, one in fleet and one in work.
+ * An orphan in work whose parent is gone. Profile Q: a session the overseer started in another profile.
+ */
+const fleet = () => server('A', [rootOf('fleet', 'P'), rootOf('work', 'P'), rootOf('other', 'Q')], [
+  projectOf('overseer', 'P', 'fleet', 'Running', '2026-09-28T08:00:00Z'),
+  childOf('P/fleet/epic', 'worker-1', 'P', 'work'),
+  childOf('P/fleet/overseer', 'epic', 'P', 'fleet'),
+  childOf('P/fleet/epic', 'worker-2', 'P', 'fleet'),
+  childOf('P/work/gone', 'orphan', 'P', 'work'),
+  childOf('P/fleet/overseer', 'elsewhere', 'Q', 'other'),
+]);
+
+describe('nesting', () => {
+  it('nests three levels, a child in another root under its parent with its own root marked', () => {
+    expect(tree([fleet()])).toEqual([
+      'P (5)',
+      '  fleet',
+      '    overseer',
+      '      epic',
+      '        worker-2',
+      '        worker-1 [work]',
+      '  work',
+      '    orphan',
+      'Q (1)',
+      '  other',
+      '    elsewhere <- overseer',
+    ]);
+  });
+
+  it('keeps a child in another root in its own root, noting its parent, when asked to', () => {
+    expect(tree([fleet()], 'root', 'All', 'stay').slice(0, 9)).toEqual([
+      'P (5)',
+      '  fleet',
+      '    overseer',
+      '      epic',
+      '        worker-2',
+      '  work',
+      '    worker-1 <- epic',
+      '    orphan',
+      'Q (1)',
+    ]);
+  });
+
+  it('gives a session whose parent is gone the top level, with no note', () => {
+    expect(tree([fleet()])).toContain('    orphan');
+  });
+
+  it('never mixes profiles: a parent in another profile leaves the child at the top of its own, noted', () => {
+    expect(tree([fleet()], 'root', 'Q')).toEqual(['Q (1)', '  other', '    elsewhere <- overseer']);
+  });
+
+  it.each<SidebarGroupBy>(['recent', 'status'])('nests by %s too, under the profile', groupBy => {
+    const shown = tree([fleet()], groupBy);
+    // No root headers, so no root markers: each row's meta names its root
+    expect(shown.slice(shown.indexOf('    overseer'), shown.indexOf('    overseer') + 4)).toEqual(['    overseer', '      epic', '        worker-2', '        worker-1']);
+    expect(shown.filter(l => l.trim() === 'epic')).toEqual(['      epic']);
+  });
+
+  it('nests only under a parent on its own server', () => {
+    const b = server('B', [rootOf('fleet', 'P')], [childOf('P/fleet/overseer', 'stray', 'P', 'fleet')]);
+    expect(tree([fleet(), b]).filter(l => l.includes('stray'))).toEqual(['    stray']);
+  });
+
+  it("counts the root's own sessions for the root, wherever they are shown", () => {
+    const groups = rebuildHierarchy([fleet()], 'All', 'root').profileGroups[0].rootGroups;
+    expect(groups.map(g => `${g.rootName}: ${g.sessionCount}`)).toEqual(['fleet: 3', 'work: 2']);
+  });
+});
+
+describe('a cycle planted in status.json', () => {
+  /** c1 and c2 name each other, c3 itself; c4's parent is c1. */
+  const cyclic = () => server('A', [rootOf('work', 'P')], [
+    childOf('P/work/c2', 'c1', 'P', 'work'),
+    childOf('P/work/c1', 'c2', 'P', 'work'),
+    childOf('P/work/c3', 'c3', 'P', 'work'),
+    childOf('P/work/c1', 'c4', 'P', 'work'),
+  ]);
+
+  it.each<OtherRootChildren>(['nest', 'stay'])('ends, its sessions at the top level, and what hangs off it under them (%s)', otherRoot => {
+    expect(tree([cyclic()], 'root', 'All', otherRoot)).toEqual(['P (4)', '  work', '    c1', '      c4', '    c2', '    c3']);
+  });
+});
+
+describe('folding older sessions (#325) with what they started', () => {
+  const now = new Date('2026-10-01T12:00:00Z').getTime();
+  const old = '2026-09-01T00:00:00Z';
+  const topOf = (child: ProjectState) => rebuildHierarchy([server('A', [rootOf('work', 'P')], [
+    projectOf('parent', 'P', 'work', 'Stopped', old),
+    childOf('P/work/parent', 'child', 'P', 'work', child, old),
+  ])], 'All', 'root').profileGroups[0].rootGroups[0].items;
+
+  it('folds a parent with its children when all of them are quiet', () => {
+    const { shown, older } = foldItems(topOf('Stopped'), now, () => false);
+    expect([shown.length, older.map(i => i.project.Name)]).toEqual([0, ['parent']]);
+  });
+
+  it('keeps a quiet parent shown while a child of it is live', () => {
+    const { shown, older } = foldItems(topOf('Running'), now, () => false);
+    expect([shown.map(i => i.project.Name), older.length]).toEqual([['parent'], 0]);
   });
 });
