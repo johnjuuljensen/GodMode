@@ -47,6 +47,21 @@ public interface IProjectManager
     /// </summary>
     Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true);
 
+    /// <summary>
+    /// The MCP <c>message_parent</c> tool: holds <paramref name="text"/> for the project's parent, labelled with the
+    /// project, and delivers it if the parent can take input now. Refused (<see cref="InvalidOperationException"/>)
+    /// when the project has no parent or its parent is gone, and (<see cref="ArgumentException"/>) for an empty text
+    /// or one over <see cref="SessionInbox.MaxTextLength"/>.
+    /// </summary>
+    Task<Delivery> MessageParentAsync(string projectId, string text);
+
+    /// <summary>
+    /// The fleet's <c>send</c>: a reply, as <see cref="ReplyAndResumeAsync"/> without answering what is pending, except
+    /// that a session waiting on the user (a permission prompt, a question) has it held, labelled with its sender
+    /// (<paramref name="senderId"/>, a session; null for the server's credential), and gets it once it can take input.
+    /// </summary>
+    Task<Delivery> SendOrHoldAsync(string projectId, string text, string? senderId);
+
     /// <summary>The project's last <paramref name="turns"/> replies, oldest first: see <see cref="OutputLog.LastRepliesAsync"/>.</summary>
     Task<IReadOnlyList<AssistantReply>> LastRepliesAsync(string projectId, int turns);
 

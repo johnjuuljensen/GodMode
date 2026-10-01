@@ -1365,26 +1365,33 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <see cref="ReplyAndResumeAsync"/>, under the project's resume lock. With
     /// <paramref name="onlyIfInterrupted"/> (the start carrying on after a shutdown), it sends
     /// nothing to a running claude and resumes only while the project still has its
-    /// <see cref="ProjectStatus.StateAtShutdown"/>; not delivered when it did neither.
+    /// <see cref="ProjectStatus.StateAtShutdown"/>; not delivered when it did neither. A resume carries the messages
+    /// held for the session after <paramref name="text"/>, or alone when <paramref name="text"/> is null.
     /// </summary>
-    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string text, bool onlyIfInterrupted, bool answersPending = true)
+    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string? text, bool onlyIfInterrupted, bool answersPending = true)
     {
         var projectId = project.Status.Id;
         await _lifecycle.SettleAsync(project);
         if (_lifecycle.IsRunning(project))
         {
-            if (onlyIfInterrupted) return new(false);
+            if (onlyIfInterrupted || text == null) return new(false);
             await SendInputAsync(projectId, text, answersPending);
             return new(true);
         }
+
+        // A claude that does not run takes what was held for it with what it is resumed with
+        var (held, heldCount) = await PeekHeldMessagesAsync(project);
+        if (WithHeld(text, held) is not { } input) return new(false);
 
         // claude writes system/init once it has read its first input, so the reply is sent at
         // once and the session start awaited after it
         var sessionStart = project.Process.NextSessionStart();
         if (!await TryResumeAsync(project, onlyIfInterrupted)) return new(false);
-        var sentTo = await TrySendInputAsync(project, text);
+        var sentTo = await TrySendInputAsync(project, input);
+        // A resume that found no conversation sends it again to the fresh session (AwaitSessionStartAsync)
+        await TakeHeldMessagesAsync(project, heldCount);
         await NotifyStatusChanged(project);
-        return new(true, AwaitSessionStartAsync(project, text, sessionStart, sentTo));
+        return new(true, AwaitSessionStartAsync(project, input, sessionStart, sentTo));
     }
 
     /// <summary>
@@ -1481,10 +1488,14 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         await NotifyStatusChanged(project);
     }
 
-    /// <summary>After every status push: the pull request check a transition to Idle or Stopped makes, then the attention list.</summary>
+    /// <summary>
+    /// After every status push: the pull request check a transition to Idle or Stopped makes, the parent's notice and
+    /// the delivery of what is held (<see cref="DeliverOnStatusChange"/>), then the attention list.
+    /// </summary>
     private Task OnStatusNotifiedAsync(ProjectInfo project)
     {
         _pullRequests.Observe(project.Status.Id, project.Status.State);
+        DeliverOnStatusChange(project);
         return PushAttentionIfChangedAsync();
     }
 
@@ -1839,6 +1850,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
+        Task? sessionStart = null;
         await WithTrackedLockAsync(project, async () =>
         {
             // Check if process is actually still running (regardless of reported state)
@@ -1861,10 +1873,20 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 return;
             }
 
+            // Messages held for it while it was stopped: it is resumed with them
+            if (SessionInbox.Any(project.StatePath)
+                && (await ReplyAndResumeLockedAsync(project, text: null, onlyIfInterrupted: false)) is { Delivered: true } resumed)
+            {
+                sessionStart = resumed.SessionStart;
+                return;
+            }
+
             // A resume with nothing to say: claude waits for input, and writes nothing until it has
             // some, so the project is Idle, resumed and waiting for the user, until then
             await TryResumeAsync(project, onlyIfInterrupted: false, resumedAs: ProjectState.Idle);
         });
+        // As a reply's: after the lock, so a stop is not held behind it
+        if (sessionStart != null) await sessionStart;
     }
 
     /// <summary>
