@@ -454,7 +454,9 @@ public class ParentMessageTests
     public async Task NoticesToAStoppedParent_AreDropped()
     {
         await using var run = await FleetRun.StartAsync(Turns());
-        run.WriteActionScript(OverseerAction, Turns(), new() { ["fleetTools"] = true }, configDir: "config-a");
+        // As claude does, a resumed launch writes nothing until it has input: it is Idle, resumed, until then
+        run.WriteActionScript(OverseerAction, new FakeScript().AwaitStdin().EmitInit().EmitAssistant("ok").Sleep(50).EmitResult().Turn("next").AwaitStdin(),
+            new() { ["fleetTools"] = true }, configDir: "config-a");
         run.WriteActionScript(ChildAction, new FakeScript().EmitInit().AwaitStdin().EmitResult()
             .AwaitStdin().CallTool("godmode", MessageParentTool.Name, new { text = "Report" }).EmitResult().AwaitStdin(), configDir: "config-b");
         await using var fleet = await run.ConnectFleetAsync();
