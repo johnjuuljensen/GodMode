@@ -3,7 +3,6 @@ using GodMode.Server.Auth;
 using GodMode.Server.Hubs;
 using GodMode.Server.Services;
 using GodMode.Shared;
-using ModelContextProtocol.AspNetCore;
 using Serilog;
 using Serilog.Events;
 
@@ -89,12 +88,8 @@ builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 
-// GodMode's MCP endpoint, for its sessions' claude: the permission prompt is its only tool. Stateless:
-// claude's calls need no session (Claude Code speaks the sessionless 2026-07-28 revision), and a
-// waiting call keeps its own response stream, which carries its progress and its answer
-builder.Services.AddMcpServer(options => options.ServerInfo = new() { Name = ProjectManager.McpServerName, Version = "1.0.0" })
-    .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
-    .WithTools<PermissionPromptTool>();
+// GodMode's MCP endpoints: its sessions' claude's (the permission prompt) and the fleet's (GodModeMcp)
+builder.Services.AddGodModeMcp();
 
 var app = builder.Build();
 
@@ -117,9 +112,10 @@ app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
 
 app.MapHub<ProjectHub>(GodModeAuthExtensions.HubPath).RequireAuthorization();
 
-// ── MCP (a project's claude → server, project-token auth): the permission prompt, its one tool ──
+// ── MCP: /mcp (a project's claude, its project token): the permission prompt, its one tool;
+// /mcp/fleet (an overseer, the server's own credential): the fleet's tools ──
 
-app.MapMcp(McpEndpointUrl.Path).RequireAuthorization(GodModeAuthExtensions.ProjectPolicy);
+app.MapGodModeMcp();
 
 app.Logger.LogInformation("Config file: {ConfigFile}", instanceConfigFile ?? "none (appsettings only)");
 app.Logger.LogInformation("Authentication mode: {AuthMode}", authSettings.Mode);

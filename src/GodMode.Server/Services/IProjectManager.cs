@@ -41,9 +41,14 @@ public interface IProjectManager
 
     /// <summary>
     /// Answers the project whether its claude runs or not (hub ReplyAndResume): input to a running
-    /// one, else a resume, the input, and a wait for claude to report its session started.
+    /// one, else a resume, the input, and a wait for claude to report its session started. Without
+    /// <paramref name="answersPending"/> (the fleet's <c>send</c>), a pending permission prompt or
+    /// question refuses it (<see cref="InvalidOperationException"/>), changing nothing: those are the user's.
     /// </summary>
-    Task ReplyAndResumeAsync(string projectId, string text);
+    Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true);
+
+    /// <summary>The project's last <paramref name="turns"/> replies, oldest first: see <see cref="OutputLog.LastRepliesAsync"/>.</summary>
+    Task<IReadOnlyList<AssistantReply>> LastRepliesAsync(string projectId, int turns);
 
     /// <summary>Every project that needs the user, oldest first (hub GetAttention).</summary>
     AttentionItem[] GetAttention();

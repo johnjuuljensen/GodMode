@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using GodMode.Server.Auth;
 using GodMode.Server.Models;
 using GodMode.Shared;
+using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -20,6 +21,7 @@ namespace GodMode.Server.Services;
 /// no response or progress for 300 seconds.
 /// </summary>
 [McpServerToolType]
+[Authorize(Policy = GodModeAuthExtensions.ProjectPolicy)]
 public sealed class PermissionPromptTool(IProjectManager projects, IConfiguration configuration)
 {
     public const string Name = "permission_prompt";

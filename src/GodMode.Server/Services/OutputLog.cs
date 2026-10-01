@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using GodMode.ProjectFiles;
+using GodMode.Server.Models;
 using GodMode.Shared.Models;
 
 namespace GodMode.Server.Services;
@@ -272,6 +274,91 @@ public static class OutputLog
             if (line.Offset != lastEnd && IsResult(line.RawJson) && ++results == turns)
                 return line.Offset;
         return 0;
+    }
+
+    /// <summary>
+    /// The session's last <paramref name="turns"/> replies, oldest first, whether or not it needs the user:
+    /// the fleet's <c>read</c>, and what voice reads a project's last answer by (#378).
+    /// <list type="bullet">
+    /// <item>A turn ends with a <c>result</c> line. Its reply is its last assistant message with text, else the result's text (<see cref="AssistantReply"/>).
+    /// A subagent's messages (with a <c>parent_tool_use_id</c>) are not the session's, and are skipped.</item>
+    /// <item>Claude's lines after the last result are a turn too, unfinished, once one of its messages has text: what it is saying now, or said before a stop cut the turn short.
+    /// One with no text yet (only tool calls, or a resume's <c>system/init</c>) is not counted, so a session that is resumed, or just sent a message, still gives its last reply.</item>
+    /// <item>Fewer when the output has fewer; none when it has no output. The file is read from its end, back only as far as those turns go.</item>
+    /// </list>
+    /// </summary>
+    public static async Task<IReadOnlyList<AssistantReply>> LastRepliesAsync(string statePath, int turns, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(turns, 1);
+        var path = PathOf(statePath);
+        if (!File.Exists(path)) return [];
+
+        await using var stream = OpenRead(path);
+        return await LastRepliesAsync(stream, turns, ct);
+    }
+
+    /// <summary><see cref="LastRepliesAsync(string, int, CancellationToken)"/> in the file open as <paramref name="stream"/>.</summary>
+    internal static async Task<IReadOnlyList<AssistantReply>> LastRepliesAsync(Stream stream, int turns, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(turns, 1);
+        // Read backwards: the turn being read is complete once the result before it (or the file's start) is reached
+        var replies = new List<AssistantReply>();
+        (string? Text, bool Finished, bool IsError, string ResultText)? turn = null;
+        await foreach (var line in ReadLinesBackwardAsync(stream, LastLineEnd(stream), ct))
+        {
+            if (ReplyLine(line.RawJson) is not { } read) continue;
+            if (read.IsResult)
+            {
+                if (turn is { } done && replies.Count < turns) replies.Add(Reply(done));
+                if (replies.Count == turns) break;
+                turn = (null, true, read.IsError, read.Text ?? "");
+            }
+            else if (read.Text is { } text)
+                // The first text met going back is the turn's last
+                turn = turn is { } current ? current with { Text = current.Text ?? text } : (text, false, false, "");
+        }
+        if (turn is { } first && replies.Count < turns) replies.Add(Reply(first));
+        replies.Reverse();
+        return replies;
+
+        static AssistantReply Reply((string? Text, bool Finished, bool IsError, string ResultText) turn) =>
+            new(turn.Text ?? turn.ResultText, turn.Finished, turn.IsError);
+    }
+
+    /// <summary>
+    /// A line's part in a reply: a result (its text and whether it is an error), or an assistant message
+    /// (its text blocks joined, null when it has none). Null for any other line, and for one that is not JSON.
+    /// </summary>
+    private static (bool IsResult, string? Text, bool IsError)? ReplyLine(string line)
+    {
+        // Most lines are neither: no parse for those
+        if (!line.Contains("\"assistant\"", StringComparison.Ordinal) && !line.Contains("\"result\"", StringComparison.Ordinal))
+            return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out var type)) return null;
+            if (type.ValueEquals("result"))
+                return (true,
+                    root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.String ? result.GetString() : null,
+                    root.TryGetProperty("is_error", out var isError) && isError.ValueKind == JsonValueKind.True);
+            // A subagent's message (parent_tool_use_id, its Task call's) is no reply of the session's: the app nests it under that call
+            if (!type.ValueEquals("assistant")
+                || root.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String
+                || !root.TryGetProperty("message", out var message) || message.ValueKind != JsonValueKind.Object
+                || !message.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+                return null;
+            var texts = content.EnumerateArray()
+                .Where(block => block.ValueKind == JsonValueKind.Object
+                    && block.TryGetProperty("type", out var blockType) && blockType.ValueEquals("text")
+                    && block.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+                .Select(block => block.GetProperty("text").GetString()!)
+                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .ToList();
+            return (false, texts.Count > 0 ? string.Join("\n\n", texts) : null, false);
+        }
+        catch (JsonException) { return null; }
     }
 
     private static bool IsResult(string line) =>

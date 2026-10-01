@@ -1301,17 +1301,26 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         : ProjectFiles.SessionState.ListTrashed(rootPath).FirstOrDefault() is { } trashed ? $"session {trashed} is in its trash"
         : null;
 
-    public async Task SendInputAsync(string projectId, string input)
+    public Task SendInputAsync(string projectId, string input) => SendInputAsync(projectId, input, answersPending: true);
+
+    /// <summary>
+    /// <see cref="SendInputAsync(string, string)"/>; without <paramref name="answersPending"/>, a pending permission
+    /// prompt or question refuses the input (<see cref="InvalidOperationException"/>) and is left as it is. One that
+    /// comes after the check gets no answer from it: the input then waits in claude's stdin as a message.
+    /// </summary>
+    private async Task SendInputAsync(string projectId, string input, bool answersPending)
     {
         if (!_projects.TryGetValue(projectId, out var project))
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
+        if (!answersPending) RefuseWhilePending(project);
 
         // claude is blocked on a permission prompt and reads no input until it is answered: a reply
         // in the chat answers it. A single question takes it as its answer; anything else is a deny
-        // that tells claude what the user said instead
-        if (project.Process.OldestPending is { } pending)
+        // that tells claude what the user said instead. Only a reply that answers pending requests does:
+        // one that comes after the refusal above is never answered by the fleet's text
+        if (answersPending && project.Process.OldestPending is { } pending)
         {
             var result = pending.Question is { Questions: [var only] }
                 ? PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, new Dictionary<string, string> { [only.Question] = input }))
@@ -1324,14 +1333,15 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         await NotifyStatusChanged(project);
     }
 
-    public async Task ReplyAndResumeAsync(string projectId, string text)
+    public async Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true)
     {
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
+        if (!answersPending) RefuseWhilePending(project);
 
         // One reply at a time decides whether to resume: two would launch two processes. The wait
         // for the session to start comes after the lock, so a stop is not held behind it
-        var reply = await WithTrackedLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false));
+        var reply = await WithTrackedLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false, answersPending));
         if (reply.SessionStart is { } sessionStart) await sessionStart;
     }
 
@@ -1344,14 +1354,14 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// nothing to a running claude and resumes only while the project still has its
     /// <see cref="ProjectStatus.StateAtShutdown"/>; not delivered when it did neither.
     /// </summary>
-    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string text, bool onlyIfInterrupted)
+    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string text, bool onlyIfInterrupted, bool answersPending = true)
     {
         var projectId = project.Status.Id;
         await _lifecycle.SettleAsync(project);
         if (_lifecycle.IsRunning(project))
         {
             if (onlyIfInterrupted) return new(false);
-            await SendInputAsync(projectId, text);
+            await SendInputAsync(projectId, text, answersPending);
             return new(true);
         }
 
@@ -1431,6 +1441,20 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             return 0;
         }
     }
+
+    /// <summary>Refuses, changing nothing, while the project's claude waits on a permission prompt or a question: those are the user's to answer.</summary>
+    private static void RefuseWhilePending(ProjectInfo project)
+    {
+        if (project.Process.OldestPending is { } pending)
+            throw new InvalidOperationException(
+                $"Project {project.Status.Id} is waiting on the user's answer to its {(pending.Question != null ? "question" : "permission prompt")}: " +
+                "nothing is sent until the user has answered it in the app.");
+    }
+
+    public async Task<IReadOnlyList<AssistantReply>> LastRepliesAsync(string projectId, int turns) =>
+        _projects.TryGetValue(projectId, out var project)
+            ? await OutputLog.LastRepliesAsync(project.StatePath, turns)
+            : throw new KeyNotFoundException($"Project {projectId} not found");
 
     public AttentionItem[] GetAttention() => Attention.Of(_projects.Values.Select(project => project.Status));
 
@@ -2865,7 +2889,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>
     /// Gets a boolean value from inputs. Handles both JsonValueKind.True/False and string "true"/"false".
     /// </summary>
-    private static bool GetBool(Dictionary<string, JsonElement> inputs, string key)
+    internal static bool GetBool(Dictionary<string, JsonElement> inputs, string key)
     {
         if (!inputs.TryGetValue(key, out var value))
             return false;
