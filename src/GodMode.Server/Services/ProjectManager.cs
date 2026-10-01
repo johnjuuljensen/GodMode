@@ -43,6 +43,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>The name GodMode's own MCP server, this server's <c>/mcp</c> endpoint, has in every session's MCP config.</summary>
     internal const string McpServerName = "godmode";
 
+    /// <summary>The fleet's endpoint's entry in the MCP config of a session that has the fleet's tools: its tools are <c>mcp__godmode-fleet__*</c>.</summary>
+    internal const string FleetMcpServerName = "godmode-fleet";
+
     /// <summary>
     /// The tool claude asks for permission with (--permission-prompt-tool), and puts its
     /// AskUserQuestion calls to: see <see cref="RequestPermissionAsync"/>.
@@ -787,6 +790,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // session is checked as well, and has nothing to be the parent of
         if (request.ParentId is { } parentId && !_projects.ContainsKey(parentId))
             throw new ArgumentException($"The parent session '{parentId}' is not one this server has.");
+        // A grant of the fleet's tools is the action's to allow, as skipping permissions is: one that does
+        // not say "grantable" (or true) gets none, and one that starts no session has none to get
+        if (request.FleetTools && (action.FleetTools == FleetToolsGrant.None || !action.Session))
+            throw new ArgumentException(
+                $"Action '{action.Name}' of root '{request.ProjectRootName}' does not allow granting the fleet's tools: its config would need \"fleetTools\": \"grantable\".");
 
         if (!action.Session)
             return await RunSessionlessActionAsync(request, snap, rootPath, config, action);
@@ -1011,7 +1019,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             ActionName: action.Name,
             PermissionMode: action.PermissionMode,
             SharedFolder: action.SharedFolder);
-        return new CreateProjectResult(await LaunchNewSessionAsync(project, action, request.Inputs, name, kind, prompt, settings));
+        return new CreateProjectResult(await LaunchNewSessionAsync(project, action, request.Inputs, name, kind, prompt, settings, request.FleetTools));
     }
 
     /// <summary>
@@ -1052,10 +1060,12 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>
     /// The last of a create or an adopt, once the session's id is final: its state folder, its
     /// <paramref name="settings"/> and status are written, and it is tracked and its claude started, with
-    /// <paramref name="prompt"/> or, with none, idle, waiting for its first message. Returns its status.
+    /// <paramref name="prompt"/> or, with none, idle, waiting for its first message. Its fleet grant record
+    /// (<see cref="FleetGrantFile"/>) says its action, and whether its starter granted it the fleet's tools
+    /// (<paramref name="fleetToolsGranted"/>, which the create checked the action allows). Returns its status.
     /// </summary>
     private async Task<ProjectStatus> LaunchNewSessionAsync(ProjectInfo project, CreateAction action, Dictionary<string, JsonElement> inputs,
-        string name, string kind, string? prompt, ProjectFiles.ProjectSettings settings)
+        string name, string kind, string? prompt, ProjectFiles.ProjectSettings settings, bool fleetToolsGranted = false)
     {
         var projectId = ProjectId(project.ProfileName!, project.Status.RootName!, project.SessionId);
         // Resolve model: user input overrides action config default.
@@ -1077,6 +1087,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // The session's state folder, now its id is final (scripts may have created the project dir without .godmode)
         CreateSessionState(project);
         settings.Save(project.StatePath);
+        FleetGrantFile.Write(project.RootPath, project.SessionId, new FleetGrantFile.Grant(action.Name, fleetToolsGranted));
 
         // Save initial status
         await _statusUpdater.SaveStatusAsync(project);
@@ -2965,7 +2976,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(project, profileName);
         var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
-        var (env, args) = BuildClaudeConfig(project.ProjectPath, project.StatePath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project)),
+        var (env, args) = BuildClaudeConfig(project.ProjectPath, project.StatePath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project), HasFleetTools(project)),
             project.Status.Model ?? action.Model, LaunchEffort(project, action), profile?.Environment, profileName, stripEnvVarProfile);
         return new ClaudeLaunchSpec(env ?? new Dictionary<string, string>(), args);
     }
@@ -3124,26 +3135,53 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     private static string IssueProjectToken(ProjectInfo project) => project.ProjectToken = GenerateProjectToken();
 
     /// <summary>
-    /// The session's MCP config: GodMode's own server, this server's MCP endpoint, and nothing else.
-    /// Its headers carry the project and its token, which claude sends on every call. The token is in
-    /// no environment variable, only in this file, which lives as long as the process does.
+    /// The session's MCP config: GodMode's own server, this server's MCP endpoint, and, for a session with the
+    /// fleet's tools at this launch (<paramref name="fleetTools"/>), the fleet's endpoint as <see cref="FleetMcpServerName"/>;
+    /// nothing else. Both entries' headers carry the project and its token, which claude sends on every call, and
+    /// the fleet's endpoint checks the grant on each. The token is in no environment variable, only in this file,
+    /// which lives as long as the process does.
     /// </summary>
-    private string McpConfigJson(ProjectInfo project, string token) => JsonSerializer.Serialize(new Dictionary<string, object>
+    private string McpConfigJson(ProjectInfo project, string token, bool fleetTools)
     {
-        ["mcpServers"] = new Dictionary<string, object>
+        var headers = new Dictionary<string, string>
         {
-            [McpServerName] = new
+            ["Authorization"] = $"Bearer {token}",
+            [ProjectTokenAuthenticationHandler.ProjectIdHeader] = project.Status.Id,
+        };
+        var url = McpEndpointUrlOfThisServer();
+        var servers = new Dictionary<string, object> { [McpServerName] = new { type = "http", url, headers } };
+        if (fleetTools)
+            servers[FleetMcpServerName] = new { type = "http", url = McpEndpointUrl.FleetOf(url), headers };
+        return JsonSerializer.Serialize(new Dictionary<string, object> { ["mcpServers"] = servers });
+    }
+
+    /// <summary>
+    /// Whether the session has the fleet's tools now: its fleet grant record (<see cref="FleetGrantFile"/>, never
+    /// its own files) names its action, and the root's config, read now, gives that action <c>"fleetTools": true</c>,
+    /// or <c>"grantable"</c> where the session that started it granted them. A config that cannot be read, or an
+    /// action it no longer has, grants nothing. Checked at every launch, for its MCP config, and on every call of a
+    /// fleet tool with its token, as skip-permissions is at each launch.
+    /// </summary>
+    public bool HasFleetTools(string projectId) => _projects.TryGetValue(projectId, out var project) && HasFleetTools(project);
+
+    private bool HasFleetTools(ProjectInfo project)
+    {
+        if (project.Status.RootName == null || FleetGrantFile.Read(project.RootPath, project.SessionId) is not { } grant) return false;
+        try
+        {
+            return _rootConfigReader.ReadConfigStrict(project.RootPath).ResolveAction(grant.Action)?.FleetTools switch
             {
-                type = "http",
-                url = McpEndpointUrlOfThisServer(),
-                headers = new Dictionary<string, string>
-                {
-                    ["Authorization"] = $"Bearer {token}",
-                    [ProjectTokenAuthenticationHandler.ProjectIdHeader] = project.Status.Id,
-                },
-            },
-        },
-    });
+                FleetToolsGrant.Granted => true,
+                FleetToolsGrant.Grantable => grant.Granted,
+                _ => false,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Project {ProjectId}: its root config could not be read ({Reason}), so it has no fleet tools", project.Status.Id, ex.Message);
+            return false;
+        }
+    }
 
     /// <summary>
     /// Builds the full environment variables dictionary for scripts.

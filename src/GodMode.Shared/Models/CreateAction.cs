@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GodMode.Shared.Enums;
 
 namespace GodMode.Shared.Models;
 
@@ -46,6 +47,10 @@ namespace GodMode.Shared.Models;
 /// The claude effort level (<c>--effort</c>: <c>low</c>, <c>medium</c>, <c>high</c>, <c>xhigh</c>, <c>max</c>) a
 /// project of this action is created with, unless the create names its own; null for claude's own default.
 /// </param>
+/// <param name="FleetTools">
+/// Whether the action's sessions get the fleet's tools (<c>fleetTools</c>): every one, one a granted session
+/// grants them to as it starts it, or none (<see cref="FleetToolsGrant"/>).
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -68,7 +73,8 @@ public record CreateAction(
     bool Session = true,
     bool Transient = false,
     bool Adopt = false,
-    string? Effort = null
+    string? Effort = null,
+    FleetToolsGrant FleetTools = FleetToolsGrant.None
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";

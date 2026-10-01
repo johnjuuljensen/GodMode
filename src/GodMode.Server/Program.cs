@@ -113,7 +113,7 @@ app.MapGet("/health", () => new { status = "healthy" }).AllowAnonymous();
 app.MapHub<ProjectHub>(GodModeAuthExtensions.HubPath).RequireAuthorization();
 
 // ── MCP: /mcp (a project's claude, its project token): the permission prompt, its one tool;
-// /mcp/fleet (an overseer, the server's own credential): the fleet's tools ──
+// /mcp/fleet (an overseer: the server's own credential, or a granted session's project token): the fleet's tools ──
 
 app.MapGodModeMcp();
 

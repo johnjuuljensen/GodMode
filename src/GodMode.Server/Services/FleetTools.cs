@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GodMode.Server.Auth;
@@ -11,13 +12,16 @@ using GodMode.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using ModelContextProtocol;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace GodMode.Server.Services;
 
 /// <summary>
-/// The fleet's tools, on <see cref="GodModeMcp.FleetPath"/>: what an overseer outside GodMode (the user's own
-/// claude, with the server's credential) runs sessions with. Each does what its hub method does, through the
+/// The fleet's tools, on <see cref="GodModeMcp.FleetPath"/>: what an overseer runs sessions with. One outside GodMode
+/// (the user's own claude) calls them with the server's credential; a GodMode session that has the fleet's tools
+/// (<see cref="IProjectManager.HasFleetTools"/>, checked on every call) with its project token, and the sessions it
+/// starts are its children unless it says otherwise. Each does what its hub method does, through the
 /// same <see cref="IProjectManager"/> call, so a session it starts is in the app's list like any other.
 /// None answers a permission prompt or a question, deletes, forgets, adopts or writes config: those are the user's.
 /// Each returns JSON text, as the hub's models serialize, unindented (<see cref="JsonDefaults.Compact"/>); a refusal is the tool's error, saying why.
@@ -75,29 +79,39 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
 
     [McpServerTool(Name = "start_session")]
     [Description("Starts a session as the app's create does: the root's action with its inputs (list_roots gives its schema). " +
-        "model and effort override the action's. With parent (a session ID) the new session is that one's child; without it, it is top level. " +
+        "model and effort override the action's. With parent (a session ID) the new session is that one's child. Without it, a session " +
+        "calling this is the new one's parent, unless top_level is true; any other caller's is top level. fleet_tools gives the new session " +
+        "these tools too, where its action's config allows a grant (\"fleetTools\": \"grantable\"). " +
         "Returns the new session, or, for an action that starts no session, its script's message. Its permission prompts go to the user.")]
     public async Task<string> StartSessionAsync(
+        RequestContext<CallToolRequestParams> context,
         [Description("The profile the root is in")] string profile,
         [Description("The root's name")] string root,
         [Description("The action's name; omit for the root's default action")] string? action = null,
         [Description("The action's inputs, by its input schema (for example name and prompt)")] JsonObject? inputs = null,
         [Description("The model, overriding the action's (for example opus, sonnet, or a full model ID)")] string? model = null,
         [Description("The effort level, overriding the action's: low, medium, high, xhigh or max; empty for claude's own default")] string? effort = null,
-        [Description("The ID of the session this one is a child of; omit for a top-level session")] string? parent = null)
+        [Description("The ID of the session this one is a child of; omit for the caller's child, if the caller is a session")] string? parent = null,
+        [Description("True for a top-level session, though the caller is a session; not with parent")] bool top_level = false,
+        [Description("True to grant the new session these fleet tools, where its action allows a grant")] bool fleet_tools = false)
     {
         var values = (inputs ?? []).ToDictionary(input => input.Key, input => JsonSerializer.SerializeToElement(input.Value));
         if (ProjectManager.GetBool(values, SkipPermissionsInput))
             throw new McpException($"The fleet cannot start a session with {SkipPermissionsInput}: its permission prompts are the user's.");
         if (values.ContainsKey(CreateProjectRequest.ParentInput))
             throw new McpException($"Name the parent with parent, not the {CreateProjectRequest.ParentInput} input.");
+        if (top_level && !string.IsNullOrWhiteSpace(parent))
+            throw new McpException("A top-level session has no parent: give parent or top_level, not both.");
+        // The caller, when it is a session: it has the fleet's tools (the endpoint let it in), so it may grant them
+        var caller = context.User?.FindFirstValue(GodModeAuthExtensions.ProjectIdClaim);
+        var parentId = !string.IsNullOrWhiteSpace(parent) ? parent : top_level ? null : caller;
         if (model != null) values["model"] = JsonSerializer.SerializeToElement(model);
         if (effort != null) values["effort"] = JsonSerializer.SerializeToElement(effort);
 
-        logger.LogInformation("Fleet starting a session in profile '{Profile}' root '{Root}' action '{Action}' (parent {Parent})",
-            profile, root, action ?? "(default)", parent ?? "none");
+        logger.LogInformation("Fleet ({Caller}) starting a session in profile '{Profile}' root '{Root}' action '{Action}' (parent {Parent}, fleet tools {FleetTools})",
+            caller ?? "the server's credential", profile, root, action ?? "(default)", parentId ?? "none", fleet_tools);
         var result = await Refusing(() => projects.CreateProjectAsync(
-            new CreateProjectRequest(profile, root, values, action, string.IsNullOrWhiteSpace(parent) ? null : parent)));
+            new CreateProjectRequest(profile, root, values, action, parentId, fleet_tools)));
         if (result.Project is not { } status) return Json(new Started(Message: result.Message));
 
         // As the hub's CreateProject: the app lists it

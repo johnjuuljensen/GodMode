@@ -6,8 +6,9 @@ namespace GodMode.Server.Services;
 /// <summary>
 /// GodMode's two MCP endpoints, one MCP server behind both. <see cref="McpEndpointUrl.Path"/> is its sessions'
 /// claude's, with their project token, and serves the permission prompt alone. <see cref="FleetPath"/> is the
-/// fleet's, with the server's own credential (as the hub), and serves <see cref="FleetTools"/>. Each tool type's
-/// <c>[Authorize]</c> policy is its endpoint's, so each endpoint lists and calls only its own tools.
+/// fleet's, and serves <see cref="FleetTools"/>: to the server's own credential (as the hub), and to the project
+/// token of a session that has the fleet's tools, which its MCP config then lists. Each tool type's
+/// <c>[Authorize]</c> policy is its endpoint's, by the request's path too, so each endpoint lists and calls only its own tools.
 /// Stateless: claude's calls need no session (Claude Code speaks the sessionless 2026-07-28 revision), and a
 /// waiting call keeps its own response stream, which carries its progress and its answer.
 /// </summary>
