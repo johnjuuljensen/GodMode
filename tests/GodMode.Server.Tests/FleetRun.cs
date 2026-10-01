@@ -29,6 +29,9 @@ internal sealed class FleetRun : IAsyncDisposable
     public const string OtherProfile = "elsewhere";
     public const string OtherRoot = "other";
 
+    /// <summary>A second root of <see cref="Profile"/>, with a work action: crossing to it as a parent needs a link.</summary>
+    public const string SiblingRoot = "sibling";
+
     public static readonly string[] FleetToolNames = ["list_roots", "list_sessions", "read", "resume", "send", "start_session", "stop"];
 
     private string _workDir = "";
@@ -61,6 +64,10 @@ internal sealed class FleetRun : IAsyncDisposable
         });
         File.WriteAllText(Path.Combine(rootConfig, "config.json"), BaseConfig(Profile));
         File.WriteAllText(Path.Combine(rootConfig, $"config.{WorkAction}.json"), "{}");
+        var siblingConfig = Path.Combine(run._workDir, "roots", SiblingRoot, ".godmode-root");
+        Directory.CreateDirectory(siblingConfig);
+        File.WriteAllText(Path.Combine(siblingConfig, "config.json"), BaseConfig(Profile));
+        File.WriteAllText(Path.Combine(siblingConfig, $"config.{WorkAction}.json"), "{}");
         var otherConfig = Path.Combine(run._workDir, "roots", OtherRoot, ".godmode-root");
         Directory.CreateDirectory(otherConfig);
         File.WriteAllText(Path.Combine(otherConfig, "config.json"), BaseConfig(OtherProfile));
@@ -150,8 +157,11 @@ internal sealed class FleetRun : IAsyncDisposable
     }
 
     /// <summary>The session's state folder, <c>.godmode/sessions/{id}/</c>, which the session can write.</summary>
-    public string StatePath(string projectId) =>
-        GodMode.ProjectFiles.SessionState.PathOf(ServerProcess.WorkingFolderOf(RootPath, projectId), projectId.Split('/')[^1]);
+    public string StatePath(string projectId, string root = RootName) =>
+        GodMode.ProjectFiles.SessionState.PathOf(ServerProcess.WorkingFolderOf(Path.Combine(_workDir, "roots", root), projectId), projectId.Split('/')[^1]);
+
+    /// <summary>A root's folder.</summary>
+    public string RootPathOf(string root) => Path.Combine(_workDir, "roots", root);
 
     /// <summary>Starts a session of <paramref name="action"/> as the app's create does, over the hub, and returns its ID.</summary>
     public async Task<string> CreateOverHubAsync(string name, string action, string profile = Profile, string root = RootName) =>

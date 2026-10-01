@@ -117,8 +117,9 @@ public partial class ProjectManager
     /// <summary>
     /// The held messages that still hold, rendered with their labels, and how many were read (delivered or dropped).
     /// A child's message holds while its recorded parent is still the receiver, in its root or through a link; a
-    /// session's <c>send</c> while the sender still has the fleet's tools and sees the receiver (its profile, or a link);
-    /// one from a sender that is gone holds by its roots alone. What no longer holds is dropped, and logged.
+    /// session's <c>send</c> while the sender still has the fleet's tools and sees the receiver (its profile, or a link).
+    /// One from a session the server no longer has cannot be checked, and is dropped too. What no longer holds is
+    /// dropped, and logged.
     /// </summary>
     private (List<string> Rendered, int Read) HeldToDeliver(ProjectInfo receiver)
     {
@@ -133,7 +134,7 @@ public partial class ProjectManager
                     receiver.Status.Id, message.Kind, message.From ?? "the server's credential");
                 continue;
             }
-            var label = message.From is { } id ? SessionInbox.LabelOf(id, sender?.Status.Name) : SessionInbox.OverseerLabel;
+            var label = sender != null ? SessionInbox.LabelOf(sender.Status.Id, sender.Status.Name) : SessionInbox.OverseerLabel;
             rendered.Add(SessionInbox.Render(label, message.Text));
         }
         return (rendered, held.Count);
@@ -142,10 +143,10 @@ public partial class ProjectManager
     private bool StillHolds(SessionInbox.HeldMessage message, ProjectInfo? sender, ProjectInfo receiver) => message switch
     {
         { From: null, Kind: SessionInbox.HeldKind.Send } => true,
-        { From: { } from, Kind: SessionInbox.HeldKind.Message } =>
-            (sender == null || ServerParentOf(sender) == receiver.Status.Id) && ParentLinkAllowed(receiver.Status.Id, from, out _),
-        { From: { } from, Kind: SessionInbox.HeldKind.Send } =>
-            (sender == null || HasFleetTools(sender)) && SeesFrom(from, receiver.Status.Id),
+        { Kind: SessionInbox.HeldKind.Message } when sender != null =>
+            ServerParentOf(sender) == receiver.Status.Id && ParentLinkAllowed(receiver.Status.Id, sender.Status.Id, out _),
+        { Kind: SessionInbox.HeldKind.Send } when sender != null =>
+            HasFleetTools(sender) && SeesFrom(sender.Status.Id, receiver.Status.Id),
         _ => false,
     };
 
