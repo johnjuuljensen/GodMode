@@ -324,3 +324,75 @@ it('leaving the page discards the drafts', async () => {
   view = await render(<CreateProject context={context} />);
   expect(titleField().value).toBe('');
 });
+
+describe('model and effort (#226)', () => {
+  const rootWith = (model: string | null, effort: string | null): ProjectRootInfo => ({
+    Name: 'work', ProfileName: 'Default',
+    Actions: [{ ...rootNamed('work').Actions![0], Model: model, Effort: effort }],
+  });
+  const pickerOf = (label: string) => [...view!.container.querySelectorAll('.form-group')]
+    .find(g => g.querySelector('label')?.textContent === label)?.querySelector('select') ?? null;
+  const choose = (select: HTMLSelectElement, value: string) => act(async () => {
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+
+  async function openFormOf(root: ProjectRootInfo) {
+    const hub = new FakeHub([], [root]);
+    await connectServers({ A: hub });
+    view = await render(<Shell />);
+    await openFor('A', root.Name);
+    await typeInto(titleField(), 'Fix the login');
+    return hub;
+  }
+
+  it('offers the current presets', async () => {
+    await openFormOf(rootWith(null, null));
+
+    expect([...pickerOf('Model')!.options].map(o => o.value)).toEqual(['fable', 'opus', 'sonnet', 'haiku', '__other__']);
+    expect([...pickerOf('Effort')!.options].map(o => o.value)).toEqual(['', 'low', 'medium', 'high', 'xhigh', 'max']);
+  });
+
+  it('shows a configured model that is not a preset as selected, and sends it', async () => {
+    const hub = await openFormOf(rootWith('opus[1m]', null));
+
+    const model = pickerOf('Model')!;
+    expect(model.value).toBe('opus[1m]');
+    expect(model.selectedOptions[0].textContent).toBe('opus[1m]');
+    await click(button('Create'));
+    expect(hub.created.map(c => c.inputs.model)).toEqual(['opus[1m]']);
+  });
+
+  it('takes a model name typed in as Other', async () => {
+    const hub = await openFormOf(rootWith('opus', null));
+
+    await choose(pickerOf('Model')!, '__other__');
+    const typed = view!.container.querySelector<HTMLInputElement>('input[aria-label="Model name"]')!;
+    await typeInto(typed, 'claude-fable-5');
+    await act(async () => typed.blur());
+    expect(pickerOf('Model')!.value).toBe('claude-fable-5');
+    await click(button('Create'));
+    expect(hub.created.map(c => c.inputs.model)).toEqual(['claude-fable-5']);
+  });
+
+  it("starts from the action's effort, and sends it", async () => {
+    const hub = await openFormOf(rootWith('fable', 'xhigh'));
+
+    expect(pickerOf('Effort')!.value).toBe('xhigh');
+    await click(button('Create'));
+    expect(hub.created.map(c => c.inputs)).toEqual([{ model: 'fable', effort: 'xhigh', title: 'Fix the login' }]);
+  });
+
+  it("sends the effort chosen over the action's, and the empty default as empty", async () => {
+    const hub = await openFormOf(rootWith('fable', 'xhigh'));
+
+    await choose(pickerOf('Effort')!, 'low');
+    await click(button('Create'));
+    await openFor('A', 'work');
+    await typeInto(titleField(), 'Fix the login');
+    await choose(pickerOf('Effort')!, '');
+    await click(button('Create'));
+
+    expect(hub.created.map(c => c.inputs.effort)).toEqual(['low', '']);
+  });
+});

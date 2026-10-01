@@ -50,12 +50,22 @@ function parseFormFields(schema: unknown, allowSkipPermissions: boolean): FormFi
   return fields;
 }
 
-const MODEL_OPTIONS = ['opus', 'sonnet', 'haiku'];
+/** Claude Code's model aliases; a full model name (claude-fable-5, say) is typed in as Other. */
+const MODEL_PRESETS = ['fable', 'opus', 'sonnet', 'haiku'];
+/** The select's choice that turns it into a text field for a model the presets do not name. */
+const OTHER_MODEL = '__other__';
+/** Claude Code's --effort levels. The empty choice passes none: claude's own default. */
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/** The presets, with the action's model and the one chosen where they are not presets: the select always shows what will run. */
+const modelOptions = (...shown: (string | null | undefined)[]) =>
+  [...new Set([...MODEL_PRESETS, ...shown.filter((m): m is string => !!m)])];
 
 /** What the user has entered in one root's form, kept in sessionStorage so a remount or a reload of a discarded tab restores it. */
 interface CreateDraft {
   actionName: string;
   model: string;
+  effort?: string;
   values: Record<string, string>;
 }
 
@@ -127,6 +137,9 @@ export function CreateProject({ context }: { context?: CreateContext }) {
   const [selectedRootName, setSelectedRootName] = useState(context?.rootName ?? '');
   const [pickedActionName, setSelectedActionName] = useState(draft?.actionName ?? '');
   const [selectedModel, setSelectedModel] = useState(draft?.model ?? 'opus');
+  // Typing a model the presets do not name, in place of the select
+  const [typingModel, setTypingModel] = useState(false);
+  const [selectedEffort, setSelectedEffort] = useState(draft?.effort ?? '');
   const [formValues, setFormValues] = useState<Record<string, string>>(draft?.values ?? {});
   // The form formValues were filled for; defaults are applied only when this changes
   const [valuesFor, setValuesFor] = useState(context && draft ? formKeyOf(context.serverId, context.profileName, context.rootName, draft.actionName) : '');
@@ -175,12 +188,14 @@ export function CreateProject({ context }: { context?: CreateContext }) {
     setValuesFor(formKey);
     setFormValues(defaults);
     if (selectedAction.Model) setSelectedModel(selectedAction.Model);
+    setTypingModel(false);
+    setSelectedEffort(selectedAction.Effort ?? '');
   }
 
   useEffect(() => {
     if (!selectedRootName || valuesFor !== formKey) return;
-    writeDraft(draftKeyOf(selectedServerId, selectedProfileName, selectedRootName), { actionName: selectedActionName, model: selectedModel, values: formValues });
-  }, [selectedServerId, selectedProfileName, selectedRootName, selectedActionName, selectedModel, formValues, valuesFor, formKey]);
+    writeDraft(draftKeyOf(selectedServerId, selectedProfileName, selectedRootName), { actionName: selectedActionName, model: selectedModel, effort: selectedEffort, values: formValues });
+  }, [selectedServerId, selectedProfileName, selectedRootName, selectedActionName, selectedModel, selectedEffort, formValues, valuesFor, formKey]);
 
   // Leaving the page (Back) discards the drafts; a remount with the page still open (another root's form) keeps them
   useEffect(() => () => {
@@ -227,7 +242,9 @@ export function CreateProject({ context }: { context?: CreateContext }) {
     setError(null);
     setFinished(null);
     const profileName = profileOf(selectedRoot);
-    const inputs: Record<string, unknown> = startsSession ? { model: selectedModel } : {};
+    const inputs: Record<string, unknown> = startsSession ? { model: selectedModel.trim() } : {};
+    // The empty choice is sent where the action has a level, so claude's default overrides it
+    if (startsSession && (selectedEffort || selectedAction?.Effort)) inputs.effort = selectedEffort;
     for (const field of formFields) {
       const val = formValues[field.key];
       if (field.fieldType === 'boolean') inputs[field.key] = val === 'true';
@@ -353,8 +370,26 @@ export function CreateProject({ context }: { context?: CreateContext }) {
             {startsSession && (
               <div className="form-group">
                 <label>Model</label>
-                <select value={selectedModel} onChange={e => setSelectedModel(e.target.value)}>
-                  {MODEL_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
+                {typingModel ? (
+                  <input type="text" aria-label="Model name" placeholder="claude-fable-5" value={selectedModel}
+                    onChange={e => setSelectedModel(e.target.value)} autoFocus
+                    // Back to the select, which then lists the name typed; an empty one is the action's model again
+                    onBlur={() => { setSelectedModel(m => m.trim() || selectedAction?.Model || 'opus'); setTypingModel(false); }} />
+                ) : (
+                  <select value={selectedModel} onChange={e => e.target.value === OTHER_MODEL ? setTypingModel(true) : setSelectedModel(e.target.value)}>
+                    {modelOptions(selectedAction?.Model, selectedModel).map(m => <option key={m} value={m}>{m}</option>)}
+                    <option value={OTHER_MODEL}>Other…</option>
+                  </select>
+                )}
+              </div>
+            )}
+
+            {startsSession && (
+              <div className="form-group">
+                <label>Effort</label>
+                <select value={selectedEffort} onChange={e => setSelectedEffort(e.target.value)}>
+                  <option value="">default</option>
+                  {EFFORT_LEVELS.map(level => <option key={level} value={level}>{level}</option>)}
                 </select>
               </div>
             )}
