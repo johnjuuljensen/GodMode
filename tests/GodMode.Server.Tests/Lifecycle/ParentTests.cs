@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GodMode.FakeClaude;
+using GodMode.Server.Services;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR;
@@ -162,6 +163,95 @@ public class ParentTests
         Assert.Contains("is not one this server has", unknown.Message);
         Assert.Contains("__parentId is not a session ID: 42", number.Message);
         Assert.Empty(await harness.Projects.ListProjectsAsync());
+    }
+
+    /// <summary>
+    /// A parent whose root moves profile while the server is down takes a new ID at the restart, and its
+    /// children, in its root (re-keyed with it) or another, take that ID as their parent, saved.
+    /// </summary>
+    [Fact]
+    public async Task ParentsRootMovesProfile_AtARestart_ItsChildrenTakeItsNewId()
+    {
+        await using var harness = new LifecycleHarness(Waiting(), extraRoots: [(OtherRoot, LifecycleHarness.ProfileName)]);
+        var parent = await harness.CreateProjectAsync("overseer", root: OtherRoot);
+        var elsewhere = await harness.CreateProjectAsync("worker", parentId: parent.Id);
+        var beside = await harness.CreateProjectAsync("helper", root: OtherRoot, parentId: parent.Id);
+        var unrelated = await harness.CreateProjectAsync("alone");
+
+        RenameProfile(Path.Combine(harness.RootsDir, OtherRoot), "renamed");
+        await harness.RestartAsync();
+
+        var renamedParent = Renamed(parent.Id);
+        var renamedBeside = Renamed(beside.Id);
+        Assert.Equal(renamedParent, (await harness.Projects.GetStatusAsync(renamedParent)).Id);
+        Assert.Equal(renamedParent, (await ListedAsync(harness, elsewhere.Id)).ParentId);
+        Assert.Equal(renamedParent, harness.ReadStatusFile(elsewhere.Id).ParentId);
+        Assert.Equal(renamedParent, (await ListedAsync(harness, renamedBeside)).ParentId);
+        Assert.Equal(renamedParent, harness.ReadStatusFile(renamedBeside).ParentId);
+        Assert.Null((await ListedAsync(harness, unrelated.Id)).ParentId);
+    }
+
+    /// <summary>
+    /// Live: a parent without a claude takes its new ID at once, and a child that is not re-keyed, its
+    /// claude running, takes it too, saved and pushed as StatusChanged.
+    /// </summary>
+    [Fact]
+    public async Task ParentsRootMovesProfile_Live_ARunningChildTakesItsNewId_AndIsPushed()
+    {
+        await using var harness = new LifecycleHarness(Waiting(), extraRoots: [(OtherRoot, LifecycleHarness.ProfileName)],
+            settings: new Dictionary<string, string?> { [ProjectManager.RootsPollSetting] = "0.2" });
+        await harness.Projects.RecoverProjectsAsync();
+        var parent = await harness.CreateProjectAsync("overseer", root: OtherRoot);
+        await harness.WaitForStdinAsync(parent.Id);
+        await harness.Projects.StopProjectAsync(parent.Id);
+        await harness.WaitForStateAsync(parent.Id, ProjectState.Stopped);
+        var child = await harness.CreateProjectAsync("worker", parentId: parent.Id);
+        await harness.WaitForStdinAsync(child.Id);
+
+        RenameProfile(Path.Combine(harness.RootsDir, OtherRoot), "renamed");
+
+        var renamedParent = Renamed(parent.Id);
+        await harness.WaitForStatusPushAsync(child.Id, status => status.ParentId == renamedParent);
+        Assert.Contains(harness.Hub.Pushes, p => p.Method == nameof(Shared.Hubs.IProjectHubClient.ProjectCreated) && p.ProjectId == renamedParent);
+        Assert.Equal(renamedParent, harness.ReadStatusFile(child.Id).ParentId);
+        Assert.Equal(renamedParent, (await ListedAsync(harness, child.Id)).ParentId);
+        Assert.True(harness.Lifecycle.IsRunning(harness.Tracked(child.Id)), "the child's claude runs on");
+    }
+
+    /// <summary>
+    /// The prepare and create scripts get the parent as GODMODE_PARENT_ID, whether it came as the hub's
+    /// __parentId input or the request's ParentId, and the input is no GODMODE_INPUT_*. A top-level create has none.
+    /// </summary>
+    [Fact]
+    public async Task Scripts_GetGodModeParentId_AndNoParentInput()
+    {
+        await using var harness = new LifecycleHarness(Waiting(),
+            rootConfig: new Dictionary<string, object> { ["prepare"] = "told.ps1", ["create"] = "told.ps1" });
+        var told = Path.Combine(harness.WorkDir, "told.txt");
+        File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "told.ps1"), $$"""
+            $inputs = (Get-ChildItem env: | Where-Object Name -like 'GODMODE_INPUT_*' | ForEach-Object Name | Sort-Object) -join ','
+            Add-Content -Path '{{told}}' -Value "$env:GODMODE_INPUT_NAME parent=[$env:GODMODE_PARENT_ID] inputs=[$inputs]"
+            """);
+        var parent = await harness.CreateProjectAsync("overseer");
+        var typed = await harness.CreateProjectAsync("typed", parentId: parent.Id);
+        var connection = harness.Connect("app");
+        var hub = (await connection.CreateProjectAsync(LifecycleHarness.ProfileName, LifecycleHarness.RootName, null, Inputs("hub", parent.Id))).Project!;
+
+        string Told(string name) => $"{name} parent=[{(name == "overseer" ? "" : parent.Id)}] inputs=[GODMODE_INPUT_NAME,GODMODE_INPUT_PROMPT]";
+        Assert.Equal([Told("overseer"), Told("overseer"), Told("typed"), Told("typed"), Told("hub"), Told("hub")],
+            File.ReadAllLines(told).Select(line => line.Trim()).Where(line => line != ""));
+        Assert.Equal((parent.Id, parent.Id), (typed.ParentId, hub.ParentId));
+    }
+
+    private static string Renamed(string id) => "renamed" + id[LifecycleHarness.ProfileName.Length..];
+
+    /// <summary>Sets the root's profileName in its config.json, as a save of it by hand would.</summary>
+    private static void RenameProfile(string rootPath, string profile)
+    {
+        var config = Path.Combine(rootPath, ".godmode-root", "config.json");
+        var edited = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(File.ReadAllText(config))!;
+        edited["profileName"] = JsonSerializer.SerializeToElement(profile);
+        File.WriteAllText(config, JsonSerializer.Serialize(edited));
     }
 
     private static Dictionary<string, JsonElement> Inputs(string name, string? parentId) => new()
