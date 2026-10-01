@@ -18,7 +18,8 @@ the GodMode app, nested under it. Everything below holds, with these differences
 
 - **Your base branch is in your prompt and your brief**, not in `AC_GWT_BASE_BRANCH`: GodMode
   launched you, not `ac-gwt`, so that variable may be unset. The issue action's prompt says which
-  branch you were cut from and which one your pull request targets.
+  branch you were cut from and which one your pull request targets; in a worktree `ac-gwt` made,
+  `git config "branch.$(git branch --show-current).base"` says it too.
 - **You have no address, and your overseer has none you can reach.** GodMode sessions are not in
   `ListAgents`, so do not try to announce yourself or report by `SendMessage`. Your pull request is
   the whole report: draft while working, ready when done, and a comment on it (`IS#35/PR#44: fixed
@@ -144,8 +145,8 @@ depend on the answer. Blocking the whole issue on it is the last resort.
 
 Message your overseer once when you start, so it learns your address — session names are not
 predictable and it cannot guess yours. Message it again when the pull request goes ready, and when a
-review comes back and you have pushed the fix. (A GodMode session does all three on its pull
-request instead: [above](#when-you-are-a-godmode-session).)
+review comes back and you have pushed the fix. (A GodMode session announces nothing and
+reports on its pull request instead: [above](#when-you-are-a-godmode-session).)
 
 Between those, silence is correct. It reads the pull request.
 
