@@ -56,7 +56,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
 
         try
         {
-            var request = new CreateProjectRequest(profileName, projectRootName, inputs, actionName);
+            var request = new CreateProjectRequest(profileName, projectRootName, inputs, actionName, ParentOf(inputs));
             var result = await _projectManager.CreateProjectAsync(request);
             // An action that starts no session made no project to list
             if (result.Project is { } status) await Clients.All.ProjectCreated(status);
@@ -68,6 +68,20 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
             throw new HubException(ex.Message);
         }
     }
+
+    /// <summary>
+    /// The parent a create names in its <see cref="CreateProjectRequest.ParentInput"/> input: a string, or
+    /// none when it is missing, null or blank. Any other value is refused, rather than starting a top-level session.
+    /// </summary>
+    private static string? ParentOf(Dictionary<string, JsonElement> inputs) =>
+        inputs.TryGetValue(CreateProjectRequest.ParentInput, out var parent)
+            ? parent.ValueKind switch
+            {
+                JsonValueKind.Null or JsonValueKind.Undefined => null,
+                JsonValueKind.String => string.IsNullOrWhiteSpace(parent.GetString()) ? null : parent.GetString(),
+                _ => throw new ArgumentException($"The create's {CreateProjectRequest.ParentInput} is not a session ID: {parent.GetRawText()}."),
+            }
+            : null;
 
     public async Task SendInput(string projectId, string input)
     {

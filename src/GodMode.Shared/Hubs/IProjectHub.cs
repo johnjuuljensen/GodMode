@@ -34,7 +34,12 @@ public interface IProjectHub
     /// <param name="profileName">Name of the profile the root belongs to.</param>
     /// <param name="projectRootName">Name of the project root.</param>
     /// <param name="actionName">Name of the create action to use, or null for the default action.</param>
-    /// <param name="inputs">Form inputs from the dynamic form.</param>
+    /// <param name="inputs">
+    /// Form inputs from the dynamic form. <c>__parentId</c> (<see cref="Models.CreateProjectRequest.ParentInput"/>),
+    /// a string, names the session starting this one, its <see cref="Models.ProjectStatus.ParentId"/>: one
+    /// this server tracks, else the create is refused. An input, not a parameter, so a caller that names
+    /// no parent calls as it did.
+    /// </param>
     /// <returns>
     /// The project created; for an action that starts no session (<c>"session": false</c>), no project
     /// and the script's message. Progress comes as <c>CreationProgress</c> until this returns.

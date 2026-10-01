@@ -211,7 +211,9 @@ public record ProjectStatus(
     ProjectMetrics Metrics,
     GitStatus? Git,
     TestStatus? Tests,
-    long OutputOffset          // Byte offset for resume
+    long OutputOffset,         // Byte offset for resume
+    // ... optional fields, among them:
+    string? ParentId = null    // The ID of the session that started it, on the same server; null at top level
 );
 ```
 

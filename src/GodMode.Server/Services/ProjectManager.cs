@@ -721,7 +721,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 Kind: s.Kind,
                 ActionName: s.ActionName,
                 SharedFolder: s.SharedFolder,
-                Adopted: s.Adopted
+                Adopted: s.Adopted,
+                ParentId: s.ParentId
             ));
         }
 
@@ -750,6 +751,14 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
     private async Task<CreateProjectResult> CreateProjectCoreAsync(CreateProjectRequest request)
     {
+        // The parent is the request's: the hub's __parentId input, which carried it there, is no form
+        // input, for a template or a GODMODE_INPUT_* variable. Scripts get it as GODMODE_PARENT_ID
+        if (request.Inputs.ContainsKey(CreateProjectRequest.ParentInput))
+        {
+            var inputs = new Dictionary<string, JsonElement>(request.Inputs, request.Inputs.Comparer);
+            inputs.Remove(CreateProjectRequest.ParentInput);
+            request = request with { Inputs = inputs };
+        }
         _logger.LogInformation("Creating project in profile '{Profile}' root '{Root}' action '{Action}' with inputs: {InputKeys}",
             request.ProfileName, request.ProjectRootName, request.ActionName ?? "(default)", string.Join(", ", request.Inputs.Keys));
 
@@ -773,6 +782,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         var action = config.ResolveAction(request.ActionName)
             ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
         RequireInputs(action, request.Inputs);
+        // A parent is a session of this server's: an ID it does not track (another server's, a deleted
+        // session's, a typo) is refused, before anything is written. One for an action that starts no
+        // session is checked as well, and has nothing to be the parent of
+        if (request.ParentId is { } parentId && !_projects.ContainsKey(parentId))
+            throw new ArgumentException($"The parent session '{parentId}' is not one this server has.");
 
         if (!action.Session)
             return await RunSessionlessActionAsync(request, snap, rootPath, config, action);
@@ -872,7 +886,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 ProfileName: profileName,
                 Kind: kind,
                 ActionName: action.Name,
-                SharedFolder: action.SharedFolder
+                SharedFolder: action.SharedFolder,
+                ParentId: request.ParentId
             ),
             ProjectPath = projectPath,
             RootPath = FullPath(rootPath),
@@ -890,7 +905,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // Build environment variables for scripts (profile env merged in)
         var scriptEnv = BuildScriptEnvironment(rootPath, project, action, request.Inputs, profileEnv, resultFilePath,
-            request.ProfileName, config.StripEnvVarProfile);
+            request.ProfileName, config.StripEnvVarProfile, request.ParentId);
 
         // Script log file — at root level so it persists regardless of what scripts do
         var logFilePath = GetScriptLogPath(rootPath, sessionId);
@@ -1130,7 +1145,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             var resultFilePath = GetResultFilePath(rootPath, runId);
             if (File.Exists(resultFilePath)) File.Delete(resultFilePath);
             var scriptEnv = BuildScriptEnvironment(rootPath, null, action, request.Inputs, profileConfig?.Environment, resultFilePath,
-                request.ProfileName, config.StripEnvVarProfile);
+                request.ProfileName, config.StripEnvVarProfile, request.ParentId);
             var logFilePath = GetScriptLogPath(rootPath, runId);
 
             foreach (var (scripts, what) in new[] { (action.Prepare, "Prepare"), (action.Create, "Create") })
@@ -1952,6 +1967,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>What a script is told whether the session shares its working folder with, <c>true</c> or <c>false</c>.</summary>
     public const string SharedFolderVariable = "GODMODE_SHARED_FOLDER";
 
+    /// <summary>A create's parent (<see cref="CreateProjectRequest.ParentId"/>), as its prepare and create scripts see it; unset at top level.</summary>
+    public const string ParentIdVariable = "GODMODE_PARENT_ID";
+
     private static readonly JsonSerializerOptions CaseInsensitiveOptions = new() { PropertyNameCaseInsensitive = true };
 
     public async Task RecoverProjectsAsync()
@@ -2090,8 +2108,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 (settings with { SharedFolder = true }).Save(statePath);
         }
 
-        var project = await RecoverSessionAsync(folder, sessionId, root.Profile, root.Root, rootPath)
+        var rekeyed = new ConcurrentDictionary<string, string>();
+        var project = await RecoverSessionAsync(folder, sessionId, root.Profile, root.Root, rootPath, rekeyed)
             ?? throw new InvalidOperationException($"Project {projectId} is back in {folder}, but could not be recovered from its files: see the server log");
+        await ReparentAsync(rekeyed, [project]);
         _logger.LogInformation("Project {ProjectId} was restored from the trash of {Folder}", projectId, folder);
         return project;
     }
@@ -2335,22 +2355,46 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // Process all sessions in parallel for faster startup
         var recovered = new ConcurrentBag<ProjectInfo>();
+        var rekeyed = new ConcurrentDictionary<string, string>();
         await Parallel.ForEachAsync(unique, async (found, ct) =>
         {
-            if (await RecoverSessionAsync(found.WorkingFolder, found.SessionId, found.Profile, found.Root, found.RootPath, ct) is { } project)
+            if (await RecoverSessionAsync(found.WorkingFolder, found.SessionId, found.Profile, found.Root, found.RootPath, rekeyed, ct) is { } project)
                 recovered.Add(project);
         });
-        return recovered.ToArray();
+        var all = recovered.ToArray();
+        await ReparentAsync(rekeyed, all);
+        return all;
+    }
+
+    /// <summary>
+    /// The children of the sessions recovery gave a new ID (<paramref name="rekeyed"/>, old to new: their
+    /// root moved profile or was renamed) take it as their <see cref="ProjectStatus.ParentId"/>, saved,
+    /// so they stay under their parent. Every tracked session is looked at, wherever its root and whether
+    /// its claude runs; one not in <paramref name="justRecovered"/>, which its caller announces, is pushed
+    /// as changed. A parent ID that names no re-keyed session (a deleted parent's) is left as it is.
+    /// </summary>
+    private async Task ReparentAsync(IReadOnlyDictionary<string, string> rekeyed, IReadOnlyCollection<ProjectInfo> justRecovered)
+    {
+        if (rekeyed.Count == 0) return;
+        foreach (var child in _projects.Values.Where(project => project.Status.ParentId is { } parent && rekeyed.ContainsKey(parent)).ToArray())
+        {
+            var oldParent = child.Status.ParentId!;
+            await _lifecycle.UpdateStatusAsync(child, status =>
+                status.ParentId is { } parent && rekeyed.TryGetValue(parent, out var newParent) ? status with { ParentId = newParent } : status);
+            _logger.LogInformation("Project {ProjectId}: its parent {OldParent} is {NewParent} now", child.Status.Id, oldParent, child.Status.ParentId);
+            if (!justRecovered.Contains(child)) await NotifyStatusChanged(child);
+        }
     }
 
     /// <summary>
     /// Tracks the session <paramref name="sessionId"/> of <paramref name="projectPath"/>, in the root at
     /// <paramref name="rootPath"/>, from its files, under the ID they give it there, Stopped if it was
     /// active: recovery's, for one session. Null when it is not recovered (no status.json, one that cannot
-    /// be read, or an ID another session has), logged.
+    /// be read, or an ID another session has), logged. A recovered session whose status.json had another ID
+    /// is added to <paramref name="rekeyed"/>, old to new, for its children (<see cref="ReparentAsync"/>).
     /// </summary>
     private async Task<ProjectInfo?> RecoverSessionAsync(string projectPath, string sessionId, string profileName, string rootName, string rootPath,
-        CancellationToken ct = default)
+        ConcurrentDictionary<string, string> rekeyed, CancellationToken ct = default)
     {
         var statePath = ProjectFiles.SessionState.PathOf(projectPath, sessionId);
         try
@@ -2428,6 +2472,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             {
                 await _statusUpdater.SaveStatusAsync(project);
             }
+            // Its children name the ID it had: they take the new one once the recovery is done (ReparentAsync)
+            if (status.Id != id) rekeyed[status.Id] = id;
             ResumeChecks(project);
 
             _logger.LogInformation("Recovered project {ProjectId} ({Name})", project.Status.Id, project.Status.Name);
@@ -3087,7 +3133,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         Dictionary<string, string>? profileEnv = null,
         string? resultFilePath = null,
         string? profileName = null,
-        bool stripEnvVarProfile = false)
+        bool stripEnvVarProfile = false,
+        string? parentId = null)
     {
         var env = MergeAndExpandEnvironment(profileEnv, action.Environment, profileName, stripEnvVarProfile)
             ?? new Dictionary<string, string>();
@@ -3111,6 +3158,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         if (resultFilePath != null)
             env["GODMODE_RESULT_FILE"] = resultFilePath;
+        if (parentId != null)
+            env[ParentIdVariable] = parentId;
 
         // Add form inputs as GODMODE_INPUT_* env vars
         foreach (var (key, value) in inputs)
