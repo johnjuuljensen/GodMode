@@ -291,7 +291,8 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
         </div>
       )}
       <div className={rootGroup.flat ? 'project-list project-list-flat' : 'project-list'}>
-        {rootGroup.items.length === 0 ? (
+        {/* A root whose sessions all nest under parents in other roots has none of its own to show, and is not empty */}
+        {rootGroup.sessionCount === 0 ? (
           !rootGroup.flat && <div className="project-list-empty">No projects</div>
         ) : (
           listed.map(item => (
