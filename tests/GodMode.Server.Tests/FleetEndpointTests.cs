@@ -44,8 +44,9 @@ public class FleetEndpointTests
     }
 
     /// <summary>
-    /// The fleet's endpoint takes the server's own credential, and not an ungranted session's project token, with its
-    /// project named (forbidden: the session has no fleet tools) or not, nor a request with an Origin. The session
+    /// The fleet's endpoint takes the server's own credential, and not an ungranted session's project token: with its
+    /// project named it is forbidden (the session has no fleet tools); with none named, or another project named, it
+    /// opens nothing (unauthorized). Nor a request with an Origin. The session
     /// endpoint does not take the API key. Granted sessions are <see cref="FleetGrantTests"/>'.
     /// </summary>
     [Fact]
@@ -54,6 +55,7 @@ public class FleetEndpointTests
         await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin());
         var id = await run.CreateOverHubAsync("p1");
         var token = GodModeMcpEntry.Of(await run.WaitForLaunchAsync(id, launch => launch.Stdin.Count > 0)).Token;
+        var other = await run.CreateOverHubAsync("p2");
 
         // The project's token is good where it belongs
         using (var own = await run.Http.SendAsync(Initialize(McpEndpointUrl.Path, token, id)))
@@ -64,6 +66,8 @@ public class FleetEndpointTests
         foreach (var (path, credential, projectId, expected) in new[]
         {
             (GodModeMcp.FleetPath, token, id, HttpStatusCode.Forbidden),
+            // Another project's token is no token of this one's
+            (GodModeMcp.FleetPath, token, other, HttpStatusCode.Unauthorized),
             (GodModeMcp.FleetPath, token, null, HttpStatusCode.Unauthorized),
             (GodModeMcp.FleetPath, null, null, HttpStatusCode.Unauthorized),
             (GodModeMcp.FleetPath, "not-the-key", null, HttpStatusCode.Unauthorized),
@@ -74,7 +78,7 @@ public class FleetEndpointTests
             using var response = await run.Http.SendAsync(Initialize(path, credential, projectId));
             Assert.True(response.StatusCode == expected,
                 $"POST {path} with {(credential == token ? "the project token" : credential == ServerProcess.ApiKey ? "the API key" : credential ?? "nothing")}" +
-                $"{(projectId != null ? ", naming its project," : "")} → {(int)response.StatusCode}, expected {(int)expected}");
+                $"{(projectId == id ? ", naming its project," : projectId != null ? ", naming another project," : "")} → {(int)response.StatusCode}, expected {(int)expected}");
         }
 
         // No browser is a client, the key or not

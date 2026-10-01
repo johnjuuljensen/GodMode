@@ -21,7 +21,9 @@ namespace GodMode.Server.Services;
 /// The fleet's tools, on <see cref="GodModeMcp.FleetPath"/>: what an overseer runs sessions with. One outside GodMode
 /// (the user's own claude) calls them with the server's credential; a GodMode session that has the fleet's tools
 /// (<see cref="IProjectManager.HasFleetTools"/>, checked on every call) with its project token, and the sessions it
-/// starts are its children unless it says otherwise. Each does what its hub method does, through the
+/// starts are its children unless it says otherwise. A session's tools see its own profile alone: another profile's
+/// sessions are not listed, and are not found, as an unknown ID is not; its roots are not listed and not started in.
+/// The server's credential (the user's own overseer) sees every profile. Each does what its hub method does, through the
 /// same <see cref="IProjectManager"/> call, so a session it starts is in the app's list like any other.
 /// None answers a permission prompt or a question, deletes, forgets, adopts or writes config: those are the user's.
 /// Each returns JSON text, as the hub's models serialize, unindented (<see cref="JsonDefaults.Compact"/>); a refusal is the tool's error, saying why.
@@ -61,10 +63,12 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     [McpServerTool(Name = "list_sessions", ReadOnly = true)]
     [Description("Every GodMode session on this server: its ID, name, profile, root, kind, action, state, parent, " +
         "what it needs from the user (Permission, Question, Error, Review, Finished; null for nothing) and its pull request.")]
-    public async Task<string> ListSessionsAsync()
+    public async Task<string> ListSessionsAsync(RequestContext<CallToolRequestParams> context)
     {
+        var scope = await ScopeOfAsync(context);
         var needs = projects.GetAttention().ToDictionary(item => item.ProjectId, item => item);
         var sessions = (await projects.ListProjectsAsync())
+            .Where(s => InScope(scope, s.ProfileName))
             .Select(s => new SessionEntry(s.Id, s.Name, s.ProfileName, s.RootName, s.Kind, s.ActionName, s.State, s.ParentId,
                 needs.GetValueOrDefault(s.Id)?.Kind, s.PullRequest?.Url))
             .OrderBy(s => s.Id, StringComparer.Ordinal);
@@ -74,8 +78,15 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     [McpServerTool(Name = "list_roots", ReadOnly = true)]
     [Description("The server's profiles, and its roots with their actions: each action's name, description, input schema " +
         "(JSON Schema), model, effort, and whether it starts a session. start_session takes a profile, a root, an action and its inputs.")]
-    public async Task<string> ListRootsAsync() =>
-        Json(new { Profiles = await projects.ListProfilesAsync(), Roots = await projects.ListProjectRootsAsync() });
+    public async Task<string> ListRootsAsync(RequestContext<CallToolRequestParams> context)
+    {
+        var scope = await ScopeOfAsync(context);
+        return Json(new
+        {
+            Profiles = (await projects.ListProfilesAsync()).Where(p => InScope(scope, p.Name)),
+            Roots = (await projects.ListProjectRootsAsync()).Where(r => InScope(scope, r.ProfileName)),
+        });
+    }
 
     [McpServerTool(Name = "start_session")]
     [Description("Starts a session as the app's create does: the root's action with its inputs (list_roots gives its schema). " +
@@ -102,8 +113,15 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
             throw new McpException($"Name the parent with parent, not the {CreateProjectRequest.ParentInput} input.");
         if (top_level && !string.IsNullOrWhiteSpace(parent))
             throw new McpException("A top-level session has no parent: give parent or top_level, not both.");
-        // The caller, when it is a session: it has the fleet's tools (the endpoint let it in), so it may grant them
-        var caller = context.User?.FindFirstValue(GodModeAuthExtensions.ProjectIdClaim);
+        // The caller, when it is a session: it has the fleet's tools (the endpoint let it in), so it may grant them,
+        // in its own profile
+        var caller = CallerOf(context);
+        var scope = await ScopeOfAsync(context);
+        if (!InScope(scope, profile))
+            throw new McpException($"A session starts sessions in its own profile only, '{scope}'.");
+        // Another profile's session is no parent this caller can name, as one this server does not have is not
+        if (scope != null && !string.IsNullOrWhiteSpace(parent) && await StatusOrNullAsync(parent) is { } named && !InScope(scope, named.ProfileName))
+            throw new McpException($"The parent session '{parent}' is not one this server has.");
         var parentId = !string.IsNullOrWhiteSpace(parent) ? parent : top_level ? null : caller;
         if (model != null) values["model"] = JsonSerializer.SerializeToElement(model);
         if (effort != null) values["effort"] = JsonSerializer.SerializeToElement(effort);
@@ -123,9 +141,11 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     [Description("Sends the session a message, as the app's reply does: to its running claude, or it is resumed with it. " +
         "Refused while the session waits on a permission prompt or a question: those are the user's to answer, in the app.")]
     public async Task<string> SendAsync(
+        RequestContext<CallToolRequestParams> context,
         [Description("The session's ID")] string session,
         [Description("The message")] string text)
     {
+        await SeenAsync(context, session);
         logger.LogInformation("Fleet sending to {ProjectId}", session);
         await Refusing(() => projects.ReplyAndResumeAsync(session, text, answersPending: false));
         return await StateAsync(session);
@@ -136,11 +156,12 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         "an error, a pull request's review, or a finished turn's result), and its last replies, oldest first " +
         "(turns, default 1, at most 20; the last may be unfinished while it works).")]
     public async Task<string> ReadAsync(
+        RequestContext<CallToolRequestParams> context,
         [Description("The session's ID")] string session,
         [Description("How many of its last turns to read")] int turns = 1)
     {
         if (turns is < 1 or > MaxTurns) throw new McpException($"turns must be 1 to {MaxTurns}.");
-        var status = await Refusing(() => projects.GetStatusAsync(session));
+        var status = await SeenAsync(context, session);
         var replies = await Refusing(() => projects.LastRepliesAsync(session, turns));
         return Json(new SessionRead(status.Id, status.Name, status.State, status.Kind, status.ParentId, status.Model, status.Effort,
             await WaitingOnAsync(status), status.PullRequest?.Url, replies));
@@ -148,8 +169,9 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
 
     [McpServerTool(Name = "stop")]
     [Description("Stops the session, as the app's stop does: claude is interrupted, then ended. resume carries it on.")]
-    public async Task<string> StopAsync([Description("The session's ID")] string session)
+    public async Task<string> StopAsync(RequestContext<CallToolRequestParams> context, [Description("The session's ID")] string session)
     {
+        await SeenAsync(context, session);
         logger.LogInformation("Fleet stopping {ProjectId}", session);
         await Refusing(() => projects.StopProjectAsync(session));
         return await StateAsync(session);
@@ -157,11 +179,41 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
 
     [McpServerTool(Name = "resume")]
     [Description("Resumes a stopped session on its conversation, as the app's resume does. It is Idle until it is sent a message.")]
-    public async Task<string> ResumeAsync([Description("The session's ID")] string session)
+    public async Task<string> ResumeAsync(RequestContext<CallToolRequestParams> context, [Description("The session's ID")] string session)
     {
+        await SeenAsync(context, session);
         logger.LogInformation("Fleet resuming {ProjectId}", session);
         await Refusing(() => projects.ResumeProjectAsync(session));
         return await StateAsync(session);
+    }
+
+    /// <summary>The calling session's ID; null for the server's credential.</summary>
+    private static string? CallerOf(RequestContext<CallToolRequestParams> context) =>
+        context.User?.FindFirstValue(GodModeAuthExtensions.ProjectIdClaim);
+
+    /// <summary>The profile the caller's tools see: a calling session's own; null, every profile, for the server's credential.</summary>
+    private async Task<string?> ScopeOfAsync(RequestContext<CallToolRequestParams> context) =>
+        CallerOf(context) is { } caller
+            ? (await Refusing(() => projects.GetStatusAsync(caller))).ProfileName ?? throw new McpException("The calling session has no profile.")
+            : null;
+
+    private static bool InScope(string? scope, string? profile) => scope == null || string.Equals(scope, profile, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The session, as the caller may see it: one of another profile than a calling session's is refused as an unknown
+    /// ID is (<see cref="IProjectManager.GetStatusAsync"/>'s message), so its tools do not confirm that it exists.
+    /// </summary>
+    private async Task<ProjectStatus> SeenAsync(RequestContext<CallToolRequestParams> context, string session)
+    {
+        var scope = await ScopeOfAsync(context);
+        var status = await Refusing(() => projects.GetStatusAsync(session));
+        return InScope(scope, status.ProfileName) ? status : throw new McpException($"Project {session} not found");
+    }
+
+    private async Task<ProjectStatus?> StatusOrNullAsync(string session)
+    {
+        try { return await projects.GetStatusAsync(session); }
+        catch (KeyNotFoundException) { return null; }
     }
 
     /// <summary>What the session needs, from its attention item's kind, with the whole text where the item cuts it.</summary>

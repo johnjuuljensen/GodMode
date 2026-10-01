@@ -199,4 +199,60 @@ public class FleetGrantTests
         var entry = GodModeMcpEntry.FleetOf(await run.WaitForLaunchAsync(IdOf(epic), launch => launch.Stdin.Count > 0));
         Assert.Equal(HttpStatusCode.OK, await run.InitializeAsync(GodModeMcp.FleetPath, entry.Token, IdOf(epic)));
     }
+
+    /// <summary>
+    /// A deleted overseer's grant is no one's: a state folder planted under its id, in another folder of its root (as a
+    /// session can make in its own), with its very status and settings, is recovered after a restart without the tools.
+    /// </summary>
+    [Fact]
+    public async Task AStateFolderPlantedUnderADeletedOverseersId_HasNoGrant_AfterARestart()
+    {
+        await using var run = await FleetRun.StartAsync(Waiting());
+        var (overseerId, _) = await OverseerAsync(run);
+        var sessionId = overseerId.Split('/')[^1];
+        var state = Directory.GetFiles(run.StatePath(overseerId))
+            .Where(file => Path.GetFileName(file) is "status.json" or "settings.json")
+            .ToDictionary(file => Path.GetFileName(file), File.ReadAllText);
+
+        await run.Client.Hub.InvokeAsync<DeleteProjectResult>(nameof(IProjectHub.DeleteProject), overseerId, false);
+        Assert.False(File.Exists(FleetGrantFile.PathFor(run.RootPath, sessionId)), "the delete left the overseer's grant record");
+
+        var planted = GodMode.ProjectFiles.SessionState.PathOf(Path.Combine(run.RootPath, "planted"), sessionId);
+        Directory.CreateDirectory(planted);
+        foreach (var (file, text) in state) File.WriteAllText(Path.Combine(planted, file), text);
+
+        // The restart recovers it, purges the trash, and carries it on, as it was working
+        await run.RestartAsync();
+        Assert.True(await Lifecycle.LifecycleHarness.WaitForAsync(async () =>
+            (await run.Client.Hub.InvokeAsync<ProjectSummary[]>(nameof(IProjectHub.ListProjects))).Any(s => s.Id == overseerId)), "the planted session was not recovered");
+        await using var user = await run.ConnectFleetAsync();
+        if ((await run.Client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), overseerId)).State == Shared.Enums.ProjectState.Stopped)
+            await run.CallAsync(user, "send", new() { ["session"] = overseerId, ["text"] = "Go on" });
+
+        await AssertNoFleetToolsAsync(run, overseerId);
+    }
+
+    /// <summary>The fleet's endpoint with a trailing slash is the fleet's endpoint, as routing has it, for every caller.</summary>
+    [Fact]
+    public async Task TheFleetEndpoint_WithATrailingSlash_IsTheFleetEndpoint()
+    {
+        await using var run = await FleetRun.StartAsync(Waiting());
+        var (overseerId, fleetEntry) = await OverseerAsync(run);
+        var worker = await run.CreateOverHubAsync("worker", WorkAction);
+        var workerToken = GodModeMcpEntry.Of(await run.WaitForLaunchAsync(worker, launch => launch.Stdin.Count > 0)).Token;
+
+        Assert.Equal(HttpStatusCode.OK, await run.InitializeAsync(GodModeMcp.FleetPath + "/", ServerProcess.ApiKey));
+        Assert.Equal(HttpStatusCode.OK, await run.InitializeAsync(GodModeMcp.FleetPath + "/", fleetEntry.Token, overseerId));
+        Assert.Equal(HttpStatusCode.Forbidden, await run.InitializeAsync(GodModeMcp.FleetPath + "/", workerToken, worker));
+    }
+
+    [Fact]
+    public async Task AGrant_ToAnActionThatStartsNoSession_IsRefused()
+    {
+        await using var run = await FleetRun.StartAsync(Waiting());
+        await using var user = await run.ConnectFleetAsync();
+
+        var arguments = StartArguments("fresh", ProvisionAction, new() { ["fleet_tools"] = true });
+        Assert.Contains("fleetTools", await run.RefusedAsync(user, "start_session", arguments));
+    }
 }

@@ -15,7 +15,8 @@ namespace GodMode.Server.Tests;
 /// A real server over one root, whose sessions play the script in the fake, for the fleet's endpoint: an action
 /// that starts a session (<see cref="WorkAction"/>), one that starts none (<see cref="ProvisionAction"/>), one whose
 /// sessions have the fleet's tools (<see cref="OverseerAction"/>, <c>"fleetTools": true</c>) and one whose sessions
-/// have them when granted (<see cref="GrantableAction"/>, <c>"fleetTools": "grantable"</c>).
+/// have them when granted (<see cref="GrantableAction"/>, <c>"fleetTools": "grantable"</c>). A second root,
+/// <see cref="OtherRoot"/>, is another profile's (<see cref="OtherProfile"/>), with a work action.
 /// </summary>
 internal sealed class FleetRun : IAsyncDisposable
 {
@@ -25,6 +26,8 @@ internal sealed class FleetRun : IAsyncDisposable
     public const string ProvisionAction = "provision";
     public const string OverseerAction = "overseer";
     public const string GrantableAction = "grantable";
+    public const string OtherProfile = "elsewhere";
+    public const string OtherRoot = "other";
 
     public static readonly string[] FleetToolNames = ["list_roots", "list_sessions", "read", "resume", "send", "start_session", "stop"];
 
@@ -42,16 +45,21 @@ internal sealed class FleetRun : IAsyncDisposable
         script.Save(scriptPath);
         var rootConfig = Path.Combine(run._workDir, "roots", RootName, ".godmode-root");
         Directory.CreateDirectory(rootConfig);
-        File.WriteAllText(Path.Combine(rootConfig, "config.json"), JsonSerializer.Serialize(new
+        string BaseConfig(string profile) => JsonSerializer.Serialize(new
         {
-            profileName = Profile,
+            profileName = profile,
             environment = new Dictionary<string, string>
             {
                 [FakeClaudeEnvironment.Script] = scriptPath,
                 [FakeClaudeEnvironment.Record] = "fake-claude.jsonl",
             },
-        }));
+        });
+        File.WriteAllText(Path.Combine(rootConfig, "config.json"), BaseConfig(Profile));
         File.WriteAllText(Path.Combine(rootConfig, $"config.{WorkAction}.json"), "{}");
+        var otherConfig = Path.Combine(run._workDir, "roots", OtherRoot, ".godmode-root");
+        Directory.CreateDirectory(otherConfig);
+        File.WriteAllText(Path.Combine(otherConfig, "config.json"), BaseConfig(OtherProfile));
+        File.WriteAllText(Path.Combine(otherConfig, $"config.{WorkAction}.json"), "{}");
         File.WriteAllText(Path.Combine(rootConfig, $"config.{OverseerAction}.json"), """{ "fleetTools": true }""");
         File.WriteAllText(Path.Combine(rootConfig, $"config.{GrantableAction}.json"), """{ "fleetTools": "grantable" }""");
         File.WriteAllText(Path.Combine(rootConfig, $"config.{ProvisionAction}.json"), """{ "session": false, "create": "provision.ps1" }""");
@@ -63,12 +71,8 @@ internal sealed class FleetRun : IAsyncDisposable
         run.BaseUrl = $"http://127.0.0.1:{ServerProcess.GetFreePort()}";
         try
         {
-            run.Server = ServerProcess.Start(run._workDir, run.BaseUrl,
-                environment: new Dictionary<string, string> { ["Claude__Executable"] = LifecycleHarness.FakeClaudePath });
             run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TimeSpan.FromSeconds(10) };
-            await run.Server.WaitForHealthyAsync(run.Http);
-            run.Client = new ServerHubClient(run.BaseUrl);
-            await run.Client.StartAsync();
+            await run.StartServerAsync();
             return run;
         }
         catch
@@ -77,6 +81,23 @@ internal sealed class FleetRun : IAsyncDisposable
             await run.DisposeAsync();
             throw;
         }
+    }
+
+    private async Task StartServerAsync()
+    {
+        Server = ServerProcess.Start(_workDir, BaseUrl,
+            environment: new Dictionary<string, string> { ["Claude__Executable"] = LifecycleHarness.FakeClaudePath });
+        await Server.WaitForHealthyAsync(Http);
+        Client = new ServerHubClient(BaseUrl);
+        await Client.StartAsync();
+    }
+
+    /// <summary>Kills the server, as a crash would, and starts another over the same roots and port, which recovers their sessions.</summary>
+    public async Task RestartAsync()
+    {
+        await Client.DisposeAsync();
+        Server.Dispose();
+        await StartServerAsync();
     }
 
     /// <summary>The root's folder.</summary>
@@ -109,8 +130,8 @@ internal sealed class FleetRun : IAsyncDisposable
         GodMode.ProjectFiles.SessionState.PathOf(ServerProcess.WorkingFolderOf(RootPath, projectId), projectId.Split('/')[^1]);
 
     /// <summary>Starts a session of <paramref name="action"/> as the app's create does, over the hub, and returns its ID.</summary>
-    public async Task<string> CreateOverHubAsync(string name, string action) =>
-        (await Client.Hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), Profile, RootName, action,
+    public async Task<string> CreateOverHubAsync(string name, string action, string profile = Profile, string root = RootName) =>
+        (await Client.Hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), profile, root, action,
             new Dictionary<string, JsonElement>
             {
                 ["name"] = JsonSerializer.SerializeToElement(name),
@@ -168,9 +189,9 @@ internal sealed class FleetRun : IAsyncDisposable
     public Task<string> CreateOverHubAsync(string name) => CreateOverHubAsync(name, WorkAction);
 
     /// <summary>Waits until the session's first launch (or its <paramref name="index"/>th) satisfies <paramref name="condition"/>.</summary>
-    public async Task<FakeLaunch> WaitForLaunchAsync(string projectId, Func<FakeLaunch, bool> condition, int index = 0)
+    public async Task<FakeLaunch> WaitForLaunchAsync(string projectId, Func<FakeLaunch, bool> condition, int index = 0, string root = RootName)
     {
-        var record = Path.Combine(ServerProcess.WorkingFolderOf(RootPath, projectId), "fake-claude.jsonl");
+        var record = Path.Combine(ServerProcess.WorkingFolderOf(Path.Combine(_workDir, "roots", root), projectId), "fake-claude.jsonl");
         FakeLaunch? launch = null;
         Assert.True(await LifecycleHarness.WaitForAsync(() =>
                 Task.FromResult((launch = FakeRecording.Read(record).ElementAtOrDefault(index)) is { } l && condition(l))),

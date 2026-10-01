@@ -1087,7 +1087,6 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // The session's state folder, now its id is final (scripts may have created the project dir without .godmode)
         CreateSessionState(project);
         settings.Save(project.StatePath);
-        FleetGrantFile.Write(project.RootPath, project.SessionId, new FleetGrantFile.Grant(action.Name, fleetToolsGranted));
 
         // Save initial status
         await _statusUpdater.SaveStatusAsync(project);
@@ -1105,6 +1104,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             // Start Claude process, configured from what is saved above, exactly as a resume will be
             try
             {
+                // Once its ID is its own: a failed add never replaces another session's record
+                FleetGrantFile.Write(project.RootPath, project.SessionId,
+                    new FleetGrantFile.Grant(action.Name, fleetToolsGranted, Path.GetRelativePath(project.RootPath, project.ProjectPath)));
                 await _lifecycle.StartAsync(project, prompt, BuildLaunchSpec(project));
             }
             catch (Exception ex)
@@ -1781,6 +1783,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // Remove from tracking, and finish its output and any check a push started since
         _projects.TryRemove(projectId, out _);
+        ForgetFleetGrant(project);
         await project.Process.CloseAsync();
         await _pullRequests.ForgetAsync(projectId);
 
@@ -2168,6 +2171,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 try
                 {
                     await DeleteDirectoryRobustAsync(trashed, WhyNotStateOf(rootPath, folder, trashed));
+                    FleetGrantFile.Delete(rootPath, sessionId);
                     _logger.LogInformation("Purged {ProjectId} from the trash of {Folder}", ProjectId(profile, root, sessionId), folder);
                 }
                 catch (Exception ex)
@@ -2976,7 +2980,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(project, profileName);
         var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
-        var (env, args) = BuildClaudeConfig(project.ProjectPath, project.StatePath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project), HasFleetTools(project)),
+        // A session with the fleet's tools keeps its config, and the token that opens them, out of its working folder
+        var fleetTools = HasFleetTools(project);
+        var mcpConfigPath = fleetTools ? McpConfigFile.FleetPathFor(project.RootPath, project.SessionId) : McpConfigFile.PathFor(project.StatePath);
+        var (env, args) = BuildClaudeConfig(project.ProjectPath, mcpConfigPath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project), fleetTools),
             project.Status.Model ?? action.Model, LaunchEffort(project, action), profile?.Environment, profileName, stripEnvVarProfile);
         return new ClaudeLaunchSpec(env ?? new Dictionary<string, string>(), args);
     }
@@ -3080,7 +3087,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// Claude Code's own settings, the permission mode, or skip-permissions, allow it.
     /// </summary>
     private static (Dictionary<string, string>? Env, string[] Args) BuildClaudeConfig(
-        string projectPath, string statePath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
+        string projectPath, string mcpConfigPath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
         string? model = null,
         string? effort = null,
         Dictionary<string, string>? profileEnv = null,
@@ -3120,7 +3127,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // It holds the project token, so every launch first makes sure git ignores it
         ProjectFiles.ProjectFolder.EnsureGitIgnore(projectPath);
         args.Add("--mcp-config");
-        args.Add(McpConfigFile.Write(statePath, mcpConfigJson));
+        args.Add(McpConfigFile.WriteFile(mcpConfigPath, mcpConfigJson));
 
         return (env, args.ToArray());
     }
@@ -3164,9 +3171,24 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// </summary>
     public bool HasFleetTools(string projectId) => _projects.TryGetValue(projectId, out var project) && HasFleetTools(project);
 
+    /// <summary>
+    /// Deletes the fleet grant record of a session that leaves GodMode (a delete or a forget): one restored from the
+    /// trash has no grant, and a state folder planted under its id, in its own folder or another, finds none.
+    /// </summary>
+    private void ForgetFleetGrant(ProjectInfo project)
+    {
+        try { FleetGrantFile.Delete(project.RootPath, project.SessionId); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Project {ProjectId}: its fleet grant record could not be deleted: {Reason}", project.Status.Id, ex.Message);
+        }
+    }
+
     private bool HasFleetTools(ProjectInfo project)
     {
         if (project.Status.RootName == null || FleetGrantFile.Read(project.RootPath, project.SessionId) is not { } grant) return false;
+        // The record is the session's that was created or adopted in that folder, not a state folder planted under its id elsewhere
+        if (!PathComparer.Equals(FullPath(Path.Combine(project.RootPath, grant.Folder)), FullPath(project.ProjectPath))) return false;
         try
         {
             return _rootConfigReader.ReadConfigStrict(project.RootPath).ResolveAction(grant.Action)?.FleetTools switch

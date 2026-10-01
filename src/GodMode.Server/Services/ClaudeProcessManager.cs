@@ -294,6 +294,8 @@ public class ClaudeProcessManager : IClaudeProcessManager
             project.Status.Id, string.Join(" ", args));
 
         var launchedAt = DateTime.UtcNow;
+        // The token this launch's config holds (BuildLaunchSpec issued it): cleared when its process exits
+        var launchToken = project.ProjectToken;
         try
         {
             // A stop came first (it cancels the launch): nothing is started
@@ -332,7 +334,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         // A stop cancels the launch: this process is being stopped, and no fresh session takes its place
         var cancellation = cancellationToken.Register(launch.MarkStopped);
 
-        _ = HandleExitAsync(project, launch, launchedAt, Task.WhenAll(stdoutClosed.Task, stderrClosed.Task),
+        _ = HandleExitAsync(project, launch, launchedAt, launchToken, Task.WhenAll(stdoutClosed.Task, stderrClosed.Task),
             stderrTail, takeover, cancellation);
 
         // Send initial prompt via stdin if provided
@@ -349,7 +351,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
     /// else deletes its MCP config, clears its PID and puts its exit on the pipeline, last. What is
     /// left of its tree goes with it.
     /// </summary>
-    private async Task HandleExitAsync(ProjectInfo project, Launch launch, DateTime launchedAt, Task drained,
+    private async Task HandleExitAsync(ProjectInfo project, Launch launch, DateTime launchedAt, string? launchToken, Task drained,
         ConcurrentQueue<string> stderrTail, ExitTakeover? takeover, CancellationTokenRegistration cancellation)
     {
         var id = project.Status.Id;
@@ -369,7 +371,13 @@ public class ClaudeProcessManager : IClaudeProcessManager
             if (!launch.Stopped && takeover != null && await takeover(exitCode, tail))
                 return;
 
-            try { McpConfigFile.DeleteIfWrittenBefore(project.StatePath, launchedAt); }
+            // The launch's token opens nothing once its process is gone, whatever was left of its config file
+            if (launchToken != null) Interlocked.CompareExchange(ref project.ProjectTokenField, null, launchToken);
+            try
+            {
+                McpConfigFile.DeleteIfWrittenBefore(project.StatePath, launchedAt);
+                McpConfigFile.DeleteFileIfWrittenBefore(McpConfigFile.FleetPathFor(project.RootPath, project.SessionId), launchedAt);
+            }
             catch (Exception ex) { _logger.LogWarning(ex, "Could not delete the MCP config for project {ProjectId}", id); }
 
             project.Process.ClearProcessId(launch.Id);

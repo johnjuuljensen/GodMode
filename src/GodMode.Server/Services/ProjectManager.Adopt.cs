@@ -283,6 +283,7 @@ public partial class ProjectManager
         await _pullRequests.ForgetAsync(projectId);
 
         _projects.TryRemove(projectId, out _);
+        ForgetFleetGrant(project);
         await project.Process.CloseAsync();
         await _pullRequests.ForgetAsync(projectId);
 

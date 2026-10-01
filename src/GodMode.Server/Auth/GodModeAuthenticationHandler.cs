@@ -256,7 +256,8 @@ public sealed class McpCallerHandler(IHttpContextAccessor http, IProjectManager 
     {
         var path = http.HttpContext?.Request.Path;
         var projectId = context.User.FindFirstValue(GodModeAuthExtensions.ProjectIdClaim);
-        var allowed = path is { } requested && requested.Equals(requirement.Path, StringComparison.OrdinalIgnoreCase)
+        // As routing compares it: any case, and a trailing slash, so /mcp/fleet/ is /mcp/fleet
+        var allowed = path is { Value: { } requested } && requested.TrimEnd('/').Equals(requirement.Path, StringComparison.OrdinalIgnoreCase)
             && (projectId == null ? !requirement.ProjectsOnly : requirement.ProjectsOnly || projects.HasFleetTools(projectId));
         if (allowed) context.Succeed(requirement);
         return Task.CompletedTask;

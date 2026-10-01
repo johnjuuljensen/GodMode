@@ -133,4 +133,91 @@ public class FleetGrantRecordTests
         File.Delete(record);
         Assert.False(harness.Projects.HasFleetTools(overseer));
     }
+
+    /// <summary>The record is the session's that was created in its folder: one naming another folder grants the session nothing.</summary>
+    [Fact]
+    public async Task ARecordOfAnotherFolder_GrantsNothing()
+    {
+        await using var harness = Harness();
+        var overseer = await CreateAsync(harness, Overseer, "overseer");
+        var sessionId = overseer.Split('/')[^1];
+        var grant = FleetGrantFile.Read(harness.RootPath, sessionId)!;
+        Assert.Equal(Path.GetFileName(harness.ProjectPath(overseer)), grant.Folder);
+
+        FleetGrantFile.Write(harness.RootPath, sessionId, grant with { Folder = "elsewhere" });
+
+        Assert.False(harness.Projects.HasFleetTools(overseer));
+    }
+
+    /// <summary>A delete or a forget takes the record with it: a restored or planted session under the id finds none.</summary>
+    [Fact]
+    public async Task ADeleteOrAForget_DeletesTheRecord()
+    {
+        await using var harness = Harness();
+        var deleted = await CreateAsync(harness, Overseer, "deleted");
+        var forgotten = await CreateAsync(harness, Overseer, "forgotten");
+
+        await harness.Projects.DeleteProjectAsync(deleted);
+        await harness.Projects.ForgetProjectAsync(forgotten);
+
+        Assert.False(File.Exists(FleetGrantFile.PathFor(harness.RootPath, deleted.Split('/')[^1])));
+        Assert.False(File.Exists(FleetGrantFile.PathFor(harness.RootPath, forgotten.Split('/')[^1])));
+    }
+
+    [Fact]
+    public async Task ARelaunch_AfterTheActionStopsGranting_HasNoFleetEntry()
+    {
+        await using var harness = Harness();
+        var overseer = await CreateAsync(harness, Overseer, "overseer");
+        Assert.Equal(["godmode", "godmode-fleet"], McpServersOf(harness.Launches(overseer)[0]));
+
+        WriteAction(harness, Overseer, "{}");
+        await harness.Projects.StopProjectAsync(overseer);
+        await harness.WaitForStateAsync(overseer, ProjectState.Stopped);
+        await harness.Projects.ReplyAndResumeAsync(overseer, "Go on");
+
+        Assert.Equal(["godmode"], McpServersOf(await harness.WaitForStdinAsync(overseer, index: 1)));
+    }
+
+    /// <summary>A launch's token opens nothing once its process has exited, whatever was left of its config file.</summary>
+    [Fact]
+    public async Task TheToken_IsClearedWhenItsProcessExits()
+    {
+        await using var harness = Harness();
+        var overseer = await CreateAsync(harness, Overseer, "overseer");
+        var token = GodModeMcpEntry.FleetOf(harness.Launches(overseer)[0]).Token;
+        Assert.NotNull(harness.Projects.ValidateProjectToken(overseer, token));
+
+        await harness.Projects.StopProjectAsync(overseer);
+        await harness.WaitForStateAsync(overseer, ProjectState.Stopped);
+
+        Assert.True(await LifecycleHarness.WaitForAsync(() => Task.FromResult(harness.Projects.ValidateProjectToken(overseer, token) == null)),
+            "the exited launch's token still opens the endpoint");
+    }
+
+    /// <summary>
+    /// A session with the fleet's tools keeps its MCP config, and the token that opens them, out of its working folder,
+    /// which in a shared folder its neighbours work in: beside its record, in the root's logs, until its process exits.
+    /// </summary>
+    [Fact]
+    public async Task AGrantedSessionsMcpConfig_IsOutOfItsWorkingFolder_EvenWhereItSharesIt()
+    {
+        await using var harness = Harness();
+        WriteAction(harness, "workspace", """{ "fleetTools": true, "sharedFolder": true }""");
+        var overseer = await CreateAsync(harness, "workspace", "overseer");
+        var worker = await CreateAsync(harness, Work, "worker");
+        var sessionId = overseer.Split('/')[^1];
+
+        var outside = McpConfigFile.FleetPathFor(harness.RootPath, sessionId);
+        Assert.Equal(["godmode", "godmode-fleet"], McpServersOf(harness.Launches(overseer)[0]));
+        Assert.True(File.Exists(outside));
+        Assert.False(File.Exists(McpConfigFile.PathFor(harness.StatePath(overseer))));
+        Assert.Empty(Directory.GetFiles(harness.ProjectPath(overseer), McpConfigFile.FileName, SearchOption.AllDirectories));
+        // An ungranted session's stays in its state folder
+        Assert.True(File.Exists(McpConfigFile.PathFor(harness.StatePath(worker))));
+
+        await harness.Projects.StopProjectAsync(overseer);
+        await harness.WaitForStateAsync(overseer, ProjectState.Stopped);
+        Assert.True(await LifecycleHarness.WaitForAsync(() => Task.FromResult(!File.Exists(outside))), "the config outlived its process");
+    }
 }
