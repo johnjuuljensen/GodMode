@@ -1047,8 +1047,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // Persisted in status.json so resumes keep using the same model even if the
         // root config changes or the machine-wide Claude default differs.
         var model = TemplateResolver.GetString(inputs, "model") ?? action.Model;
-        // Effort the same way, kept even when empty: the form's default, claude's own, over the action's
-        var effort = RequestedEffort(inputs) ?? action.Effort;
+        // Effort the same way, kept even when empty (claude's own default), so a resume never takes up a level the root gains later
+        var effort = RequestedEffort(inputs) ?? action.Effort ?? "";
         // No prompt from the form, a template or a script: claude starts with no input and waits on
         // stdin, and the project is Idle, waiting for its first message, which needs nothing of the
         // user until they write it. Claude is never sent an empty turn

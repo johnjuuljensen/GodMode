@@ -84,6 +84,22 @@ public class LaunchModelEffortTests
         Assert.DoesNotContain(Effort, (await harness.WaitForStdinAsync(created.Id)).Argv);
     }
 
+    /// <summary>Started at claude's default, it resumes at claude's default, whatever level its root has gained since.</summary>
+    [Fact]
+    public async Task NoEffortAnywhere_ResumesWithoutEffort_AfterTheRootGainsOne()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+        File.WriteAllText(Overlay(harness), "{}");
+
+        var created = await harness.CreateProjectAsync();
+        var create = await harness.WaitForStdinAsync(created.Id);
+        File.WriteAllText(Overlay(harness), """{ "effort": "high" }""");
+        var resume = await StopAndResumeAsync(harness, created.Id);
+
+        Assert.DoesNotContain(Effort, create.Argv);
+        Assert.DoesNotContain(Effort, resume.Argv);
+    }
+
     [Fact]
     public async Task InvalidEffortInput_FailsTheCreate_AndNothingIsCreated()
     {

@@ -17,7 +17,7 @@ namespace GodMode.Shared.Models;
 /// <param name="OutputOffset">The byte offset in output.jsonl after its last line: what a client that has all the output resumes from.</param>
 /// <param name="RootName">The name of the project root this project belongs to.</param>
 /// <param name="Model">The Claude model the session was started with. Used on resume so the session keeps running on the same model regardless of the current root config or machine default.</param>
-/// <param name="Effort">The claude effort level the session was started with, kept and used on resume as <paramref name="Model"/> is. Empty when its create chose claude's default over its action's level; null when it was never set, and the action's applies.</param>
+/// <param name="Effort">The claude effort level the session was started with, kept and used on resume as <paramref name="Model"/> is. Empty when it was started at claude's own default; null only for a session created before effort was kept, which takes its action's.</param>
 /// <param name="PendingPermission">The tool call waiting for the user to allow or deny it, while the project is <see cref="ProjectState.WaitingPermission"/>. Null otherwise.</param>
 /// <param name="PendingQuestion">The AskUserQuestion waiting for the user's answer, while the project is <see cref="ProjectState.WaitingInput"/> on it. Null otherwise.</param>
 /// <param name="LastError">Why the project is in <see cref="ProjectState.Error"/>: the last lines claude wrote to stderr before it exited, or an error result's text. Null otherwise.</param>
