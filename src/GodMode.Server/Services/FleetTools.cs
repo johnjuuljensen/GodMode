@@ -20,7 +20,7 @@ namespace GodMode.Server.Services;
 /// claude, with the server's credential) runs sessions with. Each does what its hub method does, through the
 /// same <see cref="IProjectManager"/> call, so a session it starts is in the app's list like any other.
 /// None answers a permission prompt or a question, deletes, forgets, adopts or writes config: those are the user's.
-/// Each returns JSON text, as the hub's models serialize (<see cref="JsonDefaults"/>); a refusal is the tool's error, saying why.
+/// Each returns JSON text, as the hub's models serialize, unindented (<see cref="JsonDefaults.Compact"/>); a refusal is the tool's error, saying why.
 /// </summary>
 [McpServerToolType]
 [Authorize(Policy = GodModeAuthExtensions.FleetPolicy)]
@@ -189,5 +189,5 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
 
     private static Task Refusing(Func<Task> call) => Refusing(async () => { await call(); return true; });
 
-    private static string Json<T>(T value) => JsonSerializer.Serialize(value, JsonDefaults.Options);
+    private static string Json<T>(T value) => JsonSerializer.Serialize(value, JsonDefaults.Compact);
 }

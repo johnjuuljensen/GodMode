@@ -316,6 +316,40 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 - **Before Allow**, a client fetches `GetPermissionDetail`: the whole command for `Bash` and `PowerShell`, the path and the whole new text for `Write` and `NotebookEdit`, the path and each replacement for `Edit` and `MultiEdit` (`Replace:`, or `Replace every occurrence of:` with `replace_all`, the old text, `With:`, the new text), and the input as indented JSON for any other tool, cut at 16384 characters with `DetailTruncated` set. The call runs with all of it.
 - **One answer counts.** When two clients answer at once, the one that came second fails, as does any answer to a request that was answered already or withdrawn: claude got the other.
 
+### The fleet endpoint
+
+`/mcp/fleet` serves MCP over streamable HTTP, statelessly, for an overseer: a `claude` the user runs themselves, in a terminal, outside GodMode, that lists, starts, messages, reads, stops and resumes the server's sessions. The sessions it starts are GodMode sessions like any other: in the app's list, notifying, and asking the user for their permissions.
+
+- **The server's own credential opens it**, as it opens the hub: the API key (`Authorization: Bearer <key>`), or in codespace mode a GitHub token of `GITHUB_USER`. A project token does not, with its project named or not, and the API key does not open `/mcp`. A request with an `Origin` gets 403, as everywhere.
+- **Each endpoint lists its own tools.** `/mcp` has `permission_prompt` alone, `/mcp/fleet` the tools below. One MCP server serves both; each tool's `[Authorize]` policy is its endpoint's.
+- **The overseer's `.mcp.json`** (in the folder it runs in, or `claude mcp add --transport http godmode-fleet <url> --header "Authorization: Bearer <key>"`):
+
+  ```json
+  { "mcpServers": { "godmode-fleet": {
+    "type": "http",
+    "url": "http://127.0.0.1:31337/mcp/fleet",
+    "headers": { "Authorization": "Bearer ${GODMODE_API_KEY}" }
+  } } }
+  ```
+
+  Claude Code expands `${VAR}` in `.mcp.json`, so the key can stay in the environment of the shell that runs the overseer rather than in the file. A codespace's URL is `https://<codespace-name>-31337.app.github.dev/mcp/fleet`, with a GitHub token of the codespace's user (`gh auth token`).
+- **Tools.** Each returns JSON text, PascalCase as the hub's models; a refusal is the tool's error, with the reason the hub would give.
+  - `list_sessions` — every session: `Id`, `Name`, `Profile`, `Root`, `Kind`, `Action`, `State`, `ParentId`, `Needs` (its attention item's kind: `Permission`, `Question`, `Error`, `Review`, `Finished`; absent when nothing) and `PullRequestUrl`.
+  - `list_roots` — `Profiles`, and `Roots` with their `Actions` as `ListProjectRoots` gives them: each action's `InputSchema`, `Model`, `Effort` and whether it starts a `Session`.
+  - `start_session(profile, root, action?, inputs?, model?, effort?, parent?)` — `CreateProject`'s path: `inputs` by the action's schema, `model` and `effort` over the action's (an unknown effort is refused). Without `parent` the session is top level; with it, that session's child ([A session's parent](#a-sessions-parent)). It is pushed to the app as `ProjectCreated`, and returns its `Id`, `Name`, `State`, `Kind`, `ParentId`, `Model` and `Effort`; an action that starts no session returns its script's `Message`. Refused: a `skipPermissions` input (the session's prompts are the user's), and a `__parentId` input (`parent` names the parent).
+  - `send(session, text)` — `ReplyAndResume`: to a running claude, or a resume with it. **Refused while the session waits on a permission prompt or an AskUserQuestion**, changing nothing: those are the user's to answer, in the app. Returns its `State`.
+  - `read(session, turns?)` — `State`, `Kind`, `ParentId`, `Model`, `Effort`, `PullRequestUrl`, `WaitingOn` (what it needs, in full: a permission's `Tool`, summary and `Detail`, everything the call would run, as `GetPermissionDetail` gives it; a question's text and its `Question` with options; the whole error; a pull request's review; a finished turn's whole result), and `Replies`, its last `turns` (default 1, at most 20) replies, oldest first ([A session's last replies](#a-sessions-last-replies)).
+  - `stop(session)`, `resume(session)` — `StopProject` and `ResumeProject`. Return the `State`.
+- **Not provided:** answering a permission or a question, delete, forget, adopt, restore, or anything that writes config. Merging stays in the overseer's own `gh`: the server is VCS-agnostic.
+
+### A session's last replies
+
+What a session said, whether or not it needs the user, read from its `output.jsonl`: the fleet's `read`, and voice's last answer (#378). On the server it is `IProjectManager.LastRepliesAsync(projectId, turns)` (`OutputLog.LastRepliesAsync` on a state folder), which gives `AssistantReply(Text, Finished, IsError)`s, oldest first.
+
+- **A turn ends with a `result` line.** Its reply is its last assistant message that has text (the text blocks joined by a blank line), which is claude's reply as its result repeats it; a turn with none (tool calls only) has the result's text, maybe empty. `IsError` is the result's `is_error`.
+- **What claude says after its last result is a turn too**, `Finished: false`, once a message of it has text: the turn under way, or one a stop cut short. Lines with no text (a resume's `system/init`, a message just sent, tool calls) make no turn, so the last reply is still there after a resume or a send.
+- **Fewer** when the output has fewer, none when it has none. The file is read from its end, only as far back as the turns go.
+
 ### Input Schema (Convention-Based)
 
 Place a `schema.json` file in the action's folder: `{actionName}/schema.json`. If no schema file exists, the default schema (name + prompt + skip permissions) is used.
@@ -734,6 +768,7 @@ Utility:
 - `GET /health` — Anonymous liveness probe
 - `GET /` — What the server is, with the key: `{"service":"GodMode.Server","version":…,"status":"running"}` (the app's codespace probe reads it). No path serves a page
 - `POST /mcp` — GodMode's MCP endpoint, for its sessions' claude, with the project token of its MCP config: see [The MCP endpoint](#the-mcp-endpoint)
+- `POST /mcp/fleet` — The fleet's MCP endpoint, for an overseer outside GodMode, with the server's own credential: see [The fleet endpoint](#the-fleet-endpoint)
 
 ## Dependencies
 
