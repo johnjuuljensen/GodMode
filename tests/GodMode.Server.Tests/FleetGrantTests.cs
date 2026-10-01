@@ -17,7 +17,7 @@ namespace GodMode.Server.Tests;
 /// Overseer sessions, against the real server with FakeClaude: a session has the fleet's tools when its action's
 /// config says <c>"fleetTools": true</c>, or <c>"grantable"</c> and the session that started it granted them. Its MCP
 /// config then lists the fleet's endpoint, which takes its project token and checks the grant, in the root's config
-/// as it is then, on every call. Nothing the session can write itself grants them. The sessions it starts are its
+/// as it is then, on every call. Nothing in its working folder grants them. The sessions it starts are its
 /// children unless it asks for top-level ones.
 /// </summary>
 public class FleetGrantTests
