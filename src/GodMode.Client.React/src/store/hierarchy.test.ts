@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectionState, GodModeHub } from '../signalr/hub';
 import type { ProjectRootInfo, ProjectState, ProjectSummary } from '../signalr/types';
-import { rebuildHierarchy, type OtherRootChildren, type ServerConnection, type SidebarGroupBy, type SidebarItem } from './hierarchy';
+import { foldItems, rebuildHierarchy, type OtherRootChildren, type ServerConnection, type SidebarGroupBy, type SidebarItem } from './hierarchy';
 
 const issue = [{ Name: 'issue', AllowSkipPermissions: false, Session: true, Transient: false }];
 
@@ -229,5 +229,24 @@ describe('a cycle planted in status.json', () => {
 
   it.each<OtherRootChildren>(['nest', 'stay'])('ends, its sessions at the top level, and what hangs off it under them (%s)', otherRoot => {
     expect(tree([cyclic()], 'root', 'All', otherRoot)).toEqual(['P (4)', '  work', '    c1', '      c4', '    c2', '    c3']);
+  });
+});
+
+describe('folding older sessions (#325) with what they started', () => {
+  const now = new Date('2026-10-01T12:00:00Z').getTime();
+  const old = '2026-09-01T00:00:00Z';
+  const topOf = (child: ProjectState) => rebuildHierarchy([server('A', [rootOf('work', 'P')], [
+    projectOf('parent', 'P', 'work', 'Stopped', old),
+    childOf('P/work/parent', 'child', 'P', 'work', child, old),
+  ])], 'All', 'root').profileGroups[0].rootGroups[0].items;
+
+  it('folds a parent with its children when all of them are quiet', () => {
+    const { shown, older } = foldItems(topOf('Stopped'), now, () => false);
+    expect([shown.length, older.map(i => i.project.Name)]).toEqual([0, ['parent']]);
+  });
+
+  it('keeps a quiet parent shown while a child of it is live', () => {
+    const { shown, older } = foldItems(topOf('Running'), now, () => false);
+    expect([shown.map(i => i.project.Name), older.length]).toEqual([['parent'], 0]);
   });
 });

@@ -121,7 +121,7 @@ it('shows no dot on a collapsed parent when nothing under it needs the user, nor
   expect(toggleOf('overseer')!.querySelector('.project-children-attention')).toBeNull();
 });
 
-it('keeps a collapse across a new list, and on this device', async () => {
+it('keeps a collapse on this device', async () => {
   await showFleet();
   await click(toggleOf('epic')!);
   expect(outline()).toEqual(['overseer', '  epic']);
