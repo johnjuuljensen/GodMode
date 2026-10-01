@@ -8,6 +8,16 @@ interface Props {
   item: SidebarItem;
   isSelected: boolean;
   onSelect: () => void;
+  /** What it started (#390), when it started any: its row's toggle shows or hides them. */
+  nested?: NestedToggle;
+}
+
+/** A parent's toggle: collapsed, it shows how many sessions are under it, and a dot when any of them needs the user. */
+export interface NestedToggle {
+  collapsed: boolean;
+  count: number;
+  needsYou: boolean;
+  onToggle: () => void;
 }
 
 /** How far a swipe to the left opens the row, showing Delete behind it (px). */
@@ -24,8 +34,8 @@ const MENU_HEIGHT_PX = 44;
  * A session in the list. Its delete is never a bare button (#325): on a phone the row is swiped to the
  * left to show Delete behind it; on a desktop its ⋯ button, or a right-click on it, opens a menu with Delete.
  */
-export function ProjectItem({ item, isSelected, onSelect }: Props) {
-  const { project, serverLabel } = item;
+export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
+  const { project, serverLabel, ownRoot, startedBy } = item;
   const timeAgo = formatRelativeTime(project.UpdatedAt);
   const clientQuestion = useAppStore(s => s.projectQuestions[item.key]);
   const isMobile = useAppStore(s => s.isMobile);
@@ -126,9 +136,11 @@ export function ProjectItem({ item, isSelected, onSelect }: Props) {
           <div className="project-name-row">
             <div className="project-name">{project.Name}</div>
             <KindLabel kind={project.Kind} />
+            {ownRoot && <span className="project-own-root" title={`In ${ownRoot}`}>{ownRoot}</span>}
           </div>
           <div className="project-meta">
             {serverLabel && `${serverLabel} · `}{project.RootName && `${project.RootName} · `}{timeAgo}
+            {startedBy && <span className="project-started-by">{' · started by '}{startedBy}</span>}
             {isWaiting && project.CurrentQuestion && (
               <span className="project-question-hint" title={project.CurrentQuestion}>
                 {' · '}{project.CurrentQuestion.length > 30
@@ -138,6 +150,19 @@ export function ProjectItem({ item, isSelected, onSelect }: Props) {
             )}
           </div>
         </div>
+        {nested && (
+          <button
+            className={`project-children-toggle ${nested.collapsed ? 'collapsed' : ''}`}
+            aria-expanded={!nested.collapsed}
+            aria-label={`${nested.collapsed ? 'Show' : 'Hide'} the ${nested.count} under ${project.Name}`}
+            title={nested.collapsed ? `Show the ${nested.count} under it` : 'Hide the sessions under it'}
+            onClick={e => { e.stopPropagation(); nested.onToggle(); }}
+          >
+            {nested.collapsed && <span className="project-children-count">{nested.count}</span>}
+            {nested.needsYou && <span className="project-children-attention" aria-label="needs you" />}
+            <span className="project-children-chevron" aria-hidden="true">{nested.collapsed ? '▸' : '▾'}</span>
+          </button>
+        )}
         {!isMobile && (
           <button
             className="project-item-menu-btn"

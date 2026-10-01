@@ -23,7 +23,7 @@ export { projectKey, type ProjectKey };
 /** The key of a transcript: a project's ProjectKey. */
 export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
-export { isListed, foldItems, inProfile, profileNameOf, sameProfile } from './hierarchy';
+export { isListed, foldItems, descendantsOf, inProfile, profileNameOf, sameProfile } from './hierarchy';
 
 // ── Persisted dismiss tracking ─────────────────────────────────
 // Keyed by ProjectKey; the unversioned key held project IDs alone, which collide across servers
@@ -218,6 +218,9 @@ interface AppState {
   // Sidebar grouping
   sidebarGroupBy: SidebarGroupBy;
   cycleSidebarGroupBy: () => void;
+  /** The parents whose rows are collapsed in the list, hiding what they started (#390); kept on this device. */
+  collapsedSessions: Record<ProjectKey, true>;
+  toggleCollapsed: (key: ProjectKey) => void;
 
   // Server lifecycle
   loadServers: () => Promise<void>;
@@ -396,6 +399,16 @@ export function loadGroupBy(): SidebarGroupBy {
   return SIDEBAR_GROUP_ORDER.includes(v as SidebarGroupBy) ? v as SidebarGroupBy : DEFAULT_GROUP_BY;
 }
 
+const COLLAPSED_KEY = 'godmode-collapsed-sessions';
+/** The collapsed parents this device keeps, else none. */
+function loadCollapsed(): Record<ProjectKey, true> {
+  try {
+    return JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
 /** What a call to a server that is not connected says: a server offline, reconnecting or not. */
 export function offlineMessage(conn: ServerConnection): string {
   return conn.connectionState === 'disconnected'
@@ -483,6 +496,13 @@ export const useAppStore = create<AppState>((set, get) => {
     localStorage.setItem(GROUPBY_KEY, next);
     const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(get().serverConnections, get().profileFilter, next);
     set({ sidebarGroupBy: next, profileGroups, inactiveServers, profileFilterOptions });
+  },
+  collapsedSessions: loadCollapsed(),
+  toggleCollapsed: (key) => {
+    const collapsedSessions = { ...get().collapsedSessions };
+    if (collapsedSessions[key]) delete collapsedSessions[key]; else collapsedSessions[key] = true;
+    try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsedSessions)); } catch { /* kept for this page only */ }
+    set({ collapsedSessions });
   },
 
   lockedProfile: null,

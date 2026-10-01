@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
-  useAppStore, foldItems,
-  type ActivePage, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy,
+  useAppStore, foldItems, descendantsOf,
+  type ActivePage, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy, type SidebarItem,
 } from '../../store';
 import { projectKey } from '../../store/projectKey';
 import { ProjectItem } from './ProjectItem';
@@ -270,10 +270,10 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
   const { serverId, profileName, rootName } = rootGroup;
 
   // Older sessions fold under "N older", one tap away (#325): never one that needs the user or is open
-  const needsYou = new Set(attention.map(a => projectKey(a.serverId, a.ProjectId)));
-  const { shown, older } = foldItems(rootGroup.items, now, item =>
-    needsYou.has(item.key) || !!projectQuestions[item.key]
-    || (selectedProject?.serverId === item.serverId && selectedProject.projectId === item.project.Id));
+  const attentionKeys = new Set(attention.map(a => projectKey(a.serverId, a.ProjectId)));
+  const needsYou = (item: SidebarItem) => attentionKeys.has(item.key) || !!projectQuestions[item.key];
+  const isSelected = (item: SidebarItem) => selectedProject?.serverId === item.serverId && selectedProject.projectId === item.project.Id;
+  const { shown, older } = foldItems(rootGroup.items, now, item => needsYou(item) || isSelected(item));
   const listed = showOlder ? [...shown, ...older] : shown;
 
   return (
@@ -295,15 +295,7 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
           !rootGroup.flat && <div className="project-list-empty">No projects</div>
         ) : (
           listed.map(item => (
-            <ProjectItem
-              key={item.key}
-              item={item}
-              isSelected={
-                selectedProject?.serverId === item.serverId &&
-                selectedProject?.projectId === item.project.Id
-              }
-              onSelect={() => selectProject(item.serverId, item.project.Id)}
-            />
+            <SessionTree key={item.key} item={item} needsYou={needsYou} isSelected={isSelected} onSelect={selectProject} />
           ))
         )}
         {older.length > 0 && (
@@ -313,10 +305,46 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
         )}
         {/* The root's folders GodMode does not manage, one tap from being sessions (#370) */}
         {!rootGroup.flat && rootGroup.canCreate && serverId && (
-          <UnmanagedGroup serverId={serverId} profileName={profileName} rootName={rootName} sessionCount={rootGroup.items.length} />
+          <UnmanagedGroup serverId={serverId} profileName={profileName} rootName={rootName} sessionCount={rootGroup.sessionCount} />
         )}
       </div>
     </div>
+  );
+}
+
+interface SessionTreeProps {
+  item: SidebarItem;
+  needsYou: (item: SidebarItem) => boolean;
+  isSelected: (item: SidebarItem) => boolean;
+  onSelect: (serverId: string, projectId: string) => void;
+}
+
+/**
+ * A session and, under it, the sessions it started, on every level (#390). A parent's row collapses them: it
+ * then shows how many there are, and a dot when any of them needs the user.
+ */
+function SessionTree({ item, needsYou, isSelected, onSelect }: SessionTreeProps) {
+  const collapsed = useAppStore(s => !!s.collapsedSessions[item.key]);
+  const toggleCollapsed = useAppStore(s => s.toggleCollapsed);
+  const below = item.children.length > 0 ? descendantsOf(item) : [];
+  return (
+    <>
+      <ProjectItem
+        item={item}
+        isSelected={isSelected(item)}
+        onSelect={() => onSelect(item.serverId, item.project.Id)}
+        nested={below.length === 0 ? undefined : {
+          collapsed, count: below.length, needsYou: collapsed && below.some(needsYou), onToggle: () => toggleCollapsed(item.key),
+        }}
+      />
+      {below.length > 0 && !collapsed && (
+        <div className="project-children">
+          {item.children.map(child => (
+            <SessionTree key={child.key} item={child} needsYou={needsYou} isSelected={isSelected} onSelect={onSelect} />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
