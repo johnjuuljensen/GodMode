@@ -293,6 +293,13 @@ public static class OutputLog
         if (!File.Exists(path)) return [];
 
         await using var stream = OpenRead(path);
+        return await LastRepliesAsync(stream, turns, ct);
+    }
+
+    /// <summary><see cref="LastRepliesAsync(string, int, CancellationToken)"/> in the file open as <paramref name="stream"/>.</summary>
+    internal static async Task<IReadOnlyList<AssistantReply>> LastRepliesAsync(Stream stream, int turns, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(turns, 1);
         // Read backwards: the turn being read is complete once the result before it (or the file's start) is reached
         var replies = new List<AssistantReply>();
         (string? Text, bool Finished, bool IsError, string ResultText)? turn = null;

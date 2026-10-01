@@ -1,4 +1,6 @@
 using System.Text;
+using System.Text.Json;
+using GodMode.Server.Models;
 using Xunit.Abstractions;
 using GodMode.Server.Services;
 
@@ -225,6 +227,79 @@ public sealed class OutputLogTests : IDisposable
         _output.WriteLine($"tail of the last 2 turns of a {length:N0}-byte output.jsonl: read {stream.BytesRead:N0} bytes");
         Assert.Equal(length - 2 * turn.Length, start);
         Assert.True(stream.BytesRead < 1024 * 1024, $"reading the last 2 turns of a {length:N0}-byte file read {stream.BytesRead:N0} bytes");
+    }
+
+    // ── Last replies (the fleet's read, voice's last answer) ──
+
+    private static string User(string text) => JsonSerializer.Serialize(new { type = "user", message = new { role = "user", content = new[] { new { type = "text", text } } } });
+
+    private static string Assistant(params string[] texts) =>
+        JsonSerializer.Serialize(new { type = "assistant", message = new { role = "assistant", content = texts.Select(text => new { type = "text", text }) } });
+
+    private static string ToolUse() =>
+        """{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}""";
+
+    private static string ResultLine(string result, bool isError = false) => JsonSerializer.Serialize(new { type = "result", is_error = isError, result });
+
+    private const string Init = """{"type":"system","subtype":"init","session_id":"s"}""";
+
+    private void WriteLines(params string[] lines) => WriteFile(string.Concat(lines.Select(line => line + "\n")));
+
+    [Fact]
+    public async Task LastReplies_AreEachTurnsLastText_OldestFirst()
+    {
+        WriteLines(Init, User("one"), Assistant("Looking."), ToolUse(), Assistant("First", "answer"), ResultLine("First\n\nanswer"),
+            User("two"), Assistant("Second answer"), ResultLine("Second answer"),
+            User("three"), Assistant("Third answer"), ResultLine("Third answer"));
+
+        Assert.Equal([new("Second answer", true), new("Third answer", true)], await OutputLog.LastRepliesAsync(_statePath, 2));
+        Assert.Equal(new AssistantReply("First\n\nanswer", true), (await OutputLog.LastRepliesAsync(_statePath, 10))[0]);
+        Assert.Equal(3, (await OutputLog.LastRepliesAsync(_statePath, 10)).Count);
+    }
+
+    [Fact]
+    public async Task LastReplies_TheTurnUnderWay_IsTheLast_OnceItHasText()
+    {
+        WriteLines(Init, User("one"), Assistant("Done"), ResultLine("Done"), User("two"), Assistant("Working on it"), ToolUse());
+
+        Assert.Equal([new("Done", true), new("Working on it", false)], await OutputLog.LastRepliesAsync(_statePath, 2));
+    }
+
+    /// <summary>A resume's init, a message just sent, or a turn of tool calls alone has said nothing yet: the last reply is still the last.</summary>
+    [Fact]
+    public async Task LastReplies_AfterTheLastResult_LinesWithNoText_AreNoTurn()
+    {
+        WriteLines(Init, User("one"), Assistant("Done"), ResultLine("Done"), Init, User("two"), ToolUse(), "not json", "");
+
+        Assert.Equal([new("Done", true)], await OutputLog.LastRepliesAsync(_statePath, 1));
+    }
+
+    [Fact]
+    public async Task LastReplies_ATurnWithNoText_HasItsResultsText_AndAnErrorSaysSo()
+    {
+        WriteLines(User("one"), ToolUse(), ResultLine("Only the result"), User("two"), ResultLine("It failed", isError: true));
+
+        Assert.Equal([new("Only the result", true), new("It failed", true, IsError: true)], await OutputLog.LastRepliesAsync(_statePath, 2));
+    }
+
+    [Fact]
+    public async Task LastReplies_OfNoOutput_AreNone()
+    {
+        Assert.Empty(await OutputLog.LastRepliesAsync(_statePath, 1));
+        WriteLines(Init, User("one"));
+        Assert.Empty(await OutputLog.LastRepliesAsync(_statePath, 3));
+    }
+
+    [Fact]
+    public async Task LastReplies_ReadOnlyAsFarBackAsTheTurnsGo()
+    {
+        var turn = User("q") + "\n" + Assistant(new string('x', 10_000)) + "\n" + ResultLine("r") + "\n";
+        WriteFile(string.Concat(Enumerable.Repeat(turn, 500)) + User("q") + "\n" + Assistant("Last") + "\n" + ResultLine("Last") + "\n");
+        var length = new FileInfo(FilePath).Length;
+
+        await using var stream = new CountingStream(File.OpenRead(FilePath));
+        Assert.Equal([new("Last", true)], await OutputLog.LastRepliesAsync(stream, 1));
+        Assert.True(stream.BytesRead < 1024 * 1024, $"reading the last reply of a {length:N0}-byte file read {stream.BytesRead:N0} bytes");
     }
 
     /// <summary>A read-only stream over another that counts the bytes read through it.</summary>
