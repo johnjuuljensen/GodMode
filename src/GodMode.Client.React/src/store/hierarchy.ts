@@ -30,7 +30,24 @@ export interface SidebarItem {
   serverLabel?: string;
   /** Its action is transient (CreateActionInfo.Transient), as its root lists it: it folds sooner. */
   transient?: boolean;
+  /** The sessions it started, nested under it (#390), in the order its profile lists them. */
+  children: SidebarItem[];
+  /**
+   * Its parent's name, when its parent is listed but it is not nested under it: in another profile, which never
+   * mixes (#308), or in another root with 'stay'.
+   */
+  startedBy?: string;
+  /** Its own root, when it is nested under a parent in another root. */
+  ownRoot?: string;
 }
+
+/**
+ * Where a child in another root of its parent's profile is shown (#390): under its parent, marked with its own
+ * root ('nest', the default: an overseer's fleet reads as one piece of work, wherever its workers' roots are),
+ * or at the top of its own root, noting its parent ('stay').
+ */
+export type OtherRootChildren = 'nest' | 'stay';
+export const DEFAULT_OTHER_ROOT_CHILDREN: OtherRootChildren = 'nest';
 
 export interface RootGroup {
   name: string;          // display name (qualified with server name if multi-server)
@@ -39,7 +56,10 @@ export interface RootGroup {
   /** The server of a root's group; absent on a flat group, whose items may come from several servers. */
   serverId?: string;
   serverName: string;
+  /** Its top-level sessions, each with what it started under it. */
   items: SidebarItem[];
+  /** How many sessions the root has, wherever they are shown: one nested under a parent in another root is still its. */
+  sessionCount: number;
   /** Whether the root's header offers +: the root has create actions and its server is connected. */
   canCreate: boolean;
   flat?: boolean;        // true = render projects directly without root header
@@ -95,7 +115,7 @@ function collectFilteredData(connections: ServerConnection[], filter: string) {
     for (const p of conn.projects) {
       const rn = rootKey(p.ProfileName, p.RootName ?? 'default');
       if (!itemsByRoot.has(rn)) itemsByRoot.set(rn, []);
-      itemsByRoot.get(rn)!.push({ key: projectKey(serverId, p.Id), serverId, project: p });
+      itemsByRoot.get(rn)!.push({ key: projectKey(serverId, p.Id), serverId, project: p, children: [] });
     }
     // A project whose root the server no longer lists (removed while its claude runs, or moved to
     // another profile until it stops) is still shown, under its root's name, with no +
@@ -141,17 +161,24 @@ export function rebuildHierarchy(
   connections: ServerConnection[],
   filter: string,
   groupBy: SidebarGroupBy = DEFAULT_GROUP_BY,
+  otherRoot: OtherRootChildren = DEFAULT_OTHER_ROOT_CHILDREN,
 ): HierarchyResult {
   const { allRoots, inactiveServers, profileFilterOptions } = collectFilteredData(connections, filter);
   const build = { root: rootGroupsOf, recent: recentGroupOf, status: statusGroupOf }[groupBy];
-  return { profileGroups: byProfile(allRoots, build), inactiveServers, profileFilterOptions };
+  // Every listed session, in the profile filter or not: a parent filtered out still names its child's note
+  const names = new Map(connections.filter(isListed)
+    .flatMap(c => c.projects.map(p => [projectKey(c.serverInfo.Id, p.Id), p.Name] as const)));
+  return { profileGroups: byProfile(allRoots, build, otherRoot, names), inactiveServers, profileFilterOptions };
 }
 
 /**
  * One group per profile name, sorted, whatever servers it is on: a profile never mixes with another (#308).
- * `build` chooses what is under each profile, from that profile's roots.
+ * `build` chooses what is under each profile, from that profile's roots; then each session nests under its parent.
  */
-function byProfile(allRoots: RootEntry[], build: (roots: RootEntry[]) => RootGroup[]): ProfileGroup[] {
+function byProfile(
+  allRoots: RootEntry[], build: (roots: RootEntry[]) => RootGroup[],
+  otherRoot: OtherRootChildren, names: ReadonlyMap<ProjectKey, string>,
+): ProfileGroup[] {
   const dict = new Map<string, RootEntry[]>();
   for (const r of allRoots) {
     if (!dict.has(r.profileName)) dict.set(r.profileName, []);
@@ -160,13 +187,69 @@ function byProfile(allRoots: RootEntry[], build: (roots: RootEntry[]) => RootGro
   return [...dict.entries()].sort(([a], [b]) => a.localeCompare(b))
     .map(([name, roots]) => {
       const rootGroups = build(roots);
-      return { key: name, name, rootGroups, projectCount: rootGroups.reduce((n, rg) => n + rg.items.length, 0) };
+      const projectCount = rootGroups.reduce((n, rg) => n + rg.items.length, 0);
+      nest(rootGroups, otherRoot, names);
+      return { key: name, name, rootGroups, projectCount };
     });
+}
+
+/** The key of the session that started the item: on its own server, as no session starts one on another. */
+const parentKeyOf = (item: SidebarItem) => item.project.ParentId ? projectKey(item.serverId, item.project.ParentId) : null;
+
+/**
+ * Nests a profile's sessions under their parents (#390), on as many levels as there are. A session is at the
+ * top when its parent is not in the profile's list (gone; in another profile, or another root with 'stay',
+ * which it notes), and when it is its own ancestor: a self-parent or a cycle, planted in status.json, never
+ * loops. What hangs off a cycle nests under it as usual.
+ */
+function nest(groups: RootGroup[], otherRoot: OtherRootChildren, names: ReadonlyMap<ProjectKey, string>) {
+  const groupOf = new Map<ProjectKey, RootGroup>();
+  const byKey = new Map<ProjectKey, SidebarItem>();
+  for (const g of groups) {
+    for (const i of g.items) { groupOf.set(i.key, g); byKey.set(i.key, i); }
+  }
+  const sameRoot = (a: SidebarItem, b: SidebarItem) => a.project.RootName === b.project.RootName;
+  // The parent it may sit under, before cycles are broken
+  const candidate = (i: SidebarItem) => {
+    const key = parentKeyOf(i);
+    const parent = key ? byKey.get(key) : undefined;
+    return parent && (otherRoot === 'nest' || sameRoot(i, parent)) ? parent : undefined;
+  };
+  // Whether the item is reached again from its parent. Each step is to an item not seen yet, so it ends
+  const onCycle = (i: SidebarItem) => {
+    const seen = new Set<SidebarItem>();
+    for (let p = candidate(i); p && !seen.has(p); p = candidate(p)) {
+      if (p === i) return true;
+      seen.add(p);
+    }
+    return false;
+  };
+
+  const all = groups.flatMap(g => g.items);
+  const parents = new Map<SidebarItem, SidebarItem>();
+  for (const i of all) {
+    i.children = [];
+    const parent = candidate(i);
+    const key = parentKeyOf(i);
+    if (parent) {
+      // A cycle's members are at the top, with no note
+      if (!onCycle(i)) parents.set(i, parent);
+    } else if (key) {
+      i.startedBy = names.get(key);
+    }
+  }
+  for (const i of all) {
+    const parent = parents.get(i);
+    if (!parent) continue;
+    parent.children.push(i);
+    if (!groupOf.get(parent.key)!.flat && !sameRoot(i, parent)) i.ownRoot = i.project.RootName ?? undefined;
+  }
+  for (const g of groups) g.items = g.items.filter(i => !parents.has(i));
 }
 
 /** A profile's projects listed directly, with no root header. */
 const flatGroup = (profileName: string, items: SidebarItem[]): RootGroup => ({
-  name: '', rootName: '', profileName, serverName: '', items, canCreate: false, flat: true,
+  name: '', rootName: '', profileName, serverName: '', items, sessionCount: items.length, canCreate: false, flat: true,
 });
 
 /** A root header per server, each with its +, then that root's projects. */
@@ -182,6 +265,7 @@ function rootGroupsOf(roots: RootEntry[]): RootGroup[] {
       serverId: conn.serverInfo.Id,
       serverName: conn.serverInfo.Name,
       items,
+      sessionCount: items.length,
       canCreate: (root.Actions?.length ?? 0) > 0 && conn.connectionState === 'connected',
     }));
 }
@@ -232,12 +316,20 @@ export const TRANSIENT_FOLD_AFTER_MS = 1 * DAY_MS;
 /** A session with a claude (working, waiting on the user, or idle between turns) never folds, however old. */
 const LIVE_STATES = new Set(['Running', 'WaitingInput', 'WaitingPermission', 'Idle']);
 
-/** Whether the item folds at `now`: no claude, nothing the caller keeps it for (it needs the user, it is open), and quiet long enough. */
+/**
+ * Whether the item folds at `now`: no claude, nothing the caller keeps it for (it needs the user, it is open),
+ * and quiet long enough. A parent folds with what it started, and only when every one of them folds too (#390).
+ */
 export function folds(item: SidebarItem, now: number, keep: (item: SidebarItem) => boolean): boolean {
   if (LIVE_STATES.has(String(item.project.State ?? 'Idle')) || keep(item)) return false;
   const quiet = now - new Date(item.project.UpdatedAt).getTime();
-  return quiet > (item.transient ? TRANSIENT_FOLD_AFTER_MS : FOLD_AFTER_MS);
+  return quiet > (item.transient ? TRANSIENT_FOLD_AFTER_MS : FOLD_AFTER_MS)
+    && item.children.every(c => folds(c, now, keep));
 }
+
+/** Every session nested under the item, on every level. */
+export const descendantsOf = (item: SidebarItem): SidebarItem[] =>
+  item.children.flatMap(c => [c, ...descendantsOf(c)]);
 
 /** A group's items split in two, each in the order it had: those shown, and those folded under "N older". */
 export function foldItems(items: SidebarItem[], now: number, keep: (item: SidebarItem) => boolean): { shown: SidebarItem[]; older: SidebarItem[] } {

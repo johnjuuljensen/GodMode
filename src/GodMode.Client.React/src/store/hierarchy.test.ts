@@ -201,8 +201,10 @@ describe('nesting', () => {
   });
 
   it.each<SidebarGroupBy>(['recent', 'status'])('nests by %s too, under the profile', groupBy => {
-    expect(tree([fleet()], groupBy).slice(0, 6)).toEqual(expect.arrayContaining(['    overseer', '      epic', '        worker-1 [work]', '        worker-2']));
-    expect(tree([fleet()], groupBy).filter(l => l.trim() === 'epic')).toEqual(['      epic']);
+    const shown = tree([fleet()], groupBy);
+    // No root headers, so no root markers: each row's meta names its root
+    expect(shown.slice(shown.indexOf('    overseer'), shown.indexOf('    overseer') + 4)).toEqual(['    overseer', '      epic', '        worker-2', '        worker-1']);
+    expect(shown.filter(l => l.trim() === 'epic')).toEqual(['      epic']);
   });
 
   it('nests only under a parent on its own server', () => {
