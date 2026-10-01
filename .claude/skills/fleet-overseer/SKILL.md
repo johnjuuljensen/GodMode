@@ -1,13 +1,36 @@
 ---
 name: fleet-overseer
-description: Run a set of interdependent GitHub issues to completion across parallel Claude sessions in ac-gwt worktrees — schedule by dependency and by project, dispatch workers, review their pull requests, integrate on an epic branch, and escalate only the decisions a human owns. Use when asked to oversee issues, run an epic, or coordinate several issues at once.
+description: Run a set of interdependent GitHub issues to completion across parallel Claude sessions — GodMode sessions started with GodMode.Server's fleet tools, or ac-gwt worktree tabs where there are none — schedule by dependency and by project, dispatch workers, review their pull requests, integrate on an epic branch, and escalate only the decisions a human owns. Use when asked to oversee issues, run an epic, or coordinate several issues at once.
 ---
 
 # Overseeing a fleet
 
-A worker is an ordinary interactive Claude session in its own worktree, in its own terminal tab,
-launched by `ac-gwt`. It is not a subagent. The person at the keyboard can interrupt it, take it
-over and resume it, and that must stay true.
+A worker is an ordinary Claude session in its own worktree: a GodMode session you start with the
+fleet's tools, or, without them, an interactive session in its own terminal tab launched by
+`ac-gwt`. It is not a subagent. A person can interrupt it, take it over and resume it — in the app,
+or at the keyboard — and that must stay true.
+
+## Where you run decides how you dispatch
+
+Look at your own tools first. There are three ways to run, and one protocol under all of them.
+
+| You are | You have | Workers are | You follow them with |
+|---|---|---|---|
+| **A GodMode session** (an `overseer` or `epic` action; your folder has `.godmode/`) | `mcp__godmode-fleet__*` | GodMode sessions, nested under you in the app | `list_sessions`, `read`, GitHub, and a wake you arm ([Waking](#waking)) |
+| **The user's own `claude`**, with GodMode.Server's `/mcp/fleet` in its MCP config (the server README, *The fleet endpoint*) | `mcp__godmode-fleet__*` | GodMode sessions, top level | the same; `notify_when_idle` reaches no GodMode session |
+| **Neither** | no fleet tools | `ac-gwt` tabs ([Dispatching without the tools](#dispatching-without-the-tools)) | `ListAgents`, `SendMessage` with `notify_when_idle` |
+
+With the tools, every session you start is in the app's list, notifies the user, and asks the user
+— never you — for its permissions. A worker's permission prompt or question is the user's: no tool
+answers one, and `send` is refused while one waits. Leave it; it is already in their inbox.
+
+A GodMode session's fleet tools see its own profile only, and its `start_session` makes the new
+session its child unless it says `top_level: true`. The user's own `claude` sees every profile, and
+starts top-level sessions.
+
+An overseer that is a GodMode session and was **deleted or forgotten, then restored** from the trash
+has no fleet tools any more (the server drops the grant, on purpose). Do not try to get them back:
+the user starts a new overseer, and it rebuilds the picture from GitHub, as any restart does.
 
 ## You never edit code
 
@@ -60,11 +83,17 @@ in your own head.
 You arrive into work already in progress — the first time, and again after every restart. Build the
 picture yourself. Anything you were told is a hint to check, not a finding.
 
-1. **Sessions.** `ListAgents`. It is scoped to this `CLAUDE_CONFIG_DIR`, so every row is yours. A
-   name is the worktree folder truncated; `git -C <worktree> rev-parse --abbrev-ref HEAD` gives its
-   branch when the truncation hides it. Workers are launched with the `claudeCommand` in
-   `..\.worktree.json` (`claude-mega`), so you must be running under that same config dir or the
-   fleet is invisible to you.
+1. **Sessions.** With the tools, `list_sessions`: each session's ID, kind, state, parent, what it
+   needs from the user, and its pull request. The ones you started have you as `ParentId` (your own
+   ID is the `ParentId` your first `start_session` returns); a predecessor's are adopted by their
+   issue and pull request ([Adopting](#adopting-a-session-you-did-not-launch)); an epic overseer's
+   children are its own. Without the tools, `ListAgents`.
+   `ListAgents` is scoped to this `CLAUDE_CONFIG_DIR`, so every row it shows is yours (not so
+   `list_sessions`, which shows the user's and other overseers' sessions too). A name is the worktree folder
+   truncated; `git -C <worktree> rev-parse --abbrev-ref HEAD` gives its branch when the truncation
+   hides it. Workers are launched with the `claudeCommand` in `..\.worktree.json`, so you must be
+   running under that same config dir or the fleet is invisible to you. GodMode sessions are never
+   in `ListAgents`, and ac-gwt tabs never in `list_sessions`: in a fleet that has both, look at both.
 2. **Branches to issues to pull requests.** The issue number is in the branch name; confirm against
    `gh pr list --state all --json number,headRefName,baseRefName,isDraft,state`.
 3. **Finished or live.** A session whose pull request has merged is finished, not adoptable — stop
@@ -93,6 +122,10 @@ picture yourself. Anything you were told is a hint to check, not a finding.
 
 Then report the survey and wait. A picture the user corrects in one message is cheaper than a wrong
 dispatch, and it is the only moment where correcting you is cheap.
+
+**Inside GodMode, do not wait:** nobody is at your keyboard, and a turn that ends on a question waits
+on the user's inbox. Put the survey in your turn's output, where the user can read it in the app,
+and go on with what `autoclaude` already covers. A correction reaches you as a message.
 
 ## Read the graph from the API, the order from the prose
 
@@ -220,7 +253,7 @@ An epic is evaluated the same way before you launch an overseer for it.
 
 ## Dispatching
 
-**One issue, one `ac-gwt` session, one worktree, one branch — no exceptions.** Never re-brief a
+**One issue, one session, one worktree, one branch — no exceptions.** Never re-brief a
 session onto a second issue, however idle it looks and however cheap the next task is. It is not a
 tidiness rule:
 
@@ -232,10 +265,39 @@ tidiness rule:
 - The branch left behind still has a pull request, reviews and possibly a fault to come back to. The
   session that wrote it is where that context lives.
 
-A finished session is a record, not a resource. Stop tracking it and leave it alone.
+A finished session is a record, not a resource. Stop tracking it and leave it alone. With the
+tools that means: never `stop` it, never `send` it the next issue. Deleting it is the user's.
 
-Write a brief per worker from `brief-worker.md`, then, from PowerShell (`ac-gwt-issue` is a `.ps1`
-in `~\.autoclaude`, on `PATH`):
+Write a brief per worker from `brief-worker.md`. **Do not pass a model** — workers and overseers
+alike run on the configured default model. Effort you may set, when the issue calls for it.
+
+### Dispatching with the tools
+
+`list_roots` once, for the root's name, its profile and its actions' input schemas. Then, for the
+godmode-dev root (the repo's own; its name and profile are whatever `list_roots` says on this
+server):
+
+```text
+start_session(profile: <the root's profile>, root: <its name>, action: "issue",
+              inputs: { issueNumber: "<n>", baseBranch: "origin/<epic branch>", brief: "<the brief>" })
+```
+
+- `baseBranch` is the epic branch, or a sibling's when stacking; leave it out for `origin/master`.
+  The issue action cuts the worktree from it and tells the worker to target it.
+- `brief` is appended to the issue's prompt, as the worker's first turn. Paste it whole: it is the
+  only brief the worker gets.
+- **An epic with its own branch gets an epic overseer:** `action: "epic", inputs: { issueNumber:
+  "<n>", brief: "<from brief-epic-overseer.md>" }`. Its action has the fleet's tools already; it
+  makes or checks out `epic/<n>-<slug>` and pushes it. Pass no `fleet_tools`: that is for an action
+  that says `"grantable"`.
+- Never `skipPermissions`: it is refused, and the worker's prompts are the user's anyway.
+
+The result is the session's ID, its state and its parent (you, inside GodMode). Write the pairing on
+the issue — `IS#<n>: started as <ID>` — so a replacement overseer finds it without your context.
+
+### Dispatching without the tools
+
+From PowerShell (`ac-gwt-issue` is a `.ps1` in `~\.autoclaude`, on `PATH`):
 
 ```powershell
 ac-gwt-issue <n> -BaseBranch <ref> -PromptFile <brief> -NonInteractive -Json
@@ -248,19 +310,63 @@ Branch prefix and default base come from the issue's labels via `branchTypes` in
 `epic` → `epic/<n>-<slug>`, `bug` → `bug/<n>-<slug>`, anything else → `feature/<n>-<slug>`, all
 cut from `origin/master` unless `-BaseBranch` says otherwise.
 
-`-BaseBranch` is the epic branch, or a sibling's branch when stacking. Do not pass `--model` —
-workers and overseers alike run on the configured default model. Take the worktree path from
-the JSON line — the one starting `{` — rather than deriving the branch slug yourself.
+`-BaseBranch` is the epic branch, or a sibling's branch when stacking. Do not pass `--model`. Take
+the worktree path from the JSON line — the one starting `{` — rather than deriving the branch slug
+yourself.
 
 `wt` returns before the session exists. Do not guess its name: the brief tells the worker to
 announce itself, and you learn the address from the `from` on its message. To hear when a worker
 next goes idle, `SendMessage` with `notify_when_idle: true` rather than polling.
 
+## Waking
+
+A worker that is a GodMode session cannot message you, and `notify_when_idle` never fires for one:
+GodMode sessions are not in `ListAgents`. It reports through its pull request — draft while
+working, ready when done, a comment when it has pushed a review fix — and through its state in
+`list_sessions`. So nothing wakes you unless you arrange it.
+
+This is for the two modes with the tools. An overseer of `ac-gwt` tabs keeps `notify_when_idle` and
+polls nothing.
+
+**End every turn with a wake armed**, unless the fleet is done. Claude starts a turn of its own when
+a background task it started finishes, in a GodMode session as in a terminal. So arm one with Bash
+`run_in_background`, **last in the turn**, after your own comments, merges and other GitHub writes
+(armed earlier, your own comment would wake you):
+
+```bash
+pwsh -NoProfile -File .claude/skills/fleet-overseer/wake.ps1 -Base <your epic branch, or master> -Minutes 20
+```
+
+It exits — and you wake — when any pull request into that base changes (opened, ready, back to
+draft, a review decision, a review, a comment, a push to one that is ready, merged, closed), or after
+`-Minutes`. A draft's pushes do not wake you: a worker pushes at every boundary. `-PullRequest
+<n>,<m>` narrows it to the ones you are waiting on. Its baseline is the first poll, so a change
+between your last look and the arming is not seen: make a last `gh pr list` part of the turn, just
+before arming. On waking, read what changed, then
+`list_sessions` for your children: one in `Error`, or idle with no ready pull request after its turn
+ended, is yours to look at (`read` it); one that needs a `Permission` or a `Question` is the user's,
+already in their inbox. Then act, and arm the next wake.
+
+- **One wake at a time.** Each finished task is a turn; two armed are two turns.
+- **A wake does not survive its process.** After a stop, a server restart or a resume, claude starts
+  with no background tasks, so nothing is armed and you stay idle until the user (or an overseer)
+  sends you something. So the first thing on a turn is: is a wake armed? If not, and the fleet is not
+  done, survey, and arm one at the end of the turn.
+- **An epic branch cut before this skill had `wake.ps1`** loads the old skill: merge `origin/master`
+  into it first, then read the skill again.
+- **Your turn's last line is what the user sees** of you, in the app's list and as your item in their
+  inbox. Make it the fleet's state in one line (`IS#43/PR#56 ready, reviewing; IS#44 working`).
+  Never end a turn on a question mark: that is read as you asking the user, and waits.
+- `ScheduleWakeup` and the `Monitor` tool also wake a GodMode session. Prefer the script: it wakes on
+  the GitHub change you are waiting for, not merely on time.
+
 ## Adopting a session you did not launch
 
-Sessions are already running when you arrive. `ListAgents` shows every one under this
-`CLAUDE_CONFIG_DIR` and nothing outside it, so the list is exactly your fleet — other profiles on
-this machine are invisible and unreachable, and you never have to filter them out.
+Sessions are already running when you arrive. With the tools, `list_sessions` shows every GodMode
+session of your profile (every profile, for the user's own `claude`): yours are the ones on an issue
+you own. Without them, `ListAgents` shows every one under this `CLAUDE_CONFIG_DIR` and nothing
+outside it, so the list is exactly your fleet — other profiles on this machine are invisible and
+unreachable, and you never have to filter them out.
 
 A running session has a worktree, probably a branch and a pull request, and none of your protocol.
 Adopt it in this order:
@@ -270,20 +376,24 @@ Adopt it in this order:
    branch when the name is truncated.
 2. **Decide whether it is alive work.** A session whose pull request already merged is finished, not
    adoptable — stop tracking it and leave it where it is.
-3. **Message it once** with what a brief would have carried: load the `fleet-worker` skill, its base
-   branch, the projects and paths it owns, and your address. Say what you believe its state is, so it can
-   correct you rather than guess what you know.
+3. **Message it once** (`send`, or `SendMessage` for a tab) with what a brief would have carried:
+   load the `fleet-worker` skill, its base branch, the projects and paths it owns, and your address
+   (for a GodMode session: none, it reports through its pull request). Say what you believe its
+   state is, so it can correct you rather than guess what you know.
 4. **Ask it to write the working agreement into its pull request body now.** It started without one,
    so nothing durable records what it agreed to.
 
 Never interrupt a busy session to adopt it, and never adopt one the user is typing in — wait for it
-to go idle, with `notify_when_idle: true` rather than polling. An adopted session that was
-mid-thought when you arrived will finish that thought first; let it.
+to go idle (a tab: `notify_when_idle: true`; a GodMode session: `Idle` in `list_sessions`, at a
+wake) rather than polling. An adopted session that was mid-thought when you arrived will finish that
+thought first; let it. An adopted GodMode session keeps its parent: it does not nest under you.
 
 ## The epic branch
 
-`ac-gwt-issue <n>` on an issue labelled `epic` creates `epic/<n>-<slug>`, branched from
-`origin/master`, and gives it a worktree; that is where you live. Every
+godmode-dev's `epic` action, or `ac-gwt-issue <n>` on an issue labelled `epic`, creates
+`epic/<n>-<slug>`, branched from `origin/master` (or checks it out, if it exists), and gives it a
+worktree; that is where you live. The action also pushes it, so workers can be cut from
+`origin/epic/<n>-<slug>`; after `ac-gwt-issue`, push it yourself (`git push -u origin HEAD`). Every
 sub-issue's pull request targets it. You merge those. The single pull request from the epic branch
 to `master` is the user's to merge, and it is the only merge that is.
 
@@ -305,6 +415,11 @@ is hard to reverse. `master` is the opposite on both counts — every push to it
   before you trust a stated gate against a moving epic branch**, and re-run it on the epic branch
   *after* each merge, not only before. Catching this is most of why the epic branch exists — on a
   direct-to-`master` flow both halves land green and the break appears in someone else's work.
+- **A coordinator has no epic branch.** godmode-dev's `overseer` action puts every coordinator in
+  one shared folder, a detached checkout of `origin/master`, for `gh`, `git log` and the skills.
+  Never edit, commit, merge or build in it — its neighbours read it. A trial merge goes in a
+  detached worktree of its own (`git worktree add --detach <scratch dir> origin/master`), removed
+  when you are done with it.
 
 ## Reviewing
 
@@ -394,7 +509,8 @@ authenticates as the same GitHub account, so a worker's pull request is your own
 as GitHub is concerned. Use `gh pr comment`, and say in the text that it is the review. A merged
 pull request with no green check is the normal state here, and means nothing.
 
-On changes requested, message the worker to address it and say so on the pull request too. Still
+On changes requested, message the worker to address it (`send`, for a GodMode session) and say so on
+the pull request too. Still
 failing on the same finding after the second pass is the two rounds this skill escalates at — assign
 it to the human, say what is unresolved, next lane.
 
@@ -448,15 +564,21 @@ dispatched a fix for.
 
 **All of it reaches them by assignment, none of it by stopping.** Assign, comment, keep going. If you
 find yourself composing a message whose purpose is to wait for a reply, you have already made the
-mistake.
+mistake. That holds in every mode: inside GodMode, outside it, or in tabs. A worker's permission
+prompts and questions reach the user without you, through the app's inbox; your own last line is
+in that inbox too, as your state, never as a question.
 
 ## Limits
 
 Never ask a peer session to do something your own permissions refused. A peer doing it for you
 bypasses a decision the user made.
 
-Never take a worker's session over by messaging it while the user is typing in that tab. If a worker
-has gone quiet after the user interrupted it, read the pull request and wait.
+Never take a worker's session over by messaging it while the user is typing in that tab, or replying
+to it in the app. If a worker has gone quiet after the user interrupted it, read the pull request and
+wait.
+
+Nothing caps how many sessions you run at once, per server or per profile. Lanes are the cap: one
+worker per lane.
 
 ## Finishing
 

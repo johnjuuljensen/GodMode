@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "title": "Name", "description": "Short name for this overseer" },
+    "prompt": { "type": "string", "title": "What to coordinate", "x-multiline": true, "description": "The issues or epics to run, and anything already decided" }
+  },
+  "required": ["name", "prompt"]
+}

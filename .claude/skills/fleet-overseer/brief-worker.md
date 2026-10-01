@@ -1,4 +1,6 @@
-<!-- Template. Fill every field; delete nothing. Passed to ac-gwt-issue -PromptFile. -->
+<!-- Template. Fill every field. There are two Report to lines: keep the one that fits how you
+     dispatched and delete the other; delete nothing else. Passed to ac-gwt-issue -PromptFile (the
+     first Report to), or as the issue action's `brief` input to start_session (the second). -->
 
 Use the `fleet-worker` skill, then implement issue #<N> in this worktree.
 
@@ -8,6 +10,11 @@ Use the `fleet-worker` skill, then implement issue #<N> in this worktree.
 
 **Report to:** `<overseer session name>` — message it once now so it learns your address, again when
 the pull request is ready, and again after you push a fix for a review.
+
+**Report to:** your overseer, `<its session ID>`, through your pull request — you are a GodMode
+session and have no address to message: draft while working, ready when done, and a comment
+(`IS#<N>/PR#<pr>: fixed …, pushed <sha>`) when you push a fix for a review. It reaches you with
+messages in this session.
 
 **Known open questions on this issue:** <the ones already parked, or "none recorded">
 

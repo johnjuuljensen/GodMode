@@ -5,6 +5,12 @@ $barePath = Join-Path $env:GODMODE_ROOT_PATH "GodMode.git"
 $projectPath = $env:GODMODE_PROJECT_PATH
 $projectId = $env:GODMODE_PROJECT_FOLDER
 
+# A shared folder (the overseers') is other sessions' too: the server removes only this session's state
+if ($env:GODMODE_SHARED_FOLDER -eq 'true') {
+    Write-Output "The folder is shared, so it stays: only the session's state goes."
+    exit 0
+}
+
 if ($env:GODMODE_FORCE -ne "true") {
     # Check for uncommitted changes
     $status = git -C $projectPath status --porcelain
@@ -44,7 +50,9 @@ if ($env:GODMODE_FORCE -ne "true") {
 git -C $barePath worktree remove $projectPath --force
 
 # Delete the local branch if it was auto-created (project/*)
-if ($branch -like "project/*" -or $branch -like "issue-*") {
+# An epic's branch only when nothing on it is unpushed, checked above: a force delete keeps it, as an
+# epic overseer may have merged into it without pushing yet
+if ($branch -like "project/*" -or $branch -like "issue-*" -or ($branch -like "epic/*" -and $env:GODMODE_FORCE -ne "true")) {
     Write-Output "Deleting local branch '$branch'..."
     git -C $barePath branch -D $branch 2>$null
 }

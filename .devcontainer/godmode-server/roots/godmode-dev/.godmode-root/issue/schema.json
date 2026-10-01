@@ -2,6 +2,8 @@
   "type": "object",
   "properties": {
     "issueNumber": { "type": "string", "title": "Issue Number", "description": "GitHub issue number" },
+    "baseBranch": { "type": "string", "title": "Base Branch", "description": "Branch to cut from, e.g. origin/epic/243-… for a sub-issue of an epic. Empty: origin/master" },
+    "brief": { "type": "string", "title": "Brief", "x-multiline": true, "description": "Optional: added to the issue's prompt (an overseer's brief)" },
     "skipPermissions": { "type": "boolean", "title": "Skip Permissions", "description": "Start Claude with --dangerously-skip-permissions", "default": false }
   },
   "required": ["issueNumber"]

@@ -1,4 +1,6 @@
-<!-- Template. For launching an overseer that owns one epic. -->
+<!-- Template. For launching an overseer that owns one epic: as godmode-dev's epic action's `brief`
+     input to start_session (the action's own prompt already names the epic and its branch), or by
+     ac-gwt-issue -PromptFile. A GodMode epic overseer reports through its epic's pull request. -->
 
 Use the `fleet-overseer` skill. You own epic #<N> and nothing else.
 
