@@ -25,7 +25,8 @@ public class GitIgnoreTests
 
         var launch = await harness.WaitForStdinAsync(created.Id);
         AssertIgnoresEverything(harness.ProjectPath(created.Id));
-        Assert.StartsWith(Path.Combine(harness.ProjectPath(created.Id), ".godmode"), launch.ArgValue("--mcp-config"));
+        // Its token is not in the checkout at all: its MCP config is in the root's logs
+        Assert.Equal(harness.McpConfigPath(created.Id), launch.ArgValue("--mcp-config"));
     }
 
     /// <summary>One the session deleted (or a checkout replaced) is back before the resumed claude gets its token.</summary>

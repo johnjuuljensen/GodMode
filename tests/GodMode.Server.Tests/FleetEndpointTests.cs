@@ -26,7 +26,7 @@ namespace GodMode.Server.Tests;
 public class FleetEndpointTests
 {
     [Fact]
-    public async Task TheApiKey_OpensTheFleetEndpoint_WhichListsTheFleetsToolsAlone_AndASessionsEndpointListsItsPromptAlone()
+    public async Task TheApiKey_OpensTheFleetEndpoint_WhichListsTheFleetsToolsAlone_AndASessionsEndpointListsItsOwnTools()
     {
         // The fake connects to /mcp, listing its tools, when it asks its first permission
         await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin().AskPermission("Bash", new { command = "ls" }).AwaitStdin());
@@ -35,12 +35,12 @@ public class FleetEndpointTests
         var tools = await fleet.ListToolsAsync();
         Assert.Equal(FleetToolNames, tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
 
-        // A session's claude, on /mcp with its project token, is given the permission prompt and nothing of the fleet's
+        // A session's claude, on /mcp with its project token, is given the permission prompt and message_parent, and nothing of the fleet's
         var id = (await run.CallAsync(fleet, "start_session", new() { ["profile"] = Profile, ["root"] = RootName, ["action"] = WorkAction,
             ["inputs"] = new Dictionary<string, object?> { ["name"] = "p1", ["prompt"] = "Start" } })).GetProperty("Id").GetString()!;
         var launch = await run.WaitForLaunchAsync(id, l => l.Tools != null);
         var sessionTools = JsonDocument.Parse(launch.Tools!).RootElement.EnumerateArray().Select(tool => tool.GetProperty("name").GetString());
-        Assert.Equal([PermissionPromptTool.Name], sessionTools);
+        Assert.Equal([MessageParentTool.Name, PermissionPromptTool.Name], sessionTools.Order(StringComparer.Ordinal));
     }
 
     /// <summary>
@@ -225,14 +225,15 @@ public class FleetEndpointTests
     }
 
     /// <summary>
-    /// A permission prompt is the user's: send is refused while one waits, and leaves it waiting with claude given
-    /// nothing; read shows it in full. The user's answer still goes through.
+    /// A permission prompt is the user's: send while one waits is held, and leaves it waiting with claude given
+    /// nothing; read shows it in full. The user's answer goes through, and the message follows once the turn has ended,
+    /// labelled as the overseer's.
     /// </summary>
     [Fact]
-    public async Task Send_IsRefusedWhileAPermissionPromptWaits_AndLeavesTheSessionAsItIs()
+    public async Task Send_IsHeldWhileAPermissionPromptWaits_AndLeavesTheSessionAsItIs_UntilTheUserHasAnswered()
     {
         await using var run = await FleetRun.StartAsync(
-            new FakeScript().EmitInit().AwaitStdin().AskPermission("Bash", new { command = "git push origin main" }, "toolu_push").AwaitStdin());
+            new FakeScript().EmitInit().AwaitStdin().AskPermission("Bash", new { command = "git push origin main" }, "toolu_push").EmitResult().AwaitStdin().AwaitStdin());
         await using var fleet = await run.ConnectFleetAsync();
         var id = await run.StartAsync(fleet, "p1");
         var asking = await run.Client.WaitForAsync(id, s => s.PendingPermission != null, run.Server);
@@ -243,7 +244,9 @@ public class FleetEndpointTests
         Assert.Equal("Bash", waiting.GetProperty("Tool").GetString());
         Assert.Contains("git push origin main", waiting.GetProperty("Detail").GetString());
 
-        Assert.Contains("permission", await run.RefusedAsync(fleet, "send", new() { ["session"] = id, ["text"] = "Allow it yourself" }));
+        var sent = await run.CallAsync(fleet, "send", new() { ["session"] = id, ["text"] = "Allow it yourself" });
+        Assert.Equal("WaitingPermission", sent.GetProperty("State").GetString());
+        Assert.Contains("permission prompt", sent.GetProperty("Held").GetString());
 
         var after = await run.Client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), id);
         Assert.Equal(ProjectState.WaitingPermission, after.State);
@@ -253,13 +256,15 @@ public class FleetEndpointTests
         Assert.Empty(untouched.Permissions);
 
         await run.Client.Hub.InvokeAsync(nameof(IProjectHub.RespondToPermission), id, after.PendingPermission!.RequestId, new PermissionDecision(true));
-        var answered = await run.WaitForLaunchAsync(id, l => l.Permissions.Count == 1);
+        var answered = await run.WaitForLaunchAsync(id, l => l.Permissions.Count == 1 && l.Stdin.Count == 2);
         Assert.Equal("allow", JsonDocument.Parse(answered.Permissions[0]).RootElement.GetProperty("behavior").GetString());
+        Assert.Equal($"{SessionInbox.OverseerLabel}\nAllow it yourself",
+            JsonDocument.Parse(answered.Stdin[1]).RootElement.GetProperty("message").GetProperty("content")[0].GetProperty("text").GetString());
     }
 
-    /// <summary>An AskUserQuestion is the user's too: send would answer it, so it is refused, and read gives its questions.</summary>
+    /// <summary>An AskUserQuestion is the user's too: send would answer it, so it is held, and read gives its questions.</summary>
     [Fact]
-    public async Task Send_IsRefusedWhileAQuestionWaits()
+    public async Task Send_IsHeldWhileAQuestionWaits()
     {
         var question = new { questions = new[] { new { question = "Which branch?", header = "Branch", options = new[] { new { label = "main", description = "the default" } }, multiSelect = false } } };
         await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin().AskPermission("AskUserQuestion", question, "toolu_ask").AwaitStdin());
@@ -272,7 +277,7 @@ public class FleetEndpointTests
         Assert.Equal("Which branch?", waiting.GetProperty("Text").GetString());
         Assert.Equal("main", waiting.GetProperty("Question").GetProperty("Questions")[0].GetProperty("Options")[0].GetProperty("Label").GetString());
 
-        Assert.Contains("question", await run.RefusedAsync(fleet, "send", new() { ["session"] = id, ["text"] = "main" }));
+        Assert.Contains("question", (await run.CallAsync(fleet, "send", new() { ["session"] = id, ["text"] = "main" })).GetProperty("Held").GetString());
         Assert.NotNull((await run.Client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), id)).PendingQuestion);
         var untouched = await run.WaitForLaunchAsync(id, l => true);
         Assert.Single(untouched.Stdin);

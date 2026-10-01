@@ -47,8 +47,10 @@ public class ProjectResumeBridgeTests
             Assert.Equal(ProjectId, godMode.ProjectId);
             Assert.Equal(godMode.Token, launch.Token);
             Assert.NotNull(projects.ValidateProjectToken(ProjectId, godMode.Token));
-            // claude is given no GODMODE_* variables: its MCP config carries the project and token
-            Assert.DoesNotContain(launch.Env ?? [], e => e.Key.StartsWith("GODMODE_"));
+            // claude is given no GODMODE_* variable but its address (it has no parent): its MCP config carries the project and token
+            Assert.Equal([SessionAddress.Variable], (launch.Env ?? []).Keys.Where(key => key.StartsWith("GODMODE_")));
+            Assert.Equal(SessionAddress.OfId(ProjectId), launch.Env![SessionAddress.Variable]);
+            Assert.Equal(SessionAddress.OfId(ProjectId), launch.Args![Array.LastIndexOf(launch.Args, "-n") + 1]);
         }
         finally
         {
@@ -92,7 +94,7 @@ public class ProjectResumeBridgeTests
         Assert.NotNull(args);
         var index = Array.IndexOf(args!, "--mcp-config");
         Assert.True(index >= 0 && index + 1 < args!.Length, $"no --mcp-config in: {string.Join(' ', args!)}");
-        // --mcp-config takes a file path; the server writes the JSON to mcp-config.json in the session's state folder
+        // --mcp-config takes a file path; the server writes the JSON to {root}/logs/{id}.mcp-config.json
         return File.ReadAllText(args[index + 1]);
     }
 

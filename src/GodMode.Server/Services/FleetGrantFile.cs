@@ -5,7 +5,7 @@ using GodMode.Shared;
 namespace GodMode.Server.Services;
 
 /// <summary>
-/// The server's record of what a session was started as, for its fleet tools: <c>{root}/logs/{id}.fleet</c>,
+/// The server's record of what a session was started as, for its fleet tools and its parent: <c>{root}/logs/{id}.fleet</c>,
 /// beside its create log, out of its working folder. Its action, whether the session that started it granted
 /// it the fleet's tools, and its working folder. Written once, by its create or adopt, and never from anything
 /// the session keeps: its <c>settings.json</c> is in its working folder, which it can write, and names its action
@@ -23,7 +23,12 @@ public static class FleetGrantFile
     /// <param name="Action">The action the session was created or adopted with.</param>
     /// <param name="Granted">Whether the session that started it granted it the fleet's tools.</param>
     /// <param name="Folder">Its working folder, relative to the root (<c>.</c> for the root itself), so the record survives a move of the root.</param>
-    public sealed record Grant(string Action, bool Granted, string Folder);
+    /// <param name="Parent">
+    /// The ID of the session that started it, as its create named it (a re-key of the parent rewrites it); null at top
+    /// level. The server's word for its parent, for <c>message_parent</c> and the notices: its <c>status.json</c>'s
+    /// <c>ParentId</c>, which the session can write, only nests it in the app.
+    /// </param>
+    public sealed record Grant(string Action, bool Granted, string Folder, string? Parent = null);
 
     public static string PathFor(string rootPath, string sessionId) =>
         Path.Combine(rootPath, ProjectFolder.ScriptLogsFolderName, sessionId + Extension);

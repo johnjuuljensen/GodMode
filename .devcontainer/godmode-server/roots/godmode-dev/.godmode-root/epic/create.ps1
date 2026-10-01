@@ -66,6 +66,10 @@ if ($onOrigin) {
 $prompt = "Use the ``fleet-overseer`` skill. You own epic #$number and nothing else, as a GodMode session with the fleet's tools. " +
     "Your branch is $branch, checked out here and on origin: every sub-issue's pull request targets it, you merge those, " +
     "and the pull request from it to master is the user's. Read the epic first: ``gh issue view $number``."
+# Started by another session (an overseer): say how to report to it, by Claude Code's own channel or the server's
+if ($env:GODMODE_PARENT_ADDRESS) {
+    $prompt += " You report to your parent session, ``$($env:GODMODE_PARENT_ADDRESS)``: with SendMessage to that name, or, when it is not reachable, with the ``message_parent`` tool."
+}
 if ($brief) { $prompt += "`n`n$brief" }
 
 # The prompt last, as it may span lines

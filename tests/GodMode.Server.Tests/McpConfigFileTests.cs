@@ -15,7 +15,7 @@ public class McpConfigFileTests
         var workDir = ServerProcess.CreateWorkDir("mcpcfg");
         try
         {
-            var path = McpConfigFile.Write(workDir, """{"mcpServers":{}}""");
+            var path = McpConfigFile.WriteFile(Path.Combine(workDir, McpConfigFile.FileName), """{"mcpServers":{}}""");
 
             Assert.Equal(Path.Combine(workDir, "mcp-config.json"), path);
             Assert.Equal("""{"mcpServers":{}}""", File.ReadAllText(path));
@@ -32,8 +32,8 @@ public class McpConfigFileTests
         var workDir = ServerProcess.CreateWorkDir("mcpcfg");
         try
         {
-            McpConfigFile.Write(workDir, "old");
-            var path = McpConfigFile.Write(workDir, "new");
+            McpConfigFile.WriteFile(Path.Combine(workDir, McpConfigFile.FileName), "old");
+            var path = McpConfigFile.WriteFile(Path.Combine(workDir, McpConfigFile.FileName), "new");
 
             Assert.Equal("new", File.ReadAllText(path));
             if (!OperatingSystem.IsWindows())
@@ -51,10 +51,10 @@ public class McpConfigFileTests
         var workDir = ServerProcess.CreateWorkDir("mcpcfg");
         try
         {
-            var path = McpConfigFile.Write(workDir, "{}");
+            var path = McpConfigFile.WriteFile(Path.Combine(workDir, McpConfigFile.FileName), "{}");
             var launchedAt = DateTime.UtcNow;
 
-            McpConfigFile.DeleteIfWrittenBefore(workDir, launchedAt);
+            McpConfigFile.DeleteFileIfWrittenBefore(Path.Combine(workDir, McpConfigFile.FileName), launchedAt);
 
             Assert.False(File.Exists(path));
         }
@@ -71,10 +71,10 @@ public class McpConfigFileTests
         try
         {
             var launchedAt = DateTime.UtcNow;
-            var path = McpConfigFile.Write(workDir, "{}");
+            var path = McpConfigFile.WriteFile(Path.Combine(workDir, McpConfigFile.FileName), "{}");
             File.SetLastWriteTimeUtc(path, launchedAt.AddSeconds(1));
 
-            McpConfigFile.DeleteIfWrittenBefore(workDir, launchedAt);
+            McpConfigFile.DeleteFileIfWrittenBefore(Path.Combine(workDir, McpConfigFile.FileName), launchedAt);
 
             Assert.True(File.Exists(path));
         }
@@ -90,7 +90,7 @@ public class McpConfigFileTests
         var workDir = ServerProcess.CreateWorkDir("mcpcfg");
         try
         {
-            McpConfigFile.DeleteIfWrittenBefore(workDir, DateTime.UtcNow);
+            McpConfigFile.DeleteFileIfWrittenBefore(Path.Combine(workDir, McpConfigFile.FileName), DateTime.UtcNow);
         }
         finally
         {

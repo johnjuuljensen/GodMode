@@ -375,8 +375,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
             if (launchToken != null) Interlocked.CompareExchange(ref project.ProjectTokenField, null, launchToken);
             try
             {
-                McpConfigFile.DeleteIfWrittenBefore(project.StatePath, launchedAt);
-                McpConfigFile.DeleteFileIfWrittenBefore(McpConfigFile.FleetPathFor(project.RootPath, project.SessionId), launchedAt);
+                McpConfigFile.DeleteFileIfWrittenBefore(McpConfigFile.PathFor(project.RootPath, project.SessionId), launchedAt);
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Could not delete the MCP config for project {ProjectId}", id); }
 

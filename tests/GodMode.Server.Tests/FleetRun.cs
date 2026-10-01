@@ -29,6 +29,9 @@ internal sealed class FleetRun : IAsyncDisposable
     public const string OtherProfile = "elsewhere";
     public const string OtherRoot = "other";
 
+    /// <summary>A second root of <see cref="Profile"/>, with a work action: crossing to it as a parent needs a link.</summary>
+    public const string SiblingRoot = "sibling";
+
     public static readonly string[] FleetToolNames = ["list_roots", "list_sessions", "read", "resume", "send", "start_session", "stop"];
 
     private string _workDir = "";
@@ -38,9 +41,14 @@ internal sealed class FleetRun : IAsyncDisposable
     public HttpClient Http { get; private set; } = null!;
     public ServerHubClient Client { get; private set; } = null!;
 
-    public static async Task<FleetRun> StartAsync(FakeScript script)
+    /// <summary>The server's instance config file, <c>main.json</c> in the work dir (<c>--config</c>), which the server reloads when it changes.</summary>
+    public const string InstanceConfigFile = "main.json";
+
+    /// <param name="instanceConfig">The instance config file's content (for example <c>Fleet:Links</c>); <c>{}</c> by default.</param>
+    public static async Task<FleetRun> StartAsync(FakeScript script, string instanceConfig = "{}")
     {
         var run = new FleetRun { _workDir = ServerProcess.CreateWorkDir("fleet") };
+        run.WriteInstanceConfig(instanceConfig);
         var scriptPath = Path.Combine(run._workDir, "fake-claude.script");
         script.Save(scriptPath);
         var rootConfig = Path.Combine(run._workDir, "roots", RootName, ".godmode-root");
@@ -56,6 +64,10 @@ internal sealed class FleetRun : IAsyncDisposable
         });
         File.WriteAllText(Path.Combine(rootConfig, "config.json"), BaseConfig(Profile));
         File.WriteAllText(Path.Combine(rootConfig, $"config.{WorkAction}.json"), "{}");
+        var siblingConfig = Path.Combine(run._workDir, "roots", SiblingRoot, ".godmode-root");
+        Directory.CreateDirectory(siblingConfig);
+        File.WriteAllText(Path.Combine(siblingConfig, "config.json"), BaseConfig(Profile));
+        File.WriteAllText(Path.Combine(siblingConfig, $"config.{WorkAction}.json"), "{}");
         var otherConfig = Path.Combine(run._workDir, "roots", OtherRoot, ".godmode-root");
         Directory.CreateDirectory(otherConfig);
         File.WriteAllText(Path.Combine(otherConfig, "config.json"), BaseConfig(OtherProfile));
@@ -86,7 +98,8 @@ internal sealed class FleetRun : IAsyncDisposable
     private async Task StartServerAsync()
     {
         Server = ServerProcess.Start(_workDir, BaseUrl,
-            environment: new Dictionary<string, string> { ["Claude__Executable"] = LifecycleHarness.FakeClaudePath });
+            environment: new Dictionary<string, string> { ["Claude__Executable"] = LifecycleHarness.FakeClaudePath },
+            arguments: ["--config", InstanceConfigFile]);
         await Server.WaitForHealthyAsync(Http);
         Client = new ServerHubClient(BaseUrl);
         await Client.StartAsync();
@@ -102,6 +115,24 @@ internal sealed class FleetRun : IAsyncDisposable
 
     /// <summary>The root's folder.</summary>
     public string RootPath => Path.Combine(_workDir, "roots", RootName);
+
+    /// <summary>Writes the server's instance config file, as the host would; the server reloads it.</summary>
+    public void WriteInstanceConfig(string json) => File.WriteAllText(Path.Combine(_workDir, InstanceConfigFile), json);
+
+    /// <summary>
+    /// Gives <paramref name="action"/>'s sessions their own script: its overlay, <c>config.{action}.json</c>, is
+    /// <paramref name="overlay"/> (its other keys) with an environment naming the script, and <paramref name="configDir"/>
+    /// as their <c>CLAUDE_CONFIG_DIR</c> when given (the fake only records it).
+    /// </summary>
+    public void WriteActionScript(string action, FakeScript script, Dictionary<string, object?>? overlay = null, string? configDir = null, string root = RootName)
+    {
+        var scriptPath = Path.Combine(_workDir, $"{root}.{action}.script");
+        script.Save(scriptPath);
+        var environment = new Dictionary<string, string> { [FakeClaudeEnvironment.Script] = scriptPath };
+        if (configDir != null) environment["CLAUDE_CONFIG_DIR"] = Path.Combine(_workDir, configDir);
+        var config = new Dictionary<string, object?>(overlay ?? []) { ["environment"] = environment };
+        File.WriteAllText(Path.Combine(_workDir, "roots", root, ".godmode-root", $"config.{action}.json"), JsonSerializer.Serialize(config));
+    }
 
     /// <summary>Writes the action's overlay, <c>config.{action}.json</c>, as the host would.</summary>
     public void WriteActionConfig(string action, string json) =>
@@ -126,8 +157,11 @@ internal sealed class FleetRun : IAsyncDisposable
     }
 
     /// <summary>The session's state folder, <c>.godmode/sessions/{id}/</c>, which the session can write.</summary>
-    public string StatePath(string projectId) =>
-        GodMode.ProjectFiles.SessionState.PathOf(ServerProcess.WorkingFolderOf(RootPath, projectId), projectId.Split('/')[^1]);
+    public string StatePath(string projectId, string root = RootName) =>
+        GodMode.ProjectFiles.SessionState.PathOf(ServerProcess.WorkingFolderOf(Path.Combine(_workDir, "roots", root), projectId), projectId.Split('/')[^1]);
+
+    /// <summary>A root's folder.</summary>
+    public string RootPathOf(string root) => Path.Combine(_workDir, "roots", root);
 
     /// <summary>Starts a session of <paramref name="action"/> as the app's create does, over the hub, and returns its ID.</summary>
     public async Task<string> CreateOverHubAsync(string name, string action, string profile = Profile, string root = RootName) =>

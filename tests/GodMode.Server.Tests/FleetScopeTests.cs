@@ -92,7 +92,7 @@ public class FleetScopeTests
 
         var own = Of(await scoped.Run.CallAsync(scoped.Overseer, "list_roots"));
         Assert.Equal([Profile], own.Profiles);
-        Assert.Equal([RootName], own.Roots);
+        Assert.Equal([SiblingRoot, RootName], own.Roots);
         var all = Of(await scoped.Run.CallAsync(scoped.User, "list_roots"));
         Assert.Contains(OtherProfile, all.Profiles);
         Assert.Contains(OtherRoot, all.Roots);

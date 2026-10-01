@@ -241,6 +241,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public string ProjectPath(string projectId) => Session(projectId).ProjectPath;
 
     /// <summary>The session's state folder, <c>{working folder}/.godmode/sessions/{id}/</c>.</summary>
+    /// <summary>The session's MCP config while its claude runs: <c>{root}/logs/{id}.mcp-config.json</c>, out of its working folder.</summary>
+    public string McpConfigPath(string projectId) => McpConfigFile.PathFor(RootPath, projectId.Split('/')[^1]);
+
     public string StatePath(string projectId) =>
         Session(projectId) is var (projectPath, sessionId) ? SessionState.PathOf(projectPath, sessionId) : throw new UnreachableException();
 

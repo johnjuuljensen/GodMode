@@ -90,6 +90,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         remove => _lifecycle.OnProjectCompleted -= value;
     }
 
+    /// <summary>Where a parent link may cross a root or a profile (<see cref="FleetLinks"/>), read from <see cref="_configuration"/> on every check.</summary>
+    private readonly FleetLinks _links;
+
     /// <summary>The server's configuration, where its roots and profiles are read from on every rebuild (<see cref="RootSources"/>).</summary>
     private readonly IConfiguration _configuration;
 
@@ -213,7 +216,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         IHostApplicationLifetime lifetime,
         ILogger<ProjectManager> logger,
         IServer? server = null,
-        AuthSettings? authSettings = null)
+        AuthSettings? authSettings = null,
+        FleetLinks? links = null)
     {
         _lifecycle = lifecycle;
         _statusUpdater = statusUpdater;
@@ -237,6 +241,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         _logger.LogInformation("Server instance {Instance}", _instance);
 
         _configuration = configuration;
+        _links = links ?? new FleetLinks(configuration, logger);
         _keyFilePath = authSettings?.KeyFilePath is { } keyFile ? Path.GetFullPath(keyFile) : null;
         foreach (var (setting, folder) in RootSources.From(configuration).Folders)
             _logger.LogInformation("Roots from {Setting}: {Folder}", setting, folder);
@@ -1106,7 +1111,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             {
                 // Once its ID is its own: a failed add never replaces another session's record
                 FleetGrantFile.Write(project.RootPath, project.SessionId,
-                    new FleetGrantFile.Grant(action.Name, fleetToolsGranted, Path.GetRelativePath(project.RootPath, project.ProjectPath)));
+                    new FleetGrantFile.Grant(action.Name, fleetToolsGranted, Path.GetRelativePath(project.RootPath, project.ProjectPath), project.Status.ParentId));
                 await _lifecycle.StartAsync(project, prompt, BuildLaunchSpec(project));
             }
             catch (Exception ex)
@@ -1365,26 +1370,33 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <see cref="ReplyAndResumeAsync"/>, under the project's resume lock. With
     /// <paramref name="onlyIfInterrupted"/> (the start carrying on after a shutdown), it sends
     /// nothing to a running claude and resumes only while the project still has its
-    /// <see cref="ProjectStatus.StateAtShutdown"/>; not delivered when it did neither.
+    /// <see cref="ProjectStatus.StateAtShutdown"/>; not delivered when it did neither. A resume carries the messages
+    /// held for the session after <paramref name="text"/>, or alone when <paramref name="text"/> is null.
     /// </summary>
-    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string text, bool onlyIfInterrupted, bool answersPending = true)
+    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string? text, bool onlyIfInterrupted, bool answersPending = true)
     {
         var projectId = project.Status.Id;
         await _lifecycle.SettleAsync(project);
         if (_lifecycle.IsRunning(project))
         {
-            if (onlyIfInterrupted) return new(false);
+            if (onlyIfInterrupted || text == null) return new(false);
             await SendInputAsync(projectId, text, answersPending);
             return new(true);
         }
+
+        // A claude that does not run takes what was held for it with what it is resumed with
+        var (held, heldCount) = await PeekHeldMessagesAsync(project);
+        if (WithHeld(text, held) is not { } input) return new(false);
 
         // claude writes system/init once it has read its first input, so the reply is sent at
         // once and the session start awaited after it
         var sessionStart = project.Process.NextSessionStart();
         if (!await TryResumeAsync(project, onlyIfInterrupted)) return new(false);
-        var sentTo = await TrySendInputAsync(project, text);
+        var sentTo = await TrySendInputAsync(project, input);
+        // A resume that found no conversation sends it again to the fresh session (AwaitSessionStartAsync)
+        await TakeHeldMessagesAsync(project, heldCount);
         await NotifyStatusChanged(project);
-        return new(true, AwaitSessionStartAsync(project, text, sessionStart, sentTo));
+        return new(true, AwaitSessionStartAsync(project, input, sessionStart, sentTo));
     }
 
     /// <summary>
@@ -1481,10 +1493,14 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         await NotifyStatusChanged(project);
     }
 
-    /// <summary>After every status push: the pull request check a transition to Idle or Stopped makes, then the attention list.</summary>
+    /// <summary>
+    /// After every status push: the pull request check a transition to Idle or Stopped makes, the parent's notice and
+    /// the delivery of what is held (<see cref="DeliverOnStatusChange"/>), then the attention list.
+    /// </summary>
     private Task OnStatusNotifiedAsync(ProjectInfo project)
     {
         _pullRequests.Observe(project.Status.Id, project.Status.State);
+        DeliverOnStatusChange(project);
         return PushAttentionIfChangedAsync();
     }
 
@@ -1839,6 +1855,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
 
+        Task? sessionStart = null;
         await WithTrackedLockAsync(project, async () =>
         {
             // Check if process is actually still running (regardless of reported state)
@@ -1861,10 +1878,20 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 return;
             }
 
+            // Messages held for it while it was stopped: it is resumed with them
+            if (SessionInbox.Any(project.RootPath, project.SessionId) && WaitsOnTheUser(project) == null
+                && (await ReplyAndResumeLockedAsync(project, text: null, onlyIfInterrupted: false)) is { Delivered: true } resumed)
+            {
+                sessionStart = resumed.SessionStart;
+                return;
+            }
+
             // A resume with nothing to say: claude waits for input, and writes nothing until it has
             // some, so the project is Idle, resumed and waiting for the user, until then
             await TryResumeAsync(project, onlyIfInterrupted: false, resumedAs: ProjectState.Idle);
         });
+        // As a reply's: after the lock, so a stop is not held behind it
+        if (sessionStart != null) await sessionStart;
     }
 
     /// <summary>
@@ -2172,6 +2199,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 {
                     await DeleteDirectoryRobustAsync(trashed, WhyNotStateOf(rootPath, folder, trashed));
                     FleetGrantFile.Delete(rootPath, sessionId);
+                    SessionInbox.Delete(rootPath, sessionId);
                     _logger.LogInformation("Purged {ProjectId} from the trash of {Folder}", ProjectId(profile, root, sessionId), folder);
                 }
                 catch (Exception ex)
@@ -2415,12 +2443,16 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     private async Task ReparentAsync(IReadOnlyDictionary<string, string> rekeyed, IReadOnlyCollection<ProjectInfo> justRecovered)
     {
         if (rekeyed.Count == 0) return;
-        foreach (var child in _projects.Values.Where(project => project.Status.ParentId is { } parent && rekeyed.ContainsKey(parent)).ToArray())
+        foreach (var child in _projects.Values.Where(project => project.Status.ParentId is { } parent && rekeyed.ContainsKey(parent)
+            || RecordOf(project)?.Parent is { } recorded && rekeyed.ContainsKey(recorded)).ToArray())
         {
             var oldParent = child.Status.ParentId!;
             await _lifecycle.UpdateStatusAsync(child, status =>
                 status.ParentId is { } parent && rekeyed.TryGetValue(parent, out var newParent) ? status with { ParentId = newParent } : status);
             _logger.LogInformation("Project {ProjectId}: its parent {OldParent} is {NewParent} now", child.Status.Id, oldParent, child.Status.ParentId);
+            // The server's own record of its parent follows, so the child still reaches it
+            if (RecordOf(child) is { Parent: { } recorded } grant && rekeyed.TryGetValue(recorded, out var renamed))
+                FleetGrantFile.Write(child.RootPath, child.SessionId, grant with { Parent = renamed });
             if (!justRecovered.Contains(child)) await NotifyStatusChanged(child);
         }
     }
@@ -2980,13 +3012,41 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(project, profileName);
         var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
-        // A session with the fleet's tools keeps its config, and the token that opens them, out of its working folder
         var fleetTools = HasFleetTools(project);
-        var mcpConfigPath = fleetTools ? McpConfigFile.FleetPathFor(project.RootPath, project.SessionId) : McpConfigFile.PathFor(project.StatePath);
+        // Every session's MCP config, with the token that speaks for it, is out of its working folder: a neighbour in a shared folder could read it
+        var mcpConfigPath = McpConfigFile.PathFor(project.RootPath, project.SessionId);
+        // GodMode names the session itself: a root's own name would make its address another than the one it reports
+        if (action.ClaudeArgs is { } claudeArgs && SessionAddress.WithoutName(claudeArgs, out var named) is var unnamed && named)
+        {
+            if (FirstLaunchWarning(project, "name"))
+                _logger.LogWarning("Project {ProjectId}: its action's claudeArgs name the session (-n/--name), which GodMode does itself; it is left out", project.Status.Id);
+            action = action with { ClaudeArgs = unnamed };
+        }
         var (env, args) = BuildClaudeConfig(project.ProjectPath, mcpConfigPath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project), fleetTools),
             project.Status.Model ?? action.Model, LaunchEffort(project, action), profile?.Environment, profileName, stripEnvVarProfile);
-        return new ClaudeLaunchSpec(env ?? new Dictionary<string, string>(), args);
+        env ??= new Dictionary<string, string>();
+        var address = AddressOf(project);
+        env[SessionAddress.Variable] = address;
+        if (project.Status.ParentId is { } parentId)
+        {
+            env[ParentIdVariable] = parentId;
+            if (SessionAddress.OfId(parentId) is { } parentAddress) env[SessionAddress.ParentVariable] = parentAddress;
+        }
+        project.ConfigDir = ConfigDirOf(env);
+        return new ClaudeLaunchSpec(env, [.. args, "-n", address]);
     }
+
+    /// <summary>The session's address in Claude Code's own channel: see <see cref="SessionAddress"/>.</summary>
+    private static string AddressOf(ProjectInfo project) => SessionAddress.Of(project.Status.RootName, project.SessionId);
+
+    /// <summary>
+    /// The config dir claude runs under with <paramref name="env"/>: its <c>CLAUDE_CONFIG_DIR</c>, else the server's own
+    /// (the child environment passes it on), else claude's default, <c>~/.claude</c>.
+    /// </summary>
+    private static string ConfigDirOf(IReadOnlyDictionary<string, string> env) =>
+        FullPath(env.GetValueOrDefault("CLAUDE_CONFIG_DIR") is { Length: > 0 } dir ? dir
+            : Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } own ? own
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"));
 
     /// <summary>
     /// The effort level a create input asks for, as claude spells it: null when it names none, empty
@@ -3177,18 +3237,38 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// </summary>
     private void ForgetFleetGrant(ProjectInfo project)
     {
-        try { FleetGrantFile.Delete(project.RootPath, project.SessionId); }
+        try
+        {
+            FleetGrantFile.Delete(project.RootPath, project.SessionId);
+            SessionInbox.Delete(project.RootPath, project.SessionId);
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.LogWarning("Project {ProjectId}: its fleet grant record could not be deleted: {Reason}", project.Status.Id, ex.Message);
         }
     }
 
+    /// <summary>
+    /// The session's record (<see cref="FleetGrantFile"/>), when it is the session's: written for the session created or
+    /// adopted in its working folder, not a state folder planted under its id elsewhere. Null otherwise, which grants
+    /// nothing and names no parent.
+    /// </summary>
+    private FleetGrantFile.Grant? RecordOf(ProjectInfo project) =>
+        project.Status.RootName != null && FleetGrantFile.Read(project.RootPath, project.SessionId) is { } grant
+        && PathComparer.Equals(FullPath(Path.Combine(project.RootPath, grant.Folder)), FullPath(project.ProjectPath))
+            ? grant
+            : null;
+
+    /// <summary>
+    /// The session's parent as the server recorded it at its create (<see cref="FleetGrantFile.Grant.Parent"/>); null
+    /// for a top-level session, one without a record (made before it was kept), or one whose record is not its own.
+    /// The <c>ParentId</c> in its <c>status.json</c> nests it in the app, and grants nothing.
+    /// </summary>
+    private string? ServerParentOf(ProjectInfo project) => RecordOf(project)?.Parent;
+
     private bool HasFleetTools(ProjectInfo project)
     {
-        if (project.Status.RootName == null || FleetGrantFile.Read(project.RootPath, project.SessionId) is not { } grant) return false;
-        // The record is the session's that was created or adopted in that folder, not a state folder planted under its id elsewhere
-        if (!PathComparer.Equals(FullPath(Path.Combine(project.RootPath, grant.Folder)), FullPath(project.ProjectPath))) return false;
+        if (RecordOf(project) is not { } grant) return false;
         try
         {
             return _rootConfigReader.ReadConfigStrict(project.RootPath).ResolveAction(grant.Action)?.FleetTools switch
@@ -3235,6 +3315,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             // The session's id, yymmdd-{kind}-{slug}-{suffix}: its state is in .godmode/sessions/{id}/. During a create, the id
             // as the action makes it; a kind or project_name in the result file gives the session its final one
             env["GODMODE_SESSION_ID"] = project.SessionId;
+            // Its name in Claude Code's own channel (SessionAddress)
+            env[SessionAddress.Variable] = AddressOf(project);
             // Whether the session shares its working folder with others (its action's sharedFolder): a
             // script then keys what it makes by the session's id, not the folder, and removes no folder
             env[SharedFolderVariable] = project.SharedFolder ? "true" : "false";
@@ -3243,7 +3325,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (resultFilePath != null)
             env["GODMODE_RESULT_FILE"] = resultFilePath;
         if (parentId != null)
+        {
             env[ParentIdVariable] = parentId;
+            // Its address in Claude Code's own channel, for a create script to put in the child's prompt
+            if (SessionAddress.OfId(parentId) is { } parentAddress) env[SessionAddress.ParentVariable] = parentAddress;
+        }
 
         // Add form inputs as GODMODE_INPUT_* env vars
         foreach (var (key, value) in inputs)
