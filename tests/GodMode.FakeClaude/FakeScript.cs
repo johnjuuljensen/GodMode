@@ -98,6 +98,13 @@ public abstract record ScriptStep
     public sealed record AskPermission(string Arguments, bool CancelOnProgress = false) : ScriptStep;
 
     /// <summary>
+    /// Calls <paramref name="Tool"/> on the server <paramref name="Server"/> of its <c>--mcp-config</c>, as claude
+    /// calls an MCP tool the model chose, with <paramref name="Arguments"/> (a JSON object), and records the tool's
+    /// text, or <c>error: …</c> when the tool refused or the call failed.
+    /// </summary>
+    public sealed record CallTool(string Server, string Tool, string Arguments) : ScriptStep;
+
+    /// <summary>
     /// From here on an interrupt is recorded and otherwise ignored. Until this step the fake does
     /// what claude does with one (Ctrl+C or Ctrl+Break on Windows, SIGINT or SIGQUIT elsewhere): in
     /// a turn, it abandons the permission prompt it is waiting on (cancels its call), writes the
@@ -129,6 +136,7 @@ public abstract record ScriptStep
 /// reject-resume
 /// permission {"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_1"}
 /// permission-cancel {"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"toolu_1"}
+/// call-tool godmode message_parent {"text":"Ready for review"}
 /// ignore-interrupt
 /// spawn-child
 /// spawn-detached
@@ -161,6 +169,9 @@ public sealed class FakeScript
     /// <summary>As <see cref="AskPermission"/>, cancelling the call once the server reports progress on it.</summary>
     public FakeScript AskPermissionAndCancel(string toolName, object input, string toolUseId = "toolu_fake") =>
         Add(new ScriptStep.AskPermission(Json(new { tool_name = toolName, input, tool_use_id = toolUseId }), CancelOnProgress: true));
+
+    /// <summary>As <see cref="ScriptStep.CallTool"/>: <paramref name="arguments"/> is serialized as the call's arguments.</summary>
+    public FakeScript CallTool(string server, string tool, object arguments) => Add(new ScriptStep.CallTool(server, tool, Json(arguments)));
 
     public FakeScript IgnoreInterrupt() => Add(new ScriptStep.IgnoreInterrupt());
     public FakeScript SpawnChild(bool detached = false, bool ownSession = false) => Add(new ScriptStep.SpawnChild(detached, ownSession));
@@ -226,6 +237,7 @@ public sealed class FakeScript
                 ScriptStep.RejectResume => "reject-resume",
                 ScriptStep.AskPermission { CancelOnProgress: true } p => $"permission-cancel {p.Arguments}",
                 ScriptStep.AskPermission p => $"permission {p.Arguments}",
+                ScriptStep.CallTool c => $"call-tool {c.Server} {c.Tool} {c.Arguments}",
                 ScriptStep.IgnoreInterrupt => "ignore-interrupt",
                 ScriptStep.SpawnChild { OwnSession: true } => "spawn-own-session",
                 ScriptStep.SpawnChild { Detached: true } => "spawn-detached",
@@ -260,6 +272,9 @@ public sealed class FakeScript
                 "reject-resume" => new ScriptStep.RejectResume(),
                 "permission" => new ScriptStep.AskPermission(argument),
                 "permission-cancel" => new ScriptStep.AskPermission(argument, CancelOnProgress: true),
+                "call-tool" => argument.Split(' ', 3) is [var server, var tool, var arguments]
+                    ? new ScriptStep.CallTool(server, tool, arguments)
+                    : throw new FormatException($"call-tool takes a server, a tool and its arguments: {raw}"),
                 "ignore-interrupt" => new ScriptStep.IgnoreInterrupt(),
                 "spawn-child" => new ScriptStep.SpawnChild(),
                 "spawn-detached" => new ScriptStep.SpawnChild(Detached: true),

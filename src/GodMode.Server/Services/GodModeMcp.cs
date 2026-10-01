@@ -5,7 +5,7 @@ namespace GodMode.Server.Services;
 
 /// <summary>
 /// GodMode's two MCP endpoints, one MCP server behind both. <see cref="McpEndpointUrl.Path"/> is its sessions'
-/// claude's, with their project token, and serves the permission prompt alone. <see cref="FleetPath"/> is the
+/// claude's, with their project token, and serves the permission prompt and <see cref="MessageParentTool"/>. <see cref="FleetPath"/> is the
 /// fleet's, and serves <see cref="FleetTools"/>: to the server's own credential (as the hub), and to the project
 /// token of a session that has the fleet's tools, which its MCP config then lists. Each tool type's
 /// <c>[Authorize]</c> policy is its endpoint's, by the request's path too, so each endpoint lists and calls only its own tools.
@@ -23,6 +23,7 @@ public static class GodModeMcp
             .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
             .AddAuthorizationFilters()
             .WithTools<PermissionPromptTool>()
+            .WithTools<MessageParentTool>()
             .WithTools<FleetTools>();
         return services;
     }

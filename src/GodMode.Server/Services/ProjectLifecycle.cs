@@ -297,6 +297,41 @@ public sealed class ProjectLifecycle
         return sentTo;
     }
 
+    /// <summary>
+    /// Sends what was held for the project, if it can take input now, and marks it Running, under the state lock:
+    /// <see cref="CanTakeInput"/> and the send are one step, so a permission prompt or a turn that begins after the
+    /// check comes after the input, and the input never answers it. Not the user's reply: the user has not seen the
+    /// last result for it. False, with nothing sent, when it cannot take input.
+    /// </summary>
+    public async Task<bool> TrySendHeldAsync(ProjectInfo project, string input)
+    {
+        var sent = false;
+        await WithStateLockAsync(project, async () =>
+        {
+            if (!CanTakeInput(project)) return;
+            try { await _processManager.SendInputAsync(project, input); }
+            catch (InvalidOperationException ex)
+            {
+                // Exited or being stopped since the check: what was held stays held
+                _logger.LogInformation("Project {ProjectId} took no held input ({Message})", project.Status.Id, ex.Message);
+                return;
+            }
+            await SetStatusAsync(project, status => status with { State = ProjectState.Running, CurrentQuestion = null, UpdatedAt = DateTime.UtcNow });
+            sent = true;
+        });
+        if (sent) await NotifyStatusChangedAsync(project);
+        return sent;
+    }
+
+    /// <summary>
+    /// Whether the project can take input that is not the user's: its claude runs, is not being stopped, has ended
+    /// its turn (Idle) and waits on no permission prompt or question. Running, WaitingInput (a question, which is the
+    /// user's) and WaitingPermission cannot, nor can Error, which waits on the user too.
+    /// </summary>
+    public bool CanTakeInput(ProjectInfo project) =>
+        project.Status.State == ProjectState.Idle && project.Process.OldestPending == null
+        && !project.Process.Stopping && !project.Process.Launching && IsRunning(project);
+
     // ── State ──
 
     /// <summary>Changes the project's status and saves it, under the lock the consumer also takes.</summary>

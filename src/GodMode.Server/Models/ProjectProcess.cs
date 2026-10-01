@@ -164,6 +164,26 @@ public sealed class ProjectProcess
     }
 
     /// <summary>
+    /// Held by whoever reads or changes what is held for the session (<see cref="Services.SessionInbox"/>, and
+    /// <see cref="HeldNotices"/>), so a delivery takes what it sends off the list and nothing else.
+    /// </summary>
+    public SemaphoreSlim InboxLock { get; } = new(1, 1);
+
+    /// <summary>
+    /// The server's notices held for this session about its children, by child ID: the latest of each, with when it
+    /// was held. In memory only: a session whose claude is not running gets none, and loses those held.
+    /// </summary>
+    public ConcurrentDictionary<string, HeldNotice> HeldNotices { get; } = new();
+
+    private int _noticedState = -1;
+
+    /// <summary>
+    /// Records <paramref name="state"/> as the last state this session's parent heard of, or would have; true when it
+    /// is another than the last, so a status push that changes no state sends no second notice.
+    /// </summary>
+    public bool NoticeState(Shared.Enums.ProjectState state) => Interlocked.Exchange(ref _noticedState, (int)state) != (int)state;
+
+    /// <summary>
     /// The last time the process ended on its own outside a shutdown, with the status before and
     /// after. Only the consumer sets it, under the state lock.
     /// </summary>
@@ -249,6 +269,9 @@ public abstract record PipelineItem
     /// </summary>
     public sealed record InOrder(Func<Task> Change, TaskCompletionSource Done, bool UnderStateLock = true) : PipelineItem;
 }
+
+/// <summary>A notice held for a parent about one of its children: one line, and when it was held.</summary>
+public sealed record HeldNotice(string Text, DateTime At);
 
 /// <param name="ProcessId">The process that exited.</param>
 /// <param name="ExitCode">Its exit code.</param>

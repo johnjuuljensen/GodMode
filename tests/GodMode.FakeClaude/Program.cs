@@ -57,6 +57,8 @@ var environment = Environment.GetEnvironmentVariables()
     .ToDictionary(e => (string)e.Key, e => (string?)e.Value ?? "");
 FakeRecording.Append(recordPath, new RecordLine(RecordLine.Start, pid, Argv: args, Environment: environment, McpConfig: mcpConfig));
 McpClient? permissionServer = null;
+// The servers a call-tool step called, by name, each connected on its first call
+var toolServers = new Dictionary<string, McpClient>();
 
 var sessionId = ArgValue("--session-id") ?? ArgValue("--resume") ?? "";
 var script = FakeScript.Load(Path.GetFullPath(scriptPath));
@@ -153,6 +155,9 @@ async Task<int> PlayAsync()
                 Volatile.Write(ref askInFlight, answer);
                 FakeRecording.Append(recordPath, new RecordLine(RecordLine.Permission, pid, Line: await answer));
                 break;
+            case ScriptStep.CallTool call:
+                FakeRecording.Append(recordPath, new RecordLine(RecordLine.Call, pid, Line: $"{call.Tool} {await CallToolAsync(call)}"));
+                break;
             case ScriptStep.RejectResume when ArgValue("--resume") is { } resumed:
                 await stderr.WriteLineAsync(FakeScript.NoConversationError + resumed);
                 return Exit(1);
@@ -235,6 +240,25 @@ async Task<string> AskPermissionAsync(ScriptStep.AskPermission ask)
     finally
     {
         Interlocked.CompareExchange(ref asking, null, cancel);
+    }
+}
+
+// A tool the model chose: called on its server of the --mcp-config; its text, or why it failed
+async Task<string> CallToolAsync(ScriptStep.CallTool call)
+{
+    var arguments = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(call.Arguments)!
+        .ToDictionary(argument => argument.Key, argument => (object?)argument.Value);
+    try
+    {
+        if (!toolServers.TryGetValue(call.Server, out var client))
+            toolServers[call.Server] = client = await ConnectAsync(call.Server);
+        var result = await client.CallToolAsync(call.Tool, arguments);
+        var text = string.Concat(result.Content.OfType<TextContentBlock>().Select(block => block.Text));
+        return result.IsError == true ? $"error: {text}" : text;
+    }
+    catch (Exception ex)
+    {
+        return $"error: {ex.GetType().Name}: {ex.Message}";
     }
 }
 

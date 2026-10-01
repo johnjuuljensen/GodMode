@@ -87,6 +87,13 @@ public class ProjectInfo
     public string? ProfileName { get; set; }
 
     /// <summary>
+    /// The <c>CLAUDE_CONFIG_DIR</c> its last launch ran claude under, full path; null before its first launch on this
+    /// server. Sessions in one config dir reach each other through Claude Code's own channel; a parent in another
+    /// gets the server's notices instead.
+    /// </summary>
+    public string? ConfigDir { get; set; }
+
+    /// <summary>
     /// The token the project's claude calls GodMode's MCP endpoint with. Issued afresh for every
     /// launch, handed to claude only in its MCP config file, and cleared when that launch's process exits.
     /// </summary>
