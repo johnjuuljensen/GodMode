@@ -20,10 +20,22 @@ the GodMode app, nested under it. Everything below holds, with these differences
   launched you, not `ac-gwt`, so that variable may be unset. The issue action's prompt says which
   branch you were cut from and which one your pull request targets; in a worktree `ac-gwt` made,
   `git config "branch.$(git branch --show-current).base"` says it too.
-- **You have no address, and your overseer has none you can reach.** GodMode sessions are not in
-  `ListAgents`, so do not try to announce yourself or report by `SendMessage`. Your pull request is
-  the whole report: draft while working, ready when done, and a comment on it (`IS#35/PR#44: fixed
-  …, pushed <sha>`) when you have pushed a fix for a review. Your overseer wakes on those changes.
+- **You report to your parent session, the overseer that started you.** GodMode gives you its address
+  as `GODMODE_PARENT_ADDRESS` (the issue action's prompt says it too), and names you with your own
+  (`GODMODE_SESSION_ADDRESS`), so `ListAgents` lists you both when you share a config dir. Report as
+  an ac-gwt worker does, at the same moments: once when you start, when your pull request is ready,
+  after you push a fix for a review, and with feedback or a design question you parked on the issue.
+  - **`SendMessage` to your parent's address first.** It wakes your parent if it is idle, and reaches
+    it at its next step if it is working.
+  - **When `SendMessage` says it is not reachable** (it runs under another config dir, or it is
+    stopped), use the **`message_parent`** tool (`mcp__godmode__message_parent`) with the same text.
+    The server holds it until your parent can take it, on disk if your parent is stopped, and tells
+    you whether it was delivered or held. Do not retry a held message: it is kept.
+  - `message_parent` refuses a session with no parent, and a parent in another root without a link.
+    Report through your pull request then, as below.
+  - Your pull request is still your status: draft while working, ready when done, and a comment
+    (`IS#35/PR#44: fixed …, pushed <sha>`) after a review fix. A message is how your overseer hears it
+    now. The pull request is how anyone finds it later.
 - **Your overseer reaches you with messages in this session**, as the user's replies do. One sent
   while you work arrives at your next step.
 - **Never end a turn on a question.** A last line ending in `?` is the user's to answer, in their
@@ -145,8 +157,8 @@ depend on the answer. Blocking the whole issue on it is the last resort.
 
 Message your overseer once when you start, so it learns your address — session names are not
 predictable and it cannot guess yours. Message it again when the pull request goes ready, and when a
-review comes back and you have pushed the fix. (A GodMode session announces nothing and
-reports on its pull request instead: [above](#when-you-are-a-godmode-session).)
+review comes back and you have pushed the fix. (A GodMode session does the same, to its parent's
+address or with `message_parent`: [above](#when-you-are-a-godmode-session).)
 
 Between those, silence is correct. It reads the pull request.
 

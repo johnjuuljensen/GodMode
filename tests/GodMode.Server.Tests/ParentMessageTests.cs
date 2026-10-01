@@ -260,8 +260,10 @@ public class ParentMessageTests
         run.WriteActionScript(ChildAction, Turns(), new() { ["claudeArgs"] = new[] { "-n", "the-roots-name", "--verbose" } });
         await using var fleet = await run.ConnectFleetAsync();
         var parent = await IdleParentAsync(run, WorkAction);
-        var child = await StartChildAsync(run, fleet, parent);
+        var started = await run.StartSessionAsync(fleet, ChildName, ChildAction, new() { ["parent"] = parent });
+        var child = started.GetProperty("Id").GetString()!;
         var address = SessionAddress.OfId(child)!;
+        Assert.Equal(address, started.GetProperty("Address").GetString());
         Assert.Equal($"{RootName}-{child.Split('/')[^1]}", address);
 
         var launch = await run.WaitForLaunchAsync(child, l => l.Stdin.Count == 1);

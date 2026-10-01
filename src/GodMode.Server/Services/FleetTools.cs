@@ -59,7 +59,7 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
 
     /// <summary>What <see cref="StartSessionAsync"/> made: the session, or, for an action that starts none, its script's message.</summary>
     public sealed record Started(string? Id = null, string? Name = null, ProjectState? State = null, string? Kind = null,
-        string? ParentId = null, string? Model = null, string? Effort = null, string? Message = null);
+        string? ParentId = null, string? Model = null, string? Effort = null, string? Message = null, string? Address = null);
 
     /// <summary>A session's state after <see cref="SendAsync"/>, <see cref="StopAsync"/> or <see cref="ResumeAsync"/>.</summary>
     /// <param name="Held">For <see cref="SendAsync"/>: why the message is held, not delivered yet; null when it was.</param>
@@ -102,7 +102,7 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         "calling this is the new one's parent, unless top_level is true; any other caller's is top level. A session's child is in its " +
         "parent's root, unless a Fleet:Links entry in the server's config links the parent's root to the new one's. fleet_tools gives the new session " +
         "these tools too, where its action's config allows a grant (\"fleetTools\": \"grantable\"). " +
-        "Returns the new session, or, for an action that starts no session, its script's message. Its permission prompts go to the user.")]
+        "Returns the new session (with its Address for SendMessage), or, for an action that starts no session, its script's message. Its permission prompts go to the user.")]
     public async Task<string> StartSessionAsync(
         RequestContext<CallToolRequestParams> context,
         [Description("The profile the root is in")] string profile,
@@ -147,7 +147,8 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
 
         // As the hub's CreateProject: the app lists it
         await hub.Clients.All.ProjectCreated(status);
-        return Json(new Started(status.Id, status.Name, status.State, status.Kind, status.ParentId, status.Model, status.Effort));
+        return Json(new Started(status.Id, status.Name, status.State, status.Kind, status.ParentId, status.Model, status.Effort,
+            Address: SessionAddress.OfId(status.Id)));
     }
 
     [McpServerTool(Name = "send")]
