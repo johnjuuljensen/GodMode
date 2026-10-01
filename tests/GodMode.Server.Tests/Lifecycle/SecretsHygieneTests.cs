@@ -22,8 +22,9 @@ public class SecretsHygieneTests
         var launch = await harness.WaitForStdinAsync(created.Id);
 
         canaries.AssertAbsent(launch.Environment);
-        // Everything the process got is on the allowlist or from the root's config: the server sets none
-        string[] configured = [FakeClaudeEnvironment.Script, FakeClaudeEnvironment.Record];
+        // Everything the process got is on the allowlist or from the root's config; the server sets the session's
+        // address alone (its parent's too, for a child), which is no secret
+        string[] configured = [FakeClaudeEnvironment.Script, FakeClaudeEnvironment.Record, SessionAddress.Variable];
         Assert.All(launch.Environment.Keys, name => Assert.True(
             ChildEnvironment.Claude.IsAllowed(name) || configured.Contains(name, StringComparer.OrdinalIgnoreCase),
             $"{name} is neither allowlisted nor configured"));

@@ -47,8 +47,10 @@ public class ProjectResumeBridgeTests
             Assert.Equal(ProjectId, godMode.ProjectId);
             Assert.Equal(godMode.Token, launch.Token);
             Assert.NotNull(projects.ValidateProjectToken(ProjectId, godMode.Token));
-            // claude is given no GODMODE_* variables: its MCP config carries the project and token
-            Assert.DoesNotContain(launch.Env ?? [], e => e.Key.StartsWith("GODMODE_"));
+            // claude is given no GODMODE_* variable but its address (it has no parent): its MCP config carries the project and token
+            Assert.Equal([SessionAddress.Variable], (launch.Env ?? []).Keys.Where(key => key.StartsWith("GODMODE_")));
+            Assert.Equal(SessionAddress.OfId(ProjectId), launch.Env![SessionAddress.Variable]);
+            Assert.Equal(SessionAddress.OfId(ProjectId), launch.Args![Array.LastIndexOf(launch.Args, "-n") + 1]);
         }
         finally
         {
