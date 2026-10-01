@@ -513,6 +513,14 @@ A project has at most one claude process at a time.
 - **A resume with nothing to say is `Idle`.** `ResumeProject` on a stopped project starts claude on its session, and claude writes nothing until it has input: the project is `Idle` ("resumed, waiting for you") until the user writes, rather than `Running` with nothing happening.
 - **A launch that does not start says why.** A missing executable, a root config the launch cannot use, or a create script that failed leaves the project `Error` with `LastError`.
 
+### A session's parent
+
+A session may have a **parent**: the session that started it (an overseer starting a worker, say). It is `ProjectStatus.ParentId`, the parent's full ID, kept in `status.json` and listed in `ProjectSummary.ParentId`, so the app can nest sessions with no extra call; null for a top-level session.
+
+- **Named at create, never changed.** Over the hub it is the `__parentId` input of `CreateProject`, a string (null or blank is none; any other kind of value is refused). It is an input, not a fifth parameter, because a hub method takes all its arguments: every caller that names no parent, the voice session and older apps among them, calls as it did. On the server it is `CreateProjectRequest.ParentId`. It reaches a create script as any input does (`GODMODE_INPUT_*`).
+- **A session of this server.** A parent this server does not track (another server's session, a deleted one, a typo) is refused before anything is created or run. One in any root or profile of this server is taken. An action that starts no session checks it too, and keeps it nowhere.
+- **Metadata only.** The ID stays `{profile}/{root}/{id}`. Stopping, resuming or deleting a parent leaves its children as they are, and a restart recovers them with it. A deleted parent leaves its children naming a session that is gone, which the app shows as top level; nothing on the server reads it. A parent whose root moves profile takes a new ID, and its children keep the old one.
+
 ### Stopping a Session
 
 Each session runs in a process tree of its own, off the server's console: on Windows claude has a hidden console of its own and is in a Job Object; on Linux it is started through `setsid`, as the leader of a session and process group of its own. A Ctrl+C in the server's terminal reaches the server alone, which then stops its sessions itself. Without `setsid` on the `PATH` (macOS), claude stays in the server's process group, and a stop kills claude and the children it still has.
@@ -679,7 +687,7 @@ A connection's calls run up to four at a time (`MaximumParallelInvocationsPerCli
 Projects:
 - `Task<ProjectSummary[]> ListProjects()` — Get all projects
 - `Task<ProjectStatus> GetStatus(projectId)` — Get project status
-- `Task<CreateProjectResult> CreateProject(profileName, projectRootName, actionName, inputs)` — Create a project with form inputs (`actionName` null = default action): its `Project`, or, for an action that starts no session, no project and the script's `Message` ([Actions that start no session](#actions-that-start-no-session))
+- `Task<CreateProjectResult> CreateProject(profileName, projectRootName, actionName, inputs)` — Create a project with form inputs (`actionName` null = default action): its `Project`, or, for an action that starts no session, no project and the script's `Message` ([Actions that start no session](#actions-that-start-no-session)); the `__parentId` input names its parent ([A session's parent](#a-sessions-parent))
 - `Task SendInput(projectId, input)` — Send input to Claude (while a permission prompt or question waits, it answers that instead)
 - `Task RespondToPermission(projectId, requestId, decision)` — Allow or deny the project's `PendingPermission`; fails when the request is not pending, another answer to it came first included
 - `Task<PermissionDetail> GetPermissionDetail(projectId, requestId)` — Everything the pending permission request would run, to show before Allow (see [The MCP endpoint](#the-mcp-endpoint))
