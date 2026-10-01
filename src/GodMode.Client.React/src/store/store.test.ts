@@ -178,3 +178,22 @@ describe('a project this client created (#170)', () => {
     expect(s.getConnection('A')?.projects.map(p => p.Id)).toEqual(['p1', 'p2', 'p9']);
   });
 });
+
+describe("a session's parent (#390)", () => {
+  /** The ids under p1 in the list, as it nests them. */
+  const childrenOfP1 = () => useAppStore.getState().profileGroups
+    .flatMap(g => g.rootGroups.flatMap(rg => rg.items))
+    .find(i => i.serverId === 'A' && i.project.Id === 'p1')?.children.map(c => c.project.Id);
+
+  it('is kept from a live ProjectCreated, so the child nests before the next list', () => {
+    hubA.callbacks.onProjectCreated?.({ ...status('p9', 'Running'), ParentId: 'p1' });
+    expect(useAppStore.getState().getConnection('A')?.projects.find(p => p.Id === 'p9')?.ParentId).toBe('p1');
+    expect(childrenOfP1()).toEqual(['p9']);
+  });
+
+  it('is kept from a StatusChanged', () => {
+    hubA.callbacks.onStatusChanged?.('p2', { ...status('p2', 'Idle'), ParentId: 'p1' });
+    expect(useAppStore.getState().getConnection('A')?.projects.find(p => p.Id === 'p2')?.ParentId).toBe('p1');
+    expect(childrenOfP1()).toEqual(['p2']);
+  });
+});
