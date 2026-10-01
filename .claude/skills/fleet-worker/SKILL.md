@@ -11,6 +11,26 @@ base is `AC_GWT_BASE_BRANCH` rather than `master`, a draft pull request means *w
 *needs attention*, and a question for a human is parked on the issue rather than signalled with
 `!!Attention needed!!`.
 
+## When you are a GodMode session
+
+Your folder has `.godmode/`, and an overseer started you with the fleet's tools: you are a session in
+the GodMode app, nested under it. Everything below holds, with these differences:
+
+- **Your base branch is in your prompt and your brief**, not in `AC_GWT_BASE_BRANCH`: GodMode
+  launched you, not `ac-gwt`, so that variable may be unset. The issue action's prompt says which
+  branch you were cut from and which one your pull request targets.
+- **You have no address, and your overseer has none you can reach.** GodMode sessions are not in
+  `ListAgents`, so do not try to announce yourself or report by `SendMessage`. Your pull request is
+  the whole report: draft while working, ready when done, and a comment on it (`IS#35/PR#44: fixed
+  …, pushed <sha>`) when you have pushed a fix for a review. Your overseer wakes on those changes.
+- **Your overseer reaches you with messages in this session**, as the user's replies do. One sent
+  while you work arrives at your next step.
+- **Never end a turn on a question.** A last line ending in `?` is the user's to answer, in their
+  inbox, and you wait on it. A design question is parked on the issue, as below, and the turn ends on
+  what you did.
+- **A permission prompt is the user's,** as always: it waits in their inbox. Your overseer cannot
+  answer it and will not try.
+
 ## Your pull request is your status
 
 Nobody watches your terminal. The pull request is how the fleet knows what you are doing.
@@ -124,7 +144,8 @@ depend on the answer. Blocking the whole issue on it is the last resort.
 
 Message your overseer once when you start, so it learns your address — session names are not
 predictable and it cannot guess yours. Message it again when the pull request goes ready, and when a
-review comes back and you have pushed the fix.
+review comes back and you have pushed the fix. (A GodMode session does all three on its pull
+request instead: [above](#when-you-are-a-godmode-session).)
 
 Between those, silence is correct. It reads the pull request.
 
