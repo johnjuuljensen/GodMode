@@ -217,7 +217,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 
 | Field | Merge Rule |
 |-------|-----------|
-| Scalars (description, nameTemplate, model, permissionMode, allowSkipPermissions, resumeOnRestart, resumePrompt, etc.) | Overlay replaces if present |
+| Scalars (description, nameTemplate, model, effort, permissionMode, allowSkipPermissions, resumeOnRestart, resumePrompt, etc.) | Overlay replaces if present |
 | `environment` | Dictionary merge, overlay keys override |
 | `claudeArgs` | Concatenated (base + overlay) |
 | Script fields (prepare, create, delete, status) | Overlay replaces entirely |
@@ -244,7 +244,8 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `list` | One script (`config.json` only; an overlay's is ignored) that prints the root's folders to offer for adopting (working dir = root). Without it, the root's immediate subfolders are offered. See [Adopting folders](#adopting-folders) |
 | `adopt` | Whether the action's `create` script knows how to adopt a folder that exists: an adopt with the action runs it, alone, with `GODMODE_ADOPT=true`. Default `false`: an adopt with the action runs no script. See [Adopting folders](#adopting-folders) |
 | `claudeArgs` | Extra CLI arguments appended when starting Claude |
-| `model` | Default `--model` for the action. A `model` form input overrides it |
+| `model` | Default `--model` for the action: an alias (`fable`, `opus`, `sonnet`, `haiku`) or a full name (`claude-fable-5`). A `model` form input overrides it. Kept with each project at create (`status.json`), so its resumes keep it. Passed as given, unchecked |
+| `effort` | Default `--effort` for the action: `low`, `medium`, `high`, `xhigh` or `max`, any case. An `effort` form input overrides it, and an empty one passes none (claude's own default) over the action's. Kept with each project at create (`status.json`), so its resumes keep it. Any other value is refused: in a config file, as an error in that file, as an unknown `permissionMode` is; in a create or adopt input, before anything is created. Default: none |
 | `permissionMode` | claude's `--permission-mode` for the action's projects: `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`. Kept with each project at create. Default: none (claude's own settings decide). See [Permissions](#permissions) |
 | `allowSkipPermissions` | Whether the action's projects may run with `--dangerously-skip-permissions`. Default `false`. See [Permissions](#permissions) |
 | `nameTemplate` | Derive project name from inputs, e.g. `"issue_{issueNumber}"` |
@@ -416,7 +417,7 @@ New-Item -ItemType Directory -Force (Join-Path $root '.godmode-root') | Out-Null
 - **Of the result file, only `message` is read.** `project_path`, `project_name`, `project_prompt` and `kind` are ignored, and their checks do not apply: nothing is made a project's folder, so a script may name a folder outside the root (the root it made) without being refused.
 - **`CreateProject` returns no project** (`CreateProjectResult.Project` is null) and the script's `message`. The app shows the message, or that the action finished, and stays on the form; it offers no model for such an action (the listed action's `Session` is `false`, its `Model` null and `AllowSkipPermissions` false).
 - **The roots are read again once it has run**, so a root it made reaches every client as `RootsChanged` at once, not at the next poll ([Live roots](#live-roots)).
-- **What would give it a working folder is a config error**: `"session": false` with `"sharedFolder": true`, with `"scriptsCreateFolder": true`, or with no `create` script. A create of the action is refused saying why, and the listing leaves that action out, with a warning in the log, as it leaves out an overlay it cannot read: the root keeps its profile and its other actions. The merged action is checked, so a base `config.json` that sets one of these for its worktree actions needs `false` in the session-less action's overlay. `claudeArgs`, `model`, `permissionMode`, `allowSkipPermissions`, `promptTemplate`, `delete`, `status` and the resume settings mean nothing to it and are ignored, since a base config shares them with every action.
+- **What would give it a working folder is a config error**: `"session": false` with `"sharedFolder": true`, with `"scriptsCreateFolder": true`, or with no `create` script. A create of the action is refused saying why, and the listing leaves that action out, with a warning in the log, as it leaves out an overlay it cannot read: the root keeps its profile and its other actions. The merged action is checked, so a base `config.json` that sets one of these for its worktree actions needs `false` in the session-less action's overlay. `claudeArgs`, `model`, `effort`, `permissionMode`, `allowSkipPermissions`, `promptTemplate`, `delete`, `status` and the resume settings mean nothing to it and are ignored, since a base config shares them with every action.
 
 ### Adopting folders
 
