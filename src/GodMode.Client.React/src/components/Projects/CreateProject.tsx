@@ -40,7 +40,7 @@ function parseFormFields(schema: unknown, allowSkipPermissions: boolean): FormFi
     } else if (Array.isArray(prop.enum)) {
       const enumOptions = (prop.enum as string[]).map(v => ({ value: v, label: v }));
       fields.push({ key, title, fieldType: 'enum', isRequired: required.has(key), description, defaultValue, enumOptions });
-    } else if (prop.format === 'multiline' || (prop.maxLength && (prop.maxLength as number) > 200)) {
+    } else if (prop['x-multiline'] === true || prop.format === 'multiline' || (prop.maxLength && (prop.maxLength as number) > 200)) {
       fields.push({ key, title, fieldType: 'multiline', isRequired: required.has(key), description, defaultValue });
     } else {
       fields.push({ key, title, fieldType: 'string', isRequired: required.has(key), description, defaultValue });
