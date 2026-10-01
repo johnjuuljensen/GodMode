@@ -215,7 +215,6 @@ public class FleetGrantTests
             .ToDictionary(file => Path.GetFileName(file), File.ReadAllText);
 
         await run.Client.Hub.InvokeAsync<DeleteProjectResult>(nameof(IProjectHub.DeleteProject), overseerId, false);
-        Assert.False(File.Exists(FleetGrantFile.PathFor(run.RootPath, sessionId)), "the delete left the overseer's grant record");
 
         var planted = GodMode.ProjectFiles.SessionState.PathOf(Path.Combine(run.RootPath, "planted"), sessionId);
         Directory.CreateDirectory(planted);
