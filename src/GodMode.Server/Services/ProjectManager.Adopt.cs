@@ -180,6 +180,7 @@ public partial class ProjectManager
             ?? throw new ArgumentException($"Action '{actionName}' not found in root '{requestedRoot}'.");
         if (!action.Session)
             throw new ArgumentException($"Action '{action.Name}' of root '{requestedRoot}' starts no session, so it adopts no folder.");
+        RequestedEffort(inputs);
 
         var projectPath = FullPath(Path.Combine(rootPath, path));
         if (WhyNotAnAdoptableFolder(rootPath, projectPath) is { } notAdoptable)

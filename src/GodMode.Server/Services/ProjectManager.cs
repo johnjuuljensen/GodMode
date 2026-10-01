@@ -693,7 +693,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             var config = snap.RootConfigs.GetValueOrDefault(FullPath(root.Path)) ?? _rootConfigReader.ReadConfig(root.Path);
             var actions = config.GetEffectiveActions()
                 .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Session ? a.Model : null,
-                    a.Session && a.AllowSkipPermissions, a.Session, a.Session && a.Transient))
+                    a.Session && a.AllowSkipPermissions, a.Session, a.Session && a.Transient, a.Session ? a.Effort : null))
                 .ToArray();
             return new ProjectRootInfo(root.Root, config.Description, actions, ProfileName: root.Profile);
         }).ToArray();
@@ -782,6 +782,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (skipPermissions && !action.AllowSkipPermissions)
             throw new ArgumentException(
                 $"Root '{request.ProjectRootName}' does not allow Skip Permissions for action '{action.Name}': its config would need \"allowSkipPermissions\": true.");
+        RequestedEffort(request.Inputs);
 
         // Get profile environment for merging
         snap.Profiles.TryGetValue(request.ProfileName, out var profileConfig);
@@ -1046,13 +1047,15 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // Persisted in status.json so resumes keep using the same model even if the
         // root config changes or the machine-wide Claude default differs.
         var model = TemplateResolver.GetString(inputs, "model") ?? action.Model;
+        // Effort the same way, kept even when empty (claude's own default), so a resume never takes up a level the root gains later
+        var effort = RequestedEffort(inputs) ?? action.Effort ?? "";
         // No prompt from the form, a template or a script: claude starts with no input and waits on
         // stdin, and the project is Idle, waiting for its first message, which needs nothing of the
         // user until they write it. Claude is never sent an empty turn
         if (string.IsNullOrWhiteSpace(prompt)) prompt = null;
         project.Status = project.Status with
         {
-            Id = projectId, Name = name, Model = model, Kind = kind, Adopted = settings.Adopted,
+            Id = projectId, Name = name, Model = model, Effort = effort, Kind = kind, Adopted = settings.Adopted,
             State = prompt == null ? ProjectState.Idle : project.Status.State,
         };
 
@@ -2893,8 +2896,36 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(project, profileName);
         var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
         var (env, args) = BuildClaudeConfig(project.ProjectPath, project.StatePath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project)),
-            project.Status.Model ?? action.Model, profile?.Environment, profileName, stripEnvVarProfile);
+            project.Status.Model ?? action.Model, LaunchEffort(project, action), profile?.Environment, profileName, stripEnvVarProfile);
         return new ClaudeLaunchSpec(env ?? new Dictionary<string, string>(), args);
+    }
+
+    /// <summary>
+    /// The effort level a create input asks for, as claude spells it: null when it names none, empty
+    /// for claude's own default (the form's empty choice, over the action's level). Throws
+    /// <see cref="ArgumentException"/> for any other value, before anything is written or run.
+    /// </summary>
+    private static string? RequestedEffort(Dictionary<string, JsonElement> inputs) =>
+        TemplateResolver.GetString(inputs, "effort") switch
+        {
+            null => null,
+            var effort when string.IsNullOrWhiteSpace(effort) => "",
+            var effort => Efforts.Canonical(effort) ?? throw new ArgumentException($"The create's {Efforts.Refusal(effort)}."),
+        };
+
+    /// <summary>
+    /// The effort a launch passes: the one the session was started with (its status), else its
+    /// action's as its root's config has it now; none when that is empty. A status that names no level
+    /// (status.json is in the project folder, which the session can write) is ignored, logged once.
+    /// </summary>
+    private string? LaunchEffort(ProjectInfo project, CreateAction action)
+    {
+        var kept = project.Status.Effort ?? action.Effort;
+        if (string.IsNullOrWhiteSpace(kept)) return null;
+        var effort = Efforts.Canonical(kept);
+        if (effort == null && FirstLaunchWarning(project, "effort"))
+            _logger.LogWarning("Project {ProjectId}: {Reason}; it launches without --effort", project.Status.Id, Efforts.Refusal(kept));
+        return effort;
     }
 
     /// <summary>
@@ -2970,6 +3001,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     private static (Dictionary<string, string>? Env, string[] Args) BuildClaudeConfig(
         string projectPath, string statePath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
         string? model = null,
+        string? effort = null,
         Dictionary<string, string>? profileEnv = null,
         string? profileName = null,
         bool stripEnvVarProfile = false)
@@ -2997,6 +3029,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         {
             args.Add("--model");
             args.Add(model);
+        }
+        if (effort != null)
+        {
+            args.Add("--effort");
+            args.Add(effort);
         }
         // --mcp-config expects a file path, not inline JSON; the process manager deletes it on exit.
         // It holds the project token, so every launch first makes sure git ignores it

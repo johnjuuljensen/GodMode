@@ -134,6 +134,11 @@ export interface CreateActionInfo {
   Session: boolean;
   /** Whether the action's sessions are short-lived (CreateAction.Transient): the app folds them sooner. */
   Transient: boolean;
+  /**
+   * The action's effort level (CreateAction.Effort), which the create form starts from; null for claude's own
+   * default.
+   */
+  Effort?: string | null;
 }
 
 /**
@@ -364,6 +369,12 @@ export interface ProjectStatus {
    * folder.
    */
   Adopted: boolean;
+  /**
+   * The claude effort level the session was started with, kept and used on resume as Model is. Empty when it
+   * was started at claude's own default; null only for a session created before effort was kept, which takes
+   * its action's.
+   */
+  Effort?: string | null;
 }
 
 /** Summary information about a project. */

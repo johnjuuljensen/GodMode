@@ -42,6 +42,10 @@ namespace GodMode.Shared.Models;
 /// adopt of a folder with it runs the create script alone, with <c>GODMODE_ADOPT=true</c> and the folder
 /// as the project's, to name the session and nothing more. An adopt with any other action runs no script.
 /// </param>
+/// <param name="Effort">
+/// The claude effort level (<c>--effort</c>: <c>low</c>, <c>medium</c>, <c>high</c>, <c>xhigh</c>, <c>max</c>) a
+/// project of this action is created with, unless the create names its own; null for claude's own default.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -63,7 +67,8 @@ public record CreateAction(
     bool SharedFolder = false,
     bool Session = true,
     bool Transient = false,
-    bool Adopt = false
+    bool Adopt = false,
+    string? Effort = null
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";
