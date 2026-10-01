@@ -9,8 +9,11 @@ namespace GodMode.Server.Services;
 /// with the fleet's tools when its child ends a turn or waits on the user, and the fleet's <c>send</c> to a session
 /// waiting on the user. Nothing of it answers a permission prompt or a question, or interrupts a turn: it is held until
 /// the receiver can take input (<see cref="ProjectLifecycle.CanTakeInput"/>), then delivered as one message. Messages are
-/// held on disk (<see cref="SessionInbox"/>), notices in memory, and a receiver whose claude is not running gets its
-/// messages with its next resume or reply, and its notices dropped.
+/// held on disk, out of every working folder (<see cref="SessionInbox"/>), notices in memory, and a receiver whose claude
+/// is not running gets its messages with its next resume or reply, and its notices dropped. A session's parent, for all
+/// of it, is the one the server recorded at its create (<see cref="FleetGrantFile.Grant.Parent"/>), never its
+/// <c>status.json</c>'s, which the session can write; and at delivery each sender is checked again, so what no longer
+/// holds (a removed link, revoked tools, a re-parented sender) is dropped, not delivered.
 /// </summary>
 public partial class ProjectManager
 {
@@ -25,15 +28,15 @@ public partial class ProjectManager
         if (!_projects.TryGetValue(projectId, out var sender))
             throw new KeyNotFoundException($"Project {projectId} not found");
         CheckText(text);
-        if (sender.Status.ParentId is not { } parentId)
-            throw new InvalidOperationException("This session has no parent session to message: it was started on its own, not by another session.");
+        if (ServerParentOf(sender) is not { } parentId)
+            throw new InvalidOperationException("This session has no parent session to message: the server has no record of a session that started it.");
         if (!_projects.TryGetValue(parentId, out var parent))
             throw new InvalidOperationException($"This session's parent, {parentId}, is no longer on this server: the message was not sent.");
-        if (!ParentLinkAllowed(parent, sender, out var missing))
+        if (!ParentLinkAllowed(parentId, projectId, out var missing))
             throw new InvalidOperationException($"This session's parent, {parentId}, is in another root, and {missing}: the message was not sent.");
 
         _logger.LogInformation("Project {ProjectId} messages its parent {ParentId} ({Length} characters)", projectId, parentId, text.Length);
-        await HoldAsync(parent, SessionInbox.LabelOf(projectId, sender.Status.Name), text);
+        await HoldAsync(parent, new SessionInbox.HeldMessage(DateTime.UtcNow, projectId, SessionInbox.HeldKind.Message, text));
         return await DeliverHeldAsync(parent);
     }
 
@@ -42,15 +45,21 @@ public partial class ProjectManager
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
         CheckText(text);
-        var label = senderId != null && _projects.TryGetValue(senderId, out var sender)
-            ? SessionInbox.LabelOf(senderId, sender.Status.Name)
-            : SessionInbox.OverseerLabel;
+        var held = new SessionInbox.HeldMessage(DateTime.UtcNow, senderId, SessionInbox.HeldKind.Send, text);
 
         if (WaitsOnTheUser(project) is { } waiting)
         {
-            await HoldAsync(project, label, text);
+            await HoldAsync(project, held);
             // The user may have answered since the check: then it takes it now
             return await DeliverHeldAsync(project) is { Delivered: true } delivered ? delivered : new Delivery(false, waiting);
+        }
+        // Messages held before it go first: it does not overtake them
+        if (SessionInbox.Any(project.RootPath, project.SessionId))
+        {
+            await HoldAsync(project, held);
+            if (_lifecycle.IsRunning(project)) return await DeliverHeldAsync(project);
+            await ResumeProjectAsync(projectId);
+            return new Delivery(true);
         }
         try
         {
@@ -60,7 +69,7 @@ public partial class ProjectManager
         catch (InvalidOperationException) when (WaitsOnTheUser(project) is { } waitingNow)
         {
             // A prompt came between the check and the send, which refused the text: held, as above
-            await HoldAsync(project, label, text);
+            await HoldAsync(project, held);
             return new Delivery(false, waitingNow);
         }
     }
@@ -72,11 +81,14 @@ public partial class ProjectManager
             throw new ArgumentException($"The message has {text.Length} characters; at most {SessionInbox.MaxTextLength} are sent. Shorten it, or point to where the rest is.");
     }
 
-    /// <summary>Why the session's running claude waits on the user (a permission prompt, a question); null when it does not, or does not run.</summary>
-    private string? WaitsOnTheUser(ProjectInfo project) =>
-        !_lifecycle.IsRunning(project) ? null
-        : project.Process.OldestPending is { } pending ? WaitingOn(pending.Question != null)
-        : project.Status.State == ProjectState.WaitingInput ? WaitingOn(question: true)
+    /// <summary>
+    /// Why the session waits on the user, whose answer a message must not be taken for: a permission prompt or a question
+    /// its claude waits on, a question it ended its turn on, or one it was stopped while asking (a restart keeps it). Null
+    /// when it waits on nothing of the user's.
+    /// </summary>
+    private static string? WaitsOnTheUser(ProjectInfo project) =>
+        project.Process.OldestPending is { } pending ? WaitingOn(pending.Question != null)
+        : project.Status.State == ProjectState.WaitingInput || project.Status.CurrentQuestion != null ? WaitingOn(question: true)
         : null;
 
     private static string WaitingOn(bool question) =>
@@ -85,16 +97,71 @@ public partial class ProjectManager
     /// <summary>Why the session cannot take what is held now; null when it can.</summary>
     private string? WhyHeld(ProjectInfo project) =>
         _lifecycle.CanTakeInput(project) ? null
+        : WaitsOnTheUser(project) is { } waiting ? waiting
         : !_lifecycle.IsRunning(project) || project.Process.Stopping
             ? project.Process.Launching ? "it is starting, and gets it once it has started" : "it is stopped, and gets it when it is resumed"
-        : WaitsOnTheUser(project)
-            ?? (project.Status.State == ProjectState.Error ? "it is in error, waiting on the user, and gets it after its next turn" : "it is working on a turn, and gets it when the turn ends");
+        : project.Status.State == ProjectState.Error ? "it is in error, waiting on the user, and gets it after its next turn"
+        : "it is working on a turn, and gets it when the turn ends";
 
-    private async Task HoldAsync(ProjectInfo project, string label, string text)
+    private async Task HoldAsync(ProjectInfo project, SessionInbox.HeldMessage message)
     {
         await project.Process.InboxLock.WaitAsync();
-        try { SessionInbox.Append(project.StatePath, new SessionInbox.HeldMessage(DateTime.UtcNow, label, text)); }
+        try { SessionInbox.Append(project.RootPath, project.SessionId, message); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidOperationException($"The message could not be kept for {project.Status.Id}: {ex.Message}", ex);
+        }
         finally { project.Process.InboxLock.Release(); }
+    }
+
+    /// <summary>
+    /// The held messages that still hold, rendered with their labels, and how many were read (delivered or dropped).
+    /// A child's message holds while its recorded parent is still the receiver, in its root or through a link; a
+    /// session's <c>send</c> while the sender still has the fleet's tools and sees the receiver (its profile, or a link);
+    /// one from a sender that is gone holds by its roots alone. What no longer holds is dropped, and logged.
+    /// </summary>
+    private (List<string> Rendered, int Read) HeldToDeliver(ProjectInfo receiver)
+    {
+        var held = SessionInbox.Read(receiver.RootPath, receiver.SessionId);
+        var rendered = new List<string>();
+        foreach (var message in held)
+        {
+            var sender = message.From is { } from && _projects.TryGetValue(from, out var tracked) ? tracked : null;
+            if (!StillHolds(message, sender, receiver))
+            {
+                _logger.LogWarning("Project {ProjectId}: a held {Kind} from {From} is dropped: its sender may no longer message it",
+                    receiver.Status.Id, message.Kind, message.From ?? "the server's credential");
+                continue;
+            }
+            var label = message.From is { } id ? SessionInbox.LabelOf(id, sender?.Status.Name) : SessionInbox.OverseerLabel;
+            rendered.Add(SessionInbox.Render(label, message.Text));
+        }
+        return (rendered, held.Count);
+    }
+
+    private bool StillHolds(SessionInbox.HeldMessage message, ProjectInfo? sender, ProjectInfo receiver) => message switch
+    {
+        { From: null, Kind: SessionInbox.HeldKind.Send } => true,
+        { From: { } from, Kind: SessionInbox.HeldKind.Message } =>
+            (sender == null || ServerParentOf(sender) == receiver.Status.Id) && ParentLinkAllowed(receiver.Status.Id, from, out _),
+        { From: { } from, Kind: SessionInbox.HeldKind.Send } =>
+            (sender == null || HasFleetTools(sender)) && SeesFrom(from, receiver.Status.Id),
+        _ => false,
+    };
+
+    /// <summary>Whether a session's fleet tools see <paramref name="toId"/>: its own profile, or a link from its root.</summary>
+    private bool SeesFrom(string fromId, string toId) =>
+        RootRef.OfId(fromId) is { } from && RootRef.OfId(toId) is { } to && (from.Profile == to.Profile || _links.Linked(from, to));
+
+    /// <summary>The notices held for the receiver that still hold: it has the fleet's tools, and each child is still its own.</summary>
+    private KeyValuePair<string, HeldNotice>[] NoticesToDeliver(ProjectInfo receiver)
+    {
+        var notices = receiver.Process.HeldNotices.ToArray().OrderBy(n => n.Value.At).ToArray();
+        var hasTools = notices.Length > 0 && HasFleetTools(receiver);
+        foreach (var gone in notices.Where(n => !hasTools || !_projects.TryGetValue(n.Key, out var child)
+            || ServerParentOf(child) != receiver.Status.Id || !ParentLinkAllowed(receiver.Status.Id, n.Key, out _)))
+            receiver.Process.HeldNotices.TryRemove(gone);
+        return notices.Where(n => receiver.Process.HeldNotices.ContainsKey(n.Key)).ToArray();
     }
 
     /// <summary>
@@ -113,15 +180,17 @@ public partial class ProjectManager
                 if (!_lifecycle.IsRunning(project)) project.Process.HeldNotices.Clear();
                 if (WhyHeld(project) is { } why) return new Delivery(false, why);
 
-                var messages = SessionInbox.Read(project.StatePath);
-                var notices = project.Process.HeldNotices.ToArray().OrderBy(n => n.Value.At).ToArray();
-                if (SessionInbox.Compose(messages, notices.Select(n => n.Value.Text)) is not { } input) return new Delivery(true);
-                if (!await _lifecycle.TrySendHeldAsync(project, input)) return new Delivery(false, WhyHeld(project) ?? "it took no input");
+                var (messages, read) = HeldToDeliver(project);
+                var notices = NoticesToDeliver(project);
+                if (SessionInbox.Compose(messages, notices.Select(n => n.Value.Text)) is { } input
+                    && !await _lifecycle.TrySendHeldAsync(project, input))
+                    return new Delivery(false, WhyHeld(project) ?? "it took no input");
 
-                SessionInbox.RemoveFirst(project.StatePath, messages.Count);
+                SessionInbox.RemoveFirst(project.RootPath, project.SessionId, read);
                 foreach (var notice in notices) project.Process.HeldNotices.TryRemove(notice);
-                _logger.LogInformation("Project {ProjectId}: delivered {Messages} held message(s) and {Notices} notice(s)",
-                    project.Status.Id, messages.Count, notices.Length);
+                if (messages.Count + notices.Length > 0)
+                    _logger.LogInformation("Project {ProjectId}: delivered {Messages} held message(s) and {Notices} notice(s)",
+                        project.Status.Id, messages.Count, notices.Length);
                 return new Delivery(true);
             }
             finally
@@ -133,7 +202,8 @@ public partial class ProjectManager
 
     /// <summary>
     /// The messages held for a session about to be resumed, under its resume lock: their text, to send with what it is
-    /// resumed with, and how many, to take off once sent (<see cref="TakeHeldMessagesAsync"/>). Its notices are dropped.
+    /// resumed with, and how many were read, to take off once sent (<see cref="TakeHeldMessagesAsync"/>). Its notices
+    /// are dropped.
     /// </summary>
     private async Task<(string? Text, int Count)> PeekHeldMessagesAsync(ProjectInfo project)
     {
@@ -141,8 +211,8 @@ public partial class ProjectManager
         try
         {
             project.Process.HeldNotices.Clear();
-            var messages = SessionInbox.Read(project.StatePath);
-            return (SessionInbox.Compose(messages, []), messages.Count);
+            var (messages, read) = HeldToDeliver(project);
+            return (SessionInbox.Compose(messages, []), read);
         }
         finally
         {
@@ -154,9 +224,9 @@ public partial class ProjectManager
     {
         if (count == 0) return;
         await project.Process.InboxLock.WaitAsync();
-        try { SessionInbox.RemoveFirst(project.StatePath, count); }
+        try { SessionInbox.RemoveFirst(project.RootPath, project.SessionId, count); }
         finally { project.Process.InboxLock.Release(); }
-        _logger.LogInformation("Project {ProjectId}: delivered {Messages} held message(s) with its resume", project.Status.Id, count);
+        _logger.LogInformation("Project {ProjectId}: dealt with {Messages} held message(s) with its resume", project.Status.Id, count);
     }
 
     /// <summary>A reply, with what is held for the session after it: the user's words first, as they wrote them.</summary>
@@ -177,7 +247,7 @@ public partial class ProjectManager
     {
         NoticeParent(project);
         if (!_lifecycle.IsRunning(project)) project.Process.HeldNotices.Clear();
-        if (_lifecycle.CanTakeInput(project) && (!project.Process.HeldNotices.IsEmpty || SessionInbox.Any(project.StatePath)))
+        if (_lifecycle.CanTakeInput(project) && (!project.Process.HeldNotices.IsEmpty || SessionInbox.Any(project.RootPath, project.SessionId)))
             DeliverInBackground(project);
     }
 
@@ -188,11 +258,12 @@ public partial class ProjectManager
     });
 
     /// <summary>
-    /// Tells the session's parent, in one line, when the session ends a turn, waits on the user, fails or stops: only a
-    /// parent with the fleet's tools now (<see cref="HasFleetTools(ProjectInfo)"/>), whose claude runs, in the session's
-    /// root or one a link lets it oversee, and under another <c>CLAUDE_CONFIG_DIR</c> than the session's last launch: in
-    /// the same one it subscribes with <c>notify_when_idle</c>. A notice held for the parent about this session is
-    /// replaced by the newer one.
+    /// Tells the session's recorded parent, in one line, when the session ends a turn, waits on the user, fails or
+    /// stops: only a parent with the fleet's tools now (<see cref="HasFleetTools(ProjectInfo)"/>), whose claude runs, in
+    /// the session's root or one a link lets it oversee. A parent in the session's <c>CLAUDE_CONFIG_DIR</c> hears of the
+    /// turn's end through <c>notify_when_idle</c>, so it gets no notice of Idle, and gets the rest. Two sessions are in
+    /// the same dir when their last launches on this server were, or when neither has launched since the server started.
+    /// A notice held for the parent about this session is replaced by the newer one.
     /// </summary>
     private void NoticeParent(ProjectInfo child)
     {
@@ -200,25 +271,32 @@ public partial class ProjectManager
         if (!child.Process.NoticeState(status.State)) return;
         if (status.State is not (ProjectState.Idle or ProjectState.WaitingInput or ProjectState.WaitingPermission or ProjectState.Error or ProjectState.Stopped))
             return;
-        if (status.ParentId is not { } parentId || !_projects.TryGetValue(parentId, out var parent)) return;
-        if (!_lifecycle.IsRunning(parent) || !HasFleetTools(parent) || !ParentLinkAllowed(parent, child, out _)) return;
-        // In one config dir the parent hears of it through Claude Code's own channel (notify_when_idle): a notice
-        // would wake it twice
-        if (parent.ConfigDir != null && child.ConfigDir != null && PathComparer.Equals(parent.ConfigDir, child.ConfigDir)) return;
+        if (ServerParentOf(child) is not { } parentId || !_projects.TryGetValue(parentId, out var parent)) return;
+        if (!_lifecycle.IsRunning(parent) || !HasFleetTools(parent) || !ParentLinkAllowed(parentId, status.Id, out _)) return;
+        if (status.State == ProjectState.Idle && SameConfigDir(parent, child)) return;
 
         parent.Process.HeldNotices[status.Id] = new HeldNotice(NoticeOf(status), DateTime.UtcNow);
         _logger.LogInformation("Project {ParentId} is told its child {ProjectId} is {State}", parentId, status.Id, status.State);
         DeliverInBackground(parent);
     }
 
+    private static bool SameConfigDir(ProjectInfo a, ProjectInfo b) =>
+        (a.ConfigDir, b.ConfigDir) switch
+        {
+            (null, null) => true,
+            ({ } x, { } y) => PathComparer.Equals(x, y),
+            _ => false,
+        };
+
     /// <summary>
-    /// Whether <paramref name="parent"/> may hear from <paramref name="child"/>: the same root, or a <see cref="FleetLinks"/>
-    /// entry from the parent's root to the child's; <paramref name="missing"/> says which link is missing when not.
+    /// Whether the session <paramref name="parentId"/> may hear from <paramref name="childId"/>: the same root, or a
+    /// <see cref="FleetLinks"/> entry from the parent's root to the child's; <paramref name="missing"/> says which link is
+    /// missing when not.
     /// </summary>
-    private bool ParentLinkAllowed(ProjectInfo parent, ProjectInfo child, out string missing)
+    private bool ParentLinkAllowed(string parentId, string childId, out string missing)
     {
         missing = "";
-        if (RootRef.OfId(parent.Status.Id) is not { } from || RootRef.OfId(child.Status.Id) is not { } to) return false;
+        if (RootRef.OfId(parentId) is not { } from || RootRef.OfId(childId) is not { } to) return false;
         if (_links.AllowsParent(from, to)) return true;
         missing = FleetLinks.Missing(from, to);
         return false;

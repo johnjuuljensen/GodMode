@@ -94,7 +94,7 @@ public class ProjectResumeBridgeTests
         Assert.NotNull(args);
         var index = Array.IndexOf(args!, "--mcp-config");
         Assert.True(index >= 0 && index + 1 < args!.Length, $"no --mcp-config in: {string.Join(' ', args!)}");
-        // --mcp-config takes a file path; the server writes the JSON to mcp-config.json in the session's state folder
+        // --mcp-config takes a file path; the server writes the JSON to {root}/logs/{id}.mcp-config.json
         return File.ReadAllText(args[index + 1]);
     }
 

@@ -208,13 +208,13 @@ public class FleetGrantRecordTests
         var worker = await CreateAsync(harness, Work, "worker");
         var sessionId = overseer.Split('/')[^1];
 
-        var outside = McpConfigFile.FleetPathFor(harness.RootPath, sessionId);
+        var outside = McpConfigFile.PathFor(harness.RootPath, sessionId);
         Assert.Equal(["godmode", "godmode-fleet"], McpServersOf(harness.Launches(overseer)[0]));
         Assert.True(File.Exists(outside));
-        Assert.False(File.Exists(McpConfigFile.PathFor(harness.StatePath(overseer))));
         Assert.Empty(Directory.GetFiles(harness.ProjectPath(overseer), McpConfigFile.FileName, SearchOption.AllDirectories));
-        // An ungranted session's stays in its state folder
-        Assert.True(File.Exists(McpConfigFile.PathFor(harness.StatePath(worker))));
+        // An ungranted session's is out of its folder too: its token speaks for it (message_parent)
+        Assert.True(File.Exists(harness.McpConfigPath(worker)));
+        Assert.Empty(Directory.GetFiles(harness.ProjectPath(worker), McpConfigFile.FileName, SearchOption.AllDirectories));
 
         await harness.Projects.StopProjectAsync(overseer);
         await harness.WaitForStateAsync(overseer, ProjectState.Stopped);

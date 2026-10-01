@@ -148,7 +148,7 @@ public class ParentMessageTests
 
         var child = await StartChildAsync(run, fleet, parent);
         Assert.Contains("stopped", await CallResultAsync(run, child));
-        var inbox = SessionInbox.PathFor(run.StatePath(parent));
+        var inbox = SessionInbox.PathFor(run.RootPath, parent.Split('/')[^1]);
         Assert.True(File.Exists(inbox), "the message is not on disk");
         await run.CallAsync(fleet, "stop", new() { ["session"] = child });
 

@@ -52,9 +52,9 @@ public class SharedFolderTests
         Assert.Contains("first", Assert.Single(firstLaunch.Stdin));
         Assert.Contains("second", Assert.Single(secondLaunch.Stdin));
 
-        // Each session's MCP config is in its own state folder, for its own ID, with its own token
-        Assert.StartsWith(harness.StatePath(first.Id), firstLaunch.ArgValue("--mcp-config"));
-        Assert.StartsWith(harness.StatePath(second.Id), secondLaunch.ArgValue("--mcp-config"));
+        // Each session's MCP config is its own, out of the folder they share, for its own ID, with its own token
+        Assert.Equal(harness.McpConfigPath(first.Id), firstLaunch.ArgValue("--mcp-config"));
+        Assert.Equal(harness.McpConfigPath(second.Id), secondLaunch.ArgValue("--mcp-config"));
         var (firstMcp, secondMcp) = (GodModeMcpEntry.Parse(ReadMcpConfig(harness, first.Id)), GodModeMcpEntry.Parse(ReadMcpConfig(harness, second.Id)));
         Assert.Equal((first.Id, second.Id), (firstMcp.ProjectId, secondMcp.ProjectId));
         Assert.NotEqual(firstMcp.Token, secondMcp.Token);
@@ -336,6 +336,6 @@ public class SharedFolderTests
 
     /// <summary>The MCP config while claude runs; the server replaces it whole, which a read can meet.</summary>
     private static string ReadMcpConfig(LifecycleHarness harness, string projectId) =>
-        LifecycleHarness.ReadShared(Path.Combine(harness.StatePath(projectId), "mcp-config.json"));
+        LifecycleHarness.ReadShared(harness.McpConfigPath(projectId));
 
 }

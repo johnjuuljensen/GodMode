@@ -78,7 +78,7 @@ public class SecretsHygieneTests
     {
         await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().AwaitStdin().Exit(0));
         var created = await harness.CreateProjectAsync();
-        var configPath = McpConfigFile.PathFor(harness.StatePath(created.Id));
+        var configPath = harness.McpConfigPath(created.Id);
 
         var launch = await harness.WaitForStdinAsync(created.Id);
         Assert.Equal(configPath, launch.ArgValue("--mcp-config"));

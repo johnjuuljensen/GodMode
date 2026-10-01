@@ -216,7 +216,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         IHostApplicationLifetime lifetime,
         ILogger<ProjectManager> logger,
         IServer? server = null,
-        AuthSettings? authSettings = null)
+        AuthSettings? authSettings = null,
+        FleetLinks? links = null)
     {
         _lifecycle = lifecycle;
         _statusUpdater = statusUpdater;
@@ -240,7 +241,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         _logger.LogInformation("Server instance {Instance}", _instance);
 
         _configuration = configuration;
-        _links = new FleetLinks(configuration, logger);
+        _links = links ?? new FleetLinks(configuration, logger);
         _keyFilePath = authSettings?.KeyFilePath is { } keyFile ? Path.GetFullPath(keyFile) : null;
         foreach (var (setting, folder) in RootSources.From(configuration).Folders)
             _logger.LogInformation("Roots from {Setting}: {Folder}", setting, folder);
@@ -1110,7 +1111,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             {
                 // Once its ID is its own: a failed add never replaces another session's record
                 FleetGrantFile.Write(project.RootPath, project.SessionId,
-                    new FleetGrantFile.Grant(action.Name, fleetToolsGranted, Path.GetRelativePath(project.RootPath, project.ProjectPath)));
+                    new FleetGrantFile.Grant(action.Name, fleetToolsGranted, Path.GetRelativePath(project.RootPath, project.ProjectPath), project.Status.ParentId));
                 await _lifecycle.StartAsync(project, prompt, BuildLaunchSpec(project));
             }
             catch (Exception ex)
@@ -1878,7 +1879,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             }
 
             // Messages held for it while it was stopped: it is resumed with them
-            if (SessionInbox.Any(project.StatePath)
+            if (SessionInbox.Any(project.RootPath, project.SessionId) && WaitsOnTheUser(project) == null
                 && (await ReplyAndResumeLockedAsync(project, text: null, onlyIfInterrupted: false)) is { Delivered: true } resumed)
             {
                 sessionStart = resumed.SessionStart;
@@ -2198,6 +2199,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 {
                     await DeleteDirectoryRobustAsync(trashed, WhyNotStateOf(rootPath, folder, trashed));
                     FleetGrantFile.Delete(rootPath, sessionId);
+                    SessionInbox.Delete(rootPath, sessionId);
                     _logger.LogInformation("Purged {ProjectId} from the trash of {Folder}", ProjectId(profile, root, sessionId), folder);
                 }
                 catch (Exception ex)
@@ -2441,12 +2443,16 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     private async Task ReparentAsync(IReadOnlyDictionary<string, string> rekeyed, IReadOnlyCollection<ProjectInfo> justRecovered)
     {
         if (rekeyed.Count == 0) return;
-        foreach (var child in _projects.Values.Where(project => project.Status.ParentId is { } parent && rekeyed.ContainsKey(parent)).ToArray())
+        foreach (var child in _projects.Values.Where(project => project.Status.ParentId is { } parent && rekeyed.ContainsKey(parent)
+            || RecordOf(project)?.Parent is { } recorded && rekeyed.ContainsKey(recorded)).ToArray())
         {
             var oldParent = child.Status.ParentId!;
             await _lifecycle.UpdateStatusAsync(child, status =>
                 status.ParentId is { } parent && rekeyed.TryGetValue(parent, out var newParent) ? status with { ParentId = newParent } : status);
             _logger.LogInformation("Project {ProjectId}: its parent {OldParent} is {NewParent} now", child.Status.Id, oldParent, child.Status.ParentId);
+            // The server's own record of its parent follows, so the child still reaches it
+            if (RecordOf(child) is { Parent: { } recorded } grant && rekeyed.TryGetValue(recorded, out var renamed))
+                FleetGrantFile.Write(child.RootPath, child.SessionId, grant with { Parent = renamed });
             if (!justRecovered.Contains(child)) await NotifyStatusChanged(child);
         }
     }
@@ -3006,9 +3012,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(project, profileName);
         var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
-        // A session with the fleet's tools keeps its config, and the token that opens them, out of its working folder
         var fleetTools = HasFleetTools(project);
-        var mcpConfigPath = fleetTools ? McpConfigFile.FleetPathFor(project.RootPath, project.SessionId) : McpConfigFile.PathFor(project.StatePath);
+        // Every session's MCP config, with the token that speaks for it, is out of its working folder: a neighbour in a shared folder could read it
+        var mcpConfigPath = McpConfigFile.PathFor(project.RootPath, project.SessionId);
         // GodMode names the session itself: a root's own name would make its address another than the one it reports
         if (action.ClaudeArgs is { } claudeArgs && SessionAddress.WithoutName(claudeArgs, out var named) is var unnamed && named)
         {
@@ -3231,18 +3237,38 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// </summary>
     private void ForgetFleetGrant(ProjectInfo project)
     {
-        try { FleetGrantFile.Delete(project.RootPath, project.SessionId); }
+        try
+        {
+            FleetGrantFile.Delete(project.RootPath, project.SessionId);
+            SessionInbox.Delete(project.RootPath, project.SessionId);
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.LogWarning("Project {ProjectId}: its fleet grant record could not be deleted: {Reason}", project.Status.Id, ex.Message);
         }
     }
 
+    /// <summary>
+    /// The session's record (<see cref="FleetGrantFile"/>), when it is the session's: written for the session created or
+    /// adopted in its working folder, not a state folder planted under its id elsewhere. Null otherwise, which grants
+    /// nothing and names no parent.
+    /// </summary>
+    private FleetGrantFile.Grant? RecordOf(ProjectInfo project) =>
+        project.Status.RootName != null && FleetGrantFile.Read(project.RootPath, project.SessionId) is { } grant
+        && PathComparer.Equals(FullPath(Path.Combine(project.RootPath, grant.Folder)), FullPath(project.ProjectPath))
+            ? grant
+            : null;
+
+    /// <summary>
+    /// The session's parent as the server recorded it at its create (<see cref="FleetGrantFile.Grant.Parent"/>); null
+    /// for a top-level session, one without a record (made before it was kept), or one whose record is not its own.
+    /// The <c>ParentId</c> in its <c>status.json</c> nests it in the app, and grants nothing.
+    /// </summary>
+    private string? ServerParentOf(ProjectInfo project) => RecordOf(project)?.Parent;
+
     private bool HasFleetTools(ProjectInfo project)
     {
-        if (project.Status.RootName == null || FleetGrantFile.Read(project.RootPath, project.SessionId) is not { } grant) return false;
-        // The record is the session's that was created or adopted in that folder, not a state folder planted under its id elsewhere
-        if (!PathComparer.Equals(FullPath(Path.Combine(project.RootPath, grant.Folder)), FullPath(project.ProjectPath))) return false;
+        if (RecordOf(project) is not { } grant) return false;
         try
         {
             return _rootConfigReader.ReadConfigStrict(project.RootPath).ResolveAction(grant.Action)?.FleetTools switch
@@ -3289,6 +3315,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             // The session's id, yymmdd-{kind}-{slug}-{suffix}: its state is in .godmode/sessions/{id}/. During a create, the id
             // as the action makes it; a kind or project_name in the result file gives the session its final one
             env["GODMODE_SESSION_ID"] = project.SessionId;
+            // Its name in Claude Code's own channel (SessionAddress)
+            env[SessionAddress.Variable] = AddressOf(project);
             // Whether the session shares its working folder with others (its action's sharedFolder): a
             // script then keys what it makes by the session's id, not the folder, and removes no folder
             env[SharedFolderVariable] = project.SharedFolder ? "true" : "false";

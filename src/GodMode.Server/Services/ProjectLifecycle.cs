@@ -329,7 +329,7 @@ public sealed class ProjectLifecycle
     /// user's) and WaitingPermission cannot, nor can Error, which waits on the user too.
     /// </summary>
     public bool CanTakeInput(ProjectInfo project) =>
-        project.Status.State == ProjectState.Idle && project.Process.OldestPending == null
+        project.Status is { State: ProjectState.Idle, CurrentQuestion: null } && project.Process.OldestPending == null
         && !project.Process.Stopping && !project.Process.Launching && IsRunning(project);
 
     // ── State ──

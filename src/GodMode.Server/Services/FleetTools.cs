@@ -134,8 +134,13 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
             throw new McpException($"The parent session '{parent}' is not one this server has.");
         var parentId = !string.IsNullOrWhiteSpace(parent) ? parent : top_level ? null : caller;
         // A session's child is in its parent's root, or one a link lets the parent oversee
-        if (scope != null && parentId != null && RootRef.OfId(parentId) is { } parentRoot && !links.AllowsParent(parentRoot, target))
-            throw new McpException($"A child of {parentId} is in its root, {parentRoot}: {FleetLinks.Missing(parentRoot, target)}.");
+        if (scope != null && parentId != null)
+        {
+            if (RootRef.OfId(parentId) is not { } parentRoot)
+                throw new McpException($"The parent session '{parent}' is not one this server has.");
+            if (!links.AllowsParent(parentRoot, target))
+                throw new McpException($"A child of {parentId} is in its root, {parentRoot}: {FleetLinks.Missing(parentRoot, target)}.");
+        }
         if (model != null) values["model"] = JsonSerializer.SerializeToElement(model);
         if (effort != null) values["effort"] = JsonSerializer.SerializeToElement(effort);
 

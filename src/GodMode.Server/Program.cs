@@ -86,6 +86,7 @@ builder.Services.AddSingleton<IStatusUpdater, StatusUpdater>();
 builder.Services.AddSingleton<ProjectLifecycle>();
 builder.Services.AddSingleton<IRootConfigReader, RootConfigReader>();
 builder.Services.AddSingleton<IScriptRunner, ScriptRunner>();
+// One instance, the fleet tools' and the project manager's
 builder.Services.AddSingleton(services => new FleetLinks(services.GetRequiredService<IConfiguration>(), services.GetRequiredService<ILogger<FleetLinks>>()));
 builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 

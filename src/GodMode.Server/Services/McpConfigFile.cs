@@ -2,23 +2,18 @@ namespace GodMode.Server.Services;
 
 /// <summary>
 /// The MCP config a Claude process is launched with (<c>--mcp-config</c> takes a file path):
-/// GodMode's own server, and the fleet's for a session with the fleet's tools. It lives in the session's state folder
-/// (<c>.godmode/sessions/{id}/</c>), or, for a session with the fleet's tools, beside its grant record in the root's
-/// <c>logs</c> (<see cref="FleetPathFor"/>): its token opens the fleet's tools, and a shared working folder is its
-/// neighbours' too. Owner-only where the OS supports it, and only for as long as the process runs.
+/// GodMode's own server, and the fleet's for a session with the fleet's tools. It lives beside the session's record in
+/// the root's <c>logs</c> (<see cref="PathFor"/>), out of its working folder: its token speaks for the session
+/// (<c>message_parent</c>, and the fleet's tools when it has them), and a shared working folder is its neighbours' too.
+/// Owner-only where the OS supports it, and only for as long as the process runs.
 /// </summary>
 public static class McpConfigFile
 {
     public const string FileName = "mcp-config.json";
 
-    public static string PathFor(string statePath) => Path.Combine(statePath, FileName);
-
-    /// <summary>Where a session with the fleet's tools has its config: <c>{root}/logs/{id}.mcp-config.json</c>, out of its working folder.</summary>
-    public static string FleetPathFor(string rootPath, string sessionId) =>
+    /// <summary>Where a session has its config: <c>{root}/logs/{id}.mcp-config.json</c>, out of its working folder.</summary>
+    public static string PathFor(string rootPath, string sessionId) =>
         Path.Combine(rootPath, GodMode.ProjectFiles.ProjectFolder.ScriptLogsFolderName, $"{sessionId}.{FileName}");
-
-    /// <summary>Writes the config into the state folder and returns its path.</summary>
-    public static string Write(string statePath, string json) => WriteFile(PathFor(statePath), json);
 
     /// <summary>Writes the config to <paramref name="path"/> and returns it.</summary>
     public static string WriteFile(string path, string json)
@@ -54,12 +49,9 @@ public static class McpConfigFile
     }
 
     /// <summary>
-    /// Deletes the config if it was written before <paramref name="launchedAtUtc"/>. A later file
-    /// belongs to a newer launch of the same project and is left alone.
+    /// Deletes the config at <paramref name="path"/> if it was written before <paramref name="launchedAtUtc"/>. A later
+    /// file belongs to a newer launch of the same project and is left alone.
     /// </summary>
-    public static void DeleteIfWrittenBefore(string statePath, DateTime launchedAtUtc) => DeleteFileIfWrittenBefore(PathFor(statePath), launchedAtUtc);
-
-    /// <summary>As <see cref="DeleteIfWrittenBefore"/>, for the config at <paramref name="path"/>.</summary>
     public static void DeleteFileIfWrittenBefore(string path, DateTime launchedAtUtc)
     {
         if (File.Exists(path) && File.GetLastWriteTimeUtc(path) <= launchedAtUtc)

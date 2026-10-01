@@ -35,10 +35,12 @@ public class SessionFolderTests
         Assert.Equal([".gitignore", "sessions"], Directory.GetFileSystemEntries(godMode).Select(Path.GetFileName).Order(StringComparer.Ordinal));
         Assert.Equal([id], Directory.GetDirectories(Path.Combine(godMode, "sessions")).Select(Path.GetFileName));
         var state = harness.StatePath(created.Id);
-        foreach (var file in new[] { "status.json", "settings.json", "input.jsonl", "output.jsonl", "output-generation", "session-id", "mcp-config.json" })
+        foreach (var file in new[] { "status.json", "settings.json", "input.jsonl", "output.jsonl", "output-generation", "session-id" })
             Assert.True(File.Exists(Path.Combine(state, file)), $"{file} is not in {state}");
         Assert.Equal(created.Id, harness.ReadStatusFile(created.Id).Id);
-        Assert.StartsWith(state, (await harness.WaitForStdinAsync(created.Id)).ArgValue("--mcp-config"));
+        // Its MCP config, with its token, is out of the working folder
+        Assert.Equal(harness.McpConfigPath(created.Id), (await harness.WaitForStdinAsync(created.Id)).ArgValue("--mcp-config"));
+        Assert.False(File.Exists(Path.Combine(state, GodMode.Server.Services.McpConfigFile.FileName)));
     }
 
     /// <summary>Without a kind from its script, a session's kind is its action's name, in the id and in the status.</summary>
@@ -209,7 +211,7 @@ public class SessionFolderTests
     }
 
     private static string McpConfigPath(LifecycleHarness harness, string projectId) =>
-        Path.Combine(harness.StatePath(projectId), "mcp-config.json");
+        harness.McpConfigPath(projectId);
 
     private static string[] Git(string folder, string arguments)
     {

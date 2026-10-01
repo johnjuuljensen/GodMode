@@ -6,8 +6,11 @@ namespace GodMode.Server.Services;
 /// A session's address in Claude Code's own cross-session channel: the name GodMode gives its claude with <c>-n</c> on
 /// every launch, resume included, so <c>ListAgents</c> lists it under it and <c>SendMessage</c> reaches it by it, from
 /// another session in the same <c>CLAUDE_CONFIG_DIR</c>. It is <c>{root}-{id}</c>: the root's name, which is one root's
-/// on a server, then the session's id, unique in its root; anything but a letter, a digit, <c>.</c>, <c>_</c> or
-/// <c>-</c> in the root's name is a <c>-</c>. Stable for the session's life. A root's own <c>-n</c> or <c>--name</c> in its
+/// on a server, then the session's id, unique in its root. Anything but a letter, a digit, <c>.</c>, <c>_</c> or
+/// <c>-</c> in the root's name is a <c>-</c>, and a name that changed so ends with <c>_</c> and 6 hex digits of its hash,
+/// so <c>a b</c> and <c>a-b</c> stay apart. Stable while the session's root keeps its name (a re-key renames it).
+/// Only a name: any process in the config dir could claim it (<c>claude -n</c>), so the server relay is what checks
+/// who a message is from. A root's own <c>-n</c> or <c>--name</c> in its
 /// <c>claudeArgs</c> is taken out (<see cref="WithoutName"/>): GodMode's name wins, so the address is the one it reports.
 /// </summary>
 public static class SessionAddress
@@ -23,6 +26,8 @@ public static class SessionAddress
         if (string.IsNullOrEmpty(rootName)) return sessionId;
         var root = new StringBuilder(rootName.Length);
         foreach (var c in rootName) root.Append(char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-' ? c : '-');
+        if (root.ToString() != rootName)
+            root.Append('_').Append(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(rootName)))[..6]);
         return $"{root}-{sessionId}";
     }
 
