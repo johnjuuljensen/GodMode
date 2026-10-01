@@ -40,6 +40,11 @@ namespace GodMode.Shared.Models;
 /// <c>adopted</c>): its folder was there before it, so the app offers <see cref="Hubs.IProjectHub.ForgetProject"/>
 /// beside its delete, which keeps the folder.
 /// </param>
+/// <param name="ParentId">
+/// The <see cref="Id"/> of the session that started this one, on the same server, set at its create and
+/// kept for its life; null for a top-level session. Metadata only: the parent's stop or delete leaves its
+/// children as they are, so it may name a session that is gone, which the app shows as top level.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -67,5 +72,6 @@ public record ProjectStatus(
     string? ActionName = null,
     bool SharedFolder = false,
     bool Adopted = false,
-    string? Effort = null
+    string? Effort = null,
+    string? ParentId = null
 );

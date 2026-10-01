@@ -721,7 +721,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 Kind: s.Kind,
                 ActionName: s.ActionName,
                 SharedFolder: s.SharedFolder,
-                Adopted: s.Adopted
+                Adopted: s.Adopted,
+                ParentId: s.ParentId
             ));
         }
 
@@ -773,6 +774,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         var action = config.ResolveAction(request.ActionName)
             ?? throw new ArgumentException($"Action '{request.ActionName}' not found in root '{request.ProjectRootName}'.");
         RequireInputs(action, request.Inputs);
+        // A parent is a session of this server's: an ID it does not track (another server's, a deleted
+        // session's, a typo) is refused, before anything is written. One for an action that starts no
+        // session is checked as well, and has nothing to be the parent of
+        if (request.ParentId is { } parentId && !_projects.ContainsKey(parentId))
+            throw new ArgumentException($"The parent session '{parentId}' is not one this server has.");
 
         if (!action.Session)
             return await RunSessionlessActionAsync(request, snap, rootPath, config, action);
@@ -872,7 +878,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 ProfileName: profileName,
                 Kind: kind,
                 ActionName: action.Name,
-                SharedFolder: action.SharedFolder
+                SharedFolder: action.SharedFolder,
+                ParentId: request.ParentId
             ),
             ProjectPath = projectPath,
             RootPath = FullPath(rootPath),

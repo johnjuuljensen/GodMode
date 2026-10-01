@@ -375,6 +375,12 @@ export interface ProjectStatus {
    * its action's.
    */
   Effort?: string | null;
+  /**
+   * The ProjectStatus.Id of the session that started this one, on the same server, set at its create and kept
+   * for its life; null for a top-level session. Metadata only: the parent's stop or delete leaves its
+   * children as they are, so it may name a session that is gone, which the app shows as top level.
+   */
+  ParentId?: string | null;
 }
 
 /** Summary information about a project. */
@@ -410,6 +416,8 @@ export interface ProjectSummary {
    * Whether the session was adopted, as in ProjectStatus.Adopted: the app offers Forget beside its delete.
    */
   Adopted: boolean;
+  /** The session that started this one, or null, as in ProjectStatus.ParentId. */
+  ParentId?: string | null;
 }
 
 /**
