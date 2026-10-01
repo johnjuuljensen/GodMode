@@ -1,4 +1,5 @@
 using GodMode.Server.Services;
+using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -110,5 +111,38 @@ public class RootConfigPermissionsTests
             ("config.freeform.json", """{ "permissionMode": "auto" }"""));
 
         Assert.Equal(["freeform"], config.GetEffectiveActions().Select(a => a.Name));
+    }
+
+    // ── fleetTools ──
+
+    /// <summary>true, "grantable" or false, merged as any scalar: an overlay replaces the base. None unless a root says so.</summary>
+    [Fact]
+    public void FleetTools_IsNoneUnlessSet_AndAnOverlayReplacesTheBase()
+    {
+        var config = Read(
+            ("config.json", """{ "fleetTools": "grantable" }"""),
+            ("config.overseer.json", """{ "fleetTools": true }"""),
+            ("config.issue.json", """{ "fleetTools": false }"""),
+            ("config.epic.json", "{}"));
+
+        Assert.Equal(FleetToolsGrant.Granted, config.ResolveAction("overseer")!.FleetTools);
+        Assert.Equal(FleetToolsGrant.None, config.ResolveAction("issue")!.FleetTools);
+        Assert.Equal(FleetToolsGrant.Grantable, config.ResolveAction("epic")!.FleetTools);
+        Assert.Equal(FleetToolsGrant.None, Read(("config.json", "{}")).ResolveAction(null)!.FleetTools);
+    }
+
+    /// <summary>Anything else is an error, never taken for a grant; read leniently, its action is left out.</summary>
+    [Theory]
+    [InlineData("\"yes\"")]
+    [InlineData("\"true\"")]
+    [InlineData("1")]
+    [InlineData("{}")]
+    public void FleetTools_OfAnyOtherValue_IsAnError(string value)
+    {
+        var error = Assert.Throws<InvalidDataException>(() => Read(("config.json", "{}"), ("config.overseer.json", $$"""{ "fleetTools": {{value}} }""")));
+        Assert.Contains("fleetTools", error.Message);
+
+        var lenient = Read(strict: false, ("config.json", "{}"), ("config.overseer.json", $$"""{ "fleetTools": {{value}} }"""), ("config.issue.json", "{}"));
+        Assert.Equal(["issue"], lenient.GetEffectiveActions().Select(a => a.Name));
     }
 }

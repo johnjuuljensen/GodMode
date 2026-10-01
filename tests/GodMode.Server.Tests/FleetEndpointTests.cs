@@ -13,6 +13,7 @@ using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
+using static GodMode.Server.Tests.FleetRun;
 
 namespace GodMode.Server.Tests;
 
@@ -24,25 +25,18 @@ namespace GodMode.Server.Tests;
 /// </summary>
 public class FleetEndpointTests
 {
-    private const string Profile = "fleet";
-    private const string Root = "work";
-    private const string WorkAction = "work";
-    private const string ProvisionAction = "provision";
-
-    private static readonly string[] FleetToolNames = ["list_roots", "list_sessions", "read", "resume", "send", "start_session", "stop"];
-
     [Fact]
     public async Task TheApiKey_OpensTheFleetEndpoint_WhichListsTheFleetsToolsAlone_AndASessionsEndpointListsItsPromptAlone()
     {
         // The fake connects to /mcp, listing its tools, when it asks its first permission
-        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin().AskPermission("Bash", new { command = "ls" }).AwaitStdin());
+        await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin().AskPermission("Bash", new { command = "ls" }).AwaitStdin());
 
         await using var fleet = await run.ConnectFleetAsync();
         var tools = await fleet.ListToolsAsync();
         Assert.Equal(FleetToolNames, tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
 
         // A session's claude, on /mcp with its project token, is given the permission prompt and nothing of the fleet's
-        var id = (await run.CallAsync(fleet, "start_session", new() { ["profile"] = Profile, ["root"] = Root, ["action"] = WorkAction,
+        var id = (await run.CallAsync(fleet, "start_session", new() { ["profile"] = Profile, ["root"] = RootName, ["action"] = WorkAction,
             ["inputs"] = new Dictionary<string, object?> { ["name"] = "p1", ["prompt"] = "Start" } })).GetProperty("Id").GetString()!;
         var launch = await run.WaitForLaunchAsync(id, l => l.Tools != null);
         var sessionTools = JsonDocument.Parse(launch.Tools!).RootElement.EnumerateArray().Select(tool => tool.GetProperty("name").GetString());
@@ -50,13 +44,14 @@ public class FleetEndpointTests
     }
 
     /// <summary>
-    /// The fleet's endpoint takes the server's own credential alone: not a project token, with its project named
-    /// or not, and not a request with an Origin. The session endpoint does not take the API key.
+    /// The fleet's endpoint takes the server's own credential, and not an ungranted session's project token, with its
+    /// project named (forbidden: the session has no fleet tools) or not, nor a request with an Origin. The session
+    /// endpoint does not take the API key. Granted sessions are <see cref="FleetGrantTests"/>'.
     /// </summary>
     [Fact]
-    public async Task AProjectToken_IsRefusedOnTheFleetEndpoint_AndTheApiKeyOnTheSessionEndpoint()
+    public async Task AnUngrantedProjectToken_IsRefusedOnTheFleetEndpoint_AndTheApiKeyOnTheSessionEndpoint()
     {
-        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin());
+        await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin());
         var id = await run.CreateOverHubAsync("p1");
         var token = GodModeMcpEntry.Of(await run.WaitForLaunchAsync(id, launch => launch.Stdin.Count > 0)).Token;
 
@@ -68,7 +63,7 @@ public class FleetEndpointTests
 
         foreach (var (path, credential, projectId, expected) in new[]
         {
-            (GodModeMcp.FleetPath, token, id, HttpStatusCode.Unauthorized),
+            (GodModeMcp.FleetPath, token, id, HttpStatusCode.Forbidden),
             (GodModeMcp.FleetPath, token, null, HttpStatusCode.Unauthorized),
             (GodModeMcp.FleetPath, null, null, HttpStatusCode.Unauthorized),
             (GodModeMcp.FleetPath, "not-the-key", null, HttpStatusCode.Unauthorized),
@@ -92,15 +87,15 @@ public class FleetEndpointTests
     [Fact]
     public async Task ListRoots_GivesTheActionsAndTheirSchemas()
     {
-        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin());
+        await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin());
         await using var fleet = await run.ConnectFleetAsync();
 
         var listed = await run.CallAsync(fleet, "list_roots");
 
         Assert.Contains(listed.GetProperty("Profiles").EnumerateArray(), profile => profile.GetProperty("Name").GetString() == Profile);
-        var root = Assert.Single(listed.GetProperty("Roots").EnumerateArray(), r => r.GetProperty("Name").GetString() == Root);
+        var root = Assert.Single(listed.GetProperty("Roots").EnumerateArray(), r => r.GetProperty("Name").GetString() == RootName);
         var actions = root.GetProperty("Actions").EnumerateArray().ToDictionary(a => a.GetProperty("Name").GetString()!);
-        Assert.Equal([ProvisionAction, WorkAction], actions.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal([GrantableAction, OverseerAction, ProvisionAction, WorkAction], actions.Keys.Order(StringComparer.Ordinal));
         Assert.True(actions[WorkAction].GetProperty("Session").GetBoolean());
         Assert.False(actions[ProvisionAction].GetProperty("Session").GetBoolean());
         Assert.True(actions[WorkAction].GetProperty("InputSchema").GetProperty("properties").TryGetProperty("prompt", out _));
@@ -110,20 +105,20 @@ public class FleetEndpointTests
     [Fact]
     public async Task StartSession_LaunchesWithItsModelAndEffort_UnderItsParent_AndTheAppIsTold()
     {
-        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin());
+        await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin());
         var created = new ConcurrentQueue<ProjectStatus>();
         run.Client.Hub.On<ProjectStatus>(nameof(IProjectHubClient.ProjectCreated), created.Enqueue);
         await using var fleet = await run.ConnectFleetAsync();
 
         // skipPermissions false is the schema's default, which an overseer may fill in: only true is refused
-        var parent = await run.CallAsync(fleet, "start_session", new() { ["profile"] = Profile, ["root"] = Root, ["action"] = WorkAction,
+        var parent = await run.CallAsync(fleet, "start_session", new() { ["profile"] = Profile, ["root"] = RootName, ["action"] = WorkAction,
             ["inputs"] = new Dictionary<string, object?> { ["name"] = "overseer", ["prompt"] = "Oversee", ["skipPermissions"] = false } });
         var parentId = parent.GetProperty("Id").GetString()!;
         Assert.False(parent.TryGetProperty("ParentId", out _), "an overseer outside GodMode starts top-level sessions");
 
         var child = await run.CallAsync(fleet, "start_session", new()
         {
-            ["profile"] = Profile, ["root"] = Root, ["action"] = WorkAction,
+            ["profile"] = Profile, ["root"] = RootName, ["action"] = WorkAction,
             ["inputs"] = new Dictionary<string, object?> { ["name"] = "worker", ["prompt"] = "Work" },
             ["model"] = "sonnet", ["effort"] = "high", ["parent"] = parentId,
         });
@@ -146,30 +141,30 @@ public class FleetEndpointTests
         Assert.Equal(new[] { childId, parentId }.Order(StringComparer.Ordinal), sessions.Keys.Order(StringComparer.Ordinal));
         Assert.Equal(parentId, sessions[childId].GetProperty("ParentId").GetString());
         Assert.Equal(Profile, sessions[childId].GetProperty("Profile").GetString());
-        Assert.Equal(Root, sessions[childId].GetProperty("Root").GetString());
+        Assert.Equal(RootName, sessions[childId].GetProperty("Root").GetString());
         Assert.Equal(WorkAction, sessions[childId].GetProperty("Kind").GetString());
     }
 
     [Fact]
     public async Task StartSession_RefusesWhatItCannotStart_SayingWhy_AndStartsNothing()
     {
-        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin());
+        await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin());
         await using var fleet = await run.ConnectFleetAsync();
         var inputs = new Dictionary<string, object?> { ["name"] = "p1", ["prompt"] = "Start" };
 
         Assert.Contains("nowhere", await run.RefusedAsync(fleet, "start_session", new() { ["profile"] = Profile, ["root"] = "nowhere", ["inputs"] = inputs }));
         Assert.Contains("no-such-session", await run.RefusedAsync(fleet, "start_session",
-            new() { ["profile"] = Profile, ["root"] = Root, ["action"] = WorkAction, ["inputs"] = inputs, ["parent"] = "no-such-session" }));
+            new() { ["profile"] = Profile, ["root"] = RootName, ["action"] = WorkAction, ["inputs"] = inputs, ["parent"] = "no-such-session" }));
         Assert.Contains("effort", await run.RefusedAsync(fleet, "start_session",
-            new() { ["profile"] = Profile, ["root"] = Root, ["action"] = WorkAction, ["inputs"] = inputs, ["effort"] = "enormous" }));
+            new() { ["profile"] = Profile, ["root"] = RootName, ["action"] = WorkAction, ["inputs"] = inputs, ["effort"] = "enormous" }));
         Assert.Contains("skipPermissions", await run.RefusedAsync(fleet, "start_session", new()
         {
-            ["profile"] = Profile, ["root"] = Root, ["action"] = WorkAction,
+            ["profile"] = Profile, ["root"] = RootName, ["action"] = WorkAction,
             ["inputs"] = new Dictionary<string, object?>(inputs) { ["skipPermissions"] = true },
         }));
         Assert.Contains("parent", await run.RefusedAsync(fleet, "start_session", new()
         {
-            ["profile"] = Profile, ["root"] = Root, ["action"] = WorkAction,
+            ["profile"] = Profile, ["root"] = RootName, ["action"] = WorkAction,
             ["inputs"] = new Dictionary<string, object?>(inputs) { [CreateProjectRequest.ParentInput] = "x" },
         }));
 
@@ -179,12 +174,12 @@ public class FleetEndpointTests
     [Fact]
     public async Task StartSession_OfAnActionThatStartsNoSession_ReturnsItsMessage()
     {
-        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin());
+        await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin());
         await using var fleet = await run.ConnectFleetAsync();
 
         var result = await run.CallAsync(fleet, "start_session", new()
         {
-            ["profile"] = Profile, ["root"] = Root, ["action"] = ProvisionAction,
+            ["profile"] = Profile, ["root"] = RootName, ["action"] = ProvisionAction,
             ["inputs"] = new Dictionary<string, object?> { ["name"] = "fresh" },
         });
 
@@ -197,7 +192,7 @@ public class FleetEndpointTests
     [Fact]
     public async Task Send_ReachesClaude_AndRead_GivesTheLastReplies()
     {
-        await using var run = await Run.StartAsync(new FakeScript().EmitInit().Turn("The first answer").Turn("The second answer").AwaitStdin());
+        await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().Turn("The first answer").Turn("The second answer").AwaitStdin());
         await using var fleet = await run.ConnectFleetAsync();
         var id = await run.StartAsync(fleet, "p1");
         await run.Client.WaitForAsync(id, s => s.State == ProjectState.Idle && s.LastResult != null, run.Server);
@@ -232,7 +227,7 @@ public class FleetEndpointTests
     [Fact]
     public async Task Send_IsRefusedWhileAPermissionPromptWaits_AndLeavesTheSessionAsItIs()
     {
-        await using var run = await Run.StartAsync(
+        await using var run = await FleetRun.StartAsync(
             new FakeScript().EmitInit().AwaitStdin().AskPermission("Bash", new { command = "git push origin main" }, "toolu_push").AwaitStdin());
         await using var fleet = await run.ConnectFleetAsync();
         var id = await run.StartAsync(fleet, "p1");
@@ -263,7 +258,7 @@ public class FleetEndpointTests
     public async Task Send_IsRefusedWhileAQuestionWaits()
     {
         var question = new { questions = new[] { new { question = "Which branch?", header = "Branch", options = new[] { new { label = "main", description = "the default" } }, multiSelect = false } } };
-        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin().AskPermission("AskUserQuestion", question, "toolu_ask").AwaitStdin());
+        await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin().AskPermission("AskUserQuestion", question, "toolu_ask").AwaitStdin());
         await using var fleet = await run.ConnectFleetAsync();
         var id = await run.StartAsync(fleet, "p1");
         await run.Client.WaitForAsync(id, s => s.PendingQuestion != null, run.Server);
@@ -283,7 +278,7 @@ public class FleetEndpointTests
     [Fact]
     public async Task StopAndResume_AsTheApps()
     {
-        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin().EmitAssistant("Working on it").AwaitStdin());
+        await using var run = await FleetRun.StartAsync(new FakeScript().EmitInit().AwaitStdin().EmitAssistant("Working on it").AwaitStdin());
         await using var fleet = await run.ConnectFleetAsync();
         var id = await run.StartAsync(fleet, "p1");
         Assert.True(await LifecycleHarness.WaitForAsync(async () =>
@@ -304,123 +299,5 @@ public class FleetEndpointTests
         var request = McpEndpointTests.Initialize(projectId, token);
         request.RequestUri = new Uri(path, UriKind.Relative);
         return request;
-    }
-
-    /// <summary>A server over one root, with an action that starts a session and one that starts none, whose sessions play the script in the fake.</summary>
-    private sealed class Run : IAsyncDisposable
-    {
-        private string _workDir = "";
-
-        public ServerProcess Server { get; private set; } = null!;
-        public string BaseUrl { get; private set; } = "";
-        public HttpClient Http { get; private set; } = null!;
-        public ServerHubClient Client { get; private set; } = null!;
-
-        public static async Task<Run> StartAsync(FakeScript script)
-        {
-            var run = new Run { _workDir = ServerProcess.CreateWorkDir("fleet") };
-            var scriptPath = Path.Combine(run._workDir, "fake-claude.script");
-            script.Save(scriptPath);
-            var rootConfig = Path.Combine(run._workDir, "roots", Root, ".godmode-root");
-            Directory.CreateDirectory(rootConfig);
-            File.WriteAllText(Path.Combine(rootConfig, "config.json"), JsonSerializer.Serialize(new
-            {
-                profileName = Profile,
-                environment = new Dictionary<string, string>
-                {
-                    [FakeClaudeEnvironment.Script] = scriptPath,
-                    [FakeClaudeEnvironment.Record] = "fake-claude.jsonl",
-                },
-            }));
-            File.WriteAllText(Path.Combine(rootConfig, $"config.{WorkAction}.json"), "{}");
-            File.WriteAllText(Path.Combine(rootConfig, $"config.{ProvisionAction}.json"), """{ "session": false, "create": "provision.ps1" }""");
-            File.WriteAllText(Path.Combine(rootConfig, "provision.ps1"), """
-                $ErrorActionPreference = 'Stop'
-                Set-Content -Path $env:GODMODE_RESULT_FILE -Value "message=Provisioned $env:GODMODE_INPUT_NAME"
-                """);
-
-            run.BaseUrl = $"http://127.0.0.1:{ServerProcess.GetFreePort()}";
-            try
-            {
-                run.Server = ServerProcess.Start(run._workDir, run.BaseUrl,
-                    environment: new Dictionary<string, string> { ["Claude__Executable"] = LifecycleHarness.FakeClaudePath });
-                run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TimeSpan.FromSeconds(10) };
-                await run.Server.WaitForHealthyAsync(run.Http);
-                run.Client = new ServerHubClient(run.BaseUrl);
-                await run.Client.StartAsync();
-                return run;
-            }
-            catch
-            {
-                // The test never gets the run to dispose: a server left running outlives the test host
-                await run.DisposeAsync();
-                throw;
-            }
-        }
-
-        /// <summary>An MCP client on the fleet's endpoint with the server's API key, as an overseer's <c>.mcp.json</c> gives it.</summary>
-        public async Task<McpClient> ConnectFleetAsync() =>
-            await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions
-            {
-                Endpoint = new Uri(BaseUrl + GodModeMcp.FleetPath),
-                TransportMode = HttpTransportMode.StreamableHttp,
-                AdditionalHeaders = new Dictionary<string, string> { ["Authorization"] = $"Bearer {ServerProcess.ApiKey}" },
-            }));
-
-        /// <summary>The tool's JSON answer; fails the test when the tool refused.</summary>
-        public async Task<JsonElement> CallAsync(McpClient fleet, string tool, Dictionary<string, object?>? arguments = null)
-        {
-            var result = await fleet.CallToolAsync(tool, arguments ?? []);
-            var text = Text(result);
-            Assert.True(result.IsError != true, $"{tool} refused: {text}\n{Server.Output}");
-            return JsonDocument.Parse(text).RootElement.Clone();
-        }
-
-        /// <summary>Why the tool refused; fails the test when it did not.</summary>
-        public async Task<string> RefusedAsync(McpClient fleet, string tool, Dictionary<string, object?> arguments)
-        {
-            var result = await fleet.CallToolAsync(tool, arguments);
-            var text = Text(result);
-            Assert.True(result.IsError == true, $"{tool} was not refused: {text}");
-            return text;
-        }
-
-        private static string Text(CallToolResult result) => string.Concat(result.Content.OfType<TextContentBlock>().Select(block => block.Text));
-
-        /// <summary>Starts a session of the work action through the fleet, prompted, and returns its ID.</summary>
-        public async Task<string> StartAsync(McpClient fleet, string name) =>
-            (await CallAsync(fleet, "start_session", new()
-            {
-                ["profile"] = Profile, ["root"] = Root, ["action"] = WorkAction,
-                ["inputs"] = new Dictionary<string, object?> { ["name"] = name, ["prompt"] = "Start" },
-            })).GetProperty("Id").GetString()!;
-
-        public async Task<string> CreateOverHubAsync(string name) =>
-            (await Client.Hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), Profile, Root, WorkAction,
-                new Dictionary<string, JsonElement>
-                {
-                    ["name"] = JsonSerializer.SerializeToElement(name),
-                    ["prompt"] = JsonSerializer.SerializeToElement("Start"),
-                })).Project!.Id;
-
-        /// <summary>Waits until the session's first launch satisfies <paramref name="condition"/>.</summary>
-        public async Task<FakeLaunch> WaitForLaunchAsync(string projectId, Func<FakeLaunch, bool> condition)
-        {
-            var record = Path.Combine(ServerProcess.WorkingFolderOf(Path.Combine(_workDir, "roots", Root), projectId), "fake-claude.jsonl");
-            FakeLaunch? launch = null;
-            Assert.True(await LifecycleHarness.WaitForAsync(() =>
-                    Task.FromResult((launch = FakeRecording.Read(record).FirstOrDefault()) is { } l && condition(l))),
-                $"the fake of {projectId} did not get there: {(launch == null ? "no launch" : $"{launch.Stdin.Count} stdin lines, " +
-                    $"permissions [{string.Join(", ", launch.Permissions)}]")}.\n{Server.Output}");
-            return launch!;
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (Client != null) await Client.DisposeAsync();
-            Http?.Dispose();
-            Server?.Dispose();
-            ServerProcess.DeleteWorkDir(_workDir);
-        }
     }
 }
