@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GodMode.ProjectFiles;
+using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 
 namespace GodMode.Server.Services;
@@ -247,7 +248,8 @@ public class RootConfigReader : IRootConfigReader
         SharedFolder = overlay.SharedFolder ?? baseConfig.SharedFolder,
         Session = overlay.Session ?? baseConfig.Session,
         Transient = overlay.Transient ?? baseConfig.Transient,
-        Adopt = overlay.Adopt ?? baseConfig.Adopt
+        Adopt = overlay.Adopt ?? baseConfig.Adopt,
+        FleetTools = overlay.FleetTools ?? baseConfig.FleetTools
     };
 
     /// <summary>
@@ -300,9 +302,23 @@ public class RootConfigReader : IRootConfigReader
             Session: raw.Session ?? true,
             Transient: raw.Transient ?? false,
             Adopt: raw.Adopt ?? false,
-            Effort: raw.Effort
+            Effort: raw.Effort,
+            FleetTools: ParseFleetTools(name, raw.FleetTools)
         );
     }
+
+    /// <summary>
+    /// The action's <c>fleetTools</c>: <c>true</c>, <c>"grantable"</c>, <c>false</c> or none. Anything else is
+    /// a config error (<see cref="InvalidDataException"/>), never taken for a grant.
+    /// </summary>
+    private static FleetToolsGrant ParseFleetTools(string name, JsonElement? value) => value switch
+    {
+        null or { ValueKind: JsonValueKind.Null or JsonValueKind.False } => FleetToolsGrant.None,
+        { ValueKind: JsonValueKind.True } => FleetToolsGrant.Granted,
+        { ValueKind: JsonValueKind.String } grantable when grantable.GetString() == "grantable" => FleetToolsGrant.Grantable,
+        { } other => throw new InvalidDataException(
+            $"Action '{name}' has \"fleetTools\": {other.GetRawText()}, which is none of true, \"grantable\" and false."),
+    };
 
     /// <summary>Why an action that starts no session cannot have <paramref name="raw"/>'s settings, or null when it can.</summary>
     private static string? WhySessionlessCannot(RawConfig raw, string[]? create) =>
@@ -410,6 +426,8 @@ public class RootConfigReader : IRootConfigReader
         public bool? Session { get; init; }
         public bool? Transient { get; init; }
         public bool? Adopt { get; init; }
+        /// <summary>true, "grantable" or false: <see cref="ParseFleetTools"/>.</summary>
+        public JsonElement? FleetTools { get; init; }
         /// <summary>The root's list script: read from config.json alone, never an action's overlay.</summary>
         public JsonElement? List { get; init; }
 

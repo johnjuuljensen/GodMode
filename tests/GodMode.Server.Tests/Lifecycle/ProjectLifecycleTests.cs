@@ -160,7 +160,7 @@ public class ProjectLifecycleTests
         var onDisk = harness.ReadStatusFile(created.Id);
         Assert.Equal(ProjectState.Error, onDisk.State);
         Assert.Contains("fatal: something broke", onDisk.LastError);
-        Assert.Equal(0, harness.ProjectInfo(created.Id).Process.ProcessId);
+        Assert.Equal(0, harness.Tracked(created.Id).Process.ProcessId);
     }
 
     [Fact]
@@ -174,7 +174,7 @@ public class ProjectLifecycleTests
         var status = await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Stopped);
         Assert.Null(status.LastError);
         Assert.Equal(ProjectState.Stopped, harness.ReadStatusFile(created.Id).State);
-        Assert.Equal(0, harness.ProjectInfo(created.Id).Process.ProcessId);
+        Assert.Equal(0, harness.Tracked(created.Id).Process.ProcessId);
     }
 
     /// <summary>A clean exit in the middle of a turn, before its result, is not a finished session.</summary>

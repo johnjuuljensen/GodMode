@@ -88,9 +88,12 @@ public class ProjectInfo
 
     /// <summary>
     /// The token the project's claude calls GodMode's MCP endpoint with. Issued afresh for every
-    /// launch, and handed to claude only in its MCP config file.
+    /// launch, handed to claude only in its MCP config file, and cleared when that launch's process exits.
     /// </summary>
-    public string? ProjectToken { get; set; }
+    public string? ProjectToken { get => Volatile.Read(ref ProjectTokenField); set => Volatile.Write(ref ProjectTokenField, value); }
+
+    /// <summary><see cref="ProjectToken"/>'s field, for a launch's exit to clear only its own token (<see cref="Interlocked.CompareExchange{T}(ref T, T, T)"/>).</summary>
+    internal string? ProjectTokenField;
 
     /// <summary>The process, its output pipeline and the locks that order changes to <see cref="Status"/>.</summary>
     public ProjectProcess Process { get; } = new();

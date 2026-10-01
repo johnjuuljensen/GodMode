@@ -26,6 +26,11 @@ public static class McpEndpointUrl
             .FirstOrDefault()
         ?? Default;
 
+    /// <summary>The fleet's endpoint (<see cref="GodModeMcp.FleetPath"/>) on the server <paramref name="sessionUrl"/>, one <see cref="From"/> gave, is on.</summary>
+    public static string FleetOf(string sessionUrl) =>
+        sessionUrl.EndsWith(Path, StringComparison.Ordinal) ? sessionUrl[..^Path.Length] + GodModeMcp.FleetPath
+        : throw new ArgumentException($"Not a session endpoint URL: {sessionUrl}", nameof(sessionUrl));
+
     /// <summary>The URL this machine reaches <paramref name="address"/> on, and how much to prefer it (lower first).</summary>
     private static (Uri Url, int Rank)? Reachable(string address)
     {

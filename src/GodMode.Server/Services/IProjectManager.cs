@@ -141,6 +141,13 @@ public interface IProjectManager
     ProjectInfo? ValidateProjectToken(string projectId, string token);
 
     /// <summary>
+    /// Whether the project has the fleet's tools now: its action as it was started, in the root's config read
+    /// now, says <c>"fleetTools": true</c>, or <c>"grantable"</c> and its starter granted them. Its own files
+    /// never grant them. The fleet's endpoint asks on every call made with a project token.
+    /// </summary>
+    bool HasFleetTools(string projectId);
+
+    /// <summary>
     /// The MCP permission_prompt tool: waits until the user answers, and returns what claude gets.
     /// Canceled by <paramref name="aborted"/> when claude cancels the call or its connection drops.
     /// </summary>

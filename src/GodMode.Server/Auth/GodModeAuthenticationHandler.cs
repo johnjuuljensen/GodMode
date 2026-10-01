@@ -214,23 +214,52 @@ public static class GodModeAuthExtensions
     public static IServiceCollection AddGodModeAuth(this IServiceCollection services, AuthSettings settings)
     {
         services.AddSingleton(settings);
+        services.AddHttpContextAccessor();
+        services.AddSingleton<IAuthorizationHandler, McpCallerHandler>();
         services.AddAuthentication(SchemeName)
             .AddScheme<AuthenticationSchemeOptions, GodModeAuthenticationHandler>(SchemeName, _ => { })
             .AddScheme<AuthenticationSchemeOptions, ProjectTokenAuthenticationHandler>(ProjectTokenSchemeName, _ => { });
         services.AddAuthorizationBuilder()
             .SetFallbackPolicy(new AuthorizationPolicyBuilder(SchemeName).RequireAuthenticatedUser().Build())
+            // Each MCP policy is its endpoint's, by the request's path too: one MCP server is behind both, and each
+            // tool type's [Authorize] names its endpoint's policy, so each endpoint lists and calls its own tools alone
             .AddPolicy(ProjectPolicy, policy => policy
                 .AddAuthenticationSchemes(ProjectTokenSchemeName)
                 .RequireAuthenticatedUser()
-                .RequireClaim(ProjectIdClaim))
-            // The fleet endpoint's: the server's own credential, as the hub's. A project token is no
-            // user (its handler leaves a request naming a project to the project scheme), and a
-            // principal with a project claim is refused even where it is the one being checked (a
-            // tool's [Authorize] on /mcp)
+                .RequireClaim(ProjectIdClaim)
+                .AddRequirements(new McpCallerRequirement(McpEndpointUrl.Path, ProjectsOnly: true)))
+            // The fleet endpoint's: the server's own credential, as the hub's, or the project token of a session
+            // that has the fleet's tools now (IProjectManager.HasFleetTools, asked on every request). A project
+            // token is no user: its handler leaves a request naming a project to the project scheme
             .AddPolicy(FleetPolicy, policy => policy
-                .AddAuthenticationSchemes(SchemeName)
+                .AddAuthenticationSchemes(SchemeName, ProjectTokenSchemeName)
                 .RequireAuthenticatedUser()
-                .RequireAssertion(context => !context.User.HasClaim(claim => claim.Type == ProjectIdClaim)));
+                .AddRequirements(new McpCallerRequirement(GodModeMcp.FleetPath, ProjectsOnly: false)));
         return services;
+    }
+}
+
+/// <summary>
+/// An MCP endpoint's caller: the request is to <paramref name="Path"/>, and its caller is a project with the
+/// fleet's tools, or, unless <paramref name="ProjectsOnly"/>, the server's own credential (no project claim).
+/// </summary>
+public sealed record McpCallerRequirement(string Path, bool ProjectsOnly) : IAuthorizationRequirement;
+
+/// <summary>
+/// <see cref="McpCallerRequirement"/>, against the request being served: an endpoint's policy and a tool's
+/// [Authorize] alike see its path. A project is let onto the fleet's endpoint only while it has the fleet's
+/// tools (<see cref="IProjectManager.HasFleetTools"/>), which reads its root's config for every request.
+/// </summary>
+public sealed class McpCallerHandler(IHttpContextAccessor http, IProjectManager projects) : AuthorizationHandler<McpCallerRequirement>
+{
+    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, McpCallerRequirement requirement)
+    {
+        var path = http.HttpContext?.Request.Path;
+        var projectId = context.User.FindFirstValue(GodModeAuthExtensions.ProjectIdClaim);
+        // As routing compares it: any case, and a trailing slash, so /mcp/fleet/ is /mcp/fleet
+        var allowed = path is { Value: { } requested } && requested.TrimEnd('/').Equals(requirement.Path, StringComparison.OrdinalIgnoreCase)
+            && (projectId == null ? !requirement.ProjectsOnly : requirement.ProjectsOnly || projects.HasFleetTools(projectId));
+        if (allowed) context.Succeed(requirement);
+        return Task.CompletedTask;
     }
 }

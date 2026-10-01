@@ -13,12 +13,17 @@ namespace GodMode.Shared.Models;
 /// The ID of the session starting this one, its <see cref="ProjectStatus.ParentId"/>: a session this
 /// server tracks, else the create is refused. Null for a top-level session.
 /// </param>
+/// <param name="FleetTools">
+/// Whether the session starting this one grants it the fleet's tools: the fleet's <c>start_session</c> alone
+/// asks, for a caller that has them. Refused unless the action allows a grant (<see cref="CreateAction.FleetTools"/>).
+/// </param>
 public record CreateProjectRequest(
     string ProfileName,
     string ProjectRootName,
     Dictionary<string, JsonElement> Inputs,
     string? ActionName = null,
-    string? ParentId = null
+    string? ParentId = null,
+    bool FleetTools = false
 )
 {
     /// <summary>

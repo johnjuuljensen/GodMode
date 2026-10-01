@@ -11,6 +11,7 @@ SignalR server for GodMode. It runs Claude Code sessions in project folders on t
 - **Cross-Platform Scripts**: Write `.ps1` scripts once; they run under `pwsh` on Windows and Linux
 - **State Persistence**: Each session's state lives in its working folder's `.godmode/sessions/<id>/` and is recovered on restart
 - **Permission prompts**: Every session asks the user for permission through the server's own MCP endpoint, `/mcp`, whose one tool is claude's `--permission-prompt-tool`
+- **The fleet**: An overseer lists, starts, messages, reads, stops and resumes sessions with the tools of `/mcp/fleet`: the user's own claude with the server's credential, or a GodMode session its root's config gives them
 
 ## Configuration
 
@@ -248,6 +249,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `effort` | Default `--effort` for the action: `low`, `medium`, `high`, `xhigh` or `max`, any case. An `effort` form input overrides it, and an empty one passes none (claude's own default) over the action's. Kept with each project at create (`status.json`), so its resumes keep it. Any other value is refused: in a config file, as an error in that file, as an unknown `permissionMode` is; in a create or adopt input, before anything is created. Default: none |
 | `permissionMode` | claude's `--permission-mode` for the action's projects: `acceptEdits`, `auto`, `manual`, `dontAsk` or `plan`. Kept with each project at create. Default: none (claude's own settings decide). See [Permissions](#permissions) |
 | `allowSkipPermissions` | Whether the action's projects may run with `--dangerously-skip-permissions`. Default `false`. See [Permissions](#permissions) |
+| `fleetTools` | Whether the action's sessions get the fleet's tools: `true` (every one), `"grantable"` (one a session with them starts with `fleet_tools: true`), or `false`. Any other value is a config error. Read on every call of a fleet tool. Default `false`. See [Overseer sessions](#overseer-sessions) |
 | `nameTemplate` | Derive project name from inputs, e.g. `"issue_{issueNumber}"` |
 | `promptTemplate` | Derive initial prompt from inputs |
 | `scriptsCreateFolder` | If true, create scripts are responsible for creating the project directory |
@@ -262,7 +264,7 @@ Script fields accept either a single string or a string array in JSON. Paths are
 
 ### MCP Servers
 
-GodMode gives a session one MCP server, its own: `godmode`, this server's `/mcp` endpoint, in the `--mcp-config` file it launches claude with (see [The MCP endpoint](#the-mcp-endpoint)). It configures no others:
+GodMode gives a session one MCP server, its own: `godmode`, this server's `/mcp` endpoint, in the `--mcp-config` file it launches claude with (see [The MCP endpoint](#the-mcp-endpoint)). A session with the fleet's tools gets a second, `godmode-fleet`, this server's `/mcp/fleet` (see [Overseer sessions](#overseer-sessions)). It configures no others:
 
 - A repo brings its MCP servers in its own `.mcp.json` (Claude Code's project scope).
 - User-scoped servers live in the profile's Claude config: the `CLAUDE_CONFIG_DIR` its `environment` (or the root's) sets, for example with `claude mcp add --scope user` run with that `CLAUDE_CONFIG_DIR`.
@@ -296,7 +298,7 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 
 ### The MCP endpoint
 
-`/mcp` serves MCP over streamable HTTP, statelessly, with one tool: `permission_prompt`. claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode__permission_prompt` and an MCP config whose only entry is:
+`/mcp` serves MCP over streamable HTTP, statelessly, with one tool: `permission_prompt`. claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode__permission_prompt` and an MCP config whose entry, its only one unless the session has the fleet's tools ([Overseer sessions](#overseer-sessions)), is:
 
 ```json
 { "mcpServers": { "godmode": {
@@ -307,8 +309,8 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 ```
 
 - **The URL** is an address this machine reaches the server on, from the addresses it is bound to: a loopback binding first, a wildcard's `127.0.0.1` next, else the one IP bound.
-- **The token** is issued afresh for each launch and lives only in memory and in this file. The file is `mcp-config.json` in the session's state folder (`.godmode/sessions/<id>/`), owner-only where the OS allows, and is deleted when the process exits. No environment variable carries it.
-- **Only a project token opens `/mcp`**, and only for the project it was issued to. The user's API key does not, and a project token opens nothing else: not the hub, not `/api/*`.
+- **The token** is issued afresh for each launch and lives only in memory and in this file, until the process exits: then the server forgets it, so a token read from a leftover file opens nothing. The file is `mcp-config.json` in the session's state folder (`.godmode/sessions/<id>/`), or, for a session with the fleet's tools, `{root}/logs/<id>.mcp-config.json` ([Overseer sessions](#overseer-sessions)); owner-only where the OS allows, and deleted when the process exits. No environment variable carries it.
+- **Only a project token opens `/mcp`**, and only for the project it was issued to. The user's API key does not, and a project token opens nothing else: not the hub, not `/api/*`, and `/mcp/fleet` only while its session has the fleet's tools.
 - **The tool** takes claude's flat arguments, `tool_name`, `input` (an object) and `tool_use_id` (optional). It waits until the user answers, however long that takes, and returns claude `{"behavior":"allow","updatedInput":{…}}` or `{"behavior":"deny","message":"…"}` as text.
 - **While it waits,** it sends a progress notification every `PermissionPromptKeepAliveSeconds` (default 30). claude gives up on a tool call that sends no response or progress for 300 seconds.
 - **When claude cancels the call**, or its connection drops, the request is withdrawn (denied).
@@ -318,10 +320,10 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 
 ### The fleet endpoint
 
-`/mcp/fleet` serves MCP over streamable HTTP, statelessly, for an overseer: a `claude` the user runs themselves, in a terminal, outside GodMode, that lists, starts, messages, reads, stops and resumes the server's sessions. The sessions it starts are GodMode sessions like any other: in the app's list, notifying, and asking the user for their permissions.
+`/mcp/fleet` serves MCP over streamable HTTP, statelessly, for an overseer, which lists, starts, messages, reads, stops and resumes the server's sessions: a `claude` the user runs themselves, in a terminal, outside GodMode, or a GodMode session with the fleet's tools ([Overseer sessions](#overseer-sessions)). The sessions it starts are GodMode sessions like any other: in the app's list, notifying, and asking the user for their permissions.
 
-- **The server's own credential opens it**, as it opens the hub: the API key (`Authorization: Bearer <key>`), or in codespace mode a GitHub token of `GITHUB_USER`. A project token does not, with its project named or not, and the API key does not open `/mcp`. A request with an `Origin` gets 403, as everywhere.
-- **Each endpoint lists its own tools.** `/mcp` has `permission_prompt` alone, `/mcp/fleet` the tools below. One MCP server serves both; each tool's `[Authorize]` policy is its endpoint's.
+- **The server's own credential opens it**, as it opens the hub: the API key (`Authorization: Bearer <key>`), or in codespace mode a GitHub token of `GITHUB_USER`. So does the project token of a session that has the fleet's tools, with its project named, checked on every request. A session's token with its own project named, when the session has no fleet tools, gets 403; a project token with no project named, or with another project named, opens nothing (401). The API key does not open `/mcp`. `/mcp/fleet/`, with a trailing slash, is the same endpoint, as routing has it. A request with an `Origin` gets 403, as everywhere.
+- **Each endpoint lists its own tools.** `/mcp` has `permission_prompt` alone, `/mcp/fleet` the tools below, whoever calls. One MCP server serves both; each tool's `[Authorize]` policy is its endpoint's, by the request's path too, so a granted session's token gets no permission prompt on `/mcp/fleet` and no fleet tool on `/mcp`.
 - **The overseer's `.mcp.json`** (in the folder it runs in, or `claude mcp add --transport http godmode-fleet <url> --header "Authorization: Bearer <key>"`):
 
   ```json
@@ -336,12 +338,36 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 - **Tools.** Each returns JSON text, PascalCase as the hub's models; a refusal is the tool's error, with the reason the hub would give.
   - `list_sessions` — every session: `Id`, `Name`, `Profile`, `Root`, `Kind`, `Action`, `State`, `ParentId`, `Needs` (its attention item's kind: `Permission`, `Question`, `Error`, `Review`, `Finished`; absent when nothing) and `PullRequestUrl`.
   - `list_roots` — `Profiles`, and `Roots` with their `Actions` as `ListProjectRoots` gives them: each action's `InputSchema`, `Model`, `Effort` and whether it starts a `Session`.
-  - `start_session(profile, root, action?, inputs?, model?, effort?, parent?)` — `CreateProject`'s path: `inputs` by the action's schema, `model` and `effort` over the action's (an unknown effort is refused). Without `parent` the session is top level; with it, that session's child ([A session's parent](#a-sessions-parent)). It is pushed to the app as `ProjectCreated`, and returns its `Id`, `Name`, `State`, `Kind`, `ParentId`, `Model` and `Effort`; an action that starts no session returns its script's `Message`. Refused: a `skipPermissions` input that is true (the session's prompts are the user's; false, the schema's default, is fine), and a `__parentId` input (`parent` names the parent).
+  - `start_session(profile, root, action?, inputs?, model?, effort?, parent?, top_level?, fleet_tools?)` — `CreateProject`'s path: `inputs` by the action's schema, `model` and `effort` over the action's (an unknown effort is refused). With `parent` the session is that session's child ([A session's parent](#a-sessions-parent)). Without it, a session calling is the new one's parent, unless `top_level` is true; the server's credential's are top level. `fleet_tools: true` grants the new session the fleet's tools, where its action allows a grant ([Overseer sessions](#overseer-sessions)). It is pushed to the app as `ProjectCreated`, and returns its `Id`, `Name`, `State`, `Kind`, `ParentId`, `Model` and `Effort`; an action that starts no session returns its script's `Message`. Refused: a `skipPermissions` input that is true (the session's prompts are the user's; false, the schema's default, is fine), a `__parentId` input (`parent` names the parent), `parent` with `top_level`, and `fleet_tools` for an action whose `fleetTools` is `false`, or that starts no session.
   - `send(session, text)` — `ReplyAndResume`: to a running claude, or a resume with it. **Refused while the session waits on a permission prompt or an AskUserQuestion**, changing nothing: those are the user's to answer, in the app. Returns its `State`.
   - `read(session, turns?)` — `State`, `Kind`, `ParentId`, `Model`, `Effort`, `PullRequestUrl`, `WaitingOn` (what it needs, in full: a permission's `Tool`, summary and `Detail`, everything the call would run, as `GetPermissionDetail` gives it; a question's text and its `Question` with options; the whole error; a pull request's review; a finished turn's whole result), and `Replies`, its last `turns` (default 1, at most 20) replies, oldest first ([A session's last replies](#a-sessions-last-replies)).
   - `stop(session)`, `resume(session)` — `StopProject` and `ResumeProject`. Return the `State`.
 - **The overseer drives what it starts and what it sends to.** `send` and `resume` work on any session, one the user started with skip-permissions included, which asks the user nothing. An overseer that reads untrusted text (an issue's, a pull request's, a reply that quotes one) and acts on it is a prompt-injection path into those sessions: point it at work and sessions you would run unattended.
 - **Not provided:** answering a permission or a question, delete, forget, adopt, restore, or anything that writes config. Merging stays in the overseer's own `gh`: the server is VCS-agnostic.
+
+### Overseer sessions
+
+A GodMode session can be an overseer: it gets the fleet's tools in its own MCP config, and the sessions it starts are its children. A session has none by default.
+
+- **The root's config grants them**, per action, as `allowSkipPermissions` allows skip: `"fleetTools": true` gives every session of the action the tools; `"grantable"` gives them to one whose starter, a caller with the tools (a session that has them, or the server's credential: the user), asked with `start_session(..., fleet_tools: true)`; `false` (the default) to none. An über-overseer's action is `true`, and the epic overseers it starts are of a `"grantable"` action.
+- **Nothing in the session's working folder grants them.** Its `settings.json` is in its working folder, and names its action, so it is not read for the grant: a session that writes `"fleetTools": true` there, or renames its action to an overseer's, gains nothing, at once or after a restart. What the session was started as is the server's own record, `{root}/logs/{id}.fleet` (its action, whether its starter granted the tools, and its working folder, relative to the root), written by its create or adopt beside its create log; a session without one (made before it was kept) has no grant. The record is the session's of that folder alone: a session's id is its state folder's name, which any session can make in its own folder, so one recovered under the id from another folder has no grant. A delete or a forget deletes the record (and the trash's purge does, for any left), so a session restored from the trash has no grant: the fail-safe choice, since a neighbour in a shared folder could plant the trashed id in that very folder. Restored, an overseer needs starting anew. A root whose working folder is the root itself ([A root as its own workspace](#a-root-as-its-own-workspace)) has its `.godmode-root` and `logs` in that folder, so its sessions could edit the config that grants them: give such a root no `fleetTools`.
+- **Checked on every call**, against the root's config as it is then, as each launch checks skip: a call of a fleet tool with the session's token, the listing included, is refused (403) once the action no longer grants them, or the config cannot be read, with no relaunch. Each launch lists `godmode-fleet` in the MCP config only when the session has them then.
+- **The MCP config** of a session with the tools has a second entry, with the same headers (its project and its launch's token) as `godmode`'s:
+
+  ```json
+  "godmode-fleet": {
+    "type": "http",
+    "url": "http://127.0.0.1:31337/mcp/fleet",
+    "headers": { "Authorization": "Bearer <project token>", "X-GodMode-Project-Id": "<project ID>" }
+  }
+  ```
+
+  Its tools are `mcp__godmode-fleet__list_sessions` and the rest. GodMode pre-approves none: each call reaches the permission prompt unless the session's permission mode or Claude Code's settings allow it ([MCP Servers](#mcp-servers)), for example `"permissions": { "allow": ["mcp__godmode-fleet"] }` in the repo's `.claude/settings.json`, which allows the fleet's tools and not the permission prompt's server.
+- **Why `/mcp/fleet`, not `/mcp`.** One tool set, with one policy and one grant check, for both kinds of overseer, and each endpoint keeps one job: `/mcp` is claude's own (the permission prompt it calls by itself), `/mcp/fleet` the tools a model calls. A session without the grant has no fleet entry in its config at all, rather than an endpoint that hides tools from it, and an allow rule can name the fleet's server without naming the permission prompt's.
+- **Its children are its own.** A session it starts has it as parent, unless it passes `top_level: true` or names another `parent`, and gets no tools of its own unless granted them.
+- **Its own profile alone.** A profile is another account, with its own secrets, and GodMode never mixes profiles in a list, so a session's fleet tools see its profile only: `list_sessions` and `list_roots` list that profile's; `send`, `read`, `stop` and `resume` on another profile's session are refused as an unknown ID is, so a session cannot learn it exists; `start_session` into another profile's root, or under another profile's session as `parent`, is refused. The server's credential, the user's own overseer, sees every profile.
+- **Its MCP config is out of its working folder:** `{root}/logs/<id>.mcp-config.json`, beside its record. A session in a shared folder ([Several sessions in one folder](#several-sessions-in-one-folder)) has its neighbours in that folder, and its token opens the fleet's tools. An ungranted session's config stays in its state folder.
+- **An overseer never answers a permission prompt or a question**, its children's or anyone's: no tool does, and `send` is refused while one waits. A child's prompts go to the user, through the inbox and notifications.
 
 ### A session's last replies
 
@@ -555,6 +581,7 @@ A project has at most one claude process at a time.
 A session may have a **parent**: the session that started it (an overseer starting a worker, say). It is `ProjectStatus.ParentId`, the parent's full ID, kept in `status.json` and listed in `ProjectSummary.ParentId`, so the app can nest sessions with no extra call; null for a top-level session.
 
 - **Named at create, never changed.** Over the hub it is the `__parentId` input of `CreateProject`, a string (null or blank is none; any other kind of value is refused). It is an input, not a fifth parameter, because a hub method takes all its arguments: every caller that names no parent, the voice session and older apps among them, calls as it did. On the server it is `CreateProjectRequest.ParentId`. The prepare and create scripts get it as `GODMODE_PARENT_ID`, whichever way it came; `__parentId` is no form input, so it is in no `GODMODE_INPUT_*` and no name or prompt template.
+- **The fleet's `start_session` names it for a session that calls it:** the caller is its child's parent unless it says `top_level` or names another ([Overseer sessions](#overseer-sessions)).
 - **A session of this server.** A parent this server does not track (another server's session, a deleted one, a typo) is refused before anything is created or run. One in any root or profile of this server is taken. An action that starts no session checks it too, and keeps it nowhere.
 - **Metadata only.** The ID stays `{profile}/{root}/{id}`. Stopping, resuming or deleting a parent leaves its children as they are, and a restart recovers them with it. A deleted parent leaves its children naming a session that is gone, which the app shows as top level; nothing on the server reads it. - **A parent's new ID is its children's.** When a parent takes a new ID (its root's `profileName` edited, or its explicit entry renamed, at a restart or a read of the live roots), the server, once it has recovered it under that ID, rewrites the `ParentId` of every session naming the old one, in any root, saving each `status.json` as any change is, and pushes a child it does not announce anew as `StatusChanged`. So children stay under their parent, whether the root changed while the server ran or while it was down. Only a child the server does not track at that moment (its root missing, or held by another server) keeps the old ID.
 
@@ -770,7 +797,7 @@ Utility:
 - `GET /health` — Anonymous liveness probe
 - `GET /` — What the server is, with the key: `{"service":"GodMode.Server","version":…,"status":"running"}` (the app's codespace probe reads it). No path serves a page
 - `POST /mcp` — GodMode's MCP endpoint, for its sessions' claude, with the project token of its MCP config: see [The MCP endpoint](#the-mcp-endpoint)
-- `POST /mcp/fleet` — The fleet's MCP endpoint, for an overseer outside GodMode, with the server's own credential: see [The fleet endpoint](#the-fleet-endpoint)
+- `POST /mcp/fleet` — The fleet's MCP endpoint, for an overseer: the server's own credential, or a session with the fleet's tools with its project token. See [The fleet endpoint](#the-fleet-endpoint)
 
 ## Dependencies
 
