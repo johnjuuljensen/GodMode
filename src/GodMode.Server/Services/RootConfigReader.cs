@@ -162,6 +162,9 @@ public class RootConfigReader : IRootConfigReader
         // A mode claude does not have, or bypassPermissions, is an error in the file that names it
         if (raw.PermissionMode is { } mode)
             raw = raw with { PermissionMode = PermissionModes.Canonical(mode) ?? throw new InvalidDataException($"{Path.GetFileName(path)}: {PermissionModes.Refusal(mode)}") };
+        // So is an effort level claude does not have
+        if (raw.Effort is { } effort)
+            raw = raw with { Effort = Efforts.Canonical(effort) ?? throw new InvalidDataException($"{Path.GetFileName(path)}: {Efforts.Refusal(effort)}") };
         // GodMode gives a session no MCP server but its own: a leftover mcpServers is not an error
         if (raw.Unrecognized?.Keys.Any(key => key.Equals(IgnoredMcpServersKey, StringComparison.OrdinalIgnoreCase)) == true
             && _ignoredMcpLogged.TryAdd(Path.GetFullPath(path), 0))
@@ -238,6 +241,7 @@ public class RootConfigReader : IRootConfigReader
         PromptTemplate = overlay.PromptTemplate ?? baseConfig.PromptTemplate,
         ScriptsCreateFolder = overlay.ScriptsCreateFolder ?? baseConfig.ScriptsCreateFolder,
         Model = overlay.Model ?? baseConfig.Model,
+        Effort = overlay.Effort ?? baseConfig.Effort,
         AllowSkipPermissions = overlay.AllowSkipPermissions ?? baseConfig.AllowSkipPermissions,
         PermissionMode = overlay.PermissionMode ?? baseConfig.PermissionMode,
         SharedFolder = overlay.SharedFolder ?? baseConfig.SharedFolder,
@@ -295,7 +299,8 @@ public class RootConfigReader : IRootConfigReader
             SharedFolder: raw.SharedFolder ?? false,
             Session: raw.Session ?? true,
             Transient: raw.Transient ?? false,
-            Adopt: raw.Adopt ?? false
+            Adopt: raw.Adopt ?? false,
+            Effort: raw.Effort
         );
     }
 
@@ -398,6 +403,7 @@ public class RootConfigReader : IRootConfigReader
         public bool? ScriptsCreateFolder { get; init; }
         public bool? StripEnvVarProfile { get; init; }
         public string? Model { get; init; }
+        public string? Effort { get; init; }
         public bool? AllowSkipPermissions { get; init; }
         public string? PermissionMode { get; init; }
         public bool? SharedFolder { get; init; }
