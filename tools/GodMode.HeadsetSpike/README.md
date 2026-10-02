@@ -43,6 +43,7 @@ A reference is a mic open or close, or an announcement test. So a switch's timin
 | `CALL` | `Windows.Media.Devices.CallControl`: what the app reported, and `AnswerRequested`, `HangUpRequested` and the rest |
 | `AUDIO` | Every endpoint at start, defaults, endpoints added, removed or changing state, the headset's property changes and mix formats, sound starting and stopping on each headset endpoint (its peak meter), and each headset endpoint's volume and mute, at first and on every change |
 | `MIC` | WaveIn (the same capture GodMode.Maui's voice uses: VoiceBot's `NativeAudioSource`, `MicCapture.WaveIn`, 16 kHz mono, 100 ms buffers), opened and closed on a worker thread so the hook and Mark keep running: the moment you asked (the reference), the moment the open or close returned, the first buffer, the first buffer with sound in it, and once a second the loudest sample of that second (`level`) |
+| `LISTEN` | Listen mode (Trial 3): started, stopped, each play/pause turning the mic on or off, and each button it ignored |
 | `PROXY` | The proxy: started, stopped, and each button it caught; the buttons it passes on are `GSMTC forwarded …` lines, and the status it mirrors from Spotify `SMTC status -> …` |
 | `TONE` | The tone's start and end, its device and format |
 | `LEAUD` | The LE Audio probe |
@@ -254,24 +255,38 @@ Read from the log `headset-20261002-121327.log` and the user's notes in it.
   AudioVideo), with RFCOMM services Hands-Free (0x111E), 0xFEF0 and a vendor UUID, and no paired Bluetooth LE device,
   so it has no LE Audio services. This matches the specification (SBC only).
 
-## Trial 3: the proxy that mirrors Spotify, and the tones
+## The user's decision after the second trial
 
-Two short scenarios. Note each step first (`T1 single`), as before.
+**`Previous` (the triple press) is no control**: it is too brittle, and too hard to tell from `Next`. Instead, while
+GodMode listens, **it captures the media buttons and play/pause turns the mic on and off**, and the user runs Spotify
+with the mouse. So GodMode passes nothing on to Spotify (the proxy stays in the app only as the second trial's
+evidence). The spike's **Listen** row is that design. It holds the media session, its status mirrors Spotify's
+play/pause (the second trial: a session saying "playing" with nothing playing gets no button), and `Play`/`Pause` open
+the mic with the rising tone or close it with the falling one. With *pause Spotify while the mic is open* ticked, it
+pauses Spotify for the mic and resumes it after.
 
-**T. The mirroring proxy**
-1. Spotify playing. Pick `Previous` in **Proxy: catch**, leave *mirror Spotify's play/pause* ticked, **Start proxy**.
-2. Single press: Spotify pauses, and the log says `SMTC status -> Paused (mirrors …)`. **Single press again: does
-   Spotify play?** This is what failed in Trial 2.
-3. Repeat pause/play three times. Then double press (Spotify skips), and triple press (tone, Spotify stays).
-4. Pause Spotify from its own window, then single press on the headset: does it play?
-5. Leave it 3 minutes across a track change, then single press twice.
-6. Untick *mirror*, **Stop proxy**, **Start proxy**, and repeat 2 once: the log then shows the Trial 2 behaviour again,
-   for comparison.
-7. **Stop proxy**.
+## Trial 3: listen mode, and the tones
+
+Note each step first (`L2 single`), as before. Leave the tone offset at 0 unless a step says otherwise.
+
+**L. Listen mode**
+1. Spotify playing, by mouse. **Start listen mode** (*pause Spotify while the mic is open* ticked, *status while mic
+   open* `mirror Spotify`).
+2. Single press: the music pauses, the mic opens (quality drop), the rising tone. Log: `LISTEN Pause: mic on`.
+3. Wait 5 s, then single press again. **Does the press reach the app while the mic is open (HFP)?** Look for `LISTEN
+   …: mic off` and the falling tone, and Spotify resuming once A2DP is back. This decides whether the headset can
+   close the mic, or whether only silence and "færdig" can (steps 3 and 4 of #382).
+4. If 3 did nothing: close the mic with **Close mic**. Set *status while mic open* to `Playing`, and repeat 2 and 3.
+   Then set it to `Paused`, and repeat again.
+5. Pause Spotify by mouse, then single press: does the mic open with nothing playing? Single press again to close it.
+6. Start Spotify by mouse while listen mode runs, and wait a minute. Single press: does it still reach the app (mic
+   on), or did Windows hand the buttons to Spotify (Spotify pauses, no mic)?
+7. Double press, with the mic closed and with it open: the log should say `Next ignored`; Spotify must not skip.
+8. **Stop listen mode**.
 
 **U. The tones around the switches**
-1. Spotify playing. Tone offset 0: **Open mic + rising tone**. Did you hear the rising tone, whole, cut, or not?
-2. **Close mic + falling tone** at offset 0, then (opening the mic in between) 3000 and 6000 ms. Did you hear the
+1. Spotify playing. **Open mic + rising tone** at offset 0. Did you hear the rising tone whole, cut, or not at all?
+2. **Close mic + falling tone** at offset 0, then (opening the mic in between) at 3000 and 6000 ms. Did you hear the
    falling tone each time?
 3. Repeat 1 with offset 1000.
 
@@ -283,10 +298,11 @@ Filled in from the first and second trials. The rest waits for Trial 3.
 |---|---|---|
 | 1a | Single press on A2DP | `Pause`, or `Play` while the current session says paused; as a media-session (SMTC) button only, never a key or HID report |
 | 1b | Double press | `Next` |
-| 1c | Triple press | `Previous`, unreliably: about a third of triple presses came as `Next` |
+| 1c | Triple press | `Previous`, unreliably: 8 of 22 came as `Next`. The user's decision: no control |
 | 1d | Long press | Nothing reaches Windows |
 | 1e | Volume buttons | Windows' volume in 6 % steps (AVRCP absolute volume); no key or HID report. Hold − does nothing, hold + is power off |
-| 1f | Catch one gesture, keep Spotify's play/pause | Not by a keyboard hook. By the proxy: forwarding and catching work while Spotify plays; after a pause no button arrived with the proxy saying "playing". Mirroring: Trial 3, T |
+| 1f | Catch one gesture, keep Spotify's play/pause | Not by a keyboard hook. By the proxy: forwarding and catching work while Spotify plays; after a pause no button arrived with the proxy saying "playing". Dropped by the user: while listening GodMode takes every button (listen mode) |
+| 1h | Listen mode: play/pause turns the mic on and off | Trial 3, L: on with the mic closed, off **in HFP**, with Spotify paused, after Spotify was started by mouse |
 | 1g | Own SMTC claimed | Gets every button; Spotify gets none while the app holds the session |
 | 2a | GSMTC pause and resume Spotify | Works every time; Spotify's state 55–290 ms later |
 | 2b | Announcement test | Paused at 289 ms, tones from 439 ms, playing again at 1022 ms |

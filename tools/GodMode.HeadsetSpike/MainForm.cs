@@ -47,6 +47,11 @@ public sealed class MainForm : Form
     private readonly ComboBox _caught = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
     private readonly CheckBox _proxy = new() { Text = "proxy: catch it, forward the rest", AutoSize = true };
     private readonly CheckBox _mirror = new() { Text = "mirror Spotify's play/pause", AutoSize = true, Checked = true };
+    private readonly CheckBox _pauseWhileListening = new() { Text = "pause Spotify while the mic is open", AutoSize = true, Checked = true };
+    private readonly ComboBox _statusWhileOpen = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
+    private bool _listening;
+    private bool _toggling;
+    private bool _pausedForMic;
     private readonly TextBox _note = new() { Width = 300, PlaceholderText = "a note for the log (what you pressed, what you heard)" };
 
     private sealed record Choice<T>(string Label, T Value)
@@ -93,6 +98,8 @@ public sealed class MainForm : Form
             new Label { Text = "gesture gap ms", AutoSize = true }, _gap, new Label { Text = "long ms", AutoSize = true }, _longPress));
         controls.Controls.Add(Row("Proxy", _proxy, new Label { Text = "catch", AutoSize = true }, _caught,
             _mirror, Button("Start proxy", StartProxy), Button("Stop proxy", StopProxy)));
+        controls.Controls.Add(Row("Listen", Button("Start listen mode", StartListening), Button("Stop listen mode", StopListening),
+            _pauseWhileListening, new Label { Text = "status while mic open", AutoSize = true }, _statusWhileOpen));
         controls.Controls.Add(Row("Call", Button("Report incoming (ringing)", () => _call.Incoming(ringer: true)),
             Button("Report incoming (silent)", () => _call.Incoming(ringer: false)),
             Button("Report active call", _call.Active), Button("End call", _call.End)));
@@ -116,13 +123,16 @@ public sealed class MainForm : Form
         foreach (var button in new[] { SystemMediaTransportControlsButton.Previous, SystemMediaTransportControlsButton.Next })
             _caught.Items.Add(new Choice<SystemMediaTransportControlsButton>(button.ToString(), button));
         _caught.SelectedIndex = 0;
-        _smtc.Pressed += OnOwnButton;
+        foreach (var status in new[] { "mirror Spotify", "Playing", "Paused" }) _statusWhileOpen.Items.Add(status);
+        _statusWhileOpen.SelectedIndex = 0;
+        _smtc.Pressed += button => BeginInvoke(() => OnOwnButton(button));
         _sessions.StateChanged += (id, status) =>
         {
             if (MediaSessions.IsOwn(id)) return;
             BeginInvoke(() =>
             {
-                if (_proxy.Checked && _mirror.Checked)
+                var mirrors = _proxy.Checked ? _mirror.Checked : _listening && (!_mic.IsOpen || _statusWhileOpen.SelectedIndex == 0);
+                if (mirrors)
                     _smtc.SetStatus(status == Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
                         ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, $"mirrors {id}");
             });
@@ -256,6 +266,7 @@ public sealed class MainForm : Form
     /// </summary>
     private void StartProxy()
     {
+        if (_listening) StopListening();
         _proxy.Checked = true;
         _smtc.Enable(Handle, MediaPlaybackStatus.Playing);
         _log.Write("PROXY", $"started: catches {_caught.SelectedItem}, forwards the rest, {(_mirror.Checked ? "mirrors Spotify's play/pause" : "always playing")}");
@@ -270,12 +281,76 @@ public sealed class MainForm : Form
         _log.Write("PROXY", "stopped");
     }
 
-    // On a WinRT thread: reads the controls' state through Invoke
+    /// <summary>
+    /// Listen mode, the user's design after the second trial: GodMode holds the media session and takes every headset
+    /// button, Spotify is run by mouse, and play/pause turns the mic on (rising tone) and off (falling tone). Its status
+    /// mirrors Spotify's play/pause, so the session keeps getting buttons with the music paused; while the mic is open
+    /// it is the one chosen, to find which one a press in HFP still reaches.
+    /// </summary>
+    private void StartListening()
+    {
+        if (_proxy.Checked) StopProxy();
+        _listening = true;
+        _smtc.Enable(Handle, MediaPlaybackStatus.Playing);
+        _log.Write("LISTEN", $"started: play/pause turns the mic on and off; {(_pauseWhileListening.Checked ? "Spotify paused while it is open" : "Spotify left alone")}; status while open: {_statusWhileOpen.SelectedItem}");
+        if (_sessions.OtherPlaying() is false)
+            _smtc.SetStatus(MediaPlaybackStatus.Paused, "mirrors the other session at start");
+    }
+
+    private void StopListening()
+    {
+        _listening = false;
+        _smtc.Disable();
+        _log.Write("LISTEN", "stopped");
+    }
+
+    private async Task ToggleMicAsync(SystemMediaTransportControlsButton button)
+    {
+        if (_toggling)
+        {
+            _log.Write("LISTEN", $"{button} ignored: the mic is still switching");
+            return;
+        }
+        _toggling = true;
+        try
+        {
+            if (!_mic.IsOpen)
+            {
+                _log.Write("LISTEN", $"{button}: mic on");
+                if (_pauseWhileListening.Checked) _pausedForMic = await _sessions.PausePlayingAsync() > 0;
+                await OpenWithToneAsync();
+                if (_statusWhileOpen.SelectedIndex > 0)
+                    _smtc.SetStatus(_statusWhileOpen.SelectedIndex == 1 ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, "while the mic is open");
+            }
+            else
+            {
+                _log.Write("LISTEN", $"{button}: mic off");
+                await CloseWithToneAsync();
+                if (_pausedForMic) await _sessions.ResumePausedAsync();
+                _pausedForMic = false;
+                if (_sessions.OtherPlaying() is { } playing)
+                    _smtc.SetStatus(playing ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, "mirrors the other session after the mic");
+            }
+        }
+        finally
+        {
+            _toggling = false;
+        }
+    }
+
+    // On the UI thread (the handler posts it)
     private void OnOwnButton(SystemMediaTransportControlsButton button)
     {
-        var (proxy, caught) = ((bool, SystemMediaTransportControlsButton))Invoke(() =>
-            (_proxy.Checked, ((Choice<SystemMediaTransportControlsButton>)_caught.SelectedItem!).Value));
-        if (!proxy) return;
+        if (_listening)
+        {
+            if (button is SystemMediaTransportControlsButton.Play or SystemMediaTransportControlsButton.Pause)
+                _ = ToggleMicAsync(button);
+            else
+                _log.Write("LISTEN", $"{button} ignored (mic {(_mic.IsOpen ? "open" : "closed")})");
+            return;
+        }
+        if (!_proxy.Checked) return;
+        var caught = ((Choice<SystemMediaTransportControlsButton>)_caught.SelectedItem!).Value;
         if (button == caught)
         {
             _log.Write("PROXY", $"CAUGHT {button}: GodMode would step in here (rising tone)");

@@ -200,7 +200,7 @@ public sealed class MediaSessions(SpikeLog log)
     {
         if (_manager is null) return 0;
         var paused = 0;
-        foreach (var session in _manager.GetSessions())
+        foreach (var session in _manager.GetSessions().Where(s => !IsOwn(s.SourceAppUserModelId))) // never its own: a pause would come back as a button
         {
             if (session.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
             if (await RunAsync(session, "TryPauseAsync (pause playing)", s => s.TryPauseAsync().AsTask()))
@@ -230,7 +230,7 @@ public sealed class MediaSessions(SpikeLog log)
         var until = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < until)
         {
-            if (_manager is null || _manager.GetSessions().All(s =>
+            if (_manager is null || _manager.GetSessions().Where(s => !IsOwn(s.SourceAppUserModelId)).All(s =>
                     s.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing))
                 return true;
             await Task.Delay(20);
