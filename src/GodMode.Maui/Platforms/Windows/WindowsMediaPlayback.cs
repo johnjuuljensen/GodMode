@@ -179,7 +179,7 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
         while (paused.Any(s => StatusOf(s) == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
                && Environment.TickCount64 < until)
             await Task.Delay(20, ct);
-        return [.. paused.Select(s => s.SourceAppUserModelId)];
+        return paused.Select(s => s.SourceAppUserModelId).ToArray();
     }
 
     public async Task ResumeAsync(IReadOnlyCollection<string> sessions, CancellationToken ct)

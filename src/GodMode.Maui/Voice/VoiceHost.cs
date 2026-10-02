@@ -53,7 +53,7 @@ public sealed class VoiceHost : IVoiceEvents
         get
         {
             var mic = _running?.Mic?.State ?? (VoiceAudio.MicOnDemand ? VoiceMicState.Closed : VoiceMicState.Open);
-            lock (_lock) return new VoiceStatus(Available, _state, [.. _lines], _error, mic, VoiceAudio.MicOnDemand);
+            lock (_lock) return new VoiceStatus(Available, _state, _lines.ToArray(), _error, mic, VoiceAudio.MicOnDemand);
         }
     }
 
