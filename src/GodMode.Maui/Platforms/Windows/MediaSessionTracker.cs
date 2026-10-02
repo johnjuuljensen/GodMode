@@ -5,7 +5,8 @@ namespace GodMode.Maui;
 /// <summary>
 /// How GodMode tells its own media session from the others (issue #442): its session's display carries
 /// <see cref="Marker"/>, with this process's id, so neither an app ID without "GodMode" in it nor another GodMode
-/// beside it (a debug build beside the installed app) is mistaken for it.
+/// beside it (a debug build beside the installed app) is mistaken for it. Another GodMode's session is no music either:
+/// a pause or a play sent to it would be a press of its headset's button, its mic's switch.
 /// </summary>
 public static class OwnMediaSession
 {
@@ -21,7 +22,7 @@ public static class OwnMediaSession
 /// session itself, so an app that restarts (a new session, the same app ID) is watched again; nothing is told before
 /// the sessions have arrived, and their arrival is told, so a manager that comes late is mirrored. A session is
 /// GodMode's own when it shows <see cref="OwnMediaSession.Marker"/>; while no marker is read from it, when its app ID
-/// names GodMode. Compiled into the voice tests from its source, as <see cref="HeadsetButtons"/> is.
+/// names GodMode. One with another GodMode's marker is neither GodMode's own nor music. Compiled into the voice tests from its source, as <see cref="HeadsetButtons"/> is.
 /// </summary>
 /// <param name="appId">A session's app ID.</param>
 /// <param name="playing">Whether a session plays; null when that cannot be read.</param>
@@ -30,6 +31,14 @@ public static class OwnMediaSession
 public sealed class MediaSessionTracker<TSession>(Func<TSession, string> appId, Func<TSession, bool?> playing,
     Action<TSession> watch, Action<TSession> unwatch, ILogger logger) : IMediaSessions where TSession : class
 {
+    private enum Whose
+    {
+        Own,
+        // Another GodMode's: never paused, played or mirrored
+        OtherGodMode,
+        Music,
+    }
+
     private sealed class Entry(string appId)
     {
         public string AppId { get; } = appId;
@@ -58,7 +67,7 @@ public sealed class MediaSessionTracker<TSession>(Func<TSession, string> appId, 
             lock (_lock)
             {
                 if (_current is null) return null;
-                others = [.. _watched.Where(w => !IsOwn(w.Value)).Select(w => w.Key)];
+                others = [.. _watched.Where(w => WhoseIs(w.Value) == Whose.Music).Select(w => w.Key)];
             }
             try
             {
@@ -89,23 +98,29 @@ public sealed class MediaSessionTracker<TSession>(Func<TSession, string> appId, 
     }
 
     /// <summary>Whether <paramref name="session"/> is GodMode's own.</summary>
-    public bool IsOwn(TSession session)
+    public bool IsOwn(TSession session) => WhoseIs(session) == Whose.Own;
+
+    /// <summary>Whether <paramref name="session"/> is music voice pauses and resumes: neither GodMode's own nor another GodMode's.</summary>
+    public bool IsMusic(TSession session) => WhoseIs(session) == Whose.Music;
+
+    private Whose WhoseIs(TSession session)
     {
         lock (_lock)
         {
-            if (_watched.TryGetValue(session, out var entry)) return IsOwn(entry);
+            if (_watched.TryGetValue(session, out var entry)) return WhoseIs(entry);
         }
-        return IsOwn(null, appId(session));
+        return WhoseIs(null, appId(session));
     }
 
-    private static bool IsOwn(Entry entry) => IsOwn(entry.Marker, entry.AppId);
+    private static Whose WhoseIs(Entry entry) => WhoseIs(entry.Marker, entry.AppId);
 
-    private static bool IsOwn(string? marker, string appId) => marker switch
+    private static Whose WhoseIs(string? marker, string appId) => marker switch
     {
-        _ when marker == OwnMediaSession.Marker => true,
-        // Another GodMode's, a debug build's beside the installed app
-        not null when marker.StartsWith(OwnMediaSession.MarkerPrefix, StringComparison.Ordinal) => false,
-        _ => appId.Contains("GodMode", StringComparison.OrdinalIgnoreCase),
+        _ when marker == OwnMediaSession.Marker => Whose.Own,
+        // A debug build's beside the installed app
+        not null when marker.StartsWith(OwnMediaSession.MarkerPrefix, StringComparison.Ordinal) => Whose.OtherGodMode,
+        _ when appId.Contains("GodMode", StringComparison.OrdinalIgnoreCase) => Whose.Own,
+        _ => Whose.Music,
     };
 
     /// <summary>
@@ -183,16 +198,16 @@ public sealed class MediaSessionTracker<TSession>(Func<TSession, string> appId, 
         }
         if (now is not { } isPlaying) return;
         string id;
-        bool own;
+        bool music;
         lock (_lock)
         {
             if (_disposed || _current is null || !_watched.TryGetValue(session, out var entry) || entry.Playing == isPlaying) return;
             entry.Playing = isPlaying;
             id = entry.AppId;
-            own = IsOwn(entry);
+            music = WhoseIs(entry) == Whose.Music;
         }
         if (isPlaying) Playing?.Invoke(id);
-        if (own) return;
+        if (!music) return;
         OthersChanged?.Invoke();
         if (isPlaying) OtherPlaying?.Invoke(id);
     }
@@ -203,11 +218,16 @@ public sealed class MediaSessionTracker<TSession>(Func<TSession, string> appId, 
         lock (_lock)
         {
             if (_disposed || !_watched.TryGetValue(session, out var entry) || entry.Marker == marker) return;
-            var was = IsOwn(entry);
+            var was = WhoseIs(entry);
             entry.Marker = marker;
-            if (IsOwn(entry) == was && marker != OwnMediaSession.Marker) return;
-            logger.LogInformation("Voice: media session {AppId} is {Whose}, by its marker", entry.AppId,
-                IsOwn(entry) ? "GodMode's own" : "another GodMode's");
+            var now = WhoseIs(entry);
+            if (now == was && marker != OwnMediaSession.Marker) return;
+            logger.LogInformation("Voice: media session {AppId} is {Whose}, by its marker", entry.AppId, now switch
+            {
+                Whose.Own => "GodMode's own",
+                Whose.OtherGodMode => "another GodMode's: neither paused nor mirrored",
+                _ => "music",
+            });
         }
         OthersChanged?.Invoke();
     }

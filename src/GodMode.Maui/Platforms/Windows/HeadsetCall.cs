@@ -72,6 +72,14 @@ public sealed class HeadsetCall(IPhoneLine line, ILogger logger) : IHeadsetCall
             }
             throw;
         }
+        bool ended;
+        lock (_lock) ended = _call != call;
+        if (ended)
+        {
+            // Ended while it became active, maybe before Windows had it so: Windows would hold it with nobody to end it
+            NotifyEnded(call);
+            return;
+        }
         logger.LogInformation("Voice: the headset's call is active");
     }
 

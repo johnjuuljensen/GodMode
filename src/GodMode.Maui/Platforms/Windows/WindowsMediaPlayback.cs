@@ -113,8 +113,11 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
         }
     }
 
-    /// <summary>Voice's own app is never paused: a pause would come back as a button.</summary>
-    private bool IsOwn(GlobalSystemMediaTransportControlsSession session) => _sessions.IsOwn(session);
+    /// <summary>
+    /// Neither voice's own app nor another GodMode's is paused or played: a pause would come back as a button, and
+    /// another GodMode's would toggle its mic.
+    /// </summary>
+    private bool IsMusic(GlobalSystemMediaTransportControlsSession session) => _sessions.IsMusic(session);
 
     private void SessionsChanged(GlobalSystemMediaTransportControlsSessionManager manager, SessionsChangedEventArgs args)
     {
@@ -199,7 +202,7 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
         TimeSpan Left() => TimeSpan.FromMilliseconds(until - Environment.TickCount64);
         if (await Bounded(_manager, wait) is not { } manager) return [];
         var paused = new List<GlobalSystemMediaTransportControlsSession>();
-        foreach (var session in manager.GetSessions().Where(s => !IsOwn(s)))
+        foreach (var session in manager.GetSessions().Where(IsMusic))
         {
             if (StatusOf(session) != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
             try
@@ -224,7 +227,7 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
     public async Task ResumeAsync(IReadOnlyCollection<string> sessions, CancellationToken ct)
     {
         if (await Bounded(_manager, ResumeWait) is not { } manager) return;
-        foreach (var session in manager.GetSessions().Where(s => sessions.Contains(s.SourceAppUserModelId)))
+        foreach (var session in manager.GetSessions().Where(s => sessions.Contains(s.SourceAppUserModelId) && IsMusic(s)))
         {
             if (StatusOf(session) != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused) continue;
             try

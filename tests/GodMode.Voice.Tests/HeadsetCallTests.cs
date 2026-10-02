@@ -38,13 +38,28 @@ public sealed class HeadsetCallTests : IDisposable
     [Fact]
     public async Task The_headsets_button_while_the_call_becomes_active_ends_it_and_closes_the_mic()
     {
-        _line.EndsWhileActivating = true;
+        _line.WhileActivating = call => call.RequestEnd();
 
         await _mic.OpenAsync();
 
         await Eventually.UntilAsync(() => _switch.Closes == 1, () => "the mic did not close");
         Assert.Equal(VoiceMicState.Closed, _mic.State);
-        Assert.Equal(["open", "call activating", "call ended", "close"], _log);
+        // Ended as the button asked, and again once the activation is through, which may have landed after the first
+        Assert.Equal(["open", "call activating", "call ended", "call ended", "close"], _log);
+    }
+
+    /// <summary>A close while Windows makes the call active: it is ended again after, so Windows holds no call nobody ends.</summary>
+    [Fact]
+    public async Task A_mic_closed_while_the_call_becomes_active_ends_the_call_once_it_is()
+    {
+        _line.WhileActivating = _ => _call.End();
+
+        await _call.StartAsync();
+
+        Assert.Equal(["call activating", "call ended", "call ended"], _log);
+        // Nothing is left to end
+        _call.End();
+        Assert.Equal(3, _log.Count);
     }
 
     [Fact]
@@ -75,28 +90,29 @@ public sealed class HeadsetCallTests : IDisposable
 
     private sealed class FakeLine(ConcurrentQueue<string> log) : IPhoneLine
     {
-        public bool EndsWhileActivating { get; set; }
+        /// <summary>What happens while the call becomes active, before <c>NotifyActive</c> returns.</summary>
+        public Action<FakeCall>? WhileActivating { get; set; }
         public Task Requested { get; set; } = Task.CompletedTask;
         public FakeCall? Last { get; private set; }
 
         public async Task<IPhoneCall?> RequestAsync()
         {
             await Requested;
-            return Last = new FakeCall(log, EndsWhileActivating);
+            return Last = new FakeCall(log, WhileActivating);
         }
     }
 
-    private sealed class FakeCall(ConcurrentQueue<string> log, bool endsWhileActivating) : IPhoneCall
+    private sealed class FakeCall(ConcurrentQueue<string> log, Action<FakeCall>? whileActivating) : IPhoneCall
     {
         public event Action? EndRequested;
 
-        /// <summary>As Windows may: the headset's button is pressed before <c>NotifyCallActive</c> returns.</summary>
+        /// <summary>As Windows may: the headset's button, or a close, before <c>NotifyCallActive</c> returns.</summary>
         public void NotifyActive()
         {
             log.Enqueue("call activating");
-            if (endsWhileActivating)
+            if (whileActivating is not null)
             {
-                EndRequested?.Invoke();
+                whileActivating(this);
                 return;
             }
             log.Enqueue("call active");

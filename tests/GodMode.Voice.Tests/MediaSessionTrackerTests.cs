@@ -142,19 +142,40 @@ public sealed class MediaSessionTrackerTests : IDisposable
         Assert.Equal(["Some.App.Id"], _otherPlaying);
     }
 
+    /// <summary>A debug build beside the installed app: a pause sent to the other's session would toggle its mic.</summary>
     [Fact]
-    public void Another_GodModes_session_is_other_music()
+    public void Another_GodModes_session_is_neither_GodModes_own_nor_music()
     {
         var installed = Add("GodMode.Maui.exe", playing: false);
         Arrive();
         Assert.True(_tracker.IsOwn(installed));
+        var changes = 0;
+        _tracker.OthersChanged += () => changes++;
 
         _tracker.Marked(installed, OwnMediaSession.MarkerPrefix + (Environment.ProcessId + 1));
+        Assert.Equal(1, changes);
         Assert.False(_tracker.IsOwn(installed));
-        Plays(installed, true);
+        Assert.False(_tracker.IsMusic(installed));
+        _current = installed;
+        Assert.False(_tracker.OwnIsCurrent);
 
-        Assert.Equal(["GodMode.Maui.exe"], _otherPlaying);
-        Assert.True(_tracker.OthersPlaying);
+        Plays(installed, true);
+        Assert.Empty(_otherPlaying);
+        Assert.False(_tracker.OthersPlaying);
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public void Music_is_neither_GodModes_own_nor_another_GodModes()
+    {
+        var spotify = Add("Spotify.exe", playing: false);
+        var own = Add("GodMode.Maui.exe", playing: false);
+        Arrive();
+
+        Assert.True(_tracker.IsMusic(spotify));
+        Assert.False(_tracker.IsMusic(own));
+        _tracker.Marked(own, OwnMediaSession.Marker);
+        Assert.False(_tracker.IsMusic(own));
     }
 
     [Fact]
