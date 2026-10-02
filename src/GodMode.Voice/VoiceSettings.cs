@@ -10,7 +10,7 @@ namespace GodMode.Voice;
 /// <summary>The Claude model behind each of VoiceBot's inference tiers.</summary>
 public sealed record VoiceModels(string Light, string Medium, string Heavy)
 {
-    public static readonly VoiceModels Default = new("claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5-5");
+    public static readonly VoiceModels Default = new("claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-opus-5-5");
 }
 
 /// <summary>
