@@ -53,7 +53,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.god
 dotnet build src/GodMode.Maui/GodMode.Maui.csproj
 
 # Run the Windows app
-dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.19041.0
+dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.26100.0
 
 # Run all tests
 dotnet test

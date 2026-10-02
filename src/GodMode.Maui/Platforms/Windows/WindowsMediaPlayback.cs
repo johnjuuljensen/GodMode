@@ -11,12 +11,13 @@ namespace GodMode.Maui;
 /// (#382): GSMTC (GlobalSystemMediaTransportControlsSessionManager) pauses and resumes what plays, Spotify among them,
 /// and the render endpoints' volumes mark the audio route's switches. Windows keeps a volume per Bluetooth profile, so
 /// with no hand on it a volume change is a switch: HFP's 0.2–0.5 s after the mic opens, A2DP's 5.2–5.3 s after it closes.
+/// It is also the music GodMode's own media session mirrors (<see cref="IMediaSessions"/>, issue #423's headset buttons).
 /// </summary>
 /// <remarks>
 /// Core Audio objects are made and used on background (MTA) threads: NAudio's fail across apartments, and the app's UI
 /// thread is STA.
 /// </remarks>
-public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
+public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNotificationClient
 {
     /// <summary>How long a resume, or the manager it needs, is waited for.</summary>
     private static readonly TimeSpan ResumeWait = TimeSpan.FromSeconds(2);
@@ -56,6 +57,46 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
 
     public event Action<string>? Playing;
 
+    public event Action<string>? OtherPlaying;
+
+    public event Action? OthersChanged;
+
+    /// <summary>The manager, once it is there; null before, or where Windows has none.</summary>
+    private GlobalSystemMediaTransportControlsSessionManager? Manager =>
+        _manager.IsCompletedSuccessfully ? _manager.Result : null;
+
+    public bool? OthersPlaying
+    {
+        get
+        {
+            if (Manager is not { } manager) return null;
+            try
+            {
+                return manager.GetSessions().Where(s => !IsOwn(s))
+                    .Any(s => StatusOf(s) == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+    }
+
+    public bool OwnIsCurrent
+    {
+        get
+        {
+            try
+            {
+                return Manager?.GetCurrentSession() is { } current && IsOwn(current);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+    }
+
     private static TaskCompletionSource Completed()
     {
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -89,8 +130,12 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
     private static bool IsOwn(GlobalSystemMediaTransportControlsSession session) =>
         session.SourceAppUserModelId.Contains("GodMode", StringComparison.OrdinalIgnoreCase);
 
-    private void SessionsChanged(GlobalSystemMediaTransportControlsSessionManager manager, SessionsChangedEventArgs args) =>
+    private void SessionsChanged(GlobalSystemMediaTransportControlsSessionManager manager, SessionsChangedEventArgs args)
+    {
         WatchSessions(manager);
+        // One that went away may have been the music playing
+        OthersChanged?.Invoke();
+    }
 
     private void PlaybackInfoChanged(GlobalSystemMediaTransportControlsSession session, PlaybackInfoChangedEventArgs args) =>
         StatusChanged(session);
@@ -140,6 +185,9 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
             _statuses[id] = status;
         }
         if (status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) Playing?.Invoke(id);
+        if (IsOwn(session)) return;
+        OthersChanged?.Invoke();
+        if (status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) OtherPlaying?.Invoke(id);
     }
 
     private static GlobalSystemMediaTransportControlsSessionPlaybackStatus? StatusOf(GlobalSystemMediaTransportControlsSession session)
@@ -179,7 +227,7 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
         while (paused.Any(s => StatusOf(s) == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
                && Environment.TickCount64 < until)
             await Task.Delay(20, ct);
-        return [.. paused.Select(s => s.SourceAppUserModelId)];
+        return paused.Select(s => s.SourceAppUserModelId).ToArray();
     }
 
     public async Task ResumeAsync(IReadOnlyCollection<string> sessions, CancellationToken ct)
@@ -341,7 +389,7 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
             _watched.Clear();
             foreach (var session in sessions) session.PlaybackInfoChanged -= PlaybackInfoChanged;
         }
-        if (_manager.IsCompletedSuccessfully && _manager.Result is { } manager) manager.SessionsChanged -= SessionsChanged;
+        if (Manager is { } manager) manager.SessionsChanged -= SessionsChanged;
         if (_enumerator is { } enumerator)
         {
             Task.Run(() =>

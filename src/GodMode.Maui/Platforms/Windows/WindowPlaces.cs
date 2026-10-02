@@ -205,10 +205,11 @@ internal static class WindowPlaces
         var primary = DisplayArea.Primary.DisplayId.Value;
         // By index: CsWinRT's projection of FindAll's list fails to enumerate
         var all = DisplayArea.FindAll();
-        return [.. Enumerable.Range(0, all.Count)
+        return Enumerable.Range(0, all.Count)
             .Select(i => all[i])
             .OrderBy(d => d.DisplayId.Value == primary ? 0 : 1)
-            .Select(d => new WindowBounds(d.WorkArea.X, d.WorkArea.Y, d.WorkArea.Width, d.WorkArea.Height))];
+            .Select(d => new WindowBounds(d.WorkArea.X, d.WorkArea.Y, d.WorkArea.Width, d.WorkArea.Height))
+            .ToArray();
     }
 
     private static void StartPolling(DispatcherQueue queue)
@@ -224,7 +225,7 @@ internal static class WindowPlaces
     private static void Save()
     {
         if (_quitting) return;
-        var layout = new WindowLayout([.. Open.Select(t => t.Capture()), .. _pending]);
+        var layout = new WindowLayout(Open.Select(t => t.Capture()).Concat(_pending).ToArray());
         var json = layout.ToJson();
         if (json == _written) return;
         try

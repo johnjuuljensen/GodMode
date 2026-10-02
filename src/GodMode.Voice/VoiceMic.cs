@@ -22,6 +22,9 @@ public enum MicClose
 
     /// <summary>Nothing was heard for the silence timeout.</summary>
     Silence,
+
+    /// <summary>The headset's button: its play/pause, or the end of its call (<see cref="IHeadsetCall.EndRequested"/>).</summary>
+    Headset,
 }
 
 /// <summary>The microphone that opens and closes on demand: <see cref="FollowingAudio"/>.</summary>
@@ -44,6 +47,22 @@ public interface IVoiceInput
 
     /// <summary>Connects again; a failure is reported on the session's health, as a lost connection is, and retried.</summary>
     Task ResumeAsync(CancellationToken ct);
+}
+
+/// <summary>
+/// A call the platform shows while the mic is open, whose call control device is the headset (issue #423: Windows 11
+/// 24H2's VoIP calls): in HFP the headset's button is no media button, and reaches the app only as the call's end.
+/// </summary>
+public interface IHeadsetCall : IDisposable
+{
+    /// <summary>Reports the call active, with the headset as its call control device.</summary>
+    Task StartAsync();
+
+    /// <summary>Ends the call, if there is one.</summary>
+    void End();
+
+    /// <summary>The headset's button asked to end the call, which has ended; on any thread.</summary>
+    event Action? EndRequested;
 }
 
 /// <summary>How the mic behaves, with the defaults issue #422 names.</summary>
@@ -87,6 +106,7 @@ public sealed class VoiceMic : IDisposable
     private readonly IMicSwitch _mic;
     private readonly IAudioSink _speaker;
     private readonly MediaPause? _media;
+    private readonly IHeadsetCall? _call;
     private readonly VoiceMicOptions _options;
     private readonly ILogger _logger;
     private readonly TimeProvider _time;
@@ -102,8 +122,9 @@ public sealed class VoiceMic : IDisposable
 
     /// <param name="speaker">Where the tones play: the session's speaker, not through <see cref="MediaPause.Holding"/>.</param>
     /// <param name="media">The music to pause while the mic is open; null where the platform has none.</param>
+    /// <param name="call">The call held while the mic is open, whose end closes it; null where the platform has none.</param>
     public VoiceMic(IMicSwitch mic, IAudioSink speaker, MediaPause? media, VoiceMicOptions options, ILogger logger,
-        TimeProvider? time = null)
+        TimeProvider? time = null, IHeadsetCall? call = null)
     {
         _mic = mic;
         _speaker = speaker;
@@ -111,6 +132,8 @@ public sealed class VoiceMic : IDisposable
         _options = options;
         _logger = logger;
         _time = time ?? TimeProvider.System;
+        _call = call;
+        if (_call is not null) _call.EndRequested += HeadsetEnded;
     }
 
     private static TaskCompletionSource Quiet()
@@ -151,98 +174,128 @@ public sealed class VoiceMic : IDisposable
     }
 
     /// <summary>
-    /// Pauses the music and opens the microphone while voice input resumes, then plays the rising tone; the silence
-    /// timer starts from it.
+    /// Pauses the music and opens the microphone while voice input resumes, then plays the rising tone and holds the
+    /// headset's call; the silence timer starts from it.
     /// </summary>
-    public async Task OpenAsync()
+    public Task OpenAsync() => SwitchAsync(OpenHeldAsync);
+
+    /// <summary>
+    /// Ends the headset's call, plays the falling tone, closes the microphone, suspends voice input (what the user was
+    /// saying is committed and answered), and lets the music resume once the route is back.
+    /// </summary>
+    public Task CloseAsync(MicClose why) => SwitchAsync(() => CloseHeldAsync(why));
+
+    /// <summary>
+    /// The headset's play/pause (issue #423): opens the mic when it is closed, closes it when it is open. A press while
+    /// the mic opens or closes waits for that switch, then switches it back: no press is dropped.
+    /// </summary>
+    public Task ToggleAsync() => SwitchAsync(() => State == VoiceMicState.Open ? CloseHeldAsync(MicClose.Headset) : OpenHeldAsync());
+
+    /// <summary>One switch at a time: what each does is decided once the one before it is done.</summary>
+    private async Task SwitchAsync(Func<Task> switchHeld)
     {
         await _switching.WaitAsync().ConfigureAwait(false);
         try
         {
-            lock (_lock)
-            {
-                if (_disposed || _state == VoiceMicState.Open) return;
-            }
-
-            // Speech recognition connects while the music pauses and the headset switches to HFP: the tone waits for both
-            var opening = _time.GetTimestamp();
-            var resuming = ResumeInputAsync();
-
-            if (_media is not null)
-            {
-                try
-                {
-                    await _media.Hold(MediaHold.Mic).WaitAsync(MediaPause.PauseWait).ConfigureAwait(false);
-                }
-                catch (TimeoutException)
-                {
-                }
-            }
-            await QuietAsync().ConfigureAwait(false);
-            lock (_lock)
-            {
-                if (_disposed) return;
-            }
-            try
-            {
-                await Task.Run(_mic.OpenMic).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Voice: the mic did not open");
-                await resuming.ConfigureAwait(false);
-                await SuspendInputAsync("the mic did not open").ConfigureAwait(false);
-                _media?.Release(MediaHold.Mic);
-                throw;
-            }
-            var resumed = await resuming.ConfigureAwait(false);
-            Set(VoiceMicState.Open);
-            if (resumed is { } took)
-                _logger.LogInformation("Voice: mic open in {Open} ms (speech recognition connected in {Resume} ms)",
-                    (int)_time.GetElapsedTime(opening).TotalMilliseconds, (int)took.TotalMilliseconds);
-            else
-                _logger.LogInformation("Voice: mic open in {Open} ms", (int)_time.GetElapsedTime(opening).TotalMilliseconds);
-            await ToneAsync(rising: true).ConfigureAwait(false);
-            RestartSilence();
+            await switchHeld().ConfigureAwait(false);
         }
         finally
         {
             _switching.Release();
         }
+    }
+
+    private async Task OpenHeldAsync()
+    {
+        lock (_lock)
+        {
+            if (_disposed || _state == VoiceMicState.Open) return;
+        }
+
+        // Speech recognition connects while the music pauses and the headset switches to HFP: the tone waits for both
+        var opening = _time.GetTimestamp();
+        var resuming = ResumeInputAsync();
+
+        if (_media is not null)
+        {
+            try
+            {
+                await _media.Hold(MediaHold.Mic).WaitAsync(MediaPause.PauseWait).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+            }
+        }
+        await QuietAsync().ConfigureAwait(false);
+        lock (_lock)
+        {
+            if (_disposed) return;
+        }
+        try
+        {
+            await Task.Run(_mic.OpenMic).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Voice: the mic did not open");
+            await resuming.ConfigureAwait(false);
+            await SuspendInputAsync("the mic did not open").ConfigureAwait(false);
+            _media?.Release(MediaHold.Mic);
+            throw;
+        }
+        var resumed = await resuming.ConfigureAwait(false);
+        Set(VoiceMicState.Open);
+        if (resumed is { } took)
+            _logger.LogInformation("Voice: mic open in {Open} ms (speech recognition connected in {Resume} ms)",
+                (int)_time.GetElapsedTime(opening).TotalMilliseconds, (int)took.TotalMilliseconds);
+        else
+            _logger.LogInformation("Voice: mic open in {Open} ms", (int)_time.GetElapsedTime(opening).TotalMilliseconds);
+        await ToneAsync(rising: true).ConfigureAwait(false);
+        await StartCallAsync().ConfigureAwait(false);
+        RestartSilence();
+    }
+
+    private async Task CloseHeldAsync(MicClose why)
+    {
+        lock (_lock)
+        {
+            if (_disposed || _state == VoiceMicState.Closed) return;
+        }
+
+        StopSilence();
+        Set(VoiceMicState.Closed);
+        _logger.LogInformation("Voice: mic closed ({Why})", why);
+        _call?.End();
+        await QuietAsync().ConfigureAwait(false);
+        await ToneAsync(rising: false).ConfigureAwait(false);
+        if (_options.ToneWait > TimeSpan.Zero)
+            await Task.Delay(_options.ToneWait, _time).ConfigureAwait(false);
+        await Task.Run(_mic.CloseMic).ConfigureAwait(false);
+        // After the close, so the answer to a sentence it cut off plays on the speaker the closed mic leaves Default
+        // on; and before the music is let go of, which that answer would pause again
+        await SuspendInputAsync($"mic closed: {why}").ConfigureAwait(false);
+        _media?.Release(MediaHold.Mic);
     }
 
     /// <summary>
-    /// Plays the falling tone, closes the microphone, suspends voice input (what the user was saying is committed and
-    /// answered), and lets the music resume once the route is back.
+    /// The headset's call, held while the mic is open: in HFP its button reaches GodMode only as the call's end. A call
+    /// that does not start leaves the mic open, to close by silence, a Done phrase or the app's button.
     /// </summary>
-    public async Task CloseAsync(MicClose why)
+    private async Task StartCallAsync()
     {
-        await _switching.WaitAsync().ConfigureAwait(false);
+        if (_call is null) return;
         try
         {
-            lock (_lock)
-            {
-                if (_disposed || _state == VoiceMicState.Closed) return;
-            }
-
-            StopSilence();
-            Set(VoiceMicState.Closed);
-            _logger.LogInformation("Voice: mic closed ({Why})", why);
-            await QuietAsync().ConfigureAwait(false);
-            await ToneAsync(rising: false).ConfigureAwait(false);
-            if (_options.ToneWait > TimeSpan.Zero)
-                await Task.Delay(_options.ToneWait, _time).ConfigureAwait(false);
-            await Task.Run(_mic.CloseMic).ConfigureAwait(false);
-            // After the close, so the answer to a sentence it cut off plays on the speaker the closed mic leaves Default
-            // on; and before the music is let go of, which that answer would pause again
-            await SuspendInputAsync($"mic closed: {why}").ConfigureAwait(false);
-            _media?.Release(MediaHold.Mic);
+            await _call.StartAsync().ConfigureAwait(false);
         }
-        finally
+        catch (Exception ex)
         {
-            _switching.Release();
+            _logger.LogWarning(ex, "Voice: the headset's call did not start; its button cannot close the mic");
         }
     }
+
+    /// <summary>The headset's button in the call: the call has ended, and the mic closes.</summary>
+    private void HeadsetEnded() => _ = CloseAsync(MicClose.Headset);
 
     /// <summary>A Done phrase (<see cref="DoneNode"/>): the mic closes.</summary>
     public void Done() => _ = CloseAsync(MicClose.Done);
@@ -383,15 +436,23 @@ public sealed class VoiceMic : IDisposable
         return bytes;
     }
 
-    /// <summary>Stops the silence timer. The microphone and the music are their owners' to let go of.</summary>
+    /// <summary>
+    /// Stops the silence timer and ends the headset's call. The microphone and the music are their owners' to let go of.
+    /// </summary>
     public void Dispose()
     {
         lock (_lock)
         {
+            if (_disposed) return;
             _disposed = true;
             _silence?.Dispose();
             _silence = null;
             _quiet.TrySetResult();
+        }
+        if (_call is not null)
+        {
+            _call.EndRequested -= HeadsetEnded;
+            _call.End();
         }
     }
 }
