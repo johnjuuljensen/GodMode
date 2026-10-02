@@ -28,6 +28,7 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
     private readonly ConcurrentDictionary<string, string> _formats = new();
     private readonly ConcurrentDictionary<string, int> _silentFor = new();
     private readonly ConcurrentDictionary<string, bool> _audible = new();
+    private readonly ConcurrentDictionary<string, AudioEndpointVolume> _volumes = new();
     private volatile IReadOnlyList<HeadsetEndpoint> _headset = [];
     private int _polling;
 
@@ -85,7 +86,41 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
             .Where(d => d.FriendlyName.Contains(HeadsetName, StringComparison.OrdinalIgnoreCase))
             .Select(d => new HeadsetEndpoint(d, d.ID, d.FriendlyName, d.DataFlow))];
         _log.Write(Source, $"headset endpoints ('{HeadsetName}'): [{string.Join("; ", _headset.Select(e => $"{e.Flow} '{e.Name}'"))}]");
+        WatchVolumes();
         PollFormats();
+    }
+
+    /// <summary>
+    /// Each headset endpoint's volume and mute, logged at first and on every change: the headset's volume buttons may
+    /// reach Windows only as a volume change (AVRCP absolute volume), not as keys.
+    /// </summary>
+    private void WatchVolumes()
+    {
+        // An endpoint that went away is watched afresh when it comes back
+        foreach (var gone in _volumes.Keys.Where(id => _headset.All(e => e.Id != id)).ToList())
+            _volumes.TryRemove(gone, out _);
+        foreach (var endpoint in _headset)
+        {
+            if (_volumes.ContainsKey(endpoint.Id)) continue;
+            try
+            {
+                var volume = endpoint.Device.AudioEndpointVolume;
+                if (!_volumes.TryAdd(endpoint.Id, volume)) continue;
+                _log.Write(Source, $"volume of {endpoint.Flow} '{endpoint.Name}': {volume.MasterVolumeLevelScalar:P0}{(volume.Mute ? ", muted" : "")}");
+                var last = $"{volume.MasterVolumeLevelScalar:P0}{(volume.Mute ? ", muted" : "")}";
+                // Windows notifies once per channel too: only a change of the master volume or mute is logged
+                volume.OnVolumeNotification += data =>
+                {
+                    var now = $"{data.MasterVolume:P0}{(data.Muted ? ", muted" : "")}";
+                    if (Interlocked.Exchange(ref last, now) != now)
+                        _log.Write(Source, $"volume of {endpoint.Flow} '{endpoint.Name}' -> {now}");
+                };
+            }
+            catch (Exception ex)
+            {
+                _log.Error(Source, $"volume of '{endpoint.Name}'", ex);
+            }
+        }
     }
 
     private static string Describe(MMDevice device)
