@@ -5,6 +5,9 @@ MAUI app. It answers the questions that decide steps 3 and 4 of #382's flow: whi
 whether GodMode can pause and resume Spotify, how long the A2DP↔HFP switches take, whether a button in HFP reaches
 `CallControl`, and whether the headset has LE Audio.
 
+**The answer is in [Conclusions for steps 3 and 4 of #382](#conclusions-for-steps-3-and-4-of-382)**, after six trials
+by the user on 2026-10-02, with the [results](#results) table. The trials' own sections, in order, record how it got there.
+
 It is **manual**: no test can press a headset button. The one piece of pure logic, the gesture classifier
 (`GestureClassifier.cs`), has unit tests in `tests/GodMode.HeadsetSpike.Tests`.
 
@@ -390,9 +393,53 @@ Read from the log `headset-20261002-144415.log` and the user's report.
 4. Start Spotify by mouse, wait 5 s, then do one round.
 5. **Stop listen mode**.
 
+## Sixth trial (2026-10-02)
+
+Read from the log `headset-20261002-150829.log`. The user: "all points worked as expected".
+
+- **Seven rounds of listen mode, every one complete**: a press opened the mic (8 mic-ons, the last one closed by
+  stopping), and a press in HFP closed it through the VoIP call's `EndRequested` (7 of 7).
+- **Spotify resumed at full quality**: in each round the spike paused Spotify, and resumed it once the endpoint's volume
+  marked A2DP's return, 5.16–5.20 s after the mic closed. The 8 s fallback was never needed.
+- **The reclaim worked every time**: after each resume Spotify took the current session, the spike reopened its own
+  (300 ms later), and was current at the next check, 1 s after (7 of 7). So every next press reached the spike.
+- **Spotify paused by mouse stayed paused** across a round. **Spotify started by mouse** was taken back from in the
+  same way, and the next press opened the mic.
+- No error in the log.
+
+## Conclusions for steps 3 and 4 of #382
+
+The spike's answer, for the OpenRun Pro 2 on Windows 11 (build 26200):
+
+1. **Normally the mic is closed, and GodMode leaves the media buttons to Spotify.** Windows sends a Bluetooth
+   headset's buttons only to the current media session (SMTC), never as keys or HID reports. No hook sees them.
+2. **While GodMode listens, it holds the media session, and the headset's play/pause is the mic's switch** (the user's
+   design). The user runs Spotify with the mouse. Next and Previous are ignored: the triple press is too unreliable to
+   be a control, a long press sends nothing, and the volume buttons only change Windows' volume. Holding the session
+   needs two things:
+   - GodMode's media session **mirrors Spotify's play/pause** as its status. A session saying "playing" with nothing
+     playing got no button at all.
+   - Whenever another session starts playing, Windows makes it current. **GodMode takes it back by closing its session
+     and opening it again, playing.** Going paused and playing again does not take it back.
+3. **Stepping in (a press in A2DP)**: GodMode pauses Spotify through GSMTC (Spotify paused 284–330 ms later), opens the
+   mic (WaveIn, the switch to HFP: the quality drop is heard at once), plays the rising tone (heard), and reports a
+   **VoIP call whose call control device is the headset** (active about 1.6 s after the press).
+4. **Back to music by a press in HFP**: in HFP the headset's button is no media button. It reaches Windows only as the
+   VoIP call's `EndRequested`, through Windows 11 24H2's call control devices (`VoipCallCoordinator`, CallsVoipContract
+   v5). `Windows.Media.Devices.CallControl` is not available. GodMode ends the call, closes the mic and plays the
+   falling tone. Then it **waits for A2DP's return**, marked by the headset endpoint's Windows volume changing back
+   (Windows keeps one per profile), 5.2–5.3 s after the close in every trial, before it resumes Spotify. Resumed sooner,
+   Spotify plays at HFP quality until then.
+5. **What it needs**: Windows 11 24H2 (10.0.26100) or later at run time, and a build against the 26100 SDK projection
+   `Microsoft.Windows.SDK.NET.Ref` 10.0.26100.87 or later (the .NET SDK's default, .57, lacks these APIs). No app
+   package or capability declaration: the unpackaged spike reported calls and got `EndRequested`. On an older Windows
+   only the automatic way back (silence, "færdig") is left.
+6. **Open, not tested**: whether Windows shows the VoIP call anywhere (the user noted nothing), the falling tone's
+   audibility during the 5 s HFP hold, other headsets, and Android.
+
 ## Results
 
-Filled in from the first five trials. The rest waits for Trial 6.
+Final, from the six trials.
 
 | # | Question | Result |
 |---|---|---|
@@ -401,16 +448,16 @@ Filled in from the first five trials. The rest waits for Trial 6.
 | 1c | Triple press | `Previous`, unreliably: 8 of 22 came as `Next`. The user's decision: no control |
 | 1d | Long press | Nothing reaches Windows |
 | 1e | Volume buttons | Windows' volume in 6 % steps (AVRCP absolute volume); no key or HID report. Hold − does nothing, hold + is power off |
-| 1f | Catch one gesture, keep Spotify's play/pause | Not by a keyboard hook. By the proxy: forwarding and catching work while Spotify plays; after a pause no button arrived with the proxy saying "playing". Dropped by the user: while listening GodMode takes every button (listen mode) |
-| 1h | Listen mode: play/pause turns the mic on and off | **On: yes** (a press in A2DP opens the mic). **Off: no**: in HFP no press reaches the media session, with its status paused or playing |
-| 1i | A press in HFP through a VoIP call (24H2 call control devices) | Unpackaged app: the coordinator, Bluetooth association and the headset as a call control device all work, and a call with it goes active. **The button raises `EndRequested`**: a press in HFP closes the mic (fourth trial). Every press in HFP gave `EndRequested` (seven rounds in the fifth trial). Repeated rounds keep working once the spike reclaims the session after Spotify resumes: Trial 6 |
+| 1f | Catch one gesture, keep Spotify's play/pause | Not by a keyboard hook (the buttons are no keys). The proxy forwarded and caught while Spotify played. Dropped by the user: while listening GodMode takes every button, and Spotify is run by mouse |
 | 1g | Own SMTC claimed | Gets every button; Spotify gets none while the app holds the session |
-| 2a | GSMTC pause and resume Spotify | Works every time; Spotify's state 55–290 ms later |
+| 1h | Listen mode: play/pause turns the mic on | Yes: a press in A2DP opens the mic, with GodMode's session mirroring Spotify's play/pause and taken back (closed and reopened) whenever Spotify starts playing |
+| 1i | A press in HFP turns the mic off | Not as a media button (none arrives in HFP). Yes through a VoIP call associated with the headset (Windows 11 24H2 call control devices): `EndRequested` on every press, 7 of 7 rounds in the sixth trial, unpackaged |
+| 2a | GSMTC pause and resume Spotify | Works every time; Spotify's state 55–330 ms later |
 | 2b | Announcement test | Paused at 289 ms, tones from 439 ms, playing again at 1022 ms |
-| 3a | A2DP→HFP (mic open) | Heard at once, as a quality drop (marked 1.2–1.9 s after the ask); WaveIn's open returns in 0.9–1.1 s with music; Windows' volume of the endpoint changes 0.28–0.40 s after the ask |
-| 3b | HFP→A2DP (mic close) | Full quality back after 5.2–5.3 s (volume change and meter), heard at about 5.9 s, every time, by itself |
-| 3c | Rising tone after open | Trial 3, U |
-| 3d | Falling tone after close | Trial 3, U (it plays inside the 5 s HFP hold) |
+| 3a | A2DP→HFP (mic open) | Heard at once, as a quality drop (marked 1.2–1.9 s after the ask); WaveIn's open returns in 0.2–1.1 s; the endpoint's Windows volume changes 0.2–0.5 s after the ask |
+| 3b | HFP→A2DP (mic close) | Full quality back 5.2–5.3 s after the close (the endpoint's volume and meter), heard at about 5.9 s, every time, by itself. Spotify resumed on that volume change plays at full quality |
+| 3c | Rising tone after open | Heard ("ping plays"), played about 0.4–0.7 s after the ask, with the switch under way |
+| 3d | Falling tone after close | Played 0.2 s after the close, inside the 5 s HFP hold; its audibility was not noted |
 | 3e | Does the mic hear speech? | Yes: peaks 16000–32737 of 32767 while counting |
 | 4 | Button in HFP via `CallControl` | `CallControl` unavailable (GetDefault and FromId give none). The VoIP route instead: 1i |
 | 5 | LE Audio | No: a Bluetooth Classic device only, no LE device or LE Audio service; the spec lists SBC only |
