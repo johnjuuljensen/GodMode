@@ -131,6 +131,12 @@ export interface AttentionItem {
    * The project's pull request, when Kind is AttentionKind.Review or AttentionKind.Finished and it has one.
    */
   PullRequestUrl?: string | null;
+  /**
+   * The session's own spoken version of the turn's reply (ProjectStatus.SpokenSummary), when Kind is
+   * AttentionKind.Finished, or AttentionKind.Question asked in plain text at the turn's end, and the turn
+   * made one; voice says it word for word. Null otherwise.
+   */
+  Spoken?: string | null;
 }
 
 /**
@@ -401,6 +407,13 @@ export interface ProjectStatus {
    * children as they are, so it may name a session that is gone, which the app shows as top level.
    */
   ParentId?: string | null;
+  /**
+   * The session's own spoken version of its last turn's reply: the text of the `speak` call that turn made in
+   * its main conversation, which the server accepted (issue #384). Set with LastResult as the turn ends, null
+   * for a turn that made none or ended in error, and cleared as the next turn starts. Plain text of at most
+   * about 300 characters, for voice to say word for word; the whole reply stays in the transcript.
+   */
+  SpokenSummary?: string | null;
 }
 
 /** Summary information about a project. */
