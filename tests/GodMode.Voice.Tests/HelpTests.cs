@@ -19,14 +19,15 @@ public sealed class HelpTests
         return [.. GodModeGraph.AddTools(new ToolSet(), tools).ResolveAll().Keys];
     }
 
-    /// <summary>The voice log of 2026-09-30: a partial "Hjælp.", then, with no final, nothing answered at all.</summary>
+    /// <summary>
+    /// The voice log of 2026-09-30: a partial "Hjælp.", then, with no final, nothing answered at all. A phrase of one
+    /// word is help on the partial; one of several waits for the final (<see cref="A_command_that_grows_from_a_help_phrase_is_the_models_and_help_is_not_said"/>).
+    /// </summary>
     [Theory]
     [InlineData("Hjælp.", true)]
-    [InlineData("Hvad kan du?", true)]
-    [InlineData("Hvad kan jeg sige", true)]
     [InlineData("Kommandoer.", true)]
     [InlineData("Help.", false)]
-    [InlineData("What can I say?", false)]
+    [InlineData("Commands", false)]
     public async Task A_partial_that_asks_for_help_is_answered_with_the_list_and_the_model_is_not_called(string asked, bool danish)
     {
         var model = new ScriptedChatClient();
@@ -49,6 +50,9 @@ public sealed class HelpTests
     [InlineData("Hvad kan jeg gøre?", true)]
     [InlineData("Hvad kan jeg?", true)]
     [InlineData("Hjælp, hvad kan jeg sige?", true)]
+    [InlineData("Hvad kan du?", true)]
+    [InlineData("Hvad kan jeg sige", true)]
+    [InlineData("What can I say?", false)]
     [InlineData("Help. Help.", false)]
     [InlineData("What can I do?", false)]
     public async Task A_repeated_phrase_and_the_common_asks_are_help(string asked, bool danish)
@@ -84,6 +88,53 @@ public sealed class HelpTests
 
         Assert.Equal(["Hvad venter?"], UserTexts(model));
         Assert.Single(voice.Events.Responses, r => r == Danish);
+    }
+
+    /// <summary>
+    /// ElevenLabs' partials grow word by word: "Hvad kan jeg" is the start of "Hvad kan jeg svare 283?" as much as an
+    /// ask of its own, so a phrase of several words is help on the final only, never on a partial that may go on.
+    /// </summary>
+    [Theory]
+    [InlineData("Hvad kan jeg svare 283?", "Hvad", "Hvad kan", "Hvad kan jeg", "Hvad kan jeg svare")]
+    [InlineData("Hvad kan du fortælle om 283?", "Hvad", "Hvad kan", "Hvad kan du", "Hvad kan du fortælle om")]
+    [InlineData("What can I do about 283?", "What", "What can", "What can I", "What can I do", "What can I do about")]
+    public async Task A_command_that_grows_from_a_help_phrase_is_the_models_and_help_is_not_said(string final, params string[] partials)
+    {
+        var model = new ScriptedChatClient().Respond("Uklar.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        foreach (var partial in partials)
+            voice.Transcriptions.AddPartial(partial);
+        voice.Transcriptions.AddFinal(final);
+        await voice.Events.SaidAsync("Uklar.");
+
+        Assert.Equal([final], UserTexts(model));
+        Assert.DoesNotContain(Danish, voice.Events.Responses);
+        Assert.DoesNotContain(English, voice.Events.Responses);
+    }
+
+    /// <summary>The same growth, ending as the ask itself: help is said once, on the final, and the model is not called.</summary>
+    [Theory]
+    [InlineData("Hvad kan jeg?", true, "Hvad", "Hvad kan", "Hvad kan jeg")]
+    [InlineData("Hvad kan jeg gøre?", true, "Hvad", "Hvad kan", "Hvad kan jeg", "Hvad kan jeg gøre")]
+    [InlineData("Hjælp. Hvad kan jeg sige?", true, "Hjælp", "Hjælp. Hvad", "Hjælp. Hvad kan", "Hjælp. Hvad kan jeg", "Hjælp. Hvad kan jeg sige")]
+    [InlineData("What can I do?", false, "What", "What can", "What can I", "What can I do")]
+    public async Task A_help_phrase_said_in_growing_partials_is_help_once(string final, bool danish, params string[] partials)
+    {
+        var model = new ScriptedChatClient().Respond("Intet venter.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        foreach (var partial in partials)
+            voice.Transcriptions.AddPartial(partial);
+        voice.Transcriptions.AddFinal(final);
+        await voice.Events.SaidAsync(danish ? Danish : English);
+        voice.Transcriptions.SayAsRecognized("Hvad venter?");
+        await voice.Events.SaidAsync("Intet venter.");
+
+        Assert.Equal(["Hvad venter?"], UserTexts(model));
+        Assert.Single(voice.Events.Responses, r => r == (danish ? Danish : English));
     }
 
     /// <summary>A command that holds help's words, among others, is the model's, and help is not said.</summary>

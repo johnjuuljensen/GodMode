@@ -5,10 +5,12 @@ using VoiceBot.Core.Tools;
 namespace GodMode.Voice;
 
 /// <summary>
-/// "Hjælp" / "help": says what the user can ask, from the tools the graph has. It answers on the first partial that
-/// is its phrases alone (one, or several: "Hjælp. Hjælp."), as VoiceBot's CommandNode answers a command, without waiting for the final, and claims the
-/// help's words when they come again in that utterance (later partials, and the final that ends it, the same words
-/// or more of help's), so the chat node never answers them. New words after them are the user's next sentence (VoiceBot#62 can hold an utterance open):
+/// "Hjælp" / "help": says what the user can ask, from the tools the graph has, when the utterance is its phrases alone
+/// (one, or several: "Hjælp. Hjælp."). Phrases of one word it answers on the first partial, as VoiceBot's CommandNode
+/// answers a command, without waiting for the final; a phrase of several words opens ordinary commands too ("Hvad kan
+/// jeg" of "Hvad kan jeg svare 283?"), so one of those is help on the final only. Once it has answered, it claims what
+/// comes again in that utterance while it is, or may still grow into, help's words (later partials, and the final that
+/// ends it), so the chat node never answers them, nor help twice. New words after them are the user's next sentence (VoiceBot#62 can hold an utterance open):
 /// they release the claim and go on, whole, to the chat node.
 /// Help decides on the final's own words: the earlier readings a final carries (VoiceBot#61) are the model's, never help's.
 /// Not a CommandNode, even with VoiceBot#65's phrase keywords and claim: a keyword matches anywhere in the utterance, so
@@ -56,19 +58,21 @@ public sealed class HelpNode(string id, int priority) : INode
             return Task.FromResult<NodeResult?>(null);
 
         var text = context.CleanedText ?? transcription.Text;
-        var asked = Asked(CommandResolver.Tokenize(text));
+        var tokens = CommandResolver.Tokenize(text);
+        var asked = Asked(tokens);
 
-        // Help answered in this utterance, until the final: help's words again (the same, or more of them) are the same
-        // request, and other words are not
+        // Help answered in this utterance, until the final: help's words again (the same, more of them, or the start of
+        // more) are the same request, and other words are not
         if (context.GraphState.Get(context.StateKey, false))
         {
-            if (asked is null || !transcription.IsPartial)
+            var same = asked is not null || (transcription.IsPartial && MayBecomeHelp(tokens));
+            if (!same || !transcription.IsPartial)
                 context.GraphState.Remove(context.StateKey);
-            if (asked is not null)
+            if (same)
                 return Task.FromResult<NodeResult?>(new NodeResult());
         }
 
-        if (asked is not { } danish)
+        if (asked is not var (danish, onPartial) || (transcription.IsPartial && !onPartial))
             return Task.FromResult<NodeResult?>(null);
 
         if (transcription.IsPartial)
@@ -82,25 +86,37 @@ public sealed class HelpNode(string id, int priority) : INode
     }
 
     /// <summary>
-    /// Whether the words are help's phrases alone, one after another, and if so whether the first is Danish; null when
-    /// any word is not part of a phrase.
+    /// Whether the words are help's phrases alone, one after another: if so, whether the first is Danish, and whether
+    /// each is of one word (help on a partial); null when any word is not part of a phrase.
     /// </summary>
-    public static bool? Asked(string[] tokens)
+    public static (bool Danish, bool OnPartial)? Asked(string[] tokens) => Cover(tokens, open: false);
+
+    /// <summary>Whether the words are help's phrases, the last of them perhaps only begun ("Hjælp. Hvad kan").</summary>
+    public static bool MayBecomeHelp(string[] tokens) => Cover(tokens, open: true) is not null;
+
+    /// <summary>The words as help's phrases, the last of them perhaps only begun when <paramref name="open"/>.</summary>
+    private static (bool Danish, bool OnPartial)? Cover(string[] tokens, bool open)
     {
-        // From the end: the language of the first of the phrases that make up the words from each position on, null
-        // where no phrases do
-        var from = new bool?[tokens.Length + 1];
+        // From the end: the cover of the words from each position on, null where there is none
+        var from = new (bool Danish, bool OnPartial)?[tokens.Length + 1];
         for (var at = tokens.Length - 1; at >= 0; at--)
         {
             foreach (var (phrase, danish) in PhraseTokens)
             {
                 var end = at + phrase.Length;
-                if (end <= tokens.Length && (end == tokens.Length || from[end] is not null)
-                    && tokens.AsSpan(at, phrase.Length).SequenceEqual(phrase))
+                if (end > tokens.Length)
                 {
-                    from[at] = danish;
-                    break;
+                    if (open && tokens.AsSpan(at).SequenceEqual(phrase.AsSpan(0, tokens.Length - at)))
+                        from[at] = (danish, false);
                 }
+                else if (tokens.AsSpan(at, phrase.Length).SequenceEqual(phrase))
+                {
+                    if (end == tokens.Length)
+                        from[at] = (danish, phrase.Length == 1);
+                    else if (from[end] is { } rest)
+                        from[at] = (danish, phrase.Length == 1 && rest.OnPartial);
+                }
+                if (from[at] is not null) break;
             }
         }
         return tokens.Length == 0 ? null : from[0];
