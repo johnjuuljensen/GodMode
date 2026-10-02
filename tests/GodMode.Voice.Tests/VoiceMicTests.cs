@@ -239,6 +239,134 @@ public sealed class VoiceMicTests : IDisposable
         Assert.False(DoneNode.Said("Færdig med 283"));
     }
 
+    // ── The headset's button (issue #423) ──
+
+    private VoiceMic WithCall(FakeCall call) => new(_switch, _speaker, _media, Options, NullLogger.Instance, _time, call);
+
+    [Fact]
+    public async Task The_headsets_play_pause_opens_a_closed_mic_and_closes_an_open_one()
+    {
+        await _mic.ToggleAsync();
+        Assert.Equal(VoiceMicState.Open, _mic.State);
+        await _mic.ToggleAsync();
+        Assert.Equal(VoiceMicState.Closed, _mic.State);
+        await _mic.ToggleAsync();
+
+        Assert.Equal((2, 1, VoiceMicState.Open), (_switch.Opens, _switch.Closes, _mic.State));
+    }
+
+    /// <summary>A press while the mic still opens is not lost: once it is open (the rising tone), it closes (the falling one).</summary>
+    [Fact]
+    public async Task A_press_while_the_mic_opens_closes_it_once_it_is_open()
+    {
+        var first = _mic.ToggleAsync();
+        var second = _mic.ToggleAsync();
+        await Task.WhenAll(first, second).WaitAsync(Eventually.Timeout);
+
+        Assert.Equal(["mic opening", "open", "rising tone", "falling tone", "close", "mic closed"], _log);
+        Assert.Equal(VoiceMicState.Closed, _mic.State);
+    }
+
+    [Fact]
+    public async Task A_press_while_the_bot_speaks_opens_the_mic_once_the_speech_has_played_out()
+    {
+        _mic.Activity(SessionActivity.Speaking);
+
+        var press = _mic.ToggleAsync();
+        await Task.Delay(100);
+        Assert.Equal((0, VoiceMicState.Closed), (_switch.Opens, _mic.State));
+
+        _mic.Activity(SessionActivity.Listening);
+        await press.WaitAsync(Eventually.Timeout);
+        Assert.Equal((1, VoiceMicState.Open), (_switch.Opens, _mic.State));
+    }
+
+    [Fact]
+    public async Task The_headsets_call_is_held_from_the_rising_tone_and_ended_before_the_falling_one()
+    {
+        using var mic = WithCall(new FakeCall(_log));
+
+        await mic.OpenAsync();
+        await mic.CloseAsync(MicClose.Button);
+
+        Assert.Equal(["mic opening", "open", "rising tone", "call active", "call ended", "falling tone", "close", "mic closed"], _log);
+    }
+
+    /// <summary>In HFP the headset's button is no media button: it ends the call, and that closes the mic.</summary>
+    [Fact]
+    public async Task The_headsets_button_in_the_call_closes_the_mic()
+    {
+        var call = new FakeCall(_log);
+        using var mic = WithCall(call);
+        await mic.OpenAsync();
+
+        call.RequestEnd();
+
+        await Eventually.UntilAsync(() => _switch.Closes == 1, () => "the mic did not close");
+        Assert.Equal(VoiceMicState.Closed, mic.State);
+        Assert.Contains("falling tone", _log);
+    }
+
+    [Fact]
+    public async Task A_call_that_does_not_start_leaves_the_mic_open()
+    {
+        using var mic = WithCall(new FakeCall(_log) { Fail = true });
+
+        await mic.OpenAsync();
+
+        Assert.Equal(VoiceMicState.Open, mic.State);
+        await mic.CloseAsync(MicClose.Button);
+        Assert.Equal(1, _switch.Closes);
+    }
+
+    [Fact]
+    public async Task Stopping_voice_ends_the_call_and_its_end_closes_nothing_after()
+    {
+        var call = new FakeCall(_log);
+        var mic = WithCall(call);
+        await mic.OpenAsync();
+
+        mic.Dispose();
+        call.RequestEnd();
+        await Task.Delay(100);
+
+        Assert.Equal("call ended", _log.Last());
+        Assert.Equal(0, _switch.Closes);
+    }
+
+    private sealed class FakeCall(ConcurrentQueue<string> log) : IHeadsetCall
+    {
+        private bool _active;
+
+        public bool Fail { get; init; }
+
+        public event Action? EndRequested;
+
+        public Task StartAsync()
+        {
+            if (Fail) throw new InvalidOperationException("No call control device");
+            _active = true;
+            log.Enqueue("call active");
+            return Task.CompletedTask;
+        }
+
+        public void End()
+        {
+            if (!_active) return;
+            _active = false;
+            log.Enqueue("call ended");
+        }
+
+        /// <summary>As Windows does with the headset's button: the call ends, then the app hears it.</summary>
+        public void RequestEnd()
+        {
+            End();
+            EndRequested?.Invoke();
+        }
+
+        public void Dispose() => End();
+    }
+
     private sealed class FakeMicSwitch(ConcurrentQueue<string> log) : IMicSwitch
     {
         private int _opens;
