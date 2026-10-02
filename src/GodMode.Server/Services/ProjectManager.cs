@@ -3152,8 +3152,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
     /// <summary>
     /// Builds claude environment and args from action config + the launch's permissions + profile env.
-    /// Nothing is pre-approved: a tool call that needs approval reaches the permission prompt, unless
-    /// Claude Code's own settings, the permission mode, or skip-permissions, allow it.
+    /// Only GodMode's own session tools are pre-approved (<see cref="SessionTools"/>): any other tool call that needs
+    /// approval reaches the permission prompt, unless Claude Code's own settings, the permission mode, or
+    /// skip-permissions, allow it.
     /// </summary>
     private static (Dictionary<string, string>? Env, string[] Args) BuildClaudeConfig(
         string projectPath, string mcpConfigPath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
@@ -3165,9 +3166,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     {
         var env = MergeAndExpandEnvironment(profileEnv, action.Environment, profileName, stripEnvVarProfile);
 
-        var args = new List<string>();
-        if (action.ClaudeArgs != null)
-            args.AddRange(action.ClaudeArgs);
+        // The root's args, with GodMode's own session tools allowed in its --allowedTools, or one of their own
+        var args = SessionTools.Allow(action.ClaudeArgs);
         if (skipPermissions)
             args.Add("--dangerously-skip-permissions");
         if (permissionMode != null)
