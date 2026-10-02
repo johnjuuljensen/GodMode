@@ -45,6 +45,8 @@ public partial class ProjectManager
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
         CheckText(text);
+        // Refused before it is held, as the app's reply is
+        SlashCommands.Check(text, project.Status);
         var held = new SessionInbox.HeldMessage(DateTime.UtcNow, senderId, SessionInbox.HeldKind.Send, text);
 
         if (WaitsOnTheUser(project) is { } waiting)

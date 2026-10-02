@@ -38,5 +38,12 @@ public enum OutputEventType
     /// Error message.
     /// </summary>
     [JsonStringEnumMemberName("error")]
-    Error
+    Error,
+
+    /// <summary>
+    /// claude started a new conversation in the same process (<c>/clear</c>): a new session ID follows, in a new
+    /// <c>system/init</c>, and the session's output starts over.
+    /// </summary>
+    [JsonStringEnumMemberName("conversation_reset")]
+    ConversationReset
 }

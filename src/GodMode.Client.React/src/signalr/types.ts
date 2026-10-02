@@ -51,4 +51,15 @@ export interface ClaudeMessage {
   isError: boolean;
   contentItems: ClaudeContentItem[];
   contentSummary: string;
+  /**
+   * What a slash command did to the conversation, shown as a marker across the transcript: claude's
+   * `conversation_reset` (/clear) and `system/compact_boundary` (/compact)
+   */
+  marker?: string;
+  /**
+   * A line that is claude's bookkeeping of a command, not the conversation: the summary a /compact
+   * leaves (`isSynthetic`), a command's `<local-command-stdout>`, or a command's result with no text
+   * and no turn of the model's (`num_turns` 0), which is no reply
+   */
+  commandNote?: 'summary' | 'stdout' | 'silentResult';
 }

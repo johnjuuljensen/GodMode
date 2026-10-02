@@ -18,6 +18,7 @@ namespace GodMode.Shared.Models;
 /// <param name="SharedFolder">Whether its delete removes only its state, as in <see cref="ProjectStatus.SharedFolder"/>.</param>
 /// <param name="Adopted">Whether the session was adopted, as in <see cref="ProjectStatus.Adopted"/>: the app offers Forget beside its delete.</param>
 /// <param name="ParentId">The session that started this one, or null, as in <see cref="ProjectStatus.ParentId"/>.</param>
+/// <param name="SlashCommands">The slash commands GodMode sends to the session, as in <see cref="ProjectStatus.SlashCommands"/>.</param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -33,5 +34,6 @@ public record ProjectSummary(
     string? ActionName = null,
     bool SharedFolder = false,
     bool Adopted = false,
-    string? ParentId = null
+    string? ParentId = null,
+    IReadOnlyList<string>? SlashCommands = null
 );

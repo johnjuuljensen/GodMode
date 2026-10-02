@@ -45,6 +45,16 @@ namespace GodMode.Shared.Models;
 /// kept for its life; null for a top-level session. Metadata only: the parent's stop or delete leaves its
 /// children as they are, so it may name a session that is gone, which the app shows as top level.
 /// </param>
+/// <param name="SlashCommands">
+/// The slash commands GodMode sends to the session's claude, without their <c>/</c>: <c>clear</c>, <c>compact</c>,
+/// <c>context</c> and the skills its claude's last <c>system/init</c> listed. What the app's composer completes.
+/// Null until claude has started its session once.
+/// </param>
+/// <param name="ClaudeCommands">
+/// Every slash command the session's claude's last <c>system/init</c> listed (its built-ins and skills), without
+/// their <c>/</c>. Input that starts with one that is not in <paramref name="SlashCommands"/> is refused, and
+/// never reaches claude. Null until claude has started its session once.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -73,5 +83,7 @@ public record ProjectStatus(
     bool SharedFolder = false,
     bool Adopted = false,
     string? Effort = null,
-    string? ParentId = null
+    string? ParentId = null,
+    IReadOnlyList<string>? SlashCommands = null,
+    IReadOnlyList<string>? ClaudeCommands = null
 );

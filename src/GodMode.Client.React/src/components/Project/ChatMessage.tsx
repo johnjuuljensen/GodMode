@@ -52,6 +52,12 @@ export const ChatMessage = memo(function ChatMessage({ item, expanded, onToggle,
           <span className="ti-status-text">{resultLine(item.summary)}</span>
         </div>
       );
+    case 'marker':
+      return (
+        <div className="ti ti-marker" role="separator" aria-label={item.label}>
+          <span className="ti-marker-label">{item.label}</span>
+        </div>
+      );
     case 'system':
       return (
         <div className={`ti ti-status ${item.isError ? 'ti-status-error' : ''}`}>

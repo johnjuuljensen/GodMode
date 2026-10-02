@@ -113,6 +113,8 @@ function TileItem({ item }: { item: TranscriptItem }) {
           <span className="tile-status-text">{preview(resultLine(item.summary))}</span>
         </div>
       );
+    case 'marker':
+      return <div className="tile-marker" role="separator" aria-label={item.label}>{item.label}</div>;
     case 'system':
       return (
         <div className={`tile-status ${item.isError ? 'tile-status-error' : ''}`}>
