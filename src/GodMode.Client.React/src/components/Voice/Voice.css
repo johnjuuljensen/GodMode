@@ -1,63 +1,100 @@
-/* The voice button and transcript: bottom right, over the content (Windows app only) */
+/* The voice button and transcript: in the sidebar's foot, above Settings, never over the content (#433; Windows app only).
+   The transcript is a strip in the foot's flow, so opening it shortens the list beside it and covers nothing */
 .voice-control {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 50;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  max-width: min(420px, calc(100vw - 32px));
-  pointer-events: none;
+  gap: 6px;
+  margin-bottom: 6px;
+  min-width: 0;
 }
-.voice-control > * { pointer-events: auto; }
 
 .voice-button {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 14px;
-  border-radius: var(--radius-pill);
-  border: var(--border-width) var(--border-style) var(--glass-border-strong);
-  background: var(--bg-base);
-  color: var(--text-primary);
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-ml);
+  border: var(--border-width) var(--border-style) var(--glass-border);
+  background: var(--glass);
+  color: var(--text-secondary);
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: 11px;
+  font-weight: 500;
   cursor: pointer;
-  box-shadow: var(--shadow-card);
 }
+.voice-button:hover:not(:disabled) { background: var(--glass-hover); color: var(--text-primary); }
 .voice-button:disabled { opacity: 0.6; cursor: default; }
-.voice-buttons { display: flex; gap: 8px; }
-.voice-mic-button.voice-mic-open { border-color: var(--success); background: var(--success-soft); }
-.voice-state-listening .voice-button { border-color: var(--accent); box-shadow: var(--shadow-focus); }
-.voice-state-thinking .voice-button { border-color: var(--purple); }
-.voice-state-speaking .voice-button { border-color: var(--success); box-shadow: var(--shadow-focus-success); }
-.voice-state-error .voice-button { border-color: var(--error); }
+.voice-buttons { display: flex; gap: 6px; }
+.voice-power-button { flex: 1; min-width: 0; }
+.voice-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-transcript-toggle { padding: 0 9px; }
+.voice-chevron { transition: transform var(--duration-fast) ease; }
+.voice-chevron.expanded { transform: rotate(180deg); }
+.voice-mic-button.voice-mic-open { border-color: var(--success); background: var(--success-soft); color: var(--text-primary); }
+.voice-state-listening .voice-power-button { border-color: var(--accent); box-shadow: var(--shadow-focus); color: var(--text-primary); }
+.voice-state-thinking .voice-power-button { border-color: var(--purple); color: var(--text-primary); }
+.voice-state-speaking .voice-power-button { border-color: var(--success); box-shadow: var(--shadow-focus-success); color: var(--text-primary); }
+.voice-state-error .voice-power-button { border-color: var(--error); color: var(--error); }
 
+/* Open: resizable by its corner, never past half the window */
 .voice-transcript {
   list-style: none;
   margin: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 40vh;
+  height: 160px;
+  min-height: 60px;
+  max-height: 50vh;
   overflow-y: auto;
+  resize: vertical;
   background: var(--bg-base);
   border: var(--border-width) var(--border-style) var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-card);
-  font-size: 13px;
+  font-size: 12px;
 }
-.voice-line { color: var(--text-primary); }
+.voice-line { color: var(--text-primary); overflow-wrap: anywhere; }
 .voice-line-user { color: var(--text-secondary); text-align: right; }
 .voice-line-partial { font-style: italic; opacity: 0.7; }
+.voice-line-empty { color: var(--text-tertiary); font-style: italic; }
+
+/* Collapsed: the latest line, one line, fading out after a few seconds */
+.voice-latest {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 2px;
+  animation: voice-latest-fade 6s ease-in forwards;
+}
+.voice-latest.voice-line-user { text-align: left; }
+.voice-latest.voice-line-partial { animation: none; }
+@keyframes voice-latest-fade {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; }
+}
 
 .voice-alert {
-  padding: 8px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px 6px 10px;
   border-radius: var(--radius);
   background: var(--error-soft);
   color: var(--error);
-  font-size: 13px;
+  font-size: 12px;
+}
+.voice-alert-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.voice-alert-dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
 }

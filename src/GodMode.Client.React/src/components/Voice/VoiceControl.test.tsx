@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 /**
  * Voice in the Windows app (#285): the button shows the session's state, the transcript follows it, and an error says
- * what failed and what to do, until the service recovers. The session is the shell's: the page only shows it.
+ * what failed and what to do, until the service recovers or it is dismissed. The session is the shell's: the page only
+ * shows it. The transcript is folded away by default, and opened per device (#433).
  */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import * as bridge from '../../services/hostBridge';
 import type { VoiceLine, VoiceStatus } from '../../services/hostBridge';
 import { click, render, typeInto, type Rendered } from '../../test/render';
-import { VoiceControl } from './VoiceControl';
+import { TRANSCRIPT_OPEN_KEY, VoiceControl } from './VoiceControl';
 import { VoiceSettings } from './VoiceSettings';
 
 vi.mock('../../services/hostBridge', () => ({ request: vi.fn(), on: vi.fn() }));
@@ -23,8 +24,14 @@ const container = () => view!.container;
 const button = () => container().querySelector<HTMLButtonElement>('.voice-power-button');
 const micButton = () => container().querySelector<HTMLButtonElement>('.voice-mic-button');
 const label = () => container().querySelector('.voice-label')?.textContent;
-const alertText = () => container().querySelector('[role="alert"]')?.textContent ?? null;
-const lines = () => [...container().querySelectorAll('.voice-line')].map(l => l.textContent);
+const alertText = () => container().querySelector('[role="alert"] .voice-alert-text')?.textContent ?? null;
+const lines = () => [...container().querySelectorAll('.voice-transcript .voice-line')].map(l => l.textContent);
+const transcript = () => container().querySelector('.voice-transcript');
+const transcriptToggle = () => container().querySelector<HTMLButtonElement>('.voice-transcript-toggle');
+const latest = () => container().querySelector('.voice-latest')?.textContent ?? null;
+const dismissButton = () => container().querySelector<HTMLButtonElement>('.voice-alert-dismiss');
+/** This device has the transcript open, as a user who opened it before. */
+const openTranscript = () => localStorage.setItem(TRANSCRIPT_OPEN_KEY, 'true');
 
 /** The shell's answer to each request type; an Error is a request that fails with its message. */
 function answer(responses: Record<string, unknown>) {
@@ -57,6 +64,7 @@ it('shows nothing where the shell has no voice', async () => {
 });
 
 it('starts voice, then follows its state and the transcript, a partial replaced by what follows it', async () => {
+  openTranscript();
   answer({ 'voice.state': status(), 'voice.start': status({ State: 'Starting' }) });
   view = await render(<VoiceControl />);
   expect(label()).toBe('Voice off');
@@ -115,10 +123,61 @@ it('shows no Mic button while voice is off, nor where the mic is always open', a
 });
 
 it('shows the conversation so far to a page loaded again', async () => {
+  openTranscript();
   answer({ 'voice.state': status({ State: 'Listening', Lines: [{ Speaker: 'Bot', Text: 'Klar.' }, { Speaker: 'User', Text: 'Hvad venter?' }] }) });
   view = await render(<VoiceControl />);
 
   expect(lines()).toEqual(['Klar.', 'Hvad venter?']);
+});
+
+it('folds the transcript away by default, showing only the latest line, a partial included', async () => {
+  answer({ 'voice.state': status({ State: 'Listening', Lines: [{ Speaker: 'Bot', Text: 'Klar.' }] }) });
+  view = await render(<VoiceControl />);
+
+  expect(transcript()).toBeNull();
+  expect(transcriptToggle()!.getAttribute('aria-expanded')).toBe('false');
+  expect(latest()).toBe('Klar.');
+  await emit('voice.transcript', { Speaker: 'User', Text: 'hvad ven', Partial: true });
+  expect(latest()).toBe('hvad ven');
+  expect(container().querySelectorAll('.voice-latest')).toHaveLength(1);
+});
+
+it('opens the transcript with its toggle, and keeps it open on this device across a reload', async () => {
+  const said: VoiceLine[] = [{ Speaker: 'Bot', Text: 'Klar.' }, { Speaker: 'User', Text: 'Hvad venter?' }];
+  answer({ 'voice.state': status({ State: 'Listening', Lines: said }) });
+  view = await render(<VoiceControl />);
+
+  await click(transcriptToggle()!);
+  expect(lines()).toEqual(said.map(l => l.Text));
+  expect(latest()).toBeNull();
+  expect(transcriptToggle()!.getAttribute('aria-expanded')).toBe('true');
+  expect(localStorage.getItem(TRANSCRIPT_OPEN_KEY)).toBe('true');
+
+  view.unmount();
+  view = await render(<VoiceControl />);
+  expect(lines()).toEqual(said.map(l => l.Text));
+
+  await click(transcriptToggle()!);
+  expect(transcript()).toBeNull();
+  expect(localStorage.getItem(TRANSCRIPT_OPEN_KEY)).toBe('false');
+});
+
+it('shows an error while the transcript is folded, until it is dismissed, and a later one again', async () => {
+  answer({ 'voice.state': status({ State: 'Listening' }) });
+  view = await render(<VoiceControl />);
+  expect(transcript()).toBeNull();
+
+  await emit('voice.error', { Service: 'Model', Kind: 'ModelError', Message: 'overloaded' });
+  expect(alertText()).toMatch(/^Claude could not answer \(overloaded\)/);
+  await emit('voice.response', { Speaker: 'Bot', Text: 'Klar.' });
+  expect(alertText()).not.toBeNull();
+
+  await click(dismissButton()!);
+  expect(alertText()).toBeNull();
+
+  await emit('voice.recovered', { Service: 'Model' });
+  await emit('voice.error', { Service: 'Model', Kind: 'ModelError', Message: 'overloaded' });
+  expect(alertText()).not.toBeNull();
 });
 
 it('says ElevenLabs refused the key, and clears it when that service recovers', async () => {

@@ -9,6 +9,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem, PendingQuestion } from '../signalr/types';
 import { FakeHub, project, root, connectServers } from '../test/fakeHub';
+import { answer, settle } from '../test/appShell';
 import { render, typeInto, keyDown, click, pointerClick, type Rendered } from '../test/render';
 import { useAppStore } from '../store';
 import { Shell } from './Shell';
@@ -229,5 +230,28 @@ describe("the phone's project view (#221)", () => {
     await open('alpha');
     await act(() => hub.drop());
     expect(view.container.querySelector('.project-connection')).toBeNull();
+  });
+});
+
+describe('the voice button (#433)', () => {
+  const voiceButton = () => view.container.querySelector<HTMLElement>('.voice-power-button');
+
+  it("is in the sidebar's foot beside Settings, outside the content, with a project open and in tile mode", async () => {
+    view.unmount();
+    answer('voice.state', { Available: true, State: 'Listening', Lines: [{ Speaker: 'Bot', Text: 'Klar.' }] });
+    view = await render(<Shell />);
+    await settle();
+    await open('alpha');
+
+    expect(voiceButton()).not.toBeNull();
+    expect(voiceButton()!.closest('.sidebar-footer')).not.toBeNull();
+    expect(voiceButton()!.closest('.shell-content')).toBeNull();
+    expect(view.container.querySelector('.shell-content .voice-control')).toBeNull();
+
+    await act(async () => useAppStore.getState().setTileView(true));
+    // The tile layout's foot is its own, so the control asks the shell again
+    await settle();
+    expect(voiceButton()!.closest('.sidebar-footer')).not.toBeNull();
+    expect(voiceButton()!.closest('.shell-content')).toBeNull();
   });
 });
