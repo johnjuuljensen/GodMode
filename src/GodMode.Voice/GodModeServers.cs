@@ -55,6 +55,9 @@ public interface IGodModeServers
 
     Task MarkSeenAsync(ProjectRef project, CancellationToken ct);
 
+    /// <summary>What claude said in the project's last <paramref name="turns"/> turns, oldest first (<see cref="IProjectHub.GetLastReplies"/>).</summary>
+    Task<IReadOnlyList<AssistantReply>> GetLastRepliesAsync(ProjectRef project, int turns, CancellationToken ct);
+
     /// <summary>Every root on every server connected now (<see cref="IProjectHub.ListProjectRoots"/>). A server that fails to answer is left out.</summary>
     Task<IReadOnlyList<ServerRoot>> ListRootsAsync(CancellationToken ct);
 
@@ -127,6 +130,9 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
     public Task MarkSeenAsync(ProjectRef project, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.MarkSeen), project.ProjectId, ct);
+
+    public async Task<IReadOnlyList<AssistantReply>> GetLastRepliesAsync(ProjectRef project, int turns, CancellationToken ct) =>
+        await Hub(project).InvokeAsync<AssistantReply[]>(nameof(IProjectHub.GetLastReplies), project.ProjectId, turns, ct);
 
     public async Task<IReadOnlyList<ServerRoot>> ListRootsAsync(CancellationToken ct) =>
         [.. await EachServerAsync(async (server, hub) =>

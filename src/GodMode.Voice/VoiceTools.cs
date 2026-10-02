@@ -17,6 +17,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string WhatNeedsMe = "what_needs_me";
     public const string ListProjects = "list_projects";
     public const string ProjectStatus = "project_status";
+    public const string ReadReply = "read_reply";
+    public const string ReadMore = "read_more";
     public const string Answer = "answer_project";
     public const string MarkSeen = "mark_seen";
     public const string StartSession = "start_session";
@@ -28,6 +30,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string IssueParameter = "issue";
     public const string NameParameter = "name";
     public const string PromptParameter = "prompt";
+    public const string TurnsParameter = "turns";
 
     /// <summary>What the conversation is about, and whether the final being answered was heard more than one way.</summary>
     public VoiceConversation Conversation => conversation;
@@ -58,6 +61,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             "Call when the user asks about one project, or to hear a question or result.",
             [ProjectReference],
             (_, args, ct) => ProjectStatusAsync(Argument(args, ProjectParameter), ct))
+        .Add(ReadReply, "STUB", [ProjectReference, new ToolParameter(TurnsParameter, "turns", Required: false)],
+            (_, args, ct) => ReadReplyAsync(Argument(args, ProjectParameter), Argument(args, TurnsParameter), ct))
+        .Add(ReadMore, "STUB", (_, _, _) => Task.FromResult(ReadMoreText()))
         .Add(Answer,
             "Send the user's answer to a project: it reaches the Claude session as the user's reply, and the session " +
             "continues. Give the answer as the instruction the user meant, in their words.",
@@ -167,6 +173,13 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <summary>The index <paramref name="length"/>, or one before it where a cut there would split a surrogate pair.</summary>
     private static int Whole(string text, int length) =>
         length > 0 && length < text.Length && char.IsLowSurrogate(text[length]) ? length - 1 : length;
+
+    public const int ReplyPartLength = 1200;
+    public const int MaxTurnsRead = 5;
+
+    public Task<string> ReadReplyAsync(string? reference, string? turns, CancellationToken ct) => Task.FromResult("");
+
+    public string ReadMoreText() => "";
 
     public async Task<string> AnswerAsync(string? reference, string? answer, CancellationToken ct)
     {

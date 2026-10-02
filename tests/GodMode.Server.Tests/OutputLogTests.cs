@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using GodMode.Server.Models;
+using GodMode.Shared.Models;
 using Xunit.Abstractions;
 using GodMode.Server.Services;
 

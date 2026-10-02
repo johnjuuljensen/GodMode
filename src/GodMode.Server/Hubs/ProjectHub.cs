@@ -185,6 +185,22 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         await _projectManager.SubscribeProjectAsync(projectId, fromOffset, subscriptionId, generation, Context.ConnectionId);
     }
 
+    public async Task<AssistantReply[]> GetLastReplies(string projectId, int turns)
+    {
+        _logger.LogInformation("Client {ConnectionId} reading the last {Turns} replies of project {ProjectId}",
+            Context.ConnectionId, turns, projectId);
+        if (turns is < 1 or > IProjectHub.MaxReplyTurns)
+            throw new HubException($"turns must be 1 to {IProjectHub.MaxReplyTurns}, not {turns}.");
+        try
+        {
+            return await Task.FromResult<AssistantReply[]>([]); // RED STUB
+        }
+        catch (KeyNotFoundException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
     public async Task UnsubscribeProject(string projectId)
     {
         _logger.LogInformation("Client {ConnectionId} unsubscribing from project {ProjectId}",

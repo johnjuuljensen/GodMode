@@ -131,6 +131,25 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         return Task.CompletedTask;
     }
 
+    private readonly ConcurrentDictionary<ProjectRef, AssistantReply[]> _replies = new();
+
+    /// <summary>The project's turns, oldest first, as its <c>output.jsonl</c> has them on the server.</summary>
+    public void SetReplies(string serverId, string projectId, params AssistantReply[] replies) =>
+        _replies[new ProjectRef(serverId, projectId)] = replies;
+
+    /// <summary>The turns each read of replies asked for, in order.</summary>
+    public ConcurrentQueue<(ProjectRef Project, int Turns)> RepliesRead { get; } = new();
+
+    /// <summary>As the server reads them: the last <paramref name="turns"/>, oldest first; none for a project with none.</summary>
+    public Task<IReadOnlyList<AssistantReply>> GetLastRepliesAsync(ProjectRef project, int turns, CancellationToken ct)
+    {
+        RepliesRead.Enqueue((project, turns));
+        if (!_statuses.ContainsKey(project))
+            return Task.FromException<IReadOnlyList<AssistantReply>>(new KeyNotFoundException(project.ProjectId));
+        var all = _replies.GetValueOrDefault(project, []);
+        return Task.FromResult<IReadOnlyList<AssistantReply>>(all[Math.Max(0, all.Length - turns)..]);
+    }
+
     /// <summary>A project on a server, that no attention item names: created, as the hub pushes it.</summary>
     public void AddProject(string serverId, string projectId, string name, string? root = null, string? kind = null, string? profile = null)
     {
