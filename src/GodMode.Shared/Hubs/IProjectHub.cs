@@ -122,6 +122,18 @@ public interface IProjectHub
     Task SubscribeProject(string projectId, long fromOffset, string subscriptionId, string? generation);
 
     /// <summary>
+    /// What claude said in the project's last <c>turns</c> turns, oldest first, read from its
+    /// <c>output.jsonl</c> whatever the project waits on, or whether it waits at all: the read the fleet's
+    /// <c>read</c> tool gives. The last turn may be unfinished while claude works on it. Fewer when it has had
+    /// fewer turns, none before its first. Fails for a project the server does not track, and for
+    /// <paramref name="turns"/> outside 1 to <see cref="MaxReplyTurns"/>.
+    /// </summary>
+    Task<AssistantReply[]> GetLastReplies(string projectId, int turns);
+
+    /// <summary>The most turns <see cref="GetLastReplies"/> reads at once, as the fleet's <c>read</c> does.</summary>
+    const int MaxReplyTurns = 20;
+
+    /// <summary>
     /// Unsubscribes from output events from a project.
     /// </summary>
     Task UnsubscribeProject(string projectId);

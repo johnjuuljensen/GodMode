@@ -1,7 +1,8 @@
-namespace GodMode.Server.Models;
+namespace GodMode.Shared.Models;
 
 /// <summary>
-/// What claude said in one turn of a session, from its <c>output.jsonl</c> (<see cref="Services.OutputLog.LastRepliesAsync"/>).
+/// What claude said in one turn of a session, from its <c>output.jsonl</c>: the server's <c>OutputLog.LastRepliesAsync</c>,
+/// which the hub's <see cref="Hubs.IProjectHub.GetLastReplies"/> and the fleet's <c>read</c> tool give.
 /// </summary>
 /// <param name="Text">
 /// The turn's last assistant message with text (its text blocks, joined by a blank line): claude's reply,

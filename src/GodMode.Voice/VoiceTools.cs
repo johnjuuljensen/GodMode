@@ -7,8 +7,8 @@ using VoiceBot.Core.Tools;
 namespace GodMode.Voice;
 
 /// <summary>
-/// The graph's tools on the servers: what needs the user, which projects there are, a project's status, answer it,
-/// mark it seen, and start one (read back only: the user's yes creates it, <see cref="ConfirmCreateNode"/>). Their results are for the model, which says them in the user's language. A permission request is
+/// The graph's tools on the servers: what needs the user, which projects there are, a project's status, its last reply
+/// (in parts), answer it, mark it seen, and start one (read back only: the user's yes creates it, <see cref="ConfirmCreateNode"/>). Their results are for the model, which says them in the user's language. A permission request is
 /// never answered here: that is the screen's (issue #285).
 /// </summary>
 public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, ProjectBoard projects, ProjectHandles handles,
@@ -17,6 +17,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string WhatNeedsMe = "what_needs_me";
     public const string ListProjects = "list_projects";
     public const string ProjectStatus = "project_status";
+    public const string ReadReply = "read_reply";
+    public const string ReadMore = "read_more";
     public const string Answer = "answer_project";
     public const string MarkSeen = "mark_seen";
     public const string StartSession = "start_session";
@@ -28,6 +30,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string IssueParameter = "issue";
     public const string NameParameter = "name";
     public const string PromptParameter = "prompt";
+    public const string TurnsParameter = "turns";
 
     /// <summary>What the conversation is about, and whether the final being answered was heard more than one way.</summary>
     public VoiceConversation Conversation => conversation;
@@ -58,13 +61,25 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             "Call when the user asks about one project, or to hear a question or result.",
             [ProjectReference],
             (_, args, ct) => ProjectStatusAsync(Argument(args, ProjectParameter), ct))
+        .Add(ReadReply,
+            "Read what a project said last: its last reply, from its output, whether or not it needs the user, also once it " +
+            "is seen or idle. A long one comes in parts, the first now, and says how many; read_more gives the next. It marks nothing seen. " +
+            "Call when the user asks to hear a project's reply or answer (\"Læs hele masters svar\", \"Hvad svarede 283?\").",
+            [ProjectReference, new ToolParameter(TurnsParameter,
+                $"How many of its last replies to read, oldest first: 1 unless the user asked for more (\"de sidste tre svar\"), at most {MaxTurnsRead}.",
+                ToolParameterType.Integer, Required: false)],
+            (_, args, ct) => ReadReplyAsync(Argument(args, ProjectParameter), Argument(args, TurnsParameter), ct))
+        .Add(ReadMore,
+            $"Read the next part of the reply {ReadReply} read last. Call when the user says \"læs videre\", \"mere\" or \"read on\".",
+            (_, _, _) => Task.FromResult(ReadMoreText()))
         .Add(Answer,
             "Send the user's answer to a project: it reaches the Claude session as the user's reply, and the session " +
             "continues. Give the answer as the instruction the user meant, in their words.",
             [new ToolParameter(TextParameter, "The answer to send, e.g. \"Brug den eksisterende migration.\""), ProjectReference],
             (_, args, ct) => AnswerAsync(Argument(args, ProjectParameter), Argument(args, TextParameter), ct))
         .Add(MarkSeen,
-            "Mark a project's finished result as seen, so it no longer needs the user. Call when the user says they have heard it or it is done with.",
+            "Mark a project's finished result as seen, so it no longer needs the user. Call only when the user says so themselves " +
+            "(\"læst\", \"seen\"): never as part of reading a project, its status or its reply, nor when they ask whether that was all.",
             [ProjectReference],
             (_, args, ct) => MarkSeenAsync(Argument(args, ProjectParameter), ct))
         .Add(StartSession,
@@ -167,6 +182,95 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <summary>The index <paramref name="length"/>, or one before it where a cut there would split a surrogate pair.</summary>
     private static int Whole(string text, int length) =>
         length > 0 && length < text.Length && char.IsLowSurrogate(text[length]) ? length - 1 : length;
+
+    /// <summary>
+    /// About how long a part of a reply <see cref="ReadReplyAsync"/> and <see cref="ReadMoreText"/> give is: what the model
+    /// says in one go, a minute or so of speech. The whole reply read is <see cref="Capped"/>, as a status's text is.
+    /// </summary>
+    public const int ReplyPartLength = 1200;
+
+    /// <summary>The most replies <see cref="ReadReplyAsync"/> reads at once: the last few, well under the hub's <see cref="Shared.Hubs.IProjectHub.MaxReplyTurns"/>.</summary>
+    public const int MaxTurnsRead = 5;
+
+    /// <summary>
+    /// The project's last reply, or its last <paramref name="turns"/> (1 when none or not a number, at most
+    /// <see cref="MaxTurnsRead"/>), from its output on the server, whatever it waits on (issue #378). A reply longer than
+    /// <see cref="ReplyPartLength"/> gives its first part, and is kept for <see cref="ReadMoreText"/>. Nothing is marked seen.
+    /// </summary>
+    public async Task<string> ReadReplyAsync(string? reference, string? turns, CancellationToken ct)
+    {
+        if (Target(reference) is not { } target || handles.Of(target) is not { } handle)
+            return await UnknownAsync(reference, ct);
+
+        var count = int.TryParse(turns, NumberStyles.Integer, CultureInfo.InvariantCulture, out var asked) && asked >= 1 ? Math.Min(asked, MaxTurnsRead) : 1;
+        var status = await servers.GetStatusAsync(target, ct);
+        var replies = await servers.GetLastRepliesAsync(target, count, ct);
+        Talked(target);
+        var header = $"{handle} ({Where(status.Name, status.RootName, status.ProfileName, status.Kind)}): {status.State}.";
+        if (replies.Count == 0)
+        {
+            conversation.Reading = null;
+            return $"{header} It has said nothing yet.";
+        }
+
+        var said = replies is [var one]
+            ? $"Last reply{Flags(one)}: {one.Text.Trim()}"
+            : $"Last {replies.Count} replies, oldest first:\n" + string.Join("\n", replies.Select((r, i) => $"Reply {i + 1}{Flags(r)}: {r.Text.Trim()}"));
+        var parts = Parts(Capped(said));
+        conversation.Reading = new ReplyReading(target, handle, parts, 1);
+        return parts.Count == 1
+            ? $"{header} {parts[0]}"
+            : $"{header} {parts[0]} [Part 1 of {parts.Count}: more follows; {ReadMore} reads it.]";
+    }
+
+    /// <summary>The next part of the reply <see cref="ReadReplyAsync"/> read last, or that there is none.</summary>
+    public string ReadMoreText()
+    {
+        if (conversation.Reading is not { } reading || reading.Next >= reading.Parts.Count)
+            return $"Nothing more to read: the last reply read was read to its end. {ReadReply} reads a project's reply.";
+
+        conversation.Reading = reading with { Next = reading.Next + 1 };
+        Talked(reading.Project);
+        var last = reading.Next + 1 == reading.Parts.Count;
+        return $"{reading.Handle}'s reply, part {reading.Next + 1} of {reading.Parts.Count}: {reading.Parts[reading.Next]}" +
+            (last ? " [That was the end of it.]" : $" [More follows: {ReadMore} reads it.]");
+    }
+
+    /// <summary>What a reply was besides its text: a failure, or a turn claude is still on (or was stopped in).</summary>
+    private static string Flags(AssistantReply reply) =>
+        reply.IsError ? " (failed)" : reply.Finished ? "" : " (unfinished: it is still working on it)";
+
+    /// <summary>
+    /// The text in parts of at most <see cref="ReplyPartLength"/>, each ended where it reads well: at a paragraph, else a
+    /// sentence, in its second half, else at a space. Joined with a space, they are the text, but for the whitespace at the cuts.
+    /// </summary>
+    private static IReadOnlyList<string> Parts(string text)
+    {
+        var parts = new List<string>();
+        var rest = text;
+        while (rest.Length > ReplyPartLength)
+        {
+            var cut = Break(rest);
+            parts.Add(rest[..cut].TrimEnd());
+            rest = rest[cut..].TrimStart();
+        }
+        if (rest.Length > 0)
+            parts.Add(rest);
+        return parts;
+    }
+
+    /// <summary>Where the first part of <paramref name="text"/>, longer than <see cref="ReplyPartLength"/>, ends.</summary>
+    private static int Break(string text)
+    {
+        var window = text[..(ReplyPartLength + 1)];
+        var half = ReplyPartLength / 2;
+        if (window.LastIndexOf("\n\n", StringComparison.Ordinal) is var paragraph and >= 0 && paragraph >= half)
+            return paragraph;
+        for (var i = ReplyPartLength - 1; i >= half; i--)
+            if (window[i] is '.' or '?' or '!' or ':' && char.IsWhiteSpace(window[i + 1]))
+                return i + 1;
+        return window.LastIndexOfAny([' ', '\n', '\t']) is var space and > 0 ? space : Whole(text, ReplyPartLength);
+    }
 
     public async Task<string> AnswerAsync(string? reference, string? answer, CancellationToken ct)
     {

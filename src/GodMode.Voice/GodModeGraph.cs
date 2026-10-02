@@ -20,7 +20,7 @@ public static class GodModeGraph
 
     /// <summary>What the user says to the bot, besides project handles; ElevenLabs is biased towards them.</summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "projekter", "status","svar", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review", "start issue", "opret"];
+        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review", "start issue", "opret"];
 
     /// <summary>The graph's tools: the hub's, and muting announcements, which acts too (<see cref="VoiceTools.Acting"/>).</summary>
     public static ToolSet AddTools(ToolSet set, VoiceTools tools) =>
@@ -55,7 +55,13 @@ public static class GodModeGraph
               eksisterende migration."). Without a handle, leave project empty: it goes to the project last announced
               or talked about. If the tool says no project is being talked about, ask which, as a closed question.
               When it sent the answer, the system says so itself, in place of your reply: respond with one word.
-            - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}.
+            - "Læs hele [handle]s svar", "Læs det sidste svar", "Hvad svarede [handle]?" / "Read its reply" — call
+              {{VoiceTools.ReadReply}}: it reads what the project said last, also when it is idle or seen and needs nothing
+              ({{VoiceTools.ProjectStatus}} does not have it then). Say the reply itself, as fully as speech allows, not only
+              its gist. If it says more follows, end with "Mere?". "Læs videre", "Mere" / "Read on" — call {{VoiceTools.ReadMore}}.
+              "Er det hele?" is answered from what the tool said: if more follows, call {{VoiceTools.ReadMore}}.
+            - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}, and only then: on the user's own "læst" or "seen".
+              Never mark a project seen as part of reading it, its status or its reply, or when the user asks if that was all.
             - "Stille" / "Quiet" — call mute_announcements; "Du må godt sige til igen" — call unmute_announcements.
             - "Start issue 283 [i GodMode]", "Start en chat i Assistant om …", "Start et eksperiment om …" / "Start issue …",
               "Start a chat in … about …" — call {{VoiceTools.StartSession}} with the root, kind, issue, name and prompt as
