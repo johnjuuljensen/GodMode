@@ -55,7 +55,7 @@ internal static class TestingExtensions
 }
 
 /// <summary>The session's services without a network: the scripted model and a synthesizer of silence.</summary>
-internal sealed class OfflineProviders(IInferenceProvider model, FixedPcmSynthesizer synthesizer) : IVoiceProviders
+internal sealed class OfflineProviders(IInferenceProvider model, FixedPcmSynthesizer synthesizer, ScriptedSpeechEngine? engine = null) : IVoiceProviders
 {
     public ElevenLabsLanguageOptions? Language { get; private set; }
 
@@ -67,8 +67,8 @@ internal sealed class OfflineProviders(IInferenceProvider model, FixedPcmSynthes
         services.AddSingleton<IInferenceProvider>(model);
         // The session's keyterms, as AddVoiceBotElevenLabs registers them
         services.AddScoped(_ => new ElevenLabsSttKeyterms(language.SttKeyterms));
-        // Heard only by a session fed from a microphone (TranscriptionInput.FromAudio)
-        services.AddTransient<ISpeechEngine, ScriptedSpeechEngine>();
+        // Heard only by a session fed from a microphone (TranscriptionInput.FromAudio): the test's, when it watches it
+        services.AddTransient<ISpeechEngine>(_ => engine ?? new ScriptedSpeechEngine());
     }
 
     public Task InitializeAsync(IServiceProvider services, VoiceSettings settings) => Task.CompletedTask;
@@ -123,20 +123,20 @@ internal sealed class OfflineVoice : IAsyncDisposable
     public OfflineProviders Providers { get; }
     public VoiceSession Session { get; private set; } = null!;
 
-    private OfflineVoice(ScriptedChatClient model, IInferenceProvider inference, TimeSpan speech)
+    private OfflineVoice(ScriptedChatClient model, IInferenceProvider inference, TimeSpan speech, ScriptedSpeechEngine? engine)
     {
         Synthesizer = new FixedPcmSynthesizer(speech);
         Model = model;
-        Providers = new OfflineProviders(inference, Synthesizer);
+        Providers = new OfflineProviders(inference, Synthesizer, engine);
     }
 
     public static async Task<OfflineVoice> StartAsync(IGodModeServers servers, ScriptedChatClient model,
         Func<CancellationToken, Task>? connect = null, VoiceSettings? settings = null, ILoggerFactory? loggerFactory = null,
         TimeSpan? speech = null, IAudioSource? microphone = null, IInferenceProvider? inference = null,
-        VoiceMic? mic = null, MediaPause? media = null, IAudioSink? speaker = null)
+        VoiceMic? mic = null, MediaPause? media = null, IAudioSink? speaker = null, ScriptedSpeechEngine? engine = null)
     {
         // How long anything the bot says plays: short, unless a test watches it speak
-        var voice = new OfflineVoice(model, inference ?? model, speech ?? TimeSpan.FromMilliseconds(50));
+        var voice = new OfflineVoice(model, inference ?? model, speech ?? TimeSpan.FromMilliseconds(50), engine);
         voice.Session = await VoiceSession.StartAsync(new VoiceSessionSetup
         {
             Settings = settings ?? VoiceSettings.Default,

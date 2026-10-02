@@ -205,6 +205,8 @@ public sealed class VoiceSession : IAsyncDisposable
             voice.RefreshKeyterms();
             board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(phrases.Announce(handle, item.Item), item.Project.Key)));
             tools.Creates.Attach(outcome => session.Announcements.TryWrite(new Announcement(phrases.Created(outcome))));
+            // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
+            if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));
             state.Release();
             voice._run = voice.RunAsync(languages);
             logger.LogInformation("Voice session started ({Languages}); {Answered} of {Servers} servers answered, {Projects} projects, {Waiting} waiting, {Handles} handles",
@@ -299,6 +301,14 @@ public sealed class VoiceSession : IAsyncDisposable
 
     private static string TwoLetter(string language) =>
         System.Globalization.CultureInfo.GetCultureInfo(language).TwoLetterISOLanguageName;
+
+    /// <summary>The session's voice input, for the mic to suspend while it is closed.</summary>
+    private sealed class SessionInput(VoiceBotSession session) : IVoiceInput
+    {
+        public Task SuspendAsync(CancellationToken ct) => session.SuspendInputAsync(ct);
+
+        public Task ResumeAsync(CancellationToken ct) => session.ResumeInputAsync(ct);
+    }
 
     /// <summary>The session's events, to the host and the state.</summary>
     private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates, VoiceMic? mic, MediaPause? media)
