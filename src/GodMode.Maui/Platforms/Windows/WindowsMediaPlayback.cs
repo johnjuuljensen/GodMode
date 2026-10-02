@@ -24,8 +24,7 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
 
     private readonly ILogger _logger;
     private readonly Lock _lock = new();
-    private readonly Dictionary<string, GlobalSystemMediaTransportControlsSessionPlaybackStatus> _statuses = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, GlobalSystemMediaTransportControlsSession> _watched = new(StringComparer.Ordinal);
+    private readonly MediaSessionTracker<GlobalSystemMediaTransportControlsSession> _sessions;
     private readonly List<(MMDevice Device, AudioEndpointVolume Volume)> _volumes = [];
     private readonly Task<GlobalSystemMediaTransportControlsSessionManager?> _manager;
     private readonly MMDeviceEnumerator? _enumerator;
@@ -38,6 +37,9 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
     public WindowsMediaPlayback(ILogger logger)
     {
         _logger = logger;
+        _sessions = new MediaSessionTracker<GlobalSystemMediaTransportControlsSession>(s => s.SourceAppUserModelId,
+            s => StatusOf(s) is { } status ? status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing : null,
+            Watch, Unwatch, logger);
         _manager = StartSessionsAsync();
         try
         {
@@ -55,47 +57,31 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
         }
     }
 
-    public event Action<string>? Playing;
+    public event Action<string>? Playing
+    {
+        add => _sessions.Playing += value;
+        remove => _sessions.Playing -= value;
+    }
 
-    public event Action<string>? OtherPlaying;
+    public event Action<string>? OtherPlaying
+    {
+        add => _sessions.OtherPlaying += value;
+        remove => _sessions.OtherPlaying -= value;
+    }
 
-    public event Action? OthersChanged;
+    public event Action? OthersChanged
+    {
+        add => _sessions.OthersChanged += value;
+        remove => _sessions.OthersChanged -= value;
+    }
 
     /// <summary>The manager, once it is there; null before, or where Windows has none.</summary>
     private GlobalSystemMediaTransportControlsSessionManager? Manager =>
         _manager.IsCompletedSuccessfully ? _manager.Result : null;
 
-    public bool? OthersPlaying
-    {
-        get
-        {
-            if (Manager is not { } manager) return null;
-            try
-            {
-                return manager.GetSessions().Where(s => !IsOwn(s))
-                    .Any(s => StatusOf(s) == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-        }
-    }
+    public bool? OthersPlaying => _sessions.OthersPlaying;
 
-    public bool OwnIsCurrent
-    {
-        get
-        {
-            try
-            {
-                return Manager?.GetCurrentSession() is { } current && IsOwn(current);
-            }
-            catch (Exception)
-            {
-                return false;
-            }
-        }
-    }
+    public bool OwnIsCurrent => _sessions.OwnIsCurrent;
 
     private static TaskCompletionSource Completed()
     {
@@ -116,7 +102,8 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
                 if (_disposed) return null;
                 manager.SessionsChanged += SessionsChanged;
             }
-            WatchSessions(manager);
+            // Told once it is here: what changed before it, while the sessions could not be told, is mirrored now (issue #442)
+            _sessions.Arrived(manager.GetSessions, manager.GetCurrentSession);
             return manager;
         }
         catch (Exception ex)
@@ -126,32 +113,63 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
         }
     }
 
-    /// <summary>Voice's own app is never paused: a pause would come back as a button.</summary>
-    private static bool IsOwn(GlobalSystemMediaTransportControlsSession session) =>
-        session.SourceAppUserModelId.Contains("GodMode", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Neither voice's own app nor another GodMode's is paused or played: a pause would come back as a button, and
+    /// another GodMode's would toggle its mic.
+    /// </summary>
+    private bool IsMusic(GlobalSystemMediaTransportControlsSession session) => _sessions.IsMusic(session);
 
     private void SessionsChanged(GlobalSystemMediaTransportControlsSessionManager manager, SessionsChangedEventArgs args)
     {
-        WatchSessions(manager);
-        // One that went away may have been the music playing
-        OthersChanged?.Invoke();
+        try
+        {
+            _sessions.Listed();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Voice: the media sessions cannot be listed");
+        }
     }
 
     private void PlaybackInfoChanged(GlobalSystemMediaTransportControlsSession session, PlaybackInfoChangedEventArgs args) =>
-        StatusChanged(session);
+        _sessions.StatusChanged(session);
 
-    private void WatchSessions(GlobalSystemMediaTransportControlsSessionManager manager)
+    private void MediaPropertiesChanged(GlobalSystemMediaTransportControlsSession session, MediaPropertiesChangedEventArgs args) =>
+        ReadMarkerLater(session);
+
+    private void Watch(GlobalSystemMediaTransportControlsSession session)
     {
-        foreach (var session in manager.GetSessions())
+        session.PlaybackInfoChanged += PlaybackInfoChanged;
+        session.MediaPropertiesChanged += MediaPropertiesChanged;
+        ReadMarkerLater(session);
+    }
+
+    private void Unwatch(GlobalSystemMediaTransportControlsSession session)
+    {
+        try
         {
-            lock (_lock)
-            {
-                if (_disposed || !_watched.TryAdd(session.SourceAppUserModelId, session)) continue;
-                session.PlaybackInfoChanged += PlaybackInfoChanged;
-            }
-            StatusChanged(session);
+            session.PlaybackInfoChanged -= PlaybackInfoChanged;
+            session.MediaPropertiesChanged -= MediaPropertiesChanged;
+        }
+        catch (Exception)
+        {
+            // A session that went away may throw as it is let go of
         }
     }
+
+    /// <summary>Whose the session is, by the marker GodMode's own shows as its genre (<see cref="OwnMediaSession"/>).</summary>
+    private void ReadMarkerLater(GlobalSystemMediaTransportControlsSession session) => Task.Run(async () =>
+    {
+        try
+        {
+            if (await Bounded(session.TryGetMediaPropertiesAsync().AsTask(), ResumeWait) is not { } properties) return;
+            _sessions.Marked(session, properties.Genres?.FirstOrDefault(g => g.StartsWith(OwnMediaSession.MarkerPrefix, StringComparison.Ordinal)));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Voice: the media properties of {Session} cannot be read", session.SourceAppUserModelId);
+        }
+    });
 
     /// <summary>A WinRT call that may hang (a cold <c>RequestAsync</c>, an app that never answers), waited for at most <paramref name="wait"/>.</summary>
     private static async Task<T?> Bounded<T>(Task<T> call, TimeSpan wait)
@@ -164,30 +182,6 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
         {
             return default;
         }
-    }
-
-    /// <summary>PlaybackInfoChanged fires for more than the status (position, shuffle): only a change to playing is told.</summary>
-    private void StatusChanged(GlobalSystemMediaTransportControlsSession session)
-    {
-        GlobalSystemMediaTransportControlsSessionPlaybackStatus status;
-        try
-        {
-            status = session.GetPlaybackInfo().PlaybackStatus;
-        }
-        catch (Exception)
-        {
-            return;
-        }
-        var id = session.SourceAppUserModelId;
-        lock (_lock)
-        {
-            if (_statuses.TryGetValue(id, out var was) && was == status) return;
-            _statuses[id] = status;
-        }
-        if (status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) Playing?.Invoke(id);
-        if (IsOwn(session)) return;
-        OthersChanged?.Invoke();
-        if (status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) OtherPlaying?.Invoke(id);
     }
 
     private static GlobalSystemMediaTransportControlsSessionPlaybackStatus? StatusOf(GlobalSystemMediaTransportControlsSession session)
@@ -208,7 +202,7 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
         TimeSpan Left() => TimeSpan.FromMilliseconds(until - Environment.TickCount64);
         if (await Bounded(_manager, wait) is not { } manager) return [];
         var paused = new List<GlobalSystemMediaTransportControlsSession>();
-        foreach (var session in manager.GetSessions().Where(s => !IsOwn(s)))
+        foreach (var session in manager.GetSessions().Where(IsMusic))
         {
             if (StatusOf(session) != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
             try
@@ -233,7 +227,7 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
     public async Task ResumeAsync(IReadOnlyCollection<string> sessions, CancellationToken ct)
     {
         if (await Bounded(_manager, ResumeWait) is not { } manager) return;
-        foreach (var session in manager.GetSessions().Where(s => sessions.Contains(s.SourceAppUserModelId)))
+        foreach (var session in manager.GetSessions().Where(s => sessions.Contains(s.SourceAppUserModelId) && IsMusic(s)))
         {
             if (StatusOf(session) != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused) continue;
             try
@@ -381,14 +375,8 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMediaSessions, IMMNo
             }
             UnwatchVolumes();
         }
-        GlobalSystemMediaTransportControlsSession[] sessions;
-        lock (_lock)
-        {
-            _back.TrySetResult();
-            sessions = [.. _watched.Values];
-            _watched.Clear();
-            foreach (var session in sessions) session.PlaybackInfoChanged -= PlaybackInfoChanged;
-        }
+        lock (_lock) _back.TrySetResult();
+        _sessions.Dispose();
         if (Manager is { } manager) manager.SessionsChanged -= SessionsChanged;
         if (_enumerator is { } enumerator)
         {

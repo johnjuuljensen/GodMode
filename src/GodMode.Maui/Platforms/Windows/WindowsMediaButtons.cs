@@ -106,6 +106,9 @@ public sealed class WindowsMediaButtons : IOwnMediaSession
         display.Type = MediaPlaybackType.Music;
         display.MusicProperties.Title = "GodMode voice";
         display.MusicProperties.Artist = "Play/pause opens the mic";
+        // What tells it from the others in Windows' sessions, this process's own (issue #442)
+        display.MusicProperties.Genres.Clear();
+        display.MusicProperties.Genres.Add(OwnMediaSession.Marker);
         display.Update();
     }
 
