@@ -11,7 +11,8 @@ namespace GodMode.Maui.Voice;
 /// <summary>
 /// The app's voice session: it belongs to the app, not the page, so a WebView reload (or a new page) finds it running
 /// and gets the conversation so far. Its events go to every page attached (<see cref="Attach"/>): one per window, so
-/// voice started in one window shows as on in the others (#340).
+/// voice started in one window shows as on in the others (#340). On Windows it owns the mic that opens on demand
+/// (<see cref="VoiceMic"/>, issue #422), and the music it pauses while it speaks or the mic is open (<see cref="MediaPause"/>).
 /// </summary>
 public sealed class VoiceHost : IVoiceEvents
 {
@@ -51,7 +52,8 @@ public sealed class VoiceHost : IVoiceEvents
     {
         get
         {
-            lock (_lock) return new VoiceStatus(Available, _state, [.. _lines], _error);
+            var mic = _running?.Mic?.State ?? (VoiceAudio.MicOnDemand ? VoiceMicState.Closed : VoiceMicState.Open);
+            lock (_lock) return new VoiceStatus(Available, _state, [.. _lines], _error, mic, VoiceAudio.MicOnDemand);
         }
     }
 
@@ -97,9 +99,20 @@ public sealed class VoiceHost : IVoiceEvents
 
             IVoiceAudio? audio = null;
             HubServers? servers = null;
+            MediaPause? media = null;
+            VoiceMic? mic = null;
             try
             {
                 audio = await open(new VoiceAudioRequest(settings.EchoCancellation, settings.Microphone, settings.Speaker, AudioLost));
+                if (VoiceAudio.Media is { } playback)
+                    media = new MediaPause(playback(), _loggerFactory.CreateLogger<MediaPause>());
+                if (audio.Mic is { } micSwitch)
+                {
+                    mic = new VoiceMic(micSwitch, audio.Sink, media,
+                        new VoiceMicOptions { SilenceTimeout = TimeSpan.FromSeconds(settings.MicSilenceSeconds) },
+                        _loggerFactory.CreateLogger<VoiceMic>());
+                    mic.Changed += _ => Send(ShellMessageTypes.VoiceStateChanged, Status);
+                }
                 servers = new HubServers(_directory, _loggerFactory);
                 var hub = servers;
                 var session = await VoiceSession.StartAsync(new VoiceSessionSetup
@@ -109,6 +122,8 @@ public sealed class VoiceHost : IVoiceEvents
                     ConnectAsync = ct => hub.ConnectAsync(ConnectWait, ct),
                     Transcription = TranscriptionInput.FromAudio(audio.Source),
                     AudioSink = audio.Sink,
+                    Mic = mic,
+                    Media = media,
                     Providers = providers,
                     Events = this,
                     LoggerFactory = _loggerFactory,
@@ -116,15 +131,18 @@ public sealed class VoiceHost : IVoiceEvents
                 }, CancellationToken.None);
                 audio.Start();
 
-                var running = new Running(session, audio, servers);
+                var running = new Running(session, audio, servers, mic, media);
                 _running = running;
                 _ = WatchAsync(running);
-                _logger.LogInformation("Voice started ({Language}, echo cancellation {Echo})", settings.Language, settings.EchoCancellation);
+                _logger.LogInformation("Voice started ({Language}, echo cancellation {Echo}, mic {Mic})", settings.Language, settings.EchoCancellation,
+                    mic is null ? "always open" : $"on demand, closing after {settings.MicSilenceSeconds} s of silence");
                 return Status;
             }
             catch
             {
+                mic?.Dispose();
                 audio?.Dispose();
+                media?.Dispose();
                 if (servers is not null) await servers.DisposeAsync();
                 StateChanged(VoiceState.Off);
                 throw;
@@ -163,6 +181,27 @@ public sealed class VoiceHost : IVoiceEvents
             _switching.Release();
         }
     }
+
+    /// <summary>The Mic button (<c>voice.mic.open</c>): pauses the music, opens the microphone, plays the rising tone.</summary>
+    public async Task<VoiceStatus> OpenMicAsync()
+    {
+        await RunningMic().OpenAsync();
+        return Status;
+    }
+
+    /// <summary>The Mic button (<c>voice.mic.close</c>): the falling tone, then the microphone is let go of.</summary>
+    public async Task<VoiceStatus> CloseMicAsync()
+    {
+        await RunningMic().CloseAsync(MicClose.Button);
+        return Status;
+    }
+
+    private VoiceMic RunningMic() => _running switch
+    {
+        null => throw new InvalidOperationException("Voice is off"),
+        { Mic: { } mic } => mic,
+        _ => throw new PlatformNotSupportedException("The mic is always open here"),
+    };
 
     /// <summary>
     /// Saves the settings (<c>voice.settings.set</c>). A running session moves to the devices they choose now; the rest
@@ -269,14 +308,16 @@ public sealed class VoiceHost : IVoiceEvents
         if (_lines.Count > KeptLines) _lines.RemoveRange(0, _lines.Count - KeptLines);
     }
 
-    private sealed record Running(VoiceSession Session, IVoiceAudio Audio, HubServers Servers) : IAsyncDisposable
+    private sealed record Running(VoiceSession Session, IVoiceAudio Audio, HubServers Servers, VoiceMic? Mic, MediaPause? Media)
+        : IAsyncDisposable
     {
         /// <summary>
         /// The audio and the connections go back even if the session's teardown throws: on Android the audio holds the
-        /// microphone, the foreground service and the audio mode.
+        /// microphone, the foreground service and the audio mode. The music it paused resumes last, once the mic is gone.
         /// </summary>
         public async ValueTask DisposeAsync()
         {
+            Mic?.Dispose();
             try
             {
                 await Session.DisposeAsync();
@@ -286,6 +327,7 @@ public sealed class VoiceHost : IVoiceEvents
                 try
                 {
                     Audio.Dispose();
+                    Media?.Dispose();
                 }
                 finally
                 {

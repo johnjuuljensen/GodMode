@@ -1,4 +1,5 @@
 using GodMode.Voice;
+using Microsoft.Extensions.Logging;
 using VoiceBot.Core.Audio;
 
 namespace GodMode.Maui.Voice;
@@ -17,6 +18,12 @@ public interface IVoiceAudio : IDisposable
     /// route, and ignores it.
     /// </summary>
     void UseDevices(AudioDevice? microphone, AudioDevice? speaker);
+
+    /// <summary>
+    /// The mic that opens on demand, closed until it is opened (issue #422: Windows); null where the mic is always open
+    /// (Android).
+    /// </summary>
+    IMicSwitch? Mic => null;
 }
 
 /// <summary>What a session asks of this platform's audio.</summary>
@@ -41,6 +48,22 @@ public static class VoiceAudio
         request => Task.FromResult<IVoiceAudio>(new WindowsVoiceAudio(request));
 #elif ANDROID
         AndroidVoiceAudio.OpenAsync;
+#else
+        null;
+#endif
+
+    /// <summary>Whether voice's mic opens on demand here (<see cref="IVoiceAudio.Mic"/>), and the page shows its Mic button.</summary>
+    public static bool MicOnDemand =>
+#if WINDOWS
+        true;
+#else
+        false;
+#endif
+
+    /// <summary>The media sessions voice pauses while it speaks or its mic is open; null where it pauses none.</summary>
+    public static Func<IMediaPlayback>? Media { get; } =
+#if WINDOWS
+        () => new WindowsMediaPlayback(MauiProgram.LoggerFactory.CreateLogger<WindowsMediaPlayback>());
 #else
         null;
 #endif

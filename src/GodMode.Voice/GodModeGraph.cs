@@ -12,7 +12,8 @@ namespace GodMode.Voice;
 /// help (<see cref="HelpNode"/>) above it, which says what they are on the first partial that asks, and the yes a create
 /// waits on (<see cref="ConfirmCreateNode"/>) between them. A final heard more than one way goes to the chat with its
 /// earlier readings (VoiceBot#61), and the chat acts on it as on any other (#376). "Sendt" is the code's word, said
-/// only for an answer sent in that turn (<see cref="SentNode"/>).
+/// only for an answer sent in that turn (<see cref="SentNode"/>). Where the mic opens on demand, a final that is a Done
+/// phrase alone closes it (<see cref="DoneNode"/>), above help.
 /// </summary>
 public static class GodModeGraph
 {
@@ -24,7 +25,7 @@ public static class GodModeGraph
     /// before the servers' names (<see cref="VoiceSession.Keyterms"/>).
     /// </summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review", "start issue", "opret",
+        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "færdig", "det var alt", "done", "that's all", "GodMode", "pull request", "review", "start issue", "opret",
          "log", "loggen", "session", "sessionen", "branch", "worktree", "commit", "push", "merge", "issue"];
 
     /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
@@ -32,8 +33,9 @@ public static class GodModeGraph
         tools.AddTo(set).AddAnnouncementTools();
 
     /// <summary>The graph, greeting the user as <paramref name="heard"/> allows (<see cref="VoicePhrases.Greeting"/>).</summary>
+    /// <param name="done">Closes the mic, on a Done phrase; null where the mic is always open (Android), and there is no Done.</param>
     public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases,
-        ServersHeard heard)
+        ServersHeard heard, Action? done = null)
     {
         var systemPrompt = $$"""
             You are GodMode's voice: the user runs Claude Code sessions (projects) on several servers and follows them
@@ -100,8 +102,9 @@ public static class GodModeGraph
             Never use emoji, markdown or lists: the output is spoken.
             """;
 
-        return new CompositeBuilder(Id)
-            .WithTools(t => AddTools(t, tools))
+        var graph = new CompositeBuilder(Id).WithTools(t => AddTools(t, tools));
+        if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));
+        return graph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
