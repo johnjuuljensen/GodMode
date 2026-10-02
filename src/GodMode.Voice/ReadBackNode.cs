@@ -1,4 +1,3 @@
-using Microsoft.Extensions.AI;
 using VoiceBot.Core.Graph;
 
 namespace GodMode.Voice;
@@ -23,15 +22,6 @@ public sealed class ReadBackNode(INode chat, SessionCreates creates, VoicePhrase
         var readBack = phrases.ReadBack(request);
         creates.ReadingBack(request, readBack);
         context.Log?.Log("CREATE", $"Read back \"{readBack}\" for {request.What}, in place of \"{result?.ResponseText}\"");
-
-        // The model's reply, if it gave one, is not said: the history holds what was
-        if (result?.ResponseText is { } reply && context.History is [.., { Role: var role } last] && role == ChatRole.Assistant && last.Text == reply)
-            context.History[^1] = new ChatMessage(ChatRole.Assistant, readBack);
-        else
-        {
-            if ((context.CleanedText ?? context.LatestTranscription?.Text) is { } text) context.AddUserMessage(text);
-            context.AddAssistantMessage(readBack);
-        }
-        return (result ?? new NodeResult()) with { ResponseText = readBack };
+        return ChatReply.Replace(context, result, readBack);
     }
 }

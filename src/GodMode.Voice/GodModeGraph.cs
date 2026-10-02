@@ -11,7 +11,8 @@ namespace GodMode.Voice;
 /// the hub (<see cref="VoiceTools"/>) instead of its fake system. A greeting, then one chat node with the tools, and
 /// help (<see cref="HelpNode"/>) above it, which says what they are on the first partial that asks, and the yes a create
 /// waits on (<see cref="ConfirmCreateNode"/>) between them. The chat is told when a final was heard more than one way
-/// (<see cref="HeardNode"/>): its tools then act on nothing.
+/// (<see cref="HeardNode"/>): its tools then act on nothing. "Sendt" is the code's word, said only for an answer sent in
+/// that turn (<see cref="SentNode"/>).
 /// </summary>
 public static class GodModeGraph
 {
@@ -53,6 +54,7 @@ public static class GodModeGraph
               instruction the user meant (e.g. "Svar at den skal bruge den eksisterende migration" → text "Brug den
               eksisterende migration."). Without a handle, leave project empty: it goes to the project last announced
               or talked about. If the tool says no project is being talked about, ask which, as a closed question.
+              When it sent the answer, the system says so itself, in place of your reply: respond with one word.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}.
             - "Stille" / "Quiet" — call mute_announcements; "Du må godt sige til igen" — call unmute_announcements.
             - "Start issue 283 [i GodMode]", "Start en chat i Assistant om …", "Start et eksperiment om …" / "Start issue …",
@@ -68,8 +70,9 @@ public static class GodModeGraph
 
             PERMISSION REQUESTS are never answered by voice. Say "<handle> skal have tilladelse: <what>. Svar på skærmen."
 
-            PROTOCOL WORDS you use yourself: "Klar" (ready), "Sendt" (the answer was sent), "Ukendt" (no such project),
-            "Uklar" (ambiguous: give two or three options as a closed question).
+            PROTOCOL WORDS you use yourself: "Klar" (ready), "Ukendt" (no such project), "Uklar" (ambiguous: give two or
+            three options as a closed question). Never say an answer was sent ("Sendt"): only the system says that, and
+            only when {{VoiceTools.Answer}} sent it. A reply that says so otherwise is not said.
 
             Never use emoji, markdown or lists: the output is spoken.
             """;
@@ -79,7 +82,7 @@ public static class GodModeGraph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting))
-            .Child(new ReadBackNode(new HeardNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt), tools.Conversation), tools.Creates, phrases))
+            .Child(new ReadBackNode(new SentNode(new HeardNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt), tools.Conversation), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
     }
 }

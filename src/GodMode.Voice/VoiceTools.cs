@@ -144,7 +144,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
         await servers.ReplyAsync(target, answer.Trim(), ct);
         conversation.Current = target;
-        return $"Sent to {handle}: \"{answer.Trim()}\". It continues.";
+        conversation.Sent(handle);
+        return $"Sent to {handle}: \"{answer.Trim()}\". It continues. The system says it was sent itself.";
     }
 
     public async Task<string> MarkSeenAsync(string? reference, CancellationToken ct)
