@@ -148,6 +148,39 @@ public sealed class EndToEndTests
         Assert.Contains("backup-jobbet", server.StdinOf(created.Id)[0]);
     }
 
+    /// <summary>
+    /// Issue #378: a project that is idle and seen, needing nothing, has its last reply read through the hub's
+    /// GetLastReplies: its last turn's, not an earlier one's.
+    /// </summary>
+    [Fact]
+    public async Task The_last_reply_of_a_seen_idle_project_is_read_through_the_hub()
+    {
+        const string First = "Jeg merger de tre PR'er nu.";
+        const string Last = "Alle tre PR'er er merged, og master bygger grønt.";
+        await using var server = await TestServer.StartAsync(new FakeScript().EmitInit().Turn(First).Turn(Last).AwaitStdin());
+        await using var hub = HubConnections.Build(new RelayTarget($"{server.Url}/hubs/projects", TestServer.ApiKey));
+        await hub.StartAsync();
+        var project = await CreateAsync(hub, "283-merge");
+        await Eventually.UntilAsync(() => Status(hub, project.Id) is { State: ProjectState.Idle, LastResultAt: not null }, () => $"the first turn: {Status(hub, project.Id)}");
+        var firstAt = Status(hub, project.Id).LastResultAt;
+        await hub.InvokeAsync(nameof(IProjectHub.SendInput), project.Id, "Merge dem");
+        await Eventually.UntilAsync(() => Status(hub, project.Id) is { State: ProjectState.Idle } status && status.LastResultAt > firstAt,
+            () => $"the last turn: {Status(hub, project.Id)}");
+        await hub.InvokeAsync(nameof(IProjectHub.MarkSeen), project.Id);
+        Assert.Empty(await hub.InvokeAsync<AttentionItem[]>(nameof(IProjectHub.GetAttention)));
+
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.ReadReply, new() { [VoiceTools.ProjectParameter] = "283" }).Respond("283: alle tre er merged.");
+        await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
+        await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Læs hele 283s svar.");
+        await voice.Events.SaidAsync("283: alle tre er merged.");
+
+        Assert.EndsWith($"Idle. Last reply: {Last}", Assert.Single(model.ToolResults));
+    }
+
     private static async Task<ProjectStatus> CreateAsync(HubConnection hub, string name) =>
         (await hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), TestServer.Profile, TestServer.Root, null,
             new Dictionary<string, JsonElement>
