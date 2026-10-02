@@ -37,6 +37,14 @@ public interface IProjectHubClient
     Task OutputReplayComplete(string projectId, string subscriptionId, string generation, long offset);
 
     /// <summary>
+    /// A project's output started over, in a new <paramref name="generation"/>, as claude's conversation did
+    /// (<c>/clear</c>), sent to the connections that follow it live. What they hold is not in the file any more: the
+    /// <see cref="OutputReceived"/> lines that follow are the new generation's, from its start, and its first is
+    /// claude's <c>conversation_reset</c>.
+    /// </summary>
+    Task OutputRestarted(string projectId, string generation);
+
+    /// <summary>
     /// Called when a project's status changes.
     /// </summary>
     Task StatusChanged(string projectId, ProjectStatus status);

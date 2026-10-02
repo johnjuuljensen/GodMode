@@ -430,6 +430,9 @@ public sealed class ProjectLifecycle
         var sent = new List<Task>();
         await InOrderAsync(project, async () =>
         {
+            // The output started over (/clear) while the file was read: what was replayed is not in it, so all of it is
+            if (await OutputLog.GenerationAsync(project.StatePath) is var now && now != replay.Generation)
+                (replay, offset) = (replay with { Generation = now }, 0);
             offset = await ReplayAsync(project, replay, offset, sent);
             await _hubContext.Groups.AddToGroupAsync(connectionId, OutputGroup(id));
             sent.Add(replay.Client.OutputReplayComplete(id, subscriptionId, replay.Generation, offset));
@@ -656,6 +659,9 @@ public sealed class ProjectLifecycle
         long? offset = null;
         try
         {
+            // 0. /clear: claude's conversation starts over, and so does its output, with this line first
+            if (IsConversationReset(jsonLine)) await RestartOutputAsync(project, output);
+
             // 1. Persist, so a client subscribing from here on backfills this line
             offset = await output.AppendAsync(jsonLine);
 
@@ -691,6 +697,34 @@ public sealed class ProjectLifecycle
             try { await OnProjectCompleted(id); }
             catch (Exception ex) { _logger.LogError(ex, "Error in OnProjectCompleted handler for project {ProjectId}", id); }
         }
+    }
+
+    /// <summary>The <c>type</c> of the line claude writes when <c>/clear</c> starts a new conversation.</summary>
+    private const string ConversationResetType = "conversation_reset";
+
+    private static bool IsConversationReset(string jsonLine) =>
+        jsonLine.Contains($"\"{ConversationResetType}\"", StringComparison.Ordinal) && ExtractEventType(jsonLine) == ConversationResetType;
+
+    /// <summary>
+    /// Starts the project's output over (<see cref="OutputLog.RestartAsync"/>), on the consumer, between two lines, and tells
+    /// the connections that follow it live (<see cref="IProjectHubClient.OutputRestarted"/>) before its next line. A
+    /// subscription whose replay is under way meets the new generation when it catches up (<see cref="SubscribeAsync"/>).
+    /// A restart that fails is logged, and the output goes on in the file it was in.
+    /// </summary>
+    private async Task RestartOutputAsync(ProjectInfo project, BurstOutput output)
+    {
+        var id = project.Status.Id;
+        await output.CloseAsync();
+        string generation;
+        try { generation = await OutputLog.RestartAsync(project.StatePath); }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Could not start the output of project {ProjectId} over; it goes on in the same file", id);
+            return;
+        }
+        _logger.LogInformation("Project {ProjectId}: its conversation was cleared; its output starts over in generation {Generation}", id, generation);
+        await project.Process.Sends.SendAsync(() => _hubContext.Clients.Group(OutputGroup(id)).OutputRestarted(id, generation),
+            ex => _logger.LogError(ex, "Error broadcasting the output restart of project {ProjectId}", id));
     }
 
     /// <summary>
@@ -739,6 +773,7 @@ public sealed class ProjectLifecycle
                 return null;
 
             var typeStr = typeElement.GetString();
+            if (typeStr == ConversationResetType) return new OutputEvent(DateTime.UtcNow, OutputEventType.ConversationReset, "", null);
             if (!Enum.TryParse<OutputEventType>(typeStr, ignoreCase: true, out var eventType))
                 return null;
 
@@ -831,6 +866,17 @@ public sealed class ProjectLifecycle
 
         if (root.TryGetProperty("is_error", out var isError) && isError.ValueKind is JsonValueKind.True or JsonValueKind.False)
             metadata["is_error"] = isError.GetBoolean();
+
+        if (root.TryGetProperty(StatusUpdater.NumTurnsKey, out var numTurns) && numTurns.TryGetInt64(out var turns))
+            metadata[StatusUpdater.NumTurnsKey] = turns;
+
+        // What system/init lists: the commands GodMode passes or refuses are read from it (SlashCommands)
+        foreach (var key in (ReadOnlySpan<string>)[StatusUpdater.SlashCommandsKey, StatusUpdater.SkillsKey])
+            if (root.TryGetProperty(key, out var names) && names.ValueKind == JsonValueKind.Array)
+                metadata[key] = names.EnumerateArray()
+                    .Where(name => name.ValueKind == JsonValueKind.String)
+                    .Select(name => name.GetString()!)
+                    .ToArray();
 
         // A user message claude echoes (--replay-user-messages) as it takes it; a tool result is a user line without it
         if (root.TryGetProperty("isReplay", out var isReplay) && isReplay.ValueKind == JsonValueKind.True)

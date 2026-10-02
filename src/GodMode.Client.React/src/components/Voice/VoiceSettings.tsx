@@ -50,6 +50,7 @@ export function VoiceSettings() {
   const [devices, setDevices] = useState<VoiceDeviceList | null>(null);
   const [microphone, setMicrophone] = useState<AudioDevice>(DEFAULT);
   const [speaker, setSpeaker] = useState<AudioDevice>(DEFAULT);
+  const [micSilence, setMicSilence] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
 
@@ -60,6 +61,7 @@ export function VoiceSettings() {
     setEchoCancellation(settings.EchoCancellation);
     setMicrophone(settings.Microphone ?? DEFAULT);
     setSpeaker(settings.Speaker ?? DEFAULT);
+    setMicSilence(String(settings.MicSilenceSeconds));
   };
 
   // The devices as they are now: read again when a picker opens, so a headset turned on since shows
@@ -96,6 +98,7 @@ export function VoiceSettings() {
     Language: language,
     EchoCancellation: echoCancellation,
     ...(devices?.Supported && { Microphone: microphone, Speaker: speaker }),
+    ...(devices?.Supported && Number(micSilence) > 0 && { MicSilenceSeconds: Math.round(Number(micSilence)) }),
     ...(elevenLabsKey.trim() && { ElevenLabsKey: elevenLabsKey }),
     ...(anthropicKey.trim() && { AnthropicKey: anthropicKey }),
   };
@@ -131,7 +134,15 @@ export function VoiceSettings() {
             chosen={microphone} onChange={setMicrophone} onOpen={listDevices} />
           <DevicePicker label="Speaker" devices={devices.Speakers} defaultId={devices.DefaultSpeakerId}
             chosen={speaker} onChange={setSpeaker} onOpen={listDevices} />
-          <div className="form-description">Default follows Windows' default communications device, a headset turned on included.</div>
+          <div className="form-description">
+            Default follows Windows' default device while the mic is closed, so a headset plays music at full quality, and its
+            default communications device while the mic is open; a headset turned on included.
+          </div>
+          <div className="form-group">
+            <label htmlFor="voice-mic-silence">Close the mic after (seconds of silence)</label>
+            <input id="voice-mic-silence" type="number" min={1} value={micSilence} onChange={e => setMicSilence(e.target.value)} />
+            <div className="form-description">The mic also closes on the Mic button, or when you say "færdig" or "done".</div>
+          </div>
         </>
       )}
       <div className="settings-item">

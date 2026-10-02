@@ -138,8 +138,19 @@ export class FakeHub {
   /** The generation of each project's output.jsonl on this server: `g1` until a test starts another. */
   generations: Record<string, string> = {};
   generationOf(projectId: string) { return this.generations[projectId] ?? 'g1'; }
+  /** The project's output starts over in generation, as a /clear's does: the server pushes OutputRestarted to who follows it live. */
+  restartOutput(projectId: string, generation: string) {
+    this.generations[projectId] = generation;
+    this.callbacks.onOutputRestarted?.(projectId, generation);
+  }
   async unsubscribeProject(projectId: string) { this.invoke(); this.unsubscriptions.push(projectId); }
-  async replyAndResume(projectId: string, text: string) { this.invoke(); this.replies.push({ projectId, text }); }
+  /** When set, ReplyAndResume fails with it, as the server's HubException does (a slash command it does not pass). */
+  refuseReply?: string;
+  async replyAndResume(projectId: string, text: string) {
+    this.invoke();
+    if (this.refuseReply) throw new Error(`An unexpected error occurred invoking 'ReplyAndResume' on the server. HubException: ${this.refuseReply}`);
+    this.replies.push({ projectId, text });
+  }
   async answerQuestion(projectId: string, requestId: string, answers: Record<string, string>) {
     this.invoke();
     this.answers.push({ projectId, requestId, answers });

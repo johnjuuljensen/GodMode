@@ -184,6 +184,7 @@
 
 /* ── Input Bar ── */
 .project-input-bar {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 8px;
@@ -192,6 +193,42 @@
   background: var(--glass);
   backdrop-filter: var(--blur-md);
   -webkit-backdrop-filter: var(--blur-md);
+}
+
+/* The slash commands a /word starts (ReplyInput), over the input */
+.reply-commands {
+  position: absolute;
+  bottom: calc(100% - 6px);
+  left: 16px;
+  z-index: 5;
+  min-width: 180px;
+  max-width: calc(100% - 32px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--menu-bg);
+  backdrop-filter: var(--blur-xl);
+  -webkit-backdrop-filter: var(--blur-xl);
+  border: var(--border-width) var(--border-style) var(--glass-border-strong);
+  border-radius: var(--radius-menu);
+  box-shadow: var(--shadow-menu);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.reply-commands li {
+  padding: 4px 10px;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reply-commands li.active {
+  background: var(--accent-soft);
+  color: var(--text-primary);
 }
 
 /* As tall as one line of the input, and stays at the bottom as it grows */

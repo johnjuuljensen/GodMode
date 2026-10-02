@@ -16,6 +16,23 @@ public sealed class MediaSessions(SpikeLog log)
     private readonly ConcurrentBag<string> _pausedByUs = [];
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
 
+    /// <summary>A session's playback status changed (not only its position): its id and the new status; on a WinRT thread.</summary>
+    public event Action<string, GlobalSystemMediaTransportControlsSessionPlaybackStatus>? StateChanged;
+
+    /// <summary>Whether the session the proxy forwards to (the other one: playing, else the first) is playing; null for none.</summary>
+    public bool? OtherPlaying()
+    {
+        var others = _manager?.GetSessions().Where(s => !IsOwn(s.SourceAppUserModelId)).ToList() ?? [];
+        return others.Count == 0
+            ? null
+            : others.Any(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
+    }
+
+    /// <summary>Whether Windows' current session (the one the headset's buttons go to) is the spike's own.</summary>
+    public bool CurrentIsOwn => _manager?.GetCurrentSession() is { } current && IsOwn(current.SourceAppUserModelId);
+
+    public static bool IsOwn(string id) => id.Contains("GodMode.HeadsetSpike", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>What plays, for the state line: the current session's app, state and track.</summary>
     public string Playing { get; private set; } = "(no session)";
 
@@ -67,20 +84,22 @@ public sealed class MediaSessions(SpikeLog log)
 
     private void PlaybackState(GlobalSystemMediaTransportControlsSession session)
     {
-        string state;
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus status;
         try
         {
-            state = session.GetPlaybackInfo().PlaybackStatus.ToString();
+            status = session.GetPlaybackInfo().PlaybackStatus;
         }
         catch (Exception ex)
         {
             log.Error(Source, "GetPlaybackInfo", ex);
             return;
         }
+        var state = status.ToString();
         // PlaybackInfoChanged fires for more than the status (position, shuffle): only a change of status is logged
         if (_states.TryGetValue(session.SourceAppUserModelId, out var was) && was == state) return;
         _states[session.SourceAppUserModelId] = state;
         log.Write(Source, $"{session.SourceAppUserModelId}: {state}");
+        StateChanged?.Invoke(session.SourceAppUserModelId, status);
         _ = UpdatePlayingAsync();
     }
 
@@ -148,12 +167,43 @@ public sealed class MediaSessions(SpikeLog log)
         }
     }
 
+    /// <summary>
+    /// The proxy's half: a button the spike's own session got, passed on to the other session (the one playing, else
+    /// the first): play and pause as a toggle, since the spike stays "playing" to stay the current session.
+    /// </summary>
+    public async Task ForwardAsync(Windows.Media.SystemMediaTransportControlsButton button)
+    {
+        var others = _manager?.GetSessions().Where(s => !IsOwn(s.SourceAppUserModelId)).ToList() ?? [];
+        var target = others.FirstOrDefault(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+            ?? others.FirstOrDefault();
+        if (target is null)
+        {
+            log.Write(Source, $"forward {button}: no other session");
+            return;
+        }
+        Func<GlobalSystemMediaTransportControlsSession, Task<bool>>? act = button switch
+        {
+            Windows.Media.SystemMediaTransportControlsButton.Play or Windows.Media.SystemMediaTransportControlsButton.Pause =>
+                s => s.TryTogglePlayPauseAsync().AsTask(),
+            Windows.Media.SystemMediaTransportControlsButton.Next => s => s.TrySkipNextAsync().AsTask(),
+            Windows.Media.SystemMediaTransportControlsButton.Previous => s => s.TrySkipPreviousAsync().AsTask(),
+            Windows.Media.SystemMediaTransportControlsButton.Stop => s => s.TryStopAsync().AsTask(),
+            _ => null,
+        };
+        if (act is null)
+        {
+            log.Write(Source, $"forward {button}: not forwarded");
+            return;
+        }
+        await RunAsync(target, $"forwarded {button}", act);
+    }
+
     /// <summary>Pauses every session that is playing, and remembers them for <see cref="ResumePausedAsync"/>: step 2's pause.</summary>
     public async Task<int> PausePlayingAsync()
     {
         if (_manager is null) return 0;
         var paused = 0;
-        foreach (var session in _manager.GetSessions())
+        foreach (var session in _manager.GetSessions().Where(s => !IsOwn(s.SourceAppUserModelId))) // never its own: a pause would come back as a button
         {
             if (session.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
             if (await RunAsync(session, "TryPauseAsync (pause playing)", s => s.TryPauseAsync().AsTask()))
@@ -183,7 +233,7 @@ public sealed class MediaSessions(SpikeLog log)
         var until = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < until)
         {
-            if (_manager is null || _manager.GetSessions().All(s =>
+            if (_manager is null || _manager.GetSessions().Where(s => !IsOwn(s.SourceAppUserModelId)).All(s =>
                     s.GetPlaybackInfo().PlaybackStatus != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing))
                 return true;
             await Task.Delay(20);

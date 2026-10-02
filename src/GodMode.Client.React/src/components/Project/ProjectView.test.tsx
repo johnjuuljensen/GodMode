@@ -87,3 +87,43 @@ it('a session that has had no turn asks for its first message, and offers no Res
     fresh.unmount();
   }
 });
+
+// Slash commands (#31): the composer offers the session's, and a command the server refuses says why
+it('offers the slash commands a /word starts, and Enter completes the one picked', async () => {
+  const commandsHub = new FakeHub([{ ...project('p3', 'cmds', 'Idle', '2026-10-02T12:00:00Z'), SlashCommands: ['clear', 'compact', 'context', 'loop'] }], [root]);
+  await connectServers({ C: commandsHub });
+  useAppStore.getState().selectProject('C', 'p3');
+  const cmds = await render(<ProjectView serverId="C" projectId="p3" />);
+  try {
+    const el = cmds.container;
+    const input = el.querySelector<HTMLTextAreaElement>('textarea.project-input')!;
+    const offered = () => [...el.querySelectorAll('.reply-commands [role="option"]')].map(o => o.textContent);
+
+    await typeInto(input, '/c');
+    expect(offered()).toEqual(['/clear', '/compact', '/context']);
+    await keyDown(input, 'ArrowDown');
+    await keyDown(input, 'Enter');
+    expect(input.value).toBe('/compact ');
+    expect(offered()).toEqual([]);
+    expect(commandsHub.replies).toEqual([]);
+
+    // A command typed whole is sent by Enter, as any text is
+    await typeInto(input, '/clear');
+    expect(offered()).toEqual([]);
+    await keyDown(input, 'Enter');
+    expect(commandsHub.replies).toEqual([{ projectId: 'p3', text: '/clear' }]);
+  } finally {
+    cmds.unmount();
+  }
+});
+
+it('a message the server refuses says why, and comes back to the input', async () => {
+  hub.refuseReply = '/model is not sent: GodMode sets a session\'s model and effort.';
+  const input = view.container.querySelector<HTMLTextAreaElement>('textarea.project-input')!;
+
+  await typeInto(input, '/model opus');
+  await keyDown(input, 'Enter');
+
+  expect(view.container.querySelector('[role="alert"]')?.textContent).toBe(hub.refuseReply);
+  expect(input.value).toBe('/model opus');
+});

@@ -111,6 +111,14 @@ public class StatusUpdater : IStatusUpdater
                 status = WithTokenMetrics(status, outputEvent);
                 break;
 
+            // A command's turn that says nothing (/clear, /compact): the session is idle, and has no new reply to
+            // show, so the last one stays, and the user who sent it is not told it finished
+            case OutputEventType.Result when IsSilentCommandResult(outputEvent):
+                stateChanged = status.State != ProjectState.Idle || status.CurrentQuestion != null;
+                status = WithTokenMetrics(status with { State = ProjectState.Idle, CurrentQuestion = null, LastError = null }, outputEvent);
+                process.LastAssistantText = null;
+                break;
+
             case OutputEventType.Result:
                 // End of turn: decide Idle vs WaitingInput based on whether the
                 // last assistant text block (trimmed) ends with '?'. See issue #131.
@@ -144,6 +152,18 @@ public class StatusUpdater : IStatusUpdater
                 // The session (re)started - project is running
                 stateChanged = status.State != ProjectState.Running || status.LastError != null;
                 status = status with { State = ProjectState.Running, LastError = null };
+                if (WithCommands(status, outputEvent) is { } withCommands)
+                {
+                    status = withCommands;
+                    stateChanged = true;
+                }
+                break;
+
+            case OutputEventType.ConversationReset:
+                // /clear: the conversation that had the last reply and question is gone
+                process.LastAssistantText = null;
+                stateChanged = status is not { LastResult: null, LastResultAt: null, CurrentQuestion: null };
+                status = status with { LastResult = null, LastResultAt = null, CurrentQuestion = null };
                 break;
         }
 
@@ -180,6 +200,40 @@ public class StatusUpdater : IStatusUpdater
 
     /// <summary>The metadata key a <c>system</c> event carries claude's session ID under.</summary>
     public const string SessionIdKey = "session_id";
+
+    /// <summary>The metadata key a <c>system/init</c> carries claude's slash commands under (its <c>slash_commands</c>).</summary>
+    public const string SlashCommandsKey = "slash_commands";
+
+    /// <summary>The metadata key a <c>system/init</c> carries claude's skills under (its <c>skills</c>).</summary>
+    public const string SkillsKey = "skills";
+
+    /// <summary>The metadata key a <c>result</c> carries its <c>num_turns</c> under.</summary>
+    public const string NumTurnsKey = "num_turns";
+
+    /// <summary>
+    /// The status with the commands a <c>system/init</c> listed (<see cref="ProjectStatus.SlashCommands"/>,
+    /// <see cref="ProjectStatus.ClaudeCommands"/>); null when it lists none, or the same as the status has.
+    /// </summary>
+    private static ProjectStatus? WithCommands(ProjectStatus status, OutputEvent init)
+    {
+        var claude = init.Metadata?.GetValueOrDefault(SlashCommandsKey) as IReadOnlyList<string>;
+        var skills = init.Metadata?.GetValueOrDefault(SkillsKey) as IReadOnlyList<string>;
+        if (claude == null && skills == null) return null;
+        var passed = SlashCommands.Passed(skills ?? []);
+        return Same(status.SlashCommands, passed) && Same(status.ClaudeCommands, claude)
+            ? null
+            : status with { SlashCommands = passed, ClaudeCommands = claude ?? status.ClaudeCommands };
+
+        static bool Same(IReadOnlyList<string>? a, IReadOnlyList<string>? b) =>
+            a == null ? b == null : b != null && a.SequenceEqual(b, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// A result that ends a turn in which the model took no turn (<c>num_turns</c> 0) and that has no text: what claude
+    /// writes after <c>/clear</c> or <c>/compact</c>. <c>/context</c>'s has its text, and is a reply as any other.
+    /// </summary>
+    private static bool IsSilentCommandResult(OutputEvent outputEvent) =>
+        outputEvent.Metadata?.GetValueOrDefault(NumTurnsKey) is 0L && string.IsNullOrWhiteSpace(outputEvent.Content);
 
     /// <summary>The metadata key a <c>user</c> event that claude echoed (<c>isReplay</c>) carries.</summary>
     public const string IsReplayKey = "is_replay";

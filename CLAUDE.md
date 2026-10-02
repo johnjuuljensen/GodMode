@@ -53,7 +53,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.god
 dotnet build src/GodMode.Maui/GodMode.Maui.csproj
 
 # Run the Windows app
-dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.19041.0
+dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.26100.0
 
 # Run all tests
 dotnet test
@@ -113,6 +113,11 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - Use the helpers in `hostApi.ts` (`getHubUrl()`, `getHubOptions()`, and its bridge calls) — never hardcode URLs
 - Client tests run as the app's page: jsdom at `https://0.0.0.1/`, with a fake shell behind `window.HybridWebView` (`src/test/appShell.ts`)
 
+**Slash commands** (#31, server README *Slash commands*)
+- GodMode sends `/clear`, `/compact`, `/context` and the session's skills (its last `system/init`'s `skills`), and refuses claude's other commands (`SlashCommands.WhyRefused`), on every input path: `SendInput`, `ReplyAndResume`, the fleet's `send`, a create's prompt. A `/word` claude does not know is text, as claude takes it
+- `ProjectStatus.SlashCommands` (sent, what the composer completes) and `ClaudeCommands` (all claude listed) come from each `system/init`
+- `/clear`'s `conversation_reset` starts the output over (`OutputLog.RestartAsync`, `OutputRestarted`); a result with no text and `num_turns` 0 (`/clear`, `/compact`) raises no `Finished`. `/model` and `/effort` stay GodMode's, per root and action
+
 **Process Management**
 - `ClaudeProcessManager` uses `System.Diagnostics.Process` directly (not CliWrap) for proper stdin handling
 - `--dangerously-skip-permissions` is passed only when the project asks for it (its session's `settings.json`) and its root's config, read at that launch, allows it (`allowSkipPermissions`, default false, for every action of the root). Otherwise the project's stored `permissionMode` (else the root's, e.g. `auto`) applies, and approvals go to the permission prompt
@@ -136,7 +141,8 @@ cd src/GodMode.Client.React && npm test && npm run lint
 │           ├── settings.json      # The session's settings (action, permission mode, skip-permissions asked for, shared folder)
 │           ├── input.jsonl        # User input log
 │           ├── output.jsonl       # Claude output stream (GodMode's own; Claude's transcripts are not read)
-│           ├── output-generation  # Changes when output.jsonl starts over, so clients drop what they hold
+│           ├── output-generation  # Changes when output.jsonl starts over (a create, a /clear), so clients drop what they hold
+│           ├── output-{generation}.jsonl # The output a /clear started over from, kept
 │           └── session-id         # Claude's session GUID for --resume (not the id)
 └── (project files)                # Working directory for Claude
 ```
@@ -285,3 +291,4 @@ When doing work initiated by GodMode, indicated by the presence of a `.godmode` 
 - Make sure to maintain slnx file
 - When asked to merge master into a branch always use origin/master as local master is likely stale
 - Branches for issues are named by `ac-gwt-issue` from the issue's labels: `feature/<n>-<slug>`, `bug/<n>-<slug>`, `epic/<n>-<slug>`. Use the same scheme when creating one by hand.
+- Refer to work by its issue, never by its pull request alone: `#375` (or `IS#375`), or `IS#375/PR#408` once it has one, never just `PR#408`. This goes for messages to the user, PR descriptions, comments, commits, and reports to an overseer.

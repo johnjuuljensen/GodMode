@@ -25,6 +25,7 @@ public sealed class MainForm : Form
     private readonly Mic _mic;
     private readonly Tone _tone;
     private readonly LeAudioProbe _leAudio;
+    private readonly VoipCalls _voip;
     private KeyboardHook? _hook;
     private GestureClassifier _hookGestures = new();
     private GestureClassifier _rawGestures = new();
@@ -44,6 +45,16 @@ public sealed class MainForm : Form
     private readonly CheckBox _toneWaitsForSound = new() { Text = "tone waits for first mic sound", AutoSize = true };
     private readonly NumericUpDown _gap = new() { Minimum = 50, Maximum = 3000, Increment = 50, Value = (decimal)GestureClassifier.DefaultGap.TotalMilliseconds, Width = 60 };
     private readonly NumericUpDown _longPress = new() { Minimum = 100, Maximum = 5000, Increment = 100, Value = (decimal)GestureClassifier.DefaultLongPress.TotalMilliseconds, Width = 60 };
+    private readonly ComboBox _caught = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
+    private readonly CheckBox _proxy = new() { Text = "proxy: catch it, forward the rest", AutoSize = true };
+    private readonly CheckBox _mirror = new() { Text = "mirror Spotify's play/pause", AutoSize = true, Checked = true };
+    private readonly CheckBox _pauseWhileListening = new() { Text = "pause Spotify while the mic is open", AutoSize = true, Checked = true };
+    private readonly ComboBox _statusWhileOpen = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
+    private readonly CheckBox _resumeOnA2dp = new() { Text = "resume Spotify once A2DP is back", AutoSize = true, Checked = true };
+    private readonly CheckBox _voipWhileOpen = new() { Text = "report a VoIP call while the mic is open", AutoSize = true, Checked = true };
+    private bool _listening;
+    private bool _toggling;
+    private bool _pausedForMic;
     private readonly TextBox _note = new() { Width = 300, PlaceholderText = "a note for the log (what you pressed, what you heard)" };
 
     private sealed record Choice<T>(string Label, T Value)
@@ -63,7 +74,11 @@ public sealed class MainForm : Form
         _mic = new Mic(_log);
         _tone = new Tone(_log);
         _leAudio = new LeAudioProbe(_log);
+        _voip = new VoipCalls(_log);
         _log.Written += _pending.Enqueue;
+        Application.ThreadException += (_, e) => _log.Write("ERROR", $"UI thread: {e.Exception}");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => _log.Write("ERROR", $"unhandled: {e.ExceptionObject}");
+        TaskScheduler.UnobservedTaskException += (_, e) => _log.Write("ERROR", $"task: {e.Exception}");
 
         var controls = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         controls.Controls.Add(_state);
@@ -85,6 +100,12 @@ public sealed class MainForm : Form
             Button("Claim SMTC (paused)", () => _smtc.Enable(Handle, MediaPlaybackStatus.Paused)),
             Button("Release SMTC", _smtc.Disable),
             new Label { Text = "gesture gap ms", AutoSize = true }, _gap, new Label { Text = "long ms", AutoSize = true }, _longPress));
+        controls.Controls.Add(Row("Proxy", _proxy, new Label { Text = "catch", AutoSize = true }, _caught,
+            _mirror, Button("Start proxy", StartProxy), Button("Stop proxy", StopProxy)));
+        controls.Controls.Add(Row("Listen", Button("Start listen mode", StartListening), Button("Stop listen mode", StopListening),
+            _pauseWhileListening, new Label { Text = "status while mic open", AutoSize = true }, _statusWhileOpen, _voipWhileOpen, _resumeOnA2dp));
+        controls.Controls.Add(Row("VoIP", Button("Probe VoIP", () => _ = _voip.ProbeAsync()), Button("Report VoIP call", () => _ = _voip.StartAsync()),
+            Button("End VoIP call", () => _voip.End("button"))));
         controls.Controls.Add(Row("Call", Button("Report incoming (ringing)", () => _call.Incoming(ringer: true)),
             Button("Report incoming (silent)", () => _call.Incoming(ringer: false)),
             Button("Report active call", _call.Active), Button("End call", _call.End)));
@@ -104,6 +125,29 @@ public sealed class MainForm : Form
             var vk = ((Choice<int?>)_swallow.SelectedItem!).Value;
             if (_hook is not null) _hook.Swallow = vk;
             _log.Write("KEY", $"swallow: {(vk is { } v ? MediaKey.Name(v) : "none")}");
+        };
+        foreach (var button in new[] { SystemMediaTransportControlsButton.Previous, SystemMediaTransportControlsButton.Next })
+            _caught.Items.Add(new Choice<SystemMediaTransportControlsButton>(button.ToString(), button));
+        _caught.SelectedIndex = 0;
+        foreach (var status in new[] { "mirror Spotify", "Playing", "Paused" }) _statusWhileOpen.Items.Add(status);
+        _statusWhileOpen.SelectedIndex = 0;
+        _smtc.Pressed += button => BeginInvoke(() => OnOwnButton(button));
+        // The headset's button in a reported VoIP call: in listen mode it closes the mic
+        _voip.EndRequested += () => BeginInvoke(() =>
+        {
+            if (_listening && _mic.IsOpen) _ = ToggleMicAsync("VoIP EndRequested");
+        });
+        _sessions.StateChanged += (id, status) =>
+        {
+            if (MediaSessions.IsOwn(id)) return;
+            BeginInvoke(() =>
+            {
+                var mirrors = _proxy.Checked ? _mirror.Checked : _listening && (!_mic.IsOpen || _statusWhileOpen.SelectedIndex == 0);
+                var playing = status == Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                if (mirrors)
+                    _smtc.SetStatus(playing ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, $"mirrors {id}");
+                if (playing && _listening) _ = ReclaimAsync(id);
+            });
         };
         _gap.ValueChanged += (_, _) => NewClassifiers();
         _longPress.ValueChanged += (_, _) => NewClassifiers();
@@ -163,6 +207,8 @@ public sealed class MainForm : Form
         FillDevices();
         _call.Start();
         _ = _sessions.StartAsync();
+        var args = Environment.GetCommandLineArgs();
+        _ = args.Contains("--voip-check") ? VoipCheckAsync() : args.Contains("--reclaim-check") ? ReclaimCheckAsync() : _voip.ProbeAsync();
     }
 
     private void FillDevices()
@@ -224,6 +270,196 @@ public sealed class MainForm : Form
                 break;
         }
         base.WndProc(ref m);
+    }
+
+    /// <summary>
+    /// The proxy: the spike holds the current media session (it reports itself playing, so Windows sends it the
+    /// headset's buttons), catches one button as GodMode's "step in", and passes every other one on to Spotify.
+    /// With mirroring it then reports Spotify's play/pause as its own: the second trial found that a proxy reporting
+    /// "playing" while Spotify was paused got no button at all, while one reporting "paused" got Play in the first.
+    /// </summary>
+    private void StartProxy()
+    {
+        if (_listening) StopListening();
+        _proxy.Checked = true;
+        _smtc.Enable(Handle, MediaPlaybackStatus.Playing);
+        _log.Write("PROXY", $"started: catches {_caught.SelectedItem}, forwards the rest, {(_mirror.Checked ? "mirrors Spotify's play/pause" : "always playing")}");
+        if (_mirror.Checked && _sessions.OtherPlaying() is false)
+            _smtc.SetStatus(MediaPlaybackStatus.Paused, "mirrors the other session at start");
+    }
+
+    private void StopProxy()
+    {
+        _proxy.Checked = false;
+        _smtc.Disable();
+        _log.Write("PROXY", "stopped");
+    }
+
+    /// <summary>
+    /// Listen mode, the user's design after the second trial: GodMode holds the media session and takes every headset
+    /// button, Spotify is run by mouse, and play/pause turns the mic on (rising tone) and off (falling tone). Its status
+    /// mirrors Spotify's play/pause, so the session keeps getting buttons with the music paused; while the mic is open
+    /// it is the one chosen, to find which one a press in HFP still reaches.
+    /// </summary>
+    private void StartListening()
+    {
+        if (_proxy.Checked) StopProxy();
+        _listening = true;
+        _smtc.Enable(Handle, MediaPlaybackStatus.Playing);
+        _log.Write("LISTEN", $"started: play/pause turns the mic on and off; {(_pauseWhileListening.Checked ? "Spotify paused while it is open" : "Spotify left alone")}; status while open: {_statusWhileOpen.SelectedItem}");
+        if (_sessions.OtherPlaying() is false)
+            _smtc.SetStatus(MediaPlaybackStatus.Paused, "mirrors the other session at start");
+    }
+
+    /// <summary>Spotify started playing, and Windows makes it the current session: take it back, if Windows did.</summary>
+    private async Task ReclaimAsync(string other)
+    {
+        foreach (var wait in new[] { 300, 1000, 2000 })
+        {
+            await Task.Delay(wait);
+            if (!_listening) return;
+            if (_sessions.CurrentIsOwn)
+            {
+                _log.Write("LISTEN", $"current session is the spike's ({wait} ms wait after {other} played)");
+                return;
+            }
+            await _smtc.ReclaimAsync($"{other} is the current session");
+        }
+        _log.Write("LISTEN", _sessions.CurrentIsOwn ? "current session is the spike's" : $"{other} is still the current session");
+    }
+
+    private void StopListening()
+    {
+        if (_mic.IsOpen && !_toggling) _ = ToggleMicAsync("listen mode stopped");
+        _listening = false;
+        _smtc.Disable();
+        _log.Write("LISTEN", "stopped");
+    }
+
+    private async Task ToggleMicAsync(object button)
+    {
+        if (_toggling)
+        {
+            _log.Write("LISTEN", $"{button} ignored: the mic is still switching");
+            return;
+        }
+        _toggling = true;
+        try
+        {
+            if (!_mic.IsOpen)
+            {
+                _log.Write("LISTEN", $"{button}: mic on");
+                if (_pauseWhileListening.Checked) _pausedForMic = await _sessions.PausePlayingAsync() > 0;
+                await OpenWithToneAsync();
+                if (_voipWhileOpen.Checked) await _voip.StartAsync();
+                if (_statusWhileOpen.SelectedIndex > 0)
+                    _smtc.SetStatus(_statusWhileOpen.SelectedIndex == 1 ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, "while the mic is open");
+            }
+            else
+            {
+                _log.Write("LISTEN", $"{button}: mic off");
+                _voip.End("mic off");
+                // Listen for A2DP's return from the moment the mic closes: its volume comes back 5.2-5.3 s later
+                var a2dp = new TaskCompletionSource();
+                void Back() => a2dp.TrySetResult();
+                _endpoints.RenderVolumeChanged += Back;
+                try
+                {
+                    await CloseWithToneAsync();
+                    if (_pausedForMic && _resumeOnA2dp.Checked)
+                        _log.Write("LISTEN", await Task.WhenAny(a2dp.Task, Task.Delay(TimeSpan.FromSeconds(8))) == a2dp.Task
+                            ? "A2DP is back (the endpoint's volume changed): Spotify resumes"
+                            : "no volume change in 8 s: Spotify resumes anyway");
+                }
+                finally
+                {
+                    _endpoints.RenderVolumeChanged -= Back;
+                }
+                if (_pausedForMic) await _sessions.ResumePausedAsync();
+                _pausedForMic = false;
+                if (_sessions.OtherPlaying() is { } playing)
+                    _smtc.SetStatus(playing ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, "mirrors the other session after the mic");
+            }
+        }
+        finally
+        {
+            _toggling = false;
+        }
+    }
+
+    // On the UI thread (the handler posts it)
+    private void OnOwnButton(SystemMediaTransportControlsButton button)
+    {
+        if (_listening)
+        {
+            if (button is SystemMediaTransportControlsButton.Play or SystemMediaTransportControlsButton.Pause)
+                _ = ToggleMicAsync(button);
+            else
+                _log.Write("LISTEN", $"{button} ignored (mic {(_mic.IsOpen ? "open" : "closed")})");
+            return;
+        }
+        if (!_proxy.Checked) return;
+        var caught = ((Choice<SystemMediaTransportControlsButton>)_caught.SelectedItem!).Value;
+        if (button == caught)
+        {
+            _log.Write("PROXY", $"CAUGHT {button}: GodMode would step in here (rising tone)");
+            _ = PlayToneAsync(rising: true);
+        }
+        else
+            _ = _sessions.ForwardAsync(button);
+    }
+
+    /// <summary>
+    /// <c>--voip-check</c>: reports a VoIP call for 4 s and ends it, then closes the app. It checks, with no button, that
+    /// an unpackaged app may report a call (the voipCall capability) and associate the headset with it.
+    /// </summary>
+    private async Task VoipCheckAsync()
+    {
+        _log.Write("VOIP", "--voip-check: a 4 s call");
+        await _voip.StartAsync();
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        _voip.End("--voip-check");
+        Close();
+    }
+
+    /// <summary>
+    /// <c>--reclaim-check</c>: with no button, whether the spike gets the current session back from a Spotify that has
+    /// just resumed (the fifth trial's failure). Spotify plays for a few seconds, and is left as it was found.
+    /// </summary>
+    private async Task ReclaimCheckAsync()
+    {
+        await Task.Delay(2000);
+        var wasPlaying = _sessions.OtherPlaying();
+        _log.Write("CHECK", $"--reclaim-check: Spotify playing at start: {wasPlaying}");
+        if (wasPlaying is null)
+        {
+            Close();
+            return;
+        }
+        if (wasPlaying is false) await _sessions.ForwardAsync(SystemMediaTransportControlsButton.Play);
+        await Task.Delay(1500);
+        _smtc.Enable(Handle, MediaPlaybackStatus.Playing);
+        await Task.Delay(1000);
+        _log.Write("CHECK", $"after enable: own is current: {_sessions.CurrentIsOwn}");
+        // As listen mode does: Spotify paused for the mic, the spike mirroring it, Spotify resumed, mirrored again
+        await _sessions.ForwardAsync(SystemMediaTransportControlsButton.Pause);
+        await Task.Delay(500);
+        _smtc.SetStatus(MediaPlaybackStatus.Paused, "--reclaim-check mirrors");
+        await Task.Delay(1000);
+        await _sessions.ForwardAsync(SystemMediaTransportControlsButton.Play);
+        await Task.Delay(100);
+        _smtc.SetStatus(MediaPlaybackStatus.Playing, "--reclaim-check mirrors");
+        await Task.Delay(1500);
+        _log.Write("CHECK", $"after Spotify resumed: own is current: {_sessions.CurrentIsOwn}");
+        await _smtc.ReclaimAsync("--reclaim-check");
+        await Task.Delay(1000);
+        _log.Write("CHECK", $"after reclaim: own is current: {_sessions.CurrentIsOwn}");
+        await Task.Delay(1000);
+        _log.Write("CHECK", $"1 s later: own is current: {_sessions.CurrentIsOwn}");
+        if (wasPlaying is false) await _sessions.ForwardAsync(SystemMediaTransportControlsButton.Pause);
+        _smtc.Disable();
+        await Task.Delay(500);
+        Close();
     }
 
     private void Mark(string how) => _log.Write("MARK", $"mark ({how})");
@@ -290,7 +526,7 @@ public sealed class MainForm : Form
 
     private void Tick()
     {
-        _endpoints.PollMeters();
+        _endpoints.PollMetersInBackground();
         if (++_ticks % 10 == 0) Task.Run(_endpoints.PollFormats);
         var now = _log.Now;
         if (_hookGestures.Flush(now) is { } hook) Gestures("HOOK", [hook], MediaKey.Name);
@@ -309,7 +545,7 @@ public sealed class MainForm : Form
             $"Mic:      {(_mic.IsOpen ? $"OPEN, level {_mic.Level:P0}" : "closed")}",
             $"Profile:  {_endpoints.Profile}",
             $"Playing:  {_sessions.Playing}",
-            $"Call:     {_call.State}    SMTC: {_smtc.State}    swallow: {_swallow.SelectedItem}",
+            $"Call:     {_call.State}    VoIP: {_voip.State}    SMTC: {_smtc.State}    swallow: {_swallow.SelectedItem}",
             $"Gesture:  {_lastGesture}",
             $"Since:    {reference} {since.TotalSeconds:F1} s",
             _endpoints.Detail);
@@ -321,6 +557,7 @@ public sealed class MainForm : Form
         _hook?.Dispose();
         _mic.CloseAsync().Wait(TimeSpan.FromSeconds(5)); // Mic awaits without the UI context, so this cannot deadlock
         if (_call.State.StartsWith("incoming") || _call.State.StartsWith("active")) _call.End();
+        _voip.End("app closed");
         _smtc.Disable();
         _endpoints.Dispose();
         _log.Write("APP", "closed");

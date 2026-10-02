@@ -730,7 +730,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 ActionName: s.ActionName,
                 SharedFolder: s.SharedFolder,
                 Adopted: s.Adopted,
-                ParentId: s.ParentId
+                ParentId: s.ParentId,
+                SlashCommands: s.SlashCommands
             ));
         }
 
@@ -822,6 +823,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // Resolve prompt from inputs or promptTemplate
         var prompt = ResolvePrompt(action, request.Inputs);
+        // The session's first message: a command in it is checked as any message's is
+        if (SlashCommands.WhyRefused(prompt, status: null) is { } refused) throw new ArgumentException(refused);
 
         // The project's folder, decided before anything is written. A name that leaves no folder of
         // its own ("..", ".") is refused here, before any script runs or file is written
@@ -1319,7 +1322,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         : ProjectFiles.SessionState.ListTrashed(rootPath).FirstOrDefault() is { } trashed ? $"session {trashed} is in its trash"
         : null;
 
-    public Task SendInputAsync(string projectId, string input) => SendInputAsync(projectId, input, answersPending: true);
+    public Task SendInputAsync(string projectId, string input)
+    {
+        if (_projects.TryGetValue(projectId, out var project)) SlashCommands.Check(input, project.Status);
+        return SendInputAsync(projectId, input, answersPending: true);
+    }
 
     /// <summary>
     /// <see cref="SendInputAsync(string, string)"/>; without <paramref name="answersPending"/>, a pending permission
@@ -1356,6 +1363,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
         if (!answersPending) RefuseWhilePending(project);
+        SlashCommands.Check(text, project.Status);
 
         // One reply at a time decides whether to resume: two would launch two processes. The wait
         // for the session to start comes after the lock, so a stop is not held behind it
@@ -1384,8 +1392,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             return new(true);
         }
 
-        // A claude that does not run takes what was held for it with what it is resumed with
-        var (held, heldCount) = await PeekHeldMessagesAsync(project);
+        // A claude that does not run takes what was held for it with what it is resumed with, but for a command,
+        // which would take it for its arguments: the held messages wait for the session to be idle after it
+        var (held, heldCount) = SlashCommands.CommandOf(text) == null ? await PeekHeldMessagesAsync(project) : (null, 0);
         if (WithHeld(text, held) is not { } input) return new(false);
 
         // claude writes system/init once it has read its first input, so the reply is sent at
@@ -3143,8 +3152,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
     /// <summary>
     /// Builds claude environment and args from action config + the launch's permissions + profile env.
-    /// Nothing is pre-approved: a tool call that needs approval reaches the permission prompt, unless
-    /// Claude Code's own settings, the permission mode, or skip-permissions, allow it.
+    /// Only GodMode's own session tools are pre-approved (<see cref="SessionTools"/>): any other tool call that needs
+    /// approval reaches the permission prompt, unless Claude Code's own settings, the permission mode, or
+    /// skip-permissions, allow it.
     /// </summary>
     private static (Dictionary<string, string>? Env, string[] Args) BuildClaudeConfig(
         string projectPath, string mcpConfigPath, CreateAction action, bool skipPermissions, string? permissionMode, string mcpConfigJson,
@@ -3156,9 +3166,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     {
         var env = MergeAndExpandEnvironment(profileEnv, action.Environment, profileName, stripEnvVarProfile);
 
-        var args = new List<string>();
-        if (action.ClaudeArgs != null)
-            args.AddRange(action.ClaudeArgs);
+        // The root's args, with GodMode's own session tools allowed in its --allowedTools, or one of their own
+        var args = SessionTools.Allow(action.ClaudeArgs);
         if (skipPermissions)
             args.Add("--dangerously-skip-permissions");
         if (permissionMode != null)

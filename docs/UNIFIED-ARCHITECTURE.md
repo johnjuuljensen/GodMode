@@ -249,7 +249,8 @@ The same `.godmode` structure for everything: every session keeps its state in i
 │           ├── settings.json    # The session's settings (action, permission mode, skip-permissions asked for, shared folder)
 │           ├── input.jsonl      # User input log
 │           ├── output.jsonl     # Claude output stream, GodMode's own
-│           ├── output-generation
+│           ├── output-generation  # New on each create and /clear
+│           ├── output-{generation}.jsonl # The output a /clear started over from
 │           ├── session-id       # Claude's session GUID, for --resume
 │           └── mcp-config.json  # While claude runs, with the session's token
 └── (project files)              # Working directory for Claude
@@ -405,7 +406,7 @@ GodMode gives a session one MCP server, its own MCP endpoint (8.2). It configure
 
 The server writes the session's MCP config, its own entry alone, to `mcp-config.json` in the session's state folder, `.godmode/sessions/{id}/` (owner-only where the OS allows) and passes it with `--mcp-config`; the file is deleted when the process exits. A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: it is logged once as a warning, and ignored.
 
-**Nothing is pre-approved.** GodMode passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (8.2), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's permission mode lets it through, or the project runs with skip-permissions, which only a root with `allowSkipPermissions` allows (4.2).
+**Only GodMode's own session tools are pre-approved.** Every launch passes `--allowedTools` with `mcp__godmode__message_parent` and `mcp__godmode__speak`, merged into a root's own `--allowedTools` when its `claudeArgs` have one (#384). Any other tool call that needs approval, an MCP tool's included, reaches the permission prompt (8.2), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's permission mode lets it through, or the project runs with skip-permissions, which only a root with `allowSkipPermissions` allows (4.2).
 
 ### 8.2 The GodMode MCP Endpoint
 

@@ -20,10 +20,12 @@ public interface ISpeaker : IAudioSink, IDisposable;
 public interface IAudioDevices
 {
     /// <summary>
-    /// The devices there are, and the defaults voice follows: with <paramref name="echoCancelled"/>, those of the
-    /// platform's echo canceller (on Windows the console defaults, which the Voice Capture DSP pairs).
+    /// The devices there are, and the defaults voice follows: the communications defaults, or with
+    /// <paramref name="consoleDefaults"/> the console (multimedia) ones. Those are what the platform's echo canceller
+    /// opens (on Windows the Voice Capture DSP pairs them), and the speaker voice plays on while its mic is closed, so a
+    /// Bluetooth headset stays in A2DP.
     /// </summary>
-    VoiceDeviceList List(bool echoCancelled);
+    VoiceDeviceList List(bool consoleDefaults);
 
     /// <summary>Calls <paramref name="changed"/> when a device comes or goes or a default changes, until disposed.</summary>
     IDisposable Watch(Action changed);
@@ -43,8 +45,14 @@ public interface IAudioDevices
 /// Echo cancellation runs only with Default for both devices: the platform's canceller opens the default pair itself.
 /// With a chosen device voice captures without it, and says so in the log.
 /// </para>
+/// <para>
+/// The microphone opens on demand (<see cref="OpenMic"/>, <see cref="CloseMic"/>): while it is closed, the session reads
+/// a silent source, no microphone is open (on a Bluetooth headset, none holds it in HFP), and Default for the speaker is
+/// the console (multimedia) default, A2DP's. While it is open, Default is the communications pair. A chosen speaker is
+/// the one chosen, either way.
+/// </para>
 /// </summary>
-public sealed class FollowingAudio : IDisposable
+public sealed class FollowingAudio : IMicSwitch, IDisposable
 {
     /// <summary>A headset turning on raises several notifications in a row: the devices are picked once they settle.</summary>
     public static readonly TimeSpan DefaultSettle = TimeSpan.FromMilliseconds(500);
@@ -63,18 +71,24 @@ public sealed class FollowingAudio : IDisposable
     private Opened? _openedMicrophone;
     private Opened? _openedSpeaker;
     private IMicrophone? _current;
+    private bool _micOpen;
     private bool _started;
     private bool _disposed;
 
     /// <summary>What is open, to tell whether a new pick changes anything.</summary>
     private sealed record Opened(string? Id, bool EchoCancelled);
 
+    /// <summary>The microphone is closed: the session reads a silent source.</summary>
+    private static readonly Opened Closed = new("(closed)", false);
+
     /// <summary>Opens the devices the settings mean now (the microphone not capturing until <see cref="Start"/>) and watches for changes.</summary>
     /// <param name="microphone">The chosen microphone; null for Default.</param>
     /// <param name="speaker">The chosen speaker; null for Default.</param>
+    /// <param name="micOpen">Whether the microphone opens now, or waits for <see cref="OpenMic"/>.</param>
     public FollowingAudio(IAudioDevices devices, bool echoCancellation, AudioDevice? microphone, AudioDevice? speaker,
-        ILogger logger, TimeSpan? settle = null)
+        ILogger logger, TimeSpan? settle = null, bool micOpen = true)
     {
+        _micOpen = micOpen;
         _devices = devices;
         _logger = logger;
         _echoCancellation = echoCancellation;
@@ -98,13 +112,54 @@ public sealed class FollowingAudio : IDisposable
     public IAudioSource Source => _source;
     public IAudioSink Sink => _sink;
 
-    /// <summary>The device each is open on now (null for none), for tests and the log.</summary>
+    /// <summary>The device each is open on now (null for none, and for the mic closed), for tests and the log.</summary>
     public (string? Microphone, string? Speaker) OpenIds
     {
         get
         {
-            lock (_picking) return (_openedMicrophone?.Id, _openedSpeaker?.Id);
+            lock (_picking) return (_openedMicrophone == Closed ? null : _openedMicrophone?.Id, _openedSpeaker?.Id);
         }
+    }
+
+    /// <summary>Whether the microphone is open: the session hears it, rather than silence.</summary>
+    public bool MicOpen
+    {
+        get
+        {
+            lock (_picking) return _micOpen;
+        }
+    }
+
+    /// <summary>
+    /// Opens the microphone the settings mean, and moves Default for the speaker to the communications default. Blocks
+    /// while the device opens: on a Bluetooth headset, the switch to HFP.
+    /// </summary>
+    public void OpenMic() => SwitchMic(true);
+
+    /// <summary>
+    /// Closes the microphone, so the session reads silence, and moves Default for the speaker back to the console
+    /// default. Letting go of the device lets a Bluetooth headset go back to A2DP.
+    /// </summary>
+    public void CloseMic() => SwitchMic(false);
+
+    /// <exception cref="InvalidOperationException">No microphone opened (none there, or it failed): the mic stays closed.</exception>
+    private void SwitchMic(bool open)
+    {
+        lock (_picking)
+        {
+            if (_micOpen == open) return;
+            _micOpen = open;
+        }
+        Pick(open ? "the mic opened" : "the mic closed");
+        if (!open) return;
+
+        lock (_picking)
+        {
+            if (_current is not null || _disposed) return;
+            _micOpen = false;
+        }
+        Pick("the mic did not open");
+        throw new InvalidOperationException("No microphone opened: see the voice log");
     }
 
     public void Start()
@@ -131,7 +186,11 @@ public sealed class FollowingAudio : IDisposable
     private void MicrophoneEnded(Exception? error)
     {
         _logger.LogWarning(error, "Voice: the microphone stopped; picking one again");
-        lock (_picking) _openedMicrophone = null;
+        lock (_picking)
+        {
+            if (_openedMicrophone == Closed) return;
+            _openedMicrophone = null;
+        }
         PickSoon();
     }
 
@@ -159,11 +218,13 @@ public sealed class FollowingAudio : IDisposable
             try
             {
                 var echoCancelled = _echoCancellation && _microphone is null && _speaker is null;
-                var devices = _devices.List(echoCancelled);
+                var devices = _devices.List(consoleDefaults: echoCancelled || !_micOpen);
                 var microphone = VoiceDevices.Choose(_microphone, devices.Microphones, devices.DefaultMicrophoneId);
                 var speaker = VoiceDevices.Choose(_speaker, devices.Speakers, devices.DefaultSpeakerId);
 
-                if (new Opened(microphone.Id, echoCancelled) != _openedMicrophone)
+                if (!_micOpen)
+                    CloseMicrophone(why);
+                else if (new Opened(microphone.Id, echoCancelled) != _openedMicrophone)
                 {
                     LogFallback("microphone", _microphone, microphone);
                     if (_echoCancellation && !echoCancelled && _openedMicrophone is null or { EchoCancelled: true })
@@ -182,6 +243,16 @@ public sealed class FollowingAudio : IDisposable
                 _logger.LogError(ex, "Voice: could not pick the devices ({Why})", why);
             }
         }
+    }
+
+    /// <summary>Lets go of the microphone, and gives the session silence in its place.</summary>
+    private void CloseMicrophone(string why)
+    {
+        if (_openedMicrophone == Closed) return;
+        _openedMicrophone = Closed;
+        _current = null;
+        Release(_source.Use(new NoMicrophone()), "microphone");
+        _logger.LogInformation("Voice: microphone closed ({Why})", why);
     }
 
     private void OpenMicrophone(DeviceChoice choice, bool echoCancelled, string why)
@@ -277,7 +348,7 @@ public sealed class FollowingAudio : IDisposable
         Release(_sink.Use(null), "speaker");
     }
 
-    /// <summary>With no microphone at all, the session hears nothing until one comes.</summary>
+    /// <summary>With no microphone at all, or the mic closed, the session hears nothing until one opens.</summary>
     private sealed class NoMicrophone : IAudioSource
     {
         private readonly Channel<ReadOnlyMemory<byte>> _audio = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();

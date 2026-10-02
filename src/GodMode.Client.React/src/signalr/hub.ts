@@ -28,6 +28,8 @@ export interface HubCallbacks {
   onOutputBatch?: (projectId: string, subscriptionId: string, generation: string, fromOffset: number, lines: OutputMessage[]) => void;
   /** The replay for subscriptionId is done at offset, in generation; live lines follow. */
   onOutputReplayComplete?: (projectId: string, subscriptionId: string, generation: string, offset: number) => void;
+  /** The project's output started over in generation (/clear): the live lines that follow are the new file's, from its start. */
+  onOutputRestarted?: (projectId: string, generation: string) => void;
   onStatusChanged?: (projectId: string, status: ProjectStatus) => void;
   /** The projects needing the user changed; items is the server's whole list, oldest first. */
   onAttentionChanged?: (items: AttentionItem[]) => void;
@@ -112,6 +114,10 @@ export class GodModeHub {
 
     this.on(connection, 'OutputReplayComplete', (projectId, subscriptionId, generation, offset) => {
       this.callbacks.onOutputReplayComplete?.(projectId, subscriptionId, generation, offset);
+    });
+
+    this.on(connection, 'OutputRestarted', (projectId, generation) => {
+      this.callbacks.onOutputRestarted?.(projectId, generation);
     });
 
     this.on(connection, 'StatusChanged', (projectId, status) => {

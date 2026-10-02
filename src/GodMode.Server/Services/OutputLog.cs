@@ -15,7 +15,8 @@ namespace GodMode.Server.Services;
 /// the same, with each offset still after the <c>\n</c>.
 /// <para>
 /// An offset is into one generation of the file, named in <c>output-generation</c> beside it: a
-/// project created, or deleted and created again with the same ID, starts a new one (see <see cref="StartGeneration"/>).
+/// project created, or deleted and created again with the same ID, starts a new one (see <see cref="StartGeneration"/>),
+/// and so does a <c>/clear</c>, which keeps the output it had beside it (see <see cref="RestartAsync"/>).
 /// </para>
 /// </summary>
 public static class OutputLog
@@ -78,6 +79,25 @@ public static class OutputLog
         {
             return NewGenerationId();
         }
+    }
+
+    /// <summary>The file a generation's output is kept in once the output has started over (<see cref="RestartAsync"/>).</summary>
+    public static string ClearedPathOf(string statePath, string generation) => Path.Combine(statePath, $"output-{generation}.jsonl");
+
+    /// <summary>
+    /// Starts the output over, as <c>/clear</c> starts claude's conversation over: what <c>output.jsonl</c> holds is kept
+    /// beside it, as <see cref="ClearedPathOf"/> its generation, and a new generation starts with no output. Returns it.
+    /// Called on the project's consumer, with its writer closed: a reader that has the file open goes on reading the
+    /// kept one, and a subscription notices the new generation when it catches up.
+    /// </summary>
+    public static async Task<string> RestartAsync(string statePath, CancellationToken ct = default)
+    {
+        var before = await GenerationAsync(statePath, ct);
+        if (File.Exists(PathOf(statePath))) File.Move(PathOf(statePath), ClearedPathOf(statePath, before), overwrite: true);
+        var generation = StartGeneration(statePath);
+        // The new generation's file, empty, at once: a read between this and the next line finds no output, not no file
+        File.Create(PathOf(statePath)).Dispose();
+        return generation;
     }
 
     private static string NewGenerationId() => Guid.NewGuid().ToString("N");

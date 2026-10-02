@@ -46,8 +46,7 @@ public sealed class HelpNode(string id, int priority) : INode
         (AnnouncementTools.Unmute.Name, "sig til igen", "you can talk again"),
     ];
 
-    private static readonly IReadOnlyList<(string[] Tokens, bool Danish)> PhraseTokens =
-        [.. Phrases.Select(p => (CommandResolver.Tokenize(p.Phrase), p.Danish))];
+    private static readonly IReadOnlyList<string[]> PhraseTokens = [.. Phrases.Select(p => CommandResolver.Tokenize(p.Phrase))];
 
     public string Id => id;
     public int Priority => priority;
@@ -95,32 +94,8 @@ public sealed class HelpNode(string id, int priority) : INode
     public static bool MayBecomeHelp(string[] tokens) => Cover(tokens, open: true) is not null;
 
     /// <summary>The words as help's phrases, the last of them perhaps only begun when <paramref name="open"/>.</summary>
-    private static (bool Danish, bool OnPartial)? Cover(string[] tokens, bool open)
-    {
-        // From the end: the cover of the words from each position on, null where there is none
-        var from = new (bool Danish, bool OnPartial)?[tokens.Length + 1];
-        for (var at = tokens.Length - 1; at >= 0; at--)
-        {
-            foreach (var (phrase, danish) in PhraseTokens)
-            {
-                var end = at + phrase.Length;
-                if (end > tokens.Length)
-                {
-                    if (open && tokens.AsSpan(at).SequenceEqual(phrase.AsSpan(0, tokens.Length - at)))
-                        from[at] = (danish, false);
-                }
-                else if (tokens.AsSpan(at, phrase.Length).SequenceEqual(phrase))
-                {
-                    if (end == tokens.Length)
-                        from[at] = (danish, phrase.Length == 1);
-                    else if (from[end] is { } rest)
-                        from[at] = (danish, phrase.Length == 1 && rest.OnPartial);
-                }
-                if (from[at] is not null) break;
-            }
-        }
-        return tokens.Length == 0 ? null : from[0];
-    }
+    private static (bool Danish, bool OnPartial)? Cover(string[] tokens, bool open) =>
+        WholeUtterance.Cover(tokens, PhraseTokens, open) is { } cover ? (Phrases[cover.First].Danish, cover.OneWordEach) : null;
 
     /// <summary>What help says for a graph with these tools: the hint of each it has, in one short sentence.</summary>
     public static string Say(IEnumerable<string> tools, bool danish)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GodMode.FakeClaude;
+using GodMode.Server.Services;
 using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
@@ -34,12 +35,12 @@ public class NoProvisioningTests
     }
 
     /// <summary>
-    /// No <c>--allowedTools</c>: every MCP tool that needs approval reaches the permission prompt,
-    /// unless Claude Code's own settings allow it. Not even when the profile's Claude config dir, or
-    /// what the root still carries, lists MCP servers.
+    /// Only GodMode's own session tools are allowed (<c>--allowedTools</c> with <c>message_parent</c> and <c>speak</c>):
+    /// every other MCP tool that needs approval reaches the permission prompt, unless Claude Code's own settings allow
+    /// it. Not even when the profile's Claude config dir, or what the root still carries, lists MCP servers.
     /// </summary>
     [Fact]
-    public async Task NothingIsPreApproved_EvenWhenTheProfilesClaudeConfigListsMcpServers()
+    public async Task OnlyGodModesOwnToolsArePreApproved_EvenWhenTheProfilesClaudeConfigListsMcpServers()
     {
         var configDir = ServerProcess.CreateWorkDir("claudecfg");
         try
@@ -55,7 +56,9 @@ public class NoProvisioningTests
 
             Assert.Equal(configDir, launch.Environment["CLAUDE_CONFIG_DIR"]);
             Assert.DoesNotContain("--dangerously-skip-permissions", launch.Argv);
-            Assert.DoesNotContain(launch.Argv, arg => arg is "--allowedTools" or "--allowed-tools");
+            var allowed = launch.Argv.Select((arg, i) => (arg, i)).Where(a => a.arg is "--allowedTools" or "--allowed-tools").Select(a => a.i).ToList();
+            var at = Assert.Single(allowed);
+            Assert.Equal([SessionTools.MessageParent, SpokenReply.ToolName], launch.Argv.Skip(at + 1).TakeWhile(arg => !arg.StartsWith('-')));
         }
         finally
         {

@@ -11,8 +11,8 @@ import { askConfirm, confirmAction } from './confirmDialog';
 import { showToast } from './toast';
 import { useAppStore } from './store';
 import type { ProjectSummary } from './signalr/types';
+import { hubErrorMessage } from './signalr/hubError';
 
-const messageOf = (err: unknown) => err instanceof Error ? err.message.replace(/^.*HubException: /, '') : String(err);
 
 /** What a worktree delete's dialog says goes: the session, its folder and files, and the root's script before that. */
 export function worktreeDeleteMessage(project: ProjectSummary): string {
@@ -62,7 +62,7 @@ async function runDelete(serverId: string, project: ProjectSummary, force: boole
     if (!hub) throw new Error('its server is not connected');
     trashed = (await hub.deleteProject(project.Id, force)).Trashed;
   } catch (err) {
-    const reason = messageOf(err);
+    const reason = hubErrorMessage(err);
     showToast(force
       ? { text: `Could not delete "${project.Name}": ${reason}`, tone: 'error' }
       : { text: `Could not delete "${project.Name}": ${reason}`, tone: 'error', action: { label: 'Force delete…', run: () => void forceDelete(serverId, project, reason) } });
@@ -103,7 +103,7 @@ export async function forgetSession(serverId: string, project: ProjectSummary): 
     if (!hub) throw new Error('its server is not connected');
     await hub.forgetProject(project.Id);
   } catch (err) {
-    showToast({ text: `Could not forget "${project.Name}": ${messageOf(err)}`, tone: 'error' });
+    showToast({ text: `Could not forget "${project.Name}": ${hubErrorMessage(err)}`, tone: 'error' });
     return false;
   }
 
@@ -120,6 +120,6 @@ export async function restoreSession(serverId: string, project: ProjectSummary):
     if (!hub) throw new Error('its server is not connected');
     await hub.restoreProject(project.Id);
   } catch (err) {
-    showToast({ text: `Could not restore "${project.Name}": ${messageOf(err)}`, tone: 'error' });
+    showToast({ text: `Could not restore "${project.Name}": ${hubErrorMessage(err)}`, tone: 'error' });
   }
 }

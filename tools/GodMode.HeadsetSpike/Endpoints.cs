@@ -12,6 +12,11 @@ namespace GodMode.HeadsetSpike;
 /// endpoint's mix format, and which of them carries sound (its peak meter). <see cref="Profile"/> is a guess from
 /// those; the user's ears are the check.
 /// </summary>
+/// <remarks>
+/// Core Audio objects stay on background (MTA) threads: NAudio's devices fail across apartments (DataFlow is a
+/// NullReferenceException on the STA UI thread), so the enumerator is made there, meters are polled there, and the UI
+/// reads only <see cref="HeadsetEndpoint"/> snapshots.
+/// </remarks>
 public sealed class Endpoints : IMMNotificationClient, IDisposable
 {
     private const string Source = "AUDIO";
@@ -19,16 +24,37 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
     private const int SilentPolls = 3;
 
     private readonly SpikeLog _log;
-    private readonly MMDeviceEnumerator _enumerator = new();
+    private readonly MMDeviceEnumerator _enumerator;
     private readonly ConcurrentDictionary<string, string> _formats = new();
     private readonly ConcurrentDictionary<string, int> _silentFor = new();
     private readonly ConcurrentDictionary<string, bool> _audible = new();
-    private volatile IReadOnlyList<MMDevice> _headset = [];
+    private readonly ConcurrentDictionary<string, AudioEndpointVolume> _volumes = new();
+    private volatile IReadOnlyList<HeadsetEndpoint> _headset = [];
+
+    /// <summary>
+    /// A headset render endpoint's volume changed. The trials found Windows keeps a volume per profile, so with no hand
+    /// on the volume this marks a switch: HFP's volume 0.2â€“0.4 s after the mic opens, A2DP's 5.2â€“5.3 s after it closes.
+    /// </summary>
+    public event Action? RenderVolumeChanged;
+    private int _polling;
+
+    /// <summary>A headset endpoint: the device (for background threads only) and what the UI reads of it.</summary>
+    private sealed record HeadsetEndpoint(MMDevice Device, string Id, string Name, DataFlow Flow)
+    {
+        // Windows 10 names the HFP speaker "Headset (... Hands-Free AG Audio)"; Windows 11 "Headset (...)", beside "Headphones (...)" for A2DP
+        public bool HandsFree =>
+            Name.Contains("Hands-Free", StringComparison.OrdinalIgnoreCase) || Name.StartsWith("Headset", StringComparison.OrdinalIgnoreCase);
+    }
 
     public Endpoints(SpikeLog log)
     {
         _log = log;
-        _enumerator.RegisterEndpointNotificationCallback(this);
+        _enumerator = Task.Run(() =>
+        {
+            var enumerator = new MMDeviceEnumerator();
+            enumerator.RegisterEndpointNotificationCallback(this);
+            return enumerator;
+        }).Result;
     }
 
     /// <summary>Endpoints whose name has this in it are the headset's (case-insensitive).</summary>
@@ -63,9 +89,45 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
     private void Rescan()
     {
         _headset = [.. _enumerator.EnumerateAudioEndPoints(DataFlow.All, DeviceState.Active)
-            .Where(d => d.FriendlyName.Contains(HeadsetName, StringComparison.OrdinalIgnoreCase))];
-        _log.Write(Source, $"headset endpoints ('{HeadsetName}'): [{string.Join("; ", _headset.Select(d => $"{d.DataFlow} '{d.FriendlyName}'"))}]");
+            .Where(d => d.FriendlyName.Contains(HeadsetName, StringComparison.OrdinalIgnoreCase))
+            .Select(d => new HeadsetEndpoint(d, d.ID, d.FriendlyName, d.DataFlow))];
+        _log.Write(Source, $"headset endpoints ('{HeadsetName}'): [{string.Join("; ", _headset.Select(e => $"{e.Flow} '{e.Name}'"))}]");
+        WatchVolumes();
         PollFormats();
+    }
+
+    /// <summary>
+    /// Each headset endpoint's volume and mute, logged at first and on every change: the headset's volume buttons may
+    /// reach Windows only as a volume change (AVRCP absolute volume), not as keys.
+    /// </summary>
+    private void WatchVolumes()
+    {
+        // An endpoint that went away is watched afresh when it comes back
+        foreach (var gone in _volumes.Keys.Where(id => _headset.All(e => e.Id != id)).ToList())
+            _volumes.TryRemove(gone, out _);
+        foreach (var endpoint in _headset)
+        {
+            if (_volumes.ContainsKey(endpoint.Id)) continue;
+            try
+            {
+                var volume = endpoint.Device.AudioEndpointVolume;
+                if (!_volumes.TryAdd(endpoint.Id, volume)) continue;
+                _log.Write(Source, $"volume of {endpoint.Flow} '{endpoint.Name}': {volume.MasterVolumeLevelScalar:P0}{(volume.Mute ? ", muted" : "")}");
+                var last = $"{volume.MasterVolumeLevelScalar:P0}{(volume.Mute ? ", muted" : "")}";
+                // Windows notifies once per channel too: only a change of the master volume or mute is logged
+                volume.OnVolumeNotification += data =>
+                {
+                    var now = $"{data.MasterVolume:P0}{(data.Muted ? ", muted" : "")}";
+                    if (Interlocked.Exchange(ref last, now) == now) return;
+                    _log.Write(Source, $"volume of {endpoint.Flow} '{endpoint.Name}' -> {now}");
+                    if (endpoint.Flow == DataFlow.Render) RenderVolumeChanged?.Invoke();
+                };
+            }
+            catch (Exception ex)
+            {
+                _log.Error(Source, $"volume of '{endpoint.Name}'", ex);
+            }
+        }
     }
 
     private static string Describe(MMDevice device)
@@ -99,21 +161,38 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
         }
     }
 
-    /// <summary>Every 100 ms: which headset endpoints carry sound. A change is logged, silence only after 300 ms of it.</summary>
-    public void PollMeters()
+    /// <summary>Every 100 ms, from the UI's timer: polls the meters on a background thread, skipped while the last poll runs.</summary>
+    public void PollMetersInBackground()
     {
-        foreach (var device in _headset)
+        if (Interlocked.CompareExchange(ref _polling, 1, 0) != 0) return;
+        Task.Run(() =>
+        {
+            try
+            {
+                PollMeters();
+            }
+            finally
+            {
+                Volatile.Write(ref _polling, 0);
+            }
+        });
+    }
+
+    /// <summary>Which headset endpoints carry sound. A change is logged, silence only after 300 ms of it.</summary>
+    private void PollMeters()
+    {
+        foreach (var endpoint in _headset)
         {
             float peak;
             try
             {
-                peak = device.AudioMeterInformation.MasterPeakValue;
+                peak = endpoint.Device.AudioMeterInformation.MasterPeakValue;
             }
             catch (Exception)
             {
                 continue;
             }
-            var id = device.ID;
+            var id = endpoint.Id;
             var was = _audible.GetValueOrDefault(id);
             if (peak > Audible)
             {
@@ -121,26 +200,26 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
                 if (!was)
                 {
                     _audible[id] = true;
-                    _log.Write(Source, $"sound on {device.DataFlow} '{device.FriendlyName}' (peak {peak:F4})");
+                    _log.Write(Source, $"sound on {endpoint.Flow} '{endpoint.Name}' (peak {peak:F4})");
                 }
             }
             else if (was && _silentFor.AddOrUpdate(id, 1, (_, n) => n + 1) >= SilentPolls)
             {
                 _audible[id] = false;
-                _log.Write(Source, $"silent on {device.DataFlow} '{device.FriendlyName}'");
+                _log.Write(Source, $"silent on {endpoint.Flow} '{endpoint.Name}'");
             }
         }
     }
 
-    /// <summary>Every second, and on any change: each headset endpoint's shared-mode mix format, logged when it changes.</summary>
+    /// <summary>Every second, and on any change (on a background thread): each headset endpoint's mix format, logged when it changes.</summary>
     public void PollFormats()
     {
-        foreach (var device in _headset)
+        foreach (var endpoint in _headset)
         {
             string format;
             try
             {
-                var client = device.AudioClient;
+                var client = endpoint.Device.AudioClient;
                 var mix = client.MixFormat;
                 format = $"{mix.SampleRate} Hz, {mix.Channels} ch, {mix.BitsPerSample} bit";
                 client.Dispose();
@@ -149,36 +228,31 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
             {
                 format = $"(unreadable: {ex.Message})";
             }
-            var id = device.ID;
-            if (_formats.TryGetValue(id, out var was) && was == format) continue;
-            _formats[id] = format;
-            _log.Write(Source, $"mix format of {device.DataFlow} '{device.FriendlyName}': {format}");
+            if (_formats.TryGetValue(endpoint.Id, out var was) && was == format) continue;
+            _formats[endpoint.Id] = format;
+            _log.Write(Source, $"mix format of {endpoint.Flow} '{endpoint.Name}': {format}");
         }
     }
 
-    /// <summary>The headset's profile as far as the endpoints tell, with why.</summary>
+    /// <summary>The headset's profile as far as the endpoints tell, with why. Reads snapshots only: the UI thread calls it.</summary>
     public string Profile
     {
         get
         {
             var headset = _headset;
             if (headset.Count == 0) return $"no active endpoint named '{HeadsetName}'";
-            // Windows 10 names the HFP speaker "Headset (… Hands-Free AG Audio)"; Windows 11 "Headset (…)", beside "Headphones (…)" for A2DP
-            static bool HandsFree(MMDevice d) =>
-                d.FriendlyName.Contains("Hands-Free", StringComparison.OrdinalIgnoreCase)
-                || d.FriendlyName.StartsWith("Headset", StringComparison.OrdinalIgnoreCase);
-            var audible = headset.Where(d => d.DataFlow == DataFlow.Render && _audible.GetValueOrDefault(d.ID)).ToList();
-            if (OpenMicrophoneId is { } mic && headset.Any(d => d.ID == mic))
+            var audible = headset.Where(e => e.Flow == DataFlow.Render && _audible.GetValueOrDefault(e.Id)).ToList();
+            if (OpenMicrophoneId is { } mic && headset.Any(e => e.Id == mic))
                 return "HFP? (the headset's microphone is open)";
-            if (audible.Any(HandsFree)) return "HFP? (sound on the hands-free endpoint)";
-            if (audible.Count > 0) return $"A2DP? (sound on '{audible[0].FriendlyName}')";
+            if (audible.Any(e => e.HandsFree)) return "HFP? (sound on the hands-free endpoint)";
+            if (audible.Count > 0) return $"A2DP? (sound on '{audible[0].Name}')";
             return "A2DP? (idle, microphone closed)";
         }
     }
 
-    /// <summary>Each headset endpoint, its format and whether it carries sound, for the state panel.</summary>
-    public string Detail => string.Join(Environment.NewLine, _headset.Select(d =>
-        $"{d.DataFlow} '{d.FriendlyName}': {_formats.GetValueOrDefault(d.ID, "?")}{(_audible.GetValueOrDefault(d.ID) ? ", sound" : "")}"));
+    /// <summary>Each headset endpoint, its format and whether it carries sound, for the state panel (snapshots only).</summary>
+    public string Detail => string.Join(Environment.NewLine, _headset.Select(e =>
+        $"{e.Flow} '{e.Name}': {_formats.GetValueOrDefault(e.Id, "?")}{(_audible.GetValueOrDefault(e.Id) ? ", sound" : "")}"));
 
     public void OnDeviceStateChanged(string deviceId, DeviceState newState)
     {
@@ -207,7 +281,7 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
     public void OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key)
     {
         // Only the headset's: other devices change properties all the time
-        if (_headset.All(d => d.ID != pwstrDeviceId)) return;
+        if (_headset.All(e => e.Id != pwstrDeviceId)) return;
         _log.Write(Source, $"property {key.formatId},{key.propertyId} changed on {Name(pwstrDeviceId)}");
         Task.Run(PollFormats);
     }

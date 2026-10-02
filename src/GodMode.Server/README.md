@@ -273,7 +273,7 @@ GodMode gives a session one MCP server, its own: `godmode`, this server's `/mcp`
 
 A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: the server logs a warning once for each, and ignores it.
 
-GodMode pre-approves no tool: it passes no `--allowedTools`. A tool call that needs approval, an MCP tool's included, reaches the permission prompt (`WaitingPermission`), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's `permissionMode` lets it through, or the project runs with skip-permissions (see [Permissions](#permissions)).
+GodMode pre-approves only its own session tools, `message_parent` and `speak` on `/mcp`: every launch passes `--allowedTools mcp__godmode__message_parent mcp__godmode__speak`, in any root and permission mode (#384). A root's own `--allowedTools` in `claudeArgs` (`--allowedTools a b`, `--allowed-tools`, or `--allowedTools=a`) gets the two added to its list, the first one it has, so claude is given one list; with none, the server adds the flag after the root's args. Any other tool call that needs approval, an MCP tool's included (the fleet's too), reaches the permission prompt (`WaitingPermission`), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's `permissionMode` lets it through, or the project runs with skip-permissions (see [Permissions](#permissions)).
 
 ### Permissions
 
@@ -371,7 +371,7 @@ A GodMode session can be an overseer: it gets the fleet's tools in its own MCP c
 - **Its MCP config is out of its working folder:** `{root}/logs/<id>.mcp-config.json`, beside its record, as every session's is. A session in a shared folder ([Several sessions in one folder](#several-sessions-in-one-folder)) has its neighbours in that folder, and its token opens the fleet's tools.
 - **An overseer never answers a permission prompt or a question**, its children's or anyone's: no tool does, and `send` is held while one waits. A child's prompts go to the user, through the inbox and notifications.
 - **It hears from its children without polling** ([Messages between sessions](#messages-between-sessions)). In its children's config dir: their `SendMessage`, and `notify_when_idle`, which it arms on each child it dispatches. In another: their `message_parent`, and the server's notices. Each wakes it, idle, as a new turn. A stop, a restart or a resume ends its `notify_when_idle` subscriptions, so a resumed overseer surveys with `list_sessions` and arms them again. Each woken turn ends with a `result`, which is the overseer's `Finished` attention item. claude also starts a turn of its own when a background task it started finishes (Bash `run_in_background`, `Monitor`, `ScheduleWakeup`): measured with claude 2.1.287, a session that ran `sleep 30` in the background woke 40 seconds later.
-- **An overseer action** (the repo's godmode-dev root, `.devcontainer/godmode-server/roots/godmode-dev/`): `overseer`, a coordinator, `"fleetTools": true` and `"sharedFolder": true`, in one folder every coordinator shares (`{root}/overseer`, a detached worktree of `origin/master`, for `gh` and the skills, edited by none); and `epic`, an epic's overseer, `"fleetTools": true`, in the worktree of its branch `epic/<n>-<slug>`, made or checked out and pushed. Both allow the fleet's tools, `message_parent` and `speak` with `"--allowedTools", "mcp__godmode-fleet", "mcp__godmode__message_parent", "mcp__godmode__speak"` in `claudeArgs` (`issue` allows `message_parent` and `speak`). Both say `"allowSkipPermissions": false`, so no session with the fleet's tools runs with permissions skipped. The `issue` action they dispatch with takes `baseBranch` and a `brief` added to its prompt. Their create scripts write the prompt (`project_prompt`): a `promptTemplate` with an input's `{placeholder}` falls back to the `prompt` input when that input is missing or its text has braces.
+- **An overseer action** (the repo's godmode-dev root, `.devcontainer/godmode-server/roots/godmode-dev/`): `overseer`, a coordinator, `"fleetTools": true` and `"sharedFolder": true`, in one folder every coordinator shares (`{root}/overseer`, a detached worktree of `origin/master`, for `gh` and the skills, edited by none); and `epic`, an epic's overseer, `"fleetTools": true`, in the worktree of its branch `epic/<n>-<slug>`, made or checked out and pushed. Both allow the fleet's tools with `"--allowedTools", "mcp__godmode-fleet"` in `claudeArgs`, to which every launch adds `message_parent` and `speak` ([MCP Servers](#mcp-servers)). Both say `"allowSkipPermissions": false`, so no session with the fleet's tools runs with permissions skipped. The `issue` action they dispatch with takes `baseBranch` and a `brief` added to its prompt. Their create scripts write the prompt (`project_prompt`): a `promptTemplate` with an input's `{placeholder}` falls back to the `prompt` input when that input is missing or its text has braces.
 
 ### Messages between sessions
 
@@ -411,7 +411,7 @@ A session and its parent talk two ways: through Claude Code's own cross-session 
 
     Each refusal says why.
   - Its result is `{"Delivered":true}`, or `{"Delivered":false,"Held":"<why>"}`.
-  - GodMode pre-approves nothing. A root that wants its sessions to report and speak without asking the user puts `"--allowedTools", "mcp__godmode__message_parent", "mcp__godmode__speak"` in the action's `claudeArgs`. The repo's godmode-dev root does so for `issue`, `overseer` and `epic`, since an epic overseer reports to its coordinator. `speak` is called on every turn ([A session's spoken reply](#a-sessions-spoken-reply)), so a root that does not allow it, and does not run in `auto` mode, raises a permission prompt on every turn that calls it.
+  - It never asks the user: every launch allows it, and `speak`, with `--allowedTools` ([MCP Servers](#mcp-servers)), whatever the root's config or permission mode, so a session reports without asking.
 - **The fleet's `send`** to a session waiting on the user is held the same way, labelled with its sender: the calling session, or `[Message from the overseer on the fleet's endpoint]` for the server's credential.
   - Waiting on the user means a permission prompt, an AskUserQuestion, a question it ended its turn on, or a question it was stopped on, a restart included.
   - Its result's `Held` says why.
@@ -464,6 +464,23 @@ A session and its parent talk two ways: through Claude Code's own cross-session 
   Each refusal names the missing link.
 - **The server's credential is not scoped by links,** as before. A child it starts under a parent in another root, and a child the app creates with `__parentId` there, still need a link to `message_parent` that parent.
 
+### Slash commands
+
+claude runs a message that starts with `/name` as its command `name`, and takes a `/word` it does not know (`/frobnicate`, `/tmp/x is full`) as text. GodMode sends a short list of them, and refuses claude's others, which never reach claude. Every message that reaches claude is checked: `SendInput`, `ReplyAndResume` (the app, and voice), the fleet's `send` and a create's prompt (refused before any script runs).
+
+| Input | What GodMode does |
+|---|---|
+| `/clear` | Sent. claude starts a new conversation (`conversation_reset`, then a new session ID in a new `system/init`, which `session-id` follows). The output starts over: `output.jsonl` is kept as `output-{generation}.jsonl`, a new `output-generation` starts with the reset line, and the clients that follow it live get `OutputRestarted`. The last result and question go with the conversation, and its result, with no text, raises no `Finished`. |
+| `/compact [instructions]` | Sent. claude writes `system/compact_boundary` (the app's marker), the summary as a user message with `isSynthetic`, and a result with no text, which keeps the last reply and raises no `Finished`. |
+| `/context` | Sent. Its table is the turn's reply. |
+| `/<skill>` | Sent, for every skill the session's last `system/init` listed (`skills`, plugin skills as `plugin:skill`). Before its first `system/init` a skill is taken for text, which claude runs all the same. |
+| `/model`, `/effort` | Refused: GodMode sets them per root and action, kept with the project, at each launch, which would undo one sent mid-session. |
+| `/rename` | Refused: GodMode names the launch (`-n {root}-{id}`), and `SendMessage` reaches sessions by that name. |
+| Any other of claude's commands | Refused: the ones claude 2.1 lists, and any the session's last `system/init` listed in `slash_commands`. |
+| Any other text | Sent, as it is. |
+
+The status carries what the last `system/init` listed: `SlashCommands`, what GodMode sends (the three and the skills, which the app's composer completes), and `ClaudeCommands`, all of claude's. A refusal is an `InvalidOperationException` (a `HubException` to the app) that says why. A command sent with a resume carries none of the messages held for the session: they wait for its turn to end.
+
 ### A session's last replies
 
 What a session said, whether or not it needs the user, read from its `output.jsonl`. On the server it is `IProjectManager.LastRepliesAsync(projectId, turns)` (`OutputLog.LastRepliesAsync` on a state folder), which gives `AssistantReply(Text, Finished, IsError)`s (`GodMode.Shared`), oldest first. It is the one read behind both of its callers: the fleet's `read`, and the hub's `GetLastReplies(projectId, turns)`, which the voice's `read_reply` calls (#378). Each takes 1 to 20 turns (`IProjectHub.MaxReplyTurns` on the hub) and refuses any other count, and a project the server does not track; neither marks anything seen.
@@ -482,7 +499,7 @@ A session writes for a screen: headings, tables, code, the question last. The vo
 - **The turn's text is read from claude's stream**, not taken from the call, so it belongs to the turn it was made in: the `speak` tool use (`mcp__godmode__speak`) of an assistant line, whose tool result in the user line after is not an error (refused, or denied at its permission prompt). A subagent's call (a line with a `parent_tool_use_id`) is not the session's, and of several calls in a turn the last accepted counts.
 - **`ProjectStatus.SpokenSummary`** is that text, set with `LastResult` as the turn's `result` comes, null for a turn that made none or ended in error, and cleared when the next turn starts (claude echoes a message the user sent). It is in `status.json`, so it lasts through a restart. `AttentionItem.Spoken` carries it for the turn's `Finished` item, or its `Question` in plain text; an AskUserQuestion, a permission and an error have none.
 - **A turn without one** is as before: the voice summarises from the full question or result (#377).
-- **It is a tool call like any other**: GodMode pre-approves it no more than `message_parent` ([Messages between sessions](#messages-between-sessions)). A root lets it run with `--allowedTools mcp__godmode__speak` in `claudeArgs`, `permissions.allow`, or `auto` mode; a root with none of those raises a permission prompt on every turn that calls it.
+- **It never asks the user**: every launch allows it, as it allows `message_parent`, with `--allowedTools` ([MCP Servers](#mcp-servers)), in any root and permission mode.
 
 ### Input Schema (Convention-Based)
 
@@ -733,7 +750,8 @@ Every session has a working folder in its root, and keeps its state in that fold
 │           ├── settings.json    # The session's settings (action, permission mode, skip-permissions asked for, shared folder)
 │           ├── input.jsonl      # User input log
 │           ├── output.jsonl     # Claude output log (GodMode's own; Claude's transcripts are not read)
-│           ├── output-generation # A GUID, new on each create: which output.jsonl a client's offset is in
+│           ├── output-generation # A GUID, new on each create and /clear: which output.jsonl a client's offset is in
+│           ├── output-{generation}.jsonl # The output a /clear started over from, kept
 │           └── session-id       # Claude's session GUID, for --resume
 └── (project files)              # Working directory for Claude
 ```
@@ -835,7 +853,7 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.god
 
 The server you use gets its own file: `--config <path>` (or `GODMODE_CONFIG`), with its `Instance`, its roots (`Roots:Scan`, `Roots:Explicit`), its `Profiles` and, if you like, its key.
 
-The server builds no React and needs no npm. To see the client, run the GodMode app (on Windows, `dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.19041.0`) and add the server there with its key.
+The server builds no React and needs no npm. To see the client, run the GodMode app (on Windows, `dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.26100.0`) and add the server there with its key.
 
 ### Production
 
@@ -877,7 +895,7 @@ Attention:
 - `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Review`, `Finished`), oldest first, with a short plain `Text`, and for a turn's end (`Finished`, or a `Question` in plain text) the session's own `Spoken` reply when it gave one; the same after a restart
 - `Task<AssistantReply[]> GetLastReplies(projectId, turns)` — What claude said in the project's last 1 to 20 turns, oldest first, whatever it waits on, seen or not; the last may be unfinished ([A session's last replies](#a-sessions-last-replies))
 - `Task MarkSeen(projectId)` — The last result is seen: no longer `Finished`, nor `Review` until the pull request changes (a reply does the same)
-- `Task ReplyAndResume(projectId, text)` — `SendInput` to a running claude; otherwise resume, send, and return once claude reports `system/init` (fails on exit or after `SessionStartTimeoutSeconds`, default 60)
+- `Task ReplyAndResume(projectId, text)` — `SendInput` to a running claude; otherwise resume, send, and return once claude reports `system/init` (fails on exit or after `SessionStartTimeoutSeconds`, default 60). A slash command GodMode does not send is refused, as by `SendInput` ([Slash commands](#slash-commands))
 
 Roots and profiles:
 - `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas
@@ -891,6 +909,7 @@ Utility:
 - `OutputReceived(projectId, offset, rawJson)` — A live raw Claude JSON output line; `offset` is the byte offset in `output.jsonl` just after it
 - `OutputBatch(projectId, subscriptionId, generation, fromOffset, lines)` — Replayed `OutputLine`s (`Offset`, `RawJson`) covering `output.jsonl` from `fromOffset`, for the subscription `subscriptionId`, in the file's `generation`; a replay from 0 when more was asked for, or in another generation, means the client's transcript is not from this file
 - `OutputReplayComplete(projectId, subscriptionId, generation, offset)` — The subscription's replay is done at `offset`, in `generation`; live lines follow
+- `OutputRestarted(projectId, generation)` — The output started over in `generation` (`/clear`), to the connections that follow it live: what they hold is gone, and the live lines that follow are the new file's, from its start
 - `StatusChanged(projectId, status)` — Project status changed
 - `AttentionChanged(items)` — The whole `GetAttention` list, pushed only when it differs from the last one pushed
 - `ProjectCreated(status)` — New project created, or recovered live from a root that appeared or took another profile (*Live roots*)

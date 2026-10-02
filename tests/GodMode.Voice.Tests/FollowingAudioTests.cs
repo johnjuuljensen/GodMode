@@ -22,9 +22,9 @@ public sealed class FollowingAudioTests : IDisposable
 
     public void Dispose() => _audio?.Dispose();
 
-    private FollowingAudio Open(bool echoCancellation = false, AudioDevice? microphone = null, AudioDevice? speaker = null)
+    private FollowingAudio Open(bool echoCancellation = false, AudioDevice? microphone = null, AudioDevice? speaker = null, bool micOpen = true)
     {
-        _audio = new FollowingAudio(_devices, echoCancellation, microphone, speaker, NullLogger.Instance, TimeSpan.FromMilliseconds(10));
+        _audio = new FollowingAudio(_devices, echoCancellation, microphone, speaker, NullLogger.Instance, TimeSpan.FromMilliseconds(10), micOpen);
         _audio.Start();
         return _audio;
     }
@@ -172,6 +172,71 @@ public sealed class FollowingAudioTests : IDisposable
         Assert.Null(audio.OpenIds.Microphone);
     }
 
+    /// <summary>
+    /// Issue #422: voice starts with the mic closed, so no microphone is open and the speaker is Windows' default device
+    /// (A2DP, on a Bluetooth headset). Opening the mic puts the microphone behind the session's source, on the
+    /// communications pair; closing it lets go of the microphone (a headset goes back to A2DP) and gives the session silence.
+    /// </summary>
+    [Fact]
+    public async Task Opening_and_closing_the_mic_swaps_the_source_and_moves_the_speaker_between_the_defaults()
+    {
+        _devices.Set([LaptopMic, HeadsetMic], [LaptopSpeakers, HeadsetSpeaker], HeadsetMic, HeadsetSpeaker);
+        _devices.ConsoleSpeaker = LaptopSpeakers;
+        var audio = Open(micOpen: false);
+
+        Assert.False(audio.MicOpen);
+        Assert.Equal((null, LaptopSpeakers.Id), audio.OpenIds);
+        Assert.Empty(_devices.Opened.OfType<FakeMicrophone>());
+
+        audio.OpenMic();
+        Assert.True(audio.MicOpen);
+        Assert.Equal((HeadsetMic.Id, HeadsetSpeaker.Id), audio.OpenIds);
+        Assert.True(_devices.Microphone(HeadsetMic).Started);
+        _devices.Microphone(HeadsetMic).Say(3);
+        Assert.Equal(3, await ReadAsync(audio));
+
+        audio.CloseMic();
+        Assert.Equal((null, LaptopSpeakers.Id), audio.OpenIds);
+        Assert.True(_devices.Microphone(HeadsetMic).Disposed);
+        Assert.False(audio.Source.Audio.Completion.IsCompleted);
+
+        // A device change while it is closed opens no microphone
+        _devices.Set([LaptopMic, HeadsetMic], [LaptopSpeakers, HeadsetSpeaker], LaptopMic, HeadsetSpeaker);
+        await Task.Delay(100);
+        Assert.Single(_devices.Opened.OfType<FakeMicrophone>());
+
+        audio.OpenMic();
+        _devices.Microphone(LaptopMic).Say(4);
+        Assert.Equal(4, await ReadAsync(audio));
+    }
+
+    [Fact]
+    public void Opening_the_mic_with_no_microphone_says_so_and_leaves_it_closed()
+    {
+        _devices.Set([], [LaptopSpeakers], null, LaptopSpeakers);
+        var audio = Open(micOpen: false);
+
+        Assert.Throws<InvalidOperationException>(audio.OpenMic);
+
+        Assert.False(audio.MicOpen);
+        Assert.Equal((null, LaptopSpeakers.Id), audio.OpenIds);
+    }
+
+    [Fact]
+    public void A_chosen_speaker_is_used_with_the_mic_open_or_closed()
+    {
+        _devices.Set([HeadsetMic], [LaptopSpeakers, HeadsetSpeaker], HeadsetMic, HeadsetSpeaker);
+        _devices.ConsoleSpeaker = LaptopSpeakers;
+        var audio = Open(speaker: HeadsetSpeaker, micOpen: false);
+        Assert.Equal((null, HeadsetSpeaker.Id), audio.OpenIds);
+
+        audio.OpenMic();
+        Assert.Equal((HeadsetMic.Id, HeadsetSpeaker.Id), audio.OpenIds);
+        audio.CloseMic();
+        Assert.Equal((null, HeadsetSpeaker.Id), audio.OpenIds);
+        Assert.Single(_devices.Opened.OfType<FakeSpeaker>());
+    }
+
     private static Task UntilOpenAsync(FollowingAudio audio, AudioDevice microphone, AudioDevice speaker) =>
         Eventually.UntilAsync(() => audio.OpenIds == (microphone.Id, speaker.Id),
             () => $"open on {audio.OpenIds}, not ({microphone.Id}, {speaker.Id})");
@@ -204,11 +269,14 @@ public sealed class FollowingAudioTests : IDisposable
         public FakeMicrophone Microphone(AudioDevice device) => Opened.OfType<FakeMicrophone>().Last(m => m.Id == device.Id);
         public FakeSpeaker Speaker(AudioDevice device) => Opened.OfType<FakeSpeaker>().Last(s => s.Id == device.Id);
 
-        public VoiceDeviceList List(bool echoCancelled)
+        public VoiceDeviceList List(bool consoleDefaults)
         {
-            Listed.Enqueue(echoCancelled);
-            return _list;
+            Listed.Enqueue(consoleDefaults);
+            return consoleDefaults && ConsoleSpeaker is { } console ? _list with { DefaultSpeakerId = console.Id } : _list;
         }
+
+        /// <summary>The console (multimedia) default speaker, where it is not the communications one.</summary>
+        public AudioDevice? ConsoleSpeaker { get; set; }
 
         public IDisposable Watch(Action changed)
         {

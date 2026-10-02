@@ -5,6 +5,7 @@ import { createTranscriptBuilder } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
 import { ReplyInput } from './ReplyInput';
+import { hubErrorMessage } from '../../signalr/hubError';
 import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import { deleteSession } from '../../deleteSession';
@@ -93,6 +94,10 @@ export function ProjectView({ serverId, projectId }: Props) {
   // Why the last answer to a question failed (another client answered first): that question's alone
   const [answerError, setAnswerError] = useState<{ requestId: string; message: string } | null>(null);
   const questionError = answerError && answerError.requestId === pendingQuestion?.RequestId ? answerError.message : null;
+  // Why the server refused the last message sent (a slash command it does not pass, #31): that project's alone,
+  // and cleared by the next send
+  const [refusal, setRefusal] = useState<{ projectId: string; message: string } | null>(null);
+  const sendError = refusal?.projectId === projectId ? refusal.message : null;
 
   // A failure (another client answered first, claude stopped waiting) is the card's to show
   const handlePermission = useCallback(async (allow: boolean) => {
@@ -117,6 +122,7 @@ export function ProjectView({ serverId, projectId }: Props) {
 
   const sendText = useCallback(async (text: string) => {
     if (!text.trim()) return;
+    setRefusal(null);
     markInputSent();
     // The reader's own message is one they want to see, wherever they had scrolled to
     transcriptRef.current?.scrollToLatest();
@@ -125,6 +131,9 @@ export function ProjectView({ serverId, projectId }: Props) {
       await replyAndResume(serverId, projectId, text);
     } catch (err) {
       console.error('Failed to send input:', err);
+      setRefusal({ projectId, message: hubErrorMessage(err) });
+      // What was typed comes back to be changed, unless something else has been typed since
+      setInputText(current => current === '' ? text : current);
     }
   }, [replyAndResume, serverId, projectId, markInputSent]);
 
@@ -236,6 +245,7 @@ export function ProjectView({ serverId, projectId }: Props) {
       )}
 
       {questionError && <div className="project-answer-error">{questionError}</div>}
+      {sendError && <div className="project-answer-error" role="alert">{sendError}</div>}
 
       <div className="project-input-bar">
         <ReplyInput
@@ -249,6 +259,7 @@ export function ProjectView({ serverId, projectId }: Props) {
           placeholder={awaitsFirstMessage ? 'Type the first message...'
             : canResume || state === 'Error' ? 'Type to resume...' : 'Type your response...'}
           disabled={notFound}
+          commands={project?.SlashCommands}
         />
         <button className="btn btn-primary" onClick={handleSendInput} disabled={notFound || !inputText.trim()}>
           Send
