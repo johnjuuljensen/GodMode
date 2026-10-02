@@ -15,7 +15,7 @@ git submodule update --init --recursive   # once per checkout: it uses VoiceBot'
 dotnet run --project tools/GodMode.HeadsetSpike/GodMode.HeadsetSpike.csproj
 ```
 
-Or build it and start `tools/GodMode.HeadsetSpike/bin/Debug/net10.0-windows10.0.19041.0/GodMode.HeadsetSpike.exe`.
+Or build it and start `tools/GodMode.HeadsetSpike/bin/Debug/net10.0-windows10.0.26100.0/GodMode.HeadsetSpike.exe`.
 No install, keys or admin rights are needed. Close the GodMode app's voice first, so the two do not hold the mic at
 once.
 
@@ -43,6 +43,7 @@ A reference is a mic open or close, or an announcement test. So a switch's timin
 | `CALL` | `Windows.Media.Devices.CallControl`: what the app reported, and `AnswerRequested`, `HangUpRequested` and the rest |
 | `AUDIO` | Every endpoint at start, defaults, endpoints added, removed or changing state, the headset's property changes and mix formats, sound starting and stopping on each headset endpoint (its peak meter), and each headset endpoint's volume and mute, at first and on every change |
 | `MIC` | WaveIn (the same capture GodMode.Maui's voice uses: VoiceBot's `NativeAudioSource`, `MicCapture.WaveIn`, 16 kHz mono, 100 ms buffers), opened and closed on a worker thread so the hook and Mark keep running: the moment you asked (the reference), the moment the open or close returned, the first buffer, the first buffer with sound in it, and once a second the loudest sample of that second (`level`) |
+| `VOIP` | VoIP calls (Trial 4): the coordinator, the call control devices, a reported call, and `EndRequested`, `AnswerRequested`, `RejectRequested`, `HoldRequested`, `ResumeRequested`, `MuteStateChanged`. `--voip-check` on the command line reports a 4 s call and closes the app |
 | `LISTEN` | Listen mode (Trial 3): started, stopped, each play/pause turning the mic on or off, and each button it ignored |
 | `PROXY` | The proxy: started, stopped, and each button it caught; the buttons it passes on are `GSMTC forwarded …` lines, and the status it mirrors from Spotify `SMTC status -> …` |
 | `TONE` | The tone's start and end, its device and format |
@@ -290,9 +291,53 @@ Note each step first (`L2 single`), as before. Leave the tone offset at 0 unless
    falling tone each time?
 3. Repeat 1 with offset 1000.
 
+## Third trial (2026-10-02)
+
+Read from the logs `headset-20261002-123944.log` and `headset-20261002-124239.log`, and the user's notes in them.
+
+- **Listen mode opens the mic from the headset**: in A2DP a single press reached the spike (`Pause`, or `Play` with
+  Spotify paused), paused Spotify, opened the mic (the switch to HFP) and played the rising tone.
+- **In HFP no press reaches it, whatever the spike's status**: none with its status mirrored as *paused* (first log),
+  none with it *playing* (second log). The user's note: "single click while mic open doesn't work". **In call mode the
+  headset's button is no media button any more.** So listen mode can turn the mic on, but not off.
+- The user's note: stopping listen mode left the mic open. Now it closes it.
+- **The way left is a call API.** `Windows.Media.Devices.CallControl` is not available here (all trials). Windows 11
+  24H2 (10.0.26100) added **call control devices to VoIP calls**: `VoipCallCoordinator.GetDeviceSelectorForCallControl`,
+  `IsCallControlDeviceKindSupportedForAssociation`, and `VoipPhoneCall.NotifyCallActive(deviceIds)`, after which the
+  device's call button raises the call's `EndRequested`
+  ([VoipPhoneCall](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.calls.voipphonecall),
+  [VoipCallCoordinator](https://learn.microsoft.com/en-us/uwp/api/windows.applicationmodel.calls.voipcallcoordinator)).
+  Teams uses HFP call control on Windows. The spike now targets the 26100 SDK (`Microsoft.Windows.SDK.NET.Ref`
+  10.0.26100.87: the projection the .NET SDK picks by default, .57, lacks these APIs).
+- **Checked here, with no button** (`--voip-check`, the unpackaged app): the coordinator is available, Bluetooth is
+  supported for association, and **the OpenRun Pro 2 is a call control device** (its Hands-Free service, 0x111E). A
+  reported VoIP call went active with the headset associated (`using the list: True`), and ended without error. So the
+  `voipCall` capability does not stop an unpackaged app.
+
+## Trial 4: the headset's button in a VoIP call
+
+Listen mode now reports a VoIP call while the mic is open (*report a VoIP call while the mic is open*, ticked), with
+the headset as its call control device. Its `EndRequested` closes the mic. Note each step first (`V2 single`).
+
+**V. Listen mode with a VoIP call**
+1. Spotify playing. **Start listen mode**.
+2. Single press: the music pauses, the mic opens, the rising tone, and `VOIP call active`. Does Windows show a call
+   (taskbar, a notification)?
+3. Wait 5 s, then **single press**. **Does `VOIP EndRequested` come**, then `LISTEN VoIP EndRequested: mic off`, the
+   falling tone, and Spotify resuming once A2DP is back?
+4. If 3 did nothing: try a long press, then a double press, with the mic still open. Note which (if any) gives a `VOIP`
+   line. Then close the mic with **Close mic**, and **End VoIP call**.
+5. Repeat 2 and 3 twice. Then mute the headset in the call, if it has a way to (its manual says how), with the mic
+   open: does `MuteStateChanged` come?
+6. **Stop listen mode**.
+
+**W. The call on its own** (if V3 failed)
+1. Mic closed. **Report VoIP call**: does the headset switch to HFP by itself (quality drop)? Single press: any `VOIP`
+   line? **End VoIP call**.
+
 ## Results
 
-Filled in from the first and second trials. The rest waits for Trial 3.
+Filled in from the first three trials. The rest waits for Trial 4.
 
 | # | Question | Result |
 |---|---|---|
@@ -302,7 +347,8 @@ Filled in from the first and second trials. The rest waits for Trial 3.
 | 1d | Long press | Nothing reaches Windows |
 | 1e | Volume buttons | Windows' volume in 6 % steps (AVRCP absolute volume); no key or HID report. Hold − does nothing, hold + is power off |
 | 1f | Catch one gesture, keep Spotify's play/pause | Not by a keyboard hook. By the proxy: forwarding and catching work while Spotify plays; after a pause no button arrived with the proxy saying "playing". Dropped by the user: while listening GodMode takes every button (listen mode) |
-| 1h | Listen mode: play/pause turns the mic on and off | Trial 3, L: on with the mic closed, off **in HFP**, with Spotify paused, after Spotify was started by mouse |
+| 1h | Listen mode: play/pause turns the mic on and off | **On: yes** (a press in A2DP opens the mic). **Off: no**: in HFP no press reaches the media session, with its status paused or playing |
+| 1i | A press in HFP through a VoIP call (24H2 call control devices) | Unpackaged app: the coordinator, Bluetooth association and the headset as a call control device all work, and a call with it goes active. The button's `EndRequested`: Trial 4, V |
 | 1g | Own SMTC claimed | Gets every button; Spotify gets none while the app holds the session |
 | 2a | GSMTC pause and resume Spotify | Works every time; Spotify's state 55–290 ms later |
 | 2b | Announcement test | Paused at 289 ms, tones from 439 ms, playing again at 1022 ms |
@@ -311,5 +357,5 @@ Filled in from the first and second trials. The rest waits for Trial 3.
 | 3c | Rising tone after open | Trial 3, U |
 | 3d | Falling tone after close | Trial 3, U (it plays inside the 5 s HFP hold) |
 | 3e | Does the mic hear speech? | Yes: peaks 16000–32737 of 32767 while counting |
-| 4 | Button in HFP via `CallControl` | `CallControl` unavailable (GetDefault and FromId give none): no manual way out by a call button |
+| 4 | Button in HFP via `CallControl` | `CallControl` unavailable (GetDefault and FromId give none). The VoIP route instead: 1i |
 | 5 | LE Audio | No: a Bluetooth Classic device only, no LE device or LE Audio service; the spec lists SBC only |

@@ -25,6 +25,7 @@ public sealed class MainForm : Form
     private readonly Mic _mic;
     private readonly Tone _tone;
     private readonly LeAudioProbe _leAudio;
+    private readonly VoipCalls _voip;
     private KeyboardHook? _hook;
     private GestureClassifier _hookGestures = new();
     private GestureClassifier _rawGestures = new();
@@ -49,6 +50,7 @@ public sealed class MainForm : Form
     private readonly CheckBox _mirror = new() { Text = "mirror Spotify's play/pause", AutoSize = true, Checked = true };
     private readonly CheckBox _pauseWhileListening = new() { Text = "pause Spotify while the mic is open", AutoSize = true, Checked = true };
     private readonly ComboBox _statusWhileOpen = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 130 };
+    private readonly CheckBox _voipWhileOpen = new() { Text = "report a VoIP call while the mic is open", AutoSize = true, Checked = true };
     private bool _listening;
     private bool _toggling;
     private bool _pausedForMic;
@@ -71,6 +73,7 @@ public sealed class MainForm : Form
         _mic = new Mic(_log);
         _tone = new Tone(_log);
         _leAudio = new LeAudioProbe(_log);
+        _voip = new VoipCalls(_log);
         _log.Written += _pending.Enqueue;
         Application.ThreadException += (_, e) => _log.Write("ERROR", $"UI thread: {e.Exception}");
         AppDomain.CurrentDomain.UnhandledException += (_, e) => _log.Write("ERROR", $"unhandled: {e.ExceptionObject}");
@@ -99,7 +102,9 @@ public sealed class MainForm : Form
         controls.Controls.Add(Row("Proxy", _proxy, new Label { Text = "catch", AutoSize = true }, _caught,
             _mirror, Button("Start proxy", StartProxy), Button("Stop proxy", StopProxy)));
         controls.Controls.Add(Row("Listen", Button("Start listen mode", StartListening), Button("Stop listen mode", StopListening),
-            _pauseWhileListening, new Label { Text = "status while mic open", AutoSize = true }, _statusWhileOpen));
+            _pauseWhileListening, new Label { Text = "status while mic open", AutoSize = true }, _statusWhileOpen, _voipWhileOpen));
+        controls.Controls.Add(Row("VoIP", Button("Probe VoIP", () => _ = _voip.ProbeAsync()), Button("Report VoIP call", () => _ = _voip.StartAsync()),
+            Button("End VoIP call", () => _voip.End("button"))));
         controls.Controls.Add(Row("Call", Button("Report incoming (ringing)", () => _call.Incoming(ringer: true)),
             Button("Report incoming (silent)", () => _call.Incoming(ringer: false)),
             Button("Report active call", _call.Active), Button("End call", _call.End)));
@@ -126,6 +131,11 @@ public sealed class MainForm : Form
         foreach (var status in new[] { "mirror Spotify", "Playing", "Paused" }) _statusWhileOpen.Items.Add(status);
         _statusWhileOpen.SelectedIndex = 0;
         _smtc.Pressed += button => BeginInvoke(() => OnOwnButton(button));
+        // The headset's button in a reported VoIP call: in listen mode it closes the mic
+        _voip.EndRequested += () => BeginInvoke(() =>
+        {
+            if (_listening && _mic.IsOpen) _ = ToggleMicAsync("VoIP EndRequested");
+        });
         _sessions.StateChanged += (id, status) =>
         {
             if (MediaSessions.IsOwn(id)) return;
@@ -195,6 +205,7 @@ public sealed class MainForm : Form
         FillDevices();
         _call.Start();
         _ = _sessions.StartAsync();
+        _ = Environment.GetCommandLineArgs().Contains("--voip-check") ? VoipCheckAsync() : _voip.ProbeAsync();
     }
 
     private void FillDevices()
@@ -299,12 +310,13 @@ public sealed class MainForm : Form
 
     private void StopListening()
     {
+        if (_mic.IsOpen && !_toggling) _ = ToggleMicAsync("listen mode stopped");
         _listening = false;
         _smtc.Disable();
         _log.Write("LISTEN", "stopped");
     }
 
-    private async Task ToggleMicAsync(SystemMediaTransportControlsButton button)
+    private async Task ToggleMicAsync(object button)
     {
         if (_toggling)
         {
@@ -319,12 +331,14 @@ public sealed class MainForm : Form
                 _log.Write("LISTEN", $"{button}: mic on");
                 if (_pauseWhileListening.Checked) _pausedForMic = await _sessions.PausePlayingAsync() > 0;
                 await OpenWithToneAsync();
+                if (_voipWhileOpen.Checked) await _voip.StartAsync();
                 if (_statusWhileOpen.SelectedIndex > 0)
                     _smtc.SetStatus(_statusWhileOpen.SelectedIndex == 1 ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, "while the mic is open");
             }
             else
             {
                 _log.Write("LISTEN", $"{button}: mic off");
+                _voip.End("mic off");
                 await CloseWithToneAsync();
                 if (_pausedForMic) await _sessions.ResumePausedAsync();
                 _pausedForMic = false;
@@ -358,6 +372,19 @@ public sealed class MainForm : Form
         }
         else
             _ = _sessions.ForwardAsync(button);
+    }
+
+    /// <summary>
+    /// <c>--voip-check</c>: reports a VoIP call for 4 s and ends it, then closes the app. It checks, with no button, that
+    /// an unpackaged app may report a call (the voipCall capability) and associate the headset with it.
+    /// </summary>
+    private async Task VoipCheckAsync()
+    {
+        _log.Write("VOIP", "--voip-check: a 4 s call");
+        await _voip.StartAsync();
+        await Task.Delay(TimeSpan.FromSeconds(4));
+        _voip.End("--voip-check");
+        Close();
     }
 
     private void Mark(string how) => _log.Write("MARK", $"mark ({how})");
@@ -443,7 +470,7 @@ public sealed class MainForm : Form
             $"Mic:      {(_mic.IsOpen ? $"OPEN, level {_mic.Level:P0}" : "closed")}",
             $"Profile:  {_endpoints.Profile}",
             $"Playing:  {_sessions.Playing}",
-            $"Call:     {_call.State}    SMTC: {_smtc.State}    swallow: {_swallow.SelectedItem}",
+            $"Call:     {_call.State}    VoIP: {_voip.State}    SMTC: {_smtc.State}    swallow: {_swallow.SelectedItem}",
             $"Gesture:  {_lastGesture}",
             $"Since:    {reference} {since.TotalSeconds:F1} s",
             _endpoints.Detail);
@@ -455,6 +482,7 @@ public sealed class MainForm : Form
         _hook?.Dispose();
         _mic.CloseAsync().Wait(TimeSpan.FromSeconds(5)); // Mic awaits without the UI context, so this cannot deadlock
         if (_call.State.StartsWith("incoming") || _call.State.StartsWith("active")) _call.End();
+        _voip.End("app closed");
         _smtc.Disable();
         _endpoints.Dispose();
         _log.Write("APP", "closed");

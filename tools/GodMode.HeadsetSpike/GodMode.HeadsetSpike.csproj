@@ -5,10 +5,12 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- The 26100 SDK for VoipCallCoordinator's call control devices (Windows 11 24H2); it still runs on 19041, where
+         those calls are skipped -->
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
-    <!-- The same Windows SDK projection as VoiceBot.Providers.Windows -->
-    <WindowsSdkPackageVersion>10.0.19041.38</WindowsSdkPackageVersion>
+    <!-- A projection of a Windows SDK servicing release that has CallsVoipContract v5 (call control devices) -->
+    <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
     <UseWindowsForms>true</UseWindowsForms>
     <!-- CsWinRT's generated interop for the WinRT generics used here is unsafe code -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
