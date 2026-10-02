@@ -94,7 +94,10 @@ public static class OutputLog
     {
         var before = await GenerationAsync(statePath, ct);
         if (File.Exists(PathOf(statePath))) File.Move(PathOf(statePath), ClearedPathOf(statePath, before), overwrite: true);
-        return StartGeneration(statePath);
+        var generation = StartGeneration(statePath);
+        // The new generation's file, empty, at once: a read between this and the next line finds no output, not no file
+        File.Create(PathOf(statePath)).Dispose();
+        return generation;
     }
 
     private static string NewGenerationId() => Guid.NewGuid().ToString("N");

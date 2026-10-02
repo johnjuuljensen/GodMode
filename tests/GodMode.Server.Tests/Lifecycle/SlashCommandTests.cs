@@ -40,6 +40,13 @@ public class SlashCommandTests
         return script.AwaitStdin();
     }
 
+    /// <summary>output.jsonl, or nothing while a clear has moved it away and not made the new one yet.</summary>
+    private static string Output(LifecycleHarness harness, string projectId)
+    {
+        try { return harness.ReadOutputFile(projectId); }
+        catch (FileNotFoundException) { return ""; }
+    }
+
     [Fact]
     public async Task Init_ListsTheCommandsTheSessionPasses_AndClaudes()
     {
@@ -115,7 +122,7 @@ public class SlashCommandTests
 
         await harness.Projects.SendInputAsync(created.Id, "/clear");
         await LifecycleHarness.WaitUntilAsync(
-            async () => harness.ReadOutputFile(created.Id).Contains("\"num_turns\":0")
+            async () => Output(harness, created.Id).Contains("\"num_turns\":0")
                 && (await harness.Projects.GetStatusAsync(created.Id)).State == ProjectState.Idle,
             null, () => $"the clear did not end.\n{harness.Describe(created.Id)}");
 
@@ -162,7 +169,7 @@ public class SlashCommandTests
 
         await harness.Projects.SendInputAsync(created.Id, "/compact");
         await LifecycleHarness.WaitUntilAsync(
-            async () => harness.ReadOutputFile(created.Id).Contains("\"num_turns\":0")
+            async () => Output(harness, created.Id).Contains("\"num_turns\":0")
                 && (await harness.Projects.GetStatusAsync(created.Id)).State == ProjectState.Idle,
             null, () => $"the compact did not end.\n{harness.Describe(created.Id)}");
 

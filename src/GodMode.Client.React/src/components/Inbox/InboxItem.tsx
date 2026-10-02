@@ -3,6 +3,7 @@ import { useAppStore, projectKey, type ServerAttentionItem } from '../../store';
 import type { AttentionKind } from '../../signalr/types';
 import { PermissionCard } from '../Project/PermissionCard';
 import { ReplyInput } from '../Project/ReplyInput';
+import { hubErrorMessage } from '../../signalr/hubError';
 
 const KIND_LABELS: Record<AttentionKind, string> = {
   Permission: 'Permission',
@@ -70,7 +71,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
       await call();
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(hubErrorMessage(err));
       return false;
     } finally {
       setBusy(false);

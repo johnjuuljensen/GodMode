@@ -21,6 +21,15 @@
   min-width: 0;
 }
 
+.tile-marker {
+  margin: 4px 0;
+  padding: 0 8px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-tertiary);
+  border-top: var(--border-width) var(--border-style) var(--glass-border-strong);
+}
+
 .tile-tool-line,
 .tile-status {
   display: flex;

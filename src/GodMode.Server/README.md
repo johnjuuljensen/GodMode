@@ -463,6 +463,23 @@ A session and its parent talk two ways: through Claude Code's own cross-session 
   Each refusal names the missing link.
 - **The server's credential is not scoped by links,** as before. A child it starts under a parent in another root, and a child the app creates with `__parentId` there, still need a link to `message_parent` that parent.
 
+### Slash commands
+
+claude runs a message that starts with `/name` as its command `name`, and takes a `/word` it does not know (`/frobnicate`, `/tmp/x is full`) as text. GodMode sends a short list of them, and refuses claude's others, which never reach claude. Every message that reaches claude is checked: `SendInput`, `ReplyAndResume` (the app, and voice), the fleet's `send` and a create's prompt (refused before any script runs).
+
+| Input | What GodMode does |
+|---|---|
+| `/clear` | Sent. claude starts a new conversation (`conversation_reset`, then a new session ID in a new `system/init`, which `session-id` follows). The output starts over: `output.jsonl` is kept as `output-{generation}.jsonl`, a new `output-generation` starts with the reset line, and the clients that follow it live get `OutputRestarted`. The last result and question go with the conversation, and its result, with no text, raises no `Finished`. |
+| `/compact [instructions]` | Sent. claude writes `system/compact_boundary` (the app's marker), the summary as a user message with `isSynthetic`, and a result with no text, which keeps the last reply and raises no `Finished`. |
+| `/context` | Sent. Its table is the turn's reply. |
+| `/<skill>` | Sent, for every skill the session's last `system/init` listed (`skills`, plugin skills as `plugin:skill`). Before its first `system/init` a skill is taken for text, which claude runs all the same. |
+| `/model`, `/effort` | Refused: GodMode sets them per root and action, kept with the project, at each launch, which would undo one sent mid-session. |
+| `/rename` | Refused: GodMode names the launch (`-n {root}-{id}`), and `SendMessage` reaches sessions by that name. |
+| Any other of claude's commands | Refused: the ones claude 2.1 lists, and any the session's last `system/init` listed in `slash_commands`. |
+| Any other text | Sent, as it is. |
+
+The status carries what the last `system/init` listed: `SlashCommands`, what GodMode sends (the three and the skills, which the app's composer completes), and `ClaudeCommands`, all of claude's. A refusal is an `InvalidOperationException` (a `HubException` to the app) that says why. A command sent with a resume carries none of the messages held for the session: they wait for its turn to end.
+
 ### A session's last replies
 
 What a session said, whether or not it needs the user, read from its `output.jsonl`. On the server it is `IProjectManager.LastRepliesAsync(projectId, turns)` (`OutputLog.LastRepliesAsync` on a state folder), which gives `AssistantReply(Text, Finished, IsError)`s (`GodMode.Shared`), oldest first. It is the one read behind both of its callers: the fleet's `read`, and the hub's `GetLastReplies(projectId, turns)`, which the voice's `read_reply` calls (#378). Each takes 1 to 20 turns (`IProjectHub.MaxReplyTurns` on the hub) and refuses any other count, and a project the server does not track; neither marks anything seen.
@@ -721,7 +738,8 @@ Every session has a working folder in its root, and keeps its state in that fold
 │           ├── settings.json    # The session's settings (action, permission mode, skip-permissions asked for, shared folder)
 │           ├── input.jsonl      # User input log
 │           ├── output.jsonl     # Claude output log (GodMode's own; Claude's transcripts are not read)
-│           ├── output-generation # A GUID, new on each create: which output.jsonl a client's offset is in
+│           ├── output-generation # A GUID, new on each create and /clear: which output.jsonl a client's offset is in
+│           ├── output-{generation}.jsonl # The output a /clear started over from, kept
 │           └── session-id       # Claude's session GUID, for --resume
 └── (project files)              # Working directory for Claude
 ```
@@ -865,7 +883,7 @@ Attention:
 - `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Review`, `Finished`), oldest first, with a short plain `Text`; the same after a restart
 - `Task<AssistantReply[]> GetLastReplies(projectId, turns)` — What claude said in the project's last 1 to 20 turns, oldest first, whatever it waits on, seen or not; the last may be unfinished ([A session's last replies](#a-sessions-last-replies))
 - `Task MarkSeen(projectId)` — The last result is seen: no longer `Finished`, nor `Review` until the pull request changes (a reply does the same)
-- `Task ReplyAndResume(projectId, text)` — `SendInput` to a running claude; otherwise resume, send, and return once claude reports `system/init` (fails on exit or after `SessionStartTimeoutSeconds`, default 60)
+- `Task ReplyAndResume(projectId, text)` — `SendInput` to a running claude; otherwise resume, send, and return once claude reports `system/init` (fails on exit or after `SessionStartTimeoutSeconds`, default 60). A slash command GodMode does not send is refused, as by `SendInput` ([Slash commands](#slash-commands))
 
 Roots and profiles:
 - `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas
@@ -879,6 +897,7 @@ Utility:
 - `OutputReceived(projectId, offset, rawJson)` — A live raw Claude JSON output line; `offset` is the byte offset in `output.jsonl` just after it
 - `OutputBatch(projectId, subscriptionId, generation, fromOffset, lines)` — Replayed `OutputLine`s (`Offset`, `RawJson`) covering `output.jsonl` from `fromOffset`, for the subscription `subscriptionId`, in the file's `generation`; a replay from 0 when more was asked for, or in another generation, means the client's transcript is not from this file
 - `OutputReplayComplete(projectId, subscriptionId, generation, offset)` — The subscription's replay is done at `offset`, in `generation`; live lines follow
+- `OutputRestarted(projectId, generation)` — The output started over in `generation` (`/clear`), to the connections that follow it live: what they hold is gone, and the live lines that follow are the new file's, from its start
 - `StatusChanged(projectId, status)` — Project status changed
 - `AttentionChanged(items)` — The whole `GetAttention` list, pushed only when it differs from the last one pushed
 - `ProjectCreated(status)` — New project created, or recovered live from a root that appeared or took another profile (*Live roots*)

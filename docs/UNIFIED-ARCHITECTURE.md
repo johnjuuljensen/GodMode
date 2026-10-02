@@ -249,7 +249,8 @@ The same `.godmode` structure for everything: every session keeps its state in i
 │           ├── settings.json    # The session's settings (action, permission mode, skip-permissions asked for, shared folder)
 │           ├── input.jsonl      # User input log
 │           ├── output.jsonl     # Claude output stream, GodMode's own
-│           ├── output-generation
+│           ├── output-generation  # New on each create and /clear
+│           ├── output-{generation}.jsonl # The output a /clear started over from
 │           ├── session-id       # Claude's session GUID, for --resume
 │           └── mcp-config.json  # While claude runs, with the session's token
 └── (project files)              # Working directory for Claude

@@ -730,7 +730,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 ActionName: s.ActionName,
                 SharedFolder: s.SharedFolder,
                 Adopted: s.Adopted,
-                ParentId: s.ParentId
+                ParentId: s.ParentId,
+                SlashCommands: s.SlashCommands
             ));
         }
 

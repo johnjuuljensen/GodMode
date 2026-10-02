@@ -401,6 +401,18 @@ export interface ProjectStatus {
    * children as they are, so it may name a session that is gone, which the app shows as top level.
    */
   ParentId?: string | null;
+  /**
+   * The slash commands GodMode sends to the session's claude, without their `/`: `clear`, `compact`,
+   * `context` and the skills its claude's last `system/init` listed. What the app's composer completes. Null
+   * until claude has started its session once.
+   */
+  SlashCommands?: string[] | null;
+  /**
+   * Every slash command the session's claude's last `system/init` listed (its built-ins and skills), without
+   * their `/`. Input that starts with one that is not in SlashCommands is refused, and never reaches claude.
+   * Null until claude has started its session once.
+   */
+  ClaudeCommands?: string[] | null;
 }
 
 /** Summary information about a project. */
@@ -438,6 +450,8 @@ export interface ProjectSummary {
   Adopted: boolean;
   /** The session that started this one, or null, as in ProjectStatus.ParentId. */
   ParentId?: string | null;
+  /** The slash commands GodMode sends to the session, as in ProjectStatus.SlashCommands. */
+  SlashCommands?: string[] | null;
 }
 
 /**
@@ -670,6 +684,13 @@ export interface IProjectHubClient {
    * this file.
    */
   OutputReplayComplete(projectId: string, subscriptionId: string, generation: string, offset: number): void;
+  /**
+   * A project's output started over, in a new generation, as claude's conversation did (`/clear`), sent to
+   * the connections that follow it live. What they hold is not in the file any more: the
+   * IProjectHubClient.OutputReceived lines that follow are the new generation's, from its start, and its
+   * first is claude's `conversation_reset`.
+   */
+  OutputRestarted(projectId: string, generation: string): void;
   /** Called when a project's status changes. */
   StatusChanged(projectId: string, status: ProjectStatus): void;
   /**

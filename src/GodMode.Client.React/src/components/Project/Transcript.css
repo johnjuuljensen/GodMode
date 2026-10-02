@@ -266,6 +266,23 @@
   border: var(--border-width) var(--border-style) var(--glass-border);
 }
 
+/* What a slash command did to the conversation: a label across the transcript, a rule either side */
+.ti-marker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.ti-marker::before,
+.ti-marker::after {
+  content: '';
+  flex: 1;
+  border-top: var(--border-width) var(--border-style) var(--glass-border-strong);
+}
+
 .ti-status-text {
   min-width: 0;
   overflow: hidden;
