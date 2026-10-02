@@ -105,6 +105,54 @@ public sealed class ReadReplyTests
         Assert.Empty(servers.Seen);
     }
 
+    /// <summary>
+    /// #411: the project wrote a new reply after the first part of its last was read. "Læs videre" does not read on in
+    /// the old one as if it were still the last: the old one is dropped, and the tool says a new one is there.
+    /// </summary>
+    [Fact]
+    public async Task Read_more_after_a_new_reply_does_not_read_on_in_the_old_one()
+    {
+        var servers = new FakeServers();
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.ReadReply, new() { [VoiceTools.ProjectParameter] = "master" })
+            .Respond("Master, del 1.")
+            .CallTool(VoiceTools.ReadMore)
+            .Respond("Master har skrevet et nyt svar. Skal jeg læse det?");
+        await using var voice = await OfflineVoice.StartAsync(servers, model, connect: _ =>
+        {
+            servers.AddProject(ServerA, Master, "master");
+            servers.SetReplies(ServerA, Master, new AssistantReply(Long, true));
+            return Task.CompletedTask;
+        });
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Læs masters svar.");
+        await voice.Events.SaidAsync("Master, del 1.");
+        servers.SetReplies(ServerA, Master, new AssistantReply(Long, true), new AssistantReply(LastAnswer, true));
+        voice.Transcriptions.SayAsRecognized("Læs videre.");
+        await voice.Events.SaidAsync("Master har skrevet et nyt svar. Skal jeg læse det?");
+
+        var results = model.ToolResults.ToList();
+        Assert.Equal(2, results.Count);
+        Assert.StartsWith("master has written a new reply since the one being read", results[1]);
+        Assert.DoesNotContain("Trin ", results[1]);
+    }
+
+    /// <summary>A reply still being written grows: what was read of it is no longer all it said, and is dropped too.</summary>
+    [Fact]
+    public async Task Read_more_after_an_unfinished_reply_grew_says_so()
+    {
+        var (servers, tools) = Tools();
+        servers.AddProject(ServerA, Master, "master");
+        servers.SetReplies(ServerA, Master, new AssistantReply(Long, false));
+        await tools.ReadReplyAsync("master", null, CancellationToken.None);
+
+        servers.SetReplies(ServerA, Master, new AssistantReply(Long + " Trin 61: færdig.", true));
+
+        Assert.StartsWith("master has written a new reply", await tools.ReadMoreAsync(CancellationToken.None));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+    }
+
     /// <summary>Every part, read in turn, is the whole reply once, each no longer than a spoken part, the last saying it was the end.</summary>
     [Fact]
     public async Task The_parts_together_are_the_whole_reply()
@@ -119,7 +167,7 @@ public sealed class ReadReplyTests
         Assert.InRange(count, 2, 10);
         for (var k = 2; k <= count; k++)
         {
-            var next = tools.ReadMoreText();
+            var next = await tools.ReadMoreAsync(CancellationToken.None);
             var prefix = $"master's reply, part {k} of {count}: ";
             Assert.StartsWith(prefix, next);
             Assert.EndsWith(k == count ? " [That was the end of it.]" : $" [More follows: {VoiceTools.ReadMore} reads it.]", next);
@@ -128,7 +176,7 @@ public sealed class ReadReplyTests
 
         Assert.Equal(Long, string.Join(" ", parts));
         Assert.All(parts, p => Assert.InRange(p.Length, 1, VoiceTools.ReplyPartLength));
-        Assert.StartsWith("Nothing more to read", tools.ReadMoreText());
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
     }
 
     [Fact]

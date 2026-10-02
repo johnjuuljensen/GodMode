@@ -71,7 +71,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             (_, args, ct) => ReadReplyAsync(Argument(args, ProjectParameter), Argument(args, TurnsParameter), ct))
         .Add(ReadMore,
             $"Read the next part of the reply {ReadReply} read last. Call when the user says \"læs videre\", \"mere\" or \"read on\".",
-            (_, _, _) => Task.FromResult(ReadMoreText()))
+            (_, _, ct) => ReadMoreAsync(ct))
         .Add(Answer,
             "Send the user's answer to a project: it reaches the Claude session as the user's reply, and the session " +
             "continues. Give the answer as the instruction the user meant, in their words.",
@@ -111,7 +111,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // One project, with its own spoken reply: the system says it, as status would
         if (items is [{ Item.Spoken.Length: > 0 } one])
             text.AppendLine(SpokenBySystem(handles.Of(one.Project)!, one.Item));
-        return text.ToString().TrimEnd();
+        return ReadOut(text.ToString().TrimEnd());
     }
 
     public string ListProjectsText()
@@ -147,7 +147,14 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             text.Append($" Asked: {Capped(question)}");
         if (status.LastError is { Length: > 0 } error && status.State == ProjectState.Error && item?.Kind != AttentionKind.Error)
             text.Append($" Error: {Capped(error)}");
-        return text.ToString();
+        return ReadOut(text.ToString());
+    }
+
+    /// <summary>A tool's text, which reads out a project's own words, for the model to say: kept for <see cref="SentNode"/>.</summary>
+    private string ReadOut(string text)
+    {
+        conversation.ReadOut(text);
+        return text;
     }
 
     /// <summary>The session's own spoken reply, word for word, after a line's text; nothing when it gave none.</summary>
@@ -205,7 +212,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         length > 0 && length < text.Length && char.IsLowSurrogate(text[length]) ? length - 1 : length;
 
     /// <summary>
-    /// About how long a part of a reply <see cref="ReadReplyAsync"/> and <see cref="ReadMoreText"/> give is: what the model
+    /// About how long a part of a reply <see cref="ReadReplyAsync"/> and <see cref="ReadMoreAsync"/> give is: what the model
     /// says in one go, a minute or so of speech. The whole reply read is <see cref="Capped"/>, as a status's text is.
     /// </summary>
     public const int ReplyPartLength = 1200;
@@ -216,7 +223,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <summary>
     /// The project's last reply, or its last <paramref name="turns"/> (1 when none or not a number, at most
     /// <see cref="MaxTurnsRead"/>), from its output on the server, whatever it waits on (issue #378). A reply longer than
-    /// <see cref="ReplyPartLength"/> gives its first part, and is kept for <see cref="ReadMoreText"/>. Nothing is marked seen.
+    /// <see cref="ReplyPartLength"/> gives its first part, and is kept for <see cref="ReadMoreAsync"/>. Nothing is marked seen.
     /// </summary>
     public async Task<string> ReadReplyAsync(string? reference, string? turns, CancellationToken ct)
     {
@@ -238,23 +245,34 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             ? $"Last reply{Flags(one)}: {one.Text.Trim()}"
             : $"Last {replies.Count} replies, oldest first:\n" + string.Join("\n", replies.Select((r, i) => $"Reply {i + 1}{Flags(r)}: {r.Text.Trim()}"));
         var parts = Parts(Capped(said));
-        conversation.Reading = new ReplyReading(target, handle, parts, 1);
-        return parts.Count == 1
+        conversation.Reading = new ReplyReading(target, handle, parts, 1, count, replies);
+        return ReadOut(parts.Count == 1
             ? $"{header} {parts[0]}"
-            : $"{header} {parts[0]} [Part 1 of {parts.Count}: more follows; {ReadMore} reads it.]";
+            : $"{header} {parts[0]} [Part 1 of {parts.Count}: more follows; {ReadMore} reads it.]");
     }
 
-    /// <summary>The next part of the reply <see cref="ReadReplyAsync"/> read last, or that there is none.</summary>
-    public string ReadMoreText()
+    /// <summary>
+    /// The next part of the reply <see cref="ReadReplyAsync"/> read last, or that there is none. A project that has
+    /// written since (a new reply, or more of one it was working on) has its old one dropped, and says so (#411):
+    /// "læs videre" never reads on in a reply that is no longer its last.
+    /// </summary>
+    public async Task<string> ReadMoreAsync(CancellationToken ct)
     {
         if (conversation.Reading is not { } reading || reading.Next >= reading.Parts.Count)
             return $"Nothing more to read: the last reply read was read to its end. {ReadReply} reads a project's reply.";
 
-        conversation.Reading = reading with { Next = reading.Next + 1 };
         Talked(reading.Project);
+        if (!(await servers.GetLastRepliesAsync(reading.Project, reading.Turns, ct)).SequenceEqual(reading.Replies))
+        {
+            conversation.Reading = null;
+            return $"{reading.Handle} has written a new reply since the one being read, so the rest of that one is not read: " +
+                $"say so, and offer to read the new one with {ReadReply}.";
+        }
+
+        conversation.Reading = reading with { Next = reading.Next + 1 };
         var last = reading.Next + 1 == reading.Parts.Count;
-        return $"{reading.Handle}'s reply, part {reading.Next + 1} of {reading.Parts.Count}: {reading.Parts[reading.Next]}" +
-            (last ? " [That was the end of it.]" : $" [More follows: {ReadMore} reads it.]");
+        return ReadOut($"{reading.Handle}'s reply, part {reading.Next + 1} of {reading.Parts.Count}: {reading.Parts[reading.Next]}" +
+            (last ? " [That was the end of it.]" : $" [More follows: {ReadMore} reads it.]"));
     }
 
     /// <summary>What a reply was besides its text: a failure, or a turn claude is still on (or was stopped in).</summary>

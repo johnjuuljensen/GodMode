@@ -64,8 +64,8 @@ public static class GodModeGraph
               When it sent the answer, the system says so itself, in place of your reply: respond with one word.
             - "Læs hele [handle]s svar", "Læs det sidste svar", "Hvad svarede [handle]?" / "Read its reply" — call
               {{VoiceTools.ReadReply}}: it reads what the project said last, also when it is idle or seen and needs nothing
-              ({{VoiceTools.ProjectStatus}} does not have it then). Say the reply itself, as fully as speech allows, not only
-              its gist. If it says more follows, end with "Mere?". "Læs videre", "Mere" / "Read on" — call {{VoiceTools.ReadMore}}.
+              ({{VoiceTools.ProjectStatus}} does not have it then). Say the reply itself, after a lead-in that names the
+              project ("283 skrev: …"), as fully as speech allows, not only its gist. If it says more follows, end with "Mere?". "Læs videre", "Mere" / "Read on" — call {{VoiceTools.ReadMore}}.
               "Er det hele?" is answered from what the tool said: if more follows, call {{VoiceTools.ReadMore}}.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}, and only then: on the user's own "læst" or "seen".
               Never mark a project seen as part of reading it, its status or its reply, or when the user asks if that was all.
