@@ -24,10 +24,12 @@
     <ProjectReference Include="..\..\external\VoiceBot\src\VoiceBot.Testing\VoiceBot.Testing.csproj" />
   </ItemGroup>
 
-  <!-- The Windows app's headset buttons (issue #423): their pure logic, compiled in from its source, so these run on any
+  <!-- The Windows app's headset buttons, call and media sessions (issues #423, #442): their pure logic, compiled in from their source, so these run on any
        OS without the MAUI app. Windows' own sessions behind it are the user's to try by hand -->
   <ItemGroup>
     <Compile Include="..\..\src\GodMode.Maui\Platforms\Windows\HeadsetButtons.cs" Link="Maui\HeadsetButtons.cs" />
+    <Compile Include="..\..\src\GodMode.Maui\Platforms\Windows\HeadsetCall.cs" Link="Maui\HeadsetCall.cs" />
+    <Compile Include="..\..\src\GodMode.Maui\Platforms\Windows\MediaSessionTracker.cs" Link="Maui\MediaSessionTracker.cs" />
   </ItemGroup>
 
   <ItemGroup>
