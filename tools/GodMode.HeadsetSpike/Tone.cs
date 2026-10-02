@@ -16,7 +16,11 @@ public sealed class Tone(SpikeLog log)
     public static readonly TimeSpan DefaultLength = TimeSpan.FromMilliseconds(80);
 
     /// <param name="endpointId">The speaker; null for the default of <paramref name="role"/>.</param>
-    public async Task PlayAsync(bool rising, TimeSpan length, float volume, string? endpointId, Role role = Role.Multimedia)
+    /// <remarks>On a background (MTA) thread, as every Core Audio object here: NAudio's fail across apartments.</remarks>
+    public Task PlayAsync(bool rising, TimeSpan length, float volume, string? endpointId, Role role = Role.Multimedia) =>
+        Task.Run(() => PlayHereAsync(rising, length, volume, endpointId, role));
+
+    private async Task PlayHereAsync(bool rising, TimeSpan length, float volume, string? endpointId, Role role)
     {
         var name = rising ? "rising" : "falling";
         try
