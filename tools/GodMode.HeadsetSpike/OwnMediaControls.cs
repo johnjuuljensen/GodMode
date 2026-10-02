@@ -50,6 +50,14 @@ public sealed class OwnMediaControls(SpikeLog log)
         }
     }
 
+    /// <summary>The status the spike reports, while its controls are on: the proxy mirrors Spotify's with it.</summary>
+    public void SetStatus(MediaPlaybackStatus status, string why)
+    {
+        if (_controls is not { IsEnabled: true } controls || controls.PlaybackStatus == status) return;
+        controls.PlaybackStatus = status;
+        log.Write(Source, $"status -> {status} ({why})");
+    }
+
     public void Disable()
     {
         if (_controls is null) return;

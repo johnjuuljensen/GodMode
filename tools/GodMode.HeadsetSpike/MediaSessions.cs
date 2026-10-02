@@ -16,6 +16,20 @@ public sealed class MediaSessions(SpikeLog log)
     private readonly ConcurrentBag<string> _pausedByUs = [];
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
 
+    /// <summary>A session's playback status changed (not only its position): its id and the new status; on a WinRT thread.</summary>
+    public event Action<string, GlobalSystemMediaTransportControlsSessionPlaybackStatus>? StateChanged;
+
+    /// <summary>Whether the session the proxy forwards to (the other one: playing, else the first) is playing; null for none.</summary>
+    public bool? OtherPlaying()
+    {
+        var others = _manager?.GetSessions().Where(s => !IsOwn(s.SourceAppUserModelId)).ToList() ?? [];
+        return others.Count == 0
+            ? null
+            : others.Any(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
+    }
+
+    public static bool IsOwn(string id) => id.Contains("GodMode.HeadsetSpike", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>What plays, for the state line: the current session's app, state and track.</summary>
     public string Playing { get; private set; } = "(no session)";
 
@@ -67,20 +81,22 @@ public sealed class MediaSessions(SpikeLog log)
 
     private void PlaybackState(GlobalSystemMediaTransportControlsSession session)
     {
-        string state;
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus status;
         try
         {
-            state = session.GetPlaybackInfo().PlaybackStatus.ToString();
+            status = session.GetPlaybackInfo().PlaybackStatus;
         }
         catch (Exception ex)
         {
             log.Error(Source, "GetPlaybackInfo", ex);
             return;
         }
+        var state = status.ToString();
         // PlaybackInfoChanged fires for more than the status (position, shuffle): only a change of status is logged
         if (_states.TryGetValue(session.SourceAppUserModelId, out var was) && was == state) return;
         _states[session.SourceAppUserModelId] = state;
         log.Write(Source, $"{session.SourceAppUserModelId}: {state}");
+        StateChanged?.Invoke(session.SourceAppUserModelId, status);
         _ = UpdatePlayingAsync();
     }
 
@@ -154,7 +170,7 @@ public sealed class MediaSessions(SpikeLog log)
     /// </summary>
     public async Task ForwardAsync(Windows.Media.SystemMediaTransportControlsButton button)
     {
-        var others = _manager?.GetSessions().Where(s => !s.SourceAppUserModelId.Contains("GodMode.HeadsetSpike", StringComparison.OrdinalIgnoreCase)).ToList() ?? [];
+        var others = _manager?.GetSessions().Where(s => !IsOwn(s.SourceAppUserModelId)).ToList() ?? [];
         var target = others.FirstOrDefault(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
             ?? others.FirstOrDefault();
         if (target is null)

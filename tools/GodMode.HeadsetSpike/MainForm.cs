@@ -46,6 +46,7 @@ public sealed class MainForm : Form
     private readonly NumericUpDown _longPress = new() { Minimum = 100, Maximum = 5000, Increment = 100, Value = (decimal)GestureClassifier.DefaultLongPress.TotalMilliseconds, Width = 60 };
     private readonly ComboBox _caught = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
     private readonly CheckBox _proxy = new() { Text = "proxy: catch it, forward the rest", AutoSize = true };
+    private readonly CheckBox _mirror = new() { Text = "mirror Spotify's play/pause", AutoSize = true, Checked = true };
     private readonly TextBox _note = new() { Width = 300, PlaceholderText = "a note for the log (what you pressed, what you heard)" };
 
     private sealed record Choice<T>(string Label, T Value)
@@ -91,7 +92,7 @@ public sealed class MainForm : Form
             Button("Release SMTC", _smtc.Disable),
             new Label { Text = "gesture gap ms", AutoSize = true }, _gap, new Label { Text = "long ms", AutoSize = true }, _longPress));
         controls.Controls.Add(Row("Proxy", _proxy, new Label { Text = "catch", AutoSize = true }, _caught,
-            Button("Start proxy", StartProxy), Button("Stop proxy", StopProxy)));
+            _mirror, Button("Start proxy", StartProxy), Button("Stop proxy", StopProxy)));
         controls.Controls.Add(Row("Call", Button("Report incoming (ringing)", () => _call.Incoming(ringer: true)),
             Button("Report incoming (silent)", () => _call.Incoming(ringer: false)),
             Button("Report active call", _call.Active), Button("End call", _call.End)));
@@ -116,6 +117,16 @@ public sealed class MainForm : Form
             _caught.Items.Add(new Choice<SystemMediaTransportControlsButton>(button.ToString(), button));
         _caught.SelectedIndex = 0;
         _smtc.Pressed += OnOwnButton;
+        _sessions.StateChanged += (id, status) =>
+        {
+            if (MediaSessions.IsOwn(id)) return;
+            BeginInvoke(() =>
+            {
+                if (_proxy.Checked && _mirror.Checked)
+                    _smtc.SetStatus(status == Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+                        ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, $"mirrors {id}");
+            });
+        };
         _gap.ValueChanged += (_, _) => NewClassifiers();
         _longPress.ValueChanged += (_, _) => NewClassifiers();
         _mic.FirstSound += () => _log.Write("MIC", "(first sound: a tone from here on is not cut by the switch, if the switch is done)");
@@ -240,12 +251,16 @@ public sealed class MainForm : Form
     /// <summary>
     /// The proxy: the spike holds the current media session (it reports itself playing, so Windows sends it the
     /// headset's buttons), catches one button as GodMode's "step in", and passes every other one on to Spotify.
+    /// With mirroring it then reports Spotify's play/pause as its own: the second trial found that a proxy reporting
+    /// "playing" while Spotify was paused got no button at all, while one reporting "paused" got Play in the first.
     /// </summary>
     private void StartProxy()
     {
         _proxy.Checked = true;
         _smtc.Enable(Handle, MediaPlaybackStatus.Playing);
-        _log.Write("PROXY", $"started: catches {_caught.SelectedItem}, forwards the rest");
+        _log.Write("PROXY", $"started: catches {_caught.SelectedItem}, forwards the rest, {(_mirror.Checked ? "mirrors Spotify's play/pause" : "always playing")}");
+        if (_mirror.Checked && _sessions.OtherPlaying() is false)
+            _smtc.SetStatus(MediaPlaybackStatus.Paused, "mirrors the other session at start");
     }
 
     private void StopProxy()

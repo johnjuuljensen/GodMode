@@ -43,7 +43,7 @@ A reference is a mic open or close, or an announcement test. So a switch's timin
 | `CALL` | `Windows.Media.Devices.CallControl`: what the app reported, and `AnswerRequested`, `HangUpRequested` and the rest |
 | `AUDIO` | Every endpoint at start, defaults, endpoints added, removed or changing state, the headset's property changes and mix formats, sound starting and stopping on each headset endpoint (its peak meter), and each headset endpoint's volume and mute, at first and on every change |
 | `MIC` | WaveIn (the same capture GodMode.Maui's voice uses: VoiceBot's `NativeAudioSource`, `MicCapture.WaveIn`, 16 kHz mono, 100 ms buffers), opened and closed on a worker thread so the hook and Mark keep running: the moment you asked (the reference), the moment the open or close returned, the first buffer, the first buffer with sound in it, and once a second the loudest sample of that second (`level`) |
-| `PROXY` | The proxy (Trial 2): started, stopped, and each button it caught; the buttons it passes on are `GSMTC forwarded …` lines |
+| `PROXY` | The proxy: started, stopped, and each button it caught; the buttons it passes on are `GSMTC forwarded …` lines, and the status it mirrors from Spotify `SMTC status -> …` |
 | `TONE` | The tone's start and end, its device and format |
 | `LEAUD` | The LE Audio probe |
 | `MARK`, `NOTE` | You: **Mark** (or Ctrl+Alt+M anywhere) when you hear something, a note when you want to say what |
@@ -225,23 +225,75 @@ and press **Add note** (`A1 single`). Then the log says what you did.
 
 Attach the log and your notes to #382.
 
+## Second trial (2026-10-02)
+
+Read from the log `headset-20261002-121327.log` and the user's notes in it.
+
+- **A. The headset's gestures** (the app's own SMTC claimed, Spotify unaffected throughout): **single press → `Pause`**
+  (`Play` while the session says it is paused), **double → `Next`**, **triple → `Previous`, but unreliably**. Of 22
+  presses during the triple-press test, 13 came as `Previous`, 8 as `Next` and 1 as `Pause`; the user called it "finicky". A long press sends nothing (first
+  trial).
+- **B. The proxy works, until Spotify is paused.** A forwarded `Pause` paused Spotify (in 290 ms), a forwarded `Next`
+  skipped a track, and a caught `Previous` played the tone with Spotify unaffected. But after the forwarded `Pause`,
+  **no button reached the spike at all**, single, double or triple, until the proxy stopped. The spike still said
+  *playing* while nothing played. In the first trial, a spike saying *paused* with nothing playing did get `Play`. So
+  the proxy now mirrors Spotify's play/pause as its own status (*mirror Spotify's play/pause*, on by default): Trial 3.
+- **C. The mic hears speech.** Counting aloud gave peaks of 16000–32737 of 32767 each second. In the first trial
+  nobody spoke. `first sound` came when the user started counting (3 s after the open), so it says nothing of the
+  switch's own timing.
+- **D. How the switches sound** (the user's note and Marks): **opening the mic, the sound quality drops at once**,
+  marked 1.2–1.9 s after the ask (the open returned at about 0.97 s). **Closing it, full quality comes back after a few
+  seconds**: marked 5.9 s after the close, every time, against 5.24–5.31 s in the log. A precise marker of both
+  switches: **the headset's Windows volume changes with the profile**. It went to 73 % 0.28–0.40 s after each open
+  (HFP's own volume), and back to 50 % 5.22–5.31 s after each close (A2DP). Whether the tones were heard was not noted
+  (D3 not run).
+- **E. Volume buttons**: volume + and − change Windows' volume of the A2DP endpoint in 6 % steps (AVRCP absolute
+  volume), with no key or HID report. Holding volume − does nothing, and holding volume + turns the headset off. So the
+  volume buttons are no gesture for GodMode.
+- **F. LE Audio: no.** The headset is one paired Bluetooth Classic device (`OpenRun Pro 2 by Shokz`, class
+  AudioVideo), with RFCOMM services Hands-Free (0x111E), 0xFEF0 and a vendor UUID, and no paired Bluetooth LE device,
+  so it has no LE Audio services. This matches the specification (SBC only).
+
+## Trial 3: the proxy that mirrors Spotify, and the tones
+
+Two short scenarios. Note each step first (`T1 single`), as before.
+
+**T. The mirroring proxy**
+1. Spotify playing. Pick `Previous` in **Proxy: catch**, leave *mirror Spotify's play/pause* ticked, **Start proxy**.
+2. Single press: Spotify pauses, and the log says `SMTC status -> Paused (mirrors …)`. **Single press again: does
+   Spotify play?** This is what failed in Trial 2.
+3. Repeat pause/play three times. Then double press (Spotify skips), and triple press (tone, Spotify stays).
+4. Pause Spotify from its own window, then single press on the headset: does it play?
+5. Leave it 3 minutes across a track change, then single press twice.
+6. Untick *mirror*, **Stop proxy**, **Start proxy**, and repeat 2 once: the log then shows the Trial 2 behaviour again,
+   for comparison.
+7. **Stop proxy**.
+
+**U. The tones around the switches**
+1. Spotify playing. Tone offset 0: **Open mic + rising tone**. Did you hear the rising tone, whole, cut, or not?
+2. **Close mic + falling tone** at offset 0, then (opening the mic in between) 3000 and 6000 ms. Did you hear the
+   falling tone each time?
+3. Repeat 1 with offset 1000.
+
 ## Results
 
-Filled in from the first trial where the log says it. The rest waits for Trial 2.
+Filled in from the first and second trials. The rest waits for Trial 3.
 
-| # | Question | What to record | Result |
-|---|---|---|---|
-| 1a–c | Single, double, triple press on A2DP | which SMTC button each sends | `Pause`/`Play`, `Next`, `Previous` arrive (SMTC only); which press sends which: Trial 2, A |
-| 1d | Long press (2 s, 4 s) | as 1a | Nothing reaches Windows (no SMTC button, no key, no HID report) |
-| 1e | Other buttons (volume, their long presses) | volume changes | No key or HID report; volume changes: Trial 2, E |
-| 1f | Swallow one gesture, keep play/pause | swallowed gesture ignored by Spotify? single press still works? | Not by a keyboard hook: the buttons are no keys. By the proxy: Trial 2, B |
-| 1g | Own SMTC claimed | `SMTC ButtonPressed` lines? Spotify still reacts? | Yes, buttons arrive; Spotify gets nothing while the app holds the session |
-| 2a | GSMTC pause and resume Spotify | worked? latency to `Paused` / `Playing` (ms) | Yes, every call; 55–290 ms to Spotify's state |
-| 2b | Announcement test | tones clear over A2DP? gap from `Paused` to tone (ms) | Paused at 289 ms, tones from 439 ms, playing again at 1022 ms; clear? Trial 2 |
-| 3a | A2DP→HFP (mic open) | heard at (ms), first buffer (ms), audible how | Open returns 0.2–0.6 s idle, 0.9–1.0 s with music; first buffer 0.7–1.1 s; A2DP meter silent about 1 s; heard: Trial 2, D |
-| 3b | HFP→A2DP (mic close) | heard at (ms), audible how, music back by itself? | Close 30–160 ms; music back on A2DP 5.3 s after the close, by itself; heard: Trial 2, D |
-| 3c | Rising tone after open | smallest offset (ms) with the whole tone | Played 0.35–1.9 s after the ask; heard whole? Trial 2, D |
-| 3d | Falling tone after close | smallest offset (ms) with the whole tone | Played 0.2–1.8 s after the close, inside the 5 s HFP hold; heard? Trial 2, D3 |
-| 3e | Does the mic hear speech? | `MIC level` while speaking | First trial: peak 1 only; Trial 2, C |
-| 4a–c | Button in HFP via `CallControl`, call indicator | `CALL` lines | `CallControl` unavailable (GetDefault and FromId give none): no manual way out by a call button |
-| 5 | LE Audio | `LEAUD` result; *Use LE Audio* switch in Settings? | Spec: SBC only (no LE Audio); probe: Trial 2, F |
+| # | Question | Result |
+|---|---|---|
+| 1a | Single press on A2DP | `Pause`, or `Play` while the current session says paused; as a media-session (SMTC) button only, never a key or HID report |
+| 1b | Double press | `Next` |
+| 1c | Triple press | `Previous`, unreliably: about a third of triple presses came as `Next` |
+| 1d | Long press | Nothing reaches Windows |
+| 1e | Volume buttons | Windows' volume in 6 % steps (AVRCP absolute volume); no key or HID report. Hold − does nothing, hold + is power off |
+| 1f | Catch one gesture, keep Spotify's play/pause | Not by a keyboard hook. By the proxy: forwarding and catching work while Spotify plays; after a pause no button arrived with the proxy saying "playing". Mirroring: Trial 3, T |
+| 1g | Own SMTC claimed | Gets every button; Spotify gets none while the app holds the session |
+| 2a | GSMTC pause and resume Spotify | Works every time; Spotify's state 55–290 ms later |
+| 2b | Announcement test | Paused at 289 ms, tones from 439 ms, playing again at 1022 ms |
+| 3a | A2DP→HFP (mic open) | Heard at once, as a quality drop (marked 1.2–1.9 s after the ask); WaveIn's open returns in 0.9–1.1 s with music; Windows' volume of the endpoint changes 0.28–0.40 s after the ask |
+| 3b | HFP→A2DP (mic close) | Full quality back after 5.2–5.3 s (volume change and meter), heard at about 5.9 s, every time, by itself |
+| 3c | Rising tone after open | Trial 3, U |
+| 3d | Falling tone after close | Trial 3, U (it plays inside the 5 s HFP hold) |
+| 3e | Does the mic hear speech? | Yes: peaks 16000–32737 of 32767 while counting |
+| 4 | Button in HFP via `CallControl` | `CallControl` unavailable (GetDefault and FromId give none): no manual way out by a call button |
+| 5 | LE Audio | No: a Bluetooth Classic device only, no LE device or LE Audio service; the spec lists SBC only |
