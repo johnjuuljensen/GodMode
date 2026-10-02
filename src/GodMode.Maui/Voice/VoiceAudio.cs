@@ -80,8 +80,7 @@ public static class VoiceAudio
 #endif
 
     /// <summary>
-    /// The call held while the mic is open, whose end the headset's button asks for in HFP (issue #423); null where there
-    /// is none: off Windows, and below Windows 11 24H2.
+    /// The call held while the mic is open, whose end the headset's button asks for in HFP (issue #423); null off Windows.
     /// </summary>
     public static IHeadsetCall? HeadsetCall() =>
 #if WINDOWS

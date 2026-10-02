@@ -5,6 +5,8 @@
 		<TargetFrameworks>net10.0-android</TargetFrameworks>
 		<TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('osx'))">$(TargetFrameworks);net10.0-ios;net10.0-maccatalyst</TargetFrameworks>
 		<TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.26100.0</TargetFrameworks>
+		<!-- -p:Windows=true builds and runs the Windows app alone, with no -f naming its SDK version -->
+		<TargetFrameworks Condition="'$(Windows)' == 'true'">net10.0-windows10.0.26100.0</TargetFrameworks>
 		<OutputType>Exe</OutputType>
 		<UseMaui>true</UseMaui>
 		<SingleProject>true</SingleProject>
@@ -23,11 +25,11 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24</SupportedOSPlatformVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">15.0</SupportedOSPlatformVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
-		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.19041.0</SupportedOSPlatformVersion>
-		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.19041.0</TargetPlatformMinVersion>
-		<!-- Windows builds against the 26100 SDK for the headset's button in a VoIP call (issue #423: VoipCallCoordinator's
-		     call control devices, Windows 11 24H2), and still runs on 19041, where those calls are skipped. This
-		     projection's servicing release has CallsVoipContract v5; the .NET SDK's default (.57) lacks it -->
+		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.26100.0</SupportedOSPlatformVersion>
+		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.26100.0</TargetPlatformMinVersion>
+		<!-- Windows 11 24H2 (26100) is the Windows app's minimum, and its SDK the one it builds against: the headset's
+		     button in a VoIP call needs it (issue #423: VoipCallCoordinator's call control devices). This projection's
+		     servicing release has CallsVoipContract v5; the .NET SDK's default (.57) lacks it -->
 		<WindowsSdkPackageVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.26100.87</WindowsSdkPackageVersion>
 
 		<!-- One app per user (issue #339, Windows): release builds take the single-instance mutex and hand a second start
