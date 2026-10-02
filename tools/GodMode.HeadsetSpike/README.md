@@ -42,7 +42,7 @@ A reference is a mic open or close, or an announcement test. So a switch's timin
 | `GSMTC` | Media sessions (`GlobalSystemMediaTransportControlsSessionManager`): sessions, the current one, each one's playback state and track, and each pause or play the app sent and what it returned |
 | `CALL` | `Windows.Media.Devices.CallControl`: what the app reported, and `AnswerRequested`, `HangUpRequested` and the rest |
 | `AUDIO` | Every endpoint at start, defaults, endpoints added, removed or changing state, the headset's property changes and mix formats, and sound starting and stopping on each headset endpoint (its peak meter) |
-| `MIC` | WaveIn (the same capture GodMode.Maui's voice uses: VoiceBot's `NativeAudioSource`, `MicCapture.WaveIn`, 16 kHz mono, 100 ms buffers): start, the first buffer, the first buffer with sound in it, stop |
+| `MIC` | WaveIn (the same capture GodMode.Maui's voice uses: VoiceBot's `NativeAudioSource`, `MicCapture.WaveIn`, 16 kHz mono, 100 ms buffers), opened and closed on a worker thread so the hook and Mark keep running: the moment you asked (the reference), the moment the open or close returned, the first buffer, the first buffer with sound in it |
 | `TONE` | The tone's start and end, its device and format |
 | `LEAUD` | The LE Audio probe |
 | `MARK`, `NOTE` | You: **Mark** (or Ctrl+Alt+M anywhere) when you hear something, a note when you want to say what |
@@ -101,12 +101,13 @@ Spotify playing, so you hear the switch.
 
 1. **Open mic**. Press **Mark** (or Ctrl+Alt+M) the moment you hear the music drop to phone quality. Wait 5 s.
    **Close mic**, and **Mark** when the music sounds full again. Do it three times.
-   - Record: the `MARK` time after `mic open` (heard switch), after `mic close` (heard switch back), the `MIC first
-     buffer` and `first sound` times after the open, the `AUDIO` lines (endpoint state, format, sound starting or
+   - Record: the `MARK` time after `mic open` (heard switch), after `mic close` (heard switch back), the `MIC open returned`,
+     `first buffer` and `first sound` times after the open (and `close returned` after the close), the `AUDIO` lines (endpoint state, format, sound starting or
      stopping) around each, and whether there was a gap, a click or a pause in the music.
 2. Tone offsets. Set **tone offset ms** to 0 and press **Open mic + rising tone**; then **Close mic + falling tone**.
    Repeat with offsets 250, 500, 1000, 1500 and 2000 ms. Then tick **tone waits for first mic sound**, with offset 0,
-   and again with 200.
+   and again with 200: speak or hum right after pressing, since the mic's first sound is a peak above 200 of 32767
+   (without it the tone plays after 10 s anyway).
    - Record, per offset: did you hear the whole tone, part of it (cut off), or nothing; and the `TONE start` time after
      `mic open`. The smallest offset where the whole tone plays is the answer.
 3. Repeat 2 with the speaker in **Tone** set to *Default communications speaker*, if that is a different endpoint.

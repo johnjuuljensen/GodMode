@@ -71,7 +71,7 @@ public sealed class MainForm : Form
             Button("Rescan endpoints", () => { _endpoints.HeadsetName = _headsetName.Text; _ = Task.Run(_endpoints.Survey); FillDevices(); }),
             Button("Probe LE Audio", () => _ = _leAudio.RunAsync(_headsetName.Text))));
         controls.Controls.Add(Row("Mic", _microphones,
-            Button("Open mic", OpenMic), Button("Close mic", CloseMic),
+            Button("Open mic", () => _ = OpenMicAsync()), Button("Close mic", () => _ = CloseMicAsync()),
             Button("Open mic + rising tone", () => _ = OpenWithToneAsync()), Button("Close mic + falling tone", () => _ = CloseWithToneAsync()),
             new Label { Text = "tone offset ms", AutoSize = true }, _toneOffset, _toneWaitsForSound));
         controls.Controls.Add(Row("Tone", _speakers, new Label { Text = "ms", AutoSize = true }, _toneLength, new Label { Text = "vol %", AutoSize = true }, _toneVolume,
@@ -136,7 +136,7 @@ public sealed class MainForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        _log.Write("APP", $"GodMode headset spike, Windows {Environment.OSVersion.Version}, {RuntimeInformation.OSArchitecture}, {Environment.MachineName}");
+        _log.Write("APP", $"GodMode headset spike, Windows {Environment.OSVersion.Version}, {RuntimeInformation.OSArchitecture}");
         _log.Write("APP", $"log: {_log.Path}");
         _log.Write("APP", $"mic: WaveIn {Mic.Format.SampleRate} Hz {Mic.Format.Channels} ch, 100 ms buffers; gesture gap {_gap.Value} ms, long press {_longPress.Value} ms");
         try
@@ -230,15 +230,16 @@ public sealed class MainForm : Form
 
     private string? MicrophoneId => ((Choice<string?>?)_microphones.SelectedItem)?.Value;
 
-    private void OpenMic()
+    /// <summary>Off the UI thread (<see cref="Mic.OpenAsync"/>), which keeps running the hook and Mark while the headset switches.</summary>
+    private async Task OpenMicAsync()
     {
-        _mic.Open(MicrophoneId);
+        await _mic.OpenAsync(MicrophoneId);
         _endpoints.OpenMicrophoneId = _mic.EndpointId;
     }
 
-    private void CloseMic()
+    private async Task CloseMicAsync()
     {
-        _mic.Close();
+        await _mic.CloseAsync();
         _endpoints.OpenMicrophoneId = null;
     }
 
@@ -256,7 +257,7 @@ public sealed class MainForm : Form
         _mic.FirstSound += Heard;
         try
         {
-            OpenMic();
+            await OpenMicAsync();
             if (_toneWaitsForSound.Checked && await Task.WhenAny(sound.Task, Task.Delay(TimeSpan.FromSeconds(10))) != sound.Task)
                 _log.Write("TONE", "no mic sound in 10 s: the tone plays anyway");
             await Task.Delay((int)_toneOffset.Value);
@@ -271,7 +272,7 @@ public sealed class MainForm : Form
     /// <summary>Step 4 by hand: the mic closes, then the falling tone after the offset.</summary>
     private async Task CloseWithToneAsync()
     {
-        CloseMic();
+        await CloseMicAsync();
         await Task.Delay((int)_toneOffset.Value);
         await PlayToneAsync(rising: false);
     }
@@ -318,7 +319,7 @@ public sealed class MainForm : Form
     {
         UnregisterHotKey(Handle, MarkHotkey);
         _hook?.Dispose();
-        _mic.Close();
+        _mic.CloseAsync().Wait(TimeSpan.FromSeconds(5)); // Mic awaits without the UI context, so this cannot deadlock
         if (_call.State.StartsWith("incoming") || _call.State.StartsWith("active")) _call.End();
         _smtc.Disable();
         _endpoints.Dispose();

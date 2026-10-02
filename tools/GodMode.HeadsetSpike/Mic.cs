@@ -13,7 +13,8 @@ public sealed class Mic(SpikeLog log)
 {
     private const string Source = "MIC";
     private const short SoundFloor = 200; // of 32767: above a silent link's zeros and dither
-    private NativeAudioSource? _source;
+    private readonly SemaphoreSlim _switching = new(1, 1);
+    private volatile NativeAudioSource? _source;
     private CancellationTokenSource? _reading;
 
     public bool IsOpen => _source is not null;
@@ -23,24 +24,47 @@ public sealed class Mic(SpikeLog log)
     /// <summary>The first buffer with sound in it after the open: a tone that waits for this is not cut by the switch.</summary>
     public event Action? FirstSound;
 
-    public void Open(string? endpointId)
+    /// <summary>
+    /// Opens it on a worker thread: waveInOpen blocks while the headset switches to HFP, and the UI thread must keep
+    /// running the keyboard hook and Mark meanwhile. The reference is the moment it was asked for; the log says when
+    /// the open returned. Opens and closes run one at a time, in the order asked.
+    /// </summary>
+    public Task OpenAsync(string? endpointId)
     {
-        if (_source is not null) return;
-        log.Reference("mic open", endpointId ?? "default");
+        log.Reference("mic open", $"asked, {endpointId ?? "default"}");
+        return Serialized(() =>
+        {
+            if (_source is not null) return;
+            var asked = log.Now;
+            NativeAudioSource? source = null;
+            try
+            {
+                source = new NativeAudioSource(capture: MicCapture.WaveIn, endpointId: endpointId);
+                source.Start();
+                log.Write(Source, $"open returned: WaveIn started ({source.Description}), {(log.Now - asked).TotalMilliseconds:F0} ms after it began");
+                _source = source;
+                EndpointId = endpointId;
+                _reading = new CancellationTokenSource();
+                _ = ReadAsync(source, _reading.Token);
+            }
+            catch (Exception ex)
+            {
+                source?.Dispose();
+                log.Error(Source, "open", ex);
+            }
+        });
+    }
+
+    private async Task Serialized(Action act)
+    {
+        await _switching.WaitAsync().ConfigureAwait(false);
         try
         {
-            var started = log.Now;
-            var source = new NativeAudioSource(capture: MicCapture.WaveIn, endpointId: endpointId);
-            source.Start();
-            log.Write(Source, $"WaveIn started ({source.Description}), Start took {(log.Now - started).TotalMilliseconds:F0} ms");
-            _source = source;
-            EndpointId = endpointId;
-            _reading = new CancellationTokenSource();
-            _ = ReadAsync(source, _reading.Token);
+            await Task.Run(act).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        finally
         {
-            log.Error(Source, "open", ex);
+            _switching.Release();
         }
     }
 
@@ -81,25 +105,29 @@ public sealed class Mic(SpikeLog log)
         return (short)Math.Min(peak, short.MaxValue);
     }
 
-    public void Close()
+    /// <summary>Closes it on a worker thread, as <see cref="OpenAsync"/> opens it: the reference is the moment it was asked for.</summary>
+    public Task CloseAsync()
     {
-        if (_source is not { } source) return;
-        log.Reference("mic close");
-        _reading?.Cancel();
-        var started = log.Now;
-        try
+        log.Reference("mic close", "asked");
+        return Serialized(() =>
         {
-            source.Stop();
-            source.Dispose();
-            log.Write(Source, $"WaveIn stopped and closed in {(log.Now - started).TotalMilliseconds:F0} ms");
-        }
-        catch (Exception ex)
-        {
-            log.Error(Source, "close", ex);
-        }
-        _source = null;
-        EndpointId = null;
-        Level = 0;
+            if (_source is not { } source) return;
+            _reading?.Cancel();
+            var asked = log.Now;
+            try
+            {
+                source.Stop();
+                source.Dispose();
+                log.Write(Source, $"close returned: WaveIn stopped and closed, {(log.Now - asked).TotalMilliseconds:F0} ms after it began");
+            }
+            catch (Exception ex)
+            {
+                log.Error(Source, "close", ex);
+            }
+            _source = null;
+            EndpointId = null;
+            Level = 0;
+        });
     }
 
     /// <summary>The format the stack records in, for the log's header.</summary>
