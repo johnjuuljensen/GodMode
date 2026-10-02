@@ -32,6 +32,17 @@ public sealed class VoiceConversation
         get => Volatile.Read(ref _unsure);
         set => Volatile.Write(ref _unsure, value);
     }
+
+    private ConcurrentQueue<string> _sent = new();
+
+    /// <summary>An answer reached <paramref name="handle"/>: <see cref="VoiceTools.AnswerAsync"/>, once the server took it.</summary>
+    public void Sent(string handle) => Volatile.Read(ref _sent).Enqueue(handle);
+
+    /// <summary>
+    /// The handles answers were sent to since the last take, and none from now on: <see cref="SentNode"/> takes them
+    /// before the chat's evaluation and after it, so what it holds after is this turn's sends alone.
+    /// </summary>
+    public IReadOnlyList<string> TakeSent() => [.. Interlocked.Exchange(ref _sent, new())];
 }
 
 /// <summary>A final and the earlier readings of the same utterance it revised: partials it contradicts, not only extends.</summary>

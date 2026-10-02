@@ -57,6 +57,18 @@ public sealed class VoicePhrases
         return _danish ? $"Skal jeg oprette {what} {where}?" : $"Shall I create {what} {where}?";
     }
 
+    /// <summary>Answers went out this turn (<see cref="SentNode"/>): "Sendt til 283.", "Sendt til 283 og 101.".</summary>
+    public string Sent(IReadOnlyList<string> handles)
+    {
+        var distinct = handles.Distinct().ToList();
+        var to = distinct.Count == 1 ? distinct[0]
+            : $"{string.Join(", ", distinct[..^1])} {(_danish ? "og" : "and")} {distinct[^1]}";
+        return _danish ? $"Sendt til {to}." : $"Sent to {to}.";
+    }
+
+    /// <summary>The model claimed a send, and none went out this turn (<see cref="SentNode"/>).</summary>
+    public string NothingSent => _danish ? "Intet sendt. Sig svaret igen." : "Nothing was sent. Say the answer again.";
+
     /// <summary>A yes after the read-back it would have answered was dropped (it timed out, or the bot said something else).</summary>
     public string NothingToConfirm => _danish ? "Der venter ingen oprettelse. Sig start igen." : "Nothing waits to be created. Say start again.";
 
