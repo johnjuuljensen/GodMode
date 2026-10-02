@@ -18,9 +18,14 @@ public static class GodModeGraph
 {
     public const string Id = "godmode-voice";
 
-    /// <summary>What the user says to the bot, besides project handles; ElevenLabs is biased towards them.</summary>
+    /// <summary>
+    /// What the user says to the bot, besides project handles: the commands, then the words of GodMode's work that
+    /// ElevenLabs hears as ordinary Danish ones without a bias ("loggen" as "klokken", #380). It is biased towards them,
+    /// before the servers' names (<see cref="VoiceSession.Keyterms"/>).
+    /// </summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review", "start issue", "opret"];
+        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review", "start issue", "opret",
+         "log", "loggen", "session", "sessionen", "branch", "worktree", "commit", "push", "merge", "issue"];
 
     /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
     public static ToolSet AddTools(ToolSet set, VoiceTools tools) =>
@@ -79,6 +84,11 @@ public static class GodModeGraph
             into "svar nej"). Then ask once, as a closed question naming the project, that says each meaning as a whole
             instruction in words the user would recognize ("Skal 283 pushe, eller ikke pushe?"), never a fragment the
             transcriber heard ("Mente du 'Så master undersøger' eller 'Så må'?"), and act on their answer.
+
+            MISHEARD WORDS: the transcriber hears GodMode's words as ordinary Danish ones ("klokken" or "lokken" for
+            "loggen", "L O G" spelled out for "log", a session or branch name as a common word). When a word makes no
+            sense where it stands and a GodMode word that sounds like it does, act on the GodMode word ("tjek klokken for
+            applikationen" → check the application's log), and send it so; never ask about it.
 
             PERMISSION REQUESTS are never answered by voice. Say "<handle> skal have tilladelse: <what>. Svar på skærmen."
 
