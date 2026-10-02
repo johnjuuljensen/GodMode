@@ -18,28 +18,30 @@ public static partial class Attention
     /// <summary>The project's attention item, or null when it needs nothing.</summary>
     public static AttentionItem? Of(ProjectStatus status)
     {
-        (AttentionKind Kind, DateTime Since, string Text)? found = status switch
+        // The turn's spoken reply goes with what its end left: a question in plain text, or its result
+        (AttentionKind Kind, DateTime Since, string Text, string? Spoken)? found = status switch
         {
-            { PendingPermission: { } permission } => (AttentionKind.Permission, permission.RequestedAt, permission.Summary),
+            { PendingPermission: { } permission } => (AttentionKind.Permission, permission.RequestedAt, permission.Summary, null),
             { PendingQuestion: { } question } => (AttentionKind.Question, question.RequestedAt,
-                string.Join("\n", question.Questions.Select(q => q.Question))),
+                string.Join("\n", question.Questions.Select(q => q.Question)), null),
             // Stopped keeps the question claude was waiting on (a shutdown, or a stop by the user): it still asks
             { CurrentQuestion: { } question, State: ProjectState.WaitingInput or ProjectState.Stopped } =>
-                (AttentionKind.Question, status.QuestionAt ?? status.UpdatedAt, question),
-            { State: ProjectState.Error } => (AttentionKind.Error, status.UpdatedAt, status.LastError ?? "The project failed."),
+                (AttentionKind.Question, status.QuestionAt ?? status.UpdatedAt, question, status.SpokenSummary),
+            { State: ProjectState.Error } => (AttentionKind.Error, status.UpdatedAt, status.LastError ?? "The project failed.", null),
             { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { IsOpen: true, Review: PullRequestReview.ChangesRequested } pr }
                 when pr.ChangedAt > (status.SeenAt ?? DateTime.MinValue) =>
-                (AttentionKind.Review, pr.ChangedAt, $"Changes requested on pull request #{pr.Number}."),
+                (AttentionKind.Review, pr.ChangedAt, $"Changes requested on pull request #{pr.Number}.", null),
             { State: ProjectState.Idle or ProjectState.Stopped, LastResultAt: { } at } when at > (status.SeenAt ?? DateTime.MinValue) =>
-                (AttentionKind.Finished, at, status.LastResult is { Length: > 0 } result ? result : "The turn finished."),
+                (AttentionKind.Finished, at, status.LastResult is { Length: > 0 } result ? result : "The turn finished.", status.SpokenSummary),
             _ => null,
         };
-        if (found is not ({ } kind, var since, { } text)) return null;
+        if (found is not ({ } kind, var since, { } text, var spoken)) return null;
 
         return new AttentionItem(status.Id, status.Name, status.ProfileName, status.RootName, kind, since, PlainText(text),
             kind == AttentionKind.Permission ? status.PendingPermission : null,
             kind == AttentionKind.Question ? status.PendingQuestion : null,
-            kind is AttentionKind.Review or AttentionKind.Finished ? status.PullRequest?.Url : null);
+            kind is AttentionKind.Review or AttentionKind.Finished ? status.PullRequest?.Url : null,
+            spoken is { Length: > 0 } ? spoken : null);
     }
 
     /// <summary>Every project's item, oldest first (by project ID when two are as old).</summary>
@@ -50,14 +52,14 @@ public static partial class Attention
 
     /// <summary>
     /// Whether two lists say the same: the same projects needing the same, since the same time,
-    /// with the same text, request and pull request. Compared by those, not by record equality, which would
+    /// with the same text, spoken text, request and pull request. Compared by those, not by record equality, which would
     /// compare a pending request's input and questions by reference.
     /// </summary>
     public static bool Same(IReadOnlyList<AttentionItem> a, IReadOnlyList<AttentionItem> b) =>
         a.Select(Key).SequenceEqual(b.Select(Key));
 
-    private static (string, AttentionKind, DateTime, string, string?, string?) Key(AttentionItem item) =>
-        (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId, item.PullRequestUrl);
+    private static (string, AttentionKind, DateTime, string, string?, string?, string?) Key(AttentionItem item) =>
+        (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId, item.PullRequestUrl, item.Spoken);
 
     /// <summary>
     /// Text to show on a phone or read aloud: code blocks become "(code)", markdown's backticks go,

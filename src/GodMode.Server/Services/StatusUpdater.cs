@@ -53,6 +53,19 @@ public class StatusUpdater : IStatusUpdater
                 // A new turn is starting — clear any memo of the previous turn's
                 // trailing assistant text so stale questions don't leak forward.
                 process.LastAssistantText = null;
+                if (IsEcho(outputEvent))
+                {
+                    // A message the user sent starts the reply over: the last turn's spoken reply, and one this
+                    // turn gave before it, say nothing of the reply to come (issue #384)
+                    process.ForgetSpoken();
+                    if (status.SpokenSummary != null)
+                    {
+                        status = status with { SpokenSummary = null };
+                        stateChanged = true;
+                    }
+                }
+                else
+                    TakeSpeakResults(process, rawJson);
                 // claude has taken a message the user sent: it is working on it, whatever a result
                 // of an earlier turn, handled after the send, said. It echoes it at once between
                 // turns, and at its next step in one
@@ -71,6 +84,8 @@ public class StatusUpdater : IStatusUpdater
                 // a previously-seen text block in that case.
                 var lastText = QuestionDetection.ExtractLastAssistantText(rawJson);
                 if (lastText != null) process.LastAssistantText = lastText;
+                foreach (var (toolUseId, spoken) in SpokenReply.Calls(rawJson))
+                    process.SpeakCalls[toolUseId] = spoken;
                 break;
 
             // Error events are stderr lines shown in the UI; the process's exit and error results
@@ -79,6 +94,7 @@ public class StatusUpdater : IStatusUpdater
             // claude's answer to the interrupt a stop sends: the stop decides the state
             case OutputEventType.Result when IsErrorResult(outputEvent) && process.Stopping:
                 process.LastAssistantText = null;
+                process.ForgetSpoken();
                 break;
 
             case OutputEventType.Result when IsErrorResult(outputEvent):
@@ -87,8 +103,10 @@ public class StatusUpdater : IStatusUpdater
                     State = ProjectState.Error,
                     CurrentQuestion = null,
                     LastError = outputEvent.Content is { Length: > 0 } text ? text : Subtype(outputEvent) ?? "error result",
+                    SpokenSummary = null,
                 };
                 process.LastAssistantText = null;
+                process.ForgetSpoken();
                 stateChanged = true;
                 status = WithTokenMetrics(status, outputEvent);
                 break;
@@ -106,11 +124,13 @@ public class StatusUpdater : IStatusUpdater
                 // last assistant text block (trimmed) ends with '?'. See issue #131.
                 // The result's text is claude's summary of the turn, whichever it is
                 var endedAt = DateTime.UtcNow;
-                status = status with { LastResult = outputEvent.Content, LastResultAt = endedAt, LastError = null };
+                // and its spoken version the one the session gave in it, or none (issue #384)
+                status = status with { LastResult = outputEvent.Content, LastResultAt = endedAt, LastError = null, SpokenSummary = process.Spoken };
                 status = QuestionDetection.IsQuestion(process.LastAssistantText)
                     ? status with { State = ProjectState.WaitingInput, CurrentQuestion = process.LastAssistantText, QuestionAt = endedAt }
                     : status with { State = ProjectState.Idle, CurrentQuestion = null };
                 process.LastAssistantText = null;
+                process.ForgetSpoken();
                 stateChanged = true;
                 status = WithTokenMetrics(status, outputEvent);
                 break;
@@ -161,6 +181,21 @@ public class StatusUpdater : IStatusUpdater
 
         project.Status = status with { UpdatedAt = DateTime.UtcNow };
         return true;
+    }
+
+    /// <summary>
+    /// The results a user line gives this turn's <c>speak</c> calls: an accepted one's text is the turn's spoken reply,
+    /// the last accepted the one kept; a refused or denied one gives none.
+    /// </summary>
+    private static void TakeSpeakResults(ProjectProcess process, string rawJson)
+    {
+        if (process.SpeakCalls.Count == 0) return;
+        foreach (var (toolUseId, isError) in SpokenReply.Results(rawJson))
+        {
+            if (!process.SpeakCalls.Remove(toolUseId, out var text) || isError) continue;
+            // The tool checked it as the stream has it; one it would refuse is never said
+            if (SpeakTool.Check(text).Refused is null) process.Spoken = text;
+        }
     }
 
     /// <summary>The metadata key a <c>system</c> event carries claude's session ID under.</summary>

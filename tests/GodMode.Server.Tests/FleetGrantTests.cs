@@ -53,9 +53,9 @@ public class FleetGrantTests
         await using var fleet = await ConnectAsync(fleetEntry);
         Assert.Equal(FleetToolNames, (await fleet.ListToolsAsync()).Select(tool => tool.Name).Order(StringComparer.Ordinal));
 
-        // Its own endpoint, with the same token, gives it the permission prompt and message_parent, and nothing of the fleet's
+        // Its own endpoint, with the same token, gives it the permission prompt, message_parent and speak, and nothing of the fleet's
         await using var own = await ConnectAsync(fleetEntry with { Url = run.BaseUrl + McpEndpointUrl.Path });
-        Assert.Equal([MessageParentTool.Name, PermissionPromptTool.Name], (await own.ListToolsAsync()).Select(tool => tool.Name).Order(StringComparer.Ordinal));
+        Assert.Equal([MessageParentTool.Name, PermissionPromptTool.Name, SpeakTool.Name], (await own.ListToolsAsync()).Select(tool => tool.Name).Order(StringComparer.Ordinal));
     }
 
     /// <summary>A session of an action without <c>fleetTools</c>: no fleet entry in its MCP config, and its token is forbidden there.</summary>

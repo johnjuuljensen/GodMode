@@ -5,5 +5,5 @@
   "scriptsCreateFolder": true,
   "create": "epic/create",
   "nameTemplate": "epic_{issueNumber}",
-  "claudeArgs": ["--allowedTools", "mcp__godmode-fleet", "mcp__godmode__message_parent"]
+  "claudeArgs": ["--allowedTools", "mcp__godmode-fleet"]
 }

@@ -5,6 +5,5 @@
   "scriptsCreateFolder": true,
   "create": "issue/create",
   "nameTemplate": "issue_{issueNumber}",
-  "promptTemplate": "Read GitHub issue #{issueNumber} by running `gh issue view {issueNumber}`. Understand the requirements and implement the changes.",
-  "claudeArgs": ["--allowedTools", "mcp__godmode__message_parent"]
+  "promptTemplate": "Read GitHub issue #{issueNumber} by running `gh issue view {issueNumber}`. Understand the requirements and implement the changes."
 }

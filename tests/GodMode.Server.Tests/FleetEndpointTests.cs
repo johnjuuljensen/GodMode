@@ -35,12 +35,12 @@ public class FleetEndpointTests
         var tools = await fleet.ListToolsAsync();
         Assert.Equal(FleetToolNames, tools.Select(tool => tool.Name).Order(StringComparer.Ordinal));
 
-        // A session's claude, on /mcp with its project token, is given the permission prompt and message_parent, and nothing of the fleet's
+        // A session's claude, on /mcp with its project token, is given the permission prompt, message_parent and speak, and nothing of the fleet's
         var id = (await run.CallAsync(fleet, "start_session", new() { ["profile"] = Profile, ["root"] = RootName, ["action"] = WorkAction,
             ["inputs"] = new Dictionary<string, object?> { ["name"] = "p1", ["prompt"] = "Start" } })).GetProperty("Id").GetString()!;
         var launch = await run.WaitForLaunchAsync(id, l => l.Tools != null);
         var sessionTools = JsonDocument.Parse(launch.Tools!).RootElement.EnumerateArray().Select(tool => tool.GetProperty("name").GetString());
-        Assert.Equal([MessageParentTool.Name, PermissionPromptTool.Name], sessionTools.Order(StringComparer.Ordinal));
+        Assert.Equal([MessageParentTool.Name, PermissionPromptTool.Name, SpeakTool.Name], sessionTools.Order(StringComparer.Ordinal));
     }
 
     /// <summary>

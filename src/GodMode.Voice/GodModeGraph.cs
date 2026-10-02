@@ -13,7 +13,8 @@ namespace GodMode.Voice;
 /// waits on (<see cref="ConfirmCreateNode"/>) between them. A final heard more than one way goes to the chat with its
 /// earlier readings (VoiceBot#61), and the chat acts on it as on any other (#376). "Sendt" is the code's word, said
 /// only for an answer sent in that turn (<see cref="SentNode"/>). Where the mic opens on demand, a final that is a Done
-/// phrase alone closes it (<see cref="DoneNode"/>), above help.
+/// phrase alone closes it (<see cref="DoneNode"/>), above help. A session's own spoken reply that a tool read out is
+/// said word for word by the code, not retold by the model (<see cref="SpokenNode"/>, #384).
 /// </summary>
 public static class GodModeGraph
 {
@@ -59,6 +60,10 @@ public static class GodModeGraph
               says it is unknown, give the handles it lists as options.
             - "Status [handle]", "Læs [handle]", "Hvad spørger [handle] om?" — call {{VoiceTools.ProjectStatus}}; read the
               question or result itself, shortened if long.
+            - A SPOKEN REPLY is a project's own words for the user to hear, which the session wrote itself. When a tool
+              says the system says it, it does so itself, in place of your reply: respond with one word. Where a list
+              gives one ("In its own spoken words: …"), say those words as they are, after the handle, never shortened
+              or retold. Only a project without one is summarized by you.
             - "Svar [handle] at …", "Svar at …", "Sig til [handle] at …" — call {{VoiceTools.Answer}} with the answer as the
               instruction the user meant (e.g. "Svar at den skal bruge den eksisterende migration" → text "Brug den
               eksisterende migration."). Without a handle, leave project empty: it goes to the project last announced
@@ -108,7 +113,8 @@ public static class GodModeGraph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
-            .Child(new ReadBackNode(new SentNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt), tools.Conversation, phrases), tools.Creates, phrases))
+            .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt),
+                tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
     }
 }

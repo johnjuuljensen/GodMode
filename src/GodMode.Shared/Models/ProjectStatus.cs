@@ -55,6 +55,12 @@ namespace GodMode.Shared.Models;
 /// their <c>/</c>. Input that starts with one that is not in <paramref name="SlashCommands"/> is refused, and
 /// never reaches claude. Null until claude has started its session once.
 /// </param>
+/// <param name="SpokenSummary">
+/// The session's own spoken version of its last turn's reply: the text of the <c>speak</c> call that turn made in its
+/// main conversation, which the server accepted (issue #384). Set with <paramref name="LastResult"/> as the turn ends,
+/// null for a turn that made none or ended in error, and cleared as the next turn starts. Plain text of at most about
+/// 300 characters, for voice to say word for word; the whole reply stays in the transcript.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -85,5 +91,6 @@ public record ProjectStatus(
     string? Effort = null,
     string? ParentId = null,
     IReadOnlyList<string>? SlashCommands = null,
-    IReadOnlyList<string>? ClaudeCommands = null
+    IReadOnlyList<string>? ClaudeCommands = null,
+    string? SpokenSummary = null
 );

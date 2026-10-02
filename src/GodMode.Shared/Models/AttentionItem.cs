@@ -21,6 +21,11 @@ namespace GodMode.Shared.Models;
 /// <param name="Permission">The tool call to allow or deny, when <paramref name="Kind"/> is <see cref="AttentionKind.Permission"/>.</param>
 /// <param name="Question">The AskUserQuestion with its options, when <paramref name="Kind"/> is <see cref="AttentionKind.Question"/> and claude asked with the tool; null for a question in plain text.</param>
 /// <param name="PullRequestUrl">The project's pull request, when <paramref name="Kind"/> is <see cref="AttentionKind.Review"/> or <see cref="AttentionKind.Finished"/> and it has one.</param>
+/// <param name="Spoken">
+/// The session's own spoken version of the turn's reply (<see cref="ProjectStatus.SpokenSummary"/>), when
+/// <paramref name="Kind"/> is <see cref="AttentionKind.Finished"/>, or <see cref="AttentionKind.Question"/> asked in plain
+/// text at the turn's end, and the turn made one; voice says it word for word. Null otherwise.
+/// </param>
 public record AttentionItem(
     string ProjectId,
     string ProjectName,
@@ -31,4 +36,5 @@ public record AttentionItem(
     string Text,
     PendingPermission? Permission = null,
     PendingQuestion? Question = null,
-    string? PullRequestUrl = null);
+    string? PullRequestUrl = null,
+    string? Spoken = null);

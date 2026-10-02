@@ -5,7 +5,8 @@ namespace GodMode.Server.Services;
 
 /// <summary>
 /// GodMode's two MCP endpoints, one MCP server behind both. <see cref="McpEndpointUrl.Path"/> is its sessions'
-/// claude's, with their project token, and serves the permission prompt and <see cref="MessageParentTool"/>. <see cref="FleetPath"/> is the
+/// claude's, with their project token, and serves the permission prompt, <see cref="MessageParentTool"/> and <see cref="SpeakTool"/>,
+/// with <see cref="SpeakTool.Instructions"/> as the server's instructions there alone. <see cref="FleetPath"/> is the
 /// fleet's, and serves <see cref="FleetTools"/>: to the server's own credential (as the hub), and to the project
 /// token of a session that has the fleet's tools, which its MCP config then lists. Each tool type's
 /// <c>[Authorize]</c> policy is its endpoint's, by the request's path too, so each endpoint lists and calls only its own tools.
@@ -20,10 +21,21 @@ public static class GodModeMcp
     public static IServiceCollection AddGodModeMcp(this IServiceCollection services)
     {
         services.AddMcpServer(options => options.ServerInfo = new() { Name = ProjectManager.McpServerName, Version = "1.0.0" })
-            .WithHttpTransport(options => options.SessionMode = HttpServerSessionMode.Stateless)
+            .WithHttpTransport(options =>
+            {
+                options.SessionMode = HttpServerSessionMode.Stateless;
+                // Claude Code shows a server's instructions to the model on every turn: a session is asked to speak there
+                options.ConfigureSessionOptions = (context, server, _) =>
+                {
+                    if (context.Request.Path.Equals(McpEndpointUrl.Path, StringComparison.Ordinal))
+                        server.ServerInstructions = SpeakTool.Instructions;
+                    return Task.CompletedTask;
+                };
+            })
             .AddAuthorizationFilters()
             .WithTools<PermissionPromptTool>()
             .WithTools<MessageParentTool>()
+            .WithTools<SpeakTool>()
             .WithTools<FleetTools>();
         return services;
     }

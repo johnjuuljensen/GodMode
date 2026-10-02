@@ -27,8 +27,11 @@ public sealed class VoicePhrases
     /// <summary>Before several announcements said together: "3 venter på dig:".</summary>
     public string Several(int count) => _danish ? $"{count} venter på dig:" : $"{count} need you:";
 
-    /// <summary>One project that needs the user, by its handle: short, since the model reads the rest when asked.</summary>
-    public string Announce(string handle, AttentionItem item) => (item.Kind, _danish) switch
+    /// <summary>
+    /// One project that needs the user, by its handle: short, since the model reads the rest when asked, or, when the
+    /// session gave its own spoken reply, that reply word for word (<see cref="Spoken"/>).
+    /// </summary>
+    public string Announce(string handle, AttentionItem item) => Spoken(handle, item) ?? (item.Kind, _danish) switch
     {
         (AttentionKind.Question, true) => $"{handle} har et spørgsmål",
         (AttentionKind.Question, false) => $"{handle} has a question",
@@ -40,6 +43,21 @@ public sealed class VoicePhrases
         (AttentionKind.Review, false) => $"{handle} has changes requested",
         (AttentionKind.Finished, true) => $"{handle} er færdig",
         (AttentionKind.Finished, false) => $"{handle} is done",
+    };
+
+    /// <summary>
+    /// The session's own spoken reply (<see cref="AttentionItem.Spoken"/>, issue #384), word for word, after a lead-in
+    /// that names the project and what it needs: "283 er færdig: …", "283 spørger: …". The session wrote it, not the bot,
+    /// so it never starts the line, where a "Sendt" in it would be the bot's own word (<see cref="SentNode"/>). Null
+    /// when the session gave none.
+    /// </summary>
+    public string? Spoken(string handle, AttentionItem item) => (item.Spoken, item.Kind, _danish) switch
+    {
+        (null or "", _, _) => null,
+        (var spoken, AttentionKind.Question, true) => $"{handle} spørger: {spoken}",
+        (var spoken, AttentionKind.Question, false) => $"{handle} asks: {spoken}",
+        (var spoken, _, true) => $"{handle} er færdig: {spoken}",
+        (var spoken, _, false) => $"{handle} is done: {spoken}",
     };
 
     /// <summary>
