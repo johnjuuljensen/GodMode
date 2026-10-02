@@ -108,3 +108,31 @@ describe('building a transcript as lines arrive', () => {
     expect(buildTranscript([orphan])).toMatchObject([{ kind: 'toolCall', id: 'gone', result: { text: 'late' } }]);
   });
 });
+
+// What claude 2.1.287 writes for /clear and /compact headless (#31)
+describe('a slash command in the transcript', () => {
+  const reset = '{"type":"conversation_reset","new_conversation_id":"03c6","trigger":"clear","session_id":"90a4"}';
+  const boundary = '{"type":"system","subtype":"compact_boundary","session_id":"1d18","compact_metadata":{"trigger":"manual","pre_tokens":28063}}';
+  const summary = '{"type":"user","message":{"role":"user","content":"This session is being continued from a previous conversation."},"isReplay":false,"isSynthetic":true}';
+  const stdout = '{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"},"isReplay":true}';
+  const silent = '{"type":"result","subtype":"success","is_error":false,"num_turns":0,"result":"","session_id":"1d18"}';
+  const context = '{"type":"result","subtype":"success","is_error":false,"num_turns":0,"result":"## Context Usage","session_id":"1d18"}';
+
+  it('shows /clear and /compact as markers across it', () => {
+    expect(buildTranscript([reset, boundary].map(parseClaudeMessage))).toEqual([
+      { kind: 'marker', key: '0', label: 'Conversation cleared' },
+      { kind: 'marker', key: '1', label: 'Conversation compacted' },
+    ]);
+  });
+
+  it("keeps /compact's summary and output as bookkeeping, not the user's messages", () => {
+    const items = buildTranscript([summary, stdout].map(parseClaudeMessage));
+    expect(items.map(i => i.kind)).toEqual(['system', 'system']);
+    expect(items[1]).toMatchObject({ label: 'command', summary: 'Compacted' });
+  });
+
+  it("shows no row for a command's result with no text, and /context's as a result", () => {
+    expect(buildTranscript([silent].map(parseClaudeMessage))).toEqual([]);
+    expect(buildTranscript([context].map(parseClaudeMessage))).toEqual([{ kind: 'result', key: '0', summary: '## Context Usage', isError: false }]);
+  });
+});

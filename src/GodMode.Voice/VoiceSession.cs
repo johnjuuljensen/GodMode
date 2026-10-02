@@ -47,6 +47,18 @@ public sealed record VoiceSessionSetup
     /// <summary>The speaker.</summary>
     public required IAudioSink AudioSink { get; init; }
 
+    /// <summary>
+    /// The mic that opens on demand: it hears the session's transcripts and activity (its silence timer), and a Done
+    /// phrase closes it (<see cref="DoneNode"/>). Null where the mic is always open (Android, a test's text).
+    /// </summary>
+    public VoiceMic? Mic { get; init; }
+
+    /// <summary>
+    /// The music, paused while the session speaks: its first audio waits for the pause (<see cref="MediaPause.Holding"/>),
+    /// and back at Listening it resumes. Null where the platform has no media sessions to pause.
+    /// </summary>
+    public MediaPause? Media { get; init; }
+
     public required IVoiceProviders Providers { get; init; }
     public required IVoiceEvents Events { get; init; }
     public required ILoggerFactory LoggerFactory { get; init; }
@@ -173,10 +185,10 @@ public sealed class VoiceSession : IAsyncDisposable
             var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
-                GodModeGraph.Build(inference, languages, tools, phrases, heard),
+                GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null),
                 setup.Transcription,
-                setup.AudioSink,
-                new EventSink(setup.Events, state, tools.Creates))
+                setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink,
+                new EventSink(setup.Events, state, tools.Creates, setup.Mic, setup.Media))
             {
                 AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation), logger),
                 Options = new SessionOptions
@@ -193,6 +205,8 @@ public sealed class VoiceSession : IAsyncDisposable
             voice.RefreshKeyterms();
             board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(phrases.Announce(handle, item.Item), item.Project.Key)));
             tools.Creates.Attach(outcome => session.Announcements.TryWrite(new Announcement(phrases.Created(outcome))));
+            // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
+            if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));
             state.Release();
             voice._run = voice.RunAsync(languages);
             logger.LogInformation("Voice session started ({Languages}); {Answered} of {Servers} servers answered, {Projects} projects, {Waiting} waiting, {Handles} handles",
@@ -288,11 +302,21 @@ public sealed class VoiceSession : IAsyncDisposable
     private static string TwoLetter(string language) =>
         System.Globalization.CultureInfo.GetCultureInfo(language).TwoLetterISOLanguageName;
 
+    /// <summary>The session's voice input, for the mic to suspend while it is closed.</summary>
+    private sealed class SessionInput(VoiceBotSession session) : IVoiceInput
+    {
+        public Task SuspendAsync(CancellationToken ct) => session.SuspendInputAsync(ct);
+
+        public Task ResumeAsync(CancellationToken ct) => session.ResumeInputAsync(ct);
+    }
+
     /// <summary>The session's events, to the host and the state.</summary>
-    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates) : ISessionEventSink
+    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates, VoiceMic? mic, MediaPause? media)
+        : ISessionEventSink
     {
         public Task OnTranscriptionAsync(TranscriptionEvent evt, string? cleanedText)
         {
+            mic?.Heard();
             events.Transcript(cleanedText ?? evt.Text, evt.IsPartial);
             return Task.CompletedTask;
         }
@@ -334,6 +358,8 @@ public sealed class VoiceSession : IAsyncDisposable
 
         public Task OnActivityAsync(SessionActivity activity)
         {
+            media?.Activity(activity);
+            mic?.Activity(activity);
             state.Activity(activity);
             return Task.CompletedTask;
         }

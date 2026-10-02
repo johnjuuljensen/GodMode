@@ -12,24 +12,31 @@ namespace GodMode.Voice;
 /// help (<see cref="HelpNode"/>) above it, which says what they are on the first partial that asks, and the yes a create
 /// waits on (<see cref="ConfirmCreateNode"/>) between them. A final heard more than one way goes to the chat with its
 /// earlier readings (VoiceBot#61), and the chat acts on it as on any other (#376). "Sendt" is the code's word, said
-/// only for an answer sent in that turn (<see cref="SentNode"/>). A session's own spoken reply that a tool read out is
+/// only for an answer sent in that turn (<see cref="SentNode"/>). Where the mic opens on demand, a final that is a Done
+/// phrase alone closes it (<see cref="DoneNode"/>), above help. A session's own spoken reply that a tool read out is
 /// said word for word by the code, not retold by the model (<see cref="SpokenNode"/>, #384).
 /// </summary>
 public static class GodModeGraph
 {
     public const string Id = "godmode-voice";
 
-    /// <summary>What the user says to the bot, besides project handles; ElevenLabs is biased towards them.</summary>
+    /// <summary>
+    /// What the user says to the bot, besides project handles: the commands, then the words of GodMode's work that
+    /// ElevenLabs hears as ordinary Danish ones without a bias ("loggen" as "klokken", #380). It is biased towards them,
+    /// before the servers' names (<see cref="VoiceSession.Keyterms"/>).
+    /// </summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review", "start issue", "opret"];
+        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "færdig", "det var alt", "done", "that's all", "GodMode", "pull request", "review", "start issue", "opret",
+         "log", "loggen", "session", "sessionen", "branch", "worktree", "commit", "push", "merge", "issue"];
 
     /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
     public static ToolSet AddTools(ToolSet set, VoiceTools tools) =>
         tools.AddTo(set).AddAnnouncementTools();
 
     /// <summary>The graph, greeting the user as <paramref name="heard"/> allows (<see cref="VoicePhrases.Greeting"/>).</summary>
+    /// <param name="done">Closes the mic, on a Done phrase; null where the mic is always open (Android), and there is no Done.</param>
     public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases,
-        ServersHeard heard)
+        ServersHeard heard, Action? done = null)
     {
         var systemPrompt = $$"""
             You are GodMode's voice: the user runs Claude Code sessions (projects) on several servers and follows them
@@ -85,6 +92,11 @@ public static class GodModeGraph
             instruction in words the user would recognize ("Skal 283 pushe, eller ikke pushe?"), never a fragment the
             transcriber heard ("Mente du 'Så master undersøger' eller 'Så må'?"), and act on their answer.
 
+            MISHEARD WORDS: the transcriber hears GodMode's words as ordinary Danish ones ("klokken" or "lokken" for
+            "loggen", "L O G" spelled out for "log", a session or branch name as a common word). When a word makes no
+            sense where it stands and a GodMode word that sounds like it does, act on the GodMode word ("tjek klokken for
+            applikationen" → check the application's log), and send it so; never ask about it.
+
             PERMISSION REQUESTS are never answered by voice. Say "<handle> skal have tilladelse: <what>. Svar på skærmen."
 
             PROTOCOL WORDS you use yourself: "Klar" (ready), "Ukendt" (no such project), "Uklar" (ambiguous: give two or
@@ -95,8 +107,9 @@ public static class GodModeGraph
             Never use emoji, markdown or lists: the output is spoken.
             """;
 
-        return new CompositeBuilder(Id)
-            .WithTools(t => AddTools(t, tools))
+        var graph = new CompositeBuilder(Id).WithTools(t => AddTools(t, tools));
+        if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));
+        return graph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))

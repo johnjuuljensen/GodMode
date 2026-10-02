@@ -34,17 +34,45 @@ export function parseClaudeMessage(rawJson: string): ClaudeMessage {
   const type = asString(root.type) ?? 'unknown';
   const subtype = asString(root.subtype);
   const contentItems = extractContentItems(root, type);
+  const summary = extractSummary(root, type, subtype);
+  const isError = type === 'error' || (type === 'result' && root.is_error === true);
+  const marker = commandMarker(type, subtype);
+  const commandNote = noteOf(root, type, contentItems, summary, isError);
   return {
     type,
     subtype,
     typeDisplay: subtype ? `${type}:${subtype}` : type,
     isUserMessage: type === 'user',
     parentToolUseId: asString(root.parent_tool_use_id),
-    summary: extractSummary(root, type, subtype),
-    isError: type === 'error' || (type === 'result' && root.is_error === true),
+    summary,
+    isError,
     contentItems,
     contentSummary: buildContentSummary(contentItems),
+    ...(marker ? { marker } : {}),
+    ...(commandNote ? { commandNote } : {}),
   };
+}
+
+/** The marker a slash command's line puts across the transcript: /clear's reset, /compact's boundary. */
+function commandMarker(type: string, subtype: string | null): string | undefined {
+  if (type === 'conversation_reset') return 'Conversation cleared';
+  if (type === 'system' && subtype === 'compact_boundary') return 'Conversation compacted';
+  return undefined;
+}
+
+/** A command's output that claude writes as a user message: `<local-command-stdout>Compacted </local-command-stdout>`. */
+const LOCAL_COMMAND_STDOUT = /^\s*<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/;
+
+/** The text of a command's output that claude wrote as a user message; null for any other text. */
+export function localCommandStdout(text: string): string | null {
+  return LOCAL_COMMAND_STDOUT.exec(text)?.[1].trim() ?? null;
+}
+
+function noteOf(root: Json, type: string, items: ClaudeContentItem[], summary: string, isError: boolean): ClaudeMessage['commandNote'] {
+  if (type === 'user' && root.isSynthetic === true) return 'summary';
+  if (type === 'user' && items.length === 1 && items[0].type === 'text' && localCommandStdout(items[0].text ?? '') !== null) return 'stdout';
+  if (type === 'result' && !isError && root.num_turns === 0 && summary.trim() === '') return 'silentResult';
+  return undefined;
 }
 
 function extractSummary(root: Json, type: string, subtype: string | null): string {
@@ -202,6 +230,8 @@ export type TranscriptItem =
   | { kind: 'thinking'; key: string; text: string }
   | ToolCallItem
   | { kind: 'system'; key: string; label: string; summary: string; isError: boolean }
+  /** What a slash command did to the conversation (cleared, compacted), across the transcript */
+  | { kind: 'marker'; key: string; label: string }
   | { kind: 'result'; key: string; summary: string; isError: boolean };
 
 /** The transcript of a run of messages, from scratch. */
@@ -290,6 +320,14 @@ export function createTranscriptBuilder(): (messages: readonly ClaudeMessage[]) 
 type Attach = { kind: 'attach'; key: string; toolUseId: string; result: ToolResult };
 
 function messageItems(message: ClaudeMessage, key: string): (TranscriptItem | Attach)[] {
+  if (message.marker) return [{ kind: 'marker', key, label: message.marker }];
+  switch (message.commandNote) {
+    // Claude's summary of what it compacted: bookkeeping, as its system lines are
+    case 'summary': return [{ kind: 'system', key, label: 'summary', summary: 'Summary of the compacted conversation', isError: false }];
+    case 'stdout': return [{ kind: 'system', key, label: 'command', summary: localCommandStdout(message.contentItems[0].text ?? '') ?? '', isError: false }];
+    // No reply: a DONE with nothing after it looked like a turn that finished empty (#31)
+    case 'silentResult': return [];
+  }
   switch (message.type) {
     case 'user':
     case 'assistant':

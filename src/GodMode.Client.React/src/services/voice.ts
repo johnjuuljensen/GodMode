@@ -16,6 +16,8 @@ export type {
 export const getVoiceStatus = (): Promise<VoiceStatus> => bridge.request('voice.state');
 export const startVoice = (): Promise<VoiceStatus> => bridge.request('voice.start');
 export const stopVoice = (): Promise<VoiceStatus> => bridge.request('voice.stop');
+export const openMic = (): Promise<VoiceStatus> => bridge.request('voice.mic.open');
+export const closeMic = (): Promise<VoiceStatus> => bridge.request('voice.mic.close');
 export const getVoiceSettings = (): Promise<VoiceSettingsView> => bridge.request('voice.settings.get');
 export const setVoiceSettings = (update: VoiceSettingsUpdate): Promise<VoiceSettingsView> =>
   bridge.request('voice.settings.set', update);

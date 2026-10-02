@@ -4,8 +4,8 @@
 import { showToast } from './toast';
 import { useAppStore } from './store';
 import type { UnmanagedFolder } from './signalr/types';
+import { hubErrorMessage } from './signalr/hubError';
 
-const messageOf = (err: unknown) => err instanceof Error ? err.message.replace(/^.*HubException: /, '') : String(err);
 
 const hubOf = (serverId: string) => useAppStore.getState().serverConnections.find(c => c.serverInfo.Id === serverId)?.hub;
 
@@ -16,7 +16,7 @@ export async function listUnmanaged(serverId: string, profileName: string, rootN
   try {
     return await hub.listUnmanaged(profileName, rootName);
   } catch (err) {
-    throw new Error(messageOf(err));
+    throw new Error(hubErrorMessage(err));
   }
 }
 
@@ -33,7 +33,7 @@ export async function adoptFolder(serverId: string, profileName: string, rootNam
     useAppStore.getState().openCreatedProject(serverId, status);
     return true;
   } catch (err) {
-    showToast({ text: `Could not adopt "${folder.Name}": ${messageOf(err)}`, tone: 'error' });
+    showToast({ text: `Could not adopt "${folder.Name}": ${hubErrorMessage(err)}`, tone: 'error' });
     return false;
   }
 }

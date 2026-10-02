@@ -10,7 +10,7 @@ namespace GodMode.Server.Tests.Lifecycle;
 /// <param name="Offset">An output line's offset (OutputReceived), a batch's fromOffset (OutputBatch), or where a replay completed.</param>
 /// <param name="Attention">The list an AttentionChanged pushed.</param>
 /// <param name="SubscriptionId">The subscription a batch or complete answers.</param>
-/// <param name="Generation">The output generation a batch's or complete's offsets are in.</param>
+/// <param name="Generation">The output generation a batch's or complete's offsets are in, or an OutputRestarted's new one.</param>
 /// <param name="Roots">The roots a RootsChanged pushed.</param>
 /// <param name="Profiles">The profiles a RootsChanged pushed.</param>
 /// <param name="Message">A CreationProgress's line of script output.</param>
@@ -132,6 +132,9 @@ internal sealed class RecordingHubContext : IHubContext<ProjectHub, IProjectHubC
 
         public Task OutputReplayComplete(string projectId, string subscriptionId, string generation, long offset) =>
             Done(new HubPush(nameof(OutputReplayComplete), projectId, Offset: offset, SubscriptionId: subscriptionId, Generation: generation));
+
+        public Task OutputRestarted(string projectId, string generation) =>
+            Done(new HubPush(nameof(OutputRestarted), projectId, Generation: generation));
 
         public Task StatusChanged(string projectId, ProjectStatus status) =>
             Done(new HubPush(nameof(StatusChanged), projectId, status));

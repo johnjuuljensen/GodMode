@@ -72,6 +72,7 @@ public sealed class Mic(SpikeLog log)
     {
         var buffers = 0;
         var heard = false;
+        short secondPeak = 0;
         try
         {
             await foreach (var chunk in source.Audio.ReadAllAsync(ct))
@@ -79,6 +80,13 @@ public sealed class Mic(SpikeLog log)
                 var peak = Peak(chunk.Span);
                 Level = peak / 32768.0;
                 if (buffers++ == 0) log.Write(Source, $"first buffer ({chunk.Length} bytes, peak {peak})");
+                // Once a second (10 buffers), the loudest sample in it: shows whether the mic hears anything at all
+                secondPeak = Math.Max(secondPeak, peak);
+                if (buffers % 10 == 0)
+                {
+                    log.Write(Source, $"level: peak {secondPeak} of 32767 in the last second (sound floor {SoundFloor})");
+                    secondPeak = 0;
+                }
                 if (!heard && peak > SoundFloor)
                 {
                     heard = true;

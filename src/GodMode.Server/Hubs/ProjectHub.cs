@@ -87,7 +87,14 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     {
         _logger.LogInformation("Client {ConnectionId} sending input to project {ProjectId}",
             Context.ConnectionId, projectId);
-        await _projectManager.SendInputAsync(projectId, input);
+        try
+        {
+            await _projectManager.SendInputAsync(projectId, input);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            throw new HubException(ex.Message);
+        }
     }
 
     public Task<AttentionItem[]> GetAttention()

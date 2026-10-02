@@ -58,6 +58,15 @@ public static class ShellMessageTypes
     /// <summary>Request → <see cref="VoiceStatus"/>, once the session has stopped.</summary>
     public const string VoiceStop = "voice.stop";
 
+    /// <summary>
+    /// Request → <see cref="VoiceStatus"/>, once the mic is open: the music paused, the microphone open, the rising tone
+    /// played. Fails where voice is off, or its mic does not open on demand (<see cref="VoiceStatus.MicOnDemand"/>).
+    /// </summary>
+    public const string VoiceMicOpen = "voice.mic.open";
+
+    /// <summary>Request → <see cref="VoiceStatus"/>, once the mic has closed: the falling tone, the microphone let go of.</summary>
+    public const string VoiceMicClose = "voice.mic.close";
+
     /// <summary>Request → <see cref="VoiceSettingsView"/>: the settings, and whether each key is set; never a key.</summary>
     public const string VoiceSettingsGet = "voice.settings.get";
 
@@ -82,7 +91,7 @@ public static class ShellMessageTypes
     /// <summary>Event <see cref="VoiceServicePayload"/>: a service that failed works again.</summary>
     public const string VoiceRecovered = "voice.recovered";
 
-    /// <summary>Event <see cref="VoiceStatus"/>: the state changed.</summary>
+    /// <summary>Event <see cref="VoiceStatus"/>: the state changed, or the mic opened or closed.</summary>
     public const string VoiceStateChanged = "voice.stateChanged";
 }
 
@@ -93,9 +102,11 @@ public sealed record VoiceLine(VoiceSpeaker Speaker, string Text, bool Partial =
 
 /// <summary>
 /// Voice in this app: <paramref name="Available"/> is false where the platform has no voice (Windows and Android have it), and
-/// <paramref name="Lines"/> is the conversation so far, so a page loaded again shows it.
+/// <paramref name="Lines"/> is the conversation so far, so a page loaded again shows it. <paramref name="Mic"/> is whether
+/// voice hears the user; it opens on demand where <paramref name="MicOnDemand"/> (Windows), and is always open elsewhere.
 /// </summary>
-public sealed record VoiceStatus(bool Available, VoiceState State, IReadOnlyList<VoiceLine> Lines, VoiceErrorPayload? Error = null);
+public sealed record VoiceStatus(bool Available, VoiceState State, IReadOnlyList<VoiceLine> Lines, VoiceErrorPayload? Error = null,
+    VoiceMicState Mic = VoiceMicState.Open, bool MicOnDemand = false);
 
 /// <summary>A failure: which service (<see cref="SessionService"/>), what kind (<see cref="SessionErrorKind"/>), and its message.</summary>
 public sealed record VoiceErrorPayload(SessionService Service, SessionErrorKind Kind, string Message);

@@ -796,7 +796,7 @@ export const useAppStore = create<AppState>((set, get) => {
                   ? {
                       ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
                       PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
-                      PullRequest: status.PullRequest, ParentId: status.ParentId,
+                      PullRequest: status.PullRequest, ParentId: status.ParentId, SlashCommands: status.SlashCommands,
                     }
                   : p) }
               : c
@@ -870,6 +870,29 @@ export const useAppStore = create<AppState>((set, get) => {
             const restart = generation !== tile.generation;
             if (restart) updates.tileMessages = { ...state.tileMessages, [key]: [] };
             updates.tiles = { ...state.tiles, [key]: { ...tile, generation, offset: restart ? offset : Math.max(tile.offset, offset) } };
+          }
+          return updates;
+        });
+      },
+      // /clear: the output started over in a new generation. A live transcript or tile drops what it holds, and
+      // takes the new file's lines from its start; one still replaying meets the new generation in its replay
+      onOutputRestarted: (projectId, generation) => {
+        const key = projectKey(serverId, projectId);
+        set(state => {
+          const updates: Partial<AppState> = {};
+          const held = state.transcripts[key];
+          if (held?.phase === 'live') {
+            updates.transcripts = { ...state.transcripts, [key]: { ...held, messages: [], offset: 0, generation } };
+            const sel = state.selectedProject;
+            if (sel?.serverId === serverId && sel.projectId === projectId) {
+              updates.outputMessages = [];
+              updates.question = emptyQuestion;
+            }
+          }
+          const tile = state.tiles[key];
+          if (state.isTileView && tile && !state.tileLoading[key]) {
+            updates.tileMessages = { ...state.tileMessages, [key]: [] };
+            updates.tiles = { ...state.tiles, [key]: { ...tile, offset: 0, generation } };
           }
           return updates;
         });

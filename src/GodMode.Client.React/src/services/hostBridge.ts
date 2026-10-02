@@ -71,6 +71,9 @@ export interface VoiceLine {
   Partial?: boolean;
 }
 
+/** Whether voice hears the user. */
+export type VoiceMicState = 'Open' | 'Closed';
+
 /** Voice in this app, and the conversation so far (the session is the app's, so a reloaded page gets it back). */
 export interface VoiceStatus {
   Available: boolean;
@@ -78,6 +81,9 @@ export interface VoiceStatus {
   Lines: VoiceLine[];
   /** The last failure not yet recovered from. */
   Error?: VoiceError | null;
+  /** Closed until the Mic button opens it, where it opens on demand (MicOnDemand: Windows); always Open elsewhere. */
+  Mic?: VoiceMicState;
+  MicOnDemand?: boolean;
 }
 
 export interface VoiceModels {
@@ -112,6 +118,8 @@ export interface VoiceSettingsView {
   /** Null for Default, which follows the platform's default device. */
   Microphone?: AudioDevice | null;
   Speaker?: AudioDevice | null;
+  /** How many seconds of silence while voice listens close the mic. */
+  MicSilenceSeconds: number;
   Models: VoiceModels;
   ElevenLabsKeySet: boolean;
   AnthropicKeySet: boolean;
@@ -127,6 +135,7 @@ export interface VoiceSettingsUpdate {
   EchoCancellation?: boolean;
   Microphone?: AudioDevice;
   Speaker?: AudioDevice;
+  MicSilenceSeconds?: number;
   Models?: VoiceModels;
   ElevenLabsKey?: string;
   AnthropicKey?: string;
@@ -150,6 +159,10 @@ export interface BridgeRequests {
   /** Fails saying why: a missing key, no microphone, voice not available here. */
   'voice.start': [void, VoiceStatus];
   'voice.stop': [void, VoiceStatus];
+  /** Pauses the music, opens the microphone, plays the rising tone. Fails where voice is off or its mic is always open. */
+  'voice.mic.open': [void, VoiceStatus];
+  /** The falling tone, then the microphone is let go of; the music resumes once the headset is back at full quality. */
+  'voice.mic.close': [void, VoiceStatus];
   'voice.settings.get': [void, VoiceSettingsView];
   /** A running session moves to the devices it chooses now; the other settings apply from voice's next start. */
   'voice.settings.set': [VoiceSettingsUpdate, VoiceSettingsView];

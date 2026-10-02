@@ -126,6 +126,8 @@ public sealed class ShellBridge : IDisposable
         _bridge.Handle(ShellMessageTypes.VoiceState, () => Task.FromResult(_voice.Status));
         _bridge.Handle(ShellMessageTypes.VoiceStart, _voice.StartAsync);
         _bridge.Handle(ShellMessageTypes.VoiceStop, _voice.StopAsync);
+        _bridge.Handle(ShellMessageTypes.VoiceMicOpen, _voice.OpenMicAsync);
+        _bridge.Handle(ShellMessageTypes.VoiceMicClose, _voice.CloseMicAsync);
         _bridge.Handle(ShellMessageTypes.VoiceSettingsGet, _voice.Settings.GetViewAsync);
         _bridge.Handle<VoiceSettingsUpdate, VoiceSettingsView>(ShellMessageTypes.VoiceSettingsSet, _voice.UpdateSettingsAsync);
         _bridge.Handle(ShellMessageTypes.VoiceDevices, () => Task.Run(VoiceAudio.Devices));
