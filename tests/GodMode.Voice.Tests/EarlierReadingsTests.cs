@@ -113,7 +113,7 @@ public sealed class EarlierReadingsTests
         voice.Transcriptions.Add(Heard("Status 101.", "Status 10"));
         await voice.Events.SaidAsync("101 er idle.");
         voice.Transcriptions.SayAsRecognized("Svar at den skal pushe");
-        await voice.Events.SaidAsync("Sendt til 101-x.");
+        await voice.Events.SaidAsync("Sendt til 101.");
 
         Assert.Equal(new ProjectRef(ServerA, "p/r/101-x"), Assert.Single(servers.Replies).Project);
     }
@@ -125,12 +125,12 @@ public sealed class EarlierReadingsTests
     [Fact]
     public async Task The_prompt_says_to_act_on_the_final_and_ask_only_on_two_meanings()
     {
-        var model = new ScriptedChatClient().Respond("Klar.");
+        var model = new ScriptedChatClient().Respond("Uklar.");
         var (_, voice) = await AskedAsync(model);
         await using var _ = voice;
 
         voice.Transcriptions.Add(Heard("Svar nej.", "Svar ja."));
-        await voice.Events.SaidAsync("Klar.");
+        await voice.Events.SaidAsync("Uklar.");
 
         var prompt = model.Requests.Last().First(m => m.Role == Microsoft.Extensions.AI.ChatRole.System).Text;
         Assert.Contains("act on the final", prompt);

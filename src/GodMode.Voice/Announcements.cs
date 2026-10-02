@@ -14,23 +14,11 @@ namespace GodMode.Voice;
 public sealed class VoiceConversation
 {
     private ProjectRef? _current;
-    private HeardTwoWays? _unsure;
 
     public ProjectRef? Current
     {
         get => Volatile.Read(ref _current);
         set => Volatile.Write(ref _current, value);
-    }
-
-    /// <summary>
-    /// The final the chat node answers now, while the recognizer heard it more than one way (VoiceBot#61); null while
-    /// it was heard one way. Set by <see cref="HeardNode"/> for the chat's evaluation: the tools that act do nothing on
-    /// it, and the ones that read leave <see cref="Current"/> as it is (<see cref="VoiceTools"/>).
-    /// </summary>
-    public HeardTwoWays? Unsure
-    {
-        get => Volatile.Read(ref _unsure);
-        set => Volatile.Write(ref _unsure, value);
     }
 
     private ReplyReading? _reading;
@@ -59,9 +47,6 @@ public sealed class VoiceConversation
 
 /// <summary>A project's reply in the parts voice reads it in, and the index of the part to read next (its count once all were read).</summary>
 public sealed record ReplyReading(ProjectRef Project, string Handle, IReadOnlyList<string> Parts, int Next);
-
-/// <summary>A final and the earlier readings of the same utterance it revised: partials it contradicts, not only extends.</summary>
-public sealed record HeardTwoWays(string Final, IReadOnlyList<string> Readings);
 
 /// <summary>
 /// GodMode's wording of the announcements queued up to a pause: one as it is, several after "3 venter på dig:". The
