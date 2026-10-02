@@ -1,4 +1,3 @@
-using System.Runtime.Versioning;
 using GodMode.Voice;
 using Microsoft.Extensions.Logging;
 using Windows.ApplicationModel.Calls;
@@ -11,8 +10,8 @@ namespace GodMode.Maui;
 /// call control device is the headset (Windows 11 24H2's <c>VoipCallCoordinator</c> call control devices,
 /// <c>NotifyCallActive(deviceIds)</c>), so the headset's button in HFP, which is no media button there, comes back as the
 /// call's <c>EndRequested</c>. Windows shows a call in the tray meanwhile. The unpackaged app needs no capability for it
-/// (the spike's fourth trial). Below 26100 there is none (<see cref="Create"/>), and nothing here is called. One call at
-/// a time is <see cref="HeadsetCall"/>'s.
+/// (the spike's fourth trial). The app's minimum, Windows 11 24H2 (10.0.26100), has it. One call at a time is
+/// <see cref="HeadsetCall"/>'s.
 /// </summary>
 public sealed class WindowsHeadsetCall : IPhoneLine
 {
@@ -21,21 +20,11 @@ public sealed class WindowsHeadsetCall : IPhoneLine
 
     private WindowsHeadsetCall(ILogger logger) => _logger = logger;
 
-    [SupportedOSPlatformGuard("windows10.0.26100.0")]
-    private static bool Supported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 26100);
-
-    /// <summary>The headset's call, from Windows 11 24H2 (10.0.26100) on; null before it.</summary>
-    public static IHeadsetCall? Create(ILogger logger)
-    {
-        if (Supported) return new HeadsetCall(new WindowsHeadsetCall(logger), logger);
-        logger.LogInformation("Voice: the headset's call needs Windows 11 24H2 (10.0.26100), this is {Version}: its button opens the mic only",
-            Environment.OSVersion.Version);
-        return null;
-    }
+    /// <summary>The headset's call.</summary>
+    public static IHeadsetCall Create(ILogger logger) => new HeadsetCall(new WindowsHeadsetCall(logger), logger);
 
     public async Task<IPhoneCall?> RequestAsync()
     {
-        if (!Supported) return null;
         var coordinator = _coordinator ??= VoipCallCoordinator.GetDefault();
         if (coordinator is null)
         {
@@ -54,7 +43,6 @@ public sealed class WindowsHeadsetCall : IPhoneLine
         return new Call(coordinator.RequestNewOutgoingCall("godmode-voice", "GodMode", "GodMode voice", VoipPhoneCallMedia.Audio), ids);
     }
 
-    [SupportedOSPlatform("windows10.0.26100.0")]
     private sealed class Call : IPhoneCall
     {
         private readonly VoipPhoneCall _call;

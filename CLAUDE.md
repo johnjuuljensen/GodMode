@@ -52,8 +52,11 @@ dotnet run --project src/GodMode.Server/GodMode.Server.csproj -- --config ~/.god
 # Build MAUI app (requires MAUI workload; builds the React client into it)
 dotnet build src/GodMode.Maui/GodMode.Maui.csproj
 
+# Build only the Windows app (Windows 11 24H2, 10.0.26100, is its minimum)
+dotnet build src/GodMode.Maui/GodMode.Maui.csproj -p:Windows=true
+
 # Run the Windows app
-dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -f net10.0-windows10.0.26100.0
+dotnet run --project src/GodMode.Maui/GodMode.Maui.csproj -p:Windows=true
 
 # Run all tests
 dotnet test
