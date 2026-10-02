@@ -6,5 +6,5 @@
   "scriptsCreateFolder": true,
   "create": "overseer/create",
   "nameTemplate": "overseer_{name}",
-  "claudeArgs": ["--allowedTools", "mcp__godmode-fleet", "mcp__godmode__message_parent"]
+  "claudeArgs": ["--allowedTools", "mcp__godmode-fleet", "mcp__godmode__message_parent", "mcp__godmode__speak"]
 }

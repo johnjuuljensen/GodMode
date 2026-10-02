@@ -103,6 +103,25 @@ public sealed class ProjectProcess
     /// </summary>
     public string? LastAssistantText { get; set; }
 
+    /// <summary>
+    /// This turn's <c>speak</c> calls of the main conversation that wait for their result, by tool use id
+    /// (<see cref="Services.SpokenReply"/>). Reset when a new turn starts. In memory only; only the consumer touches it.
+    /// </summary>
+    public Dictionary<string, string> SpeakCalls { get; } = [];
+
+    /// <summary>
+    /// The text of this turn's last <c>speak</c> call the server accepted, which its result makes the status's
+    /// <see cref="Shared.Models.ProjectStatus.SpokenSummary"/>. Reset when a new turn starts. Only the consumer touches it.
+    /// </summary>
+    public string? Spoken { get; set; }
+
+    /// <summary>Forgets the turn's spoken reply and the calls waiting to give one: a new turn starts, or the turn ended.</summary>
+    public void ForgetSpoken()
+    {
+        SpeakCalls.Clear();
+        Spoken = null;
+    }
+
     private readonly ConcurrentDictionary<string, PendingRequest> _pending = new();
 
     /// <summary>The permission prompts claude is waiting on, by request id.</summary>

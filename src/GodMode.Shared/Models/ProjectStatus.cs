@@ -45,6 +45,12 @@ namespace GodMode.Shared.Models;
 /// kept for its life; null for a top-level session. Metadata only: the parent's stop or delete leaves its
 /// children as they are, so it may name a session that is gone, which the app shows as top level.
 /// </param>
+/// <param name="SpokenSummary">
+/// The session's own spoken version of its last turn's reply: the text of the <c>speak</c> call that turn made in its
+/// main conversation, which the server accepted (issue #384). Set with <paramref name="LastResult"/> as the turn ends,
+/// null for a turn that made none or ended in error, and cleared as the next turn starts. Plain text of at most about
+/// 300 characters, for voice to say word for word; the whole reply stays in the transcript.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -73,5 +79,6 @@ public record ProjectStatus(
     bool SharedFolder = false,
     bool Adopted = false,
     string? Effort = null,
-    string? ParentId = null
+    string? ParentId = null,
+    string? SpokenSummary = null
 );
