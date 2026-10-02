@@ -28,6 +28,13 @@ public sealed record ServerRoot(string ServerId, string ServerName, ProjectRootI
     public string Profile => Root.ProfileName ?? "Default";
 }
 
+/// <summary>How many of the servers voice connects to had given their lists when the session started.</summary>
+public sealed record ServersHeard(int Answered, int Servers)
+{
+    /// <summary>There are servers, and none of them answered: voice knows no project.</summary>
+    public bool NoneAnswered => Servers > 0 && Answered == 0;
+}
+
 /// <summary>What voice does on the servers, through their hubs as they are.</summary>
 public interface IGodModeServers
 {
@@ -76,10 +83,19 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
     private readonly ConcurrentDictionary<string, string> _names = new();
     private readonly ConcurrentDictionary<string, byte> _listed = new();
     private readonly ConcurrentDictionary<string, ServerProjects> _projects = new();
+    private readonly TimeSpan _firstAnswerWait;
 
-    public HubServers(IServerDirectory directory, ILoggerFactory loggerFactory, TimeSpan? retryDelay = null, TimeSpan? maxRetryDelay = null)
+    /// <summary>
+    /// How long a start waits, in all, for the first server to answer when none has within its wait
+    /// (<see cref="ConnectAsync"/>): a local server's connection can take a few seconds to come up.
+    /// </summary>
+    public static readonly TimeSpan DefaultFirstAnswerWait = TimeSpan.FromSeconds(15);
+
+    public HubServers(IServerDirectory directory, ILoggerFactory loggerFactory, TimeSpan? retryDelay = null, TimeSpan? maxRetryDelay = null,
+        TimeSpan? firstAnswerWait = null)
     {
         _logger = loggerFactory.CreateLogger<HubServers>();
+        _firstAnswerWait = firstAnswerWait ?? DefaultFirstAnswerWait;
         _connections = new ServerConnections(directory, this, _logger, "Voice", retryDelay, maxRetryDelay);
     }
 
@@ -92,21 +108,43 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
     /// <summary>
     /// Connects to the servers listed now, and waits until each has given its attention list, or
-    /// <paramref name="wait"/> has passed (a server that is down is not waited for longer).
+    /// <paramref name="wait"/> has passed (a server that is down is not waited for longer). When none has answered
+    /// by then, it waits on for the first that does, until the first-answer wait has passed since it began (issue #381:
+    /// a session that starts knowing no project answers every project "Ukendt").
     /// </summary>
-    public async Task ConnectAsync(TimeSpan wait, CancellationToken ct = default)
+    public async Task<ServersHeard> ConnectAsync(TimeSpan wait, CancellationToken ct = default)
     {
+        var started = TimeProvider.System.GetTimestamp();
         var servers = await RefreshAsync(ct);
+        if (!await WaitAsync(() => _listed.Count >= servers, wait, ct))
+        {
+            _logger.LogInformation("Voice: {Listed} of {Servers} servers answered within {Wait}", _listed.Count, servers, wait);
+            var rest = _firstAnswerWait - TimeProvider.System.GetElapsedTime(started);
+            if (_listed.IsEmpty && rest > TimeSpan.Zero)
+            {
+                if (await WaitAsync(() => !_listed.IsEmpty, rest, ct))
+                    _logger.LogInformation("Voice: {Listed} of {Servers} servers answered within {Wait}", _listed.Count, servers, _firstAnswerWait);
+                else
+                    _logger.LogWarning("Voice: no server answered within {Wait}; starting without projects", _firstAnswerWait);
+            }
+        }
+        return new ServersHeard(_listed.Count, servers);
+    }
+
+    /// <summary>Whether <paramref name="done"/> came true within <paramref name="wait"/>.</summary>
+    private static async Task<bool> WaitAsync(Func<bool> done, TimeSpan wait, CancellationToken ct)
+    {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(wait);
         try
         {
-            while (_listed.Count < servers)
+            while (!done())
                 await Task.Delay(50, timeout.Token);
+            return true;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            _logger.LogInformation("Voice: {Listed} of {Servers} servers answered within {Wait}", _listed.Count, servers, wait);
+            return done();
         }
     }
 

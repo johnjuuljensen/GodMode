@@ -53,6 +53,37 @@ public sealed class StartTests
         Assert.Equal(new ProjectRef("local", project.Id), voice.Session.Handles.Resolve("283"));
     }
 
+    /// <summary>
+    /// A server that never answers holds the start only for the first-answer wait: the session then starts, and its
+    /// greeting says no server answers, so "Ukendt" after it is not taken for a project that is not there.
+    /// </summary>
+    [Fact]
+    public async Task A_server_that_never_answers_holds_the_start_for_the_first_answer_wait_only_and_the_greeting_says_so()
+    {
+        var firstAnswerWait = TimeSpan.FromSeconds(1);
+        var never = new LateDirectory(TestServer.Unreachable("local"));
+        var model = new ScriptedChatClient();
+        await using var servers = new HubServers(never, NullLoggerFactory.Instance, retryDelay: TimeSpan.FromMilliseconds(100),
+            firstAnswerWait: firstAnswerWait);
+        var started = DateTime.UtcNow;
+        await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(InitialWait, ct));
+        var took = DateTime.UtcNow - started;
+
+        await voice.Events.SaidAsync("Klar. Ingen server svarer endnu.");
+        Assert.InRange(took, firstAnswerWait - TimeSpan.FromMilliseconds(100), firstAnswerWait + TimeSpan.FromSeconds(5));
+        Assert.Empty(voice.Session.Projects.Projects);
+    }
+
+    /// <summary>With no servers, or some answering, the greeting is "Klar." alone.</summary>
+    [Fact]
+    public void The_greeting_says_no_server_answers_only_when_there_are_servers_and_none_did()
+    {
+        var phrases = new VoicePhrases(VoiceSettings.Default.Languages);
+        Assert.Equal("Klar.", phrases.Greeting(new ServersHeard(0, 0)));
+        Assert.Equal("Klar.", phrases.Greeting(new ServersHeard(1, 2)));
+        Assert.Equal("Klar. Ingen server svarer endnu.", phrases.Greeting(new ServersHeard(0, 1)));
+    }
+
     /// <summary>A directory whose server cannot be reached until <see cref="Open"/>: its connection comes up then.</summary>
     internal sealed class LateDirectory(IServerDirectory inner) : IServerDirectory
     {

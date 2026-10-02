@@ -6,9 +6,9 @@ namespace GodMode.Voice;
 
 /// <summary>
 /// "Hjælp" / "help": says what the user can ask, from the tools the graph has. It answers on the first partial that
-/// is one of its phrases, as VoiceBot's CommandNode answers a command, without waiting for the final, and claims the
-/// same words when they come again in that utterance (later partials, and the final that ends it), so the chat node
-/// never answers them. New words after them are the user's next sentence (VoiceBot#62 can hold an utterance open):
+/// is its phrases alone (one, or several: "Hjælp. Hjælp."), as VoiceBot's CommandNode answers a command, without waiting for the final, and claims the
+/// help's words when they come again in that utterance (later partials, and the final that ends it, the same words
+/// or more of help's), so the chat node never answers them. New words after them are the user's next sentence (VoiceBot#62 can hold an utterance open):
 /// they release the claim and go on, whole, to the chat node.
 /// Help decides on the final's own words: the earlier readings a final carries (VoiceBot#61) are the model's, never help's.
 /// Not a CommandNode, even with VoiceBot#65's phrase keywords and claim: a keyword matches anywhere in the utterance, so
@@ -18,13 +18,15 @@ namespace GodMode.Voice;
 public sealed class HelpNode(string id, int priority) : INode
 {
     /// <summary>
-    /// What asks for help: the whole utterance, as recognized, is one of these. Danish first, with English; help
-    /// answers in the phrase's language.
+    /// What asks for help: the whole utterance, as recognized, is one or more of these, and nothing else ("Hjælp.
+    /// Hjælp.", "Hjælp, hvad kan jeg sige?"). Danish first, with English; help answers in the first phrase's language.
     /// </summary>
     public static readonly IReadOnlyList<(string Phrase, bool Danish)> Phrases =
     [
         ("hjælp", true), ("kommandoer", true), ("hvad kan du", true), ("hvad kan jeg sige", true),
+        ("hvad kan jeg gøre", true), ("hvad kan jeg", true),
         ("help", false), ("commands", false), ("what can you do", false), ("what can i say", false),
+        ("what can i do", false), ("what can i", false),
     ];
 
     /// <summary>What the user says to use each tool, in Danish and English, in the order help says them.</summary>
@@ -54,29 +56,54 @@ public sealed class HelpNode(string id, int priority) : INode
             return Task.FromResult<NodeResult?>(null);
 
         var text = context.CleanedText ?? transcription.Text;
-        var tokens = CommandResolver.Tokenize(text);
+        var asked = Asked(CommandResolver.Tokenize(text));
 
-        // The words help answered, until the final: the same words again are the same request, and more are not
-        if (context.GraphState.Get<string[]?>(context.StateKey, null) is { } answered)
+        // Help answered in this utterance, until the final: help's words again (the same, or more of them) are the same
+        // request, and other words are not
+        if (context.GraphState.Get(context.StateKey, false))
         {
-            var same = tokens.AsSpan().SequenceEqual(answered);
-            if (!same || !transcription.IsPartial)
+            if (asked is null || !transcription.IsPartial)
                 context.GraphState.Remove(context.StateKey);
-            if (same)
+            if (asked is not null)
                 return Task.FromResult<NodeResult?>(new NodeResult());
         }
 
-        if (PhraseTokens.FirstOrDefault(p => tokens.AsSpan().SequenceEqual(p.Tokens)) is not { Tokens: not null } asked)
+        if (asked is not { } danish)
             return Task.FromResult<NodeResult?>(null);
 
         if (transcription.IsPartial)
-            context.GraphState.Set(context.StateKey, tokens);
+            context.GraphState.Set(context.StateKey, true);
 
-        var help = Say(context.Tools?.ResolveAll().Keys ?? [], asked.Danish);
+        var help = Say(context.Tools?.ResolveAll().Keys ?? [], danish);
         context.Log?.Log("HELP", $"'{text}' → \"{help}\"");
         context.AddUserMessage(text);
         context.AddAssistantMessage(help);
         return Task.FromResult<NodeResult?>(new NodeResult { ResponseText = help });
+    }
+
+    /// <summary>
+    /// Whether the words are help's phrases alone, one after another, and if so whether the first is Danish; null when
+    /// any word is not part of a phrase.
+    /// </summary>
+    public static bool? Asked(string[] tokens)
+    {
+        // From the end: the language of the first of the phrases that make up the words from each position on, null
+        // where no phrases do
+        var from = new bool?[tokens.Length + 1];
+        for (var at = tokens.Length - 1; at >= 0; at--)
+        {
+            foreach (var (phrase, danish) in PhraseTokens)
+            {
+                var end = at + phrase.Length;
+                if (end <= tokens.Length && (end == tokens.Length || from[end] is not null)
+                    && tokens.AsSpan(at, phrase.Length).SequenceEqual(phrase))
+                {
+                    from[at] = danish;
+                    break;
+                }
+            }
+        }
+        return tokens.Length == 0 ? null : from[0];
     }
 
     /// <summary>What help says for a graph with these tools: the hint of each it has, in one short sentence.</summary>

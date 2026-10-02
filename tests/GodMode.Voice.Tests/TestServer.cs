@@ -107,6 +107,10 @@ internal sealed class TestServer : IAsyncDisposable
     /// <summary>A directory with this server alone in it, reached with its key, as the app's registry gives it.</summary>
     public IServerDirectory ServerDirectory(string serverId = "local") => new OneServer(serverId, new RelayTarget($"{Url}/hubs/projects", ApiKey));
 
+    /// <summary>A directory with one server that is not there (nothing listens on its port).</summary>
+    public static IServerDirectory Unreachable(string serverId) =>
+        new OneServer(serverId, new RelayTarget("http://127.0.0.1:1/hubs/projects", ApiKey));
+
     /// <summary>What the fake claude of a project read from its stdin, over all its launches.</summary>
     public IReadOnlyList<string> StdinOf(string projectId)
     {
