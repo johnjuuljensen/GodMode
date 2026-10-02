@@ -79,7 +79,11 @@ public sealed class ProjectLifecycle
         }
     }
 
-    /// <summary>Replaces the previous launch's cancellation and makes sure output has its consumer.</summary>
+    /// <summary>
+    /// Replaces the previous launch's cancellation and makes sure output has its consumer. A spoken reply, and the
+    /// <c>speak</c> calls waiting for their result, are the previous launch's: one that died in a turn no result ended
+    /// leaves them (issue #411).
+    /// </summary>
     private ProjectProcess BeginLaunch(ProjectInfo project)
     {
         var process = project.Process;
@@ -90,6 +94,7 @@ public sealed class ProjectLifecycle
         }
         process.Cancellation = new CancellationTokenSource();
         process.Stopping = false;
+        process.ForgetSpoken();
         EnsureConsumer(project);
         return process;
     }

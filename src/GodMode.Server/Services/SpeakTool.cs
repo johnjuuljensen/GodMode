@@ -56,7 +56,7 @@ public sealed partial class SpeakTool(ILogger<SpeakTool> logger)
             logger.LogInformation("Project {ProjectId}: speak refused: {Reason}", projectId, refused);
             throw new McpException(refused);
         }
-        return $"Kept as this turn's spoken reply: \"{spoken}\". Now write your full reply as usual.";
+        return $"Kept as this turn's spoken reply: \"{spoken}\". Now write your full reply as usual, unless you already have.";
     }
 
     /// <summary>
@@ -92,7 +92,11 @@ public sealed partial class SpeakTool(ILogger<SpeakTool> logger)
     [GeneratedRegex(@"\b[a-z][a-z0-9+.-]*://", RegexOptions.IgnoreCase)]
     private static partial Regex Url();
 
-    /// <summary>A line that starts as a list item does: "- ", "+ ", "1. ".</summary>
-    [GeneratedRegex(@"(^|\n)[ \t]*([-+]|\d+[.)])[ \t]")]
+    /// <summary>
+    /// A line that starts as a list item does: "- ", "+ ", or, on a line after the first, "1. ". A text that starts with a
+    /// number and a dot is a sentence ("1. maj er releasen klar", "2. gang virkede det"), not a list: a numbered list has
+    /// its items on lines of their own.
+    /// </summary>
+    [GeneratedRegex(@"(^|\n)[ \t]*[-+][ \t]|\n[ \t]*\d+[.)][ \t]")]
     private static partial Regex ListItem();
 }

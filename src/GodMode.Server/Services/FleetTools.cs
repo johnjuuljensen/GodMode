@@ -35,9 +35,6 @@ namespace GodMode.Server.Services;
 [Authorize(Policy = GodModeAuthExtensions.FleetPolicy)]
 public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub, IProjectHubClient> hub, FleetLinks links, ILogger<FleetTools> logger)
 {
-    /// <summary>The most turns <see cref="ReadAsync"/> gives.</summary>
-    public const int MaxTurns = 20;
-
     /// <summary>The create input that would start a session that asks the user nothing: the fleet may not ask for it (false is the schema's default, and fine).</summary>
     private const string SkipPermissionsInput = "skipPermissions";
 
@@ -182,7 +179,7 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         [Description("The session's ID")] string session,
         [Description("How many of its last turns to read")] int turns = 1)
     {
-        if (turns is < 1 or > MaxTurns) throw new McpException($"turns must be 1 to {MaxTurns}.");
+        if (turns is < 1 or > IProjectHub.MaxReplyTurns) throw new McpException($"turns must be 1 to {IProjectHub.MaxReplyTurns}.");
         var status = await SeenAsync(context, session);
         var replies = await Refusing(() => projects.LastRepliesAsync(session, turns));
         return Json(new SessionRead(status.Id, status.Name, SessionAddress.OfId(status.Id), status.State, status.Kind, status.ParentId, status.Model, status.Effort,
