@@ -30,6 +30,12 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
     private readonly ConcurrentDictionary<string, bool> _audible = new();
     private readonly ConcurrentDictionary<string, AudioEndpointVolume> _volumes = new();
     private volatile IReadOnlyList<HeadsetEndpoint> _headset = [];
+
+    /// <summary>
+    /// A headset render endpoint's volume changed. The trials found Windows keeps a volume per profile, so with no hand
+    /// on the volume this marks a switch: HFP's volume 0.2–0.4 s after the mic opens, A2DP's 5.2–5.3 s after it closes.
+    /// </summary>
+    public event Action? RenderVolumeChanged;
     private int _polling;
 
     /// <summary>A headset endpoint: the device (for background threads only) and what the UI reads of it.</summary>
@@ -112,8 +118,9 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
                 volume.OnVolumeNotification += data =>
                 {
                     var now = $"{data.MasterVolume:P0}{(data.Muted ? ", muted" : "")}";
-                    if (Interlocked.Exchange(ref last, now) != now)
-                        _log.Write(Source, $"volume of {endpoint.Flow} '{endpoint.Name}' -> {now}");
+                    if (Interlocked.Exchange(ref last, now) == now) return;
+                    _log.Write(Source, $"volume of {endpoint.Flow} '{endpoint.Name}' -> {now}");
+                    if (endpoint.Flow == DataFlow.Render) RenderVolumeChanged?.Invoke();
                 };
             }
             catch (Exception ex)

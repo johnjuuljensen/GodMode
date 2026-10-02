@@ -50,6 +50,34 @@ public sealed class OwnMediaControls(SpikeLog log)
         }
     }
 
+    /// <summary>The status the spike reports, while its controls are on: the proxy mirrors Spotify's with it.</summary>
+    public void SetStatus(MediaPlaybackStatus status, string why)
+    {
+        if (_controls is not { IsEnabled: true } controls || controls.PlaybackStatus == status) return;
+        controls.PlaybackStatus = status;
+        log.Write(Source, $"status -> {status} ({why})");
+    }
+
+    /// <summary>
+    /// Takes the current session back from a playing Spotify. The fourth trial: once the spike resumed Spotify, Spotify
+    /// was current and the next press paused it. The fifth: going paused and playing again does not take it back,
+    /// while a session that appears anew, playing, did at every listen start. So the spike's session closes and comes
+    /// back playing.
+    /// </summary>
+    public async Task ReclaimAsync(string why)
+    {
+        if (_controls is not { IsEnabled: true } controls) return;
+        controls.PlaybackStatus = MediaPlaybackStatus.Closed;
+        controls.IsEnabled = false;
+        await Task.Delay(100);
+        controls.IsEnabled = true;
+        controls.IsPlayEnabled = controls.IsPauseEnabled = controls.IsStopEnabled = true;
+        controls.IsNextEnabled = controls.IsPreviousEnabled = true;
+        controls.PlaybackStatus = MediaPlaybackStatus.Playing;
+        controls.DisplayUpdater.Update();
+        log.Write(Source, $"reclaim: closed and back, playing ({why})");
+    }
+
     public void Disable()
     {
         if (_controls is null) return;
