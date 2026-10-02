@@ -10,9 +10,9 @@ namespace GodMode.Voice;
 /// GodMode's voice graph, after VoiceBot's VoiceControlGraph: a terse control loop in Danish protocol words, over
 /// the hub (<see cref="VoiceTools"/>) instead of its fake system. A greeting, then one chat node with the tools, and
 /// help (<see cref="HelpNode"/>) above it, which says what they are on the first partial that asks, and the yes a create
-/// waits on (<see cref="ConfirmCreateNode"/>) between them. The chat is told when a final was heard more than one way
-/// (<see cref="HeardNode"/>): its tools then act on nothing. "Sendt" is the code's word, said only for an answer sent in
-/// that turn (<see cref="SentNode"/>).
+/// waits on (<see cref="ConfirmCreateNode"/>) between them. A final heard more than one way goes to the chat with its
+/// earlier readings (VoiceBot#61), and the chat acts on it as on any other (#376). "Sendt" is the code's word, said
+/// only for an answer sent in that turn (<see cref="SentNode"/>).
 /// </summary>
 public static class GodModeGraph
 {
@@ -22,9 +22,9 @@ public static class GodModeGraph
     public static readonly IReadOnlyList<string> CommandWords =
         ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "GodMode", "pull request", "review", "start issue", "opret"];
 
-    /// <summary>The graph's tools: the hub's, and muting announcements, which acts too (<see cref="VoiceTools.Acting"/>).</summary>
+    /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
     public static ToolSet AddTools(ToolSet set, VoiceTools tools) =>
-        tools.AddTo(set).Add(tools.Acting(AnnouncementTools.Mute)).Add(tools.Acting(AnnouncementTools.Unmute));
+        tools.AddTo(set).AddAnnouncementTools();
 
     /// <summary>The graph, greeting the user as <paramref name="heard"/> allows (<see cref="VoicePhrases.Greeting"/>).</summary>
     public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases,
@@ -72,15 +72,20 @@ public static class GodModeGraph
               the user's yes to that read-back creates it, and that is not yours to answer: never say it was created. Actions that start no session (new
               root, promote) are not started by voice yet.
 
-            EARLIER READINGS: when the user's message lists earlier readings, act on an earlier reading only by asking.
-            {{VoiceTools.Answer}}, {{VoiceTools.MarkSeen}} and muting do nothing then: ask which they meant as a closed
-            question naming the project ("Mente du ja eller nej til 283?"), and act on their next answer.
+            EARLIER READINGS: the user's message may list earlier readings, the transcriber's drafts before it settled on
+            the text. They are mostly a word or two, a sentence still growing, or the same words in the other language, and
+            no reason to ask: act on the final text, as the user most plausibly meant it. Ask only when the text you would
+            send (or the project or command) really has two meanings, both plausible from what was heard ("svar ja" revised
+            into "svar nej"). Then ask once, as a closed question naming the project, that says each meaning as a whole
+            instruction in words the user would recognize ("Skal 283 pushe, eller ikke pushe?"), never a fragment the
+            transcriber heard ("Mente du 'Så master undersøger' eller 'Så må'?"), and act on their answer.
 
             PERMISSION REQUESTS are never answered by voice. Say "<handle> skal have tilladelse: <what>. Svar på skærmen."
 
             PROTOCOL WORDS you use yourself: "Klar" (ready), "Ukendt" (no such project), "Uklar" (ambiguous: give two or
-            three options as a closed question). Never say an answer was sent ("Sendt"): only the system says that, and
-            only when {{VoiceTools.Answer}} sent it. A reply that says so otherwise is not said.
+            three options as a closed question, each in words the user would recognize). Never say an answer was sent
+            ("Sendt"): only the system says that, and only when {{VoiceTools.Answer}} sent it. A reply that says so
+            otherwise is not said.
 
             Never use emoji, markdown or lists: the output is spoken.
             """;
@@ -90,7 +95,7 @@ public static class GodModeGraph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
-            .Child(new ReadBackNode(new SentNode(new HeardNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt), tools.Conversation), tools.Conversation, phrases), tools.Creates, phrases))
+            .Child(new ReadBackNode(new SentNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
     }
 }

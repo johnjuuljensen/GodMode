@@ -38,21 +38,25 @@ public sealed class SentTests
         Assert.DoesNotContain("Sendt.", voice.Events.Responses);
     }
 
-    /// <summary>17:03:52 in the issue's log: the tool returned "Nothing was done", and the model said "Sendt." anyway.</summary>
+    /// <summary>
+    /// 17:03:52 in the issue's log: the tool sent nothing, and the model said "Sendt." anyway. A project waiting on a
+    /// permission is one the tool sends nothing to (the refusal of a final heard two ways is gone, #376).
+    /// </summary>
     [Fact]
     public async Task Sendt_after_a_refused_answer_is_not_said()
     {
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja, push." })
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "283", [VoiceTools.TextParameter] = "Ja, push." })
             .Respond("Sendt.");
-        var (servers, voice) = await AskedAsync(model);
-        await using var _ = voice;
+        var servers = new FakeServers();
+        await using var voice = await OfflineVoice.StartAsync(servers, model,
+            connect: _ => { servers.Set(ServerA, Permission("p/r/283", "283-voice", "git push")); return Task.CompletedTask; });
+        await voice.Events.SaidAsync("Klar.");
 
-        voice.Transcriptions.AddPartial("Svar ja");
-        voice.Transcriptions.AddFinal("Svar nej");
+        voice.Transcriptions.SayAsRecognized("Svar 283 ja");
         await voice.Events.SaidAsync(NothingSent);
 
-        Assert.StartsWith("Nothing was done", Assert.Single(model.ToolResults));
+        Assert.Contains("Nothing was sent", Assert.Single(model.ToolResults));
         Assert.Empty(servers.Replies);
         Assert.DoesNotContain("Sendt.", voice.Events.Responses);
     }
