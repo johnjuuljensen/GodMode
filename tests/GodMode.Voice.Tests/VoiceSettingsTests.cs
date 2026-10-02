@@ -30,7 +30,7 @@ public sealed class VoiceSettingsTests : IDisposable
         Assert.Equal("da-DK+en", view.Language);
         Assert.Equal("OyYu1oFho6PvCH2wRY3S", view.VoiceId);
         Assert.False(view.EchoCancellation);
-        Assert.Equal(new VoiceModels("claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5-5"), view.Models);
+        Assert.Equal(new VoiceModels("claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-opus-5-5"), view.Models);
         Assert.False(view.ElevenLabsKeySet);
         Assert.False(view.AnthropicKeySet);
     }

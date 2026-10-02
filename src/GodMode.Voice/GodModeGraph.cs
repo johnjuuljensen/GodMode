@@ -79,7 +79,7 @@ public static class GodModeGraph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting))
-            .Child(new ReadBackNode(new HeardNode(new ChatNode("control", 50, InferenceTier.Light, inference, systemPrompt), tools.Conversation), tools.Creates, phrases))
+            .Child(new ReadBackNode(new HeardNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt), tools.Conversation), tools.Creates, phrases))
             .Build();
     }
 }
