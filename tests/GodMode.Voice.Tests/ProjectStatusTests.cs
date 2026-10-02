@@ -1,3 +1,4 @@
+using System.Globalization;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using static GodMode.Voice.Tests.FakeServers;
@@ -63,5 +64,40 @@ public sealed class ProjectStatusTests
         var result = await tools.ProjectStatusAsync("283", CancellationToken.None);
 
         Assert.Equal($"283 (283-voice, root, Default): Idle. Needs the user: finished: {Long}", result);
+    }
+
+    /// <summary>A result far past any reply read whole keeps its start and its end, where the question is, and says it was cut.</summary>
+    [Fact]
+    public async Task A_result_over_the_limit_keeps_its_start_and_end_and_says_it_was_cut()
+    {
+        var huge = "Start på svaret. " + new string('x', 3 * VoiceTools.MaxStatusTextLength) + " " + Ending;
+        var servers = new FakeServers();
+        var handles = new ProjectHandles();
+        var projects = new ProjectBoard(servers, handles);
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, new VoiceConversation());
+        servers.Set(ServerA, Finished(Id, "283-voice", Cut(huge)));
+        servers.SetStatus(ServerA, Status(ProjectState.Idle, result: huge));
+
+        var result = await tools.ProjectStatusAsync("283", CancellationToken.None);
+
+        Assert.StartsWith("283 (283-voice, root, Default): Idle. Needs the user: finished: Start på svaret. ", result);
+        Assert.EndsWith(Ending, result);
+        Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"[... {huge.Length - VoiceTools.MaxStatusTextLength} characters cut here;"), result);
+        Assert.InRange(result.Length, VoiceTools.MaxStatusTextLength, VoiceTools.MaxStatusTextLength + 200);
+    }
+
+    /// <summary>A project in error says its error once, in full: not the item's cut text and the error again.</summary>
+    [Fact]
+    public async Task An_error_is_said_once_in_full()
+    {
+        var servers = new FakeServers();
+        var handles = new ProjectHandles();
+        var projects = new ProjectBoard(servers, handles);
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, new VoiceConversation());
+        servers.Set(ServerA, new AttentionItem(Id, "283-voice", "Default", "root", AttentionKind.Error, DateTime.UtcNow, Cut(Long)));
+        servers.SetStatus(ServerA, Status(ProjectState.Error) with { LastError = Long });
+
+        Assert.Equal($"283 (283-voice, root, Default): Error. Needs the user: failed: {Long}",
+            await tools.ProjectStatusAsync("283", CancellationToken.None));
     }
 }
