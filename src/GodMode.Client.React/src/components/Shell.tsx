@@ -9,7 +9,6 @@ import { CreateProject } from './Projects/CreateProject';
 import { AppSettings } from './AppSettings';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Toast } from './Toast/Toast';
-import { VoiceControl } from './Voice/VoiceControl';
 import { Inbox, HomeTabBar } from './Inbox/Inbox';
 import { useAttentionTitle } from './Inbox/useAttentionTitle';
 import { formatRoute, goBack, useHashRoute } from '../routing';
@@ -129,7 +128,6 @@ export function Shell() {
         </div>
       )}
       {footerSlot}
-      <VoiceControl />
       <ConfirmDialog />
       <Toast />
     </div>

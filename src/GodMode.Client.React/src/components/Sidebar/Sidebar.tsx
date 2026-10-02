@@ -8,6 +8,7 @@ import { projectKey } from '../../store/projectKey';
 import { ProjectItem } from './ProjectItem';
 import { UnmanagedGroup } from './UnmanagedGroup';
 import { Inbox } from '../Inbox/Inbox';
+import { VoiceControl } from '../Voice/VoiceControl';
 import './Sidebar.css';
 
 /** What is under each profile: the profile is always the top level (#308). */
@@ -201,6 +202,8 @@ export function SidebarFooter() {
           </button>
         </div>
       )}
+      {/* Voice beside the gear, never over the content (#433): in every window, as the session is the app's (#338) */}
+      <VoiceControl />
       <div className="sidebar-footer-buttons">
         <button className="sidebar-settings-btn" onClick={() => setMenuOpen(!menuOpen)}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
