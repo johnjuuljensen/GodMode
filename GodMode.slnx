@@ -28,11 +28,14 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/GodMode.FakeClaude/GodMode.FakeClaude.csproj" />
+    <Project Path="tests/GodMode.HeadsetSpike.Tests/GodMode.HeadsetSpike.Tests.csproj" />
     <Project Path="tests/GodMode.Relay.Tests/GodMode.Relay.Tests.csproj" />
     <Project Path="tests/GodMode.Server.Tests/GodMode.Server.Tests.csproj" />
     <Project Path="tests/GodMode.Voice.Tests/GodMode.Voice.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <!-- Issue #382's spike: a Windows-only test app for a headset's buttons and profiles; manual (its README) -->
+    <Project Path="tools/GodMode.HeadsetSpike/GodMode.HeadsetSpike.csproj" />
     <Project Path="tools/GodMode.TypeGen/GodMode.TypeGen.csproj" />
   </Folder>
 </Solution>

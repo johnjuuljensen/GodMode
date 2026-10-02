@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Issue #382's spike: a Windows-only test app for a Bluetooth headset's buttons, profiles and the microphone, on the
+       audio stack GodMode.Maui's voice uses (VoiceBot.Providers.Windows' WaveIn). Manual: see README.md. -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <!-- The same Windows SDK projection as VoiceBot.Providers.Windows -->
+    <WindowsSdkPackageVersion>10.0.19041.38</WindowsSdkPackageVersion>
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- CsWinRT's generated interop for the WinRT generics used here is unsafe code -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Lets the solution build off Windows too, as VoiceBot.Providers.Windows does -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WaveIn capture, the endpoint list and NAudio (its Core Audio and WASAPI output), from the VoiceBot submodule -->
+    <ProjectReference Include="..\..\external\VoiceBot\src\Providers\VoiceBot.Providers.Windows\VoiceBot.Providers.Windows.csproj" />
+  </ItemGroup>
+
+</Project>
