@@ -20,7 +20,8 @@ const status = (over: Partial<VoiceStatus> = {}): VoiceStatus => ({ Available: t
 
 let view: Rendered | undefined;
 const container = () => view!.container;
-const button = () => container().querySelector<HTMLButtonElement>('.voice-button');
+const button = () => container().querySelector<HTMLButtonElement>('.voice-power-button');
+const micButton = () => container().querySelector<HTMLButtonElement>('.voice-mic-button');
 const label = () => container().querySelector('.voice-label')?.textContent;
 const alertText = () => container().querySelector('[role="alert"]')?.textContent ?? null;
 const lines = () => [...container().querySelectorAll('.voice-line')].map(l => l.textContent);
@@ -78,6 +79,39 @@ it('starts voice, then follows its state and the transcript, a partial replaced 
   await emit('voice.stateChanged', status({ State: 'Thinking', Lines: said }));
   expect(label()).toBe('Thinking…');
   expect(lines()).toEqual(said.map(l => l.Text));
+});
+
+it('opens and closes the mic with the Mic button, and shows whether it is open', async () => {
+  answer({
+    'voice.state': status({ State: 'Listening', Mic: 'Closed', MicOnDemand: true }),
+    'voice.mic.open': status({ State: 'Listening', Mic: 'Open', MicOnDemand: true }),
+    'voice.mic.close': status({ State: 'Listening', Mic: 'Closed', MicOnDemand: true }),
+  });
+  view = await render(<VoiceControl />);
+  expect(micButton()!.textContent).toBe('Mic');
+  expect(micButton()!.getAttribute('aria-pressed')).toBe('false');
+
+  await click(micButton()!);
+  expect(bridge.request).toHaveBeenCalledWith('voice.mic.open');
+  await emit('voice.stateChanged', status({ State: 'Listening', Mic: 'Open', MicOnDemand: true }));
+  expect(micButton()!.getAttribute('aria-pressed')).toBe('true');
+  expect(micButton()!.title).toBe('Close the mic');
+
+  await click(micButton()!);
+  expect(bridge.request).toHaveBeenCalledWith('voice.mic.close');
+  // Closed by itself (silence, "færdig"): the shell says so
+  await emit('voice.stateChanged', status({ State: 'Listening', Mic: 'Closed', MicOnDemand: true }));
+  expect(micButton()!.getAttribute('aria-pressed')).toBe('false');
+});
+
+it('shows no Mic button while voice is off, nor where the mic is always open', async () => {
+  answer({ 'voice.state': status({ Mic: 'Closed', MicOnDemand: true }) });
+  view = await render(<VoiceControl />);
+  expect(micButton()).toBeNull();
+
+  await emit('voice.stateChanged', status({ State: 'Listening', Mic: 'Open', MicOnDemand: false }));
+  expect(micButton()).toBeNull();
+  expect(label()).toBe('Listening');
 });
 
 it('shows the conversation so far to a page loaded again', async () => {
@@ -177,6 +211,27 @@ it('offers Default and each device, keeps a chosen one that is not connected, an
   });
   expect(picker('Microphone').value).toBe(headset.Id);
   expect(picker('Speaker').value).toBe('');
+});
+
+it('saves how many seconds of silence close the mic', async () => {
+  const settings = {
+    Language: 'da-DK+en', VoiceId: 'v1', EchoCancellation: false, Microphone: null, Speaker: null, MicSilenceSeconds: 10,
+    Models: { Light: 'l', Medium: 'm', Heavy: 'h' }, ElevenLabsKeySet: true, AnthropicKeySet: true,
+  };
+  answer({
+    'voice.settings.get': settings,
+    'voice.settings.set': { ...settings, MicSilenceSeconds: 20 },
+    'voice.devices': { Supported: true, Microphones: [], Speakers: [] },
+  });
+  view = await render(<VoiceSettings />);
+  const silence = container().querySelector<HTMLInputElement>('#voice-mic-silence')!;
+  expect(silence.value).toBe('10');
+
+  await typeInto(silence, '20');
+  await click([...container().querySelectorAll('button')].find(b => b.textContent === 'Save')!);
+
+  expect(bridge.request).toHaveBeenCalledWith('voice.settings.set', expect.objectContaining({ MicSilenceSeconds: 20 }));
+  expect(silence.value).toBe('20');
 });
 
 it('offers no devices where voice picks its own route', async () => {

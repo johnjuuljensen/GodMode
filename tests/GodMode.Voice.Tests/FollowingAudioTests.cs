@@ -204,11 +204,14 @@ public sealed class FollowingAudioTests : IDisposable
         public FakeMicrophone Microphone(AudioDevice device) => Opened.OfType<FakeMicrophone>().Last(m => m.Id == device.Id);
         public FakeSpeaker Speaker(AudioDevice device) => Opened.OfType<FakeSpeaker>().Last(s => s.Id == device.Id);
 
-        public VoiceDeviceList List(bool echoCancelled)
+        public VoiceDeviceList List(bool consoleDefaults)
         {
-            Listed.Enqueue(echoCancelled);
-            return _list;
+            Listed.Enqueue(consoleDefaults);
+            return consoleDefaults && ConsoleSpeaker is { } console ? _list with { DefaultSpeakerId = console.Id } : _list;
         }
+
+        /// <summary>The console (multimedia) default speaker, where it is not the communications one.</summary>
+        public AudioDevice? ConsoleSpeaker { get; set; }
 
         public IDisposable Watch(Action changed)
         {

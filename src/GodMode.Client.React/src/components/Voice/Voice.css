@@ -28,6 +28,8 @@
   box-shadow: var(--shadow-card);
 }
 .voice-button:disabled { opacity: 0.6; cursor: default; }
+.voice-buttons { display: flex; gap: 8px; }
+.voice-mic-button.voice-mic-open { border-color: var(--success); background: var(--success-soft); }
 .voice-state-listening .voice-button { border-color: var(--accent); box-shadow: var(--shadow-focus); }
 .voice-state-thinking .voice-button { border-color: var(--purple); }
 .voice-state-speaking .voice-button { border-color: var(--success); box-shadow: var(--shadow-focus-success); }

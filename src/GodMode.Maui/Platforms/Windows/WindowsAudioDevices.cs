@@ -9,12 +9,13 @@ namespace GodMode.Maui;
 /// Windows' microphones and speakers for voice, through VoiceBot.Providers.Windows: listed by Core Audio endpoint id and
 /// the name Windows shows (VoiceBot's <c>WindowsAudioDevices</c>), opened by that id (<c>NativeAudioSource</c> and
 /// <c>NativeAudioSink</c>, johnjuuljensen/VoiceBot#66), and watched with its <c>AudioEndpointWatcher</c>. Default is
-/// the default communications device; with echo cancellation the console default, which the Voice Capture DSP pairs.
+/// the default communications device; with echo cancellation, or for the speaker while the mic is closed, the console
+/// default (Windows' default device, multimedia's too), which the Voice Capture DSP pairs and A2DP plays on.
 /// </summary>
 public sealed class WindowsAudioDevices(ILoggerFactory loggerFactory) : IAudioDevices
 {
-    public VoiceDeviceList List(bool echoCancelled) =>
-        ListDevices(echoCancelled ? AudioDeviceRole.Console : AudioDeviceRole.Communications);
+    public VoiceDeviceList List(bool consoleDefaults) =>
+        ListDevices(consoleDefaults ? AudioDeviceRole.Console : AudioDeviceRole.Communications);
 
     /// <summary>Windows' notifications; if it will not give them, voice keeps the devices it opened, and says so.</summary>
     public IDisposable Watch(Action changed)

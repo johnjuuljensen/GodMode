@@ -42,8 +42,14 @@ public sealed record VoiceSettings
     /// <summary>The microphone voice uses: null for Default, which follows Windows' default communications microphone.</summary>
     public AudioDevice? Microphone { get; init; }
 
-    /// <summary>The speaker voice uses: null for Default, which follows Windows' default communications speaker.</summary>
+    /// <summary>
+    /// The speaker voice uses: null for Default, which follows Windows' default device while the mic is closed (a
+    /// Bluetooth headset's A2DP) and its default communications device while it is open.
+    /// </summary>
     public AudioDevice? Speaker { get; init; }
+
+    /// <summary>How many seconds of silence while voice listens close the mic (<see cref="VoiceMicOptions.SilenceTimeout"/>).</summary>
+    public int MicSilenceSeconds { get; init; } = VoiceMicOptions.DefaultSilenceSeconds;
 
     public VoiceModels Models { get; init; } = VoiceModels.Default;
 
@@ -80,6 +86,7 @@ public sealed record VoiceSettingsView(
     bool EchoCancellation,
     AudioDevice? Microphone,
     AudioDevice? Speaker,
+    int MicSilenceSeconds,
     VoiceModels Models,
     bool ElevenLabsKeySet,
     bool AnthropicKeySet);
@@ -96,7 +103,8 @@ public sealed record VoiceSettingsUpdate(
     AudioDevice? Speaker = null,
     VoiceModels? Models = null,
     string? ElevenLabsKey = null,
-    string? AnthropicKey = null);
+    string? AnthropicKey = null,
+    int? MicSilenceSeconds = null);
 
 /// <summary>Reads and writes the voice settings: <c>voice.json</c> in a directory, the keys in secure storage.</summary>
 public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
@@ -131,7 +139,8 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
     {
         var settings = await LoadAsync();
         var keys = await LoadKeysAsync();
-        return new VoiceSettingsView(settings.Language, settings.VoiceId, settings.EchoCancellation, settings.Microphone, settings.Speaker, settings.Models,
+        return new VoiceSettingsView(settings.Language, settings.VoiceId, settings.EchoCancellation, settings.Microphone, settings.Speaker,
+            settings.MicSilenceSeconds, settings.Models,
             ElevenLabsKeySet: !string.IsNullOrEmpty(keys.ElevenLabs),
             AnthropicKeySet: !string.IsNullOrEmpty(keys.Anthropic));
     }
@@ -154,6 +163,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
                 EchoCancellation = update.EchoCancellation ?? current.EchoCancellation,
                 Microphone = update.Microphone ?? current.Microphone,
                 Speaker = update.Speaker ?? current.Speaker,
+                MicSilenceSeconds = update.MicSilenceSeconds ?? current.MicSilenceSeconds,
                 Models = update.Models ?? current.Models,
             });
             if (next != current)
@@ -172,7 +182,10 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
         return await GetViewAsync();
     }
 
-    /// <summary>Blank fields (a hand-edited file, an empty text box) take their defaults; a device with a blank id is Default.</summary>
+    /// <summary>
+    /// Blank fields (a hand-edited file, an empty text box) take their defaults; a device with a blank id is Default; a
+    /// silence timeout of no seconds is the default.
+    /// </summary>
     private static VoiceSettings Normalized(VoiceSettings settings) => settings with
     {
         Language = Or(settings.Language, VoiceSettings.DefaultLanguage),
@@ -182,6 +195,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
             : VoiceModels.Default,
         Microphone = Device(settings.Microphone),
         Speaker = Device(settings.Speaker),
+        MicSilenceSeconds = settings.MicSilenceSeconds > 0 ? settings.MicSilenceSeconds : VoiceMicOptions.DefaultSilenceSeconds,
     };
 
     private static AudioDevice? Device(AudioDevice? device) =>
