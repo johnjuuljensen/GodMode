@@ -66,7 +66,7 @@ public interface IMediaSessions
 public sealed class HeadsetButtons : IDisposable
 {
     /// <summary>When the session is checked after another one started playing, each wait after the one before.</summary>
-    public static readonly IReadOnlyList<TimeSpan> ReclaimChecks = [TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(1)];
+    private static readonly TimeSpan[] ReclaimChecks = [TimeSpan.FromMilliseconds(300), TimeSpan.FromSeconds(1)];
 
     private readonly IOwnMediaSession _own;
     private readonly IMediaSessions _sessions;

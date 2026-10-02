@@ -68,6 +68,28 @@ public static class VoiceAudio
         null;
 #endif
 
+    /// <summary>
+    /// The headset's play/pause as the mic's switch while voice is on (issue #423), over the media sessions
+    /// <see cref="Media"/> made, until the result is disposed; null where there is none.
+    /// </summary>
+    public static Func<IMediaPlayback, Func<Task>, IDisposable?>? MediaButtons { get; } =
+#if WINDOWS
+        (playback, playPause) => WindowsMediaButtons.Start(playback, playPause, MauiProgram.LoggerFactory.CreateLogger<WindowsMediaButtons>());
+#else
+        null;
+#endif
+
+    /// <summary>
+    /// The call held while the mic is open, whose end the headset's button asks for in HFP (issue #423); null where there
+    /// is none: off Windows, and below Windows 11 24H2.
+    /// </summary>
+    public static IHeadsetCall? HeadsetCall() =>
+#if WINDOWS
+        WindowsHeadsetCall.Create(MauiProgram.LoggerFactory.CreateLogger<WindowsHeadsetCall>());
+#else
+        null;
+#endif
+
     /// <summary>The microphones and speakers the settings can choose from (<c>voice.devices</c>): Windows only.</summary>
     public static VoiceDeviceList Devices() =>
 #if WINDOWS
