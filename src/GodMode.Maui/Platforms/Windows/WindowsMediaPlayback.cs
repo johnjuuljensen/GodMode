@@ -18,10 +18,13 @@ namespace GodMode.Maui;
 /// </remarks>
 public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
 {
+    /// <summary>How long a resume, or the manager it needs, is waited for.</summary>
+    private static readonly TimeSpan ResumeWait = TimeSpan.FromSeconds(2);
+
     private readonly ILogger _logger;
     private readonly Lock _lock = new();
     private readonly Dictionary<string, GlobalSystemMediaTransportControlsSessionPlaybackStatus> _statuses = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _watched = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, GlobalSystemMediaTransportControlsSession> _watched = new(StringComparer.Ordinal);
     private readonly List<(MMDevice Device, AudioEndpointVolume Volume)> _volumes = [];
     private readonly Task<GlobalSystemMediaTransportControlsSessionManager?> _manager;
     private readonly MMDeviceEnumerator? _enumerator;
@@ -67,7 +70,11 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
         try
         {
             var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
-            manager.SessionsChanged += (m, _) => WatchSessions(m);
+            lock (_lock)
+            {
+                if (_disposed) return null;
+                manager.SessionsChanged += SessionsChanged;
+            }
             WatchSessions(manager);
             return manager;
         }
@@ -82,16 +89,35 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
     private static bool IsOwn(GlobalSystemMediaTransportControlsSession session) =>
         session.SourceAppUserModelId.Contains("GodMode", StringComparison.OrdinalIgnoreCase);
 
+    private void SessionsChanged(GlobalSystemMediaTransportControlsSessionManager manager, SessionsChangedEventArgs args) =>
+        WatchSessions(manager);
+
+    private void PlaybackInfoChanged(GlobalSystemMediaTransportControlsSession session, PlaybackInfoChangedEventArgs args) =>
+        StatusChanged(session);
+
     private void WatchSessions(GlobalSystemMediaTransportControlsSessionManager manager)
     {
         foreach (var session in manager.GetSessions())
         {
             lock (_lock)
             {
-                if (!_watched.Add(session.SourceAppUserModelId)) continue;
+                if (_disposed || !_watched.TryAdd(session.SourceAppUserModelId, session)) continue;
+                session.PlaybackInfoChanged += PlaybackInfoChanged;
             }
-            session.PlaybackInfoChanged += (s, _) => StatusChanged(s);
             StatusChanged(session);
+        }
+    }
+
+    /// <summary>A WinRT call that may hang (a cold <c>RequestAsync</c>, an app that never answers), waited for at most <paramref name="wait"/>.</summary>
+    private static async Task<T?> Bounded<T>(Task<T> call, TimeSpan wait)
+    {
+        try
+        {
+            return await call.WaitAsync(wait > TimeSpan.Zero ? wait : TimeSpan.Zero);
+        }
+        catch (TimeoutException)
+        {
+            return default;
         }
     }
 
@@ -130,15 +156,18 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
 
     public async Task<IReadOnlyList<string>> PausePlayingAsync(TimeSpan wait, CancellationToken ct)
     {
-        if (await _manager is not { } manager) return [];
         var until = Environment.TickCount64 + (long)wait.TotalMilliseconds;
+        TimeSpan Left() => TimeSpan.FromMilliseconds(until - Environment.TickCount64);
+        if (await Bounded(_manager, wait) is not { } manager) return [];
         var paused = new List<GlobalSystemMediaTransportControlsSession>();
         foreach (var session in manager.GetSessions().Where(s => !IsOwn(s)))
         {
             if (StatusOf(session) != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing) continue;
             try
             {
-                if (await session.TryPauseAsync()) paused.Add(session);
+                // Asked, though not answered in time: it is still voice's to resume once it has paused
+                var asked = session.TryPauseAsync().AsTask();
+                if (await Bounded(asked, Left()) || !asked.IsCompleted) paused.Add(session);
             }
             catch (Exception ex)
             {
@@ -155,13 +184,13 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
 
     public async Task ResumeAsync(IReadOnlyCollection<string> sessions, CancellationToken ct)
     {
-        if (await _manager is not { } manager) return;
+        if (await Bounded(_manager, ResumeWait) is not { } manager) return;
         foreach (var session in manager.GetSessions().Where(s => sessions.Contains(s.SourceAppUserModelId)))
         {
             if (StatusOf(session) != GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused) continue;
             try
             {
-                await session.TryPlayAsync();
+                await Bounded(session.TryPlayAsync().AsTask(), ResumeWait);
             }
             catch (Exception ex)
             {
@@ -212,6 +241,11 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
         catch (TimeoutException)
         {
             _logger.LogInformation("Voice: no switch back seen in {Fallback}; resuming all the same", fallback);
+            // Back by now, as far as voice can tell: a later wait does not wait again
+            lock (_lock)
+            {
+                if (!_micOpen) _back.TrySetResult();
+            }
         }
     }
 
@@ -292,11 +326,22 @@ public sealed class WindowsMediaPlayback : IMediaPlayback, IMMNotificationClient
     {
         lock (_volumes)
         {
-            if (_disposed) return;
-            _disposed = true;
+            lock (_lock)
+            {
+                if (_disposed) return;
+                _disposed = true;
+            }
             UnwatchVolumes();
         }
-        lock (_lock) _back.TrySetResult();
+        GlobalSystemMediaTransportControlsSession[] sessions;
+        lock (_lock)
+        {
+            _back.TrySetResult();
+            sessions = [.. _watched.Values];
+            _watched.Clear();
+            foreach (var session in sessions) session.PlaybackInfoChanged -= PlaybackInfoChanged;
+        }
+        if (_manager.IsCompletedSuccessfully && _manager.Result is { } manager) manager.SessionsChanged -= SessionsChanged;
         if (_enumerator is { } enumerator)
         {
             Task.Run(() =>

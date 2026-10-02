@@ -113,6 +113,9 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
     public const string AnthropicKeyName = "voice.anthropic-api-key";
     public const string FileName = "voice.json";
 
+    /// <summary>The longest silence timeout: an hour.</summary>
+    public const int MaxMicSilenceSeconds = 3600;
+
     private readonly SemaphoreSlim _writing = new(1, 1);
 
     private string FilePath => Path.Combine(directory, FileName);
@@ -184,7 +187,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
 
     /// <summary>
     /// Blank fields (a hand-edited file, an empty text box) take their defaults; a device with a blank id is Default; a
-    /// silence timeout of no seconds is the default.
+    /// silence timeout of no seconds is the default, and one over an hour is an hour.
     /// </summary>
     private static VoiceSettings Normalized(VoiceSettings settings) => settings with
     {
@@ -195,7 +198,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
             : VoiceModels.Default,
         Microphone = Device(settings.Microphone),
         Speaker = Device(settings.Speaker),
-        MicSilenceSeconds = settings.MicSilenceSeconds > 0 ? settings.MicSilenceSeconds : VoiceMicOptions.DefaultSilenceSeconds,
+        MicSilenceSeconds = settings.MicSilenceSeconds > 0 ? Math.Min(settings.MicSilenceSeconds, MaxMicSilenceSeconds) : VoiceMicOptions.DefaultSilenceSeconds,
     };
 
     private static AudioDevice? Device(AudioDevice? device) =>

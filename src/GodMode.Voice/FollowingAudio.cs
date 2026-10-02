@@ -142,6 +142,7 @@ public sealed class FollowingAudio : IMicSwitch, IDisposable
     /// </summary>
     public void CloseMic() => SwitchMic(false);
 
+    /// <exception cref="InvalidOperationException">No microphone opened (none there, or it failed): the mic stays closed.</exception>
     private void SwitchMic(bool open)
     {
         lock (_picking)
@@ -150,6 +151,15 @@ public sealed class FollowingAudio : IMicSwitch, IDisposable
             _micOpen = open;
         }
         Pick(open ? "the mic opened" : "the mic closed");
+        if (!open) return;
+
+        lock (_picking)
+        {
+            if (_current is not null || _disposed) return;
+            _micOpen = false;
+        }
+        Pick("the mic did not open");
+        throw new InvalidOperationException("No microphone opened: see the voice log");
     }
 
     public void Start()

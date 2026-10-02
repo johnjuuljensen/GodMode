@@ -211,6 +211,18 @@ public sealed class FollowingAudioTests : IDisposable
     }
 
     [Fact]
+    public void Opening_the_mic_with_no_microphone_says_so_and_leaves_it_closed()
+    {
+        _devices.Set([], [LaptopSpeakers], null, LaptopSpeakers);
+        var audio = Open(micOpen: false);
+
+        Assert.Throws<InvalidOperationException>(audio.OpenMic);
+
+        Assert.False(audio.MicOpen);
+        Assert.Equal((null, LaptopSpeakers.Id), audio.OpenIds);
+    }
+
+    [Fact]
     public void A_chosen_speaker_is_used_with_the_mic_open_or_closed()
     {
         _devices.Set([HeadsetMic], [LaptopSpeakers, HeadsetSpeaker], HeadsetMic, HeadsetSpeaker);

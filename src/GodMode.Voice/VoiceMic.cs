@@ -60,7 +60,8 @@ public sealed record VoiceMicOptions
 /// microphone (the switch to HFP), then plays the rising tone. It closes on <see cref="CloseAsync"/> (the button, a Done
 /// phrase), or when nothing is heard while Listening for <see cref="VoiceMicOptions.SilenceTimeout"/>, counted from
 /// the latest of the tone, the user's last words and the end of the bot's speech: the falling tone, then the microphone
-/// is let go of, and the music resumes once the route is back at full quality.
+/// is let go of, and the music resumes once the route is back at full quality. Pressed while the bot speaks, either
+/// waits for its speech to play out: the speaker moves with the mic, and the one it leaves drops what it holds.
 /// </summary>
 public sealed class VoiceMic : IDisposable
 {
@@ -74,6 +75,7 @@ public sealed class VoiceMic : IDisposable
     private readonly Lock _lock = new();
     private VoiceMicState _state = VoiceMicState.Closed;
     private SessionActivity _activity = SessionActivity.Listening;
+    private TaskCompletionSource _quiet = Quiet();
     private ITimer? _silence;
     private int _silenceRound;
     private bool _disposed;
@@ -89,6 +91,13 @@ public sealed class VoiceMic : IDisposable
         _options = options;
         _logger = logger;
         _time = time ?? TimeProvider.System;
+    }
+
+    private static TaskCompletionSource Quiet()
+    {
+        var quiet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        quiet.SetResult();
+        return quiet;
     }
 
     public VoiceMicState State
@@ -123,7 +132,21 @@ public sealed class VoiceMic : IDisposable
                 {
                 }
             }
-            await Task.Run(_mic.OpenMic).ConfigureAwait(false);
+            await QuietAsync().ConfigureAwait(false);
+            lock (_lock)
+            {
+                if (_disposed) return;
+            }
+            try
+            {
+                await Task.Run(_mic.OpenMic).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Voice: the mic did not open");
+                _media?.Release(MediaHold.Mic);
+                throw;
+            }
             Set(VoiceMicState.Open);
             _logger.LogInformation("Voice: mic open");
             await ToneAsync(rising: true).ConfigureAwait(false);
@@ -149,6 +172,7 @@ public sealed class VoiceMic : IDisposable
             StopSilence();
             Set(VoiceMicState.Closed);
             _logger.LogInformation("Voice: mic closed ({Why})", why);
+            await QuietAsync().ConfigureAwait(false);
             await ToneAsync(rising: false).ConfigureAwait(false);
             if (_options.ToneWait > TimeSpan.Zero)
                 await Task.Delay(_options.ToneWait, _time).ConfigureAwait(false);
@@ -173,8 +197,24 @@ public sealed class VoiceMic : IDisposable
     /// </summary>
     public void Activity(SessionActivity activity)
     {
-        lock (_lock) _activity = activity;
+        lock (_lock)
+        {
+            _activity = activity;
+            if (activity == SessionActivity.Speaking && _quiet.Task.IsCompleted)
+                _quiet = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            else if (activity != SessionActivity.Speaking)
+                _quiet.TrySetResult();
+        }
         RestartSilence();
+    }
+
+    /// <summary>
+    /// Returns once the session is not speaking: opening or closing the mic moves Default for the speaker between the
+    /// communications and console devices, and the speaker it leaves drops what it still holds, so speech plays out first.
+    /// </summary>
+    private Task QuietAsync()
+    {
+        lock (_lock) return _quiet.Task;
     }
 
     private void Set(VoiceMicState state)
@@ -259,6 +299,7 @@ public sealed class VoiceMic : IDisposable
             _disposed = true;
             _silence?.Dispose();
             _silence = null;
+            _quiet.TrySetResult();
         }
     }
 }

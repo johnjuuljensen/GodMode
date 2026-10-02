@@ -53,7 +53,12 @@ public enum MediaHold
 /// (<see cref="Hold"/>) pauses what plays, and the last release (<see cref="Release"/>) resumes it, once the route is
 /// back at full quality (<see cref="IMediaPlayback.FullQualityAsync"/>). It resumes only what it paused, and of that
 /// only what nobody played meanwhile: a session started by hand is the user's again, and so is whatever they do with it
-/// after (pause it again, say).
+/// after (pause it again, say). A session playing because of its own resume is not one played by hand.
+/// <para>
+/// After speech alone (the mic never opened), it waits <see cref="DefaultSpeechResumeDelay"/> before it resumes: the
+/// next announcement in the queue comes within it, and the music does not flap between them. Every call to the platform
+/// is bounded, so a pause that hangs neither stalls the speech nor keeps the music from resuming.
+/// </para>
 /// </summary>
 public sealed class MediaPause : IDisposable
 {
@@ -63,22 +68,38 @@ public sealed class MediaPause : IDisposable
     /// <summary>How long after the mic closed the music resumes if the route's switch back never shows.</summary>
     public static readonly TimeSpan DefaultFullQualityFallback = TimeSpan.FromSeconds(8);
 
+    /// <summary>How long after speech, with the mic closed throughout, the music waits to resume.</summary>
+    public static readonly TimeSpan DefaultSpeechResumeDelay = TimeSpan.FromSeconds(1);
+
+    /// <summary>How long a resume is waited for before it is let go of.</summary>
+    private static readonly TimeSpan ResumeWait = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long after its own resume a session's playing is put down to it, not to the user.</summary>
+    private static readonly TimeSpan OwnResumeWindow = TimeSpan.FromSeconds(3);
+
     private readonly IMediaPlayback _playback;
     private readonly ILogger _logger;
     private readonly TimeSpan _fallback;
+    private readonly TimeSpan _speechResumeDelay;
+    private readonly TimeProvider _time;
     private readonly Lock _lock = new();
     private readonly SemaphoreSlim _calls = new(1, 1);
     private readonly HashSet<string> _paused = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _resumedAt = new(StringComparer.Ordinal);
     private MediaHold _holds;
+    private bool _micHeld;
     private Task _pausing = Task.CompletedTask;
     private CancellationTokenSource? _resuming;
     private bool _disposed;
 
-    public MediaPause(IMediaPlayback playback, ILogger logger, TimeSpan? fullQualityFallback = null)
+    public MediaPause(IMediaPlayback playback, ILogger logger, TimeSpan? fullQualityFallback = null,
+        TimeSpan? speechResumeDelay = null, TimeProvider? time = null)
     {
         _playback = playback;
         _logger = logger;
         _fallback = fullQualityFallback ?? DefaultFullQualityFallback;
+        _speechResumeDelay = speechResumeDelay ?? DefaultSpeechResumeDelay;
+        _time = time ?? TimeProvider.System;
         _playback.Playing += Played;
     }
 
@@ -110,7 +131,11 @@ public sealed class MediaPause : IDisposable
             if (_disposed || (_holds & reason) == reason) return _pausing;
             var was = _holds;
             _holds |= reason;
-            if (reason.HasFlag(MediaHold.Mic) && !was.HasFlag(MediaHold.Mic)) _playback.MicOpening();
+            if (reason.HasFlag(MediaHold.Mic) && !was.HasFlag(MediaHold.Mic))
+            {
+                _micHeld = true;
+                _playback.MicOpening();
+            }
             if (was != MediaHold.None) return _pausing;
 
             CancelResume();
@@ -128,10 +153,18 @@ public sealed class MediaPause : IDisposable
             _holds &= ~reason;
             if (_holds != MediaHold.None) return;
 
-            CancelResume();
-            _resuming = new CancellationTokenSource();
-            _ = ResumeAsync(_resuming.Token);
+            // After the mic, the route takes its time to come back anyway; after speech alone, the next may be queued
+            var delay = _micHeld ? TimeSpan.Zero : _speechResumeDelay;
+            _micHeld = false;
+            StartResume(delay);
         }
+    }
+
+    private void StartResume(TimeSpan delay)
+    {
+        CancelResume();
+        _resuming = new CancellationTokenSource();
+        _ = ResumeAsync(delay, _resuming.Token);
     }
 
     /// <summary>The session's activity: speaking holds the music, back at Listening lets it go.</summary>
@@ -154,15 +187,22 @@ public sealed class MediaPause : IDisposable
     /// </summary>
     public IAudioSink Holding(IAudioSink speaker) => new HoldingSink(this, speaker);
 
+    /// <summary>Pauses what plays, done within <see cref="PauseWait"/> however long the platform takes.</summary>
     private async Task PauseAsync()
     {
         await _calls.WaitAsync().ConfigureAwait(false);
         try
         {
-            var paused = await _playback.PausePlayingAsync(PauseWait, CancellationToken.None).ConfigureAwait(false);
-            lock (_lock) _paused.UnionWith(paused);
-            if (paused.Count > 0)
-                _logger.LogInformation("Voice: paused {Sessions}", string.Join(", ", paused));
+            var call = _playback.PausePlayingAsync(PauseWait, CancellationToken.None);
+            try
+            {
+                Remember(await call.WaitAsync(PauseWait).ConfigureAwait(false));
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogWarning("Voice: the music did not pause within {Wait}; voice goes on", PauseWait);
+                _ = PausedLateAsync(call);
+            }
         }
         catch (Exception ex)
         {
@@ -174,13 +214,38 @@ public sealed class MediaPause : IDisposable
         }
     }
 
-    private async Task ResumeAsync(CancellationToken ct)
+    private void Remember(IReadOnlyList<string> paused)
+    {
+        lock (_lock) _paused.UnionWith(paused);
+        if (paused.Count > 0)
+            _logger.LogInformation("Voice: paused {Sessions}", string.Join(", ", paused));
+    }
+
+    /// <summary>A pause that came after voice stopped waiting: what it paused is resumed too, at once if nothing holds it.</summary>
+    private async Task PausedLateAsync(Task<IReadOnlyList<string>> call)
+    {
+        try
+        {
+            Remember(await call.ConfigureAwait(false));
+            lock (_lock)
+            {
+                if (!_disposed && _holds == MediaHold.None) StartResume(TimeSpan.Zero);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Voice: could not pause the music");
+        }
+    }
+
+    private async Task ResumeAsync(TimeSpan delay, CancellationToken ct)
     {
         try
         {
             Task pausing;
             lock (_lock) pausing = _pausing;
             await pausing.ConfigureAwait(false);
+            if (delay > TimeSpan.Zero) await Task.Delay(delay, _time, ct).ConfigureAwait(false);
             await _playback.FullQualityAsync(_fallback, ct).ConfigureAwait(false);
 
             await _calls.WaitAsync(ct).ConfigureAwait(false);
@@ -192,9 +257,11 @@ public sealed class MediaPause : IDisposable
                     if (ct.IsCancellationRequested) return;
                     sessions = [.. _paused];
                     _paused.Clear();
+                    var now = _time.GetTimestamp();
+                    foreach (var session in sessions) _resumedAt[session] = now;
                 }
                 if (sessions.Length == 0) return;
-                await _playback.ResumeAsync(sessions, CancellationToken.None).ConfigureAwait(false);
+                await _playback.ResumeAsync(sessions, CancellationToken.None).WaitAsync(ResumeWait).ConfigureAwait(false);
                 _logger.LogInformation("Voice: resumed {Sessions}", string.Join(", ", sessions));
             }
             finally
@@ -218,11 +285,18 @@ public sealed class MediaPause : IDisposable
         _resuming = null;
     }
 
-    /// <summary>A session it paused played again, and not by its resume: it is the user's now.</summary>
+    /// <summary>
+    /// A session played. Soon after its own resume of it, that is the resume (GSMTC tells it late, perhaps after the next
+    /// pause); otherwise, for a session it paused, the user played it, and it is theirs now.
+    /// </summary>
     private void Played(string session)
     {
         bool forgotten;
-        lock (_lock) forgotten = _paused.Remove(session);
+        lock (_lock)
+        {
+            if (_resumedAt.Remove(session, out var at) && _time.GetElapsedTime(at) < OwnResumeWindow) return;
+            forgotten = _paused.Remove(session);
+        }
         if (forgotten)
             _logger.LogInformation("Voice: {Session} was played by hand; it is not resumed", session);
     }
@@ -241,7 +315,7 @@ public sealed class MediaPause : IDisposable
             _holds = MediaHold.None;
             _disposed = true;
             CancelResume();
-            resuming = ResumeAsync(CancellationToken.None);
+            resuming = ResumeAsync(TimeSpan.Zero, CancellationToken.None);
         }
         _ = resuming.ContinueWith(_ =>
         {
@@ -250,14 +324,17 @@ public sealed class MediaPause : IDisposable
         }, TaskScheduler.Default);
     }
 
+    /// <summary>Holds only the first audio after a pause began: the rest goes straight on, however the pause is doing.</summary>
     private sealed class HoldingSink(MediaPause media, IAudioSink speaker) : IAudioSink
     {
+        private Task? _waited;
+
         public AudioFormat Format => speaker.Format;
 
         public async Task SendAudioAsync(ReadOnlyMemory<byte> audio, CancellationToken ct)
         {
             var pausing = media.Hold(MediaHold.Speech);
-            if (!pausing.IsCompleted)
+            if (!ReferenceEquals(Interlocked.Exchange(ref _waited, pausing), pausing) && !pausing.IsCompleted)
             {
                 try
                 {

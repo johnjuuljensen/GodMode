@@ -127,6 +127,57 @@ public sealed class VoiceMicTests : IDisposable
         Assert.Equal((1, 1), (_switch.Opens, _switch.Closes));
     }
 
+    /// <summary>
+    /// Review of PR#425: the Mic pressed during an announcement, to answer it. Opening moves the speaker, and the one it
+    /// leaves drops what it holds, so the mic opens once the speech has played out; the music is paused at once.
+    /// </summary>
+    [Fact]
+    public async Task The_mic_pressed_while_the_bot_speaks_opens_once_the_speech_has_played_out()
+    {
+        _playback.Has("Spotify", playing: true);
+        _mic.Activity(SessionActivity.Speaking);
+
+        var opening = _mic.OpenAsync();
+        await Eventually.UntilAsync(() => !_playback.IsPlaying("Spotify"), () => "Spotify still plays");
+        await Task.Delay(100);
+        Assert.Equal((0, VoiceMicState.Closed), (_switch.Opens, _mic.State));
+
+        _mic.Activity(SessionActivity.Listening);
+        await opening.WaitAsync(Eventually.Timeout);
+        Assert.Equal((1, VoiceMicState.Open), (_switch.Opens, _mic.State));
+    }
+
+    [Fact]
+    public async Task The_mic_closed_while_the_bot_speaks_lets_go_once_the_speech_has_played_out()
+    {
+        await _mic.OpenAsync();
+        _mic.Activity(SessionActivity.Speaking);
+
+        var closing = _mic.CloseAsync(MicClose.Button);
+        await Task.Delay(100);
+        Assert.Equal(0, _switch.Closes);
+        Assert.DoesNotContain("falling tone", _log);
+
+        _mic.Activity(SessionActivity.Listening);
+        await closing.WaitAsync(Eventually.Timeout);
+        Assert.Equal(1, _switch.Closes);
+    }
+
+    /// <summary>A mic that does not open leaves it closed, says why, and lets the music go.</summary>
+    [Fact]
+    public async Task A_mic_that_does_not_open_stays_closed_and_the_music_resumes()
+    {
+        _playback.Has("Spotify", playing: true);
+        _switch.Fail = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(_mic.OpenAsync);
+
+        Assert.Equal(VoiceMicState.Closed, _mic.State);
+        await Eventually.UntilAsync(() => _playback.IsPlaying("Spotify"), () => "Spotify was not resumed");
+        _time.Advance(TimeSpan.FromSeconds(60));
+        Assert.Equal(0, _switch.Closes);
+    }
+
     [Fact]
     public void The_tones_sweep_up_and_down_in_the_speakers_format()
     {
@@ -196,8 +247,11 @@ public sealed class VoiceMicTests : IDisposable
         public int Opens => Volatile.Read(ref _opens);
         public int Closes => Volatile.Read(ref _closes);
 
+        public bool Fail { get; set; }
+
         public void OpenMic()
         {
+            if (Fail) throw new InvalidOperationException("No microphone opened");
             Interlocked.Increment(ref _opens);
             log.Enqueue("open");
         }
