@@ -107,7 +107,10 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
         var text = new StringBuilder($"{items.Count} need the user:\n");
         foreach (var item in items)
-            text.AppendLine($"- {handles.Of(item.Project)}: {Describe(item.Item)}");
+            text.AppendLine($"- {handles.Of(item.Project)}: {Describe(item.Item)}{InItsWords(item.Item)}");
+        // One project, with its own spoken reply: the system says it, as status would
+        if (items is [{ Item.Spoken.Length: > 0 } one])
+            text.AppendLine(SpokenBySystem(handles.Of(one.Project)!, one.Item));
         return text.ToString().TrimEnd();
     }
 
@@ -135,12 +138,30 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         var text = new StringBuilder($"{handle} ({Where(status.Name, status.RootName, status.ProfileName, status.Kind)}): {status.State}.");
         var item = board.ItemOf(target)?.Item;
         if (item is not null)
+        {
             text.Append($" Needs the user: {Describe(item, InFull(item, status))}");
+            if (item.Spoken is { Length: > 0 })
+                text.Append(' ').Append(SpokenBySystem(handle, item));
+        }
         else if (status.CurrentQuestion is { Length: > 0 } question)
             text.Append($" Asked: {Capped(question)}");
         if (status.LastError is { Length: > 0 } error && status.State == ProjectState.Error && item?.Kind != AttentionKind.Error)
             text.Append($" Error: {Capped(error)}");
         return text.ToString();
+    }
+
+    /// <summary>The session's own spoken reply, word for word, after a line's text; nothing when it gave none.</summary>
+    private static string InItsWords(AttentionItem item) =>
+        item.Spoken is { Length: > 0 } spoken ? $" In its own spoken words: \"{spoken}\"" : "";
+
+    /// <summary>
+    /// The item's spoken reply goes to the system (<see cref="SpokenNode"/>), which says it word for word in place of the
+    /// model's reply (issue #384), and what the tool's result tells the model of it.
+    /// </summary>
+    private string SpokenBySystem(string handle, AttentionItem item)
+    {
+        conversation.Spoke(handle, item);
+        return $"Its own spoken reply, \"{item.Spoken}\", is said word for word by the system itself, in place of your reply: respond with one word.";
     }
 
     /// <summary>

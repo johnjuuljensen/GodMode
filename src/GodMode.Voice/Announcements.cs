@@ -43,6 +43,17 @@ public sealed class VoiceConversation
     /// before the chat's evaluation and after it, so what it holds after is this turn's sends alone.
     /// </summary>
     public IReadOnlyList<string> TakeSent() => [.. Interlocked.Exchange(ref _sent, new())];
+
+    private ConcurrentQueue<(string Handle, AttentionItem Item)> _spoken = new();
+
+    /// <summary>
+    /// A tool read out the item of <paramref name="handle"/>, which carries the session's own spoken reply
+    /// (<see cref="AttentionItem.Spoken"/>): <see cref="SpokenNode"/> says it in place of the model's reply.
+    /// </summary>
+    public void Spoke(string handle, AttentionItem item) => Volatile.Read(ref _spoken).Enqueue((handle, item));
+
+    /// <summary>The spoken replies read since the last take, oldest first, and none from now on: as <see cref="TakeSent"/>.</summary>
+    public IReadOnlyList<(string Handle, AttentionItem Item)> TakeSpoken() => [.. Interlocked.Exchange(ref _spoken, new())];
 }
 
 /// <summary>A project's reply in the parts voice reads it in, and the index of the part to read next (its count once all were read).</summary>
@@ -57,7 +68,7 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
 {
     public string Format(IReadOnlyList<Announcement> announcements, SessionLanguages languages)
     {
-        string[] texts = [.. announcements.Select(a => a.Text.Trim().TrimEnd('.')).Where(t => t.Length > 0)];
+        string[] texts = [.. announcements.Select(a => Sentence(a.Text)).Where(t => t.Length > 0)];
         var projects = announcements.Select(a => a.Source).Distinct().ToList();
         if (projects is not [null])
             conversation.Current = projects is [var only] ? ProjectRef.FromKey(only) : null;
@@ -65,10 +76,14 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
         return texts switch
         {
             [] => "",
-            [var one] => one + ".",
-            _ => $"{phrases.Several(texts.Length)} {string.Join(". ", texts)}.",
+            [var one] => one,
+            _ => $"{phrases.Several(texts.Length)} {string.Join(" ", texts)}",
         };
     }
+
+    /// <summary>The text as a sentence: ended with its own '?' or '!' (a session's spoken reply has them), else a '.'.</summary>
+    internal static string Sentence(string text) =>
+        text.Trim().TrimEnd('.') is { Length: > 0 } t ? t[^1] is '?' or '!' ? t : t + "." : "";
 }
 
 /// <summary>
