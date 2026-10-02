@@ -64,6 +64,9 @@ public sealed class MainForm : Form
         _tone = new Tone(_log);
         _leAudio = new LeAudioProbe(_log);
         _log.Written += _pending.Enqueue;
+        Application.ThreadException += (_, e) => _log.Write("ERROR", $"UI thread: {e.Exception}");
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => _log.Write("ERROR", $"unhandled: {e.ExceptionObject}");
+        TaskScheduler.UnobservedTaskException += (_, e) => _log.Write("ERROR", $"task: {e.Exception}");
 
         var controls = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
         controls.Controls.Add(_state);
@@ -290,7 +293,7 @@ public sealed class MainForm : Form
 
     private void Tick()
     {
-        _endpoints.PollMeters();
+        _endpoints.PollMetersInBackground();
         if (++_ticks % 10 == 0) Task.Run(_endpoints.PollFormats);
         var now = _log.Now;
         if (_hookGestures.Flush(now) is { } hook) Gestures("HOOK", [hook], MediaKey.Name);
