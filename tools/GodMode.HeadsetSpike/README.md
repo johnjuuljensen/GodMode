@@ -434,8 +434,9 @@ The spike's answer, for the OpenRun Pro 2 on Windows 11 (build 26200):
    `Microsoft.Windows.SDK.NET.Ref` 10.0.26100.87 or later (the .NET SDK's default, .57, lacks these APIs). No app
    package or capability declaration: the unpackaged spike reported calls and got `EndRequested`. On an older Windows
    only the automatic way back (silence, "færdig") is left.
-6. **Open, not tested**: whether Windows shows the VoIP call anywhere (the user noted nothing), the falling tone's
-   audibility during the 5 s HFP hold, other headsets, and Android.
+6. **Windows shows the call**: while the VoIP call is active, an active-call icon is in the notification area (the
+   system tray; the user's note on #382), so a listening GodMode shows there as a call.
+7. **Open, not tested**: the falling tone's audibility during the 5 s HFP hold, other headsets, and Android.
 
 ## Results
 
@@ -460,4 +461,5 @@ Final, from the six trials.
 | 3d | Falling tone after close | Played 0.2 s after the close, inside the 5 s HFP hold; its audibility was not noted |
 | 3e | Does the mic hear speech? | Yes: peaks 16000–32737 of 32767 while counting |
 | 4 | Button in HFP via `CallControl` | `CallControl` unavailable (GetDefault and FromId give none). The VoIP route instead: 1i |
+| 4b | Does Windows show the VoIP call? | Yes: an active-call icon in the notification area while the call is active (the user's note on #382) |
 | 5 | LE Audio | No: a Bluetooth Classic device only, no LE device or LE Audio service; the spec lists SBC only |
