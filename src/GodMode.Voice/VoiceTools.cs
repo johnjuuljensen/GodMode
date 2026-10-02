@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
@@ -52,7 +53,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             "about one they just started.",
             (_, _, _) => Task.FromResult(ListProjectsText()))
         .Add(ProjectStatus,
-            "Read one project's state and what it waits on (its question, result, error or permission request) in full. " +
+            "Read one project's state and what it waits on (its question, result, error or permission request) in full: " +
+            "a very long one has its middle cut, and says so. " +
             "Call when the user asks about one project, or to hear a question or result.",
             [ProjectReference],
             (_, args, ct) => ProjectStatusAsync(Argument(args, ProjectParameter), ct))
@@ -116,14 +118,55 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         var status = await servers.GetStatusAsync(target, ct);
         Talked(target);
         var text = new StringBuilder($"{handle} ({Where(status.Name, status.RootName, status.ProfileName, status.Kind)}): {status.State}.");
-        if (board.ItemOf(target) is { } item)
-            text.Append($" Needs the user: {Describe(item.Item)}");
+        var item = board.ItemOf(target)?.Item;
+        if (item is not null)
+            text.Append($" Needs the user: {Describe(item, InFull(item, status))}");
         else if (status.CurrentQuestion is { Length: > 0 } question)
-            text.Append($" Asked: {question}");
-        if (status.LastError is { Length: > 0 } error && status.State == ProjectState.Error)
-            text.Append($" Error: {error}");
+            text.Append($" Asked: {Capped(question)}");
+        if (status.LastError is { Length: > 0 } error && status.State == ProjectState.Error && item?.Kind != AttentionKind.Error)
+            text.Append($" Error: {Capped(error)}");
         return text.ToString();
     }
+
+    /// <summary>
+    /// About how long a question, result or error <see cref="ProjectStatusAsync"/> reads may be (issue #377): far over
+    /// the attention item's 500 characters, so a reply of a few thousand characters is read whole, but short of one
+    /// that would fill the model's turn and every turn after it in the conversation.
+    /// </summary>
+    public const int MaxStatusTextLength = 8000;
+
+    /// <summary>How much of a text over <see cref="MaxStatusTextLength"/> is kept from its start; the rest is its end, where a reply's question is.</summary>
+    private const int KeptFromStart = 2000;
+
+    /// <summary>
+    /// What the item is about in full, from the project's status: the attention item's text is cut for lists and
+    /// notifications, and a reply's question is at its end.
+    /// </summary>
+    private static string InFull(AttentionItem item, ProjectStatus status) => Capped(item.Kind switch
+    {
+        AttentionKind.Question when status.PendingQuestion is { Questions: [_, ..] questions } =>
+            string.Join("\n", questions.Select(q => q.Question)),
+        AttentionKind.Question when status.CurrentQuestion is { Length: > 0 } question => question,
+        AttentionKind.Finished when status.LastResult is { Length: > 0 } result => result,
+        AttentionKind.Error when status.LastError is { Length: > 0 } error => error,
+        _ => item.Text,
+    });
+
+    /// <summary>The text trimmed, or, over <see cref="MaxStatusTextLength"/>, its start and end with the cut said where its middle was.</summary>
+    private static string Capped(string text)
+    {
+        text = text.Trim();
+        if (text.Length <= MaxStatusTextLength)
+            return text;
+
+        var head = Whole(text, KeptFromStart);
+        var tail = Whole(text, text.Length - (MaxStatusTextLength - KeptFromStart));
+        return string.Create(CultureInfo.InvariantCulture, $"{text[..head]} [... {tail - head} characters cut here; the start and the end are read in full ...] {text[tail..]}");
+    }
+
+    /// <summary>The index <paramref name="length"/>, or one before it where a cut there would split a surrogate pair.</summary>
+    private static int Whole(string text, int length) =>
+        length > 0 && length < text.Length && char.IsLowSurrogate(text[length]) ? length - 1 : length;
 
     public async Task<string> AnswerAsync(string? reference, string? answer, CancellationToken ct)
     {
@@ -224,14 +267,19 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     private static string Where(string name, string? root, string? profile, string? kind) =>
         string.Join(", ", new[] { name, root, profile, kind }.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase));
 
-    private static string Describe(AttentionItem item) => item.Kind switch
+    /// <summary>The item as a line says it, with <paramref name="text"/> for its text: the item's own (cut) one when null.</summary>
+    private static string Describe(AttentionItem item, string? text = null)
     {
-        AttentionKind.Question => $"question: {item.Text}",
-        AttentionKind.Permission => $"permission request ({item.Permission?.Summary ?? item.Text}); answered on screen only",
-        AttentionKind.Error => $"failed: {item.Text}",
-        AttentionKind.Review => $"changes requested on its pull request: {item.Text}",
-        AttentionKind.Finished => $"finished: {item.Text}",
-    };
+        var said = text ?? item.Text;
+        return item.Kind switch
+        {
+            AttentionKind.Question => $"question: {said}",
+            AttentionKind.Permission => $"permission request ({item.Permission?.Summary ?? said}); answered on screen only",
+            AttentionKind.Error => $"failed: {said}",
+            AttentionKind.Review => $"changes requested on its pull request: {said}",
+            AttentionKind.Finished => $"finished: {said}",
+        };
+    }
 
     private static string? Argument(IDictionary<string, object?> args, string name) =>
         args.TryGetValue(name, out var value) ? value?.ToString() : null;
