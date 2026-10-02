@@ -116,6 +116,20 @@ public sealed class MediaPauseTests : IDisposable
         Assert.True(_playback.IsPlaying("Spotify"));
     }
 
+    /// <summary>A pause that never answers keeps neither the resume nor the teardown waiting on it.</summary>
+    [Fact]
+    public async Task A_pause_that_never_answers_still_lets_voice_stop()
+    {
+        _playback.Has("Spotify", playing: true);
+        _playback.PauseGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _media.Activity(SessionActivity.Speaking);
+        _media.Activity(SessionActivity.Listening);
+
+        _media.Dispose();
+
+        await Eventually.UntilAsync(() => _playback.Disposed, () => "the playback was kept, waiting on the pause");
+    }
+
     /// <summary>
     /// Review of PR#425: GSMTC tells of voice's own resume late, perhaps after the next announcement paused the music
     /// again. That is no play by hand: the music is still voice's to resume.
