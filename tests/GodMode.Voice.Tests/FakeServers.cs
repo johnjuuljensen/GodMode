@@ -140,6 +140,13 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         PushProjects(serverId);
     }
 
+    /// <summary>A project's status as the server holds it, in full, beside an attention item that cut its text.</summary>
+    public void SetStatus(string serverId, ProjectStatus status)
+    {
+        _statuses[new ProjectRef(serverId, status.Id)] = status;
+        PushProjects(serverId);
+    }
+
     /// <summary>The project is deleted, as the hub pushes it.</summary>
     public void DeleteProject(string serverId, string projectId)
     {
@@ -149,6 +156,9 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
 
     public static AttentionItem Question(string projectId, string name, string text, int minutesAgo = 5) =>
         new(projectId, name, "Default", "root", AttentionKind.Question, DateTime.UtcNow.AddMinutes(-minutesAgo), text);
+
+    public static AttentionItem Finished(string projectId, string name, string text, int minutesAgo = 5) =>
+        new(projectId, name, "Default", "root", AttentionKind.Finished, DateTime.UtcNow.AddMinutes(-minutesAgo), text);
 
     public static AttentionItem Permission(string projectId, string name, string summary, int minutesAgo = 5) =>
         new(projectId, name, "Default", "root", AttentionKind.Permission, DateTime.UtcNow.AddMinutes(-minutesAgo), summary,
