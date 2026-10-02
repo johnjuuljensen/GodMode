@@ -25,7 +25,8 @@ public sealed class VoiceConversation
 
     /// <summary>
     /// The reply being read in parts (<see cref="VoiceTools.ReadReplyAsync"/>), and the part to read next: what
-    /// "læs videre" reads on from (<see cref="VoiceTools.ReadMoreText"/>). Null before any was read; a new read replaces it.
+    /// "læs videre" reads on from (<see cref="VoiceTools.ReadMoreAsync"/>). Null before any was read; a new read replaces
+    /// it, and a new reply of its project drops it.
     /// </summary>
     public ReplyReading? Reading
     {
@@ -54,10 +55,25 @@ public sealed class VoiceConversation
 
     /// <summary>The spoken replies read since the last take, oldest first, and none from now on: as <see cref="TakeSent"/>.</summary>
     public IReadOnlyList<(string Handle, AttentionItem Item)> TakeSpoken() => [.. Interlocked.Exchange(ref _spoken, new())];
+
+    private ConcurrentQueue<string> _read = new();
+
+    /// <summary>
+    /// A tool read out <paramref name="text"/>, a project's own words among it (its reply, question or result), for the
+    /// model to say: <see cref="SentNode"/> does not take a reply that repeats it for a claim of a send (#411).
+    /// </summary>
+    public void ReadOut(string text) => Volatile.Read(ref _read).Enqueue(text);
+
+    /// <summary>The texts read out since the last take, and none from now on: as <see cref="TakeSent"/>.</summary>
+    public IReadOnlyList<string> TakeReadOut() => [.. Interlocked.Exchange(ref _read, new())];
 }
 
-/// <summary>A project's reply in the parts voice reads it in, and the index of the part to read next (its count once all were read).</summary>
-public sealed record ReplyReading(ProjectRef Project, string Handle, IReadOnlyList<string> Parts, int Next);
+/// <summary>
+/// A project's reply in the parts voice reads it in, and the index of the part to read next (its count once all were
+/// read). <paramref name="Replies"/> are the replies it was read from, the last <paramref name="Turns"/>: while the
+/// project's are still these, the parts are what it said last.
+/// </summary>
+public sealed record ReplyReading(ProjectRef Project, string Handle, IReadOnlyList<string> Parts, int Next, int Turns, IReadOnlyList<AssistantReply> Replies);
 
 /// <summary>
 /// GodMode's wording of the announcements queued up to a pause: one as it is, several after "3 venter på dig:". The

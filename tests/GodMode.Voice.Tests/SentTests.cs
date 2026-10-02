@@ -134,6 +134,63 @@ public sealed class SentTests
         Assert.DoesNotContain(NothingSent, voice.Events.Responses);
     }
 
+    /// <summary>
+    /// #411: a project's reply read word for word through read_reply, which starts "Sendt til review.", is the project's
+    /// words, said in full: not taken for the model's claim of a send and replaced by "Intet sendt".
+    /// </summary>
+    [Fact]
+    public async Task A_reply_read_aloud_that_starts_sendt_is_said_in_full()
+    {
+        const string Reply = "Sendt til review. Pull requesten har to ændringer, og testene er grønne.";
+        var servers = new FakeServers();
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.ReadReply, new() { [VoiceTools.ProjectParameter] = "283" })
+            .Respond(Reply);
+        await using var voice = await OfflineVoice.StartAsync(servers, model, connect: _ =>
+        {
+            servers.AddProject(ServerA, "p/r/283", "283-voice");
+            servers.SetReplies(ServerA, "p/r/283", new AssistantReply(Reply, true));
+            return Task.CompletedTask;
+        });
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad svarede 283?");
+        await voice.Events.SaidAsync(Reply);
+
+        Assert.Empty(servers.Replies);
+        Assert.DoesNotContain(NothingSent, voice.Events.Responses);
+    }
+
+    /// <summary>A reply read out that says "sendt" mid-sentence does not make the model's own "Sendt." true.</summary>
+    [Fact]
+    public async Task Sendt_after_reading_a_reply_that_says_sendt_mid_sentence_is_not_said()
+    {
+        var servers = new FakeServers();
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.ReadReply, new() { [VoiceTools.ProjectParameter] = "283" })
+            .Respond("Sendt.");
+        await using var voice = await OfflineVoice.StartAsync(servers, model, connect: _ =>
+        {
+            servers.AddProject(ServerA, "p/r/283", "283-voice");
+            servers.SetReplies(ServerA, "p/r/283", new AssistantReply("PR'en er sendt. Skal jeg merge?", true));
+            return Task.CompletedTask;
+        });
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad svarede 283?");
+        await voice.Events.SaidAsync(NothingSent);
+    }
+
+    [Theory]
+    [InlineData("Sendt til review. PR'en er klar.", "283 (x): Idle. Last reply: Sendt til review. PR'en er klar.", true)]
+    [InlineData("sendt til  review.\nPR'en","Last reply: Sendt til review. PR'en er klar.", true)]
+    [InlineData("Sendt til review. PR'en er klar, og testene er grønne, alle sammen.", "Reply 2: Sendt til review. PR'en er klar, og testene er grønne, alle sammen, og den er merged.", true)]
+    [InlineData("Sendt.", "Last reply: PR'en er sendt. Skal jeg merge?", false)]
+    [InlineData("Sendt.", "Last reply: Klar.", false)]
+    [InlineData("Sendt til 283.", "Nothing needs the user.", false)]
+    public void A_reply_repeats_a_text_read_out_from_the_start_of_one_of_its_sentences(string reply, string readOut, bool repeats) =>
+        Assert.Equal(repeats, SentNode.Repeats(reply, readOut));
+
     [Theory]
     [InlineData("Sendt.", true)]
     [InlineData("Sendt til 283.", true)]

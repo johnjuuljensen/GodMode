@@ -161,15 +161,15 @@ All real-time communication uses strongly-typed SignalR on one hub, `/hubs/proje
 - **`IProjectHubClient`** (Shared) — Server→Client callbacks
 - **`ProjectHub`** (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
 - **`HubConnectionFactory`** (ClientBase) — .NET client side: `IServerProvider.ConnectAsync` returns a raw `HubConnection`, and consumers call `CreateHubProxy<IProjectHub>()` (`TypedSignalR.Client`) for typed calls
-- **`signalr/hub.ts`** (React) — the TypeScript mirror, kept in step with the interfaces by hand
+- **`signalr/generated/hub-types.ts`** (React) — both interfaces and their models in TypeScript, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of the client (committed; not edited by hand). `signalr/hub.ts` wires the calls on them
 
 The hub is the session loop plus reading profiles and roots:
 
-| `IProjectHub` (22 methods) | |
+| `IProjectHub` (23 methods) | |
 |---|---|
 | Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `RestoreProject`, `ForgetProject` |
 | Prompts | `RespondToPermission`, `GetPermissionDetail`, `AnswerQuestion` |
-| Attention | `GetAttention`, `MarkSeen`, `ReplyAndResume` |
+| Attention | `GetAttention`, `MarkSeen`, `ReplyAndResume`, `GetLastReplies` |
 | Roots | `ListProjectRoots`, `ListUnmanaged`, `AdoptFolder` |
 | Profiles | `ListProfiles` |
 | Utility | `CheckCommand` |

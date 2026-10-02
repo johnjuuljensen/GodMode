@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GodMode.FakeClaude;
 using GodMode.Server.Services;
+using GodMode.Server.Tests.Lifecycle;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
@@ -108,6 +109,24 @@ public class SpeakTests
         Assert.Equal("Til sidst dette.", (await ItemAsync(run, id))?.Spoken);
     }
 
+    /// <summary>
+    /// A launch starts with no spoken reply (issue #411): one accepted in a turn the process died in, which no result
+    /// ended, is not the next launch's, even for a turn that starts with no message the user sent.
+    /// </summary>
+    [Fact]
+    public async Task ATextSpokenBeforeACrash_IsNotTheNextLaunchs()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit()
+            .AwaitStdin().EmitUser("Start", echo: true).Speak("Før nedbruddet.", call: false).Exit(1));
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.Error);
+
+        harness.UseScript(new FakeScript().EmitInit().EmitAssistant("Done.").EmitResult("done").AwaitStdin());
+        await harness.Projects.ResumeProjectAsync(created.Id);
+        var done = await harness.WaitForStatusPushAsync(created.Id, s => s is { State: ProjectState.Idle, LastResult: "done" });
+        Assert.Null(done.SpokenSummary);
+    }
+
     /// <summary>A turn that ends in error says nothing it spoke: the error is what needs the user.</summary>
     [Fact]
     public async Task ATurnThatFails_HasNoSpokenReply()
@@ -146,6 +165,9 @@ public class SpeakTests
     [InlineData("Se https://github.com/x/y.", "Se https://github.com/x/y.", "URL")]
     [InlineData("To ting:\n- den ene\n- den anden", "To ting: - den ene - den anden", "list")]
     [InlineData("Ja - det virker, 2. gang.", "Ja - det virker, 2. gang.", null)]
+    [InlineData("1. maj er releasen klar.", "1. maj er releasen klar.", null)]
+    [InlineData("2. gang virkede det.", "2. gang virkede det.", null)]
+    [InlineData("To ting:\n1. den ene\n2. den anden", "To ting: 1. den ene 2. den anden", "list")]
     public void Check_SaysTheTextAsVoiceSaysIt_OrWhyNot(string text, string spoken, string? refusedFor)
     {
         var (said, refused) = SpeakTool.Check(text);
@@ -168,24 +190,27 @@ internal static class SpeakScript
 {
     /// <summary>
     /// The model's <c>speak</c> tool use (under <paramref name="parentToolUseId"/>, a subagent's, when given), the real
-    /// call to the server, then its tool result, an error when <paramref name="refused"/>, as claude writes it for a call
-    /// the server refused.
+    /// call to the server (with <paramref name="call"/>; none for a server with no MCP endpoint), then its tool result,
+    /// an error when <paramref name="refused"/>, as claude writes it for a call the server refused.
     /// </summary>
-    public static FakeScript Speak(this FakeScript script, string text, string toolUseId = "toolu_speak", string? parentToolUseId = null, bool refused = false) =>
-        script
-            .Emit(JsonSerializer.Serialize(new
-            {
-                type = "assistant",
-                message = new { role = "assistant", content = new object[] { new { type = "tool_use", id = toolUseId, name = SpokenReply.ToolName, input = new { text } } } },
-                parent_tool_use_id = parentToolUseId,
-                session_id = FakeScript.SessionIdPlaceholder,
-            }))
-            .CallTool("godmode", SpeakTool.Name, new { text })
-            .Emit(JsonSerializer.Serialize(new
-            {
-                type = "user",
-                message = new { role = "user", content = new object[] { new { type = "tool_result", tool_use_id = toolUseId, content = refused ? "refused" : "kept", is_error = refused } } },
-                parent_tool_use_id = parentToolUseId,
-                session_id = FakeScript.SessionIdPlaceholder,
-            }));
+    public static FakeScript Speak(this FakeScript script, string text, string toolUseId = "toolu_speak", string? parentToolUseId = null,
+        bool refused = false, bool call = true)
+    {
+        script.Emit(JsonSerializer.Serialize(new
+        {
+            type = "assistant",
+            message = new { role = "assistant", content = new object[] { new { type = "tool_use", id = toolUseId, name = SpokenReply.ToolName, input = new { text } } } },
+            parent_tool_use_id = parentToolUseId,
+            session_id = FakeScript.SessionIdPlaceholder,
+        }));
+        if (call)
+            script.CallTool("godmode", SpeakTool.Name, new { text });
+        return script.Emit(JsonSerializer.Serialize(new
+        {
+            type = "user",
+            message = new { role = "user", content = new object[] { new { type = "tool_result", tool_use_id = toolUseId, content = refused ? "refused" : "kept", is_error = refused } } },
+            parent_tool_use_id = parentToolUseId,
+            session_id = FakeScript.SessionIdPlaceholder,
+        }));
+    }
 }
