@@ -43,7 +43,7 @@ A reference is a mic open or close, or an announcement test. So a switch's timin
 | `CALL` | `Windows.Media.Devices.CallControl`: what the app reported, and `AnswerRequested`, `HangUpRequested` and the rest |
 | `AUDIO` | Every endpoint at start, defaults, endpoints added, removed or changing state, the headset's property changes and mix formats, sound starting and stopping on each headset endpoint (its peak meter), and each headset endpoint's volume and mute, at first and on every change |
 | `MIC` | WaveIn (the same capture GodMode.Maui's voice uses: VoiceBot's `NativeAudioSource`, `MicCapture.WaveIn`, 16 kHz mono, 100 ms buffers), opened and closed on a worker thread so the hook and Mark keep running: the moment you asked (the reference), the moment the open or close returned, the first buffer, the first buffer with sound in it, and once a second the loudest sample of that second (`level`) |
-| `VOIP` | VoIP calls (Trial 4): the coordinator, the call control devices, a reported call, and `EndRequested`, `AnswerRequested`, `RejectRequested`, `HoldRequested`, `ResumeRequested`, `MuteStateChanged`. `--voip-check` on the command line reports a 4 s call and closes the app |
+| `VOIP` | VoIP calls (Trial 4): the coordinator, the call control devices, a reported call, and `EndRequested`, `AnswerRequested`, `RejectRequested`, `HoldRequested`, `ResumeRequested`, `MuteStateChanged`. `--voip-check` on the command line reports a 4 s call and closes the app; `--reclaim-check` (tag `CHECK`) checks taking the media session back from a resumed Spotify |
 | `LISTEN` | Listen mode (Trial 3): started, stopped, each play/pause turning the mic on or off, and each button it ignored |
 | `PROXY` | The proxy: started, stopped, and each button it caught; the buttons it passes on are `GSMTC forwarded …` lines, and the status it mirrors from Spotify `SMTC status -> …` |
 | `TONE` | The tone's start and end, its device and format |
@@ -360,9 +360,39 @@ Read from the log `headset-20261002-130433.log` and the user's report.
 4. Start Spotify by mouse, wait 5 s, then do one round.
 5. **Stop listen mode**.
 
+## Fifth trial (2026-10-02)
+
+Read from the log `headset-20261002-144415.log` and the user's report.
+
+- **The first round worked**: press, Spotify paused, mic open, rising tone; press (`EndRequested`), mic closed,
+  Spotify resumed. Every press with the mic open gave `EndRequested`, in all seven rounds.
+- **Spotify resumed at phone quality first** ("16 kHz, then 48 kHz"): the spike resumed it 0.9 s after closing the
+  mic, while Windows held HFP for another 5.2–5.3 s.
+- **The second round failed as in the fourth trial**: when Spotify resumed, it took the current session, and the
+  reclaim (paused, then playing again) did not take it back. The next press paused Spotify. After that, Spotify was
+  paused by that press, not by the spike, so the spike did not resume it in the rounds that followed: "spotify doesn't
+  start".
+- Fixed in the spike, and checked here without a button (`--reclaim-check`, which plays Spotify for a few seconds and
+  leaves it as it found it):
+  - **Reclaim** now closes the spike's session and brings it back, playing. In the check, a Spotify resumed after the
+    spike mirrored its pause took the current session (`own is current: False`). After the reclaim the spike was
+    current again (`True`), and still was a second later.
+  - **Resume once A2DP is back** (*resume Spotify once A2DP is back*, ticked): after the mic closes, the spike waits
+    for the headset endpoint's volume to change (Windows keeps a volume per profile, so that change marks A2DP's
+    return, 5.2–5.3 s in every trial), at most 8 s, and only then resumes Spotify.
+
+## Trial 6: listen mode, round after round (Trial 5 again)
+
+1. Spotify playing. **Start listen mode**.
+2. Press, wait for the rising tone, wait 3 s, press (falling tone). Spotify should resume only once full quality is
+   back, about 5 s later. Do this **five times in a row**, and note each round that fails and what happened instead.
+3. One round with Spotify paused by mouse first: press (mic on), press (mic off; Spotify stays paused).
+4. Start Spotify by mouse, wait 5 s, then do one round.
+5. **Stop listen mode**.
+
 ## Results
 
-Filled in from the first four trials. The rest waits for Trial 5.
+Filled in from the first five trials. The rest waits for Trial 6.
 
 | # | Question | Result |
 |---|---|---|
@@ -373,7 +403,7 @@ Filled in from the first four trials. The rest waits for Trial 5.
 | 1e | Volume buttons | Windows' volume in 6 % steps (AVRCP absolute volume); no key or HID report. Hold − does nothing, hold + is power off |
 | 1f | Catch one gesture, keep Spotify's play/pause | Not by a keyboard hook. By the proxy: forwarding and catching work while Spotify plays; after a pause no button arrived with the proxy saying "playing". Dropped by the user: while listening GodMode takes every button (listen mode) |
 | 1h | Listen mode: play/pause turns the mic on and off | **On: yes** (a press in A2DP opens the mic). **Off: no**: in HFP no press reaches the media session, with its status paused or playing |
-| 1i | A press in HFP through a VoIP call (24H2 call control devices) | Unpackaged app: the coordinator, Bluetooth association and the headset as a call control device all work, and a call with it goes active. **The button raises `EndRequested`**: a press in HFP closes the mic (fourth trial). Repeated rounds: Trial 5 |
+| 1i | A press in HFP through a VoIP call (24H2 call control devices) | Unpackaged app: the coordinator, Bluetooth association and the headset as a call control device all work, and a call with it goes active. **The button raises `EndRequested`**: a press in HFP closes the mic (fourth trial). Every press in HFP gave `EndRequested` (seven rounds in the fifth trial). Repeated rounds keep working once the spike reclaims the session after Spotify resumes: Trial 6 |
 | 1g | Own SMTC claimed | Gets every button; Spotify gets none while the app holds the session |
 | 2a | GSMTC pause and resume Spotify | Works every time; Spotify's state 55–290 ms later |
 | 2b | Announcement test | Paused at 289 ms, tones from 439 ms, playing again at 1022 ms |

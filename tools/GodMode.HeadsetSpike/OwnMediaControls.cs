@@ -59,16 +59,23 @@ public sealed class OwnMediaControls(SpikeLog log)
     }
 
     /// <summary>
-    /// Takes the current session back: a session that starts playing becomes Windows' current one, so the spike goes
-    /// paused and playing again. The fourth trial: once the spike resumed Spotify, Spotify was current and the next
-    /// press paused it instead of reaching the spike.
+    /// Takes the current session back from a playing Spotify. The fourth trial: once the spike resumed Spotify, Spotify
+    /// was current and the next press paused it. The fifth: going paused and playing again does not take it back,
+    /// while a session that appears anew, playing, did at every listen start. So the spike's session closes and comes
+    /// back playing.
     /// </summary>
-    public void Reclaim(string why)
+    public async Task ReclaimAsync(string why)
     {
         if (_controls is not { IsEnabled: true } controls) return;
-        controls.PlaybackStatus = MediaPlaybackStatus.Paused;
+        controls.PlaybackStatus = MediaPlaybackStatus.Closed;
+        controls.IsEnabled = false;
+        await Task.Delay(100);
+        controls.IsEnabled = true;
+        controls.IsPlayEnabled = controls.IsPauseEnabled = controls.IsStopEnabled = true;
+        controls.IsNextEnabled = controls.IsPreviousEnabled = true;
         controls.PlaybackStatus = MediaPlaybackStatus.Playing;
-        log.Write(Source, $"reclaim: paused and playing again ({why})");
+        controls.DisplayUpdater.Update();
+        log.Write(Source, $"reclaim: closed and back, playing ({why})");
     }
 
     public void Disable()
