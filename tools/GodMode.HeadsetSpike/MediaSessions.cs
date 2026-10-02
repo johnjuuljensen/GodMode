@@ -148,6 +148,37 @@ public sealed class MediaSessions(SpikeLog log)
         }
     }
 
+    /// <summary>
+    /// The proxy's half: a button the spike's own session got, passed on to the other session (the one playing, else
+    /// the first): play and pause as a toggle, since the spike stays "playing" to stay the current session.
+    /// </summary>
+    public async Task ForwardAsync(Windows.Media.SystemMediaTransportControlsButton button)
+    {
+        var others = _manager?.GetSessions().Where(s => !s.SourceAppUserModelId.Contains("GodMode.HeadsetSpike", StringComparison.OrdinalIgnoreCase)).ToList() ?? [];
+        var target = others.FirstOrDefault(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+            ?? others.FirstOrDefault();
+        if (target is null)
+        {
+            log.Write(Source, $"forward {button}: no other session");
+            return;
+        }
+        Func<GlobalSystemMediaTransportControlsSession, Task<bool>>? act = button switch
+        {
+            Windows.Media.SystemMediaTransportControlsButton.Play or Windows.Media.SystemMediaTransportControlsButton.Pause =>
+                s => s.TryTogglePlayPauseAsync().AsTask(),
+            Windows.Media.SystemMediaTransportControlsButton.Next => s => s.TrySkipNextAsync().AsTask(),
+            Windows.Media.SystemMediaTransportControlsButton.Previous => s => s.TrySkipPreviousAsync().AsTask(),
+            Windows.Media.SystemMediaTransportControlsButton.Stop => s => s.TryStopAsync().AsTask(),
+            _ => null,
+        };
+        if (act is null)
+        {
+            log.Write(Source, $"forward {button}: not forwarded");
+            return;
+        }
+        await RunAsync(target, $"forwarded {button}", act);
+    }
+
     /// <summary>Pauses every session that is playing, and remembers them for <see cref="ResumePausedAsync"/>: step 2's pause.</summary>
     public async Task<int> PausePlayingAsync()
     {

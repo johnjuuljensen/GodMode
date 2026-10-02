@@ -5,7 +5,9 @@ namespace GodMode.HeadsetSpike;
 /// <summary>
 /// The spike's own SystemMediaTransportControls, for its window (SystemMediaTransportControlsInterop.GetForWindow):
 /// Windows routes media buttons to the current media session, so this hears them only while it is that session, which
-/// it claims by reporting itself playing. Whether Spotify then still gets play/pause is the trial's question.
+/// it claims by reporting itself playing. The headset's buttons reach Windows only this way (the first trial: no
+/// keyboard key and no HID report for any of them), so catching one gesture means being the current session and
+/// passing the others on to Spotify (<see cref="Pressed"/>, the proxy in MainForm).
 /// </summary>
 public sealed class OwnMediaControls(SpikeLog log)
 {
@@ -14,6 +16,9 @@ public sealed class OwnMediaControls(SpikeLog log)
 
     public string State => _controls is null ? "off" : _controls.PlaybackStatus.ToString();
 
+    /// <summary>A button Windows sent to the spike's session; on a WinRT thread.</summary>
+    public event Action<SystemMediaTransportControlsButton>? Pressed;
+
     public void Enable(IntPtr window, MediaPlaybackStatus status)
     {
         try
@@ -21,7 +26,11 @@ public sealed class OwnMediaControls(SpikeLog log)
             if (_controls is null)
             {
                 _controls = SystemMediaTransportControlsInterop.GetForWindow(window);
-                _controls.ButtonPressed += (_, e) => log.Write(Source, $"ButtonPressed {e.Button}");
+                _controls.ButtonPressed += (_, e) =>
+                {
+                    log.Write(Source, $"ButtonPressed {e.Button}");
+                    Pressed?.Invoke(e.Button);
+                };
                 _controls.PlaybackPositionChangeRequested += (_, e) => log.Write(Source, $"PlaybackPositionChangeRequested {e.RequestedPlaybackPosition}");
             }
             _controls.IsEnabled = true;

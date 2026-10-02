@@ -44,6 +44,8 @@ public sealed class MainForm : Form
     private readonly CheckBox _toneWaitsForSound = new() { Text = "tone waits for first mic sound", AutoSize = true };
     private readonly NumericUpDown _gap = new() { Minimum = 50, Maximum = 3000, Increment = 50, Value = (decimal)GestureClassifier.DefaultGap.TotalMilliseconds, Width = 60 };
     private readonly NumericUpDown _longPress = new() { Minimum = 100, Maximum = 5000, Increment = 100, Value = (decimal)GestureClassifier.DefaultLongPress.TotalMilliseconds, Width = 60 };
+    private readonly ComboBox _caught = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 100 };
+    private readonly CheckBox _proxy = new() { Text = "proxy: catch it, forward the rest", AutoSize = true };
     private readonly TextBox _note = new() { Width = 300, PlaceholderText = "a note for the log (what you pressed, what you heard)" };
 
     private sealed record Choice<T>(string Label, T Value)
@@ -88,6 +90,8 @@ public sealed class MainForm : Form
             Button("Claim SMTC (paused)", () => _smtc.Enable(Handle, MediaPlaybackStatus.Paused)),
             Button("Release SMTC", _smtc.Disable),
             new Label { Text = "gesture gap ms", AutoSize = true }, _gap, new Label { Text = "long ms", AutoSize = true }, _longPress));
+        controls.Controls.Add(Row("Proxy", _proxy, new Label { Text = "catch", AutoSize = true }, _caught,
+            Button("Start proxy", StartProxy), Button("Stop proxy", StopProxy)));
         controls.Controls.Add(Row("Call", Button("Report incoming (ringing)", () => _call.Incoming(ringer: true)),
             Button("Report incoming (silent)", () => _call.Incoming(ringer: false)),
             Button("Report active call", _call.Active), Button("End call", _call.End)));
@@ -108,6 +112,10 @@ public sealed class MainForm : Form
             if (_hook is not null) _hook.Swallow = vk;
             _log.Write("KEY", $"swallow: {(vk is { } v ? MediaKey.Name(v) : "none")}");
         };
+        foreach (var button in new[] { SystemMediaTransportControlsButton.Previous, SystemMediaTransportControlsButton.Next })
+            _caught.Items.Add(new Choice<SystemMediaTransportControlsButton>(button.ToString(), button));
+        _caught.SelectedIndex = 0;
+        _smtc.Pressed += OnOwnButton;
         _gap.ValueChanged += (_, _) => NewClassifiers();
         _longPress.ValueChanged += (_, _) => NewClassifiers();
         _mic.FirstSound += () => _log.Write("MIC", "(first sound: a tone from here on is not cut by the switch, if the switch is done)");
@@ -227,6 +235,39 @@ public sealed class MainForm : Form
                 break;
         }
         base.WndProc(ref m);
+    }
+
+    /// <summary>
+    /// The proxy: the spike holds the current media session (it reports itself playing, so Windows sends it the
+    /// headset's buttons), catches one button as GodMode's "step in", and passes every other one on to Spotify.
+    /// </summary>
+    private void StartProxy()
+    {
+        _proxy.Checked = true;
+        _smtc.Enable(Handle, MediaPlaybackStatus.Playing);
+        _log.Write("PROXY", $"started: catches {_caught.SelectedItem}, forwards the rest");
+    }
+
+    private void StopProxy()
+    {
+        _proxy.Checked = false;
+        _smtc.Disable();
+        _log.Write("PROXY", "stopped");
+    }
+
+    // On a WinRT thread: reads the controls' state through Invoke
+    private void OnOwnButton(SystemMediaTransportControlsButton button)
+    {
+        var (proxy, caught) = ((bool, SystemMediaTransportControlsButton))Invoke(() =>
+            (_proxy.Checked, ((Choice<SystemMediaTransportControlsButton>)_caught.SelectedItem!).Value));
+        if (!proxy) return;
+        if (button == caught)
+        {
+            _log.Write("PROXY", $"CAUGHT {button}: GodMode would step in here (rising tone)");
+            _ = PlayToneAsync(rising: true);
+        }
+        else
+            _ = _sessions.ForwardAsync(button);
     }
 
     private void Mark(string how) => _log.Write("MARK", $"mark ({how})");
