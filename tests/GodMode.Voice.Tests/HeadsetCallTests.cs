@@ -13,6 +13,8 @@ namespace GodMode.Voice.Tests;
 public sealed class HeadsetCallTests : IDisposable
 {
     private readonly ConcurrentQueue<string> _log = new();
+    // Never moved: no silence closes the mic
+    private readonly ManualTime _time = new();
     private readonly FakeLine _line;
     private readonly HeadsetCall _call;
     private readonly FakeMicSwitch _switch;
@@ -24,7 +26,7 @@ public sealed class HeadsetCallTests : IDisposable
         _call = new HeadsetCall(_line, NullLogger.Instance);
         _switch = new FakeMicSwitch(_log);
         _mic = new VoiceMic(_switch, new SilentSink(), null, new VoiceMicOptions { ToneWait = TimeSpan.Zero }, NullLogger.Instance,
-            call: _call);
+            _time, _call);
     }
 
     public void Dispose()
