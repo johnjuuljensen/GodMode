@@ -39,6 +39,76 @@ public sealed class HelpTests
         Assert.Equal(0, model.Calls);
     }
 
+    /// <summary>
+    /// Issue #381, the voice log of 2026-10-01 (17:01:01, 17:01:10): "Hjælp. Hjælp." and "Hvad kan jeg gøre?" went to
+    /// the model, which said "Intet venter". A phrase said again, and the common ways to ask, are help, through a session,
+    /// as ElevenLabs sends them (a partial, then the final with the same text): said once, and the model is not called.
+    /// </summary>
+    [Theory]
+    [InlineData("Hjælp. Hjælp.", true)]
+    [InlineData("Hvad kan jeg gøre?", true)]
+    [InlineData("Hvad kan jeg?", true)]
+    [InlineData("Hjælp, hvad kan jeg sige?", true)]
+    [InlineData("Help. Help.", false)]
+    [InlineData("What can I do?", false)]
+    public async Task A_repeated_phrase_and_the_common_asks_are_help(string asked, bool danish)
+    {
+        var model = new ScriptedChatClient().Respond("Intet venter.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized(asked);
+        await voice.Events.SaidAsync(danish ? Danish : English);
+        // A sentence after it is the model's: it reaches it, so whatever the help words were going to do is done
+        voice.Transcriptions.SayAsRecognized("Hvad venter?");
+        await voice.Events.SaidAsync("Intet venter.");
+
+        Assert.Equal(["Hvad venter?"], UserTexts(model));
+        Assert.Single(voice.Events.Responses, r => r == (danish ? Danish : English));
+    }
+
+    /// <summary>An utterance that grows from one help phrase to the same phrase twice is one ask: help is said once.</summary>
+    [Fact]
+    public async Task Help_said_again_in_the_same_utterance_is_answered_once()
+    {
+        var model = new ScriptedChatClient().Respond("Intet venter.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.AddPartial("Hjælp.");
+        await voice.Events.SaidAsync(Danish);
+        voice.Transcriptions.AddPartial("Hjælp. Hjælp.");
+        voice.Transcriptions.AddFinal("Hjælp. Hjælp.");
+        voice.Transcriptions.SayAsRecognized("Hvad venter?");
+        await voice.Events.SaidAsync("Intet venter.");
+
+        Assert.Equal(["Hvad venter?"], UserTexts(model));
+        Assert.Single(voice.Events.Responses, r => r == Danish);
+    }
+
+    /// <summary>A command that holds help's words, among others, is the model's, and help is not said.</summary>
+    [Theory]
+    [InlineData("Hvad kan jeg gøre ved 283?")]
+    [InlineData("Hvad kan jeg svare 283?")]
+    [InlineData("Hjælp mig med 283.")]
+    [InlineData("Svar 283 at hjælp er på vej.")]
+    [InlineData("Hvad kan du fortælle om 283?")]
+    [InlineData("What can I do about 283?")]
+    [InlineData("Answer 283 that help is coming.")]
+    public async Task A_command_that_holds_help_words_is_the_models(string said)
+    {
+        var model = new ScriptedChatClient().Respond("Uklar.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized(said);
+        await voice.Events.SaidAsync("Uklar.");
+
+        Assert.Equal([said], UserTexts(model));
+        Assert.DoesNotContain(Danish, voice.Events.Responses);
+        Assert.DoesNotContain(English, voice.Events.Responses);
+    }
+
     /// <summary>The same words again in the utterance (a later partial, the final) reach neither the model nor help again.</summary>
     [Fact]
     public async Task Help_claims_its_own_words_until_the_final()
