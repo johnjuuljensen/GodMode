@@ -26,7 +26,9 @@ public static class GodModeGraph
     public static ToolSet AddTools(ToolSet set, VoiceTools tools) =>
         tools.AddTo(set).Add(tools.Acting(AnnouncementTools.Mute)).Add(tools.Acting(AnnouncementTools.Unmute));
 
-    public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases)
+    /// <summary>The graph, greeting the user as <paramref name="heard"/> allows (<see cref="VoicePhrases.Greeting"/>).</summary>
+    public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases,
+        ServersHeard heard)
     {
         var systemPrompt = $$"""
             You are GodMode's voice: the user runs Claude Code sessions (projects) on several servers and follows them
@@ -87,7 +89,7 @@ public static class GodModeGraph
             .WithTools(t => AddTools(t, tools))
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
-            .Child(new ResponseNode("greeting", phrases.Greeting))
+            .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
             .Child(new ReadBackNode(new SentNode(new HeardNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt), tools.Conversation), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
     }

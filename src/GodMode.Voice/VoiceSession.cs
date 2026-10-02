@@ -36,9 +36,10 @@ public sealed record VoiceSessionSetup
 
     /// <summary>
     /// Connects to the servers, after the session is listening to them, and returns once what they hold now is in (or
-    /// it gave up waiting): the handles of what is waiting then are biased for in speech recognition.
+    /// it gave up waiting), with how many answered: the handles of what is waiting then are biased for in speech
+    /// recognition, and the greeting says when no server answered (<see cref="HubServers.ConnectAsync"/>).
     /// </summary>
-    public required Func<CancellationToken, Task> ConnectAsync { get; init; }
+    public required Func<CancellationToken, Task<ServersHeard>> ConnectAsync { get; init; }
 
     /// <summary>The microphone (<see cref="TranscriptionInput.FromAudio"/>), or transcriptions from elsewhere (a test's).</summary>
     public required TranscriptionInput Transcription { get; init; }
@@ -142,7 +143,7 @@ public sealed class VoiceSession : IAsyncDisposable
         var board = new AttentionBoard(setup.Servers, handles, projects);
         var conversation = new VoiceConversation();
 
-        await setup.ConnectAsync(ct);
+        var heard = await setup.ConnectAsync(ct);
 
         var language = new ElevenLabsLanguageOptions
         {
@@ -172,7 +173,7 @@ public sealed class VoiceSession : IAsyncDisposable
             var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
-                GodModeGraph.Build(inference, languages, tools, phrases),
+                GodModeGraph.Build(inference, languages, tools, phrases, heard),
                 setup.Transcription,
                 setup.AudioSink,
                 new EventSink(setup.Events, state, tools.Creates))
@@ -194,8 +195,8 @@ public sealed class VoiceSession : IAsyncDisposable
             tools.Creates.Attach(outcome => session.Announcements.TryWrite(new Announcement(phrases.Created(outcome))));
             state.Release();
             voice._run = voice.RunAsync(languages);
-            logger.LogInformation("Voice session started ({Languages}); {Projects} projects, {Waiting} waiting, {Handles} handles",
-                languages, projects.Projects.Count, board.Items.Count, handles.All.Count);
+            logger.LogInformation("Voice session started ({Languages}); {Answered} of {Servers} servers answered, {Projects} projects, {Waiting} waiting, {Handles} handles",
+                languages, heard.Answered, heard.Servers, projects.Projects.Count, board.Items.Count, handles.All.Count);
             return voice;
         }
         catch

@@ -12,7 +12,17 @@ public sealed class VoicePhrases
     public VoicePhrases(SessionLanguages languages) =>
         _danish = languages.Primary.StartsWith("da", StringComparison.OrdinalIgnoreCase);
 
-    public string Greeting => _danish ? "Klar." : "Ready.";
+    /// <summary>
+    /// What the session says as it starts listening: "Klar.", and, when there are servers and none answered in time,
+    /// that it knows no project yet, so a project it does not know is not taken for one that is not there.
+    /// </summary>
+    public string Greeting(ServersHeard heard) => (heard.NoneAnswered, _danish) switch
+    {
+        (false, true) => "Klar.",
+        (false, false) => "Ready.",
+        (true, true) => "Klar. Ingen server svarer endnu.",
+        (true, false) => "Ready. No server answers yet.",
+    };
 
     /// <summary>Before several announcements said together: "3 venter på dig:".</summary>
     public string Several(int count) => _danish ? $"{count} venter på dig:" : $"{count} need you:";
