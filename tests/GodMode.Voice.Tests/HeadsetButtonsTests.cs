@@ -100,6 +100,8 @@ public sealed class HeadsetButtonsTests : IDisposable
 
         _time.Advance(TimeSpan.FromMilliseconds(300));
         await Eventually.UntilAsync(() => _own.Reopens == 1, () => $"{_own.Reopens} reopens");
+        // The 1 s check's timer starts just after the reopen
+        await Task.Delay(50);
         _own.ReopenTakesCurrent = true;
         _time.Advance(TimeSpan.FromMilliseconds(990));
         await Task.Delay(50);
