@@ -28,12 +28,15 @@ public sealed partial class SentNode(INode chat, VoiceConversation conversation,
         return ChatReply.Replace(context, result, said);
     }
 
-    /// <summary>Whether a reply says an answer was sent: "Sendt", "Sent to 283", and not "Intet sendt" or "Not sent".</summary>
-    public static bool ClaimsSend(string reply) => SentWord().IsMatch(reply) && !Negation().IsMatch(reply);
+    /// <summary>
+    /// Whether a reply says an answer was sent, in the bot's own protocol form at its start: "Sendt.", "Sendt til 283.",
+    /// "Det er sendt.", "Sent to 283, it continues." Not "Intet sendt", and not a project's own text read out ("283
+    /// spørger: PR'en er sendt til review", "Sent the PR for review"): the sent word must be the reply's own statement,
+    /// ended there, or followed only by whom it went to.
+    /// </summary>
+    public static bool ClaimsSend(string reply) => Claim().IsMatch(reply);
 
-    [GeneratedRegex(@"\b(sendt|sent)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex SentWord();
-
-    [GeneratedRegex(@"\b(ikke|intet|ingen|aldrig|not|nothing|no|never)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex Negation();
+    [GeneratedRegex(@"^\s*(?:(?:det|svaret|den|it|the answer)\s+(?:er|blev|is|was|has\s+been)\s+)?(?:sendt|sent)(?:\s+(?:til|to)\s+[^\s,.:;!?]+)?\s*(?:[.!,:;]|$)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex Claim();
 }

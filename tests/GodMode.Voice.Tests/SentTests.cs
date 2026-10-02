@@ -112,6 +112,24 @@ public sealed class SentTests
         Assert.Empty(servers.Replies);
     }
 
+    /// <summary>A project's own text read out in a turn with no send is said as the model put it, "sendt" and all.</summary>
+    [Fact]
+    public async Task A_projects_text_that_says_sendt_is_said_as_written()
+    {
+        const string Reply = "283 spørger: PR'en er sendt til review, skal jeg merge?";
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
+            .Respond(Reply);
+        var (servers, voice) = await AskedAsync(model);
+        await using var _ = voice;
+
+        voice.Transcriptions.SayAsRecognized("Status 283");
+        await voice.Events.SaidAsync(Reply);
+
+        Assert.Empty(servers.Replies);
+        Assert.DoesNotContain(NothingSent, voice.Events.Responses);
+    }
+
     [Theory]
     [InlineData("Sendt.", true)]
     [InlineData("Sendt til 283.", true)]
@@ -124,6 +142,12 @@ public sealed class SentTests
     [InlineData("Not sent.", false)]
     [InlineData("Mente du ja eller nej til 283?", false)]
     [InlineData("Udsendelsen kører.", false)]
+    [InlineData("Sendt. Ingen andre venter.", true)]
+    [InlineData("Sendt til 283, den fortsætter.", true)]
+    [InlineData("PR'en er sendt til review, skal jeg merge?", false)]
+    [InlineData("283 spørger: PR'en er sendt til review, skal jeg merge?", false)]
+    [InlineData("Sent the PR for review.", false)]
+    [InlineData("283 er færdig: sent the PR for review.", false)]
     public void A_reply_claims_a_send_when_it_says_sent_and_not_that_nothing_was(string reply, bool claims) =>
         Assert.Equal(claims, SentNode.ClaimsSend(reply));
 }
