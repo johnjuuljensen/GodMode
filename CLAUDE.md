@@ -291,3 +291,4 @@ When doing work initiated by GodMode, indicated by the presence of a `.godmode` 
 - Make sure to maintain slnx file
 - When asked to merge master into a branch always use origin/master as local master is likely stale
 - Branches for issues are named by `ac-gwt-issue` from the issue's labels: `feature/<n>-<slug>`, `bug/<n>-<slug>`, `epic/<n>-<slug>`. Use the same scheme when creating one by hand.
+- Refer to work by its issue, never by its pull request alone: `#375` (or `IS#375`), or `IS#375/PR#408` once it has one, never just `PR#408`. This goes for messages to the user, PR descriptions, comments, commits, and reports to an overseer.
