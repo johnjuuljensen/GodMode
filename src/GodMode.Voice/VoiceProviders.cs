@@ -41,10 +41,13 @@ public sealed class CloudVoiceProviders(VoiceKeys keys) : IVoiceProviders
     }
 
     public Task InitializeAsync(IServiceProvider services, VoiceSettings settings) =>
-        services.GetRequiredService<InferenceRouter>().InitializeAsync(new Dictionary<InferenceTier, TierConfig>
-        {
-            [InferenceTier.Light] = new("anthropic", settings.Models.Light),
-            [InferenceTier.Medium] = new("anthropic", settings.Models.Medium),
-            [InferenceTier.Heavy] = new("anthropic", settings.Models.Heavy),
-        });
+        services.GetRequiredService<InferenceRouter>().InitializeAsync(TierMap(settings.Models));
+
+    /// <summary>The Anthropic model behind each tier.</summary>
+    public static Dictionary<InferenceTier, TierConfig> TierMap(VoiceModels models) => new()
+    {
+        [InferenceTier.Light] = new("anthropic", models.Light),
+        [InferenceTier.Medium] = new("anthropic", models.Medium),
+        [InferenceTier.Heavy] = new("anthropic", models.Heavy),
+    };
 }

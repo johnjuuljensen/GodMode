@@ -55,7 +55,7 @@ internal static class TestingExtensions
 }
 
 /// <summary>The session's services without a network: the scripted model and a synthesizer of silence.</summary>
-internal sealed class OfflineProviders(ScriptedChatClient model, FixedPcmSynthesizer synthesizer) : IVoiceProviders
+internal sealed class OfflineProviders(IInferenceProvider model, FixedPcmSynthesizer synthesizer) : IVoiceProviders
 {
     public ElevenLabsLanguageOptions? Language { get; private set; }
 
@@ -72,6 +72,25 @@ internal sealed class OfflineProviders(ScriptedChatClient model, FixedPcmSynthes
     }
 
     public Task InitializeAsync(IServiceProvider services, VoiceSettings settings) => Task.CompletedTask;
+}
+
+/// <summary>The scripted model, behind the tier each request asks for.</summary>
+internal sealed class TieredModel(ScriptedChatClient model) : IInferenceProvider
+{
+    /// <summary>The tier of each request, in order.</summary>
+    public ConcurrentQueue<InferenceTier> Tiers { get; } = new();
+
+    public IChatClient GetClient(InferenceTier tier)
+    {
+        Tiers.Enqueue(tier);
+        return model;
+    }
+
+    public Task<ChatResponse> CompleteAsync(InferenceTier tier, IList<ChatMessage> messages, ChatOptions? options = null, CancellationToken ct = default)
+    {
+        Tiers.Enqueue(tier);
+        return model.GetResponseAsync(messages, options, ct);
+    }
 }
 
 /// <summary>What a session reported, in order.</summary>
@@ -104,19 +123,19 @@ internal sealed class OfflineVoice : IAsyncDisposable
     public OfflineProviders Providers { get; }
     public VoiceSession Session { get; private set; } = null!;
 
-    private OfflineVoice(ScriptedChatClient model, TimeSpan speech)
+    private OfflineVoice(ScriptedChatClient model, IInferenceProvider inference, TimeSpan speech)
     {
         Synthesizer = new FixedPcmSynthesizer(speech);
         Model = model;
-        Providers = new OfflineProviders(model, Synthesizer);
+        Providers = new OfflineProviders(inference, Synthesizer);
     }
 
     public static async Task<OfflineVoice> StartAsync(IGodModeServers servers, ScriptedChatClient model,
         Func<CancellationToken, Task>? connect = null, VoiceSettings? settings = null, ILoggerFactory? loggerFactory = null,
-        TimeSpan? speech = null, IAudioSource? microphone = null)
+        TimeSpan? speech = null, IAudioSource? microphone = null, IInferenceProvider? inference = null)
     {
         // How long anything the bot says plays: short, unless a test watches it speak
-        var voice = new OfflineVoice(model, speech ?? TimeSpan.FromMilliseconds(50));
+        var voice = new OfflineVoice(model, inference ?? model, speech ?? TimeSpan.FromMilliseconds(50));
         voice.Session = await VoiceSession.StartAsync(new VoiceSessionSetup
         {
             Settings = settings ?? VoiceSettings.Default,
