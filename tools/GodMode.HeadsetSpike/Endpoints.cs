@@ -6,7 +6,7 @@ namespace GodMode.HeadsetSpike;
 
 /// <summary>
 /// Windows' audio endpoints, watched for the headset's profile. A Bluetooth Classic headset is a stereo endpoint
-/// (A2DP) and a hands-free one (HFP: "Hands-Free" in its name), or on newer Windows 11 one unified endpoint that
+/// (A2DP: "Headphones") and a hands-free one (HFP: "Headset", "Hands-Free" on Windows 10), or on newer Windows 11 one unified endpoint that
 /// switches inside. No API names the profile in use, so the spike logs everything that could show it: endpoints
 /// coming, going and changing state, defaults and property changes (Core Audio's notifications), each headset
 /// endpoint's mix format, and which of them carries sound (its peak meter). <see cref="Profile"/> is a guess from
@@ -163,7 +163,10 @@ public sealed class Endpoints : IMMNotificationClient, IDisposable
         {
             var headset = _headset;
             if (headset.Count == 0) return $"no active endpoint named '{HeadsetName}'";
-            static bool HandsFree(MMDevice d) => d.FriendlyName.Contains("Hands-Free", StringComparison.OrdinalIgnoreCase);
+            // Windows 10 names the HFP speaker "Headset (… Hands-Free AG Audio)"; Windows 11 "Headset (…)", beside "Headphones (…)" for A2DP
+            static bool HandsFree(MMDevice d) =>
+                d.FriendlyName.Contains("Hands-Free", StringComparison.OrdinalIgnoreCase)
+                || d.FriendlyName.StartsWith("Headset", StringComparison.OrdinalIgnoreCase);
             var audible = headset.Where(d => d.DataFlow == DataFlow.Render && _audible.GetValueOrDefault(d.ID)).ToList();
             if (OpenMicrophoneId is { } mic && headset.Any(d => d.ID == mic))
                 return "HFP? (the headset's microphone is open)";
