@@ -33,6 +33,19 @@ public interface IMicSwitch
     void CloseMic();
 }
 
+/// <summary>
+/// The session's voice input (VoiceBot's <c>SuspendInputAsync</c>/<c>ResumeInputAsync</c>, VoiceBot#75): suspended
+/// while the mic is closed, so nothing is connected to speech recognition then (issue #424).
+/// </summary>
+public interface IVoiceInput
+{
+    /// <summary>Commits an utterance in progress (a final the graph answers), then closes the connection.</summary>
+    Task SuspendAsync(CancellationToken ct);
+
+    /// <summary>Connects again; a failure is reported on the session's health, as a lost connection is, and retried.</summary>
+    Task ResumeAsync(CancellationToken ct);
+}
+
 /// <summary>How the mic behaves, with the defaults issue #422 names.</summary>
 public sealed record VoiceMicOptions
 {
@@ -62,6 +75,12 @@ public sealed record VoiceMicOptions
 /// the latest of the tone, the user's last words and the end of the bot's speech: the falling tone, then the microphone
 /// is let go of, and the music resumes once the route is back at full quality. Pressed while the bot speaks, either
 /// waits for its speech to play out: the speaker moves with the mic, and the one it leaves drops what it holds.
+/// <para>
+/// While it is closed the session's voice input is suspended (<see cref="AttachAsync"/>, issue #424): no connection to
+/// speech recognition. Opening resumes it alongside the microphone's open, and the rising tone plays once both are
+/// done, so what follows the tone is heard. Closing suspends it once the microphone is let go of: what the user was
+/// saying is committed and answered, on the speaker the closed mic leaves Default on.
+/// </para>
 /// </summary>
 public sealed class VoiceMic : IDisposable
 {
@@ -76,6 +95,7 @@ public sealed class VoiceMic : IDisposable
     private VoiceMicState _state = VoiceMicState.Closed;
     private SessionActivity _activity = SessionActivity.Listening;
     private TaskCompletionSource _quiet = Quiet();
+    private IVoiceInput? _input;
     private ITimer? _silence;
     private int _silenceRound;
     private bool _disposed;
@@ -111,7 +131,29 @@ public sealed class VoiceMic : IDisposable
     /// <summary>The mic opened or closed; on any thread.</summary>
     public event Action<VoiceMicState>? Changed;
 
-    /// <summary>Pauses the music, opens the microphone, then plays the rising tone; the silence timer starts from it.</summary>
+    /// <summary>
+    /// The session's voice input, which the mic suspends while it is closed and resumes as it opens: suspended now when
+    /// the mic is closed. Called before the session runs, it starts suspended and connects nothing.
+    /// </summary>
+    public async Task AttachAsync(IVoiceInput input)
+    {
+        await _switching.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _input = input;
+            if (State == VoiceMicState.Closed)
+                await SuspendInputAsync("the mic starts closed").ConfigureAwait(false);
+        }
+        finally
+        {
+            _switching.Release();
+        }
+    }
+
+    /// <summary>
+    /// Pauses the music and opens the microphone while voice input resumes, then plays the rising tone; the silence
+    /// timer starts from it.
+    /// </summary>
     public async Task OpenAsync()
     {
         await _switching.WaitAsync().ConfigureAwait(false);
@@ -121,6 +163,10 @@ public sealed class VoiceMic : IDisposable
             {
                 if (_disposed || _state == VoiceMicState.Open) return;
             }
+
+            // Speech recognition connects while the music pauses and the headset switches to HFP: the tone waits for both
+            var opening = _time.GetTimestamp();
+            var resuming = ResumeInputAsync();
 
             if (_media is not null)
             {
@@ -144,11 +190,18 @@ public sealed class VoiceMic : IDisposable
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Voice: the mic did not open");
+                await resuming.ConfigureAwait(false);
+                await SuspendInputAsync("the mic did not open").ConfigureAwait(false);
                 _media?.Release(MediaHold.Mic);
                 throw;
             }
+            var resumed = await resuming.ConfigureAwait(false);
             Set(VoiceMicState.Open);
-            _logger.LogInformation("Voice: mic open");
+            if (resumed is { } took)
+                _logger.LogInformation("Voice: mic open in {Open} ms (speech recognition connected in {Resume} ms)",
+                    (int)_time.GetElapsedTime(opening).TotalMilliseconds, (int)took.TotalMilliseconds);
+            else
+                _logger.LogInformation("Voice: mic open in {Open} ms", (int)_time.GetElapsedTime(opening).TotalMilliseconds);
             await ToneAsync(rising: true).ConfigureAwait(false);
             RestartSilence();
         }
@@ -158,7 +211,10 @@ public sealed class VoiceMic : IDisposable
         }
     }
 
-    /// <summary>Plays the falling tone, closes the microphone, and lets the music resume once the route is back.</summary>
+    /// <summary>
+    /// Plays the falling tone, closes the microphone, suspends voice input (what the user was saying is committed and
+    /// answered), and lets the music resume once the route is back.
+    /// </summary>
     public async Task CloseAsync(MicClose why)
     {
         await _switching.WaitAsync().ConfigureAwait(false);
@@ -177,6 +233,9 @@ public sealed class VoiceMic : IDisposable
             if (_options.ToneWait > TimeSpan.Zero)
                 await Task.Delay(_options.ToneWait, _time).ConfigureAwait(false);
             await Task.Run(_mic.CloseMic).ConfigureAwait(false);
+            // After the close, so the answer to a sentence it cut off plays on the speaker the closed mic leaves Default
+            // on; and before the music is let go of, which that answer would pause again
+            await SuspendInputAsync($"mic closed: {why}").ConfigureAwait(false);
             _media?.Release(MediaHold.Mic);
         }
         finally
@@ -215,6 +274,39 @@ public sealed class VoiceMic : IDisposable
     private Task QuietAsync()
     {
         lock (_lock) return _quiet.Task;
+    }
+
+    /// <summary>Resumes voice input, and returns how long it took to connect; null with none attached. Never throws.</summary>
+    private async Task<TimeSpan?> ResumeInputAsync()
+    {
+        if (_input is not { } input) return null;
+        var started = _time.GetTimestamp();
+        try
+        {
+            await input.ResumeAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Voice: speech recognition did not resume");
+        }
+        return _time.GetElapsedTime(started);
+    }
+
+    /// <summary>Suspends voice input: an utterance in progress is committed first. Never throws.</summary>
+    private async Task SuspendInputAsync(string why)
+    {
+        if (_input is not { } input) return;
+        var started = _time.GetTimestamp();
+        try
+        {
+            await input.SuspendAsync(CancellationToken.None).ConfigureAwait(false);
+            _logger.LogInformation("Voice: speech recognition suspended ({Why}) in {Ms} ms: no connection while the mic is closed",
+                why, (int)_time.GetElapsedTime(started).TotalMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Voice: speech recognition did not suspend ({Why})", why);
+        }
     }
 
     private void Set(VoiceMicState state)

@@ -239,6 +239,125 @@ public sealed class VoiceMicTests : IDisposable
         Assert.False(DoneNode.Said("Færdig med 283"));
     }
 
+    /// <summary>
+    /// Issue #424: while the mic is closed nothing is connected to speech recognition. A session that starts with the
+    /// mic closed starts with its input suspended (VoiceBot#75), and opening and closing the mic resume and suspend it.
+    /// </summary>
+    [Fact]
+    public async Task A_session_started_with_the_mic_closed_is_suspended_and_opening_and_closing_resume_and_suspend_it()
+    {
+        var engine = new ScriptedSpeechEngine();
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(), mic: _mic,
+            microphone: new ScriptedAudioSource(), engine: engine);
+        await voice.Events.SaidAsync("Klar.");
+        Assert.True(engine.Suspended);
+        Assert.Equal((1, 0), (engine.Suspends, engine.Resumes));
+
+        await _mic.OpenAsync();
+        Assert.False(engine.Suspended);
+        Assert.Equal((1, 1), (engine.Suspends, engine.Resumes));
+
+        await _mic.CloseAsync(MicClose.Button);
+        Assert.True(engine.Suspended);
+        Assert.Equal((2, 1), (engine.Suspends, engine.Resumes));
+    }
+
+    /// <summary>
+    /// A press mid-sentence still gets that sentence answered: the suspend commits what was heard (the engine's final
+    /// before it returns), once the microphone is let go of, and the graph answers it.
+    /// </summary>
+    [Fact]
+    public async Task Closing_the_mic_mid_sentence_commits_it_after_the_close_and_it_is_answered()
+    {
+        var engine = new ScriptedSpeechEngine();
+        var model = new ScriptedChatClient().Respond("Intet venter.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model, mic: _mic,
+            microphone: new ScriptedAudioSource(), engine: engine);
+        await voice.Events.SaidAsync("Klar.");
+        await _mic.OpenAsync();
+        engine.OnSuspend = () =>
+        {
+            _log.Enqueue("suspend");
+            engine.AddFinal("Hvad venter på mig");
+        };
+
+        await _mic.CloseAsync(MicClose.Button);
+
+        await voice.Events.SaidAsync("Intet venter.");
+        Assert.Contains("Hvad venter på mig", voice.Events.Transcripts);
+        Assert.Equal(1, model.Calls);
+        var log = _log.ToList();
+        Assert.True(log.LastIndexOf("close") < log.IndexOf("suspend"), $"suspended before the microphone closed: {string.Join(", ", log)}");
+    }
+
+    /// <summary>Android's mic is always open (no <see cref="VoiceMic"/>): its input is never suspended.</summary>
+    [Fact]
+    public async Task A_session_without_a_mic_on_demand_is_never_suspended()
+    {
+        var engine = new ScriptedSpeechEngine();
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(),
+            microphone: new ScriptedAudioSource(), engine: engine);
+        await voice.Events.SaidAsync("Klar.");
+
+        Assert.False(engine.Suspended);
+        Assert.Equal(0, engine.Suspends);
+    }
+
+    /// <summary>
+    /// Speech recognition connects while the microphone opens (the switch to HFP), not after it: the rising tone waits
+    /// for both, so what the user says after the tone is heard.
+    /// </summary>
+    [Fact]
+    public async Task Opening_resumes_input_alongside_the_microphone_and_the_rising_tone_waits_for_both()
+    {
+        var input = new FakeInput(_log);
+        await _mic.AttachAsync(input);
+        input.Connecting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var opening = _mic.OpenAsync();
+        await Eventually.UntilAsync(() => _switch.Opens == 1, () => "the microphone did not open while input resumed");
+        Assert.DoesNotContain("rising tone", _log);
+        Assert.Equal(VoiceMicState.Closed, _mic.State);
+
+        input.Connecting.SetResult();
+        await opening;
+        var log = _log.ToList();
+        Assert.True(log.IndexOf("resume") < log.IndexOf("open"), string.Join(", ", log));
+        Assert.Equal("rising tone", log.Last());
+        Assert.Equal(VoiceMicState.Open, _mic.State);
+    }
+
+    [Fact]
+    public async Task A_microphone_that_did_not_open_leaves_input_suspended()
+    {
+        var input = new FakeInput(_log);
+        await _mic.AttachAsync(input);
+        _switch.Fail = true;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(_mic.OpenAsync);
+
+        Assert.Equal(VoiceMicState.Closed, _mic.State);
+        Assert.Equal(["suspend", "resume", "suspend"], _log.Where(e => e is "suspend" or "resume"));
+    }
+
+    /// <summary>The session's input, logging its suspends and resumes; a resume waits for <see cref="Connecting"/>.</summary>
+    private sealed class FakeInput(ConcurrentQueue<string> log) : IVoiceInput
+    {
+        public TaskCompletionSource? Connecting { get; set; }
+
+        public Task SuspendAsync(CancellationToken ct)
+        {
+            log.Enqueue("suspend");
+            return Task.CompletedTask;
+        }
+
+        public Task ResumeAsync(CancellationToken ct)
+        {
+            log.Enqueue("resume");
+            return Connecting?.Task ?? Task.CompletedTask;
+        }
+    }
+
     private sealed class FakeMicSwitch(ConcurrentQueue<string> log) : IMicSwitch
     {
         private int _opens;
