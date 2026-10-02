@@ -142,9 +142,10 @@ public sealed class MainForm : Form
             BeginInvoke(() =>
             {
                 var mirrors = _proxy.Checked ? _mirror.Checked : _listening && (!_mic.IsOpen || _statusWhileOpen.SelectedIndex == 0);
+                var playing = status == Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
                 if (mirrors)
-                    _smtc.SetStatus(status == Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
-                        ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, $"mirrors {id}");
+                    _smtc.SetStatus(playing ? MediaPlaybackStatus.Playing : MediaPlaybackStatus.Paused, $"mirrors {id}");
+                if (playing && _listening) _ = ReclaimAsync(id);
             });
         };
         _gap.ValueChanged += (_, _) => NewClassifiers();
@@ -306,6 +307,22 @@ public sealed class MainForm : Form
         _log.Write("LISTEN", $"started: play/pause turns the mic on and off; {(_pauseWhileListening.Checked ? "Spotify paused while it is open" : "Spotify left alone")}; status while open: {_statusWhileOpen.SelectedItem}");
         if (_sessions.OtherPlaying() is false)
             _smtc.SetStatus(MediaPlaybackStatus.Paused, "mirrors the other session at start");
+    }
+
+    /// <summary>Spotify started playing, and Windows makes it the current session: take it back, if Windows did.</summary>
+    private async Task ReclaimAsync(string other)
+    {
+        foreach (var wait in new[] { 300, 1000 })
+        {
+            await Task.Delay(wait);
+            if (!_listening) return;
+            if (_sessions.CurrentIsOwn)
+            {
+                _log.Write("LISTEN", $"current session is the spike's {wait} ms after {other} played");
+                return;
+            }
+            _smtc.Reclaim($"{other} is the current session");
+        }
     }
 
     private void StopListening()

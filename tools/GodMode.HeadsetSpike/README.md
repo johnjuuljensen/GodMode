@@ -335,9 +335,34 @@ the headset as its call control device. Its `EndRequested` closes the mic. Note 
 1. Mic closed. **Report VoIP call**: does the headset switch to HFP by itself (quality drop)? Single press: any `VOIP`
    line? **End VoIP call**.
 
+## Fourth trial (2026-10-02)
+
+Read from the log `headset-20261002-130433.log` and the user's report.
+
+- **The headset's button closes the mic in HFP, through the VoIP call.** Each of the three presses with the mic open gave
+  the call's `EndRequested`. Listen mode then closed the mic, played the falling tone and
+  resumed Spotify. **So the design works: a press in A2DP opens the mic (media session), and a press in HFP closes it
+  (VoIP call control).** The call went active 1.6–1.8 s after the press that opened the mic.
+- **But only once per listen start**, as the user reported. The cause is not the call: when the spike resumed Spotify,
+  Windows made Spotify the current media session (`current session: Spotify`, 1 ms before the spike mirrored
+  *playing*). So the next press went to Spotify and paused it instead of opening the mic. With Spotify paused the
+  session fell back to the spike, and the press after that worked again.
+- Fixed in the spike: whenever Spotify starts playing in listen mode, the spike checks after 300 ms and 1 s whether it
+  is still Windows' current session. If not, it takes it back by going paused and playing again (`SMTC reclaim`), as it
+  did at each listen start.
+
+## Trial 5: listen mode, round after round
+
+1. Spotify playing. **Start listen mode**.
+2. Press, wait for the rising tone, wait 3 s, press (falling tone, Spotify resumes). Do this **five times in a row**.
+   Note each round that fails, and what happened instead (Spotify paused? nothing?).
+3. Once more, but pause Spotify by mouse first: press (mic on), press (mic off; Spotify stays paused).
+4. Start Spotify by mouse, wait 5 s, then do one round.
+5. **Stop listen mode**.
+
 ## Results
 
-Filled in from the first three trials. The rest waits for Trial 4.
+Filled in from the first four trials. The rest waits for Trial 5.
 
 | # | Question | Result |
 |---|---|---|
@@ -348,7 +373,7 @@ Filled in from the first three trials. The rest waits for Trial 4.
 | 1e | Volume buttons | Windows' volume in 6 % steps (AVRCP absolute volume); no key or HID report. Hold − does nothing, hold + is power off |
 | 1f | Catch one gesture, keep Spotify's play/pause | Not by a keyboard hook. By the proxy: forwarding and catching work while Spotify plays; after a pause no button arrived with the proxy saying "playing". Dropped by the user: while listening GodMode takes every button (listen mode) |
 | 1h | Listen mode: play/pause turns the mic on and off | **On: yes** (a press in A2DP opens the mic). **Off: no**: in HFP no press reaches the media session, with its status paused or playing |
-| 1i | A press in HFP through a VoIP call (24H2 call control devices) | Unpackaged app: the coordinator, Bluetooth association and the headset as a call control device all work, and a call with it goes active. The button's `EndRequested`: Trial 4, V |
+| 1i | A press in HFP through a VoIP call (24H2 call control devices) | Unpackaged app: the coordinator, Bluetooth association and the headset as a call control device all work, and a call with it goes active. **The button raises `EndRequested`**: a press in HFP closes the mic (fourth trial). Repeated rounds: Trial 5 |
 | 1g | Own SMTC claimed | Gets every button; Spotify gets none while the app holds the session |
 | 2a | GSMTC pause and resume Spotify | Works every time; Spotify's state 55–290 ms later |
 | 2b | Announcement test | Paused at 289 ms, tones from 439 ms, playing again at 1022 ms |

@@ -28,6 +28,9 @@ public sealed class MediaSessions(SpikeLog log)
             : others.Any(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing);
     }
 
+    /// <summary>Whether Windows' current session (the one the headset's buttons go to) is the spike's own.</summary>
+    public bool CurrentIsOwn => _manager?.GetCurrentSession() is { } current && IsOwn(current.SourceAppUserModelId);
+
     public static bool IsOwn(string id) => id.Contains("GodMode.HeadsetSpike", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>What plays, for the state line: the current session's app, state and track.</summary>

@@ -58,6 +58,19 @@ public sealed class OwnMediaControls(SpikeLog log)
         log.Write(Source, $"status -> {status} ({why})");
     }
 
+    /// <summary>
+    /// Takes the current session back: a session that starts playing becomes Windows' current one, so the spike goes
+    /// paused and playing again. The fourth trial: once the spike resumed Spotify, Spotify was current and the next
+    /// press paused it instead of reaching the spike.
+    /// </summary>
+    public void Reclaim(string why)
+    {
+        if (_controls is not { IsEnabled: true } controls) return;
+        controls.PlaybackStatus = MediaPlaybackStatus.Paused;
+        controls.PlaybackStatus = MediaPlaybackStatus.Playing;
+        log.Write(Source, $"reclaim: paused and playing again ({why})");
+    }
+
     public void Disable()
     {
         if (_controls is null) return;
