@@ -122,7 +122,7 @@ public interface IProjectHub
     Task SubscribeProject(string projectId, long fromOffset, string subscriptionId, string? generation);
 
     /// <summary>
-    /// What claude said in the project's last <paramref name="turns"/> turns, oldest first, read from its
+    /// What claude said in the project's last <c>turns</c> turns, oldest first, read from its
     /// <c>output.jsonl</c> whatever the project waits on, or whether it waits at all: the read the fleet's
     /// <c>read</c> tool gives. The last turn may be unfinished while claude works on it. Fewer when it has had
     /// fewer turns, none before its first. Fails for a project the server does not track, and for

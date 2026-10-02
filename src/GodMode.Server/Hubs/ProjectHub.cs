@@ -193,7 +193,7 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
             throw new HubException($"turns must be 1 to {IProjectHub.MaxReplyTurns}, not {turns}.");
         try
         {
-            return await Task.FromResult<AssistantReply[]>([]); // RED STUB
+            return [.. await _projectManager.LastRepliesAsync(projectId, turns)];
         }
         catch (KeyNotFoundException ex)
         {

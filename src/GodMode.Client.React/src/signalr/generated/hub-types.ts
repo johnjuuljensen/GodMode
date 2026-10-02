@@ -78,6 +78,26 @@ export interface AddServerRequest {
 }
 
 /**
+ * What claude said in one turn of a session, from its `output.jsonl`: the server's
+ * `OutputLog.LastRepliesAsync`, which the hub's IProjectHub.GetLastReplies and the fleet's `read` tool give.
+ */
+export interface AssistantReply {
+  /**
+   * The turn's last assistant message with text (its text blocks, joined by a blank line): claude's reply, as
+   * its `result` line repeats it. A finished turn with no assistant text has its result's text, which may be
+   * empty.
+   */
+  Text: string;
+  /**
+   * Whether the turn has its `result` line. The last turn is unfinished while claude works on it, or when it
+   * was stopped in the middle.
+   */
+  Finished: boolean;
+  /** Whether the turn's result is an error (`is_error`). */
+  IsError: boolean;
+}
+
+/**
  * One project that needs the user, from IProjectHub.GetAttention and IProjectHubClient.AttentionChanged.
  * Answer any kind with IProjectHub.ReplyAndResume; a permission or question also with
  * IProjectHub.RespondToPermission or IProjectHub.AnswerQuestion.
@@ -571,6 +591,13 @@ export interface IProjectHub {
    * (0 for everything; an offset inside a line snaps forward to the next line), or -N for the last N turns.
    */
   SubscribeProject(projectId: string, fromOffset: number, subscriptionId: string, generation: string | null): Promise<void>;
+  /**
+   * What claude said in the project's last `turns` turns, oldest first, read from its `output.jsonl` whatever
+   * the project waits on, or whether it waits at all: the read the fleet's `read` tool gives. The last turn
+   * may be unfinished while claude works on it. Fewer when it has had fewer turns, none before its first.
+   * Fails for a project the server does not track, and for turns outside 1 to IProjectHub.MaxReplyTurns.
+   */
+  GetLastReplies(projectId: string, turns: number): Promise<AssistantReply[]>;
   /** Unsubscribes from output events from a project. */
   UnsubscribeProject(projectId: string): Promise<void>;
   /**

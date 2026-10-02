@@ -33,6 +33,18 @@ public sealed class VoiceConversation
         set => Volatile.Write(ref _unsure, value);
     }
 
+    private ReplyReading? _reading;
+
+    /// <summary>
+    /// The reply being read in parts (<see cref="VoiceTools.ReadReplyAsync"/>), and the part to read next: what
+    /// "læs videre" reads on from (<see cref="VoiceTools.ReadMoreText"/>). Null before any was read; a new read replaces it.
+    /// </summary>
+    public ReplyReading? Reading
+    {
+        get => Volatile.Read(ref _reading);
+        set => Volatile.Write(ref _reading, value);
+    }
+
     private ConcurrentQueue<string> _sent = new();
 
     /// <summary>An answer reached <paramref name="handle"/>: <see cref="VoiceTools.AnswerAsync"/>, once the server took it.</summary>
@@ -44,6 +56,9 @@ public sealed class VoiceConversation
     /// </summary>
     public IReadOnlyList<string> TakeSent() => [.. Interlocked.Exchange(ref _sent, new())];
 }
+
+/// <summary>A project's reply in the parts voice reads it in, and the index of the part to read next (its count once all were read).</summary>
+public sealed record ReplyReading(ProjectRef Project, string Handle, IReadOnlyList<string> Parts, int Next);
 
 /// <summary>A final and the earlier readings of the same utterance it revised: partials it contradicts, not only extends.</summary>
 public sealed record HeardTwoWays(string Final, IReadOnlyList<string> Readings);

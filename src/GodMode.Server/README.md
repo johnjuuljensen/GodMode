@@ -465,7 +465,7 @@ A session and its parent talk two ways: through Claude Code's own cross-session 
 
 ### A session's last replies
 
-What a session said, whether or not it needs the user, read from its `output.jsonl`: the fleet's `read`, and voice's last answer (#378). On the server it is `IProjectManager.LastRepliesAsync(projectId, turns)` (`OutputLog.LastRepliesAsync` on a state folder), which gives `AssistantReply(Text, Finished, IsError)`s, oldest first.
+What a session said, whether or not it needs the user, read from its `output.jsonl`. On the server it is `IProjectManager.LastRepliesAsync(projectId, turns)` (`OutputLog.LastRepliesAsync` on a state folder), which gives `AssistantReply(Text, Finished, IsError)`s (`GodMode.Shared`), oldest first. It is the one read behind both of its callers: the fleet's `read`, and the hub's `GetLastReplies(projectId, turns)`, which the voice's `read_reply` calls (#378). Each takes 1 to 20 turns (`IProjectHub.MaxReplyTurns` on the hub) and refuses any other count, and a project the server does not track; neither marks anything seen.
 
 - **A turn ends with a `result` line.** Its reply is its last assistant message that has text (the text blocks joined by a blank line), which is claude's reply as its result repeats it; a turn with none (tool calls only) has the result's text, maybe empty. `IsError` is the result's `is_error`.
 - **A subagent's messages are not the session's.** An assistant line with a `parent_tool_use_id` (a Task call's subagent, which the app nests under that call) is skipped.
@@ -863,6 +863,7 @@ Adopting folders ([Adopting folders](#adopting-folders)):
 
 Attention:
 - `Task<AttentionItem[]> GetAttention()` — Every project that needs the user (`Permission`, `Question`, `Error`, `Review`, `Finished`), oldest first, with a short plain `Text`; the same after a restart
+- `Task<AssistantReply[]> GetLastReplies(projectId, turns)` — What claude said in the project's last 1 to 20 turns, oldest first, whatever it waits on, seen or not; the last may be unfinished ([A session's last replies](#a-sessions-last-replies))
 - `Task MarkSeen(projectId)` — The last result is seen: no longer `Finished`, nor `Review` until the pull request changes (a reply does the same)
 - `Task ReplyAndResume(projectId, text)` — `SendInput` to a running claude; otherwise resume, send, and return once claude reports `system/init` (fails on exit or after `SessionStartTimeoutSeconds`, default 60)
 
