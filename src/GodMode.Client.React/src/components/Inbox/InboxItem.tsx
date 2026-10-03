@@ -15,8 +15,8 @@ const KIND_LABELS: Record<AttentionKind, string> = {
 
 /** Kinds answered with a typed reply (ReplyAndResume). */
 const REPLY_KINDS: ReadonlySet<AttentionKind> = new Set(['Question', 'Error', 'Finished']);
-/** Kinds with a result to open (the pull request) and to mark seen. */
-const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review']);
+/** Kinds to mark seen: a Question only in plain text, as a pending AskUserQuestion is answered (#426). */
+const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review', 'Question', 'Error']);
 
 interface Props {
   item: ServerAttentionItem;
@@ -62,6 +62,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   // A single AskUserQuestion is answered by a reply with the chosen label
   const question = kind === 'Question' && item.Question?.Questions.length === 1 ? item.Question.Questions[0] : null;
   const canReply = REPLY_KINDS.has(kind) || (kind === 'Permission' && !permission);
+  const canMarkSeen = SEEN_KINDS.has(kind) && !(kind === 'Question' && item.Question);
 
   /** Runs a hub call; the item leaves the inbox by AttentionChanged when it worked. */
   const run = async (call: () => Promise<void>) => {
@@ -137,7 +138,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
         </div>
       )}
 
-      {SEEN_KINDS.has(kind) && (
+      {canMarkSeen && (
         <div className="inbox-item-actions">
           {item.PullRequestUrl && (
             <a className="btn btn-secondary" href={item.PullRequestUrl} target="_blank" rel="noreferrer">Open PR</a>

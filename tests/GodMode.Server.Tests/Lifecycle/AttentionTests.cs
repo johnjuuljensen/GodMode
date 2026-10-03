@@ -91,12 +91,109 @@ public class AttentionTests
         await WaitForAttentionPushAsync(harness, 1);
         var statusPushes = harness.Hub.StatusPushes(asking.Id).Count;
 
-        // Seeing a question pushes the status, and leaves the question as it was
+        // Each seeing pushes the status; only the first changes the list
         for (var i = 0; i < 5; i++)
             await harness.Projects.MarkSeenAsync(asking.Id);
 
         Assert.Equal(statusPushes + 5, harness.Hub.StatusPushes(asking.Id).Count);
-        Assert.Single(harness.Hub.AttentionPushes);
+        Assert.Equal(2, harness.Hub.AttentionPushes.Count);
+        Assert.Empty(harness.Hub.AttentionPushes[^1]);
+    }
+
+    /// <summary>
+    /// A question in plain text, seen, leaves the list (#426): the project still waits on it, a reply still answers it,
+    /// and a turn that asks again is a Question again.
+    /// </summary>
+    [Fact]
+    public async Task QuestionInPlainText_IsSeen_AndStillAnswered()
+    {
+        const string again = "And which remote?";
+        await using var harness = new LifecycleHarness(Asking().EmitAssistant(again).Sleep(50).EmitResult(again).AwaitStdin());
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.WaitingInput);
+        await WaitForAttentionPushAsync(harness, 1);
+
+        await harness.Projects.MarkSeenAsync(created.Id);
+
+        Assert.Empty(harness.Projects.GetAttention());
+        var seen = await harness.Projects.GetStatusAsync(created.Id);
+        Assert.Equal(ProjectState.WaitingInput, seen.State);
+        Assert.Equal(Question, seen.CurrentQuestion);
+
+        await harness.Projects.ReplyAndResumeAsync(created.Id, "main");
+
+        var launch = await harness.WaitForStdinAsync(created.Id, count: 2);
+        Assert.Contains("main", launch.Stdin[1]);
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.Projects.GetAttention() is [{ Text: again }]), null,
+            () => $"the next question was not listed: {Describe(harness.Projects.GetAttention())}");
+        Assert.Equal(AttentionKind.Question, Assert.Single(harness.Projects.GetAttention()).Kind);
+    }
+
+    /// <summary>An error, seen, leaves the list (#426), and the project stays Error, also after a restart.</summary>
+    [Fact]
+    public async Task Error_IsSeen_AndTheProjectStaysError()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().Stderr("fatal: not a git repository").Exit(1));
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.Error);
+        await WaitForAttentionPushAsync(harness, 1);
+
+        await harness.Projects.MarkSeenAsync(created.Id);
+
+        Assert.Empty(await WaitForAttentionPushAsync(harness, 2));
+        var status = await harness.Projects.GetStatusAsync(created.Id);
+        Assert.Equal(ProjectState.Error, status.State);
+        Assert.Contains("fatal: not a git repository", status.LastError);
+        await harness.RestartAsync();
+        Assert.Empty(harness.Projects.GetAttention());
+    }
+
+    private static readonly DateTime Asked = new(2026, 10, 3, 12, 0, 0, DateTimeKind.Utc);
+
+    private static ProjectStatus StatusOf(ProjectState state, DateTime? seenAt) =>
+        new("p/r/260929-feat-x-k7q2", "x", state, Asked.AddHours(-1), Asked, null, new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0,
+            SeenAt: seenAt);
+
+    /// <summary>A question in plain text is the user's until seen, Stopped as WaitingInput (#426).</summary>
+    [Theory]
+    [InlineData(ProjectState.WaitingInput)]
+    [InlineData(ProjectState.Stopped)]
+    public void QuestionInPlainText_IsAQuestion_UntilSeen(ProjectState state)
+    {
+        var asking = StatusOf(state, null) with { CurrentQuestion = Question, QuestionAt = Asked };
+
+        Assert.Equal(AttentionKind.Question, Attention.Of(asking)?.Kind);
+        Assert.Equal(AttentionKind.Question, Attention.Of(asking with { SeenAt = Asked.AddSeconds(-1) })?.Kind);
+        Assert.Null(Attention.Of(asking with { SeenAt = Asked.AddSeconds(1) }));
+        // A turn that asks again asks anew
+        Assert.Equal(AttentionKind.Question, Attention.Of(asking with { SeenAt = Asked.AddSeconds(1), QuestionAt = Asked.AddMinutes(1) })?.Kind);
+    }
+
+    /// <summary>A pending AskUserQuestion blocks claude: only an answer clears it, whatever was seen.</summary>
+    [Fact]
+    public void PendingQuestion_IgnoresSeen()
+    {
+        var question = new PendingQuestion("q1", [new QuestionItem("Which color?", null, [new QuestionOption("Red", null)], false)], Asked);
+        var asking = StatusOf(ProjectState.WaitingInput, Asked.AddSeconds(1)) with
+        {
+            PendingQuestion = question, CurrentQuestion = "Which color?", QuestionAt = Asked,
+        };
+
+        var item = Attention.Of(asking);
+
+        Assert.Equal(AttentionKind.Question, item?.Kind);
+        Assert.Same(question, item?.Question);
+    }
+
+    /// <summary>An error is the user's until seen, and again when it fails again.</summary>
+    [Fact]
+    public void Error_IsAnError_UntilSeen()
+    {
+        var failed = StatusOf(ProjectState.Error, null) with { LastError = "boom" };
+
+        Assert.Equal(AttentionKind.Error, Attention.Of(failed)?.Kind);
+        Assert.Null(Attention.Of(failed with { SeenAt = Asked.AddSeconds(1) }));
+        Assert.Equal(AttentionKind.Error, Attention.Of(failed with { SeenAt = Asked.AddSeconds(1), UpdatedAt = Asked.AddMinutes(1) })?.Kind);
     }
 
     [Fact]

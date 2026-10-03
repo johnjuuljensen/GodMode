@@ -78,8 +78,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             [new ToolParameter(TextParameter, "The answer to send, e.g. \"Brug den eksisterende migration.\""), ProjectReference],
             (_, args, ct) => AnswerAsync(Argument(args, ProjectParameter), Argument(args, TextParameter), ct))
         .Add(MarkSeen,
-            "Mark a project's finished result as seen, so it no longer needs the user. Call only when the user says so themselves " +
-            "(\"læst\", \"seen\"): never as part of reading a project, its status or its reply, nor when they ask whether that was all.",
+            "Mark what a project needs as seen (its finished result, an error, or a question it asked in plain text), so it no " +
+            "longer needs the user; a seen question still waits for its answer. A pending choice or permission is only cleared by " +
+            "an answer. Call only when the user says so themselves (\"læst\", \"seen\"): never as part of reading a project, its status or its reply, nor when they ask whether that was all.",
             [ProjectReference],
             (_, args, ct) => MarkSeenAsync(Argument(args, ProjectParameter), ct))
         .Add(StartSession,

@@ -10,13 +10,18 @@ public enum AttentionKind
     Permission,
 
     /// <summary>
-    /// claude asked something: an AskUserQuestion (<see cref="Models.AttentionItem.Question"/>), or its turn
-    /// ended on a question in plain text (<see cref="Models.ProjectStatus.CurrentQuestion"/>), which a
-    /// project stopped since still asks.
+    /// claude asked something: an AskUserQuestion (<see cref="Models.AttentionItem.Question"/>), which only an
+    /// answer clears, or its turn ended on a question in plain text (<see cref="Models.ProjectStatus.CurrentQuestion"/>),
+    /// which a project stopped since still asks. A question in plain text is cleared by
+    /// <see cref="Hubs.IProjectHub.MarkSeen"/> and by any reply, until a turn asks again; seen, the project is still
+    /// waiting on it, and a reply still answers it.
     /// </summary>
     Question,
 
-    /// <summary>The project failed: <see cref="Models.ProjectStatus.LastError"/>.</summary>
+    /// <summary>
+    /// The project failed: <see cref="Models.ProjectStatus.LastError"/>. Cleared by <see cref="Hubs.IProjectHub.MarkSeen"/>,
+    /// until it fails again; the project stays in <see cref="ProjectState.Error"/>.
+    /// </summary>
     Error,
 
     /// <summary>
