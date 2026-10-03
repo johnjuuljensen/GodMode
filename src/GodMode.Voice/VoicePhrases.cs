@@ -79,9 +79,14 @@ public sealed partial class VoicePhrases
     /// A create read back, as the question its yes answers: the root, its profile (and server, when there are several),
     /// the action, and what will be made, its prompt said as it is when short, and cut when long (#449). It holds no
     /// yes-word (<see cref="ConfirmCreateNode.HoldsYes"/>), so its echo can never answer it: a prompt that holds one is
-    /// only said to be there.
+    /// only said to be there. An action taken from the issue's label, in place of the one asked for, is said first (#473):
+    /// "Issue 471 er mærket epic. Skal jeg oprette issue 471 i GodMode, profil Godmode, som epic?".
     /// </summary>
-    public string ReadBack(CreateRequest request)
+    public string ReadBack(CreateRequest request) =>
+        (request is { Label: { } label, Issue: { } issue } ? _danish ? $"Issue {issue} er mærket {label}. " : $"Issue {issue} is labelled {label}. " : "")
+        + Question(request);
+
+    private string Question(CreateRequest request)
     {
         var root = request.Root;
         var where = _danish

@@ -215,6 +215,17 @@ export interface GitStatus {
   UntrackedFiles: number;
 }
 
+/**
+ * An issue as a root's `issueInfo` script reports it (IProjectHub.DescribeIssue): what voice checks an action
+ * against before it reads a create back (#473). The server knows nothing of the VCS: the script does.
+ */
+export interface IssueInfo {
+  /** The issue's title; null when the script gave none. */
+  Title?: string | null;
+  /** Its labels (`bug`, `feature`, `epic`…), as the script printed them. */
+  Labels: string[];
+}
+
 /** One line of a project's output, as replayed from `output.jsonl`. */
 export interface OutputLine {
   /** The byte offset in `output.jsonl` just after this line: subscribe from it to get only what follows. */
@@ -671,6 +682,13 @@ export interface IProjectHub {
    * root is not listed, or its script fails, times out or prints anything but the documented JSON.
    */
   ListUnmanaged(profileName: string, projectRootName: string): Promise<UnmanagedFolder[]>;
+  /**
+   * The issue's title and labels, as the root's `issueInfo` script reports them (run now, with the issue in
+   * `GODMODE_INPUT_ISSUE`), or null when the root has no such script. Voice checks the action it reads back
+   * against them (#473). Fails, saying why, when the root is not listed, or its script fails, times out or
+   * prints anything but the documented JSON.
+   */
+  DescribeIssue(profileName: string, projectRootName: string, issue: string): Promise<IssueInfo | null>;
   /**
    * Makes a session of a folder that exists in the root (UnmanagedFolder.Path), as it is: no folder is made,
    * and nothing in it is changed but its `.godmode/`. With an action that says `"adopt": true` its create
