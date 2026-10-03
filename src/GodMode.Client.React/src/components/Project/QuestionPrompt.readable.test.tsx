@@ -5,7 +5,7 @@
  * a multi-select's labels joined. Renders ProjectView on the real store.
  */
 import { join } from 'node:path';
-import type { ReactNode } from 'react';
+import { act, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeHub, project, root, connectServers } from '../../test/fakeHub';
 import { render, click, keyDown, type Rendered } from '../../test/render';
@@ -104,5 +104,32 @@ describe('a request of three long questions', () => {
       [longRequest.Questions[1].Question]: 'The leak',
       [longRequest.Questions[2].Question]: 'Start them',
     } }]);
+  });
+});
+
+describe("a multi-select's checks (#489)", () => {
+  const checkedLabels = () => [...prompt().querySelectorAll('.question-option[aria-pressed="true"]')]
+    .map(b => b.querySelector('.question-option-label')?.textContent);
+  /** A StatusChanged for the project, its pending question copied into new objects, as the store takes every push. */
+  const push = (request = longRequest) => act(async () => hub.callbacks.onStatusChanged?.('p1', {
+    ...project('p1', 'asking', 'WaitingInput', '2026-10-03T12:00:00Z'),
+    PendingQuestion: structuredClone(request),
+  }));
+
+  beforeEach(async () => {
+    await click(option('Yes, repair now'));
+    await click(option('The crash'));
+    await click(option('The leak'));
+    expect(checkedLabels()).toEqual(['Yes, repair now', 'The crash', 'The leak']);
+  });
+
+  it('stay checked through a status push of the same request', async () => {
+    await push();
+    expect(checkedLabels()).toEqual(['Yes, repair now', 'The crash', 'The leak']);
+  });
+
+  it('start over for a new request', async () => {
+    await push({ ...longRequest, RequestId: 'next' });
+    expect(checkedLabels()).toEqual([]);
   });
 });

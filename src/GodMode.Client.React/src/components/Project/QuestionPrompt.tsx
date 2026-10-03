@@ -4,6 +4,8 @@ import { getOpenConfirm } from '../../confirmDialog';
 import './QuestionPrompt.css';
 
 interface Props {
+  /** The pending request's id: its checks start over when another request comes, never for the same one (#489). */
+  requestId: string;
   /** The request's questions, every one shown in full (#454). The first one not answered takes the keys. */
   questions: QuestionItem[];
   /** The answers chosen so far, by question text: one may still be changed until the last is chosen. */
@@ -32,7 +34,7 @@ function isForPrompt(prompt: HTMLElement | null, target: EventTarget | null): bo
 const isOtherButton = (target: EventTarget | null) =>
   target instanceof HTMLButtonElement && !target.classList.contains('question-option');
 
-export function QuestionPrompt({ questions, answered = {}, onAnswer, onDismiss }: Props) {
+export function QuestionPrompt({ requestId, questions, answered = {}, onAnswer, onDismiss }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
   // A multi-select's options checked so far, by question text
   const [checked, setChecked] = useState<Record<string, ReadonlySet<string>>>({});
@@ -42,12 +44,14 @@ export function QuestionPrompt({ questions, answered = {}, onAnswer, onDismiss }
   const open = openIndex >= 0 ? questions[openIndex] : null;
   const options = open?.Options ?? NO_OPTIONS;
 
-  // The next question: the highlight starts over. Another request: nothing stays checked either
-  const [shown, setShown] = useState({ questions, open });
-  if (shown.questions !== questions || shown.open !== open) {
-    setShown({ questions, open });
+  // The next question: the highlight starts over. Another request: nothing stays checked either. A status
+  // push copies the same request into new objects, so the request is its id, not its array (#489)
+  const openText = open?.Question ?? null;
+  const [shown, setShown] = useState({ requestId, openText });
+  if (shown.requestId !== requestId || shown.openText !== openText) {
+    setShown({ requestId, openText });
     setActiveIndex(0);
-    if (shown.questions !== questions) setChecked({});
+    if (shown.requestId !== requestId) setChecked({});
   }
 
   const toggle = useCallback((question: QuestionItem, label: string) => {
