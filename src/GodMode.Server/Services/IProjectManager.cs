@@ -68,7 +68,7 @@ public interface IProjectManager
     /// <summary>Every project that needs the user, oldest first (hub GetAttention).</summary>
     AttentionItem[] GetAttention();
 
-    /// <summary>The user has seen the project's last result (hub MarkSeen).</summary>
+    /// <summary>The user has seen what the project needs: its result, review, question in plain text or error (hub MarkSeen).</summary>
     Task MarkSeenAsync(string projectId);
 
     /// <summary>Answers the project's pending permission prompt <paramref name="requestId"/> (hub RespondToPermission).</summary>

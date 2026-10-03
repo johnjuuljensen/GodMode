@@ -95,6 +95,31 @@ describe('the inbox', () => {
     expect(hubA.seen).toEqual([]);
   });
 
+  it('marks a question in plain text seen, beside its reply box (#426)', async () => {
+    const el = itemEl('p1', 'Server A');
+    expect(el.querySelector('textarea')).not.toBeNull();
+    await click(button(el, 'Mark seen'));
+    expect(hubA.seen).toEqual(['p1']);
+  });
+
+  it('marks an error seen (#426)', async () => {
+    await act(async () => hubA.callbacks.onAttentionChanged?.([item('p3', 'Error', '2026-09-24T12:00:00Z')]));
+    await click(button(itemEl('p3', 'Server A'), 'Mark seen'));
+    expect(hubA.seen).toEqual(['p3']);
+  });
+
+  it('offers no Mark seen on a pending AskUserQuestion, which only an answer clears (#426)', async () => {
+    await act(async () => hubA.callbacks.onAttentionChanged?.([item('p3', 'Question', '2026-09-24T12:00:00Z', {
+      Question: {
+        RequestId: 'q1', RequestedAt: '2026-09-24T12:00:00Z',
+        Questions: [{ Question: 'Which color?', Header: null, Options: [{ Label: 'Red', Description: null }], MultiSelect: false }],
+      },
+    })]));
+    const el = itemEl('p3', 'Server A');
+    expect(button(el, 'Red')).toBeDefined();
+    expect(button(el, 'Mark seen')).toBeUndefined();
+  });
+
   it('opens the project from the header', async () => {
     await click(itemEl('p1', 'Server B').querySelector<HTMLElement>('.inbox-item-header')!);
     expect(useAppStore.getState().selectedProject).toEqual({ serverId: 'B', projectId: 'p1' });

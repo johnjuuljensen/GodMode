@@ -91,8 +91,11 @@ public interface IProjectHub
     Task<AttentionItem[]> GetAttention();
 
     /// <summary>
-    /// The user has seen the project's last result: it is no longer <see cref="Enums.AttentionKind.Finished"/>.
-    /// Persisted, so it holds after a server restart. Other kinds are unaffected.
+    /// The user has seen what the project needs: its last result (<see cref="Enums.AttentionKind.Finished"/>), its
+    /// <see cref="Enums.AttentionKind.Review"/>, its question in plain text (<see cref="Enums.AttentionKind.Question"/>
+    /// with no <see cref="AttentionItem.Question"/>) or its <see cref="Enums.AttentionKind.Error"/>, which leave
+    /// <see cref="GetAttention"/> until there is a new one. Changes no state: a seen question still waits for its
+    /// reply. Persisted, so it holds after a server restart. A pending permission or AskUserQuestion is unaffected.
     /// </summary>
     Task MarkSeen(string projectId);
 

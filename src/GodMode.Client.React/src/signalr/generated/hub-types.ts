@@ -11,11 +11,16 @@ export type AttentionKind =
   /** A tool call waits to be allowed or denied: AttentionItem.Permission. */
   | 'Permission'
   /**
-   * claude asked something: an AskUserQuestion (AttentionItem.Question), or its turn ended on a question in
-   * plain text (ProjectStatus.CurrentQuestion), which a project stopped since still asks.
+   * claude asked something: an AskUserQuestion (AttentionItem.Question), which only an answer clears, or its
+   * turn ended on a question in plain text (ProjectStatus.CurrentQuestion), which a project stopped since
+   * still asks. A question in plain text is cleared by IProjectHub.MarkSeen and by any reply, until a turn
+   * asks again; seen, the project is still waiting on it, and a reply still answers it.
    */
   | 'Question'
-  /** The project failed: ProjectStatus.LastError. */
+  /**
+   * The project failed: ProjectStatus.LastError. Cleared by IProjectHub.MarkSeen, until it fails again; the
+   * project stays in ProjectState.Error.
+   */
   | 'Error'
   /**
    * A reviewer asked for changes on the project's open pull request (ProjectStatus.PullRequest), and the
@@ -611,8 +616,11 @@ export interface IProjectHub {
    */
   GetAttention(): Promise<AttentionItem[]>;
   /**
-   * The user has seen the project's last result: it is no longer AttentionKind.Finished. Persisted, so it
-   * holds after a server restart. Other kinds are unaffected.
+   * The user has seen what the project needs: its last result (AttentionKind.Finished), its
+   * AttentionKind.Review, its question in plain text (AttentionKind.Question with no AttentionItem.Question)
+   * or its AttentionKind.Error, which leave IProjectHub.GetAttention until there is a new one. Changes no
+   * state: a seen question still waits for its reply. Persisted, so it holds after a server restart. A
+   * pending permission or AskUserQuestion is unaffected.
    */
   MarkSeen(projectId: string): Promise<void>;
   /**

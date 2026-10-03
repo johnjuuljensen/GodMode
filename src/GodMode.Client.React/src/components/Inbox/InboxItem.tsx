@@ -16,8 +16,8 @@ const KIND_LABELS: Record<AttentionKind, string> = {
 
 /** Kinds answered with a typed reply (ReplyAndResume). */
 const REPLY_KINDS: ReadonlySet<AttentionKind> = new Set(['Question', 'Error', 'Finished']);
-/** Kinds with a result to open (the pull request) and to mark seen. */
-const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review']);
+/** Kinds to mark seen: a Question only in plain text, as a pending AskUserQuestion is answered (#426). */
+const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review', 'Question', 'Error']);
 
 interface Props {
   item: ServerAttentionItem;
@@ -65,6 +65,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   // A create that failed before its launch has no session to reply to: its delete is all that is left (#448)
   const createFailed = kind === 'Error' && item.CreateFailed === true;
   const canReply = !createFailed && (REPLY_KINDS.has(kind) || (kind === 'Permission' && !permission));
+  const canMarkSeen = SEEN_KINDS.has(kind) && !(kind === 'Question' && item.Question);
 
   /** Runs a hub call; the item leaves the inbox by AttentionChanged when it worked. */
   const run = async (call: () => Promise<void>) => {
@@ -153,7 +154,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
         </div>
       )}
 
-      {SEEN_KINDS.has(kind) && (
+      {canMarkSeen && (
         <div className="inbox-item-actions">
           {item.PullRequestUrl && (
             <a className="btn btn-secondary" href={item.PullRequestUrl} target="_blank" rel="noreferrer">Open PR</a>

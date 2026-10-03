@@ -18,20 +18,26 @@ public static partial class Attention
     /// <summary>The project's attention item, or null when it needs nothing.</summary>
     public static AttentionItem? Of(ProjectStatus status)
     {
+        var seenAt = status.SeenAt ?? DateTime.MinValue;
         // The turn's spoken reply goes with what its end left: a question in plain text, or its result
         (AttentionKind Kind, DateTime Since, string Text, string? Spoken)? found = status switch
         {
             { PendingPermission: { } permission } => (AttentionKind.Permission, permission.RequestedAt, permission.Summary, null),
+            // claude is blocked on an AskUserQuestion: only an answer clears it, whatever the user has seen
             { PendingQuestion: { } question } => (AttentionKind.Question, question.RequestedAt,
                 string.Join("\n", question.Questions.Select(q => q.Question)), null),
-            // Stopped keeps the question claude was waiting on (a shutdown, or a stop by the user): it still asks
-            { CurrentQuestion: { } question, State: ProjectState.WaitingInput or ProjectState.Stopped } =>
+            // Stopped keeps the question claude was waiting on (a shutdown, or a stop by the user): it still asks.
+            // Seen, it needs the user no more, and stays the question a reply answers, until a turn asks again
+            { CurrentQuestion: { } question, State: ProjectState.WaitingInput or ProjectState.Stopped }
+                when (status.QuestionAt ?? status.UpdatedAt) > seenAt =>
                 (AttentionKind.Question, status.QuestionAt ?? status.UpdatedAt, question, status.SpokenSummary),
-            { State: ProjectState.Error } => (AttentionKind.Error, status.UpdatedAt, status.LastError ?? "The project failed.", null),
+            // Seen, the project stays Error, and needs the user again when it fails again
+            { State: ProjectState.Error } when status.UpdatedAt > seenAt =>
+                (AttentionKind.Error, status.UpdatedAt, status.LastError ?? "The project failed.", null),
             { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { IsOpen: true, Review: PullRequestReview.ChangesRequested } pr }
-                when pr.ChangedAt > (status.SeenAt ?? DateTime.MinValue) =>
+                when pr.ChangedAt > seenAt =>
                 (AttentionKind.Review, pr.ChangedAt, $"Changes requested on pull request #{pr.Number}.", null),
-            { State: ProjectState.Idle or ProjectState.Stopped, LastResultAt: { } at } when at > (status.SeenAt ?? DateTime.MinValue) =>
+            { State: ProjectState.Idle or ProjectState.Stopped, LastResultAt: { } at } when at > seenAt =>
                 (AttentionKind.Finished, at, status.LastResult is { Length: > 0 } result ? result : "The turn finished.", status.SpokenSummary),
             _ => null,
         };
