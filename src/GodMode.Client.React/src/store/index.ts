@@ -9,10 +9,6 @@ import type {
 } from '../signalr/types';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../signalr/types';
-import {
-  type QuestionState, emptyQuestion, detectQuestionFromMessage,
-  detectQuestionFromStatus,
-} from '../services/questionDetection';
 import { projectKey, type ProjectKey } from './projectKey';
 import {
   rebuildHierarchy, inProfile, SIDEBAR_GROUP_ORDER, DEFAULT_GROUP_BY,
@@ -24,27 +20,6 @@ export { projectKey, type ProjectKey };
 export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
 export { isListed, foldItems, descendantsOf, inProfile, profileNameOf, sameProfile } from './hierarchy';
-
-// ── Persisted dismiss tracking ─────────────────────────────────
-// Keyed by ProjectKey; the unversioned key held project IDs alone, which collide across servers
-const DISMISSED_KEY = 'godmode-dismissed-projects-v2';
-function loadDismissed(): Record<ProjectKey, true> {
-  try {
-    localStorage.removeItem('godmode-dismissed-projects');
-    return JSON.parse(localStorage.getItem(DISMISSED_KEY) || '{}');
-  } catch { return {}; }
-}
-function saveDismissed(dp: Record<ProjectKey, true>) {
-  localStorage.setItem(DISMISSED_KEY, JSON.stringify(dp));
-}
-
-/** Marks a project's question dismissed or not; the same object when nothing changes. */
-function withDismissed(dp: Record<ProjectKey, true>, key: ProjectKey, dismissed: boolean): Record<ProjectKey, true> {
-  if (!!dp[key] === dismissed) return dp;
-  const next = { ...dp };
-  if (dismissed) next[key] = true; else delete next[key];
-  return next;
-}
 
 /** The map without the keys given; the same object when it has none of them. */
 function without<T>(map: Record<ProjectKey, T>, keys: ReadonlySet<ProjectKey>): Record<ProjectKey, T> {
@@ -150,33 +125,14 @@ interface ReplayOf {
  * from offset 0, or in another generation, is the whole file, so what was held is dropped first; a
  * batch that starts past the offset would leave a gap, and is not applied.
  */
-function appendLines(t: Transcript, lines: OutputMessage[], batch?: ReplayOf & { fromOffset: number }): { transcript: Transcript; added: ClaudeMessage[] } {
+function appendLines(t: Transcript, lines: OutputMessage[], batch?: ReplayOf & { fromOffset: number }): Transcript {
   const base = batch && (batch.fromOffset === 0 || batch.generation !== t.generation)
     ? { ...t, messages: [], offset: 0, generation: batch.generation }
     : t;
-  if (batch && batch.fromOffset > base.offset) return { transcript: t, added: [] };
+  if (batch && batch.fromOffset > base.offset) return t;
   const fresh = lines.filter(l => l.offset > base.offset);
-  if (fresh.length === 0) return { transcript: base, added: [] };
-  const added = fresh.map(l => l.message);
-  return { transcript: { ...base, messages: [...base.messages, ...added], offset: fresh[fresh.length - 1].offset }, added };
-}
-
-/**
- * The question a held transcript is waiting on, as detection over a full replay would find it:
- * the current turn's messages (those after the last user message), then the server's status.
- * None when the project is not waiting or its question was dismissed.
- */
-function heldQuestion(
-  messages: ClaudeMessage[], project: ProjectSummary | undefined, dismissed: boolean | undefined, lastInputSentAt: number,
-): QuestionState {
-  if (!project || dismissed || (project.State !== 'WaitingInput' && project.State !== 'Idle')) return emptyQuestion;
-  let turnStart = messages.length;
-  while (turnStart > 0 && messages[turnStart - 1].type !== 'user') turnStart--;
-  let question = emptyQuestion;
-  for (const message of messages.slice(turnStart)) {
-    question = detectQuestionFromMessage(message, question, lastInputSentAt, dismissed) ?? question;
-  }
-  return detectQuestionFromStatus(project.State, project.CurrentQuestion, project.Name, question, lastInputSentAt, messages) ?? question;
+  if (fresh.length === 0) return base;
+  return { ...base, messages: [...base.messages, ...fresh.map(l => l.message)], offset: fresh[fresh.length - 1].offset };
 }
 
 // ── Active page (replaces modal booleans) ─────────────────────
@@ -230,8 +186,8 @@ interface AppState {
   disconnectServer: (serverId: string) => Promise<void>;
   startServer: (serverId: string) => Promise<void>;
   /**
-   * The server's lists again, and what is held reconciled with them (#239): each listed project's
-   * question as its status says, and a project gone gets what a ProjectDeleted would.
+   * The server's lists again, and what is held reconciled with them (#239): a project gone gets what a
+   * ProjectDeleted would.
    */
   refreshProjects: (serverId: string) => Promise<void>;
   /**
@@ -269,13 +225,6 @@ interface AppState {
   unsubscribeTail: (serverId: string, projectId: string) => Promise<void>;
   outputMessages: ClaudeMessage[];
 
-  // Question state
-  question: QuestionState;
-  lastInputSentAt: number;
-  setQuestion: (q: QuestionState) => void;
-  dismissQuestion: () => void;
-  markInputSent: () => void;
-
   // Permission prompts and AskUserQuestion (ProjectSummary.PendingPermission / PendingQuestion). These, markSeen
   // and replyAndResume reject, saying so, when the server has left the list: the caller keeps what was typed
   respondToPermission: (serverId: string, projectId: string, requestId: string, decision: PermissionDecision) => Promise<void>;
@@ -302,9 +251,6 @@ interface AppState {
   inboxDrafts: Record<ProjectKey, InboxDraft>;
   setInboxDraft: (serverId: string, projectId: string, draft: Partial<InboxDraft>) => void;
 
-  // The projects whose question the user dismissed, by ProjectKey; persisted
-  dismissedProjects: Record<ProjectKey, true>;
-
   // Tile view
   isTileView: boolean;
   setTileView: (tile: boolean) => void;
@@ -328,18 +274,9 @@ interface AppState {
 
 // ── Store ──────────────────────────────────────────────────────
 
-/** The selected project's question is gone: dismissed by the user, or answered by input sent. */
-function questionCleared(state: AppState, dismissed: boolean): Partial<AppState> {
-  const sel = state.selectedProject;
-  const key = sel && projectKey(sel.serverId, sel.projectId);
-  const dp = key ? withDismissed(state.dismissedProjects, key, dismissed) : state.dismissedProjects;
-  if (dp !== state.dismissedProjects) saveDismissed(dp);
-  return { question: emptyQuestion, lastInputSentAt: Date.now(), dismissedProjects: dp };
-}
-
 /**
  * What is held for projects their server no longer has, dropped, whether it said so (ProjectDeleted)
- * or a list after a reconnect shows it: questions, drafts, tiles and output. A transcript still open
+ * or a list after a reconnect shows it: drafts, tiles and output. A transcript still open
  * stays open, empty and unsubscribed, so it is subscribed afresh should its project come back (created
  * again with the same ID). The selection stays, and its view says the project is not found.
  * The caller works out what depends on the lists.
@@ -351,13 +288,11 @@ function forgotten(state: AppState, keys: ReadonlySet<ProjectKey>): Partial<AppS
     if (!keys.has(key)) transcripts[key] = t;
     else if (t.phase !== 'idle') transcripts[key] = { ...emptyTranscript, phase: 'replaying' };
   }
-  const dp = without(state.dismissedProjects, keys);
-  if (dp !== state.dismissedProjects) saveDismissed(dp);
   const sel = state.selectedProject;
   return {
-    transcripts, dismissedProjects: dp, inboxDrafts: without(state.inboxDrafts, keys),
+    transcripts, inboxDrafts: without(state.inboxDrafts, keys),
     tiles: without(state.tiles, keys), tileMessages: without(state.tileMessages, keys), tileLoading: without(state.tileLoading, keys),
-    ...(sel && keys.has(projectKey(sel.serverId, sel.projectId)) ? { outputMessages: [], question: emptyQuestion } : {}),
+    ...(sel && keys.has(projectKey(sel.serverId, sel.projectId)) ? { outputMessages: [] } : {}),
   };
 }
 
@@ -367,7 +302,7 @@ function goneKeys(state: AppState, serverId: string, projects: ProjectSummary[])
   const kept = new Set(projects.map(p => projectKey(serverId, p.Id)));
   const sel = state.selectedProject;
   const held = [
-    state.transcripts, state.dismissedProjects, state.inboxDrafts, state.tiles,
+    state.transcripts, state.inboxDrafts, state.tiles,
   ].flatMap(map => Object.keys(map) as ProjectKey[]);
   if (sel) held.push(projectKey(sel.serverId, sel.projectId));
   return new Set(held.filter(k => k.startsWith(prefix) && !kept.has(k)));
@@ -642,16 +577,11 @@ export const useAppStore = create<AppState>((set, get) => {
 
         const held = state.transcripts[key];
         if (held && (batch ? answers(held, batch.subscription) : held.phase === 'live')) {
-          const { transcript, added } = appendLines(held, lines, batch);
+          const transcript = appendLines(held, lines, batch);
           updates.transcripts = { ...state.transcripts, [key]: transcript };
           const sel = state.selectedProject;
           if (sel?.serverId === serverId && sel.projectId === projectId) {
             updates.outputMessages = transcript.messages;
-            let question = state.question;
-            for (const message of added) {
-              question = detectQuestionFromMessage(message, question, state.lastInputSentAt, state.dismissedProjects[key]) ?? question;
-            }
-            if (question !== state.question) updates.question = question;
           }
         }
 
@@ -732,14 +662,6 @@ export const useAppStore = create<AppState>((set, get) => {
         ...transcripts.map(({ projectId }) => get().subscribeOutput(serverId, projectId)),
         ...tiles.map(({ projectId, key }) => openTail(serverId, projectId, state.tiles[key].offset)),
       ].map(p => p.catch(err => console.error('[store] resubscribe failed:', serverId, err))));
-      // What the selected project waits on, from its state now and the lines replayed
-      set(state => {
-        const sel = state.selectedProject;
-        if (sel?.serverId !== serverId) return {};
-        const key = projectKey(serverId, sel.projectId);
-        const project = state.getConnection(serverId)?.projects.find(p => p.Id === sel.projectId);
-        return { question: heldQuestion(state.outputMessages, project, state.dismissedProjects[key], state.lastInputSentAt) };
-      });
     };
     let caughtUp: Promise<void> = Promise.resolve();
 
@@ -791,35 +713,7 @@ export const useAppStore = create<AppState>((set, get) => {
           );
           const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
 
-          const key = projectKey(serverId, status.Id);
-          const sel = state.selectedProject;
-          let questionUpdate: Partial<AppState> = {};
-          if (sel?.serverId === serverId && sel?.projectId === status.Id && !state.dismissedProjects[key]) {
-            const isWaitingOrIdle = status.State === 'WaitingInput' || status.State === 'Idle';
-            if (isWaitingOrIdle) {
-              const project = connections.find(c => c.serverInfo.Id === serverId)?.projects.find(p => p.Id === status.Id);
-              if (project) {
-                const detected = detectQuestionFromStatus(
-                  status.State, status.CurrentQuestion, project.Name,
-                  state.question, state.lastInputSentAt, state.outputMessages,
-                );
-                if (detected) questionUpdate = { question: detected };
-              }
-            } else if (state.question.isActive) {
-              questionUpdate = { question: emptyQuestion };
-            }
-          }
-
-          let dp = state.dismissedProjects;
-          if (status.State === 'Running') {
-            dp = withDismissed(dp, key, false);
-            if (dp !== state.dismissedProjects) saveDismissed(dp);
-          }
-
-          return {
-            serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
-            dismissedProjects: dp, ...questionUpdate,
-          };
+          return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions };
         });
       },
       // A live line only counts once its subscription's replay is complete: one broadcast before
@@ -866,7 +760,6 @@ export const useAppStore = create<AppState>((set, get) => {
             const sel = state.selectedProject;
             if (sel?.serverId === serverId && sel.projectId === projectId) {
               updates.outputMessages = [];
-              updates.question = emptyQuestion;
             }
           }
           const tile = state.tiles[key];
@@ -957,16 +850,10 @@ export const useAppStore = create<AppState>((set, get) => {
 
   selectedProject: null,
   selectProject: (serverId, projectId) => set(state => {
-    const key = projectKey(serverId, projectId);
-    const messages = state.transcripts[key]?.messages ?? [];
-    const project = state.serverConnections.find(c => c.serverInfo.Id === serverId)?.projects.find(p => p.Id === projectId);
-    return {
-      selectedProject: { serverId, projectId }, activePage: null, outputMessages: messages,
-      // A resume replays only what is new, so the question comes from what is held
-      question: heldQuestion(messages, project, state.dismissedProjects[key], state.lastInputSentAt),
-    };
+    const messages = state.transcripts[projectKey(serverId, projectId)]?.messages ?? [];
+    return { selectedProject: { serverId, projectId }, activePage: null, outputMessages: messages };
   }),
-  clearSelection: () => set({ selectedProject: null, outputMessages: [], question: emptyQuestion }),
+  clearSelection: () => set({ selectedProject: null, outputMessages: [] }),
   openCreatedProject: (serverId, status) => {
     // The call can return before or after the broadcast: listing it twice keeps one entry
     set(state => listed(state, serverId, summaryOf(status)));
@@ -1011,13 +898,7 @@ export const useAppStore = create<AppState>((set, get) => {
   },
   outputMessages: [],
 
-  // ── Questions ─────────────────────────────────────────────
-
-  question: emptyQuestion,
-  lastInputSentAt: 0,
-  setQuestion: (q) => set({ question: q }),
-  dismissQuestion: () => set(state => questionCleared(state, true)),
-  markInputSent: () => set(state => questionCleared(state, false)),
+  // ── Permissions and AskUserQuestion ──────────────────────
 
   respondToPermission: async (serverId, projectId, requestId, decision) => {
     await hubFor(serverId).respondToPermission(projectId, requestId, decision);
@@ -1032,7 +913,7 @@ export const useAppStore = create<AppState>((set, get) => {
   setHomeView: (view) => set({ homeView: view }),
   inboxFocus: null,
   openInboxItem: (serverId, projectId) => set({
-    activePage: null, selectedProject: null, outputMessages: [], question: emptyQuestion, homeView: 'inbox',
+    activePage: null, selectedProject: null, outputMessages: [], homeView: 'inbox',
     inboxFocus: { key: projectKey(serverId, projectId), at: Date.now() },
   }),
   markSeen: async (serverId, projectId) => {
@@ -1051,12 +932,10 @@ export const useAppStore = create<AppState>((set, get) => {
     return { inboxDrafts };
   }),
 
-  dismissedProjects: loadDismissed(),
-
   // ── Tile view ─────────────────────────────────────────────
 
   isTileView: false,
-  setTileView: (tile) => set({ isTileView: tile, tileMessages: {}, tileLoading: {}, tiles: {}, selectedProject: null, outputMessages: [], question: emptyQuestion }),
+  setTileView: (tile) => set({ isTileView: tile, tileMessages: {}, tileLoading: {}, tiles: {}, selectedProject: null, outputMessages: [] }),
   tileMessages: {},
   tileLoading: {},
   tiles: {},
