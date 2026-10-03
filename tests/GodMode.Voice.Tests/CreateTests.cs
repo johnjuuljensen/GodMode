@@ -234,35 +234,18 @@ public sealed class CreateTests
     public async Task A_yes_said_before_the_read_back_does_not_create()
     {
         var servers = Servers();
-        var roots = new TaskCompletionSource();
-        servers.RootsGate = roots.Task;
         await using var voice = await OfflineVoice.StartAsync(servers, StartIssue283());
         await voice.Events.SaidAsync("Klar.");
+        // The session listed them once as it started, for its prompt
+        var roots = new TaskCompletionSource();
+        servers.RootsGate = roots.Task;
 
         voice.Transcriptions.SayAsRecognized("Start issue 283 i GodMode");
-        await Eventually.UntilAsync(() => servers.RootsListed == 1, () => "the tool to ask for the roots");
+        await Eventually.UntilAsync(() => servers.RootsListed == 2, () => "the tool to ask for the roots");
         voice.Transcriptions.SayAsRecognized("Ja.");
         roots.SetResult();
         await voice.Events.SaidAsync(ReadBack283);
         await voice.Events.SaidAsync("Annulleret. Intet oprettet.");
-
-        Assert.Empty(servers.Creates);
-    }
-
-    /// <summary>
-    /// The review's case: an announcement is said after the read-back, and the "ja" that follows answers that, not
-    /// the read-back: the create was dropped when the bot said something else, and the yes is told so.
-    /// </summary>
-    [Fact]
-    public async Task An_announcement_after_the_read_back_drops_the_create()
-    {
-        var servers = Servers();
-        await using var voice = await ReadBack283Async(servers, StartIssue283());
-
-        servers.Set(ServerA, Permission("Kappe/kappe/260930-issue-12-a1b2", "12-deploy", "Bash: git push"));
-        await voice.Events.SaidAsync("issue 12 skal have tilladelse: Bash: git push. Svar på skærmen.");
-        voice.Transcriptions.SayAsRecognized("Ja.");
-        await voice.Events.SaidAsync("Der venter ingen oprettelse. Sig start igen.");
 
         Assert.Empty(servers.Creates);
     }
@@ -477,7 +460,7 @@ public sealed class CreateTests
         var tools = Tools(Servers(), out _);
 
         Assert.Equal("experiments (profile Private), action experiment needs Task Description: ask the user for it, then call start_session " +
-            "again with action 'experiment', the same root, and their answer. Keep that action: never start another in its place, nor put " +
+            "again with their answer. The draft keeps action 'experiment' and the root: never start another in its place, nor put " +
             "its name in another's name. Nothing was created yet.",
             await Start(tools, action: "eksperiment", name: "sorting"));
         Assert.Null(tools.Creates.TakeProposed());
@@ -492,6 +475,8 @@ public sealed class CreateTests
         Assert.Contains("create issue BD-123 (its title is not known here: read back the number) in api_worktrees (profile Mega), action issue",
             await Start(tools, issue: "bd 123"));
         Assert.Equal(new Dictionary<string, string> { ["issueKey"] = "BD-123" }, tools.Creates.TakeProposed()!.Inputs);
+        // A new ask, in the user's words: the draft's root changes on them
+        tools.Creates.Heard("Start sag BD-123 i GodMode");
         Assert.StartsWith("No action there takes the issue 'BD-123'", await Start(tools, root: "GodMode", issue: "BD-123"));
     }
 

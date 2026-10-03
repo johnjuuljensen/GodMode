@@ -107,6 +107,8 @@ public sealed class RootTitleTests
         Assert.Equal("Mega-Assistant", request.Root.Root.Name);
         Assert.Equal("Skal jeg oprette notes uden beskrivelse i Assistant, profil Mega, som chat?", Danish.ReadBack(request));
 
+        // The draft keeps its root unless the user names another (#473): by its name here
+        tools.Creates.Heard("Nej, i Outbound-Assistant");
         Assert.Contains("in Assistant (root Outbound-Assistant, profile Outbound), action chat",
             await tools.StartSessionAsync(new CreateAsk("Outbound-Assistant", null, null, "notes", null), CancellationToken.None));
         Assert.Equal("Outbound-Assistant", tools.Creates.TakeProposed()!.Root.Root.Name);

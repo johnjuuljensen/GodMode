@@ -120,7 +120,8 @@ public class RootConfigReader : IRootConfigReader
             StripEnvVarProfile: baseRaw.StripEnvVarProfile ?? false,
             // One script: its output is the answer, as a status script's is
             List: NormalizeScriptPaths(baseRaw.List, godModeRootPath) is [var list] ? list : null,
-            Environment: baseRaw.Environment);
+            Environment: baseRaw.Environment,
+            IssueInfo: NormalizeScriptPaths(baseRaw.IssueInfo, godModeRootPath) is [var issueInfo] ? issueInfo : null);
     }
 
     private static RootConfig BuildDefaultConfig() =>
@@ -432,6 +433,8 @@ public class RootConfigReader : IRootConfigReader
         public JsonElement? FleetTools { get; init; }
         /// <summary>The root's list script: read from config.json alone, never an action's overlay.</summary>
         public JsonElement? List { get; init; }
+        /// <summary>The root's issueInfo script: read from config.json alone, as <see cref="List"/> is.</summary>
+        public JsonElement? IssueInfo { get; init; }
 
         /// <summary>Keys this reader does not know, such as a leftover MCP server config.</summary>
         [JsonExtensionData]

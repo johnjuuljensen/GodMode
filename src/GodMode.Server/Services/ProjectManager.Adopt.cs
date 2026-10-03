@@ -65,6 +65,49 @@ public partial class ProjectManager
     }
 
     /// <summary>
+    /// The issue as the root's <c>issueInfo</c> script reports it, run now in the root with config.json's own
+    /// environment and the issue in <c>GODMODE_INPUT_ISSUE</c>; null when the root has none (#473).
+    /// </summary>
+    public async Task<IssueInfo?> DescribeIssueAsync(string profileName, string rootName, string issue)
+    {
+        if (string.IsNullOrWhiteSpace(issue) || issue.Length > 100 || issue.Any(char.IsControl))
+            throw new ArgumentException("The issue must be a number or key of at most 100 characters.");
+        var snap = _snapshot;
+        var (rootPath, config) = ReadRootForAdopt(snap, profileName, rootName);
+        if (config.IssueInfo is not { } script)
+            return null;
+
+        snap.Profiles.TryGetValue(profileName, out var profile);
+        var env = BuildScriptEnvironment(rootPath, null, new CreateAction("issueInfo", Environment: config.Environment),
+            new Dictionary<string, JsonElement> { ["issue"] = JsonSerializer.SerializeToElement(issue.Trim()) },
+            profile?.Environment, profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
+        string output;
+        using (var timeout = new CancellationTokenSource(ListScriptTimeout))
+        {
+            try
+            {
+                output = await _scriptRunner.RunForOutputAsync(script, rootPath, rootPath, env, IssueInfoScript.MaxOutputChars, timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                throw new InvalidOperationException($"Root '{rootName}''s issueInfo script {script} took longer than {ListScriptTimeout.TotalSeconds}s.");
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Root '{rootName}''s issueInfo script {script} failed: {ex.Message}", ex);
+            }
+        }
+        try
+        {
+            return IssueInfoScript.Parse(output);
+        }
+        catch (FormatException ex)
+        {
+            throw new InvalidOperationException($"Root '{rootName}''s issueInfo script {script} printed what is not an issue: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
     /// The folders a root without a list script offers: its immediate subfolders, in ordinal order, but its
     /// own (<c>.godmode-root</c>, <c>logs</c>…), the hidden ones (a name that starts with <c>.</c>), and any
     /// that is no project folder of it (a link out of it, a name Windows would change). None when the root
