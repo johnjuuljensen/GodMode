@@ -130,7 +130,7 @@ public sealed class EndToEndTests
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Start en chat i voice om hvorfor backup-jobbet fejler");
-        await voice.Events.SaidAsync($"Skal jeg oprette backup job med beskrivelse i {TestServer.Root}, profil {TestServer.Profile}, som Create?");
+        await voice.Events.SaidAsync($"Skal jeg oprette backup job i {TestServer.Root}, profil {TestServer.Profile}, som Create, med beskrivelsen \"Find ud af hvorfor backup-jobbet fejler\"?");
         Assert.Contains($"in {TestServer.Root} (profile {TestServer.Profile}), action Create", Assert.Single(model.ToolResults));
 
         voice.Transcriptions.SayAsRecognized("Ja");
