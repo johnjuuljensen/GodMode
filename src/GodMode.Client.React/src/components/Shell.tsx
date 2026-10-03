@@ -11,6 +11,8 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { Toast } from './Toast/Toast';
 import { Inbox, HomeTabBar } from './Inbox/Inbox';
 import { VoiceControl } from './Voice/VoiceControl';
+import { Splitter } from './Splitter/Splitter';
+import { SIDEBAR_WIDTH, sidebarWidthKey, useStoredWidth } from './Splitter/useStoredWidth';
 import { useAttentionTitle } from './Inbox/useAttentionTitle';
 import { formatRoute, goBack, useHashRoute } from '../routing';
 import { subscribeAttentionLinks } from '../services/hostApi';
@@ -63,6 +65,9 @@ export function Shell() {
   const setIsMobile = useAppStore(s => s.setIsMobile);
   const homeView = useAppStore(s => s.homeView);
   const setHomeView = useAppStore(s => s.setHomeView);
+  // The left panel's width, and the inbox's in it (#436): this device's, a profile window's its own
+  const lockedProfile = useAppStore(s => s.lockedProfile);
+  const sidebarWidth = useStoredWidth(sidebarWidthKey(lockedProfile), SIDEBAR_WIDTH);
 
   // Each screen is a history entry, so browser and Android back walk back through them
   useHashRoute();
@@ -92,17 +97,24 @@ export function Shell() {
   // On a phone home is the inbox, or the project list, with nothing beside it
   const phoneHome = isMobile && !showsPage && !project && !isTileView;
 
-  // The inbox is inside the sidebar in both layouts: beside the list on a wide screen, the phone's home in place of it
+  // The inbox is inside the sidebar in both layouts: beside the list on a wide screen, the phone's home in place of it.
+  // A wide screen's sidebar, and so its inbox, is as wide as its splitter says; the phone's is the screen
   const sidebarSlot = isTileView
     ? (!isMobile || showsTiles) && <SidebarHeader />
     : (!isMobile || phoneHome) && (
-      <div className={isMobile ? 'shell-sidebar shell-mobile-home' : 'shell-sidebar'}>
+      <div id="shell-sidebar" className={isMobile ? 'shell-sidebar shell-mobile-home' : 'shell-sidebar'}
+        style={isMobile ? undefined : { width: sidebarWidth.width }}>
         <Sidebar inbox={!isMobile ? 'pane' : homeView === 'inbox' ? 'screen' : undefined} />
         {/* The inbox tab has no sidebar foot, so voice is here, compact (#445); the Projects tab has the foot's */}
         {isMobile && homeView === 'inbox' && <VoiceControl compact />}
         {isMobile && <HomeTabBar tab={homeView} onChange={setHomeView} />}
       </div>
     );
+  // Tile mode and the phone have none: there the list is a bar, or the screen
+  const splitterSlot = !isMobile && !isTileView && (
+    <Splitter value={sidebarWidth.width} min={sidebarWidth.min} max={sidebarWidth.max}
+      onResize={sidebarWidth.resize} onReset={sidebarWidth.reset} label="Resize the left panel" controls="shell-sidebar" />
+  );
   const footerSlot = isTileView && (!isMobile || showsTiles) && <SidebarFooter />;
   const backBar = project && (isMobile || isTileView) && (
     <div className={isMobile ? 'page-back-bar' : 'shell-back-bar'}>
@@ -118,6 +130,7 @@ export function Shell() {
   return (
     <div className={shellClass}>
       {sidebarSlot}
+      {splitterSlot}
       {!phoneHome && (
         <div className={contentClass}>
           {backBar}

@@ -163,6 +163,17 @@
   --list-gutter:      6px;
   --row-pad-x:        6px;
   --row-pad-y:        4px;
+
+  /* ── The splitter on the left panel's edge (#436): always shown, over the panel's border ── */
+  --splitter-hit:          10px;    /* the width that takes the pointer */
+  --splitter-line:         transparent;
+  --splitter-line-width:   1px;
+  --splitter-active:       var(--accent);
+  --splitter-active-width: 3px;
+  --splitter-grip:         #CC99CC;
+  --splitter-grip-width:   6px;
+  --splitter-grip-length:  40px;
+  --splitter-grip-radius:  3px;
 }
 
 /* ═══ The frame ═══════════════════════════════════════════════
