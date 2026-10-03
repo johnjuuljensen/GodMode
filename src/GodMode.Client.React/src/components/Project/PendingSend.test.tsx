@@ -145,6 +145,19 @@ it('a message pending when the session stops stays, marked not taken, until its 
   expect(bubbles()).toEqual(['Use the other API', 'And then? (not taken)']);
 });
 
+// The server takes it as the answer or the denial, and writes nothing to claude: no echo comes (answersPending)
+it.each([
+  ['a permission prompt', { PendingPermission: { RequestId: 'r1', ToolName: 'Bash', Summary: 'rm -rf build' } }],
+  ['a question', { PendingQuestion: { RequestId: 'r2', Questions: [], RequestedAt: '2026-10-03T12:00:00Z' } }],
+])('a message sent with %s open answers it, and is not left pending', async (_, pending) => {
+  await act(async () => useAppStore.setState(state => ({
+    serverConnections: state.serverConnections.map(c => ({ ...c, projects: c.projects.map(p => ({ ...p, ...pending } as typeof p)) })),
+  })));
+  await useAppStore.getState().sendReply('A', 'p1', 'No, use the staging database');
+  expect(hub.replies).toEqual([{ projectId: 'p1', text: 'No, use the staging database' }]);
+  expect(useAppStore.getState().pendingSends).toEqual({});
+});
+
 it('a slash command, which claude does not echo as text, is taken by the end of its turn', async () => {
   await send('/compact');
   expect(bubbles()).toEqual(['/compact (pending)']);

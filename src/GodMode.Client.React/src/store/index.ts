@@ -1147,6 +1147,10 @@ export const useAppStore = create<AppState>((set, get) => {
   },
   pendingSends: {},
   sendReply: async (serverId, projectId, text) => {
+    // With a permission prompt or a question open, the server takes the text as its answer or denial
+    // and writes nothing to claude: no echo would ever come for it
+    const project = get().getConnection(serverId)?.projects.find(p => p.Id === projectId);
+    if (project?.PendingPermission || project?.PendingQuestion) return get().replyAndResume(serverId, projectId, text);
     const key = projectKey(serverId, projectId);
     const held = get().transcripts[key] ?? emptyTranscript;
     const sent: PendingSend = { id: `p${++pendingIds}`, text, offset: held.offset, generation: held.generation, notTaken: false };
