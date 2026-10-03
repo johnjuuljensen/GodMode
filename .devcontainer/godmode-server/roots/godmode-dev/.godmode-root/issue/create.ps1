@@ -15,8 +15,11 @@ git -C $barePath rev-parse --verify --quiet "refs/remotes/$baseBranch" | Out-Nul
 if ($LASTEXITCODE -ne 0) { throw "The base branch '$baseBranch' is not on origin." }
 
 # Get issue title via GitHub CLI
-$issueTitle = gh issue view $issueNumber --repo johnjuuljensen/GodMode --json title --jq '.title'
+$issue = gh issue view $issueNumber --repo johnjuuljensen/GodMode --json title,labels | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw "gh issue view failed (exit code $LASTEXITCODE)" }
+# An epic started here would get a plain worktree and no fleet tools, as the epic action refuses an issue that is not one
+if ($issue.labels.name -contains 'epic') { throw "Issue #$issueNumber is an epic: start it with the epic action." }
+$issueTitle = $issue.title
 Write-Output "Issue #${issueNumber}: $issueTitle"
 
 # Slugify title for branch name

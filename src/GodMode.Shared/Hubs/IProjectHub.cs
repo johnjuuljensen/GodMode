@@ -171,6 +171,14 @@ public interface IProjectHub
     Task<UnmanagedFolder[]> ListUnmanaged(string profileName, string projectRootName);
 
     /// <summary>
+    /// The issue's title and labels, as the root's <c>issueInfo</c> script reports them (run now, with the issue in
+    /// <c>GODMODE_INPUT_ISSUE</c>), or null when the root has no such script. Voice checks the action it reads back
+    /// against them (#473). Fails, saying why, when the root is not listed, or its script fails, times out or prints
+    /// anything but the documented JSON.
+    /// </summary>
+    Task<IssueInfo?> DescribeIssue(string profileName, string projectRootName, string issue);
+
+    /// <summary>
     /// Makes a session of a folder that exists in the root (<see cref="UnmanagedFolder.Path"/>), as it is:
     /// no folder is made, and nothing in it is changed but its <c>.godmode/</c>. With an action that says
     /// <c>"adopt": true</c> its create script alone runs, with <c>GODMODE_ADOPT=true</c>, to name the

@@ -86,12 +86,6 @@ export interface VoiceStatus {
   MicOnDemand?: boolean;
 }
 
-export interface VoiceModels {
-  Light: string;
-  Medium: string;
-  Heavy: string;
-}
-
 /** A microphone or speaker: its endpoint id, and the name the platform shows for it. */
 export interface AudioDevice {
   Id: string;
@@ -120,7 +114,6 @@ export interface VoiceSettingsView {
   Speaker?: AudioDevice | null;
   /** How many seconds of silence while voice listens close the mic. */
   MicSilenceSeconds: number;
-  Models: VoiceModels;
   ElevenLabsKeySet: boolean;
   AnthropicKeySet: boolean;
 }
@@ -136,7 +129,6 @@ export interface VoiceSettingsUpdate {
   Microphone?: AudioDevice;
   Speaker?: AudioDevice;
   MicSilenceSeconds?: number;
-  Models?: VoiceModels;
   ElevenLabsKey?: string;
   AnthropicKey?: string;
 }

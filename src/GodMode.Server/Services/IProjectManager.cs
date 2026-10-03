@@ -130,6 +130,9 @@ public interface IProjectManager
     /// <summary>The root's folders no session works in: see <see cref="GodMode.Shared.Hubs.IProjectHub.ListUnmanaged"/>.</summary>
     Task<UnmanagedFolder[]> ListUnmanagedAsync(string profileName, string rootName);
 
+    /// <summary>The issue as the root's issueInfo script reports it: see <see cref="GodMode.Shared.Hubs.IProjectHub.DescribeIssue"/>.</summary>
+    Task<IssueInfo?> DescribeIssueAsync(string profileName, string rootName, string issue);
+
     /// <summary>Makes a session of a folder that exists in the root: see <see cref="GodMode.Shared.Hubs.IProjectHub.AdoptFolder"/>.</summary>
     Task<ProjectStatus> AdoptFolderAsync(string profileName, string rootName, string path, string? actionName, Dictionary<string, System.Text.Json.JsonElement>? inputs);
 

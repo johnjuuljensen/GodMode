@@ -18,7 +18,7 @@ public sealed class ControlModelTests
         voice.Transcriptions.SayAsRecognized("Hvad venter?");
         await voice.Events.SaidAsync("Intet venter.");
 
-        var tierMap = CloudVoiceProviders.TierMap(VoiceSettings.Default.Models);
-        Assert.Equal(["claude-sonnet-5-5"], tiered.Tiers.Select(t => tierMap[t].Model).Distinct());
+        var tierMap = CloudVoiceProviders.TierMap();
+        Assert.Equal([VoiceBot.AI.TierMapConfiguration.DefaultModels[VoiceBot.Core.AI.InferenceTier.Medium]], tiered.Tiers.Select(t => tierMap[t].Model).Distinct());
     }
 }

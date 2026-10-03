@@ -7,15 +7,11 @@ using VoiceBot.Core.Resources;
 
 namespace GodMode.Voice;
 
-/// <summary>The Claude model behind each of VoiceBot's inference tiers.</summary>
-public sealed record VoiceModels(string Light, string Medium, string Heavy)
-{
-    public static readonly VoiceModels Default = new("claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-opus-5-5");
-}
-
 /// <summary>
 /// The voice settings that are not secret, kept in <c>voice.json</c> beside the app's other files
-/// (<see cref="GodMode.ClientBase.GodModePaths.AppDataDirectory"/>). The keys are in <see cref="ISecretStore"/>.
+/// (<see cref="GodMode.ClientBase.GodModePaths.AppDataDirectory"/>). The keys are in <see cref="ISecretStore"/>. The
+/// models are VoiceBot's (<see cref="CloudVoiceProviders.TierMap"/>): a file's old <c>Models</c> is ignored, and dropped
+/// at its next save.
 /// </summary>
 public sealed record VoiceSettings
 {
@@ -51,8 +47,6 @@ public sealed record VoiceSettings
     /// <summary>How many seconds of silence while voice listens close the mic (<see cref="VoiceMicOptions.SilenceTimeout"/>).</summary>
     public int MicSilenceSeconds { get; init; } = VoiceMicOptions.DefaultSilenceSeconds;
 
-    public VoiceModels Models { get; init; } = VoiceModels.Default;
-
     public static readonly VoiceSettings Default = new();
 
     /// <summary>The session's languages from <see cref="Language"/>.</summary>
@@ -87,7 +81,6 @@ public sealed record VoiceSettingsView(
     AudioDevice? Microphone,
     AudioDevice? Speaker,
     int MicSilenceSeconds,
-    VoiceModels Models,
     bool ElevenLabsKeySet,
     bool AnthropicKeySet);
 
@@ -101,7 +94,6 @@ public sealed record VoiceSettingsUpdate(
     bool? EchoCancellation = null,
     AudioDevice? Microphone = null,
     AudioDevice? Speaker = null,
-    VoiceModels? Models = null,
     string? ElevenLabsKey = null,
     string? AnthropicKey = null,
     int? MicSilenceSeconds = null);
@@ -143,7 +135,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
         var settings = await LoadAsync();
         var keys = await LoadKeysAsync();
         return new VoiceSettingsView(settings.Language, settings.VoiceId, settings.EchoCancellation, settings.Microphone, settings.Speaker,
-            settings.MicSilenceSeconds, settings.Models,
+            settings.MicSilenceSeconds,
             ElevenLabsKeySet: !string.IsNullOrEmpty(keys.ElevenLabs),
             AnthropicKeySet: !string.IsNullOrEmpty(keys.Anthropic));
     }
@@ -167,7 +159,6 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
                 Microphone = update.Microphone ?? current.Microphone,
                 Speaker = update.Speaker ?? current.Speaker,
                 MicSilenceSeconds = update.MicSilenceSeconds ?? current.MicSilenceSeconds,
-                Models = update.Models ?? current.Models,
             });
             if (next != current)
             {
@@ -193,9 +184,6 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
     {
         Language = Or(settings.Language, VoiceSettings.DefaultLanguage),
         VoiceId = Or(settings.VoiceId, VoiceSettings.DefaultVoiceId),
-        Models = settings.Models is { } models
-            ? new VoiceModels(Or(models.Light, VoiceModels.Default.Light), Or(models.Medium, VoiceModels.Default.Medium), Or(models.Heavy, VoiceModels.Default.Heavy))
-            : VoiceModels.Default,
         Microphone = Device(settings.Microphone),
         Speaker = Device(settings.Speaker),
         MicSilenceSeconds = settings.MicSilenceSeconds > 0 ? Math.Min(settings.MicSilenceSeconds, MaxMicSilenceSeconds) : VoiceMicOptions.DefaultSilenceSeconds,

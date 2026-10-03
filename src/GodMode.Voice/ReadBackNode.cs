@@ -7,7 +7,8 @@ namespace GodMode.Voice;
 /// (<see cref="SessionCreates.TakeProposed"/>): the question a yes answers is the code's fixed words
 /// (<see cref="VoicePhrases.ReadBack"/>), never the model's, and the create is armed when they start playing. An answer
 /// to a read-back with a change in it (<see cref="SessionCreates.Correct"/>, #449) reaches the chat with the create it
-/// changes, so the model can propose it again as changed.
+/// changes, so the model can propose it again as changed. The user's words are given to the creates first
+/// (<see cref="SessionCreates.Heard"/>), so a draft changes only on what they said (#473).
 /// </summary>
 public sealed class ReadBackNode(INode chat, SessionCreates creates, VoicePhrases phrases) : INode
 {
@@ -16,7 +17,23 @@ public sealed class ReadBackNode(INode chat, SessionCreates creates, VoicePhrase
 
     public async Task<NodeResult?> EvaluateAsync(NodeContext context, CancellationToken ct)
     {
+        try
+        {
+            return await ReadBackAsync(context, ct);
+        }
+        finally
+        {
+            // What no longer waits on the user (a question answered, a create dropped) lets the held announcements go
+            creates.Settled();
+        }
+    }
+
+    private async Task<NodeResult?> ReadBackAsync(NodeContext context, CancellationToken ct)
+    {
         _ = creates.TakeProposed();   // one settled in an evaluation that failed is never read back later
+        // The user's own words, before the chat hears them: only these change a draft's root, action or issue (#473)
+        if (context.LatestTranscription is { IsPartial: false } final)
+            creates.Heard(context.CleanedText ?? final.Text);
         NodeResult? result;
         if (creates.TakeCorrected() is { } corrected && (context.CleanedText ?? context.LatestTranscription?.Text) is { } said)
         {

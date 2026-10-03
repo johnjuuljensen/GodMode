@@ -686,6 +686,18 @@ or `{}` when there is no pull request. The result is `ProjectStatus.PullRequest`
 
 `godmode-dev`'s `scripts/status.ps1` is an example using `gh pr view`. It prints `{}` only when there is no pull request (none for the branch, not a repository, a detached HEAD, `git` or `gh` not installed); any other `gh` failure, such as a network error, a rate limit or an expired login, exits non-zero, so the server keeps what it knew and keeps polling.
 
+### Issue Info
+
+A root's `issueInfo` script (`config.json`'s `"issueInfo": "scripts/issue-info.ps1"`, one script) tells the server what an issue is, without the server knowing the VCS: `DescribeIssue` runs it now, in the root, with the root's and its profile's environment (`config.json`'s own `environment`, as the `list` script) and the issue as said in `GODMODE_INPUT_ISSUE`, and it prints one JSON object:
+
+```json
+{"title": "Voice create keeps its draft", "labels": ["bug", "voice"]}
+```
+
+Both are optional (`{}` is an issue with neither); `labels` is an array of strings (in PowerShell, a single label needs `[string[]]` or `-AsArray`, or `ConvertTo-Json` writes a string). Read strictly: unknown properties, other types, more than 64 KB of stdout, a non-zero exit or more than `ListScriptTimeoutSeconds` (default 30) fail the call, saying why. A root without one describes nothing (`null`).
+
+Voice reads an issue's labels before it reads a create back (#473): an issue labelled with the name of another of the root's actions that takes an issue (`epic`) is proposed as that action, and the read-back says why. The action's own create script stays the backstop (GodMode's `issue/create.ps1` refuses an `epic`-labelled issue).
+
 ### Resuming After a Restart
 
 When the server stops, it stops every project, and one that was `Running`, `WaitingInput` or `WaitingPermission` keeps that in `ProjectStatus.StateAtShutdown` (in `status.json`) beside `Stopped`. The marker is saved before the project is stopped, from what it was doing as the shutdown began, and nothing that happens during the stop changes it: not claude's answer to the interrupt (an `error_during_execution` result), not its exit, and not a server killed before the stop is done. A project whose stop by the user is still under way (in its grace period) when the shutdown begins is not marked. When it starts again, once it is listening and has recovered the projects, it carries on with them as the project's action says:
@@ -910,6 +922,7 @@ Attention:
 
 Roots and profiles:
 - `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas
+- `Task<IssueInfo?> DescribeIssue(profileName, projectRootName, issue)` — The issue's `Title` and `Labels` from the root's `issueInfo` script, run now; null when the root has none; fails, saying why, as [Issue Info](#issue-info) says
 - `Task<ProfileInfo[]> ListProfiles()` — Get profiles (read-only: no hub method writes a profile or a root)
 
 Utility:
