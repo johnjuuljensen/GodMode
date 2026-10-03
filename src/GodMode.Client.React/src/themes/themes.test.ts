@@ -109,6 +109,19 @@ describe('the tokens', () => {
     expect(value).toMatch(/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i);
   });
 
+  // #437: a theme restyles the left list's spacing, never widens it much; the panel's width (#436) counts on it.
+  // Glass light keeps Glass dark's spacing
+  const listBounds = { '--list-indent': [8, 12], '--list-gutter': [0, 8], '--row-pad-x': [2, 8], '--row-pad-y': [1, 6], '--state-dot-size': [5, 10] };
+  it.each(themes.map(t => t.id))('%s keeps the left list compact', id => {
+    const px = (name: string) => {
+      const value = (read(`${id}.css`).match(new RegExp(`${name}:\\s*([^;]+);`)) ?? read('glass-dark.css').match(new RegExp(`${name}:\\s*([^;]+);`)))?.[1].trim();
+      return Number(value?.match(/^(\d+(?:\.\d+)?)px$/)?.[1] ?? NaN);
+    };
+    for (const [name, [min, max]] of Object.entries(listBounds)) {
+      expect({ name, px: px(name) }).toEqual({ name, px: expect.toSatisfy((v: number) => v >= min && v <= max) });
+    }
+  });
+
   it('every token a stylesheet names is defined', () => {
     const named = new Set(allCss.flatMap(css => [...css.matchAll(/var\((--[\w-]+)/g)].map(m => m[1])));
     expect([...named].filter(t => !glassTokens.has(t))).toEqual([]);

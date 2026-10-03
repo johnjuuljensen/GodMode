@@ -42,7 +42,7 @@
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 0;
+  padding: 6px 0;
 }
 
 .sidebar-empty {
@@ -65,7 +65,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 6px calc(var(--list-gutter) + var(--row-pad-x));
   cursor: pointer;
   transition: background var(--duration-fast);
   border-radius: 0;
@@ -161,7 +161,7 @@
   background: var(--error-soft);
 }
 
-/* ── Profile Groups ── */
+/* ── Profile Groups: a header's text starts over its rows' state dots (#437) ── */
 .profile-group {
   margin-bottom: 2px;
 }
@@ -170,8 +170,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 16px 3px;
-  margin-top: 4px;
+  padding: 4px calc(var(--list-gutter) + var(--row-pad-x)) 2px;
+  margin-top: 2px;
 }
 
 .profile-group-name {
@@ -228,7 +228,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 16px 2px 20px;
+  gap: 6px;
+  padding: 3px calc(var(--list-gutter) + var(--row-pad-x)) 1px;
 }
 
 .root-group-name {
@@ -308,12 +309,8 @@
 }
 
 /* ── Project List ── */
-.project-list {
-  padding-left: 10px;
-}
-
 .project-list-empty {
-  padding: 6px 16px;
+  padding: var(--row-pad-y) calc(var(--list-gutter) + var(--row-pad-x));
   font-size: 11px;
   color: var(--text-tertiary);
 }
@@ -321,8 +318,8 @@
 /* ── Folded sessions (#325): older ones under "N older", one tap away ── */
 .project-list-older {
   display: block;
-  margin: 2px 8px;
-  padding: 4px 12px;
+  margin: 1px var(--list-gutter);
+  padding: 2px var(--row-pad-x);
   border: none;
   border-radius: var(--radius);
   background: transparent;
@@ -339,11 +336,21 @@
   color: var(--text-secondary);
 }
 
-/* ── Nesting (#390): a session's children under it, a step in per level, with a line down their side ── */
+/* ── Nesting (#390): a session's children under it, a step in per level, with a guide line down their side.
+   A level steps in --list-indent, its line included, and the line runs under the parent's state dot (#437) ── */
 .project-children {
-  margin-left: 18px;
-  padding-left: 4px;
+  margin-left: calc(var(--list-gutter) + var(--list-indent) - var(--border-width));
   border-left: var(--border-width) var(--border-style) var(--glass-border);
+}
+
+.project-children .project-children {
+  margin-left: calc(var(--list-indent) - var(--border-width));
+}
+
+/* Inside a level, its line is the left edge: a row keeps its gutter on the right only */
+.project-children > .project-item-wrapper > .project-item,
+.project-children > .project-list-older {
+  margin-left: 0;
 }
 
 .project-children-toggle {
@@ -358,7 +365,7 @@
   font-family: var(--font-body);
   font-size: 11px;
   line-height: 1;
-  padding: 2px 6px;
+  padding: 2px 4px;
   cursor: pointer;
   transition: background var(--duration-fast), color var(--duration-fast);
 }
@@ -396,17 +403,20 @@
   color: var(--text-tertiary);
 }
 
+/* A phone keeps its touch targets (#437): the list is compact on a desktop, not under a finger */
 @media (max-width: 768px) {
-  /* A phone's list is narrow: each level steps in less, so several still fit */
-  .project-children {
-    margin-left: 10px;
-    padding-left: 2px;
+  .project-item {
+    min-height: 44px;
   }
 
   .project-children-toggle {
     min-width: 44px;
     min-height: 44px;
     justify-content: center;
+  }
+
+  .group-fold-toggle {
+    min-height: 44px;
   }
 }
 
@@ -415,8 +425,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 8px;
-  padding: 4px 12px;
+  margin: 0 var(--list-gutter);
+  padding: var(--row-pad-y) var(--row-pad-x);
   border-radius: var(--radius);
   opacity: 0.8;
 }
@@ -449,8 +459,8 @@
 }
 
 .unmanaged-error {
-  margin: 0 8px;
-  padding: 4px 12px;
+  margin: 0 var(--list-gutter);
+  padding: var(--row-pad-y) var(--row-pad-x);
   color: var(--text-tertiary);
   font-size: 11px;
   white-space: pre-wrap;
@@ -471,7 +481,7 @@
   position: absolute;
   top: 1px;
   bottom: 1px;
-  right: 8px;
+  right: var(--list-gutter);
   border: none;
   border-radius: var(--radius);
   background: var(--error);
@@ -561,11 +571,11 @@
 .project-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
+  gap: 6px;
+  padding: var(--row-pad-y) var(--row-pad-x);
   cursor: pointer;
   border-radius: var(--radius);
-  margin: 1px 8px;
+  margin: 1px var(--list-gutter);
   transition: background var(--duration-fast);
 }
 
@@ -607,38 +617,38 @@
   font-size: 10px;
 }
 
-/* State badge */
-.project-state-badge {
-  font-size: 9px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  text-transform: var(--label-case);
-  letter-spacing: calc(0.05em + var(--label-tracking));
+/* A session's state (#437): a dot in the state's colour, its name in its tooltip. Running pulses where a theme loops */
+.project-state-dot {
   flex-shrink: 0;
-  font-family: var(--font-display);
-  font-size-adjust: var(--font-display-adjust);
+  box-sizing: border-box;
+  width: var(--state-dot-size);
+  height: var(--state-dot-size);
+  border-radius: var(--radius-round);
+  background: var(--state-idle);
 }
 
-.project-state-badge.Running {
-  background: var(--success-soft);
-  color: var(--success);
+.project-state-dot.Running {
+  background: var(--state-running);
+  box-shadow: var(--shadow-led-success);
+  animation: state-dot-pulse 2s ease-in-out var(--loop-iterations);
 }
-.project-state-badge.WaitingInput {
-  background: var(--waiting-soft);
-  color: var(--waiting);
+
+.project-state-dot:is(.WaitingInput, .WaitingPermission) {
+  background: var(--state-waiting);
 }
-.project-state-badge.Error {
-  background: var(--error-soft);
-  color: var(--error);
+
+.project-state-dot.Error {
+  background: var(--state-error);
 }
-.project-state-badge.Stopped {
-  background: var(--glass);
-  color: var(--text-tertiary);
+
+/* Stopped is a ring: no process behind it */
+.project-state-dot.Stopped {
+  background: transparent;
+  border: 1.5px solid var(--state-stopped);
 }
-.project-state-badge.Idle {
-  background: var(--glass);
-  color: var(--text-tertiary);
+
+@keyframes state-dot-pulse {
+  50% { opacity: 0.45; }
 }
 
 .project-info {
@@ -797,11 +807,6 @@
   height: 1px;
   background: var(--glass-border);
   margin: 4px 8px;
-}
-
-/* ── Flat project list (no root header indentation) ── */
-.project-list-flat {
-  padding-left: 0;
 }
 
 /* ── Detail Button ── */

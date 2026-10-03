@@ -150,6 +150,18 @@
   --duration:         0.15s;
   --duration-slow:    0.2s;
   --loop-iterations:  0;
+
+  /* ── The left list (#437) ── */
+  --state-running:    var(--success);
+  --state-waiting:    var(--warning);
+  --state-idle:       var(--text-secondary);
+  --state-error:      var(--error);
+  --state-stopped:    var(--text-tertiary);
+  --state-dot-size:   7px;
+  --list-indent:      11px;
+  --list-gutter:      6px;
+  --row-pad-x:        6px;
+  --row-pad-y:        4px;
 }
 
 /* ── Signs: titles are lit tubes, in magenta ── */
@@ -158,7 +170,6 @@
   text-shadow: 0 0 6px rgba(255,42,109,0.75), 0 0 1px #ff9fbf;
 }
 
-[data-theme="neon"] .project-state-badge,
 [data-theme="neon"] .tile-waiting-badge {
   text-shadow: 0 0 5px currentColor;
 }

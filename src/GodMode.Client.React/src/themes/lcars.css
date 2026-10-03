@@ -151,6 +151,18 @@
   --duration:         0.15s;
   --duration-slow:    0.2s;
   --loop-iterations:  0;
+
+  /* ── The left list (#437) ── */
+  --state-running:    var(--success);
+  --state-waiting:    var(--warning);
+  --state-idle:       var(--text-secondary);
+  --state-error:      var(--error);
+  --state-stopped:    var(--text-tertiary);
+  --state-dot-size:   7px;
+  --list-indent:      11px;
+  --list-gutter:      6px;
+  --row-pad-x:        6px;
+  --row-pad-y:        4px;
 }
 
 /* ═══ The frame ═══════════════════════════════════════════════
@@ -251,7 +263,7 @@
 }
 
 /* ═══ Pills: buttons and tabs ═══ */
-[data-theme="lcars"] :is(.btn, .sidebar-add-btn, .sidebar-settings-btn, .sidebar-footer-menu-item, .project-status-btn, .settings-add-btn, .delete-btn, .home-tab, .theme-option, .project-state-badge, .inbox-count) {
+[data-theme="lcars"] :is(.btn, .sidebar-add-btn, .sidebar-settings-btn, .sidebar-footer-menu-item, .project-status-btn, .settings-add-btn, .delete-btn, .home-tab, .theme-option, .inbox-count) {
   border-radius: var(--radius-pill);
 }
 
@@ -335,13 +347,6 @@
   transition: background var(--duration), color var(--duration);
 }
 [data-theme="lcars"] .home-tab.active { background: #FF9900; color: #000; }
-
-/* ═══ State badges: filled bands, black text ═══ */
-[data-theme="lcars"] .project-state-badge { background: #332833; color: var(--text-secondary); }
-[data-theme="lcars"] .project-state-badge.Running { background: var(--success); color: #000; }
-[data-theme="lcars"] .project-state-badge.WaitingInput { background: var(--waiting); color: #000; }
-[data-theme="lcars"] .project-state-badge.WaitingPermission { background: var(--warning); color: #000; }
-[data-theme="lcars"] .project-state-badge.Error { background: var(--error-border); color: #000; }
 
 /* ═══ Tiles: a black panel under a band; the band is the tile's state ═══ */
 [data-theme="lcars"] .tile { border-top-width: 1px; }
