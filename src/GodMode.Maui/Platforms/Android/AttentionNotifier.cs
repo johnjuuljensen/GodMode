@@ -3,7 +3,6 @@ using Android.App;
 using Android.Content;
 using AndroidX.Core.App;
 using GodMode.ClientBase.Attention;
-using GodMode.Shared.Enums;
 using Microsoft.Extensions.Logging;
 
 namespace GodMode.Maui;
@@ -40,9 +39,11 @@ public sealed class AttentionNotifier(Context context, ILogger logger) : IAttent
         var item = notice.Item;
         var builder = new NotificationCompat.Builder(context, Channel);
         builder.SetSmallIcon(Resource.Drawable.ic_attention);
-        builder.SetContentTitle($"{KindLabel(item.Kind)} · {item.ProjectName}");
-        builder.SetContentText(item.Text);
-        builder.SetStyle(new NotificationCompat.BigTextStyle().BigText(item.Text));
+        // A question says it is one, and expanded it reads in full: every question, its options and their
+        // descriptions (#454). What does not fit, a tap opens in the app
+        builder.SetContentTitle(AttentionNotificationText.Title(item));
+        builder.SetContentText(AttentionNotificationText.Line(item));
+        builder.SetStyle(new NotificationCompat.BigTextStyle().BigText(AttentionNotificationText.Body(item)));
         builder.SetSubText(notice.ServerName);
         builder.SetWhen(new DateTimeOffset(DateTime.SpecifyKind(item.Since, DateTimeKind.Utc)).ToUnixTimeMilliseconds());
         builder.SetShowWhen(true);
@@ -125,13 +126,4 @@ public sealed class AttentionNotifier(Context context, ILogger logger) : IAttent
         if (_manager.AreNotificationsEnabled())
             _manager.Notify(tag, id, notification);
     }
-
-    private static string KindLabel(AttentionKind kind) => kind switch
-    {
-        AttentionKind.Permission => "Permission",
-        AttentionKind.Question => "Question",
-        AttentionKind.Error => "Error",
-        AttentionKind.Review => "Changes requested",
-        AttentionKind.Finished => "Finished",
-    };
 }
