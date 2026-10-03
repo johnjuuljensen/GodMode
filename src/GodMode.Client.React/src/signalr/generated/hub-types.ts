@@ -99,8 +99,9 @@ export interface AssistantReply {
 
 /**
  * One project that needs the user, from IProjectHub.GetAttention and IProjectHubClient.AttentionChanged.
- * Answer any kind with IProjectHub.ReplyAndResume; a permission or question also with
- * IProjectHub.RespondToPermission or IProjectHub.AnswerQuestion.
+ * Answer any kind with IProjectHub.ReplyAndResume, but a failed create's (AttentionItem.CreateFailed), which
+ * is deleted; a permission or question also with IProjectHub.RespondToPermission or
+ * IProjectHub.AnswerQuestion.
  */
 export interface AttentionItem {
   /** The project's ID, unique on its server (it contains '/'). */
@@ -137,6 +138,12 @@ export interface AttentionItem {
    * made one; voice says it word for word. Null otherwise.
    */
   Spoken?: string | null;
+  /**
+   * Whether the item is the AttentionKind.Error of a create that failed before its launch
+   * (ProjectStatus.CreateFailed): it takes no reply, and the app offers its delete instead. Left out of the
+   * JSON when false.
+   */
+  CreateFailed?: boolean;
 }
 
 /**
@@ -426,6 +433,13 @@ export interface ProjectStatus {
    * about 300 characters, for voice to say word for word; the whole reply stays in the transcript.
    */
   SpokenSummary?: string | null;
+  /**
+   * Whether the session is a create that failed before its launch (issue #448): it is ProjectState.Error with
+   * the create's failure as its LastError, has no state and no claude, and takes no input. A delete is all
+   * that is left for it; it is in the server's memory only, so a restart drops it. Left out of the JSON when
+   * false.
+   */
+  CreateFailed?: boolean;
 }
 
 /** Summary information about a project. */

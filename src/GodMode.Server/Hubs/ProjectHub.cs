@@ -173,14 +173,28 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
     {
         _logger.LogInformation("Client {ConnectionId} stopping project {ProjectId}",
             Context.ConnectionId, projectId);
-        await _projectManager.StopProjectAsync(projectId);
+        try
+        {
+            await _projectManager.StopProjectAsync(projectId);
+        }
+        catch (CreateFailedException ex)
+        {
+            throw new HubException(ex.Message);
+        }
     }
 
     public async Task ResumeProject(string projectId)
     {
         _logger.LogInformation("Client {ConnectionId} resuming project {ProjectId}",
             Context.ConnectionId, projectId);
-        await _projectManager.ResumeProjectAsync(projectId);
+        try
+        {
+            await _projectManager.ResumeProjectAsync(projectId);
+        }
+        catch (CreateFailedException ex)
+        {
+            throw new HubException(ex.Message);
+        }
     }
 
     public async Task SubscribeProject(string projectId, long fromOffset, string subscriptionId, string? generation)

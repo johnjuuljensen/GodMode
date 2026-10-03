@@ -4,6 +4,7 @@ import type { AttentionKind } from '../../signalr/types';
 import { PermissionCard } from '../Project/PermissionCard';
 import { ReplyInput } from '../Project/ReplyInput';
 import { hubErrorMessage } from '../../signalr/hubError';
+import { deleteSession } from '../../deleteSession';
 
 const KIND_LABELS: Record<AttentionKind, string> = {
   Permission: 'Permission',
@@ -61,7 +62,9 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   };
   // A single AskUserQuestion is answered by a reply with the chosen label
   const question = kind === 'Question' && item.Question?.Questions.length === 1 ? item.Question.Questions[0] : null;
-  const canReply = REPLY_KINDS.has(kind) || (kind === 'Permission' && !permission);
+  // A create that failed before its launch has no session to reply to: its delete is all that is left (#448)
+  const createFailed = kind === 'Error' && item.CreateFailed === true;
+  const canReply = !createFailed && (REPLY_KINDS.has(kind) || (kind === 'Permission' && !permission));
 
   /** Runs a hub call; the item leaves the inbox by AttentionChanged when it worked. */
   const run = async (call: () => Promise<void>) => {
@@ -86,6 +89,19 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const answerPermission = async (allow: boolean, message?: string) => {
     if (!permission) return;
     if (await run(() => respondToPermission(serverId, projectId, permission.RequestId, { Allow: allow, Message: message ?? null }))) setDenyMessage('');
+  };
+
+  const remove = async () => {
+    if (busy) return;
+    const project = useAppStore.getState().getConnection(serverId)?.projects.find(p => p.Id === projectId)
+      ?? { Id: projectId, Name: item.ProjectName, State: 'Error' as const, UpdatedAt: item.Since, SharedFolder: false, Adopted: false };
+    setBusy(true);
+    try {
+      // The item leaves the inbox by AttentionChanged; a refusal says why in a toast
+      await deleteSession(serverId, project);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const open = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -144,6 +160,14 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
           )}
           <button className="btn btn-secondary" onClick={() => run(() => markSeen(serverId, projectId))} disabled={busy}>
             Mark seen
+          </button>
+        </div>
+      )}
+
+      {createFailed && (
+        <div className="inbox-item-actions">
+          <button className="btn btn-danger" onClick={remove} disabled={busy} title="Its create failed: delete it, or create it again">
+            Delete
           </button>
         </div>
       )}

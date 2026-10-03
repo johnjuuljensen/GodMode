@@ -44,8 +44,9 @@ public partial class ProjectManager
     {
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
+        // Refused before it is held, as the app's reply is: a failed create would never take it
+        RefuseFailedCreate(project);
         CheckText(text);
-        // Refused before it is held, as the app's reply is
         SlashCommands.Check(text, project.Status);
         var held = new SessionInbox.HeldMessage(DateTime.UtcNow, senderId, SessionInbox.HeldKind.Send, text);
 

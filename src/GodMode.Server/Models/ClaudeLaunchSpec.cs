@@ -25,3 +25,10 @@ public sealed class ServerStoppingException() : InvalidOperationException("The s
 /// </summary>
 public sealed class ProjectInUseException(string projectId, string reason)
     : InvalidOperationException($"Project {projectId} is in use: {reason}");
+
+/// <summary>
+/// The project is a create that failed before its launch (<see cref="GodMode.Shared.Models.ProjectStatus.CreateFailed"/>):
+/// it has no session, so it takes no input and has nothing to resume or stop. Nothing is written; its delete is all that is left.
+/// </summary>
+public sealed class CreateFailedException(string projectId)
+    : InvalidOperationException($"Project {projectId} failed to create, so it has no session to send to: delete it, or create it again.");

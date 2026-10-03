@@ -41,7 +41,8 @@ public static partial class Attention
             kind == AttentionKind.Permission ? status.PendingPermission : null,
             kind == AttentionKind.Question ? status.PendingQuestion : null,
             kind is AttentionKind.Review or AttentionKind.Finished ? status.PullRequest?.Url : null,
-            spoken is { Length: > 0 } ? spoken : null);
+            spoken is { Length: > 0 } ? spoken : null,
+            kind == AttentionKind.Error && status.CreateFailed);
     }
 
     /// <summary>Every project's item, oldest first (by project ID when two are as old).</summary>

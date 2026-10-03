@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using GodMode.Shared.Enums;
 
 namespace GodMode.Shared.Models;
@@ -61,6 +62,11 @@ namespace GodMode.Shared.Models;
 /// null for a turn that made none or ended in error, and cleared as the next turn starts. Plain text of at most about
 /// 300 characters, for voice to say word for word; the whole reply stays in the transcript.
 /// </param>
+/// <param name="CreateFailed">
+/// Whether the session is a create that failed before its launch (issue #448): it is <see cref="ProjectState.Error"/>
+/// with the create's failure as its <paramref name="LastError"/>, has no state and no claude, and takes no input. A delete
+/// is all that is left for it; it is in the server's memory only, so a restart drops it. Left out of the JSON when false.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -92,5 +98,6 @@ public record ProjectStatus(
     string? ParentId = null,
     IReadOnlyList<string>? SlashCommands = null,
     IReadOnlyList<string>? ClaudeCommands = null,
-    string? SpokenSummary = null
+    string? SpokenSummary = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false
 );
