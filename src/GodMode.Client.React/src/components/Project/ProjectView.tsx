@@ -41,6 +41,8 @@ export function ProjectView({ serverId, projectId }: Props) {
 
   const hub = conn?.hub;
   const project = conn?.projects.find(p => p.Id === projectId);
+  // Its root as it is shown (#434): the title, else the name
+  const rootLabel = useAppStore(s => project?.RootName ? rootShown(s.serverConnections.find(c => c.serverInfo.Id === serverId)?.roots, project.ProfileName, project.RootName) : '');
   // Connected, the server's list taken on this connection, and the project not in it: deleted (here,
   // elsewhere, or while this client slept), or a link to one it does not have. Nothing here acts on it (#239)
   const projectsListed = useAppStore(s => !!s.projectsListed[serverId]);
@@ -179,7 +181,7 @@ export function ProjectView({ serverId, projectId }: Props) {
             <span className="project-header-root" title={project?.RootName ?? undefined}>
               {project?.ProfileName && project.ProfileName !== 'Default' ? project.ProfileName : ''}
               {project?.ProfileName && project.ProfileName !== 'Default' && project?.RootName ? ' / ' : ''}
-              {project?.RootName ? rootShown(conn?.roots, project.ProfileName, project.RootName) : ''}
+              {rootLabel}
             </span>
           )}
         </div>
