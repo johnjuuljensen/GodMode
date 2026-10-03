@@ -50,7 +50,6 @@ class AttentionServer extends FakeHub {
   private sees(projectId: string) {
     this.push(this.attention.filter(i => i.ProjectId !== projectId));
   }
-  async getAttention() { await super.getAttention(); return this.attention; }
   async replyAndResume(projectId: string, text: string) {
     await super.replyAndResume(projectId, text);
     this.callbacks.onStatusChanged?.(projectId, status(projectId, 'Running'));
