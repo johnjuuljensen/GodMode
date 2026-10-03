@@ -86,6 +86,9 @@ public static class GodModeGraph
               "Er det hele?" is answered from what the tool said: if more follows, call {{VoiceTools.ReadMore}}.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}, and only then: on the user's own "læst" or "seen".
               Never mark a project seen as part of reading it, its status or its reply, or when the user asks if that was all.
+            - "Marker [handle] som vigtig / normal / stille" / "Mark [handle] as important / normal / quiet" — call
+              {{VoiceTools.SetImportance}} with important, normal or quiet. Only with "marker"/"mark": a bare "stille" is
+              mute_announcements.
             - "Stille" / "Quiet" — call mute_announcements; "Du må godt sige til igen" — call unmute_announcements.
             - "Start issue 283 [i GodMode]", "Start en chat i Assistant om …", "Start et eksperiment om …" / "Start issue …",
               "Start a chat in … about …" — call {{VoiceTools.StartSession}} with the root, kind, issue, name and prompt as

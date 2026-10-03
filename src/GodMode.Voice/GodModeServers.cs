@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using GodMode.ClientBase.Hub;
 using GodMode.ClientBase.Services;
+using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
 using Microsoft.AspNetCore.SignalR.Client;
@@ -61,6 +62,9 @@ public interface IGodModeServers
     Task ReplyAsync(ProjectRef project, string text, CancellationToken ct);
 
     Task MarkSeenAsync(ProjectRef project, CancellationToken ct);
+
+    /// <summary><see cref="IProjectHub.SetImportance"/>: how much the project may interrupt the user.</summary>
+    Task SetImportanceAsync(ProjectRef project, Importance importance, CancellationToken ct);
 
     /// <summary>What claude said in the project's last <paramref name="turns"/> turns, oldest first (<see cref="IProjectHub.GetLastReplies"/>).</summary>
     Task<IReadOnlyList<AssistantReply>> GetLastRepliesAsync(ProjectRef project, int turns, CancellationToken ct);
@@ -168,6 +172,9 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
     public Task MarkSeenAsync(ProjectRef project, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.MarkSeen), project.ProjectId, ct);
+
+    public Task SetImportanceAsync(ProjectRef project, Importance importance, CancellationToken ct) =>
+        Hub(project).InvokeAsync(nameof(IProjectHub.SetImportance), project.ProjectId, importance, ct);
 
     public async Task<IReadOnlyList<AssistantReply>> GetLastRepliesAsync(ProjectRef project, int turns, CancellationToken ct) =>
         await Hub(project).InvokeAsync<AssistantReply[]>(nameof(IProjectHub.GetLastReplies), project.ProjectId, turns, ct);

@@ -21,6 +21,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string ReadMore = "read_more";
     public const string Answer = "answer_project";
     public const string MarkSeen = "mark_seen";
+    public const string SetImportance = "set_importance";
     public const string StartSession = "start_session";
 
     public const string ProjectParameter = "project";
@@ -31,6 +32,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string NameParameter = "name";
     public const string PromptParameter = "prompt";
     public const string TurnsParameter = "turns";
+    public const string ImportanceParameter = "importance";
 
     /// <summary>What the conversation is about.</summary>
     public VoiceConversation Conversation => conversation;
@@ -87,6 +89,12 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             "an answer. Call only when the user says so themselves (\"læst\", \"seen\"): never as part of reading a project, its status or its reply, nor when they ask whether that was all.",
             [ProjectReference],
             (_, args, ct) => MarkSeenAsync(Argument(args, ProjectParameter), ct))
+        .Add(SetImportance,
+            "Set how much a project may interrupt the user: \"important\" (a sound, and said first), \"normal\", or \"quiet\" " +
+            "(its results and errors stay in the inbox; its questions still reach the user). Call only when the user asks " +
+            "(\"marker [handle] som vigtig\", \"som normal\", \"som stille\").",
+            [new ToolParameter(ImportanceParameter, "\"important\", \"normal\" or \"quiet\"."), ProjectReference],
+            (_, args, ct) => SetImportanceAsync(Argument(args, ProjectParameter), Argument(args, ImportanceParameter), ct))
         .Add(StartSession,
             "Prepare a new session (project) in a root: an issue (\"Start issue 283\", \"Start sag BD-123 i api\") or a chat, " +
             "experiment or other session with a name and a prompt (\"Start en chat i Assistant om backup-jobbet\"). It creates " +
@@ -365,6 +373,27 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         conversation.Current = target;
         return $"{Names.Of(target)?.ToString() ?? target.ProjectId} is marked seen.";
     }
+
+    public async Task<string> SetImportanceAsync(string? reference, string? importance, CancellationToken ct)
+    {
+        if (ParseImportance(importance) is not { } tier)
+            return $"\"{importance}\" is no importance: say important, normal or quiet. Nothing was changed.";
+        if (Target(reference) is not { } target)
+            return await UnknownAsync(reference, ct);
+
+        await servers.SetImportanceAsync(target, tier, ct);
+        conversation.Current = target;
+        return $"{Names.Of(target)?.ToString() ?? target.ProjectId} is now {tier.ToString().ToLowerInvariant()}.";
+    }
+
+    /// <summary>The tier the model named, in English or Danish as the user said it; null for anything else.</summary>
+    internal static Importance? ParseImportance(string? importance) => importance?.Trim().ToLowerInvariant() switch
+    {
+        "important" or "vigtig" => Importance.Important,
+        "normal" => Importance.Normal,
+        "quiet" or "stille" => Importance.Quiet,
+        _ => null,
+    };
 
     /// <summary>What the conversation is about from now on, from a tool that read it out.</summary>
     private void Talked(ProjectRef? project) => conversation.Current = project;

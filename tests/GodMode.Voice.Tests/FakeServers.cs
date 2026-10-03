@@ -125,6 +125,15 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         return Task.CompletedTask;
     }
 
+    /// <summary>Each tier set, in order.</summary>
+    public ConcurrentQueue<(ProjectRef Project, Importance Importance)> Importances { get; } = new();
+
+    public Task SetImportanceAsync(ProjectRef project, Importance importance, CancellationToken ct)
+    {
+        Importances.Enqueue((project, importance));
+        return Task.CompletedTask;
+    }
+
     public Task MarkSeenAsync(ProjectRef project, CancellationToken ct)
     {
         Seen.Enqueue(project);
