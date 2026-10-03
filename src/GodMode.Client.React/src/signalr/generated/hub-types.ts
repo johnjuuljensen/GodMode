@@ -25,8 +25,8 @@ export type AttentionKind =
   /**
    * An overseer asked the user to decide something (its fleet tool `escalate`, ProjectStatus.Escalation): the
    * item's text, and its URL as AttentionItem.PullRequestUrl when it gave one. Unlike AttentionKind.Finished,
-   * the turns that end after it leave it as it is. Cleared by IProjectHub.MarkSeen and by any reply, until it
-   * asks again.
+   * the turns that end after it leave it as it is. Cleared by IProjectHub.MarkSeen and by the user's own
+   * reply, answer or input, not by the fleet's send or a resume, until it asks again.
    */
   | 'Escalation'
   /**
@@ -484,8 +484,9 @@ export interface ProjectStatus {
   UnseenResult?: TurnResult | null;
   /**
    * What the session, an overseer, last asked the user to decide (its fleet tool `escalate`, issue #401): an
-   * AttentionKind.Escalation until the user has seen it, whatever turns end after it. Null when it never
-   * asked.
+   * AttentionKind.Escalation whatever turns end after it, until the user has seen it: IProjectHub.MarkSeen or
+   * the user's own input clears it (null), and nothing else does, the fleet's send and a resume included.
+   * Null when there is none.
    */
   Escalation?: Escalation | null;
 }
