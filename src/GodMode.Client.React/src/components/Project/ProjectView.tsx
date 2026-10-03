@@ -219,6 +219,7 @@ export function ProjectView({ serverId, projectId }: Props) {
       ) : openQuestion && (
         // A question in plain text has no prompt: it is the transcript's last line, and the composer answers it (#447)
         <QuestionPrompt
+          requestId={pendingQuestion!.RequestId}
           questions={pendingQuestion!.Questions}
           answered={answered}
           onAnswer={handleQuestionAnswer}
