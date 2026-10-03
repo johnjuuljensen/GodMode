@@ -351,8 +351,8 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
         // The draft, as the code holds it: the model fills in what it lacks, and changes what it has only on the user's words
         if (draft is not null && sessionRoots.FirstOrDefault(r => Same(r, draft.Root)) is { } heldRoot)
         {
-            var otherRoot = root is not null && Best([heldRoot], r => [r.Root.Name, r.Profile, r.ServerName], root).Count == 0;
-            if (otherRoot && !Says(heard, Best(sessionRoots, r => [r.Root.Name, r.Profile], root!).SelectMany(r => new[] { r.Root.Name, r.Profile })))
+            var otherRoot = root is not null && Best([heldRoot], r => [r.Root.Name, .. Titled(r), r.Profile, r.ServerName], root).Count == 0;
+            if (otherRoot && !Says(heard, Best(sessionRoots, r => [r.Root.Name, .. Titled(r), r.Profile], root!).SelectMany(r => (string[])[r.Root.Name, .. Titled(r), r.Profile])))
             {
                 kept.Add($"the root stays {Name(heldRoot, severalServers)}: the user did not name '{root}'");
                 otherRoot = false;
@@ -385,10 +385,10 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
 
         List<ServerRoot> matched = draftRoot is not null ? [draftRoot]
             : root is null ? sessionRoots
-            : Best(sessionRoots, r => [r.Root.Name, r.Profile, r.ServerName], root);
+            : Best(sessionRoots, r => [r.Root.Name, .. Titled(r), r.Profile, r.ServerName], root);
         if (matched.Count == 0)
         {
-            var sessionless = root is not null && Best(roots, r => [r.Root.Name, r.Profile], root).Count > 0;
+            var sessionless = root is not null && Best(roots, r => [r.Root.Name, .. Titled(r), r.Profile], root).Count > 0;
             return (sessionless
                 ? $"The root '{ask.Root}' has only actions that start no session, which voice does not start yet: tell the user to use the app. Nothing was created."
                 : $"Unknown root '{ask.Root}'. Nothing was created. Roots: {Names(sessionRoots, severalServers)}.", null, null);
@@ -645,9 +645,15 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
     private static string Names(IEnumerable<ServerRoot> roots, bool severalServers) =>
         string.Join(", ", roots.Select(r => Name(r, severalServers)));
 
-    /// <summary>"GodMode (profile Godmode)", with its server when there are several.</summary>
+    /// <summary>
+    /// "GodMode (profile Godmode)", with its server when there are several; a root with a title (#434) by its title,
+    /// with its name: "Assistant (root Mega-Assistant, profile Mega)".
+    /// </summary>
     private static string Name(ServerRoot root, bool severalServers) =>
-        $"{root.Root.Name} (profile {root.Profile}{(severalServers ? $", server {root.ServerName}" : "")})";
+        $"{root.Shown} ({(root.Root.Title is null ? "" : $"root {root.Root.Name}, ")}profile {root.Profile}{(severalServers ? $", server {root.ServerName}" : "")})";
+
+    /// <summary>The root's title, when it has one: it is said as that, and as its name (#434).</summary>
+    private static IEnumerable<string> Titled(ServerRoot root) => root.Root.Title is { } title ? [title] : [];
 
     private static string Options(IEnumerable<(ServerRoot Root, CreateActionInfo Action, Form Form)> candidates, bool severalServers) =>
         string.Join("; ", candidates.Select(c => $"{Name(c.Root, severalServers)}: {c.Action.Name}"));

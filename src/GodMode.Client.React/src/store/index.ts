@@ -12,6 +12,7 @@ import type { AddServerRequest } from '../signalr/types';
 import { projectKey, type ProjectKey } from './projectKey';
 import {
   rebuildHierarchy, inProfile, SIDEBAR_GROUP_ORDER, DEFAULT_GROUP_BY,
+  foldPathOf, profileFoldKey, rootFoldKey, rootFoldPrefix, profileNameOf,
   type ServerConnection, type SidebarGroupBy, type ProfileGroup,
 } from './hierarchy';
 
@@ -19,7 +20,10 @@ export { projectKey, type ProjectKey };
 /** The key of a transcript: a project's ProjectKey. */
 export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
-export { isListed, foldItems, descendantsOf, inProfile, profileNameOf, sameProfile } from './hierarchy';
+export {
+  isListed, foldItems, descendantsOf, inProfile, profileNameOf, sameProfile, profileFoldKey, rootFoldKey, INACTIVE_FOLD_KEY,
+  rootShown, rootShownOf,
+} from './hierarchy';
 
 /** The map without the keys given; the same object when it has none of them. */
 function without<T>(map: Record<ProjectKey, T>, keys: ReadonlySet<ProjectKey>): Record<ProjectKey, T> {
@@ -125,14 +129,68 @@ interface ReplayOf {
  * from offset 0, or in another generation, is the whole file, so what was held is dropped first; a
  * batch that starts past the offset would leave a gap, and is not applied.
  */
-function appendLines(t: Transcript, lines: OutputMessage[], batch?: ReplayOf & { fromOffset: number }): Transcript {
+function appendLines(t: Transcript, lines: OutputMessage[], batch?: ReplayOf & { fromOffset: number }): { transcript: Transcript; fresh: OutputMessage[] } {
   const base = batch && (batch.fromOffset === 0 || batch.generation !== t.generation)
     ? { ...t, messages: [], offset: 0, generation: batch.generation }
     : t;
-  if (batch && batch.fromOffset > base.offset) return t;
+  if (batch && batch.fromOffset > base.offset) return { transcript: t, fresh: [] };
   const fresh = lines.filter(l => l.offset > base.offset);
-  if (fresh.length === 0) return base;
-  return { ...base, messages: [...base.messages, ...fresh.map(l => l.message)], offset: fresh[fresh.length - 1].offset };
+  if (fresh.length === 0) return { transcript: base, fresh };
+  const added = fresh.map(l => l.message);
+  return { transcript: { ...base, messages: [...base.messages, ...added], offset: fresh[fresh.length - 1].offset }, fresh };
+}
+
+// ── Pending sends (#383) ───────────────────────────────────────
+
+/**
+ * A message this client sent that claude has not echoed yet (--replay-user-messages): shown at once,
+ * dimmed, until the echo takes its place. Transient: kept in this page only, never persisted or shared.
+ */
+export interface PendingSend {
+  id: string;
+  text: string;
+  /** Where the transcript ended when it was sent: only a line after it can be its echo. */
+  offset: number;
+  generation: string | null;
+  /** The session stopped or failed before claude took it. */
+  notTaken: boolean;
+}
+
+let pendingIds = 0;
+
+/** The text of a message the user typed, as claude echoes it; null for any other line (a tool result, a command's output). */
+function typedText(m: ClaudeMessage): string | null {
+  if (m.type !== 'user' || m.commandNote || m.contentItems.length === 0 || m.contentItems.some(c => c.type !== 'text')) return null;
+  return m.contentItems.map(c => c.text ?? '').join('');
+}
+
+/**
+ * The pending sends the lines leave: each echo takes the oldest one with its text sent before it,
+ * so the same text sent twice is matched in order. A slash command is echoed as what it does, not as
+ * its text: the end of the turn after it (its result, or the marker it puts in) takes it.
+ */
+function unechoed(pending: PendingSend[], lines: OutputMessage[], generation: string | null): PendingSend[] {
+  let left = pending;
+  for (const { offset, message } of lines) {
+    const after = (p: PendingSend) => p.generation !== generation || offset > p.offset;
+    const text = typedText(message)?.trim();
+    if (text !== undefined) {
+      const i = left.findIndex(p => after(p) && p.text.trim() === text);
+      if (i >= 0) left = left.filter((_, j) => j !== i);
+    } else if (message.type === 'result' || message.marker) {
+      left = left.filter(p => !(after(p) && p.text.trimStart().startsWith('/')));
+    }
+  }
+  return left;
+}
+
+/** The project's pending sends replaced: none drops its entry. */
+function withPending(all: Record<ProjectKey, PendingSend[]>, key: ProjectKey, pending: PendingSend[]): Record<ProjectKey, PendingSend[]> {
+  if (pending === (all[key] ?? [])) return all;
+  const next = { ...all };
+  if (pending.length > 0) next[key] = pending;
+  else delete next[key];
+  return next;
 }
 
 // ── Active page (replaces modal booleans) ─────────────────────
@@ -177,6 +235,12 @@ interface AppState {
   /** The parents whose rows are collapsed in the list, hiding what they started (#390); kept on this device. */
   collapsedSessions: Record<ProjectKey, true>;
   toggleCollapsed: (key: ProjectKey) => void;
+  /**
+   * The profile and root headers, and the inactive servers' section, folded in the list (#427); kept on this
+   * device, by the keys hierarchy.ts gives them (`profileFoldKey`, `rootFoldKey`, `INACTIVE_FOLD_KEY`).
+   */
+  foldedHeaders: Record<string, true>;
+  toggleFoldedHeader: (key: string) => void;
 
   // Server lifecycle
   loadServers: () => Promise<void>;
@@ -247,6 +311,13 @@ interface AppState {
   /** Answers a project whether its claude runs or not (resuming it if needed). */
   replyAndResume: (serverId: string, projectId: string, text: string) => Promise<void>;
   /**
+   * The project's view's messages, by ProjectKey, until claude echoes them (#383): each shows at once, pending.
+   * Only this page's, and gone with a reload.
+   */
+  pendingSends: Record<ProjectKey, PendingSend[]>;
+  /** Sends as replyAndResume does, the message pending in the conversation meanwhile; a send that fails takes it away. */
+  sendReply: (serverId: string, projectId: string, text: string) => Promise<void>;
+  /**
    * The inbox items' unsent text, by ProjectKey: held here rather than in the item, so it survives the
    * item remounting (the phone's home left and come back to, the pane collapsed, a rotation) (#240).
    */
@@ -290,9 +361,12 @@ function forgotten(state: AppState, keys: ReadonlySet<ProjectKey>): Partial<AppS
     if (!keys.has(key)) transcripts[key] = t;
     else if (t.phase !== 'idle') transcripts[key] = { ...emptyTranscript, phase: 'replaying' };
   }
+  const collapsedSessions = without(state.collapsedSessions, keys);
+  if (collapsedSessions !== state.collapsedSessions) saveKeySet(COLLAPSED_KEY, collapsedSessions);
   const sel = state.selectedProject;
   return {
-    transcripts, inboxDrafts: without(state.inboxDrafts, keys),
+    transcripts, collapsedSessions, inboxDrafts: without(state.inboxDrafts, keys),
+    pendingSends: without(state.pendingSends, keys),
     tiles: without(state.tiles, keys), tileMessages: without(state.tileMessages, keys), tileLoading: without(state.tileLoading, keys),
     ...(sel && keys.has(projectKey(sel.serverId, sel.projectId)) ? { outputMessages: [] } : {}),
   };
@@ -304,7 +378,7 @@ function goneKeys(state: AppState, serverId: string, projects: ProjectSummary[])
   const kept = new Set(projects.map(p => projectKey(serverId, p.Id)));
   const sel = state.selectedProject;
   const held = [
-    state.transcripts, state.inboxDrafts, state.tiles,
+    state.transcripts, state.inboxDrafts, state.tiles, state.collapsedSessions,
   ].flatMap(map => Object.keys(map) as ProjectKey[]);
   if (sel) held.push(projectKey(sel.serverId, sel.projectId));
   return new Set(held.filter(k => k.startsWith(prefix) && !kept.has(k)));
@@ -324,6 +398,21 @@ function listed(state: AppState, serverId: string, project: ProjectSummary): Par
   return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions };
 }
 
+/**
+ * The folds that hide the session's row opened, from its profile down (#427, #397): it was selected from the
+ * inbox, a notification or voice, so it is shown. Nothing when none hides it.
+ */
+function revealed(state: AppState, key: ProjectKey): Partial<AppState> {
+  const path = foldPathOf(state.profileGroups, key);
+  if (!path) return {};
+  const updates: Partial<AppState> = {};
+  const foldedHeaders = pruned(state.foldedHeaders, k => path.headers.includes(k));
+  if (foldedHeaders !== state.foldedHeaders) { saveKeySet(FOLDED_HEADERS_KEY, foldedHeaders); updates.foldedHeaders = foldedHeaders; }
+  const collapsedSessions = pruned(state.collapsedSessions, k => path.sessions.includes(k));
+  if (collapsedSessions !== state.collapsedSessions) { saveKeySet(COLLAPSED_KEY, collapsedSessions); updates.collapsedSessions = collapsedSessions; }
+  return updates;
+}
+
 // Helper to persist sidebar groupBy
 const GROUPBY_KEY = 'godmode-sidebar-groupby';
 /** The stored group-by, else the default: a stored value that is no longer a mode (`profile`, before #308) included. */
@@ -333,13 +422,55 @@ export function loadGroupBy(): SidebarGroupBy {
 }
 
 const COLLAPSED_KEY = 'godmode-collapsed-sessions';
-/** The collapsed parents this device keeps, else none. */
-function loadCollapsed(): Record<ProjectKey, true> {
+const FOLDED_HEADERS_KEY = 'godmode-folded-headers';
+
+/**
+ * The set of keys this device keeps under `storageKey`, else none: what is not an object of `true`s (`"null"`,
+ * an array, a value of another kind) is read as none, and an entry that is not `true` is dropped (#397).
+ */
+export function loadKeySet<K extends string>(storageKey: string): Record<K, true> {
   try {
-    return JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '{}');
+    const stored: unknown = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return {} as Record<K, true>;
+    return Object.fromEntries(Object.entries(stored).filter(([, v]) => v === true)) as Record<K, true>;
   } catch {
-    return {};
+    return {} as Record<K, true>;
   }
+}
+function saveKeySet(storageKey: string, set: Record<string, true>) {
+  try { localStorage.setItem(storageKey, JSON.stringify(set)); } catch { /* kept for this page only */ }
+}
+/** The set with the key in it or out of it. */
+function toggled<K extends string>(set: Record<K, true>, key: K): Record<K, true> {
+  const next = { ...set };
+  if (next[key]) delete next[key]; else next[key] = true;
+  return next;
+}
+/** The set without the keys `drop` names; the same object when it has none of them. */
+function pruned<K extends string>(set: Record<K, true>, drop: (key: K) => boolean): Record<K, true> {
+  const keys = Object.keys(set) as K[];
+  if (!keys.some(drop)) return set;
+  return Object.fromEntries(keys.filter(k => !drop(k)).map(k => [k, true])) as Record<K, true>;
+}
+
+/**
+ * The folded headers without those of what the server no longer lists: its roots, once it has given them on
+ * this connection; and a profile, only once every server has given its lists and none has it, as a server not
+ * connected may still have it.
+ */
+function prunedHeaders(state: AppState, serverId: string, connections: ServerConnection[]): Record<string, true> {
+  const prefix = rootFoldPrefix(serverId);
+  const conn = connections.find(c => c.serverInfo.Id === serverId)!;
+  const roots = new Set(conn.roots.map(r => rootFoldKey(serverId, profileNameOf(r.ProfileName), r.Name)));
+  const listedAll = connections.every(c => c.serverInfo.Id === serverId || state.projectsListed[c.serverInfo.Id]);
+  const profiles = new Set(connections.flatMap(c => [
+    ...c.profiles.map(p => p.Name), ...c.roots.map(r => profileNameOf(r.ProfileName)),
+    ...c.projects.map(p => profileNameOf(p.ProfileName)),
+  ]).map(profileFoldKey));
+  const folded = pruned(state.foldedHeaders, key =>
+    (key.startsWith(prefix) && !roots.has(key)) || (listedAll && key.startsWith('profile:') && !profiles.has(key)));
+  if (folded !== state.foldedHeaders) saveKeySet(FOLDED_HEADERS_KEY, folded);
+  return folded;
 }
 
 /** What a call to a server that is not connected says: a server offline, reconnecting or not. */
@@ -430,12 +561,17 @@ export const useAppStore = create<AppState>((set, get) => {
     const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(get().serverConnections, get().profileFilter, next);
     set({ sidebarGroupBy: next, profileGroups, inactiveServers, profileFilterOptions });
   },
-  collapsedSessions: loadCollapsed(),
+  collapsedSessions: loadKeySet<ProjectKey>(COLLAPSED_KEY),
   toggleCollapsed: (key) => {
-    const collapsedSessions = { ...get().collapsedSessions };
-    if (collapsedSessions[key]) delete collapsedSessions[key]; else collapsedSessions[key] = true;
-    try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsedSessions)); } catch { /* kept for this page only */ }
+    const collapsedSessions = toggled(get().collapsedSessions, key);
+    saveKeySet(COLLAPSED_KEY, collapsedSessions);
     set({ collapsedSessions });
+  },
+  foldedHeaders: loadKeySet(FOLDED_HEADERS_KEY),
+  toggleFoldedHeader: (key) => {
+    const foldedHeaders = toggled(get().foldedHeaders, key);
+    saveKeySet(FOLDED_HEADERS_KEY, foldedHeaders);
+    set({ foldedHeaders });
   },
 
   lockedProfile: null,
@@ -579,8 +715,12 @@ export const useAppStore = create<AppState>((set, get) => {
 
         const held = state.transcripts[key];
         if (held && (batch ? answers(held, batch.subscription) : held.phase === 'live')) {
-          const transcript = appendLines(held, lines, batch);
+          const { transcript, fresh } = appendLines(held, lines, batch);
           updates.transcripts = { ...state.transcripts, [key]: transcript };
+          const pending = state.pendingSends[key];
+          if (pending && fresh.length > 0) {
+            updates.pendingSends = withPending(state.pendingSends, key, unechoed(pending, fresh, transcript.generation));
+          }
           const sel = state.selectedProject;
           if (sel?.serverId === serverId && sel.projectId === projectId) {
             updates.outputMessages = transcript.messages;
@@ -702,6 +842,13 @@ export const useAppStore = create<AppState>((set, get) => {
       }),
       onStatusChanged: (_projectId, status) => {
         set(state => {
+          // Stopped or failed with a message not echoed: claude never took it, and the message says so
+          const key = projectKey(serverId, status.Id);
+          const before = state.getConnection(serverId)?.projects.find(p => p.Id === status.Id)?.State;
+          const pending = state.pendingSends[key];
+          const notTaken = pending && before !== status.State && (status.State === 'Stopped' || status.State === 'Error')
+            ? { pendingSends: withPending(state.pendingSends, key, pending.map(p => p.notTaken ? p : { ...p, notTaken: true })) }
+            : {};
           const connections = state.serverConnections.map(c =>
             c.serverInfo.Id === serverId
               ? { ...c, projects: c.projects.map(p => p.Id === status.Id
@@ -716,7 +863,7 @@ export const useAppStore = create<AppState>((set, get) => {
           );
           const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
 
-          return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions };
+          return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, ...notTaken };
         });
       },
       // A live line only counts once its subscription's replay is complete: one broadcast before
@@ -760,6 +907,9 @@ export const useAppStore = create<AppState>((set, get) => {
           const held = state.transcripts[key];
           if (held?.phase === 'live') {
             updates.transcripts = { ...state.transcripts, [key]: { ...held, messages: [], offset: 0, generation } };
+            // A /clear sent from here is done: its output started over
+            const pending = state.pendingSends[key];
+            if (pending) updates.pendingSends = withPending(state.pendingSends, key, pending.filter(p => !p.text.trimStart().startsWith('/')));
             const sel = state.selectedProject;
             if (sel?.serverId === serverId && sel.projectId === projectId) {
               updates.outputMessages = [];
@@ -842,6 +992,7 @@ export const useAppStore = create<AppState>((set, get) => {
           serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
           ...updates,
           projectsListed: { ...state.projectsListed, [serverId]: true },
+          foldedHeaders: prunedHeaders(state, serverId, connections),
         };
       });
     } catch (err) {
@@ -853,8 +1004,9 @@ export const useAppStore = create<AppState>((set, get) => {
 
   selectedProject: null,
   selectProject: (serverId, projectId) => set(state => {
-    const messages = state.transcripts[projectKey(serverId, projectId)]?.messages ?? [];
-    return { selectedProject: { serverId, projectId }, activePage: null, outputMessages: messages };
+    const key = projectKey(serverId, projectId);
+    const messages = state.transcripts[key]?.messages ?? [];
+    return { ...revealed(state, key), selectedProject: { serverId, projectId }, activePage: null, outputMessages: messages };
   }),
   clearSelection: () => set({ selectedProject: null, outputMessages: [] }),
   openCreatedProject: (serverId, status) => {
@@ -927,6 +1079,23 @@ export const useAppStore = create<AppState>((set, get) => {
   },
   replyAndResume: async (serverId, projectId, text) => {
     await hubFor(serverId).replyAndResume(projectId, text);
+  },
+  pendingSends: {},
+  sendReply: async (serverId, projectId, text) => {
+    // With a permission prompt or a question open, the server takes the text as its answer or denial
+    // and writes nothing to claude: no echo would ever come for it
+    const project = get().getConnection(serverId)?.projects.find(p => p.Id === projectId);
+    if (project?.PendingPermission || project?.PendingQuestion) return get().replyAndResume(serverId, projectId, text);
+    const key = projectKey(serverId, projectId);
+    const held = get().transcripts[key] ?? emptyTranscript;
+    const sent: PendingSend = { id: `p${++pendingIds}`, text, offset: held.offset, generation: held.generation, notTaken: false };
+    set(state => ({ pendingSends: withPending(state.pendingSends, key, [...state.pendingSends[key] ?? [], sent]) }));
+    try {
+      await get().replyAndResume(serverId, projectId, text);
+    } catch (err) {
+      set(state => ({ pendingSends: withPending(state.pendingSends, key, (state.pendingSends[key] ?? []).filter(p => p !== sent)) }));
+      throw err;
+    }
   },
   inboxDrafts: {},
   setInboxDraft: (serverId, projectId, patch) => set(state => {

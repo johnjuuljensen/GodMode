@@ -48,9 +48,9 @@ beforeEach(async () => {
 
 afterEach(() => { view?.unmount(); view = undefined; });
 
-/** The worker's row badge in the left list. */
+/** The worker's state in the left list, as its dot names it (#437). */
 const badge = () => [...view!.container.querySelectorAll('.project-item')]
-  .find(el => el.querySelector('.project-name')?.textContent === 'worker')?.querySelector('.project-state-badge')?.textContent;
+  .find(el => el.querySelector('.project-name')?.textContent === 'worker')?.querySelector('.project-state-dot')?.getAttribute('aria-label');
 
 /** The worker's tile, as the tile view renders it from the store. */
 function Tile() {
@@ -65,33 +65,33 @@ describe('a session that is not selected', () => {
   it('is not WAIT for a line ending in ? in the middle of its turn, nor once the turn ends Idle with no question', async () => {
     view = await render(<><Sidebar /><Tile /></>);
     await act(async () => hub.callbacks.onOutputReceived?.('p1', { offset: 10, message: narration }));
-    expect(badge()).toBe('RUNN');
+    expect(badge()).toBe('Running');
     expect(tileWaits()).toBe(false);
 
     await push(asking('Idle', null));
-    expect(badge()).toBe('IDLE');
+    expect(badge()).toBe('Idle');
     expect(tileWaits()).toBe(false);
   });
 
   it('is WAIT when its status is WaitingInput with a question, and not once it runs again', async () => {
     view = await render(<><Sidebar /><Tile /></>);
     await push(asking('WaitingInput', 'Shall I open the PR?'));
-    expect(badge()).toBe('WAIT');
+    expect(badge()).toBe('Waiting on you');
     expect(tileWaits()).toBe(true);
 
     await push(asking('Running', null));
-    expect(badge()).toBe('RUNN');
+    expect(badge()).toBe('Running');
     expect(tileWaits()).toBe(false);
   });
 
   it('is WAIT when it was stopped on a question it still asks, and STOP when stopped on none', async () => {
     view = await render(<><Sidebar /><Tile /></>);
     await push(asking('Stopped', 'Shall I open the PR?'));
-    expect(badge()).toBe('WAIT');
+    expect(badge()).toBe('Waiting on you');
     expect(tileWaits()).toBe(true);
 
     await push(asking('Stopped', null));
-    expect(badge()).toBe('STOP');
+    expect(badge()).toBe('Stopped');
     expect(tileWaits()).toBe(false);
   });
 });

@@ -250,3 +250,49 @@ describe('folding older sessions (#325) with what they started', () => {
     expect([shown.map(i => i.project.Name), older.length]).toEqual([['parent'], 0]);
   });
 });
+
+describe('the order of a parent by what it started (#397)', () => {
+  /** A stopped, old parent with a running, recent child; an idle session between them in time. */
+  const family = () => server('A', [rootOf('work', 'P')], [
+    projectOf('parent', 'P', 'work', 'Stopped', '2026-09-20T09:00:00Z'),
+    childOf('P/work/parent', 'child', 'P', 'work', 'Idle', '2026-09-27T09:00:00Z'),
+    childOf('P/work/child', 'grandchild', 'P', 'work', 'Running', '2026-09-28T11:00:00Z'),
+    projectOf('middle', 'P', 'work', 'Idle', '2026-09-28T10:00:00Z'),
+  ]);
+
+  it('ranks a stopped parent by its running grandchild in the Status grouping', () => {
+    expect(tree([family()], 'status')).toEqual(['P (4)', '    parent', '      child', '        grandchild', '    middle']);
+  });
+
+  it('ranks an old parent by its most recent descendant in the Recent grouping', () => {
+    expect(tree([family()], 'recent')).toEqual(['P (4)', '    parent', '      child', '        grandchild', '    middle']);
+  });
+
+  it('orders children among themselves by what is under them too', () => {
+    const conn = server('A', [rootOf('work', 'P')], [
+      projectOf('parent', 'P', 'work', 'Idle', '2026-09-28T12:00:00Z'),
+      childOf('P/work/parent', 'quiet', 'P', 'work', 'Stopped', '2026-09-28T08:00:00Z'),
+      childOf('P/work/parent', 'busy', 'P', 'work', 'Stopped', '2026-09-28T07:00:00Z'),
+      childOf('P/work/busy', 'worker', 'P', 'work', 'Running', '2026-09-28T06:00:00Z'),
+    ]);
+    expect(tree([conn], 'status')).toEqual(['P (4)', '    parent', '      busy', '        worker', '      quiet']);
+    expect(tree([conn], 'recent')).toEqual(['P (4)', '    parent', '      quiet', '      busy', '        worker']);
+  });
+
+  it('leaves the Root grouping in the order its profile lists its sessions', () => {
+    expect(tree([family()], 'root')).toEqual(['P (4)', '  work', '    parent', '      child', '        grandchild', '    middle']);
+  });
+});
+
+describe('a root whose sessions all nest under parents in other roots (#397)', () => {
+  it('counts them as nested elsewhere, and lists none of its own', () => {
+    const groups = rebuildHierarchy([fleet()], 'All', 'root').profileGroups[0].rootGroups;
+    const work = (conn: ServerConnection) => rebuildHierarchy([conn], 'All', 'root').profileGroups[0].rootGroups.find(g => g.rootName === 'work')!;
+    expect(groups.map(g => `${g.rootName}: ${g.items.length} listed, ${g.nestedElsewhere} elsewhere`)).toEqual(['fleet: 1 listed, 0 elsewhere', 'work: 1 listed, 1 elsewhere']);
+    const onlyNested = server('A', [rootOf('fleet', 'P'), rootOf('work', 'P')], [
+      projectOf('overseer', 'P', 'fleet', 'Running', '2026-09-28T08:00:00Z'),
+      childOf('P/fleet/overseer', 'worker', 'P', 'work'),
+    ]);
+    expect(work(onlyNested)).toMatchObject({ items: [], sessionCount: 1, nestedElsewhere: 1 });
+  });
+});

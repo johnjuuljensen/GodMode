@@ -66,11 +66,23 @@
 }
 .inbox-pane .inbox-list { padding: 0 8px 10px; }
 
-/* Above the tile grid */
+/* As wide as the sidebar, which its splitter sizes (#436): one column, its texts wrapping at its width, and never
+   wider than it; two once it is wide enough for two readable ones */
+.shell-sidebar .inbox-pane { container-type: inline-size; }
+.inbox-list { overflow-x: hidden; }
+@container (min-width: 720px) {
+  .inbox-pane .inbox-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    align-items: start;
+  }
+}
+
+/* Above the tile grid: as many columns as fit, one on a narrow window, never wider than it */
 .shell-content > .inbox-pane { max-height: 40%; }
 .shell-content > .inbox-pane .inbox-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   align-items: start;
 }
 
@@ -100,7 +112,8 @@
 
 .inbox-item-header {
   display: grid;
-  grid-template-columns: auto 1fr;
+  /* The name takes what is left and ellipsizes, rather than widening the item past its pane */
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 2px 8px;
   align-items: baseline;
   padding: 10px 12px 4px;

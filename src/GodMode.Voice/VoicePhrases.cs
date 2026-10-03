@@ -92,8 +92,8 @@ public sealed partial class VoicePhrases
     {
         var root = request.Root;
         var where = _danish
-            ? $"i {root.Root.Name}, profil {root.Profile}{(request.SeveralServers ? $", server {root.ServerName}" : "")}, som {request.Action.Name}"
-            : $"in {root.Root.Name}, profile {root.Profile}{(request.SeveralServers ? $", server {root.ServerName}" : "")}, as {request.Action.Name}";
+            ? $"i {root.Shown}, profil {root.Profile}{(request.SeveralServers ? $", server {root.ServerName}" : "")}, som {request.Action.Name}"
+            : $"in {root.Shown}, profile {root.Profile}{(request.SeveralServers ? $", server {root.ServerName}" : "")}, as {request.Action.Name}";
         if (request is { Issue: null, Name: { } named, Prompt: { } prompt } && Said(prompt) is { } quoted)
             return _danish
                 ? $"Skal jeg oprette {named} {where}, med beskrivelsen \"{quoted}\"?"
@@ -155,8 +155,8 @@ public sealed partial class VoicePhrases
         ({ Handle: { } handle }, true) => $"{handle} er oprettet",
         ({ Handle: { } handle }, false) => $"{handle} is created",
         ({ Error: { } error }, _) => Failed(outcome.Request, error),
-        (_, true) => $"Færdig i {outcome.Request.Root.Root.Name}",
-        (_, false) => $"Done in {outcome.Request.Root.Root.Name}",
+        (_, true) => $"Færdig i {outcome.Request.Root.Shown}",
+        (_, false) => $"Done in {outcome.Request.Root.Shown}",
     };
 
     /// <summary>How long a server's error may be to be said as it is: one short sentence.</summary>
@@ -170,7 +170,7 @@ public sealed partial class VoicePhrases
     public string Failed(CreateRequest request, string error)
     {
         var what = request.Issue is { } issue ? $"issue {issue}" : _danish ? request.Action.Name : $"the {request.Action.Name}";
-        var where = $"{request.Root.Profile} / {request.Root.Root.Name}{(request.SeveralServers ? $"{(_danish ? " på" : " on")} {request.Root.ServerName}" : "")}";
+        var where = $"{request.Root.Profile} / {request.Root.Shown}{(request.SeveralServers ? $"{(_danish ? " på" : " on")} {request.Root.ServerName}" : "")}";
         var lead = _danish ? $"Kunne ikke oprette {what} i {where}" : $"Could not create {what} in {where}";
         error = error.Trim();
         if (ScriptFailure().Match(error) is { Success: true } script)

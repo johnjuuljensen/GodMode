@@ -114,6 +114,7 @@ public class RootConfigReader : IRootConfigReader
 
         return new RootConfig(
             Description: baseRaw.Description,
+            Title: string.IsNullOrWhiteSpace(baseRaw.Title) ? null : baseRaw.Title.Trim(),
             Actions: actions,
             ProfileName: baseRaw.ProfileName,
             StripEnvVarProfile: baseRaw.StripEnvVarProfile ?? false,
@@ -423,6 +424,7 @@ public class RootConfigReader : IRootConfigReader
     private record RawConfig
     {
         public string? Description { get; init; }
+        public string? Title { get; init; }
         public string? ProfileName { get; init; }
         public JsonElement? Prepare { get; init; }
         public JsonElement? Create { get; init; }

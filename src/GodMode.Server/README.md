@@ -38,10 +38,12 @@ A server's roots, and what its profiles carry, come from its config. Each is a *
 | `Roots:Scan:<key>` = folder | A scan folder: each immediate subfolder with a `.godmode-root/` folder is a root, named after the subfolder. appsettings has one, `default` = `roots`, a scratch folder under the working directory |
 | `Roots:Explicit:<name>:Path` = folder | The folder is the root `<name>`, anywhere on disk. A folder with no `.godmode-root/` has the default action |
 | `Roots:Explicit:<name>:Profile` | The explicit root's profile, when its own `config.json` names no `profileName` |
+| `Roots:Explicit:<name>:Title` | The explicit root's title, when its own `config.json` has no `title` |
 | `Profiles:<name>:Description` | The profile's description, as the app shows it |
 | `Profiles:<name>:Environment:<VAR>` = value | An environment variable of every session and root script in the profile (a `CLAUDE_CONFIG_DIR`, a service's token) |
 
 - **A root's profile** is its `config.json`'s `profileName`, else its explicit entry's `Profile`, else `Default`. A profile is listed when it has a root; one named under `Profiles` alone is only settings.
+- **A root's title** is its `config.json`'s `title`, else its explicit entry's `Title`, else none, and the app and voice show its name. It is display only: the name stays the root's key, in session IDs, `CreateProject`, the fleet's `start_session`, links and logs, so two profiles' roots keyed `Outbound-Assistant` and `Mega-Assistant` can both be titled `Assistant`. A title may be another root's name. The app shows the name as the title's tooltip, and beside the title when two roots in one list would show one title; voice takes either, and tells two profiles' roots of one title apart by the profile. `ListProjectRoots` (and `RootsChanged`, and the fleet's `list_roots`) gives it as `Title`; a session's status carries only its `RootName`, and clients look the title up in the roots list, which is pushed again when a title is edited.
 - **One name, one root per server, and one folder, one root.** An explicit root wins a clash, and between scan folders the first key in ordinal order does. Each loser is logged once as a warning, with both paths and the settings they came from. An explicit root in a scan folder under its own name is the one root, and no clash.
 - **An entry set to `""`** is none, so a later source can turn off one an earlier source set (`"Roots": { "Scan": { "default": "" } }`). An explicit root whose folder does not exist is logged once, and listed once it does.
 - **Relative folders** resolve against the working directory.
@@ -225,7 +227,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `claudeArgs` | Concatenated (base + overlay) |
 | Script fields (prepare, create, delete, status) | Overlay replaces entirely |
 
-`profileName` and `stripEnvVarProfile` are read from `config.json` only.
+`profileName`, `title` and `stripEnvVarProfile` are read from `config.json` only.
 
 ### Action Discovery
 
@@ -239,6 +241,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 |-------|-------------|
 | `description` | Shown in the UI when selecting an action |
 | `profileName` | Profile the root belongs to (`config.json` only). Default: `Default` |
+| `title` | What the app and voice show for the root (`config.json` only); its name stays its key. Default: none, the name is shown |
 | `environment` | Env vars set for scripts and passed to Claude processes, on top of the few they inherit (see [Environment](#environment)). Values support `${VAR}` expansion from the server's environment |
 | `prepare` | Scripts run before project folder is created (working dir = root) |
 | `create` | Scripts run to create the project (working dir = project, or root if `scriptsCreateFolder`) |
@@ -340,7 +343,7 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
   Use the `${GODMODE_API_KEY}` form: Claude Code expands `${VAR}` in `.mcp.json`, so the key stays in the environment of the shell that runs the overseer, not in the file. Never put the key itself in a repo's `.mcp.json`, nor add the server with `claude mcp add … --scope project`, which writes the header as given into the repo's `.mcp.json`: the key would be committed with it. A codespace's URL is `https://<codespace-name>-31337.app.github.dev/mcp/fleet`, with a GitHub token of the codespace's user (`gh auth token`).
 - **Tools.** Each returns JSON text, PascalCase as the hub's models; a refusal is the tool's error, with the reason the hub would give.
   - `list_sessions` — every session: `Id`, `Name`, `Address` (its name in Claude Code's own channel, `SendMessage`'s `to` from a session in its config dir: [Messages between sessions](#messages-between-sessions)), `Profile`, `Root`, `Kind`, `Action`, `State`, `ParentId`, `Needs` (its attention item's kind: `Permission`, `Question`, `Error`, `Escalation`, `Review`, `Finished`; absent when nothing; a child's `Finished` and `Review` too, which the user's list leaves out) and `PullRequestUrl`.
-  - `list_roots` — `Profiles`, and `Roots` with their `Actions` as `ListProjectRoots` gives them: each action's `InputSchema`, `Model`, `Effort` and whether it starts a `Session`.
+  - `list_roots` — `Profiles`, and `Roots` with their `Name` (the key `start_session` takes), `Title` (display only, when it has one) and `Actions` as `ListProjectRoots` gives them: each action's `InputSchema`, `Model`, `Effort` and whether it starts a `Session`.
   - `start_session(profile, root, action?, inputs?, model?, effort?, parent?, top_level?, fleet_tools?)` — `CreateProject`'s path: `inputs` by the action's schema, `model` and `effort` over the action's (an unknown effort is refused). With `parent` the session is that session's child ([A session's parent](#a-sessions-parent)). Without it, a session calling is the new one's parent, unless `top_level` is true; the server's credential's are top level. `fleet_tools: true` grants the new session the fleet's tools, where its action allows a grant ([Overseer sessions](#overseer-sessions)). It is pushed to the app as `ProjectCreated`, and returns its `Id`, `Name`, `Address`, `State`, `Kind`, `ParentId`, `Model` and `Effort`; an action that starts no session returns its script's `Message`. Refused: a `skipPermissions` input that is true (the session's prompts are the user's; false, the schema's default, is fine), a `__parentId` input (`parent` names the parent), `parent` with `top_level`, and `fleet_tools` for an action whose `fleetTools` is `false`, or that starts no session.
   - `send(session, text)` — `ReplyAndResume`: to a running claude, or a resume with it. **Held while the session waits on the user** (a permission prompt, an AskUserQuestion, a question it ended its turn on or was stopped on), labelled with its sender, and delivered once the user has answered and the turn has ended: it never answers what the user is asked. Held too behind messages already held, so it does not overtake them ([Messages between sessions](#messages-between-sessions)). At most 8000 characters, and refused while what is held for the session is full. Returns its `State`, and `Held`, why, when it was held.
   - `read(session, turns?)` — `Address`, `State`, `Kind`, `ParentId`, `Model`, `Effort`, `PullRequestUrl`, `WaitingOn` (what it needs, in full: a permission's `Tool`, summary and `Detail`, everything the call would run, as `GetPermissionDetail` gives it; a question's text and its `Question` with options; the whole error; a pull request's review; a finished turn's whole result), and `Replies`, its last `turns` (default 1, at most 20) replies, oldest first ([A session's last replies](#a-sessions-last-replies)).
@@ -921,7 +924,7 @@ Attention:
 - `Task ReplyAndResume(projectId, text)` — `SendInput` to a running claude; otherwise resume, send, and return once claude reports `system/init` (fails on exit or after `SessionStartTimeoutSeconds`, default 60). A slash command GodMode does not send is refused, as by `SendInput` ([Slash commands](#slash-commands))
 
 Roots and profiles:
-- `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas
+- `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas, and each root's `Title` when it has one
 - `Task<IssueInfo?> DescribeIssue(profileName, projectRootName, issue)` — The issue's `Title` and `Labels` from the root's `issueInfo` script, run now; null when the root has none; fails, saying why, as [Issue Info](#issue-info) says
 - `Task<ProfileInfo[]> ListProfiles()` — Get profiles (read-only: no hub method writes a profile or a root)
 

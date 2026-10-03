@@ -255,3 +255,68 @@ describe('the voice button (#433)', () => {
     expect(voiceButton()!.closest('.shell-content')).toBeNull();
   });
 });
+
+describe("the voice control on a phone (#445)", () => {
+  const controls = () => [...view.container.querySelectorAll<HTMLElement>('.voice-control')];
+  const homeTab = (name: string) => click([...view.container.querySelectorAll<HTMLElement>('.home-tab')].find(b => b.textContent === name)!);
+  const alert = () => view.container.querySelector('.voice-alert');
+
+  beforeEach(async () => {
+    view.unmount();
+    answer('voice.state', {
+      Available: true, State: 'Listening', MicOnDemand: true, Mic: 'Closed', Lines: [{ Speaker: 'Bot', Text: 'Klar.' }],
+      Error: { Service: 'Model', Kind: 'ModelError', Message: 'overloaded' },
+    });
+    view = await render(<Shell />);
+    await settle();
+  });
+
+  it('is compact in the back bar inside a project: power, Mic and the error, no transcript', async () => {
+    await setPhone(true);
+    await homeTab('Projects');
+    await open('alpha');
+    await settle();
+
+    expect(controls()).toHaveLength(1);
+    const control = controls()[0];
+    expect(control.closest('.page-back-bar')).not.toBeNull();
+    expect(control.classList).toContain('voice-control-compact');
+    expect(control.querySelector('.voice-power-button')).not.toBeNull();
+    expect(control.querySelector('.voice-mic-button')).not.toBeNull();
+    expect(control.querySelector('[role="alert"]')?.textContent).toContain('overloaded');
+    expect(control.querySelector('.voice-transcript-toggle')).toBeNull();
+    expect(control.querySelector('.voice-transcript, .voice-latest')).toBeNull();
+  });
+
+  it("is compact above the tabs on the inbox tab, and the Projects tab has the foot's own", async () => {
+    await setPhone(true);
+    await settle();
+
+    expect(controls()).toHaveLength(1);
+    const control = controls()[0];
+    expect(control.classList).toContain('voice-control-compact');
+    expect(control.nextElementSibling?.classList).toContain('home-tabs');
+    expect(control.querySelector('.voice-power-button')).not.toBeNull();
+
+    await homeTab('Projects');
+    await settle();
+    expect(controls()).toHaveLength(1);
+    expect(controls()[0].closest('.sidebar-footer')).not.toBeNull();
+    expect(controls()[0].classList).not.toContain('voice-control-compact');
+  });
+
+  it('keeps a dismissed error dismissed when tile mode remounts it', async () => {
+    expect(alert()).not.toBeNull();
+    await click(view.container.querySelector<HTMLButtonElement>('.voice-alert-dismiss')!);
+    expect(alert()).toBeNull();
+
+    await act(async () => useAppStore.getState().setTileView(true));
+    await settle();
+    expect(view.container.querySelector('.voice-power-button')).not.toBeNull();
+    expect(alert()).toBeNull();
+
+    await act(async () => useAppStore.getState().setTileView(false));
+    await settle();
+    expect(alert()).toBeNull();
+  });
+});

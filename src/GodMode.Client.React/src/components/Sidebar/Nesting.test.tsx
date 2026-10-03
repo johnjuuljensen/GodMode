@@ -141,3 +141,19 @@ it("puts a child of another profile's session at the top of its own profile, not
   expect(mega.querySelector('.project-started-by')?.textContent).toBe(' · started by overseer');
   expect(toggleOf('overseer')).toBeNull();
 });
+
+it('shows a root whose sessions all nest in another root with how many are there, and its own +', async () => {
+  hub = new FakeHub([
+    session('overseer', 'fleet'),
+    session('worker-1', 'work', 'Default/fleet/overseer'),
+    session('worker-2', 'work', 'Default/fleet/overseer'),
+  ], [rootOf('fleet'), { ...rootOf('work'), Actions: [{ Name: 'issue', AllowSkipPermissions: false, Session: true, Transient: false }] }]);
+  await connectServers({ A: hub });
+  view = await render(<Shell />);
+
+  const work = q('.root-group').find(g => g.querySelector('.root-group-name')?.textContent === 'work')!;
+  expect(q('.project-item', work)).toEqual([]);
+  expect(work.querySelector('.project-list-empty')?.textContent).toBe('2 nested in another root');
+  expect(work.querySelector('.root-action-btn')).not.toBeNull();
+  expect(outline()).toEqual(['overseer', '  worker-1 [work]', '  worker-2 [work]']);
+});
