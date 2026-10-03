@@ -65,11 +65,11 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     [McpServerTool(Name = "list_sessions", ReadOnly = true)]
     [Description("Every GodMode session on this server: its ID, name, address (its name for SendMessage, from a session in its " +
         "config dir), profile, root, kind, action, state, parent, " +
-        "what it needs from the user (Permission, Question, Error, Review, Finished; null for nothing) and its pull request.")]
+        "what it needs from the user (Permission, Question, Error, Escalation, Review, Finished; null for nothing) and its pull request.")]
     public async Task<string> ListSessionsAsync(RequestContext<CallToolRequestParams> context)
     {
         var scope = await ScopeOfAsync(context);
-        var needs = projects.GetAttention().ToDictionary(item => item.ProjectId, item => item);
+        var needs = projects.GetAllAttention().ToDictionary(item => item.ProjectId, item => item);
         var sessions = (await projects.ListProjectsAsync())
             .Where(s => InScope(scope, s.ProfileName, s.RootName))
             .Select(s => new SessionEntry(s.Id, s.Name, SessionAddress.OfId(s.Id), s.ProfileName, s.RootName, s.Kind, s.ActionName, s.State, s.ParentId,
@@ -204,6 +204,22 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         logger.LogInformation("Fleet resuming {ProjectId}", session);
         await Refusing(() => projects.ResumeProjectAsync(session));
         return await StateAsync(session);
+    }
+
+    [McpServerTool(Name = "escalate")]
+    [Description("Asks the user to decide something: an item in the user's inbox on your session, with text and url (the issue or " +
+        "pull request to decide it on). It stays until the user has seen it, whatever your turns do after it; a second escalate " +
+        "replaces the first, so name every open decision in it. Escalate once per decision, not once per turn. Keep assigning " +
+        "the issue or pull request to the user too: that is the record, this is the nudge. Only a session can escalate.")]
+    public async Task<string> EscalateAsync(
+        RequestContext<CallToolRequestParams> context,
+        [Description("What the user is to decide, in a sentence or two")] string text,
+        [Description("Where to decide it: the issue or pull request URL")] string? url = null)
+    {
+        if (CallerOf(context) is not { } caller)
+            throw new McpException("Only a GodMode session can escalate: the item is on the session that asks.");
+        await Refusing(() => projects.EscalateAsync(caller, text, url));
+        return await StateAsync(caller);
     }
 
     /// <summary>The calling session's ID; null for the server's credential.</summary>

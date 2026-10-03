@@ -94,6 +94,12 @@ public class ProjectInfo
     public string? ConfigDir { get; set; }
 
     /// <summary>
+    /// Whether its action ends turns quietly (<see cref="Shared.Models.CreateAction.QuietTurns"/>), as its root's config
+    /// said at its last launch; false before its first launch on this server.
+    /// </summary>
+    public bool QuietTurns { get; set; }
+
+    /// <summary>
     /// The token the project's claude calls GodMode's MCP endpoint with. Issued afresh for every
     /// launch, handed to claude only in its MCP config file, and cleared when that launch's process exits.
     /// </summary>

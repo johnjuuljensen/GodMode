@@ -131,6 +131,7 @@ public sealed class AttentionNotifier(Context context, ILogger logger) : IAttent
         AttentionKind.Permission => "Permission",
         AttentionKind.Question => "Question",
         AttentionKind.Error => "Error",
+        AttentionKind.Escalation => "Decision",
         AttentionKind.Review => "Changes requested",
         AttentionKind.Finished => "Finished",
     };

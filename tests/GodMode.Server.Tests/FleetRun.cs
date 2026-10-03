@@ -32,7 +32,7 @@ internal sealed class FleetRun : IAsyncDisposable
     /// <summary>A second root of <see cref="Profile"/>, with a work action: crossing to it as a parent needs a link.</summary>
     public const string SiblingRoot = "sibling";
 
-    public static readonly string[] FleetToolNames = ["list_roots", "list_sessions", "read", "resume", "send", "start_session", "stop"];
+    public static readonly string[] FleetToolNames = ["escalate", "list_roots", "list_sessions", "read", "resume", "send", "start_session", "stop"];
 
     private string _workDir = "";
 

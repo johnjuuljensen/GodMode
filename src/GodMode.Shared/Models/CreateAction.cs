@@ -51,6 +51,11 @@ namespace GodMode.Shared.Models;
 /// Whether the action's sessions get the fleet's tools (<c>fleetTools</c>): every one, one a granted session
 /// grants them to as it starts it, or none (<see cref="FleetToolsGrant"/>).
 /// </param>
+/// <param name="QuietTurns">
+/// Whether the action's sessions end their turns quietly (<c>"quietTurns": true</c>, issue #401): an overseer is woken by
+/// its workers' messages, the server's notices and its own background tasks, and those turns' ends raise no
+/// <see cref="AttentionKind.Finished"/>; a turn the user started does. Off unless the root turns it on. Read at each launch.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -74,7 +79,8 @@ public record CreateAction(
     bool Transient = false,
     bool Adopt = false,
     string? Effort = null,
-    FleetToolsGrant FleetTools = FleetToolsGrant.None
+    FleetToolsGrant FleetTools = FleetToolsGrant.None,
+    bool QuietTurns = false
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";

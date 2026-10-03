@@ -249,7 +249,8 @@ public class RootConfigReader : IRootConfigReader
         Session = overlay.Session ?? baseConfig.Session,
         Transient = overlay.Transient ?? baseConfig.Transient,
         Adopt = overlay.Adopt ?? baseConfig.Adopt,
-        FleetTools = overlay.FleetTools ?? baseConfig.FleetTools
+        FleetTools = overlay.FleetTools ?? baseConfig.FleetTools,
+        QuietTurns = overlay.QuietTurns ?? baseConfig.QuietTurns
     };
 
     /// <summary>
@@ -303,7 +304,8 @@ public class RootConfigReader : IRootConfigReader
             Transient: raw.Transient ?? false,
             Adopt: raw.Adopt ?? false,
             Effort: raw.Effort,
-            FleetTools: ParseFleetTools(name, raw.FleetTools)
+            FleetTools: ParseFleetTools(name, raw.FleetTools),
+            QuietTurns: raw.QuietTurns ?? false
         );
     }
 
@@ -428,6 +430,7 @@ public class RootConfigReader : IRootConfigReader
         public bool? Adopt { get; init; }
         /// <summary>true, "grantable" or false: <see cref="ParseFleetTools"/>.</summary>
         public JsonElement? FleetTools { get; init; }
+        public bool? QuietTurns { get; init; }
         /// <summary>The root's list script: read from config.json alone, never an action's overlay.</summary>
         public JsonElement? List { get; init; }
 
