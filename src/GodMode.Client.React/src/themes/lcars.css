@@ -305,6 +305,25 @@
 }
 [data-theme="lcars"] :is(.sidebar-add-btn, .sidebar-settings-btn):hover { background: #FFCC99; color: #000; }
 
+/* Voice, beside Settings: a dim band while off, lit in the state's colour while on; the Mic is lit while open (#445) */
+[data-theme="lcars"] .voice-button {
+  border-radius: var(--radius-pill);
+  border-color: transparent;
+  background: #332833;
+  color: #CC99CC;
+  font-family: var(--font-display);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  box-shadow: none;
+}
+[data-theme="lcars"] .voice-button:hover:not(:disabled) { background: #FFCC99; color: #000; }
+[data-theme="lcars"] .voice-state-listening .voice-power-button { background: #FF9900; color: #000; }
+[data-theme="lcars"] .voice-state-thinking .voice-power-button { background: #CC99CC; color: #000; }
+[data-theme="lcars"] .voice-state-speaking .voice-power-button { background: #9999FF; color: #000; }
+[data-theme="lcars"] .voice-state-error .voice-power-button { background: #CC6666; color: #000; }
+[data-theme="lcars"] .voice-mic-button.voice-mic-open { background: #9999FF; color: #000; }
+
 /* Tabs: a lit band for the active one */
 [data-theme="lcars"] .home-tabs { gap: 6px; padding: 6px 8px; }
 [data-theme="lcars"] .home-tab {

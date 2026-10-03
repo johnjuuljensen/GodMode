@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import {
-  useAppStore, foldItems, descendantsOf,
+  useAppStore, foldItems, descendantsOf, profileFoldKey, rootFoldKey, INACTIVE_FOLD_KEY,
   type ActivePage, type ProfileGroup, type RootGroup, type ServerConnection, type SidebarGroupBy, type SidebarItem,
 } from '../../store';
 import { projectKey } from '../../store/projectKey';
@@ -217,15 +217,57 @@ export function SidebarFooter() {
   );
 }
 
+/**
+ * A header's fold (#427): its name and a chevron, one button. Folded, what is under it is hidden and the header
+ * says how many, and shows a dot when any of them needs the user, as a collapsed parent does (#390).
+ */
+function FoldToggle({ folded, onToggle, what, children }: {
+  folded: boolean; onToggle: () => void; what: string; children: React.ReactNode;
+}) {
+  return (
+    <button
+      className={`group-fold-toggle ${folded ? 'folded' : ''}`}
+      aria-expanded={!folded}
+      title={folded ? `Show ${what}` : `Hide ${what}`}
+      onClick={onToggle}
+    >
+      <span className="group-fold-chevron" aria-hidden="true">{folded ? '▸' : '▾'}</span>
+      {children}
+    </button>
+  );
+}
+
+/** Whether a session needs the user: something in the inbox for it, or a question it asks. */
+function useNeedsYou(): (item: SidebarItem) => boolean {
+  const attention = useAppStore(s => s.attention);
+  const projectQuestions = useAppStore(s => s.projectQuestions);
+  const attentionKeys = new Set(attention.map(a => projectKey(a.serverId, a.ProjectId)));
+  return item => attentionKeys.has(item.key) || !!projectQuestions[item.key];
+}
+
+/** Every session a root group lists, at the top or nested, on every level. */
+const sessionsOf = (rg: RootGroup): SidebarItem[] => rg.items.flatMap(i => [i, ...descendantsOf(i)]);
+
 function ProfileSection({ group }: { group: ProfileGroup }) {
   // Where the app has windows (Windows), and only in the main window: a locked one is the profile's already (#340)
   const canOpenWindow = useAppStore(s => s.canOpenWindows && s.lockedProfile === null);
   const openProfileWindow = useAppStore(s => s.openProfileWindow);
+  // A profile's own window shows that profile alone: it has no fold for it (#427)
+  const foldable = useAppStore(s => s.lockedProfile === null);
+  const foldKey = profileFoldKey(group.name);
+  const folded = useAppStore(s => foldable && !!s.foldedHeaders[foldKey]);
+  const toggleFoldedHeader = useAppStore(s => s.toggleFoldedHeader);
+  const needsYou = useNeedsYou();
+  const anyNeedsYou = folded && group.rootGroups.some(rg => sessionsOf(rg).some(needsYou));
+  const name = <span className="profile-group-name">{group.name}</span>;
   return (
     <div className="profile-group">
       <div className="profile-group-header">
-        <span className="profile-group-name">{group.name}</span>
+        {foldable
+          ? <FoldToggle folded={folded} onToggle={() => toggleFoldedHeader(foldKey)} what={`the ${group.name} profile`}>{name}</FoldToggle>
+          : name}
         <span className="profile-group-meta">
+          {anyNeedsYou && <span className="project-children-attention" aria-label="needs you" />}
           {canOpenWindow && (
             <button
               className="profile-window-btn"
@@ -242,7 +284,7 @@ function ProfileSection({ group }: { group: ProfileGroup }) {
           <span className="profile-group-count">{group.projectCount}</span>
         </span>
       </div>
-      {group.rootGroups.map(rg => (
+      {!folded && group.rootGroups.map(rg => (
         <RootSection key={`${rg.serverId ?? ''}:${rg.rootName}`} rootGroup={rg} />
       ))}
     </div>
@@ -266,15 +308,16 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
   const selectedProject = useAppStore(s => s.selectedProject);
   const selectProject = useAppStore(s => s.selectProject);
   const setActivePage = useAppStore(s => s.setActivePage);
-  const attention = useAppStore(s => s.attention);
-  const projectQuestions = useAppStore(s => s.projectQuestions);
   const [showOlder, setShowOlder] = useState(false);
   const now = useNow(FOLD_TICK_MS);
   const { serverId, profileName, rootName } = rootGroup;
+  // A flat group (recent, status) has no header, so no fold (#427)
+  const foldKey = !rootGroup.flat && serverId ? rootFoldKey(serverId, profileName, rootName) : null;
+  const folded = useAppStore(s => foldKey !== null && !!s.foldedHeaders[foldKey]);
+  const toggleFoldedHeader = useAppStore(s => s.toggleFoldedHeader);
 
   // Older sessions fold under "N older", one tap away (#325): never one that needs the user or is open
-  const attentionKeys = new Set(attention.map(a => projectKey(a.serverId, a.ProjectId)));
-  const needsYou = (item: SidebarItem) => attentionKeys.has(item.key) || !!projectQuestions[item.key];
+  const needsYou = useNeedsYou();
   const isSelected = (item: SidebarItem) => selectedProject?.serverId === item.serverId && selectedProject.projectId === item.project.Id;
   const { shown, older } = foldItems(rootGroup.items, now, item => needsYou(item) || isSelected(item));
   const listed = showOlder ? [...shown, ...older] : shown;
@@ -283,7 +326,14 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
     <div className="root-group">
       {!rootGroup.flat && (
         <div className="root-group-header">
-          <span className="root-group-name" title={rootGroup.tooltip}>{rootGroup.name}</span>
+          {foldKey
+            ? (
+              <FoldToggle folded={folded} onToggle={() => toggleFoldedHeader(foldKey)} what={`the ${rootGroup.name} root`}>
+                <span className="root-group-name" title={rootGroup.tooltip}>{rootGroup.name}</span>
+              </FoldToggle>
+            )
+            : <span className="root-group-name" title={rootGroup.tooltip}>{rootGroup.name}</span>}
+          {folded && <FoldSummary sessions={sessionsOf(rootGroup)} needsYou={needsYou} />}
           {rootGroup.canCreate && serverId && (
             <button
               className="root-action-btn"
@@ -293,13 +343,13 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
           )}
         </div>
       )}
-      <div className={rootGroup.flat ? 'project-list project-list-flat' : 'project-list'}>
+      {!folded && <div className={rootGroup.flat ? 'project-list project-list-flat' : 'project-list'}>
         {/* A root whose sessions all nest under parents in other roots has none of its own to show, and is not empty */}
         {rootGroup.sessionCount === 0 ? (
           !rootGroup.flat && <div className="project-list-empty">No projects</div>
         ) : (
           listed.map(item => (
-            <SessionTree key={item.key} item={item} needsYou={needsYou} isSelected={isSelected} onSelect={selectProject} />
+            <SessionTree key={item.key} item={item} now={now} needsYou={needsYou} isSelected={isSelected} onSelect={selectProject} />
           ))
         )}
         {older.length > 0 && (
@@ -311,13 +361,24 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
         {!rootGroup.flat && rootGroup.canCreate && serverId && (
           <UnmanagedGroup serverId={serverId} profileName={profileName} rootName={rootName} sessionCount={rootGroup.sessionCount} />
         )}
-      </div>
+      </div>}
     </div>
+  );
+}
+
+/** A folded header's count of what is under it, and a dot when any of it needs the user. */
+function FoldSummary({ sessions, needsYou }: { sessions: SidebarItem[]; needsYou: (item: SidebarItem) => boolean }) {
+  return (
+    <span className="group-fold-summary">
+      {sessions.some(needsYou) && <span className="project-children-attention" aria-label="needs you" />}
+      <span className="profile-group-count">{sessions.length}</span>
+    </span>
   );
 }
 
 interface SessionTreeProps {
   item: SidebarItem;
+  now: number;
   needsYou: (item: SidebarItem) => boolean;
   isSelected: (item: SidebarItem) => boolean;
   onSelect: (serverId: string, projectId: string) => void;
@@ -325,12 +386,16 @@ interface SessionTreeProps {
 
 /**
  * A session and, under it, the sessions it started, on every level (#390). A parent's row collapses them: it
- * then shows how many there are, and a dot when any of them needs the user.
+ * then shows how many there are, and a dot when any of them needs the user. Open, its children that have gone
+ * quiet fold under "N older", as a root's do (#325, #427).
  */
-function SessionTree({ item, needsYou, isSelected, onSelect }: SessionTreeProps) {
+function SessionTree({ item, now, needsYou, isSelected, onSelect }: SessionTreeProps) {
   const collapsed = useAppStore(s => !!s.collapsedSessions[item.key]);
   const toggleCollapsed = useAppStore(s => s.toggleCollapsed);
+  const [showOlder, setShowOlder] = useState(false);
   const below = item.children.length > 0 ? descendantsOf(item) : [];
+  const { shown, older } = foldItems(item.children, now, child => needsYou(child) || isSelected(child));
+  const listed = showOlder ? [...shown, ...older] : shown;
   return (
     <>
       <ProjectItem
@@ -343,9 +408,14 @@ function SessionTree({ item, needsYou, isSelected, onSelect }: SessionTreeProps)
       />
       {below.length > 0 && !collapsed && (
         <div className="project-children">
-          {item.children.map(child => (
-            <SessionTree key={child.key} item={child} needsYou={needsYou} isSelected={isSelected} onSelect={onSelect} />
+          {listed.map(child => (
+            <SessionTree key={child.key} item={child} now={now} needsYou={needsYou} isSelected={isSelected} onSelect={onSelect} />
           ))}
+          {older.length > 0 && (
+            <button className="project-list-older" onClick={() => setShowOlder(!showOlder)} aria-expanded={showOlder}>
+              {showOlder ? 'Hide older' : `${older.length} older`}
+            </button>
+          )}
         </div>
       )}
     </>
@@ -357,6 +427,8 @@ function InactiveSection({ servers }: { servers: ServerConnection[] }) {
   const startServer = useAppStore(s => s.startServer);
   const setActivePage = useAppStore(s => s.setActivePage);
   const [pendingStarts, setPendingStarts] = useState<Set<string>>(new Set());
+  const folded = useAppStore(s => !!s.foldedHeaders[INACTIVE_FOLD_KEY]);
+  const toggleFoldedHeader = useAppStore(s => s.toggleFoldedHeader);
 
   const handleStart = (serverId: string) => {
     setPendingStarts(prev => new Set(prev).add(serverId));
@@ -366,9 +438,12 @@ function InactiveSection({ servers }: { servers: ServerConnection[] }) {
   return (
     <div className="inactive-section">
       <div className="profile-group-header">
-        <span className="profile-group-name">Inactive</span>
+        <FoldToggle folded={folded} onToggle={() => toggleFoldedHeader(INACTIVE_FOLD_KEY)} what="the inactive servers">
+          <span className="profile-group-name">Inactive</span>
+        </FoldToggle>
+        {folded && <span className="profile-group-count">{servers.length}</span>}
       </div>
-      {servers.map(conn => {
+      {!folded && servers.map(conn => {
         const info = conn.serverInfo;
         const isConnecting = conn.connectionState === 'connecting' || conn.connectionState === 'reconnecting';
         const isStarting = info.State === 'Starting' || pendingStarts.has(info.Id);

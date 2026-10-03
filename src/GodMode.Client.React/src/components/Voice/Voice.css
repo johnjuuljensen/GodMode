@@ -38,7 +38,8 @@
 .voice-state-speaking .voice-power-button { border-color: var(--success); box-shadow: var(--shadow-focus-success); color: var(--text-primary); }
 .voice-state-error .voice-power-button { border-color: var(--error); color: var(--error); }
 
-/* Open: resizable by its corner, never past half the window */
+/* Open: resizable by its corner. Capped well below the window, as the sidebar it is in clips: a tall strip would push
+   the buttons and Settings out of view in a short window (#445) */
 .voice-transcript {
   list-style: none;
   margin: 0;
@@ -48,7 +49,7 @@
   gap: 6px;
   height: 160px;
   min-height: 60px;
-  max-height: 50vh;
+  max-height: 30vh;
   overflow-y: auto;
   resize: vertical;
   background: var(--bg-base);
@@ -97,4 +98,30 @@
   line-height: 1;
   cursor: pointer;
   padding: 0 2px;
+}
+
+/* Compact: the phone's, where the sidebar's foot is not shown (#445). Power and Mic in a row, the error below them */
+.voice-control-compact {
+  flex: 1;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 0;
+}
+.voice-control-compact .voice-power-button { flex: 0 1 auto; }
+.voice-control-compact .voice-alert { order: 1; flex-basis: 100%; }
+/* Above the tabs on the inbox tab */
+.shell-mobile-home > .voice-control-compact {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-top: var(--border-width) var(--border-style) var(--glass-border);
+  background: var(--sidebar-bg);
+}
+
+/* Touch targets: 44px on the phone layout, as Shell.css has them for the rest */
+@media (max-width: 768px) {
+  .voice-button { min-height: 44px; }
+  .voice-alert-dismiss { min-width: 44px; min-height: 44px; }
+  .voice-alert { align-items: center; }
 }

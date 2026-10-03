@@ -225,7 +225,8 @@ export interface ToolCallItem {
 
 /** One row of a transcript. `key` is stable for the life of the transcript, for React. */
 export type TranscriptItem =
-  | { kind: 'userText'; key: string; text: string }
+  /** `pending`: sent from this page and not echoed by claude yet, or never taken by it (#383) */
+  | { kind: 'userText'; key: string; text: string; pending?: 'waiting' | 'notTaken' }
   | { kind: 'assistantText'; key: string; text: string }
   | { kind: 'thinking'; key: string; text: string }
   | ToolCallItem

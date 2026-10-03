@@ -263,6 +263,43 @@ function nest(groups: RootGroup[], otherRoot: OtherRootChildren, names: Readonly
   for (const g of groups) g.items = g.items.filter(i => !parents.has(i));
 }
 
+// ── Folded headers (#427): kept on this device, by keys that stay the same whatever other servers are listed ──
+
+/** A profile's header, by its name, matched without case as profiles are (#308): one fold on every server. */
+export const profileFoldKey = (profileName: string) => `profile:${profileName.toLowerCase()}`;
+/** The start of every root fold key of a server: its roots are its own. */
+export const rootFoldPrefix = (serverId: string) => `root:${serverId}:`;
+/** A root's header, by server, profile and root: the root of one name on two servers, or in two profiles, is two. */
+export const rootFoldKey = (serverId: string, profileName: string, rootName: string) =>
+  `${rootFoldPrefix(serverId)}${rootKey(profileName, rootName)}`;
+/** The inactive servers' section. */
+export const INACTIVE_FOLD_KEY = 'inactive';
+
+/** What is folded above a session: the headers and the sessions to open to show its row. */
+export interface FoldPath { headers: string[]; sessions: ProjectKey[] }
+
+/** The folds above the session, from its profile down, or null when the list does not show it. */
+export function foldPathOf(profileGroups: ProfileGroup[], key: ProjectKey): FoldPath | null {
+  const find = (items: SidebarItem[], above: ProjectKey[]): ProjectKey[] | null => {
+    for (const item of items) {
+      if (item.key === key) return above;
+      const found = find(item.children, [...above, item.key]);
+      if (found) return found;
+    }
+    return null;
+  };
+  for (const group of profileGroups) {
+    for (const rg of group.rootGroups) {
+      const sessions = find(rg.items, []);
+      if (!sessions) continue;
+      const headers = [profileFoldKey(group.name)];
+      if (!rg.flat && rg.serverId) headers.push(rootFoldKey(rg.serverId, rg.profileName, rg.rootName));
+      return { headers, sessions };
+    }
+  }
+  return null;
+}
+
 /** A profile's projects listed directly, with no root header. */
 const flatGroup = (profileName: string, items: SidebarItem[]): RootGroup => ({
   name: '', rootName: '', profileName, serverName: '', items, sessionCount: items.length, canCreate: false, flat: true,

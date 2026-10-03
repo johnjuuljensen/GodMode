@@ -156,7 +156,8 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             aria-expanded={!nested.collapsed}
             aria-label={`${nested.collapsed ? 'Show' : 'Hide'} the ${nested.count} under ${project.Name}`}
             title={nested.collapsed ? `Show the ${nested.count} under it` : 'Hide the sessions under it'}
-            onClick={e => { e.stopPropagation(); nested.onToggle(); }}
+            // A tap on an opened row closes it, as anywhere on the row does, rather than collapsing it (#397)
+            onClick={e => { e.stopPropagation(); if (revealed) close(); else nested.onToggle(); }}
           >
             {nested.collapsed && <span className="project-children-count">{nested.count}</span>}
             {nested.needsYou && <span className="project-children-attention" aria-label="needs you" />}

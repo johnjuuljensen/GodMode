@@ -263,6 +263,40 @@
 }
 
 /* ── Inactive Section ── */
+/* ── A header's fold (#427): its name and chevron are one button; folded, a count and a dot at its end ── */
+.group-fold-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.group-fold-chevron {
+  flex-shrink: 0;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-tertiary);
+}
+
+.group-fold-toggle:hover .group-fold-chevron {
+  color: var(--text-primary);
+}
+
+.group-fold-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 6px;
+}
+
 .inactive-section {
   margin-top: 8px;
   border-top: var(--border-width) var(--border-style) var(--glass-border);
