@@ -283,7 +283,7 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
     <div className="root-group">
       {!rootGroup.flat && (
         <div className="root-group-header">
-          <span className="root-group-name">{rootGroup.name}</span>
+          <span className="root-group-name" title={rootGroup.tooltip}>{rootGroup.name}</span>
           {rootGroup.canCreate && serverId && (
             <button
               className="root-action-btn"

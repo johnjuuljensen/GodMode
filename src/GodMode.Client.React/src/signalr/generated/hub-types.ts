@@ -310,13 +310,15 @@ export interface ProjectMetrics {
 
 /**
  * Client-facing information about a project root directory. No server paths exposed — only name, description,
- * and available create actions.
+ * and available create actions. ProjectRootInfo.Name is the root's key (in IDs, CreateProject, fleet tools);
+ * ProjectRootInfo.Title is what a client shows for it, null when the root has none and its name is shown.
  */
 export interface ProjectRootInfo {
   Name: string;
   Description?: string | null;
   Actions?: CreateActionInfo[] | null;
   ProfileName?: string | null;
+  Title?: string | null;
 }
 
 /** Detailed status information about a project. */

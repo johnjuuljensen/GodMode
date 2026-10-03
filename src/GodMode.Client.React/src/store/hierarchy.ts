@@ -37,8 +37,10 @@ export interface SidebarItem {
    * mixes (#308), or in another root with 'stay'.
    */
   startedBy?: string;
-  /** Its own root, when it is nested under a parent in another root. */
+  /** Its own root, when it is nested under a parent in another root: as it is shown (its title, else its name). */
   ownRoot?: string;
+  /** Its root as it is shown (#434): the root's title, else its name. */
+  rootShown?: string;
 }
 
 /**
@@ -50,8 +52,10 @@ export type OtherRootChildren = 'nest' | 'stay';
 export const DEFAULT_OTHER_ROOT_CHILDREN: OtherRootChildren = 'nest';
 
 export interface RootGroup {
-  name: string;          // display name (qualified with server name if multi-server)
+  name: string;          // display name: its title, else its name (qualified with the name on a clash, the server if multi-server)
   rootName: string;      // actual root name for API calls
+  /** The root's name, when it is shown by its title (#434): its header's tooltip. */
+  tooltip?: string;
   profileName: string;
   /** The server of a root's group; absent on a flat group, whose items may come from several servers. */
   serverId?: string;
@@ -90,6 +94,15 @@ export const isListed = (c: ServerConnection) => c.connectionState === 'connecte
  */
 export const profileNameOf = (name: string | null | undefined) => name ?? 'Default';
 export const sameProfile = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** What a root is shown as (#434): its title, else its name, which stays its key. */
+export const rootShownOf = (root: ProjectRootInfo) => root.Title ?? root.Name;
+
+/** What the root of that name in that profile is shown as, among a server's roots: its name when it is not listed. */
+export const rootShown = (roots: readonly ProjectRootInfo[] | undefined, profileName: string | null | undefined, rootName: string) => {
+  const root = roots?.find(r => r.Name === rootName && sameProfile(profileNameOf(r.ProfileName), profileNameOf(profileName)));
+  return root ? rootShownOf(root) : rootName;
+};
 /** Whether a profile passes a filter: 'All', or the one it names. */
 export const inProfile = (name: string | null | undefined, filter: string) =>
   filter === 'All' || sameProfile(profileNameOf(name), filter);
@@ -129,7 +142,10 @@ function collectFilteredData(connections: ServerConnection[], filter: string) {
       if (!inProfile(profileName, filter)) continue;
       const items = itemsByRoot.get(rootKey(root.ProfileName, root.Name)) ?? [];
       const transient = new Set((root.Actions ?? []).filter(a => a.Transient).map(a => a.Name));
-      for (const item of items) item.transient = item.project.ActionName != null && transient.has(item.project.ActionName);
+      for (const item of items) {
+        item.transient = item.project.ActionName != null && transient.has(item.project.ActionName);
+        item.rootShown = rootShownOf(root);
+      }
       allRoots.push({ root, items, conn, profileName });
       representedServerIds.add(serverId);
     }
@@ -242,7 +258,7 @@ function nest(groups: RootGroup[], otherRoot: OtherRootChildren, names: Readonly
     const parent = parents.get(i);
     if (!parent) continue;
     parent.children.push(i);
-    if (!groupOf.get(parent.key)!.flat && !sameRoot(i, parent)) i.ownRoot = i.project.RootName ?? undefined;
+    if (!groupOf.get(parent.key)!.flat && !sameRoot(i, parent)) i.ownRoot = i.rootShown ?? i.project.RootName ?? undefined;
   }
   for (const g of groups) g.items = g.items.filter(i => !parents.has(i));
 }
@@ -252,14 +268,22 @@ const flatGroup = (profileName: string, items: SidebarItem[]): RootGroup => ({
   name: '', rootName: '', profileName, serverName: '', items, sessionCount: items.length, canCreate: false, flat: true,
 });
 
-/** A root header per server, each with its +, then that root's projects. */
+/**
+ * A root header per server, each with its +, then that root's projects. A root is shown by its title (#434), with its
+ * name when another root here is shown as that title too, and with its server when another server has a root of its name.
+ */
 function rootGroupsOf(roots: RootEntry[]): RootGroup[] {
   const serversByRoot = new Map<string, number>();
   for (const { root } of roots) serversByRoot.set(root.Name, (serversByRoot.get(root.Name) ?? 0) + 1);
+  const namesByShown = new Map<string, Set<string>>();
+  for (const { root } of roots) namesByShown.set(rootShownOf(root), (namesByShown.get(rootShownOf(root)) ?? new Set()).add(root.Name));
+  const nameOf = (root: ProjectRootInfo) =>
+    root.Title != null && namesByShown.get(root.Title)!.size > 1 ? `${root.Title} (${root.Name})` : rootShownOf(root);
   return [...roots]
-    .sort((a, b) => a.root.Name.localeCompare(b.root.Name) || a.conn.serverInfo.Name.localeCompare(b.conn.serverInfo.Name))
+    .sort((a, b) => nameOf(a.root).localeCompare(nameOf(b.root)) || a.conn.serverInfo.Name.localeCompare(b.conn.serverInfo.Name))
     .map(({ root, items, conn, profileName }) => ({
-      name: serversByRoot.get(root.Name)! > 1 ? `${root.Name} (${conn.serverInfo.Name})` : root.Name,
+      name: serversByRoot.get(root.Name)! > 1 ? `${nameOf(root)} (${conn.serverInfo.Name})` : nameOf(root),
+      tooltip: root.Title != null ? root.Name : undefined,
       rootName: root.Name,
       profileName,
       serverId: conn.serverInfo.Id,

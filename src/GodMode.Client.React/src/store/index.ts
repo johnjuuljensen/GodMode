@@ -23,7 +23,7 @@ export { projectKey, type ProjectKey };
 /** The key of a transcript: a project's ProjectKey. */
 export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
-export { isListed, foldItems, descendantsOf, inProfile, profileNameOf, sameProfile } from './hierarchy';
+export { isListed, foldItems, descendantsOf, inProfile, profileNameOf, sameProfile, rootShown, rootShownOf } from './hierarchy';
 
 // ── Persisted dismiss tracking ─────────────────────────────────
 // Keyed by ProjectKey; the unversioned key held project IDs alone, which collide across servers

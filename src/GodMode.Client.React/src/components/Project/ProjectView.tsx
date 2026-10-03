@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useAppStore, transcriptKey } from '../../store';
+import { useAppStore, transcriptKey, rootShown } from '../../store';
 import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
 import { createTranscriptBuilder } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
@@ -176,10 +176,10 @@ export function ProjectView({ serverId, projectId }: Props) {
         <div className="project-header-info">
           <span className="project-header-name">{projectName}</span>
           {(project?.ProfileName || project?.RootName) && (
-            <span className="project-header-root">
+            <span className="project-header-root" title={project?.RootName ?? undefined}>
               {project?.ProfileName && project.ProfileName !== 'Default' ? project.ProfileName : ''}
               {project?.ProfileName && project.ProfileName !== 'Default' && project?.RootName ? ' / ' : ''}
-              {project?.RootName ?? ''}
+              {project?.RootName ? rootShown(conn?.roots, project.ProfileName, project.RootName) : ''}
             </span>
           )}
         </div>
