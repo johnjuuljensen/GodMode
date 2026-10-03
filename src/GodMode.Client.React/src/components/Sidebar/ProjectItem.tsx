@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useAppStore, type SidebarItem } from '../../store';
+import { useAppStore, waitsOnUser, type SidebarItem } from '../../store';
 import { KindLabel } from '../KindLabel/KindLabel';
 import { deleteSession } from '../../deleteSession';
 
@@ -37,9 +37,8 @@ const MENU_HEIGHT_PX = 44;
 export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
   const { project, serverLabel, ownRoot, startedBy } = item;
   const timeAgo = formatRelativeTime(project.UpdatedAt);
-  const clientQuestion = useAppStore(s => s.projectQuestions[item.key]);
   const isMobile = useAppStore(s => s.isMobile);
-  const isWaiting = project.State === 'WaitingInput' || clientQuestion;
+  const isWaiting = waitsOnUser(project);
   const stateStr = String(project.State ?? 'Idle');
   const stateLabel = isWaiting ? 'WAIT' : stateStr.slice(0, 4).toUpperCase();
 

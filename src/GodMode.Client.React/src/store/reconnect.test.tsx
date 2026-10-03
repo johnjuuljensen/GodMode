@@ -6,12 +6,11 @@
  */
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakeHub, project, root, connectServers, flush, line } from '../test/fakeHub';
+import { FakeHub, project, root, status, connectServers, flush, line } from '../test/fakeHub';
 import { render, type Rendered } from '../test/render';
 import { ProjectView } from '../components/Project/ProjectView';
 import { TileGrid } from '../components/Tiles/TileGrid';
 import { Sidebar, SidebarHeader } from '../components/Sidebar/Sidebar';
-import { parseClaudeMessage } from '../signalr/parseMessage';
 import { useAppStore } from './index';
 import { projectKey } from './projectKey';
 
@@ -116,34 +115,34 @@ const badge = () => [...view!.container.querySelectorAll('.project-item')]
   .find(el => el.querySelector('.project-name')?.textContent === 'first')?.querySelector('.project-state-badge')?.textContent;
 
 describe('a question the user dismissed (#239)', () => {
-  it('stays dismissed over a reconnect, though its project still asks', async () => {
-    hub.projects = [{ ...project('p1', 'first', 'Idle', '2026-09-24T12:00:00Z'), CurrentQuestion: 'Shall I go on?' }, hub.projects[1]];
+  it('stays dismissed over a reconnect, though its project still asks, which its badge says (#441)', async () => {
+    hub.projects = [{ ...project('p1', 'first', 'WaitingInput', '2026-09-24T12:00:00Z'), CurrentQuestion: 'Shall I go on?' }, hub.projects[1]];
     await hub.drop();
     await hub.reconnect();
     view = await render(<Sidebar />);
     expect(badge()).toBe('WAIT');
 
     useAppStore.getState().selectProject('A', 'p1');
+    expect(useAppStore.getState().question.isActive).toBe(true);
     await act(async () => useAppStore.getState().dismissQuestion());
-    expect(badge()).toBe('IDLE');
+    expect(useAppStore.getState().question.isActive).toBe(false);
 
     await act(() => hub.drop());
     await act(() => hub.reconnect());
     await act(flush);
-    expect(badge()).toBe('IDLE');
-    expect(useAppStore.getState().totalWaitingCount).toBe(0);
+    expect(useAppStore.getState().question.isActive).toBe(false);
+    // WAIT is the server's: the session still waits on an answer, and takes a message for one
+    expect(badge()).toBe('WAIT');
   });
 });
 
 describe('after a sleep in which a question was answered elsewhere and a project was deleted (#239)', () => {
-  const asking = parseClaudeMessage(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Shall I go on?' }] } }));
-
   it("the WAIT badge is gone, and the deleted project's open view says it is not found, with nothing to act on", async () => {
     useAppStore.getState().selectProject('A', 'p2');
     view = await render(<><Sidebar /><ProjectView serverId="A" projectId="p2" /></>);
     await act(async () => {
       hub.lastReplay('p2').answer(0, [10, 20]);
-      hub.callbacks.onOutputReceived?.('p1', { offset: 5, message: asking });
+      hub.callbacks.onStatusChanged?.('p1', { ...status('p1', 'WaitingInput'), CurrentQuestion: 'Shall I go on?' });
     });
     expect(badge()).toBe('WAIT');
     expect(useAppStore.getState().outputMessages).toHaveLength(2);
@@ -154,7 +153,6 @@ describe('after a sleep in which a question was answered elsewhere and a project
     await act(flush);
 
     expect(badge()).toBe('RUNN');
-    expect(useAppStore.getState().totalWaitingCount).toBe(0);
     const el = view.container;
     expect(el.querySelector('.project-messages-empty')?.textContent).toBe('Project not found');
     expect(el.querySelector<HTMLTextAreaElement>('textarea.project-input')!.disabled).toBe(true);

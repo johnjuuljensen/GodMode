@@ -65,7 +65,6 @@ export function TileGrid() {
           <ProjectTile
             key={projectKey(serverId, project.Id)}
             project={project}
-            serverId={serverId}
             messages={tileMessages[projectKey(serverId, project.Id)] ?? []}
             isLoading={tileLoading[projectKey(serverId, project.Id)] ?? false}
             isSelected={

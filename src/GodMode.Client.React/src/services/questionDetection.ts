@@ -127,14 +127,3 @@ export function endsWithQuestionMark(text: string): boolean {
   const trimmed = text.replace(/\s+$/, '');
   return trimmed.length > 0 && trimmed.charCodeAt(trimmed.length - 1) === 0x3f; // '?'
 }
-
-/**
- * True iff this message should surface as a question (assistant text ending
- * with '?'). Used where a single bool decision is enough.
- */
-export function isQuestionMessage(message: ClaudeMessage): boolean {
-  if (message.type !== 'assistant') return false;
-  const lastText = getLastTextBlock(message);
-  return lastText !== null && endsWithQuestionMark(lastText);
-}
-
