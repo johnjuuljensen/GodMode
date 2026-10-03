@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type MouseEventHandler, type Ref } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import type { TranscriptItem } from '../../signalr/parseMessage';
 import { ChatMessage } from './ChatMessage';
@@ -13,6 +13,9 @@ export interface TranscriptListHandle {
 interface Props {
   items: TranscriptItem[];
   ref?: Ref<TranscriptListHandle>;
+  /** A press and a click in the output: the view's, to focus its composer (#435) */
+  onMouseDown?: MouseEventHandler;
+  onClick?: MouseEventHandler;
 }
 
 const Spacer = () => <div className="transcript-spacer" />;
@@ -27,7 +30,7 @@ const READER_SCROLL_MS = 1000;
  * are measured. Once the reader scrolls up nothing moves the list: new items show a "new messages"
  * button instead, which takes them back to the latest. It is remounted (a `key`) for each project.
  */
-export function TranscriptList({ items, ref }: Props) {
+export function TranscriptList({ items, ref, onMouseDown, onClick }: Props) {
   // Open rows by item key: kept here, not in the row, so a row scrolled away and back stays open
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const toggle = useCallback((key: string) => setExpanded(prev => {
@@ -121,7 +124,7 @@ export function TranscriptList({ items, ref }: Props) {
   const newCount = following ? 0 : countNewItems(items, lastSeenKey);
 
   return (
-    <div className="transcript">
+    <div className="transcript" onMouseDown={onMouseDown} onClick={onClick}>
       <Virtuoso
         ref={virtuoso}
         scrollerRef={scrollerRef}
