@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using GodMode.Shared.Enums;
 
 namespace GodMode.Shared.Models;
@@ -42,5 +43,5 @@ public record ProjectSummary(
     string? ParentId = null,
     IReadOnlyList<string>? SlashCommands = null,
     string? RecordedParentId = null,
-    Importance Importance = Importance.Normal
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal
 );

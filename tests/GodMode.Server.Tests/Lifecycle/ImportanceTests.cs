@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GodMode.FakeClaude;
 using GodMode.Server.Services;
+using GodMode.Shared;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -55,6 +56,25 @@ public class ImportanceTests
     public void EveryKind_HasAnAlertInEveryTier() =>
         Assert.All(Enum.GetValues<Importance>().SelectMany(i => Enum.GetValues<AttentionKind>().Select(k => (i, k))),
             pair => Assert.True(Enum.IsDefined(Attention.AlertOf(pair.i, pair.k))));
+
+    /// <summary>
+    /// Normal and Notify are what every item was before tiers: the JSON leaves them out, and an item without them, from a
+    /// server before tiers, reads as them. Quiet and Inbox are written.
+    /// </summary>
+    [Fact]
+    public void TheDefaults_AreLeftOutOfTheJson_AndReadBackAsNormal()
+    {
+        var normal = new AttentionItem("p/r/s", "s", "p", "r", AttentionKind.Finished, DateTime.UtcNow, "done");
+        var json = JsonSerializer.Serialize(normal, JsonDefaults.Options);
+        Assert.DoesNotContain("Importance", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Alert", json, StringComparison.OrdinalIgnoreCase);
+        var read = JsonSerializer.Deserialize<AttentionItem>(json, JsonDefaults.Options)!;
+        Assert.Equal((Importance.Normal, AttentionAlert.Notify), (read.Importance, read.Alert));
+
+        var quiet = JsonSerializer.Serialize(normal with { Importance = Importance.Quiet, Alert = AttentionAlert.Inbox }, JsonDefaults.Options);
+        Assert.Contains("\"Quiet\"", quiet);
+        Assert.Contains("\"Inbox\"", quiet);
+    }
 
     // ── Sessions ──
 

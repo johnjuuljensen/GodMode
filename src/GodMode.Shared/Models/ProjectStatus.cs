@@ -121,7 +121,7 @@ public record ProjectStatus(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool QuietResult = false,
     TurnResult? UnseenResult = null,
     Escalation? Escalation = null,
-    Importance Importance = Importance.Normal
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal
 );
 
 /// <summary>A turn's end, as <see cref="ProjectStatus.UnseenResult"/> keeps it.</summary>

@@ -61,5 +61,5 @@ public record AttentionItem(
     string? Spoken = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false,
     string? RecordedParentId = null,
-    Importance Importance = Importance.Normal,
-    AttentionAlert Alert = AttentionAlert.Notify);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] AttentionAlert Alert = AttentionAlert.Notify);
