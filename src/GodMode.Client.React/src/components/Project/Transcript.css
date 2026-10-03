@@ -38,6 +38,32 @@
   padding: 10px 0 6px;
 }
 
+/* Sent and not echoed by claude yet (#383): dimmed, its mark under it */
+.ti-user-waiting,
+.ti-user-notTaken {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.ti-user-waiting .ti-user-bubble {
+  opacity: 0.55;
+}
+
+.ti-user-notTaken .ti-user-bubble {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+.ti-user-pending {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.ti-user-notTaken .ti-user-pending {
+  color: var(--error);
+}
+
 .ti-user-bubble {
   max-width: min(80%, 720px);
   background: var(--accent-soft);

@@ -22,8 +22,11 @@ export const ChatMessage = memo(function ChatMessage({ item, expanded, onToggle,
   switch (item.kind) {
     case 'userText':
       return (
-        <div className="ti ti-user">
+        <div className={`ti ti-user${item.pending ? ` ti-user-${item.pending}` : ''}`}>
           <div className="ti-user-bubble">{item.text}</div>
+          {item.pending && (
+            <div className="ti-user-pending">{item.pending === 'waiting' ? 'Waiting for claude' : 'Not taken: the session stopped'}</div>
+          )}
         </div>
       );
     case 'assistantText':
