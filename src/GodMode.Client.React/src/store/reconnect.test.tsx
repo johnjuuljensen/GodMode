@@ -111,9 +111,9 @@ describe('the selected project and a tile, open over a reconnect', () => {
   });
 });
 
-/** The sidebar badge of p1 ('first'): WAIT when it asks, else its state's first four letters. */
+/** The state p1 ('first') shows in the sidebar, as its dot names it: waiting on you when it asks, else its state. */
 const badge = () => [...view!.container.querySelectorAll('.project-item')]
-  .find(el => el.querySelector('.project-name')?.textContent === 'first')?.querySelector('.project-state-badge')?.textContent;
+  .find(el => el.querySelector('.project-name')?.textContent === 'first')?.querySelector('.project-state-dot')?.getAttribute('aria-label');
 
 describe('a question the user dismissed (#239)', () => {
   it('stays dismissed over a reconnect, though its project still asks', async () => {
@@ -121,16 +121,16 @@ describe('a question the user dismissed (#239)', () => {
     await hub.drop();
     await hub.reconnect();
     view = await render(<Sidebar />);
-    expect(badge()).toBe('WAIT');
+    expect(badge()).toBe('Waiting on you');
 
     useAppStore.getState().selectProject('A', 'p1');
     await act(async () => useAppStore.getState().dismissQuestion());
-    expect(badge()).toBe('IDLE');
+    expect(badge()).toBe('Idle');
 
     await act(() => hub.drop());
     await act(() => hub.reconnect());
     await act(flush);
-    expect(badge()).toBe('IDLE');
+    expect(badge()).toBe('Idle');
     expect(useAppStore.getState().totalWaitingCount).toBe(0);
   });
 });
@@ -145,7 +145,7 @@ describe('after a sleep in which a question was answered elsewhere and a project
       hub.lastReplay('p2').answer(0, [10, 20]);
       hub.callbacks.onOutputReceived?.('p1', { offset: 5, message: asking });
     });
-    expect(badge()).toBe('WAIT');
+    expect(badge()).toBe('Waiting on you');
     expect(useAppStore.getState().outputMessages).toHaveLength(2);
 
     await act(() => hub.drop());
@@ -153,7 +153,7 @@ describe('after a sleep in which a question was answered elsewhere and a project
     await act(() => hub.reconnect());
     await act(flush);
 
-    expect(badge()).toBe('RUNN');
+    expect(badge()).toBe('Running');
     expect(useAppStore.getState().totalWaitingCount).toBe(0);
     const el = view.container;
     expect(el.querySelector('.project-messages-empty')?.textContent).toBe('Project not found');

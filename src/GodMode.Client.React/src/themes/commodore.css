@@ -151,6 +151,18 @@
   --duration:         0.15s;
   --duration-slow:    0.2s;
   --loop-iterations:  0;
+
+  /* ── The left list (#437) ── */
+  --state-running:    var(--success);
+  --state-waiting:    var(--warning);
+  --state-idle:       var(--text-secondary);
+  --state-error:      var(--error);
+  --state-stopped:    var(--text-tertiary);
+  --state-dot-size:   7px;
+  --list-indent:      11px;
+  --list-gutter:      6px;
+  --row-pad-x:        6px;
+  --row-pad-y:        4px;
 }
 
 /* ── Pixels stay pixels: Pet Me 64 has one weight, never a smeared fake bold ── */

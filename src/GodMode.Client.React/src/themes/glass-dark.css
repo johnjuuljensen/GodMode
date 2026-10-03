@@ -144,4 +144,17 @@
   --duration:         0.15s;
   --duration-slow:    0.2s;
   --loop-iterations:  infinite;  /* 0 in a theme without looping animation */
+
+  /* ── The left list (#437): a session's state as a dot in its colour, and the list's spacing. A theme may
+     restyle them but not widen them (themes.test.ts bounds them): the panel's width (#436) counts on them ── */
+  --state-running:    var(--success);
+  --state-waiting:    var(--warning);
+  --state-idle:       var(--text-secondary);
+  --state-error:      var(--error);
+  --state-stopped:    var(--text-tertiary);
+  --state-dot-size:   7px;
+  --list-indent:      11px;   /* each nesting level steps in this far, its guide line included */
+  --list-gutter:      6px;    /* a row's inset from the panel's edges */
+  --row-pad-x:        6px;
+  --row-pad-y:        4px;
 }

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAppStore, type SidebarItem } from '../../store';
 import { KindLabel } from '../KindLabel/KindLabel';
 import { deleteSession } from '../../deleteSession';
+import type { ProjectState } from '../../signalr/types';
 
 interface Props {
   item: SidebarItem;
@@ -40,8 +41,9 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
   const clientQuestion = useAppStore(s => s.projectQuestions[item.key]);
   const isMobile = useAppStore(s => s.isMobile);
   const isWaiting = project.State === 'WaitingInput' || clientQuestion;
-  const stateStr = String(project.State ?? 'Idle');
-  const stateLabel = isWaiting ? 'WAIT' : stateStr.slice(0, 4).toUpperCase();
+  const state: ProjectState = isWaiting ? 'WaitingInput' : project.State;
+  // A state this client does not know yet is named as the server names it
+  const stateName = stateNames[state] ?? String(state);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -129,12 +131,10 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
       >
-        <span className={`project-state-badge ${isWaiting ? 'WaitingInput' : project.State}`}>
-          {stateLabel}
-        </span>
+        <span className={`project-state-dot ${state}`} role="img" aria-label={stateName} title={stateName} />
         <div className="project-info">
           <div className="project-name-row">
-            <div className="project-name">{project.Name}</div>
+            <div className="project-name" title={project.Name}>{project.Name}</div>
             <KindLabel kind={project.Kind} />
             {ownRoot && <span className="project-own-root" title={`In ${ownRoot}`}>{ownRoot}</span>}
           </div>
@@ -190,6 +190,16 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
     </div>
   );
 }
+
+/** A state's name, as its dot's tooltip and aria-label say it (#437). */
+const stateNames: Record<ProjectState, string> = {
+  Idle: 'Idle',
+  Running: 'Running',
+  WaitingInput: 'Waiting on you',
+  WaitingPermission: 'Waiting for your permission',
+  Error: 'Error',
+  Stopped: 'Stopped',
+};
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);
