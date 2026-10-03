@@ -19,6 +19,10 @@ namespace GodMode.Shared.Models;
 /// <param name="Adopted">Whether the session was adopted, as in <see cref="ProjectStatus.Adopted"/>: the app offers Forget beside its delete.</param>
 /// <param name="ParentId">The session that started this one, or null, as in <see cref="ProjectStatus.ParentId"/>.</param>
 /// <param name="SlashCommands">The slash commands GodMode sends to the session, as in <see cref="ProjectStatus.SlashCommands"/>.</param>
+/// <param name="RecordedParentId">
+/// The session that started this one as the server recorded it, as in <see cref="AttentionItem.RecordedParentId"/>:
+/// the overseer that runs it. Null for a top-level session.
+/// </param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -35,5 +39,6 @@ public record ProjectSummary(
     bool SharedFolder = false,
     bool Adopted = false,
     string? ParentId = null,
-    IReadOnlyList<string>? SlashCommands = null
+    IReadOnlyList<string>? SlashCommands = null,
+    string? RecordedParentId = null
 );

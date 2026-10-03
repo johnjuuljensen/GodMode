@@ -731,7 +731,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 SharedFolder: s.SharedFolder,
                 Adopted: s.Adopted,
                 ParentId: s.ParentId,
-                SlashCommands: s.SlashCommands
+                SlashCommands: s.SlashCommands,
+                RecordedParentId: ServerParentOf(project)
             ));
         }
 
@@ -1330,6 +1331,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         {
             RefuseFailedCreate(project);
             SlashCommands.Check(input, project.Status);
+            project.Process.MarkUserTurn();
         }
         return SendInputAsync(projectId, input, answersPending: true);
     }
@@ -1372,6 +1374,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         RefuseFailedCreate(project);
         if (!answersPending) RefuseWhilePending(project);
         SlashCommands.Check(text, project.Status);
+        // The user's reply answers what is pending; the fleet's send, which does not, starts no turn of the user's
+        if (answersPending) project.Process.MarkUserTurn();
 
         // One reply at a time decides whether to resume: two would launch two processes. The wait
         // for the session to start comes after the lock, so a stop is not held behind it
@@ -1507,7 +1511,13 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             ? await OutputLog.LastRepliesAsync(project.StatePath, turns)
             : throw new KeyNotFoundException($"Project {projectId} not found");
 
-    public AttentionItem[] GetAttention() => Attention.Of(_projects.Values.Select(project => project.Status));
+    public AttentionItem[] GetAttention() => GetAllAttention().Where(Attention.IsTheUsers).ToArray();
+
+    /// <summary>Each item with its session's recorded parent, read only for the sessions that have one.</summary>
+    public AttentionItem[] GetAllAttention() =>
+        Attention.Sorted(_projects.Values.Select(project => Attention.Of(project.Status) is { } item
+            ? item with { RecordedParentId = ServerParentOf(project) }
+            : null));
 
     public async Task MarkSeenAsync(string projectId)
     {
@@ -1516,6 +1526,20 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // Not UpdatedAt: it dates an Error, and seeing a result changes no state
         await _lifecycle.UpdateStatusAsync(project, status => status with { SeenAt = DateTime.UtcNow });
+        await NotifyStatusChanged(project);
+    }
+
+    public async Task EscalateAsync(string projectId, string text, string? url)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        CheckText(text);
+        if (url is { Length: > 0 } && !(Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)))
+            throw new ArgumentException($"The url '{url}' is not an http(s) URL.");
+
+        _logger.LogInformation("Project {ProjectId} escalates to the user ({Length} characters)", projectId, text.Length);
+        // Not UpdatedAt, as for SeenAt: it dates an Error
+        await _lifecycle.UpdateStatusAsync(project, status => status with { Escalation = new Escalation(DateTime.UtcNow, text.Trim(), url is { Length: > 0 } ? url : null) });
         await NotifyStatusChanged(project);
     }
 
@@ -1662,6 +1686,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (answers.Count == 0)
             throw new ArgumentException("An answer needs at least one question answered", nameof(answers));
 
+        // The turn carries on with the user's answer: its end is the user's to see
+        project.Process.MarkUserTurn();
         await AnswerPendingAsync(project, pending, PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, answers)));
         _logger.LogInformation("Project {ProjectId}: question {RequestId} answered", projectId, requestId);
     }
@@ -3064,6 +3090,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             if (SessionAddress.OfId(parentId) is { } parentAddress) env[SessionAddress.ParentVariable] = parentAddress;
         }
         project.ConfigDir = ConfigDirOf(env);
+        project.QuietTurns = action.QuietTurns;
         return new ClaudeLaunchSpec(env, [.. args, "-n", address]);
     }
 

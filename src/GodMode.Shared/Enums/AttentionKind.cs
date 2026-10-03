@@ -25,6 +25,14 @@ public enum AttentionKind
     Error,
 
     /// <summary>
+    /// An overseer asked the user to decide something (its fleet tool <c>escalate</c>,
+    /// <see cref="Models.ProjectStatus.Escalation"/>): the item's text, and its URL as
+    /// <see cref="Models.AttentionItem.PullRequestUrl"/> when it gave one. Unlike <see cref="Finished"/>, the turns that
+    /// end after it leave it as it is. Cleared by <see cref="Hubs.IProjectHub.MarkSeen"/> and by any reply, until it asks again.
+    /// </summary>
+    Escalation,
+
+    /// <summary>
     /// A reviewer asked for changes on the project's open pull request (<see cref="Models.ProjectStatus.PullRequest"/>),
     /// and the project is Idle or Stopped. Cleared by <see cref="Hubs.IProjectHub.MarkSeen"/> and by any reply,
     /// until the pull request changes again.
@@ -34,6 +42,7 @@ public enum AttentionKind
     /// <summary>
     /// The turn ended with a result the user has not seen (<see cref="Models.ProjectStatus.LastResult"/>),
     /// and the project is Idle or Stopped. Cleared by <see cref="Hubs.IProjectHub.MarkSeen"/> and by any reply.
+    /// A quiet turn's end raises none (<see cref="Models.ProjectStatus.QuietResult"/>).
     /// </summary>
     Finished,
 }

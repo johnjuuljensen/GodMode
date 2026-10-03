@@ -22,7 +22,10 @@ namespace GodMode.Shared.Models;
 /// </param>
 /// <param name="Permission">The tool call to allow or deny, when <paramref name="Kind"/> is <see cref="AttentionKind.Permission"/>.</param>
 /// <param name="Question">The AskUserQuestion with its options, when <paramref name="Kind"/> is <see cref="AttentionKind.Question"/> and claude asked with the tool; null for a question in plain text.</param>
-/// <param name="PullRequestUrl">The project's pull request, when <paramref name="Kind"/> is <see cref="AttentionKind.Review"/> or <see cref="AttentionKind.Finished"/> and it has one.</param>
+/// <param name="PullRequestUrl">
+/// The project's pull request, when <paramref name="Kind"/> is <see cref="AttentionKind.Review"/> or <see cref="AttentionKind.Finished"/> and it has one;
+/// for <see cref="AttentionKind.Escalation"/>, where to decide it (<see cref="Escalation.Url"/>), when the overseer gave one.
+/// </param>
 /// <param name="Spoken">
 /// The session's own spoken version of the turn's reply (<see cref="ProjectStatus.SpokenSummary"/>), when
 /// <paramref name="Kind"/> is <see cref="AttentionKind.Finished"/>, or <see cref="AttentionKind.Question"/> asked in plain
@@ -31,6 +34,12 @@ namespace GodMode.Shared.Models;
 /// <param name="CreateFailed">
 /// Whether the item is the <see cref="AttentionKind.Error"/> of a create that failed before its launch
 /// (<see cref="ProjectStatus.CreateFailed"/>): it takes no reply, and the app offers its delete instead. Left out of the JSON when false.
+/// </param>
+/// <param name="RecordedParentId">
+/// The session that started this one, as the server recorded it at its create: an overseer that runs it and hears of
+/// it. Null for a top-level session. Unlike <see cref="ProjectStatus.ParentId"/>, which the session can write, the
+/// session cannot change it. A child's <see cref="AttentionKind.Finished"/> and <see cref="AttentionKind.Review"/> are
+/// its parent's business, and not in the user's list; its permission prompts, questions and errors are.
 /// </param>
 public record AttentionItem(
     string ProjectId,
@@ -44,4 +53,5 @@ public record AttentionItem(
     PendingQuestion? Question = null,
     string? PullRequestUrl = null,
     string? Spoken = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false,
+    string? RecordedParentId = null);
