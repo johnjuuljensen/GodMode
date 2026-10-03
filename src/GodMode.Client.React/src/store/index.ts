@@ -11,11 +11,11 @@ import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../signalr/types';
 import {
   type QuestionState, emptyQuestion, detectQuestionFromMessage,
-  detectQuestionFromStatus, isQuestionMessage,
+  detectQuestionFromStatus,
 } from '../services/questionDetection';
 import { projectKey, type ProjectKey } from './projectKey';
 import {
-  rebuildHierarchy, computeTotalWaiting, inProfile, SIDEBAR_GROUP_ORDER, DEFAULT_GROUP_BY,
+  rebuildHierarchy, inProfile, SIDEBAR_GROUP_ORDER, DEFAULT_GROUP_BY,
   type ServerConnection, type SidebarGroupBy, type ProfileGroup,
 } from './hierarchy';
 
@@ -302,12 +302,8 @@ interface AppState {
   inboxDrafts: Record<ProjectKey, InboxDraft>;
   setInboxDraft: (serverId: string, projectId: string, draft: Partial<InboxDraft>) => void;
 
-  // Per-project question tracking, by ProjectKey. dismissedProjects is persisted and holds only dismissed ones
-  projectQuestions: Record<ProjectKey, boolean>;
+  // The projects whose question the user dismissed, by ProjectKey; persisted
   dismissedProjects: Record<ProjectKey, true>;
-
-  // Notification badges
-  totalWaitingCount: number;
 
   // Tile view
   isTileView: boolean;
@@ -336,11 +332,9 @@ interface AppState {
 function questionCleared(state: AppState, dismissed: boolean): Partial<AppState> {
   const sel = state.selectedProject;
   const key = sel && projectKey(sel.serverId, sel.projectId);
-  const pq = key ? { ...state.projectQuestions, [key]: false } : state.projectQuestions;
   const dp = key ? withDismissed(state.dismissedProjects, key, dismissed) : state.dismissedProjects;
   if (dp !== state.dismissedProjects) saveDismissed(dp);
-  const total = computeTotalWaiting(state.serverConnections, pq, dp);
-  return { question: emptyQuestion, lastInputSentAt: Date.now(), projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total };
+  return { question: emptyQuestion, lastInputSentAt: Date.now(), dismissedProjects: dp };
 }
 
 /**
@@ -348,7 +342,7 @@ function questionCleared(state: AppState, dismissed: boolean): Partial<AppState>
  * or a list after a reconnect shows it: questions, drafts, tiles and output. A transcript still open
  * stays open, empty and unsubscribed, so it is subscribed afresh should its project come back (created
  * again with the same ID). The selection stays, and its view says the project is not found.
- * The caller works out what depends on the lists (totalWaitingCount among it).
+ * The caller works out what depends on the lists.
  */
 function forgotten(state: AppState, keys: ReadonlySet<ProjectKey>): Partial<AppState> {
   if (keys.size === 0) return {};
@@ -361,8 +355,7 @@ function forgotten(state: AppState, keys: ReadonlySet<ProjectKey>): Partial<AppS
   if (dp !== state.dismissedProjects) saveDismissed(dp);
   const sel = state.selectedProject;
   return {
-    transcripts, dismissedProjects: dp,
-    projectQuestions: without(state.projectQuestions, keys), inboxDrafts: without(state.inboxDrafts, keys),
+    transcripts, dismissedProjects: dp, inboxDrafts: without(state.inboxDrafts, keys),
     tiles: without(state.tiles, keys), tileMessages: without(state.tileMessages, keys), tileLoading: without(state.tileLoading, keys),
     ...(sel && keys.has(projectKey(sel.serverId, sel.projectId)) ? { outputMessages: [], question: emptyQuestion } : {}),
   };
@@ -374,21 +367,24 @@ function goneKeys(state: AppState, serverId: string, projects: ProjectSummary[])
   const kept = new Set(projects.map(p => projectKey(serverId, p.Id)));
   const sel = state.selectedProject;
   const held = [
-    state.transcripts, state.projectQuestions, state.dismissedProjects, state.inboxDrafts, state.tiles,
+    state.transcripts, state.dismissedProjects, state.inboxDrafts, state.tiles,
   ].flatMap(map => Object.keys(map) as ProjectKey[]);
   if (sel) held.push(projectKey(sel.serverId, sel.projectId));
   return new Set(held.filter(k => k.startsWith(prefix) && !kept.has(k)));
 }
 
-/** Whether a listed project is waiting on the user's answer to a question, as its status says. */
-const asksQuestion = (p: ProjectSummary) => p.State === 'WaitingInput' || (p.State === 'Idle' && !!p.CurrentQuestion);
+/**
+ * Whether a project waits on the user's answer (WAIT), as its server's status says (#441): WaitingInput, or
+ * a question it was stopped on, which it still asks. Never from its live output: the server decides at the
+ * turn's end, from the turn's final text, and a turn's narration ending in '?' is no question.
+ */
+export const waitsOnUser = (p: ProjectSummary) => p.State === 'WaitingInput' || (p.State === 'Stopped' && !!p.CurrentQuestion);
 
 /** A project added to its server's list (replacing it if listed already), and what is derived from the lists. */
 function listed(state: AppState, serverId: string, project: ProjectSummary): Partial<AppState> {
   const connections = withProject(state.serverConnections, serverId, project);
   const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
-  const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
-  return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
+  return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions };
 }
 
 // Helper to persist sidebar groupBy
@@ -643,13 +639,6 @@ export const useAppStore = create<AppState>((set, get) => {
       const key = projectKey(serverId, projectId);
       set(state => {
         const updates: Partial<AppState> = {};
-        const messages = lines.map(l => l.message);
-
-        if (!state.dismissedProjects[key] && messages.some(isQuestionMessage)) {
-          const pq = { ...state.projectQuestions, [key]: true };
-          updates.projectQuestions = pq;
-          updates.totalWaitingCount = computeTotalWaiting(state.serverConnections, pq, state.dismissedProjects);
-        }
 
         const held = state.transcripts[key];
         if (held && (batch ? answers(held, batch.subscription) : held.phase === 'live')) {
@@ -696,8 +685,7 @@ export const useAppStore = create<AppState>((set, get) => {
         );
         const updates = forgotten(state, new Set([projectKey(serverId, projectId)]));
         const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
-        const total = computeTotalWaiting(connections, updates.projectQuestions ?? state.projectQuestions, updates.dismissedProjects ?? state.dismissedProjects);
-        return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, ...updates, totalWaitingCount: total };
+        return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, ...updates };
       });
     };
 
@@ -806,7 +794,6 @@ export const useAppStore = create<AppState>((set, get) => {
           const key = projectKey(serverId, status.Id);
           const sel = state.selectedProject;
           let questionUpdate: Partial<AppState> = {};
-          let pq = state.projectQuestions;
           if (sel?.serverId === serverId && sel?.projectId === status.Id && !state.dismissedProjects[key]) {
             const isWaitingOrIdle = status.State === 'WaitingInput' || status.State === 'Idle';
             if (isWaitingOrIdle) {
@@ -816,29 +803,22 @@ export const useAppStore = create<AppState>((set, get) => {
                   status.State, status.CurrentQuestion, project.Name,
                   state.question, state.lastInputSentAt, state.outputMessages,
                 );
-                if (detected) {
-                  questionUpdate = { question: detected };
-                  pq = { ...pq, [key]: detected.isActive };
-                }
+                if (detected) questionUpdate = { question: detected };
               }
             } else if (state.question.isActive) {
               questionUpdate = { question: emptyQuestion };
-              pq = { ...pq, [key]: false };
             }
           }
 
           let dp = state.dismissedProjects;
           if (status.State === 'Running') {
-            pq = { ...pq, [key]: false };
             dp = withDismissed(dp, key, false);
             if (dp !== state.dismissedProjects) saveDismissed(dp);
           }
 
-          const total = computeTotalWaiting(connections, pq, dp);
           return {
             serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
-            projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total,
-            ...questionUpdate,
+            dismissedProjects: dp, ...questionUpdate,
           };
         });
       },
@@ -926,8 +906,7 @@ export const useAppStore = create<AppState>((set, get) => {
             : c
         );
         const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
-        const total = computeTotalWaiting(connections, state.projectQuestions, state.dismissedProjects);
-        return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
+        return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions };
       });
     }
   },
@@ -962,18 +941,10 @@ export const useAppStore = create<AppState>((set, get) => {
         );
         // What is held for a project this server no longer has goes with it, as when it was deleted
         const updates = forgotten(state, goneKeys(state, serverId, projects));
-        // What each listed project asks, as its status says now: a question answered elsewhere while
-        // this client slept has left no event behind to clear it. One the user dismissed stays dismissed
-        const dp = updates.dismissedProjects ?? state.dismissedProjects;
-        const pq = { ...(updates.projectQuestions ?? state.projectQuestions) };
-        for (const p of projects) {
-          const key = projectKey(serverId, p.Id);
-          if (asksQuestion(p) && !dp[key]) pq[key] = true; else delete pq[key];
-        }
         const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
         return {
           serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
-          ...updates, projectQuestions: pq, totalWaitingCount: computeTotalWaiting(connections, pq, dp),
+          ...updates,
           projectsListed: { ...state.projectsListed, [serverId]: true },
         };
       });
@@ -1080,9 +1051,7 @@ export const useAppStore = create<AppState>((set, get) => {
     return { inboxDrafts };
   }),
 
-  projectQuestions: {},
   dismissedProjects: loadDismissed(),
-  totalWaitingCount: 0,
 
   // ── Tile view ─────────────────────────────────────────────
 

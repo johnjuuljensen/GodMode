@@ -86,16 +86,6 @@ describe('per-project state is per server', () => {
     const s = useAppStore.getState();
     expect(s.dismissedProjects[projectKey('A', 'p1')]).toBe(true);
     expect(s.dismissedProjects[projectKey('B', 'p1')]).toBeUndefined();
-    expect(s.totalWaitingCount).toBe(1);
-  });
-
-  it("a question in A:p1's output marks A:p1, not B:p1", () => {
-    // B:p1 was listed WaitingInput, so asks; running, it no longer does
-    hubB.callbacks.onStatusChanged?.('p1', status('p1', 'Running'));
-    hubA.callbacks.onOutputReceived?.('p1', { offset: 10, message: question });
-    const pq = useAppStore.getState().projectQuestions;
-    expect(pq[projectKey('A', 'p1')]).toBe(true);
-    expect(pq[projectKey('B', 'p1')]).toBe(false);
   });
 
   it("A:p1's tile output does not reach B:p1's tile", async () => {

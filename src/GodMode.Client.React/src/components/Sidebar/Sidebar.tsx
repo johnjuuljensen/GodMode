@@ -267,14 +267,13 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
   const selectProject = useAppStore(s => s.selectProject);
   const setActivePage = useAppStore(s => s.setActivePage);
   const attention = useAppStore(s => s.attention);
-  const projectQuestions = useAppStore(s => s.projectQuestions);
   const [showOlder, setShowOlder] = useState(false);
   const now = useNow(FOLD_TICK_MS);
   const { serverId, profileName, rootName } = rootGroup;
 
   // Older sessions fold under "N older", one tap away (#325): never one that needs the user or is open
   const attentionKeys = new Set(attention.map(a => projectKey(a.serverId, a.ProjectId)));
-  const needsYou = (item: SidebarItem) => attentionKeys.has(item.key) || !!projectQuestions[item.key];
+  const needsYou = (item: SidebarItem) => attentionKeys.has(item.key);
   const isSelected = (item: SidebarItem) => selectedProject?.serverId === item.serverId && selectedProject.projectId === item.project.Id;
   const { shown, older } = foldItems(rootGroup.items, now, item => needsYou(item) || isSelected(item));
   const listed = showOlder ? [...shown, ...older] : shown;

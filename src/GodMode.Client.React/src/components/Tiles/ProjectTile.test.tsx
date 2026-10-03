@@ -29,7 +29,7 @@ const result = (id: string, content: string, isError = false) =>
 
 async function tile(messages: ClaudeMessage[]) {
   view = await render(
-    <ProjectTile project={project('p1', 'work', 'Running', new Date().toISOString())} serverId="A" messages={messages} isLoading={false} isSelected={false} onSelect={() => {}} />,
+    <ProjectTile project={project('p1', 'work', 'Running', new Date().toISOString())} messages={messages} isLoading={false} isSelected={false} onSelect={() => {}} />,
   );
   return view.container;
 }
@@ -80,7 +80,7 @@ it('clips a long reply to what a tile shows, and a failed result to its first li
 
 it("shows the session's kind as a label beside its name, and none when it has none", async () => {
   view = await render(
-    <ProjectTile project={{ ...project('p1', 'Crash on start', 'Running', new Date().toISOString()), Kind: 'bug' }} serverId="A" messages={[]} isLoading={false} isSelected={false} onSelect={() => {}} />,
+    <ProjectTile project={{ ...project('p1', 'Crash on start', 'Running', new Date().toISOString()), Kind: 'bug' }} messages={[]} isLoading={false} isSelected={false} onSelect={() => {}} />,
   );
   const label = view.container.querySelector('.tile-header .kind-label');
   expect(label?.textContent).toBe('bug');

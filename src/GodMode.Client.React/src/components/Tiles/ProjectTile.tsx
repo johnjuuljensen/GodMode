@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ProjectSummary, ClaudeMessage } from '../../signalr/types';
 import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
 import { callStatus, callStatusTitle, isConversation, resultLine } from '../Project/transcriptRow';
-import { useAppStore, projectKey } from '../../store';
+import { waitsOnUser } from '../../store';
 import { KindLabel } from '../KindLabel/KindLabel';
 import './ProjectTile.css';
 
@@ -12,7 +12,6 @@ const preview = (text: string) => (text.length > MAX_PREVIEW ? text.slice(0, MAX
 
 interface Props {
   project: ProjectSummary;
-  serverId: string;
   messages: ClaudeMessage[];
   isLoading: boolean;
   isSelected: boolean;
@@ -29,10 +28,9 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-export function ProjectTile({ project, serverId, messages, isLoading, isSelected, onSelect }: Props) {
+export function ProjectTile({ project, messages, isLoading, isSelected, onSelect }: Props) {
   const state = project.State;
-  const clientQuestion = useAppStore(s => s.projectQuestions[projectKey(serverId, project.Id)]);
-  const isWaiting = state === 'WaitingInput' || clientQuestion;
+  const isWaiting = waitsOnUser(project);
   const tileState = isWaiting ? 'WaitingInput' : state;
 
   // The tail read as the transcript reads it, in its simple view: a tool's result is inside its call, not a message of mine
