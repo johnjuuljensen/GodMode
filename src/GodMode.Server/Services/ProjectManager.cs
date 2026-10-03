@@ -477,7 +477,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// order of their keys. One name, one root per server, and one folder, one root: an explicit root
     /// wins a clash, and between scan folders the first key does. Each loser is logged once, with both
     /// paths, while the clash lasts. A root's profile is its config.json's <c>profileName</c>, else its
-    /// explicit entry's <c>Profile</c>, else <c>Default</c>.
+    /// explicit entry's <c>Profile</c>, else <c>Default</c>; its title, likewise, config.json's <c>title</c>,
+    /// else the entry's <c>Title</c>, else none (the name).
     /// </summary>
     private List<FoundRoot> FindRoots(RootSources sources)
     {
@@ -498,7 +499,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             return true;
         }
 
-        void Add(string name, string path, string? entryProfile, string source)
+        void Add(string name, string path, string? entryProfile, string? entryTitle, string source)
         {
             // The same folder found again under the same name (an explicit root in a scan folder) is that root
             if (byPath.TryGetValue(path, out var samePath) && string.Equals(samePath.Name, name, StringComparison.OrdinalIgnoreCase))
@@ -514,7 +515,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             }
             try
             {
-                var config = _rootConfigReader.ReadConfig(path);
+                var read = _rootConfigReader.ReadConfig(path);
+                var config = read with { Title = read.Title ?? entryTitle };
                 var root = new FoundRoot(name, path, config.ProfileName ?? entryProfile ?? "Default", config, source);
                 roots.Add(root);
                 byName[name] = root;
@@ -532,7 +534,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             var setting = $"{RootSources.ExplicitSection}:{root.Name}";
             if (HoldsTheKeyFile(root.Path, $"{setting}:Path")) continue;
             if (Directory.Exists(root.Path))
-                Add(root.Name, root.Path, root.Profile, setting);
+                Add(root.Name, root.Path, root.Profile, root.Title, setting);
             else if (_loggedMissingRoots.Add(root.Path))
                 _logger.LogWarning("Root {Name} at {Path} ({Setting}:Path) does not exist: skipped until it does", root.Name, root.Path, setting);
         }
@@ -547,7 +549,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             }
             foreach (var subDir in Directory.GetDirectories(scan.Folder).Order(StringComparer.Ordinal))
                 if (Directory.Exists(Path.Combine(subDir, ProjectFiles.ProjectFolder.RootConfigFolderName)))
-                    Add(Path.GetFileName(subDir), FullPath(subDir), null, setting);
+                    Add(Path.GetFileName(subDir), FullPath(subDir), null, null, setting);
         }
 
         _loggedClashes.IntersectWith(clashes);
@@ -703,7 +705,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 .Select(a => new CreateActionInfo(a.Name, a.Description, a.InputSchema, a.Session ? a.Model : null,
                     a.Session && a.AllowSkipPermissions, a.Session, a.Session && a.Transient, a.Session ? a.Effort : null))
                 .ToArray();
-            return new ProjectRootInfo(root.Root, config.Description, actions, ProfileName: root.Profile);
+            return new ProjectRootInfo(root.Root, config.Description, actions, ProfileName: root.Profile, Title: config.Title);
         }).ToArray();
         return new RootsView(roots, profiles, JsonSerializer.Serialize(new { roots, profiles }, JsonDefaults.Options));
     }

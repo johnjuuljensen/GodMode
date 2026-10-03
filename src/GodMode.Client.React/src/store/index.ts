@@ -26,6 +26,7 @@ export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
 export {
   isListed, foldItems, descendantsOf, inProfile, profileNameOf, sameProfile, profileFoldKey, rootFoldKey, INACTIVE_FOLD_KEY,
+  rootShown, rootShownOf,
 } from './hierarchy';
 
 // ── Persisted dismiss tracking ─────────────────────────────────

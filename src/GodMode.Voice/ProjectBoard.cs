@@ -13,12 +13,14 @@ public sealed class ProjectBoard
 {
     private readonly ProjectHandles _handles;
     private readonly ConcurrentDictionary<string, IReadOnlyList<ServerProject>> _lists = new();
+    private readonly ConcurrentDictionary<string, IReadOnlyDictionary<string, string>> _rootsShown = new();
     private readonly Lock _lock = new();
 
     public ProjectBoard(IGodModeServers servers, ProjectHandles handles)
     {
         _handles = handles;
         servers.ProjectsChanged += Update;
+        servers.RootsChanged += Retitle;
     }
 
     /// <summary>A server's projects changed, and the handles with them.</summary>
@@ -32,6 +34,37 @@ public sealed class ProjectBoard
     public ServerProject? Find(ProjectRef project) =>
         _lists.TryGetValue(project.ServerId, out var list) ? list.FirstOrDefault(p => p.Project.Id == project.ProjectId) : null;
 
+    /// <summary>
+    /// What the project's root is shown as (#434): its title, or its name when it has none, or when another root of its
+    /// profile on its server is shown as that title. Null when it is in no root.
+    /// </summary>
+    public string? RootShown(ServerProject project) =>
+        project.Project.RootName is not { } root ? null
+        : _rootsShown.TryGetValue(project.ServerId, out var shown) && shown.TryGetValue(RootKey(project.Project.ProfileName, root), out var title) ? title
+        : root;
+
+    private static string RootKey(string? profile, string root) => $"{profile ?? "Default"}/{root}";
+
+    private void Retitle(string serverId, IReadOnlyList<ProjectRootInfo> roots)
+    {
+        var shown = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in roots)
+        {
+            // Two roots of a profile shown as one title are said by their names
+            var clash = root.Title is { } title && roots.Any(other => other != root
+                && string.Equals(other.ProfileName ?? "Default", root.ProfileName ?? "Default", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(other.Title ?? other.Name, title, StringComparison.OrdinalIgnoreCase));
+            shown[RootKey(root.ProfileName, root.Name)] = clash ? root.Name : root.Title ?? root.Name;
+        }
+        lock (_lock)
+        {
+            _rootsShown[serverId] = shown;
+            foreach (var project in _lists.GetValueOrDefault(serverId) ?? [])
+                _handles.Retitle(project.Ref, RootShown(project));
+        }
+        Changed?.Invoke();
+    }
+
     private void Update(string serverId, string serverName, IReadOnlyList<ProjectSummary> projects)
     {
         List<ServerProject> now = [.. projects.Select(p => new ServerProject(serverId, serverName, p))];
@@ -43,7 +76,10 @@ public sealed class ProjectBoard
             foreach (var gone in before.Where(p => !ids.Contains(p.Project.Id)))
                 _handles.Forget(gone.Ref);
             foreach (var project in now)
+            {
                 _handles.For(project.Ref, project.Project.Name, project.Project.RootName, project.Project.Kind, project.Project.ProfileName);
+                _handles.Retitle(project.Ref, RootShown(project));
+            }
         }
         Changed?.Invoke();
     }

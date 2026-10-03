@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useAppStore, transcriptKey } from '../../store';
+import { useAppStore, transcriptKey, rootShown } from '../../store';
 import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
 import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
@@ -42,6 +42,8 @@ export function ProjectView({ serverId, projectId }: Props) {
 
   const hub = conn?.hub;
   const project = conn?.projects.find(p => p.Id === projectId);
+  // Its root as it is shown (#434): the title, else the name
+  const rootLabel = useAppStore(s => project?.RootName ? rootShown(s.serverConnections.find(c => c.serverInfo.Id === serverId)?.roots, project.ProfileName, project.RootName) : '');
   // Connected, the server's list taken on this connection, and the project not in it: deleted (here,
   // elsewhere, or while this client slept), or a link to one it does not have. Nothing here acts on it (#239)
   const projectsListed = useAppStore(s => !!s.projectsListed[serverId]);
@@ -183,10 +185,10 @@ export function ProjectView({ serverId, projectId }: Props) {
         <div className="project-header-info">
           <span className="project-header-name">{projectName}</span>
           {(project?.ProfileName || project?.RootName) && (
-            <span className="project-header-root">
+            <span className="project-header-root" title={project?.RootName ?? undefined}>
               {project?.ProfileName && project.ProfileName !== 'Default' ? project.ProfileName : ''}
               {project?.ProfileName && project.ProfileName !== 'Default' && project?.RootName ? ' / ' : ''}
-              {project?.RootName ?? ''}
+              {rootLabel}
             </span>
           )}
         </div>

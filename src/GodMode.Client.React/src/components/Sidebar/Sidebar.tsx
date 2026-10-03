@@ -329,10 +329,10 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
           {foldKey
             ? (
               <FoldToggle folded={folded} onToggle={() => toggleFoldedHeader(foldKey)} what={`the ${rootGroup.name} root`}>
-                <span className="root-group-name">{rootGroup.name}</span>
+                <span className="root-group-name" title={rootGroup.tooltip}>{rootGroup.name}</span>
               </FoldToggle>
             )
-            : <span className="root-group-name">{rootGroup.name}</span>}
+            : <span className="root-group-name" title={rootGroup.tooltip}>{rootGroup.name}</span>}
           {folded && <FoldSummary sessions={sessionsOf(rootGroup)} needsYou={needsYou} />}
           {rootGroup.canCreate && serverId && (
             <button
