@@ -9,6 +9,7 @@ import { hubErrorMessage } from '../../signalr/hubError';
 import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import { deleteSession } from '../../deleteSession';
+import { useClickToCompose } from './clickToCompose';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
@@ -105,6 +106,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   // and cleared by the next send
   const [refusal, setRefusal] = useState<{ projectId: string; message: string } | null>(null);
   const sendError = refusal?.projectId === projectId ? refusal.message : null;
+  // A click in the output focuses the composer, unless a question's options take the keys (#435, #240)
+  const clickToCompose = useClickToCompose(inputRef, !pendingPermission && (openQuestion?.Options.length ?? 0) > 0);
 
   // A failure (another client answered first, claude stopped waiting) is the card's to show
   const handlePermission = useCallback(async (allow: boolean) => {
@@ -218,9 +221,9 @@ export function ProjectView({ serverId, projectId }: Props) {
       </div>
 
       {!notFound && phase === 'ready' && shownItems.length > 0 ? (
-        <TranscriptList ref={transcriptRef} key={transcriptKey(serverId, projectId)} items={shownItems} />
+        <TranscriptList ref={transcriptRef} key={transcriptKey(serverId, projectId)} items={shownItems} {...clickToCompose} />
       ) : (
-        <div className="project-messages">
+        <div className="project-messages" {...clickToCompose}>
           <div className="project-messages-empty">
             {notFound ? 'Project not found'
               : phase === 'loading' ? 'Loading...' : conn?.connectionState !== 'connected' ? 'Not connected'
