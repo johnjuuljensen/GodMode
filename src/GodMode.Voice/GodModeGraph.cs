@@ -18,6 +18,20 @@ namespace GodMode.Voice;
 /// </summary>
 public static class GodModeGraph
 {
+    /// <summary>
+    /// The prompt's words for the roots' actions (#473): the session kinds there are, and the one line naming exactly the
+    /// actions that start no session, which voice does not start.
+    /// </summary>
+    internal static (string Kinds, string Sessionless) Actions(IReadOnlyList<ServerRoot> roots)
+    {
+        var actions = roots.SelectMany(r => r.Root.Actions ?? []).ToList();
+        var kinds = actions.Where(a => a.Session).Select(a => a.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var sessionless = actions.Where(a => !a.Session).Select(a => a.Name).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(n => !kinds.Contains(n, StringComparer.OrdinalIgnoreCase)).ToList();
+        return (kinds.Count == 0 ? "the roots' actions" : $"the roots have {string.Join(", ", kinds)}",
+            sessionless.Count == 0 ? "" : $"Only the actions that start no session ({string.Join(", ", sessionless)}) are not started by voice yet.");
+    }
+
     public const string Id = "godmode-voice";
 
     /// <summary>
@@ -35,9 +49,11 @@ public static class GodModeGraph
 
     /// <summary>The graph, greeting the user as <paramref name="heard"/> allows (<see cref="VoicePhrases.Greeting"/>).</summary>
     /// <param name="done">Closes the mic, on a Done phrase; null where the mic is always open (Android), and there is no Done.</param>
+    /// <param name="roots">The servers' roots when the session started: the prompt names their session kinds, and the actions voice does not start.</param>
     public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases,
-        ServersHeard heard, Action? done = null)
+        ServersHeard heard, Action? done = null, IReadOnlyList<ServerRoot>? roots = null)
     {
+        var (kinds, sessionless) = Actions(roots ?? []);
         // The words the model uses itself are the session's language's: never Danish in an English session (#449)
         var danish = languages.Primary.StartsWith("da", StringComparison.OrdinalIgnoreCase);
         var (ready, unknown, unclear, sent) = danish ? ("Klar", "Ukendt", "Uklar", "Sendt") : ("Ready", "Unknown", "Unclear", "Sent");
@@ -91,11 +107,13 @@ public static class GodModeGraph
               "Start a chat in … about …" — call {{VoiceTools.StartSession}} with the root, kind, issue, name and prompt as
               said; leave out what was not said, and never pick a root yourself. When it settles on one, the system reads it
               back itself, in place of your reply: respond with one word. Otherwise say its question back, or why not. Only
-              the user's yes to that read-back creates it, and that is not yours to answer: never say it was created. Actions that start no session (new
-              root, promote) are not started by voice yet.
+              the user's yes to that read-back creates it, and that is not yours to answer: never say it was created.
+              Every kind of session is started so, whatever its name ({{kinds}}): an overseer, an epic, an issue
+              or a chat alike. Never say a kind cannot be started by voice without calling {{VoiceTools.StartSession}}:
+              it says so itself when it cannot. {{sessionless}}
               Keep the kind the user named: when {{VoiceTools.StartSession}} asks for a field, ask the user for it and call it
-              again with the same action and their answer. Never switch to another action in its place, nor use the kind
-              as a name, unless the user asks for another kind.
+              again with the same action and their answer. It keeps the draft as it was, and changes its kind, root or issue
+              only when the user's own words do: never switch to another action in its place, nor use the kind as a name.
               An answer to a read-back with a change in it ("Nej, som overseer", "Ja, men i kappe") comes to you with the
               create it answers: call {{VoiceTools.StartSession}} again with the change and everything else as before.
 

@@ -64,6 +64,15 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         return new CreateProjectResult(_statuses[new ProjectRef(root.ServerId, id)]);
     }
 
+    /// <summary>The issues' labels, by number, as a root's issueInfo script reports them; an issue not in it is described as having none.</summary>
+    public ConcurrentDictionary<string, string[]> IssueLabels { get; } = new();
+
+    /// <summary>Whether the roots have an issueInfo script; when not, no issue is described.</summary>
+    public bool DescribesIssues { get; set; } = true;
+
+    public Task<IssueInfo?> DescribeIssueAsync(ServerRoot root, string issue, CancellationToken ct) =>
+        Task.FromResult(DescribesIssues ? new IssueInfo($"Issue {issue}", IssueLabels.GetValueOrDefault(issue, [])) : null);
+
     /// <summary>An action whose form is <paramref name="schema"/>'s JSON; the server's default form (a name, a prompt) when null.</summary>
     public static CreateActionInfo Action(string name, string? schema = null, bool session = true) =>
         new(name, InputSchema: JsonSerializer.Deserialize<JsonElement>(schema ?? DefaultSchema), Session: session);

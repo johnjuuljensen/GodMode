@@ -912,6 +912,7 @@ Attention:
 
 Roots and profiles:
 - `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas
+- `Task<IssueInfo?> DescribeIssue(profileName, projectRootName, issue)` — The issue's `Title` and `Labels` from the root's `issueInfo` script, run now; null when the root has none; fails, saying why, as [Issue Info](#issue-info) says
 - `Task<ProfileInfo[]> ListProfiles()` — Get profiles (read-only: no hub method writes a profile or a root)
 
 Utility:
