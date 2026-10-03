@@ -36,18 +36,14 @@ public sealed class CloudVoiceProviders(VoiceKeys keys) : IVoiceProviders
             throw new InvalidOperationException($"No {string.Join(" or ", MissingKeys)} key is set");
 
         services.AddVoiceBotAI();
-        services.AddVoiceBotAnthropic(keys.Anthropic!, settings.Models.Medium);
+        services.AddVoiceBotAnthropic(keys.Anthropic!);
         services.AddVoiceBotElevenLabs(keys.ElevenLabs!, settings.VoiceId, TtsModel, SttModel, Speed, language: language);
     }
 
     public Task InitializeAsync(IServiceProvider services, VoiceSettings settings) =>
-        services.GetRequiredService<InferenceRouter>().InitializeAsync(TierMap(settings.Models));
+        services.GetRequiredService<InferenceRouter>().InitializeAsync(TierMap());
 
-    /// <summary>The Anthropic model behind each tier.</summary>
-    public static Dictionary<InferenceTier, TierConfig> TierMap(VoiceModels models) => new()
-    {
-        [InferenceTier.Light] = new("anthropic", models.Light),
-        [InferenceTier.Medium] = new("anthropic", models.Medium),
-        [InferenceTier.Heavy] = new("anthropic", models.Heavy),
-    };
+    /// <summary>The model behind each tier: VoiceBot's, so a VoiceBot pin that moves its models moves voice's (#475).</summary>
+    public static Dictionary<InferenceTier, TierConfig> TierMap() =>
+        TierMapConfiguration.DefaultModels.ToDictionary(d => d.Key, d => new TierConfig(TierMapConfiguration.DefaultProvider, d.Value));
 }

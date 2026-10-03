@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.Logging;
@@ -120,6 +121,64 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
     /// <summary>The text as a sentence: ended with its own '?' or '!' (a session's spoken reply has them), else a '.'.</summary>
     internal static string Sentence(string text) =>
         text.Trim().TrimEnd('.') is { Length: > 0 } t ? t[^1] is '?' or '!' ? t : t + "." : "";
+}
+
+/// <summary>
+/// The session's announcements, held while a create or a question waits on the user (<see cref="SessionCreates.Waiting"/>,
+/// #473): an announcement between a read-back and its yes would take the yes's place. They are said in order once
+/// nothing waits (the user answered, or the wait expired). A read-back to be said again (<see cref="SessionCreates.Repeat"/>)
+/// is never held: it is what was waited on.
+/// </summary>
+public sealed class HeldAnnouncements
+{
+    private readonly ChannelWriter<Announcement> _session;
+    private readonly SessionCreates _creates;
+    private readonly Lock _lock = new();
+    private readonly List<Announcement> _held = [];
+
+    public HeldAnnouncements(ChannelWriter<Announcement> session, SessionCreates creates)
+    {
+        _session = session;
+        _creates = creates;
+        creates.Released += Release;
+        creates.Repeat += readBack => session.TryWrite(new Announcement(readBack));
+    }
+
+    /// <summary>What is held now, oldest first.</summary>
+    public IReadOnlyList<Announcement> Held
+    {
+        get
+        {
+            lock (_lock) return [.. _held];
+        }
+    }
+
+    /// <summary>Says <paramref name="announcement"/> at the next pause, or holds it while a create or question waits.</summary>
+    public void Write(Announcement announcement)
+    {
+        lock (_lock)
+        {
+            if (_held.Count > 0 || _creates.Waiting)
+            {
+                _held.Add(announcement);
+                return;
+            }
+        }
+        _session.TryWrite(announcement);
+    }
+
+    private void Release()
+    {
+        List<Announcement> held;
+        lock (_lock)
+        {
+            if (_creates.Waiting) return;
+            held = [.. _held];
+            _held.Clear();
+        }
+        foreach (var announcement in held)
+            _session.TryWrite(announcement);
+    }
 }
 
 /// <summary>

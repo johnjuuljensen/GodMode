@@ -156,6 +156,14 @@ public sealed class VoiceSession : IAsyncDisposable
         var conversation = new VoiceConversation();
 
         var heard = await setup.ConnectAsync(ct);
+        // The roots as they are now, for the prompt's kinds of session (#473); none when no server answers
+        IReadOnlyList<ServerRoot> roots;
+        try { roots = await setup.Servers.ListRootsAsync(ct); }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Voice: the roots could not be listed for the prompt");
+            roots = [];
+        }
 
         var language = new ElevenLabsLanguageOptions
         {
@@ -185,7 +193,7 @@ public sealed class VoiceSession : IAsyncDisposable
             var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
-                GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null),
+                GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null, roots),
                 setup.Mic is { } listening && setup.Transcription is TranscriptionInput.Audio audio
                     ? TranscriptionInput.FromAudio(listening.Listening(audio.Source))
                     : setup.Transcription,
@@ -205,9 +213,11 @@ public sealed class VoiceSession : IAsyncDisposable
                 scope.ServiceProvider.GetService<ElevenLabsSttKeyterms>(), logger);
             projects.Changed += voice.RefreshKeyterms;
             voice.RefreshKeyterms();
-            board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(
+            // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement
+            var announcements = new HeldAnnouncements(session.Announcements, tools.Creates);
+            board.Attach((item, handle) => announcements.Write(new Announcement(
                 phrases.Announce(tools.Names.Of(item.Project) ?? new SpokenName(handle), item.Item), item.Project.Key)));
-            tools.Creates.Attach(outcome => session.Announcements.TryWrite(new Announcement(phrases.Created(outcome))));
+            tools.Creates.Attach(outcome => announcements.Write(new Announcement(phrases.Created(outcome))));
             // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
             if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));
             state.Release();

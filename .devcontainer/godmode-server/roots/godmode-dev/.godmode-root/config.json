@@ -7,5 +7,6 @@
   "allowSkipPermissions": true,
   "prepare": "scripts/prepare",
   "delete": "scripts/delete",
-  "status": "scripts/status"
+  "status": "scripts/status",
+  "issueInfo": "scripts/issue-info"
 }

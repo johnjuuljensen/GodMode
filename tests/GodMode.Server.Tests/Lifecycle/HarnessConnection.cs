@@ -54,6 +54,9 @@ internal sealed class HarnessConnection
     /// <summary>Lists a root's folders GodMode does not manage, through the hub, which fails with the reason.</summary>
     public Task<UnmanagedFolder[]> ListUnmanagedAsync(string profileName, string rootName) => Hub().ListUnmanaged(profileName, rootName);
 
+    /// <summary>Describes an issue as voice does, through the hub, which fails with the reason.</summary>
+    public Task<IssueInfo?> DescribeIssueAsync(string profileName, string rootName, string issue) => Hub().DescribeIssue(profileName, rootName, issue);
+
     /// <summary>The connection drops: the hub hears it, and SignalR takes it out of its groups.</summary>
     public async Task DisconnectAsync()
     {

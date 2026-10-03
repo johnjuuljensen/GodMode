@@ -400,7 +400,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     /// <summary>What to read back for a create, or ask, or why there is none (<see cref="SessionCreates.Propose"/>).</summary>
     public async Task<string> StartSessionAsync(CreateAsk ask, CancellationToken ct) =>
-        Creates.Propose(await servers.ListRootsAsync(ct), ask);
+        await Creates.ProposeAsync(await servers.ListRootsAsync(ct), ask, ct);
 
     /// <summary>
     /// The project named, or the one the conversation is about when none is named, while it is still there. Every

@@ -213,7 +213,7 @@ it('shows why voice did not start', async () => {
 it('sends a key the user typed, never shows one, and says only whether each is set', async () => {
   const settings = {
     Language: 'da-DK+en', VoiceId: 'v1', EchoCancellation: false,
-    Models: { Light: 'l', Medium: 'm', Heavy: 'h' }, ElevenLabsKeySet: false, AnthropicKeySet: true,
+    ElevenLabsKeySet: false, AnthropicKeySet: true,
   };
   answer({ 'voice.settings.get': settings, 'voice.settings.set': { ...settings, ElevenLabsKeySet: true } });
   view = await render(<VoiceSettings />);
@@ -238,7 +238,7 @@ it('offers Default and each device, keeps a chosen one that is not connected, an
   const speakers = { Id: '{0.0.0}.{speakers}', Name: 'Speakers (Realtek)' };
   const settings = {
     Language: 'da-DK+en', VoiceId: 'v1', EchoCancellation: false, Microphone: null, Speaker: usb,
-    Models: { Light: 'l', Medium: 'm', Heavy: 'h' }, ElevenLabsKeySet: true, AnthropicKeySet: true,
+    ElevenLabsKeySet: true, AnthropicKeySet: true,
   };
   answer({
     'voice.settings.get': settings,
@@ -275,7 +275,7 @@ it('offers Default and each device, keeps a chosen one that is not connected, an
 it('saves how many seconds of silence close the mic', async () => {
   const settings = {
     Language: 'da-DK+en', VoiceId: 'v1', EchoCancellation: false, Microphone: null, Speaker: null, MicSilenceSeconds: 10,
-    Models: { Light: 'l', Medium: 'm', Heavy: 'h' }, ElevenLabsKeySet: true, AnthropicKeySet: true,
+    ElevenLabsKeySet: true, AnthropicKeySet: true,
   };
   answer({
     'voice.settings.get': settings,
@@ -297,7 +297,7 @@ it('offers no devices where voice picks its own route', async () => {
   answer({
     'voice.settings.get': {
       Language: 'da-DK+en', VoiceId: 'v1', EchoCancellation: false,
-      Models: { Light: 'l', Medium: 'm', Heavy: 'h' }, ElevenLabsKeySet: true, AnthropicKeySet: true,
+      ElevenLabsKeySet: true, AnthropicKeySet: true,
     },
     'voice.devices': { Supported: false, Microphones: [], Speakers: [] },
   });

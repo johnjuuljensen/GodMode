@@ -282,6 +282,21 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         }
     }
 
+    public async Task<IssueInfo?> DescribeIssue(string profileName, string projectRootName, string issue)
+    {
+        _logger.LogInformation("Client {ConnectionId} describing an issue of profile '{Profile}' root '{Root}'",
+            Context.ConnectionId, profileName, projectRootName);
+        try
+        {
+            return await _projectManager.DescribeIssueAsync(profileName, projectRootName, issue);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Describing an issue of root '{Root}' failed: {Reason}", projectRootName, ex.Message);
+            throw new HubException(ex.Message);
+        }
+    }
+
     public async Task<UnmanagedFolder[]> ListUnmanaged(string profileName, string projectRootName)
     {
         _logger.LogInformation("Client {ConnectionId} listing the folders of profile '{Profile}' root '{Root}' GodMode does not manage",

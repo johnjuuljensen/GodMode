@@ -74,6 +74,9 @@ public interface IGodModeServers
 
     /// <summary><see cref="IProjectHub.CreateProject"/> in the root, as the app's create form calls it: the form's values as strings.</summary>
     Task<CreateProjectResult> CreateAsync(ServerRoot root, string actionName, IReadOnlyDictionary<string, string> inputs, CancellationToken ct);
+
+    /// <summary>The issue's title and labels from the root's issueInfo script (<see cref="IProjectHub.DescribeIssue"/>); null when it has none.</summary>
+    Task<IssueInfo?> DescribeIssueAsync(ServerRoot root, string issue, CancellationToken ct);
 }
 
 /// <summary>
@@ -187,6 +190,9 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
     public Task<CreateProjectResult> CreateAsync(ServerRoot root, string actionName, IReadOnlyDictionary<string, string> inputs, CancellationToken ct) =>
         Hub(root.ServerId).InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), root.Profile, root.Root.Name, actionName,
             inputs.ToDictionary(i => i.Key, i => JsonSerializer.SerializeToElement(i.Value)), ct);
+
+    public Task<IssueInfo?> DescribeIssueAsync(ServerRoot root, string issue, CancellationToken ct) =>
+        Hub(root.ServerId).InvokeAsync<IssueInfo?>(nameof(IProjectHub.DescribeIssue), root.Profile, root.Root.Name, issue, ct);
 
     public ValueTask DisposeAsync() => _connections.DisposeAsync();
 
