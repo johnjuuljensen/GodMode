@@ -344,9 +344,11 @@ function RootSection({ rootGroup }: { rootGroup: RootGroup }) {
         </div>
       )}
       {!folded && <div className="project-list">
-        {/* A root whose sessions all nest under parents in other roots has none of its own to show, and is not empty */}
         {rootGroup.sessionCount === 0 ? (
           !rootGroup.flat && <div className="project-list-empty">No projects</div>
+        ) : rootGroup.items.length === 0 ? (
+          // Its sessions all nest under parents in other roots, where they are marked with it (#397)
+          <div className="project-list-empty">{rootGroup.nestedElsewhere} nested in another root</div>
         ) : (
           listed.map(item => (
             <SessionTree key={item.key} item={item} now={now} needsYou={needsYou} isSelected={isSelected} onSelect={selectProject} />
