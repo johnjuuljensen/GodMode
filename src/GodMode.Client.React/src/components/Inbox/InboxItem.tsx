@@ -203,24 +203,23 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
         </div>
       )}
 
-      {canMarkSeen && (
-        <div className="inbox-item-actions">
-          {item.PullRequestUrl && (
-            <a className="btn btn-secondary" href={item.PullRequestUrl} target="_blank" rel="noreferrer">Open PR</a>
-          )}
+      {/* Every kind can be gone to: the header opens it too, but does not look like a button (#440) */}
+      <div className="inbox-item-actions">
+        <button className="btn btn-secondary" onClick={open} title="Open the project">Go to</button>
+        {canMarkSeen && item.PullRequestUrl && (
+          <a className="btn btn-secondary" href={item.PullRequestUrl} target="_blank" rel="noreferrer">Open PR</a>
+        )}
+        {canMarkSeen && (
           <button className="btn btn-secondary" onClick={() => run(() => markSeen(serverId, projectId))} disabled={busy}>
             Mark seen
           </button>
-        </div>
-      )}
-
-      {createFailed && (
-        <div className="inbox-item-actions">
+        )}
+        {createFailed && (
           <button className="btn btn-danger" onClick={remove} disabled={busy} title="Its create failed: delete it, or create it again">
             Delete
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {error && <div className="inbox-item-error">{error}</div>}
     </article>
