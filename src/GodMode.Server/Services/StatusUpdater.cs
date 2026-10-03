@@ -45,6 +45,8 @@ public class StatusUpdater : IStatusUpdater
         var stateChanged = false;
         var status = project.Status;
         var process = project.Process;
+        // Every result ends the turn the user's input started, if one did
+        var userTurn = outputEvent.Type == OutputEventType.Result && process.TakeUserTurn();
 
         // Parse Claude output events to update state
         switch (outputEvent.Type)
@@ -125,7 +127,10 @@ public class StatusUpdater : IStatusUpdater
                 // The result's text is claude's summary of the turn, whichever it is
                 var endedAt = DateTime.UtcNow;
                 // and its spoken version the one the session gave in it, or none (issue #384)
-                status = status with { LastResult = outputEvent.Content, LastResultAt = endedAt, LastError = null, SpokenSummary = process.Spoken };
+                status = WithTurnEnd(status, IsQuietTurnEnd(project, userTurn)) with
+                {
+                    LastResult = outputEvent.Content, LastResultAt = endedAt, LastError = null, SpokenSummary = process.Spoken,
+                };
                 status = QuestionDetection.IsQuestion(process.LastAssistantText)
                     ? status with { State = ProjectState.WaitingInput, CurrentQuestion = process.LastAssistantText, QuestionAt = endedAt }
                     : status with { State = ProjectState.Idle, CurrentQuestion = null };
@@ -162,8 +167,8 @@ public class StatusUpdater : IStatusUpdater
             case OutputEventType.ConversationReset:
                 // /clear: the conversation that had the last reply and question is gone
                 process.LastAssistantText = null;
-                stateChanged = status is not { LastResult: null, LastResultAt: null, CurrentQuestion: null };
-                status = status with { LastResult = null, LastResultAt = null, CurrentQuestion = null };
+                stateChanged = status is not { LastResult: null, LastResultAt: null, CurrentQuestion: null, QuietResult: false, UnseenResult: null };
+                status = status with { LastResult = null, LastResultAt = null, CurrentQuestion = null, QuietResult = false, UnseenResult = null };
                 break;
         }
 
@@ -181,6 +186,28 @@ public class StatusUpdater : IStatusUpdater
 
         project.Status = status with { UpdatedAt = DateTime.UtcNow };
         return true;
+    }
+
+    /// <summary>
+    /// Whether the turn ending now raises no Finished (issue #401): the one place that decides it. Its action has
+    /// <c>quietTurns</c> (<see cref="ProjectInfo.QuietTurns"/>), and the user did not start the turn
+    /// (<paramref name="userTurn"/>): an overseer woken by a worker's message, a notice or its own background task, which
+    /// the server cannot always tell apart, so the setting is the action's, not the turn's origin's.
+    /// </summary>
+    public static bool IsQuietTurnEnd(ProjectInfo project, bool userTurn) => project.QuietTurns && !userTurn;
+
+    /// <summary>
+    /// <paramref name="status"/> as a turn's end leaves its Finished: a quiet one keeps the
+    /// unseen result of the last turn that raised one (<see cref="ProjectStatus.UnseenResult"/>), which its own result
+    /// would otherwise replace; any other turn's end raises its own.
+    /// </summary>
+    private static ProjectStatus WithTurnEnd(ProjectStatus status, bool quiet)
+    {
+        if (!quiet) return status with { QuietResult = false, UnseenResult = null };
+        var unseen = status.QuietResult
+            ? status.UnseenResult
+            : status.LastResultAt is { } at ? new TurnResult(at, status.LastResult, status.SpokenSummary) : null;
+        return status with { QuietResult = true, UnseenResult = unseen is { } kept && kept.At > (status.SeenAt ?? DateTime.MinValue) ? kept : null };
     }
 
     /// <summary>

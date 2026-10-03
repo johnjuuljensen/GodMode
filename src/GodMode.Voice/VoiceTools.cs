@@ -421,6 +421,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             AttentionKind.Question => $"question: {said}",
             AttentionKind.Permission => $"permission request ({item.Permission?.Summary ?? said}); answered on screen only",
             AttentionKind.Error => $"failed: {said}",
+            AttentionKind.Escalation => $"needs the user's decision: {said}",
             AttentionKind.Review => $"changes requested on its pull request: {said}",
             AttentionKind.Finished => $"finished: {said}",
         };

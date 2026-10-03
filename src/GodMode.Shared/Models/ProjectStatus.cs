@@ -67,6 +67,20 @@ namespace GodMode.Shared.Models;
 /// with the create's failure as its <paramref name="LastError"/>, has no state and no claude, and takes no input. A delete
 /// is all that is left for it; it is in the server's memory only, so a restart drops it. Left out of the JSON when false.
 /// </param>
+/// <param name="QuietResult">
+/// Whether <paramref name="LastResult"/> ended a quiet turn (issue #401): its action has <c>quietTurns</c>, and the user
+/// did not start the turn, so its end raises no <see cref="AttentionKind.Finished"/>. The result still shows as the
+/// session's last. Left out of the JSON when false.
+/// </param>
+/// <param name="UnseenResult">
+/// The last turn end that raised <see cref="AttentionKind.Finished"/>, while quiet turns have ended after it and the
+/// user has not seen it: its Finished stays, with its own result, until the user sees it. Null otherwise.
+/// </param>
+/// <param name="Escalation">
+/// What the session, an overseer, last asked the user to decide (its fleet tool <c>escalate</c>, issue #401): an
+/// <see cref="AttentionKind.Escalation"/> whatever turns end after it, until the user has seen it: <see cref="Hubs.IProjectHub.MarkSeen"/>
+/// or the user's own input clears it (null), and nothing else does, the fleet's send and a resume included. Null when there is none.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -99,5 +113,20 @@ public record ProjectStatus(
     IReadOnlyList<string>? SlashCommands = null,
     IReadOnlyList<string>? ClaudeCommands = null,
     string? SpokenSummary = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool QuietResult = false,
+    TurnResult? UnseenResult = null,
+    Escalation? Escalation = null
 );
+
+/// <summary>A turn's end, as <see cref="ProjectStatus.UnseenResult"/> keeps it.</summary>
+/// <param name="At">When it ended.</param>
+/// <param name="Result">Its result, as <see cref="ProjectStatus.LastResult"/> had it.</param>
+/// <param name="Spoken">Its spoken reply, as <see cref="ProjectStatus.SpokenSummary"/> had it.</param>
+public record TurnResult(DateTime At, string? Result, string? Spoken = null);
+
+/// <summary>A decision an overseer asked the user for: <see cref="ProjectStatus.Escalation"/>.</summary>
+/// <param name="At">When it asked.</param>
+/// <param name="Text">What the user is to decide.</param>
+/// <param name="Url">Where to decide it (an issue or a pull request), if it gave one.</param>
+public record Escalation(DateTime At, string Text, string? Url = null);

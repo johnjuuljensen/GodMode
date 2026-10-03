@@ -2,11 +2,14 @@
 /**
  * An Error project is answered where the inbox's "open the project" lands (#240): its input takes a
  * reply, through ReplyAndResume, as the inbox's Error item does. A project the server does not have
- * says so (#239). Renders ProjectView on the real store.
+ * says so (#239). A plain-text question is no prompt: its text is on screen already, and the composer answers
+ * it (#447). Renders ProjectView on the real store.
  */
-import { act } from 'react';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { FakeHub, project, root, connectServers } from '../../test/fakeHub';
+import { act, type ReactNode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PendingQuestion, ProjectStatus } from '../../signalr/types';
+import { parseClaudeMessage } from '../../signalr/parseMessage';
+import { FakeHub, project, root, connectServers, status } from '../../test/fakeHub';
 import { render, typeInto, keyDown, type Rendered } from '../../test/render';
 import { useAppStore } from '../../store';
 import { ProjectView } from './ProjectView';
@@ -18,6 +21,12 @@ vi.mock('../../services/hostApi', () => ({
   subscribeEvents: () => {},
   getHubUrl: (serverId: string) => `http://test/${serverId}`,
   getHubOptions: () => ({}),
+}));
+// jsdom lays nothing out, so Virtuoso would render no rows: this one renders them all
+vi.mock('react-virtuoso', () => ({
+  Virtuoso: ({ data, itemContent, className }: { data: unknown[]; itemContent: (i: number, item: unknown) => ReactNode; className?: string }) => (
+    <div className={className}>{data.map((row, i) => <div key={i}>{itemContent(i, row)}</div>)}</div>
+  ),
 }));
 
 const initialState = useAppStore.getState();
@@ -126,4 +135,51 @@ it('a message the server refuses says why, and comes back to the input', async (
 
   expect(view.container.querySelector('[role="alert"]')?.textContent).toBe(hub.refuseReply);
   expect(input.value).toBe('/model opus');
+});
+
+// The box repeated the turn's last line, right below it, and an offer ("Shall I file it?") is no blocking question (#447)
+describe('a question in plain text (#447)', () => {
+  const offer = 'Builds clean. Shall I file it?';
+  const asks: ProjectStatus = { ...status('p4', 'WaitingInput'), Name: 'asker', CurrentQuestion: offer };
+  const pending: PendingQuestion = {
+    RequestId: 'r1',
+    RequestedAt: '2026-10-03T12:00:00Z',
+    Questions: [{ Question: 'Which way?', Options: [{ Label: 'Left' }, { Label: 'Right' }], MultiSelect: false }],
+  };
+
+  async function viewAsking(extra: Partial<ProjectStatus> = {}) {
+    const askHub = new FakeHub([{ ...project('p4', 'asker', 'WaitingInput', '2026-10-03T12:00:00Z'), CurrentQuestion: offer, ...extra }], [root]);
+    await connectServers({ D: askHub });
+    useAppStore.getState().selectProject('D', 'p4');
+    const asking = await render(<ProjectView serverId="D" projectId="p4" />);
+    const turn = parseClaudeMessage(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: offer }] } }));
+    await act(async () => {
+      askHub.lastReplay('p4').batch(0, [{ offset: 10, message: turn }]);
+      askHub.lastReplay('p4').complete(10);
+      askHub.callbacks.onStatusChanged?.('p4', { ...asks, ...extra });
+    });
+    return asking;
+  }
+
+  it('shows no prompt for a WaitingInput status with a CurrentQuestion and no AskUserQuestion: the text is in the transcript', async () => {
+    const asking = await viewAsking();
+    try {
+      expect(asking.container.querySelector('.question-prompt')).toBeNull();
+      expect(asking.container.textContent).toContain(offer);
+      expect(asking.container.querySelector<HTMLTextAreaElement>('textarea.project-input')!.disabled).toBe(false);
+    } finally {
+      asking.unmount();
+    }
+  });
+
+  it('still shows a pending AskUserQuestion with its options', async () => {
+    const asking = await viewAsking({ PendingQuestion: pending });
+    try {
+      const prompt = asking.container.querySelector('.question-prompt')!;
+      expect(prompt.querySelector('.question-text')?.textContent).toBe('Which way?');
+      expect([...prompt.querySelectorAll('.question-option-label')].map(o => o.textContent)).toEqual(['Left', 'Right']);
+    } finally {
+      asking.unmount();
+    }
+  });
 });

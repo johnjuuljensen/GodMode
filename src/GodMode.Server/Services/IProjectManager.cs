@@ -65,11 +65,25 @@ public interface IProjectManager
     /// <summary>The project's last <paramref name="turns"/> replies, oldest first: see <see cref="OutputLog.LastRepliesAsync"/>.</summary>
     Task<IReadOnlyList<AssistantReply>> LastRepliesAsync(string projectId, int turns);
 
-    /// <summary>Every project that needs the user, oldest first (hub GetAttention).</summary>
+    /// <summary>
+    /// Every project that needs the user, oldest first (hub GetAttention), but a child's Finished and Review, which are
+    /// its parent's business (<see cref="Attention.IsTheUsers"/>).
+    /// </summary>
     AttentionItem[] GetAttention();
 
-    /// <summary>The user has seen what the project needs: its result, review, question in plain text or error (hub MarkSeen).</summary>
+    /// <summary>Every project's attention item, oldest first, children's Finished and Review too: the fleet's view.</summary>
+    AttentionItem[] GetAllAttention();
+
+    /// <summary>The user has seen what the project needs: its result, review, question in plain text, error or escalation (hub MarkSeen).</summary>
     Task MarkSeenAsync(string projectId);
+
+    /// <summary>
+    /// The fleet's <c>escalate</c>: the session asks the user to decide <paramref name="text"/>, an
+    /// <see cref="AttentionKind.Escalation"/> on it until the user has seen it. Replaces one it asked before.
+    /// Refused (<see cref="ArgumentException"/>) for an empty text, one over <see cref="SessionInbox.MaxTextLength"/>,
+    /// or a <paramref name="url"/> that is not an http(s) URL.
+    /// </summary>
+    Task EscalateAsync(string projectId, string text, string? url);
 
     /// <summary>Answers the project's pending permission prompt <paramref name="requestId"/> (hub RespondToPermission).</summary>
     Task RespondToPermissionAsync(string projectId, string requestId, PermissionDecision decision);

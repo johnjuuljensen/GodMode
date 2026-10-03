@@ -58,6 +58,7 @@ public static class AttentionNotificationText
         AttentionKind.Permission => "Permission",
         AttentionKind.Question => "Question",
         AttentionKind.Error => "Error",
+        AttentionKind.Escalation => "Decision",
         AttentionKind.Review => "Changes requested",
         AttentionKind.Finished => "Finished",
         _ => kind.ToString(),

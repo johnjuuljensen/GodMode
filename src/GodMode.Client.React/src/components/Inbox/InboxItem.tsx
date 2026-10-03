@@ -10,14 +10,15 @@ const KIND_LABELS: Record<AttentionKind, string> = {
   Permission: 'Permission',
   Question: 'Question',
   Error: 'Error',
+  Escalation: 'Decision',
   Review: 'Changes requested',
   Finished: 'Finished',
 };
 
 /** Kinds answered with a typed reply (ReplyAndResume). */
-const REPLY_KINDS: ReadonlySet<AttentionKind> = new Set(['Question', 'Error', 'Finished']);
+const REPLY_KINDS: ReadonlySet<AttentionKind> = new Set(['Question', 'Error', 'Escalation', 'Finished']);
 /** Kinds to mark seen: a Question only in plain text, as a pending AskUserQuestion is answered (#426). */
-const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review', 'Question', 'Error']);
+const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review', 'Question', 'Error', 'Escalation']);
 
 interface Props {
   item: ServerAttentionItem;

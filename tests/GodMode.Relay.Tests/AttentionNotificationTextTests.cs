@@ -56,12 +56,14 @@ public sealed class AttentionNotificationTextTests
         Assert.Equal("Asks you: Merge it now?", AttentionNotificationText.Body(item));
     }
 
-    [Fact]
-    public void Another_kind_says_its_text()
+    [Theory]
+    [InlineData(AttentionKind.Error, "Error · p1")]
+    [InlineData(AttentionKind.Escalation, "Decision · p1")]
+    public void Another_kind_says_its_text(AttentionKind kind, string title)
     {
-        var item = new AttentionItem("Default/root/p1", "p1", null, null, AttentionKind.Error, Since, "The build failed.");
+        var item = new AttentionItem("Default/root/p1", "p1", null, null, kind, Since, "The build failed.");
 
-        Assert.Equal("Error · p1", AttentionNotificationText.Title(item));
+        Assert.Equal(title, AttentionNotificationText.Title(item));
         Assert.Equal("The build failed.", AttentionNotificationText.Line(item));
         Assert.Equal("The build failed.", AttentionNotificationText.Body(item));
     }

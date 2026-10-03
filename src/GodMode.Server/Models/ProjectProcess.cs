@@ -122,6 +122,19 @@ public sealed class ProjectProcess
         Spoken = null;
     }
 
+    private int _userTurn;
+
+    /// <summary>
+    /// The user has sent the session input (the hub's SendInput, ReplyAndResume or AnswerQuestion) since its last turn
+    /// ended: the turn that takes it is the user's, and its end raises Finished on a quiet action too. Set before the
+    /// input is written; the next turn's end takes it (<see cref="TakeUserTurn"/>). claude folds input that comes
+    /// during a turn into that turn.
+    /// </summary>
+    public void MarkUserTurn() => Volatile.Write(ref _userTurn, 1);
+
+    /// <summary>Whether the turn ending now is the user's (<see cref="MarkUserTurn"/>); clears it.</summary>
+    public bool TakeUserTurn() => Interlocked.Exchange(ref _userTurn, 0) == 1;
+
     private readonly ConcurrentDictionary<string, PendingRequest> _pending = new();
 
     /// <summary>The permission prompts claude is waiting on, by request id.</summary>
