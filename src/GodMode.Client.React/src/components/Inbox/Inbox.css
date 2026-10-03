@@ -164,6 +164,57 @@
 }
 .inbox-item-actions .btn { text-decoration: none; }
 
+/* A pending AskUserQuestion: every question in full, each option's description under its label (#454) */
+.inbox-question + .inbox-question {
+  border-top: var(--border-width) var(--border-style) var(--glass-border);
+  padding-top: 8px;
+}
+.inbox-question-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 12px 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.inbox-question-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.inbox-question-num,
+.inbox-question-multi {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.inbox-question-options {
+  flex-direction: column;
+  align-items: stretch;
+}
+.inbox-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  white-space: normal;
+  line-height: 1.4;
+}
+.inbox-option-label,
+.inbox-option-desc {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.inbox-option-desc {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.inbox-option-selected {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-focus-sm);
+}
+
 .inbox-item-reply {
   display: flex;
   align-items: flex-end;
