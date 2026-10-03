@@ -33,22 +33,22 @@ public sealed class ProjectStatusTests
         var servers = new FakeServers();
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
-            .Respond("283 spørger om den skal merge.");
+            .Respond("issue 283 spørger om den skal merge.");
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: _ =>
         {
             servers.Set(ServerA, Question(Id, "283-voice", Cut(Long)));
             servers.SetStatus(ServerA, Status(ProjectState.WaitingInput, question: Long));
             return Task.CompletedTask;
         });
-        await voice.Events.SaidAsync("283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
 
         voice.Transcriptions.SayAsRecognized("Hvad spørger 283 om?");
-        await voice.Events.SaidAsync("283 spørger om den skal merge.");
+        await voice.Events.SaidAsync("issue 283 spørger om den skal merge.");
 
         var result = Assert.Single(model.ToolResults);
         Assert.Contains(Long, result);
         Assert.EndsWith(Ending, result);
-        Assert.StartsWith("283 (", result);
+        Assert.StartsWith("issue 283 (", result);
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public sealed class ProjectStatusTests
 
         var result = await tools.ProjectStatusAsync("283", CancellationToken.None);
 
-        Assert.Equal($"283 (283-voice, root, Default): Idle. Needs the user: finished: {Long}", result);
+        Assert.Equal($"issue 283 (283-voice): Idle. Needs the user: finished: {Long}", result);
     }
 
     /// <summary>A result far past any reply read whole keeps its start and its end, where the question is, and says it was cut.</summary>
@@ -80,7 +80,7 @@ public sealed class ProjectStatusTests
 
         var result = await tools.ProjectStatusAsync("283", CancellationToken.None);
 
-        Assert.StartsWith("283 (283-voice, root, Default): Idle. Needs the user: finished: Start på svaret. ", result);
+        Assert.StartsWith("issue 283 (283-voice): Idle. Needs the user: finished: Start på svaret. ", result);
         Assert.EndsWith(Ending, result);
         Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"[... {huge.Length - VoiceTools.MaxStatusTextLength} characters cut here;"), result);
         Assert.InRange(result.Length, VoiceTools.MaxStatusTextLength, VoiceTools.MaxStatusTextLength + 200);
@@ -97,7 +97,7 @@ public sealed class ProjectStatusTests
         servers.Set(ServerA, new AttentionItem(Id, "283-voice", "Default", "root", AttentionKind.Error, DateTime.UtcNow, Cut(Long)));
         servers.SetStatus(ServerA, Status(ProjectState.Error) with { LastError = Long });
 
-        Assert.Equal($"283 (283-voice, root, Default): Error. Needs the user: failed: {Long}",
+        Assert.Equal($"issue 283 (283-voice): Error. Needs the user: failed: {Long}",
             await tools.ProjectStatusAsync("283", CancellationToken.None));
     }
 }

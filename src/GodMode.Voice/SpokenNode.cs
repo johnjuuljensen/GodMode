@@ -20,7 +20,7 @@ public sealed class SpokenNode(INode chat, VoiceConversation conversation, Voice
         if (conversation.TakeSpoken() is not { Count: > 0 } spoken)
             return result;
 
-        var said = string.Join(" ", spoken.Select(s => phrases.Spoken(s.Handle, s.Item)).OfType<string>().Select(GodModeAnnouncementFormatter.Sentence));
+        var said = string.Join(" ", spoken.Select(s => phrases.Spoken(s.Name, s.Item)).OfType<string>().Select(GodModeAnnouncementFormatter.Sentence));
         if (said.Length == 0)
             return result;
         context.Log?.Log("SPOKEN", $"Said \"{said}\" in place of \"{result?.ResponseText}\"");

@@ -48,7 +48,7 @@ public sealed class StartTests
 
         var result = Assert.Single(model.ToolResults);
         Assert.DoesNotContain("Unknown project", result);
-        Assert.StartsWith("283 (283-voice", result);
+        Assert.StartsWith("issue 283 (283-voice", result);
         Assert.NotNull(voice.Session.Handles.Resolve("283"));
         Assert.Equal(new ProjectRef("local", project.Id), voice.Session.Handles.Resolve("283"));
     }

@@ -50,11 +50,11 @@ public sealed class SpokenReplyTests
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
             .Respond(Retold);
-        var (_, voice) = await AskedAsync(model, Spoken, $"283 spørger: {Spoken}");
+        var (_, voice) = await AskedAsync(model, Spoken, $"issue 283 spørger: {Spoken}");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Hvad spørger 283 om?");
-        await SaidAgainAsync(voice, $"283 spørger: {Spoken}");
+        await SaidAgainAsync(voice, $"issue 283 spørger: {Spoken}");
 
         Assert.DoesNotContain(Retold, voice.Events.Responses);
         Assert.Contains($"\"{Spoken}\", is said word for word by the system", Assert.Single(model.ToolResults));
@@ -66,11 +66,11 @@ public sealed class SpokenReplyTests
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.WhatNeedsMe)
             .Respond($"1 venter: {Retold}");
-        var (_, voice) = await AskedAsync(model, Spoken, $"283 spørger: {Spoken}");
+        var (_, voice) = await AskedAsync(model, Spoken, $"issue 283 spørger: {Spoken}");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Hvad venter?");
-        await SaidAgainAsync(voice, $"283 spørger: {Spoken}");
+        await SaidAgainAsync(voice, $"issue 283 spørger: {Spoken}");
 
         Assert.DoesNotContain($"1 venter: {Retold}", voice.Events.Responses);
     }
@@ -83,7 +83,7 @@ public sealed class SpokenReplyTests
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
             .Respond(Summary);
-        var (_, voice) = await AskedAsync(model, spoken: null, "283 har et spørgsmål.");
+        var (_, voice) = await AskedAsync(model, spoken: null, "issue 283 har et spørgsmål.");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Hvad spørger 283 om?");
@@ -109,8 +109,8 @@ public sealed class SpokenReplyTests
 
         var result = await tools.WhatNeedsMeAsync(CancellationToken.None);
 
-        Assert.Contains($"- 283: finished: {Written} In its own spoken words: \"{Spoken}\"", result);
-        Assert.Contains("- 101: question: Hvilken titel?", result);
+        Assert.Contains($"- issue 283: finished: {Written} In its own spoken words: \"{Spoken}\"", result);
+        Assert.Contains("- issue 101: question: Hvilken titel?", result);
         Assert.Empty(conversation.TakeSpoken());
     }
 
@@ -119,11 +119,11 @@ public sealed class SpokenReplyTests
     {
         var phrases = new VoicePhrases(new VoiceBot.Core.Resources.SessionLanguages("da-DK"));
 
-        Assert.Equal($"283 er færdig: {Spoken}", phrases.Announce("283", Finished(Id, "283-voice", Written) with { Spoken = Spoken }));
-        Assert.Equal($"283 spørger: {Spoken}", phrases.Announce("283", Question(Id, "283-voice", Written) with { Spoken = Spoken }));
-        Assert.Equal("283 er færdig", phrases.Announce("283", Finished(Id, "283-voice", Written)));
+        Assert.Equal($"issue 283 er færdig: {Spoken}", phrases.Announce(new SpokenName("issue 283"), Finished(Id, "283-voice", Written) with { Spoken = Spoken }));
+        Assert.Equal($"issue 283 spørger: {Spoken}", phrases.Announce(new SpokenName("issue 283"), Question(Id, "283-voice", Written) with { Spoken = Spoken }));
+        Assert.Equal("issue 283 er færdig", phrases.Announce(new SpokenName("issue 283"), Finished(Id, "283-voice", Written)));
         // Its own '?' ends the sentence said
-        Assert.Equal($"283 spørger: {Spoken}", GodModeAnnouncementFormatter.Sentence($"283 spørger: {Spoken}"));
+        Assert.Equal($"issue 283 spørger: {Spoken}", GodModeAnnouncementFormatter.Sentence($"issue 283 spørger: {Spoken}"));
     }
 
     /// <summary>
@@ -137,11 +137,11 @@ public sealed class SpokenReplyTests
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
             .Respond("Sendt.");
-        var (servers, voice) = await AskedAsync(model, SentForReview, $"283 spørger: {SentForReview}");
+        var (servers, voice) = await AskedAsync(model, SentForReview, $"issue 283 spørger: {SentForReview}");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Status 283");
-        await SaidAgainAsync(voice, $"283 spørger: {SentForReview}");
+        await SaidAgainAsync(voice, $"issue 283 spørger: {SentForReview}");
 
         Assert.Empty(servers.Replies);
         Assert.DoesNotContain("Intet sendt. Sig svaret igen.", voice.Events.Responses);

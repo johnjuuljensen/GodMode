@@ -32,36 +32,47 @@ public sealed partial class VoicePhrases
     public string Several(int count) => _danish ? $"{count} venter på dig:" : $"{count} need you:";
 
     /// <summary>
-    /// One project that needs the user, by its handle: short, since the model reads the rest when asked, or, when the
-    /// session gave its own spoken reply, that reply word for word (<see cref="Spoken"/>).
+    /// A project named alone (#450): its label, then its root and profile, those it is said with: "issue 376 i GodMode,
+    /// profil Mega" / "issue 376 in GodMode, profile Mega".
     /// </summary>
-    public string Announce(string handle, AttentionItem item) => Spoken(handle, item) ?? (item.Kind, _danish) switch
+    public string Named(SpokenName name) =>
+        name.Label + (name.Root is { } root ? _danish ? $" i {root}" : $" in {root}" : "")
+        + (name.Profile is { } profile ? _danish ? $", profil {profile}" : $", profile {profile}" : "");
+
+    /// <summary>The project named as a sentence's subject: <see cref="Named"/>, with a comma after a profile, before the verb.</summary>
+    private string Subject(SpokenName name) => Named(name) + (name.Profile is null ? "" : ",");
+
+    /// <summary>
+    /// One project that needs the user, by its name (<see cref="Named"/>): short, since the model reads the rest when
+    /// asked, or, when the session gave its own spoken reply, that reply word for word (<see cref="Spoken"/>).
+    /// </summary>
+    public string Announce(SpokenName name, AttentionItem item) => Spoken(name, item) ?? (Subject(name), item.Kind, _danish) switch
     {
-        (AttentionKind.Question, true) => $"{handle} har et spørgsmål",
-        (AttentionKind.Question, false) => $"{handle} has a question",
-        (AttentionKind.Permission, true) => $"{handle} skal have tilladelse: {PermissionSummary(item)}. Svar på skærmen",
-        (AttentionKind.Permission, false) => $"{handle} needs permission: {PermissionSummary(item)}. Answer it on screen",
-        (AttentionKind.Error, true) => $"{handle} fejlede",
-        (AttentionKind.Error, false) => $"{handle} failed",
-        (AttentionKind.Review, true) => $"{handle} har fået ændringsønsker",
-        (AttentionKind.Review, false) => $"{handle} has changes requested",
-        (AttentionKind.Finished, true) => $"{handle} er færdig",
-        (AttentionKind.Finished, false) => $"{handle} is done",
+        (var who, AttentionKind.Question, true) => $"{who} har et spørgsmål",
+        (var who, AttentionKind.Question, false) => $"{who} has a question",
+        (var who, AttentionKind.Permission, true) => $"{who} skal have tilladelse: {PermissionSummary(item)}. Svar på skærmen",
+        (var who, AttentionKind.Permission, false) => $"{who} needs permission: {PermissionSummary(item)}. Answer it on screen",
+        (var who, AttentionKind.Error, true) => $"{who} fejlede",
+        (var who, AttentionKind.Error, false) => $"{who} failed",
+        (var who, AttentionKind.Review, true) => $"{who} har fået ændringsønsker",
+        (var who, AttentionKind.Review, false) => $"{who} has changes requested",
+        (var who, AttentionKind.Finished, true) => $"{who} er færdig",
+        (var who, AttentionKind.Finished, false) => $"{who} is done",
     };
 
     /// <summary>
     /// The session's own spoken reply (<see cref="AttentionItem.Spoken"/>, issue #384), word for word, after a lead-in
-    /// that names the project and what it needs: "283 er færdig: …", "283 spørger: …". The session wrote it, not the bot,
-    /// so it never starts the line, where a "Sendt" in it would be the bot's own word (<see cref="SentNode"/>). Null
-    /// when the session gave none.
+    /// that names the project and what it needs: "issue 283 er færdig: …", "issue 283 spørger: …". The session wrote it,
+    /// not the bot, so it never starts the line, where a "Sendt" in it would be the bot's own word (<see cref="SentNode"/>).
+    /// Null when the session gave none.
     /// </summary>
-    public string? Spoken(string handle, AttentionItem item) => (item.Spoken, item.Kind, _danish) switch
+    public string? Spoken(SpokenName name, AttentionItem item) => (item.Spoken, item.Kind, _danish) switch
     {
         (null or "", _, _) => null,
-        (var spoken, AttentionKind.Question, true) => $"{handle} spørger: {spoken}",
-        (var spoken, AttentionKind.Question, false) => $"{handle} asks: {spoken}",
-        (var spoken, _, true) => $"{handle} er færdig: {spoken}",
-        (var spoken, _, false) => $"{handle} is done: {spoken}",
+        (var spoken, AttentionKind.Question, true) => $"{Subject(name)} spørger: {spoken}",
+        (var spoken, AttentionKind.Question, false) => $"{Subject(name)} asks: {spoken}",
+        (var spoken, _, true) => $"{Subject(name)} er færdig: {spoken}",
+        (var spoken, _, false) => $"{Subject(name)} is done: {spoken}",
     };
 
     /// <summary>
@@ -110,10 +121,10 @@ public sealed partial class VoicePhrases
     [GeneratedRegex(@"\s+")]
     private static partial Regex Whitespace();
 
-    /// <summary>Answers went out this turn (<see cref="SentNode"/>): "Sendt til 283.", "Sendt til 283 og 101.".</summary>
-    public string Sent(IReadOnlyList<string> handles)
+    /// <summary>Answers went out this turn (<see cref="SentNode"/>): "Sendt til issue 283.", "Sendt til issue 283 og issue 101.".</summary>
+    public string Sent(IReadOnlyList<SpokenName> names)
     {
-        var distinct = handles.Distinct().ToList();
+        var distinct = names.Select(Named).Distinct().ToList();
         var to = distinct.Count == 1 ? distinct[0]
             : $"{string.Join(", ", distinct[..^1])} {(_danish ? "og" : "and")} {distinct[^1]}";
         return _danish ? $"Sendt til {to}." : $"Sent to {to}.";

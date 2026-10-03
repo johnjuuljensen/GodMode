@@ -30,10 +30,11 @@ public sealed class ProjectListTests
 
         voice.Transcriptions.AddFinal("Hvilke projekter er i gang?");
         await voice.Events.SaidAsync("1 projekt: testing.");
-        Assert.Equal("1 projects:\n- testing (testing, Assistant, Outbound, chat): Idle", Assert.Single(model.ToolResults));
+        Assert.StartsWith("1 project, all in one group:\nProfile Outbound, root Assistant (1 project):\n- chat testing (testing, chat): Idle\nSay the count, 1,",
+            Assert.Single(model.ToolResults));
 
         voice.Transcriptions.AddFinal("Sig til Assistent at den skal skifte til outbound profil");
-        await voice.Events.SaidAsync("Sendt til testing.");
+        await voice.Events.SaidAsync("Sendt til chat testing.");
 
         var (project, text) = Assert.Single(servers.Replies);
         Assert.Equal(new ProjectRef(ServerA, Chat), project);
@@ -49,7 +50,7 @@ public sealed class ProjectListTests
         var conversation = new VoiceConversation();
         var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, conversation);
         servers.AddProject(ServerA, Chat, "testing", root: "Assistant", kind: "chat");
-        Assert.StartsWith("testing (", await tools.ProjectStatusAsync("testing", CancellationToken.None));
+        Assert.StartsWith("chat testing (", await tools.ProjectStatusAsync("testing", CancellationToken.None));
         Assert.Equal(new ProjectRef(ServerA, Chat), conversation.Current);
 
         servers.DeleteProject(ServerA, Chat);
@@ -149,7 +150,7 @@ public sealed class ProjectListTests
 
         servers.AddProject(ServerA, Chat, "testing", root: "Assistant", kind: "chat");
         Assert.Equal(["testing"], announced);
-        Assert.StartsWith("1 need the user:\n- testing: question",await tools.WhatNeedsMeAsync(CancellationToken.None));
+        Assert.StartsWith("1 need the user:\n- chat testing: question",await tools.WhatNeedsMeAsync(CancellationToken.None));
 
         servers.DeleteProject(ServerA, Chat);
         servers.PushAttention(ServerA, item);   // a stale list, on its own queue, after the delete
@@ -168,7 +169,7 @@ public sealed class ProjectListTests
         var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, new VoiceConversation());
         servers.AddProject(ServerA, Chat, "testing", root: "Assistant", kind: "chat", profile: "Outbound");
 
-        Assert.Equal("Unknown project 'vonage'. Nothing needs the user now. Projects: testing (testing, Assistant, Outbound, chat): Idle.",
+        Assert.Equal("Unknown project 'vonage'. Nothing needs the user now. Projects: chat testing (testing, chat): Idle.",
             await tools.ProjectStatusAsync("vonage", CancellationToken.None));
     }
 }

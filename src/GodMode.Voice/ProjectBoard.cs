@@ -43,7 +43,7 @@ public sealed class ProjectBoard
             foreach (var gone in before.Where(p => !ids.Contains(p.Project.Id)))
                 _handles.Forget(gone.Ref);
             foreach (var project in now)
-                _handles.For(project.Ref, project.Project.Name, project.Project.RootName, project.Project.Kind);
+                _handles.For(project.Ref, project.Project.Name, project.Project.RootName, project.Project.Kind, project.Project.ProfileName);
         }
         Changed?.Invoke();
     }
