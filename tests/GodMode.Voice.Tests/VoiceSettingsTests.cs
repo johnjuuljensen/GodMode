@@ -23,16 +23,30 @@ public sealed class VoiceSettingsTests : IDisposable
     }
 
     [Fact]
-    public async Task The_defaults_are_Danish_with_English_the_fixed_models_and_no_echo_cancellation()
+    public async Task The_defaults_are_Danish_with_English_and_no_echo_cancellation()
     {
         var view = await _store.GetViewAsync();
 
         Assert.Equal("da-DK+en", view.Language);
         Assert.Equal("OyYu1oFho6PvCH2wRY3S", view.VoiceId);
         Assert.False(view.EchoCancellation);
-        Assert.Equal(new VoiceModels("claude-haiku-4-5-20251001", "claude-sonnet-5-5", "claude-opus-5-5"), view.Models);
         Assert.False(view.ElevenLabsKeySet);
         Assert.False(view.AnthropicKeySet);
+    }
+
+    /// <summary>A file saved when voice kept its own models (#475) loads as it is, and its next save drops them.</summary>
+    [Fact]
+    public async Task A_file_with_the_old_models_loads_and_its_next_save_drops_them()
+    {
+        Directory.CreateDirectory(_dir);
+        var file = Path.Combine(_dir, VoiceSettingsStore.FileName);
+        await File.WriteAllTextAsync(file,
+            """{ "Language": "en", "Models": { "Light": "l", "Medium": "claude-sonnet-5", "Heavy": "h" } }""");
+
+        Assert.Equal("en", (await _store.LoadAsync()).Language);
+
+        await _store.UpdateAsync(new VoiceSettingsUpdate(VoiceId: "voice-2"));
+        Assert.DoesNotContain("Models", await File.ReadAllTextAsync(file));
     }
 
     /// <summary>What voice.settings.get returns, as the page gets it: whether each key is set, never the key.</summary>
