@@ -26,6 +26,9 @@ public sealed record ServerRoot(string ServerId, string ServerName, ProjectRootI
 {
     /// <summary>The root's profile, as the app names it: <c>Default</c> when it has none.</summary>
     public string Profile => Root.ProfileName ?? "Default";
+
+    /// <summary>What the root is said as: its title, else its name (#434). Its name stays its key.</summary>
+    public string Shown => Root.Title ?? Root.Name;
 }
 
 /// <summary>How many of the servers voice connects to had given their lists when the session started.</summary>
@@ -50,6 +53,12 @@ public interface IGodModeServers
     /// <see cref="IProjectHubClient.ProjectDeleted"/>), and empty when the server is let go of.
     /// </summary>
     event Action<string, string, IReadOnlyList<ProjectSummary>>? ProjectsChanged;
+
+    /// <summary>
+    /// A server's whole list of roots, for their titles (#434): on each connection, before its projects, each time
+    /// they change (<see cref="IProjectHubClient.RootsChanged"/>), and empty when the server is let go of.
+    /// </summary>
+    event Action<string, IReadOnlyList<ProjectRootInfo>>? RootsChanged;
 
     /// <summary>What needs the user on every server connected now (<see cref="IProjectHub.GetAttention"/>), oldest first.
     /// A server that fails to answer is left out.</summary>
@@ -102,6 +111,8 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
     public event Action<string, string, IReadOnlyList<AttentionItem>>? AttentionChanged;
 
     public event Action<string, string, IReadOnlyList<ProjectSummary>>? ProjectsChanged;
+
+    public event Action<string, IReadOnlyList<ProjectRootInfo>>? RootsChanged;
 
     /// <summary>Connects to the servers listed now, and lets go of those gone (<see cref="ServerConnections.RefreshAsync"/>).</summary>
     public Task<int> RefreshAsync(CancellationToken ct = default) => _connections.RefreshAsync(ct);
@@ -214,11 +225,14 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
         connection.On<ProjectStatus>(nameof(IProjectHubClient.ProjectCreated), status => Projects(server).Created(status));
         connection.On<string, ProjectStatus>(nameof(IProjectHubClient.StatusChanged), (id, status) => Projects(server).StatusChanged(id, status));
         connection.On<string>(nameof(IProjectHubClient.ProjectDeleted), id => Projects(server).Deleted(id));
+        connection.On<ProjectRootInfo[], ProfileInfo[]>(nameof(IProjectHubClient.RootsChanged), (roots, _) => RootsChanged?.Invoke(server.Id, roots));
     }
 
     async Task IServerConnectionHandler.OnConnectedAsync(ConnectedServer server, HubConnection connection, CancellationToken ct)
     {
         _names[server.Id] = server.Name;
+        // Roots before projects, so a project is said with its root's title from the first
+        RootsChanged?.Invoke(server.Id, await connection.InvokeAsync<ProjectRootInfo[]>(nameof(IProjectHub.ListProjectRoots), ct));
         // Projects before attention, so a project's handle is given with its root and kind
         // What the hub pushes while the list is on its way is made after it, on top of it
         var list = Projects(server);
@@ -240,6 +254,7 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
     void IServerConnectionHandler.OnRemoved(string serverId)
     {
         _listed.TryRemove(serverId, out _);
+        RootsChanged?.Invoke(serverId, []);
         if (_projects.TryRemove(serverId, out var projects))
             projects.Removed();
         if (_names.TryRemove(serverId, out var name))

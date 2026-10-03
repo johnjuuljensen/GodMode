@@ -38,9 +38,14 @@ public sealed partial class ProjectHandles
     private readonly Dictionary<string, ProjectRef> _byHandle = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (ProjectRef Project, Entry Entry)> _retired = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>What a handle was given for: the project's name, and its root, kind and profile once known.</summary>
-    private sealed record Entry(string Handle, string Name, string? Root, string? Kind, string? Profile = null)
+    /// <summary>
+    /// What a handle was given for: the project's name, and its root, kind and profile once known, and its root's
+    /// title (#434), when it is shown as other than its name. The root is accepted as either.
+    /// </summary>
+    private sealed record Entry(string Handle, string Name, string? Root, string? Kind, string? Profile = null, string? RootTitle = null)
     {
+        public bool InRoot(string? reference) => Same(Root, reference ?? "") || Same(RootTitle, reference ?? "");
+
         public string Label => ProjectHandles.Label(Handle, Name, Kind);
     }
 
@@ -73,6 +78,19 @@ public sealed partial class ProjectHandles
             _byProject[project] = new Entry(handle, name, root, kind, profile);
             _byHandle[handle] = project;
             return handle;
+        }
+    }
+
+    /// <summary>
+    /// What the project's root is shown as now (#434): its title, or its name. Said with its handle, and accepted
+    /// besides the root's name.
+    /// </summary>
+    public void Retitle(ProjectRef project, string? shown)
+    {
+        lock (_lock)
+        {
+            if (_byProject.TryGetValue(project, out var known))
+                _byProject[project] = known with { RootTitle = shown is null || Same(known.Root, shown) ? null : shown };
         }
     }
 
@@ -179,7 +197,7 @@ public sealed partial class ProjectHandles
             if (named.Count > 1) return null;
 
             // A root or kind that only one project has names it; one that several have names none
-            var grouped = _byProject.Where(p => Same(p.Value.Root, reference) || Same(p.Value.Kind, reference)).Select(p => p.Key).ToList();
+            var grouped = _byProject.Where(p => p.Value.InRoot(reference) || Same(p.Value.Kind, reference)).Select(p => p.Key).ToList();
             if (grouped.Count > 0) return grouped.Count == 1 ? grouped[0] : null;
             if (!fuzzy || DanishNumbers.Parse(reference) is not null) return null;
 
@@ -192,7 +210,8 @@ public sealed partial class ProjectHandles
             if (close.Count > 1) return null;
 
             // A root misheard ("Assistent" for Assistant): only when one project is in the roots it is close to
-            var roots = _byProject.Where(p => p.Value.Root is { } root && Closeness(root, reference) >= 0.9).Select(p => p.Key).ToList();
+            var roots = _byProject.Where(p => new[] { p.Value.Root, p.Value.RootTitle }.OfType<string>().Any(root => Closeness(root, reference) >= 0.9))
+                .Select(p => p.Key).ToList();
             return roots is [var only] ? only : null;
         }
     }
@@ -215,13 +234,13 @@ public sealed partial class ProjectHandles
             said.Add(e => Same(e.Profile, profile));
             rest = Regex.Replace(rest, pattern, " ", Options);
         }
-        var places = _byProject.Values.SelectMany(e => new[] { e.Root, e.Profile }).OfType<string>()
+        var places = _byProject.Values.SelectMany(e => new[] { e.Root, e.RootTitle, e.Profile }).OfType<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase).OrderByDescending(n => n.Length).ToList();
         foreach (var place in places)
         {
             var pattern = $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(place)}(?![\p{{L}}\p{{N}}])";
             if (!Regex.IsMatch(rest, pattern, Options)) continue;
-            said.Add(e => Same(e.Root, place) || Same(e.Profile, place));
+            said.Add(e => e.InRoot(place) || Same(e.Profile, place));
             rest = Regex.Replace(rest, pattern, " ", Options);
         }
         if (said.Count == 0) return null;

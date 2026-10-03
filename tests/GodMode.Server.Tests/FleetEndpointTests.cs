@@ -103,6 +103,11 @@ public class FleetEndpointTests
         Assert.True(actions[WorkAction].GetProperty("Session").GetBoolean());
         Assert.False(actions[ProvisionAction].GetProperty("Session").GetBoolean());
         Assert.True(actions[WorkAction].GetProperty("InputSchema").GetProperty("properties").TryGetProperty("prompt", out _));
+
+        // A root's name is its key, and its title, when it has one, is beside it (#434)
+        Assert.False(root.TryGetProperty("Title", out var none) && none.ValueKind != JsonValueKind.Null);
+        var sibling = Assert.Single(listed.GetProperty("Roots").EnumerateArray(), r => r.GetProperty("Name").GetString() == SiblingRoot);
+        Assert.Equal(SiblingTitle, sibling.GetProperty("Title").GetString());
     }
 
     /// <summary>A session started with a model, an effort and a parent launches with them, and is in the app's list as the hub's create's are.</summary>
