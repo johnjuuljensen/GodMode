@@ -16,6 +16,7 @@ import {
 import { projectKey, type ProjectKey } from './projectKey';
 import {
   rebuildHierarchy, computeTotalWaiting, inProfile, SIDEBAR_GROUP_ORDER, DEFAULT_GROUP_BY,
+  foldPathOf, profileFoldKey, rootFoldKey, rootFoldPrefix, profileNameOf,
   type ServerConnection, type SidebarGroupBy, type ProfileGroup,
 } from './hierarchy';
 
@@ -23,7 +24,9 @@ export { projectKey, type ProjectKey };
 /** The key of a transcript: a project's ProjectKey. */
 export { projectKey as transcriptKey };
 export type { ServerConnection, SidebarGroupBy, SidebarItem, RootGroup, ProfileGroup } from './hierarchy';
-export { isListed, foldItems, descendantsOf, inProfile, profileNameOf, sameProfile } from './hierarchy';
+export {
+  isListed, foldItems, descendantsOf, inProfile, profileNameOf, sameProfile, profileFoldKey, rootFoldKey, INACTIVE_FOLD_KEY,
+} from './hierarchy';
 
 // ── Persisted dismiss tracking ─────────────────────────────────
 // Keyed by ProjectKey; the unversioned key held project IDs alone, which collide across servers
@@ -221,6 +224,12 @@ interface AppState {
   /** The parents whose rows are collapsed in the list, hiding what they started (#390); kept on this device. */
   collapsedSessions: Record<ProjectKey, true>;
   toggleCollapsed: (key: ProjectKey) => void;
+  /**
+   * The profile and root headers, and the inactive servers' section, folded in the list (#427); kept on this
+   * device, by the keys hierarchy.ts gives them (`profileFoldKey`, `rootFoldKey`, `INACTIVE_FOLD_KEY`).
+   */
+  foldedHeaders: Record<string, true>;
+  toggleFoldedHeader: (key: string) => void;
 
   // Server lifecycle
   loadServers: () => Promise<void>;
@@ -359,9 +368,11 @@ function forgotten(state: AppState, keys: ReadonlySet<ProjectKey>): Partial<AppS
   }
   const dp = without(state.dismissedProjects, keys);
   if (dp !== state.dismissedProjects) saveDismissed(dp);
+  const collapsedSessions = without(state.collapsedSessions, keys);
+  if (collapsedSessions !== state.collapsedSessions) saveKeySet(COLLAPSED_KEY, collapsedSessions);
   const sel = state.selectedProject;
   return {
-    transcripts, dismissedProjects: dp,
+    transcripts, dismissedProjects: dp, collapsedSessions,
     projectQuestions: without(state.projectQuestions, keys), inboxDrafts: without(state.inboxDrafts, keys),
     tiles: without(state.tiles, keys), tileMessages: without(state.tileMessages, keys), tileLoading: without(state.tileLoading, keys),
     ...(sel && keys.has(projectKey(sel.serverId, sel.projectId)) ? { outputMessages: [], question: emptyQuestion } : {}),
@@ -374,7 +385,7 @@ function goneKeys(state: AppState, serverId: string, projects: ProjectSummary[])
   const kept = new Set(projects.map(p => projectKey(serverId, p.Id)));
   const sel = state.selectedProject;
   const held = [
-    state.transcripts, state.projectQuestions, state.dismissedProjects, state.inboxDrafts, state.tiles,
+    state.transcripts, state.projectQuestions, state.dismissedProjects, state.inboxDrafts, state.tiles, state.collapsedSessions,
   ].flatMap(map => Object.keys(map) as ProjectKey[]);
   if (sel) held.push(projectKey(sel.serverId, sel.projectId));
   return new Set(held.filter(k => k.startsWith(prefix) && !kept.has(k)));
@@ -391,6 +402,21 @@ function listed(state: AppState, serverId: string, project: ProjectSummary): Par
   return { serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions, totalWaitingCount: total };
 }
 
+/**
+ * The folds that hide the session's row opened, from its profile down (#427, #397): it was selected from the
+ * inbox, a notification or voice, so it is shown. Nothing when none hides it.
+ */
+function revealed(state: AppState, key: ProjectKey): Partial<AppState> {
+  const path = foldPathOf(state.profileGroups, key);
+  if (!path) return {};
+  const updates: Partial<AppState> = {};
+  const foldedHeaders = pruned(state.foldedHeaders, k => path.headers.includes(k));
+  if (foldedHeaders !== state.foldedHeaders) { saveKeySet(FOLDED_HEADERS_KEY, foldedHeaders); updates.foldedHeaders = foldedHeaders; }
+  const collapsedSessions = pruned(state.collapsedSessions, k => path.sessions.includes(k));
+  if (collapsedSessions !== state.collapsedSessions) { saveKeySet(COLLAPSED_KEY, collapsedSessions); updates.collapsedSessions = collapsedSessions; }
+  return updates;
+}
+
 // Helper to persist sidebar groupBy
 const GROUPBY_KEY = 'godmode-sidebar-groupby';
 /** The stored group-by, else the default: a stored value that is no longer a mode (`profile`, before #308) included. */
@@ -400,13 +426,55 @@ export function loadGroupBy(): SidebarGroupBy {
 }
 
 const COLLAPSED_KEY = 'godmode-collapsed-sessions';
-/** The collapsed parents this device keeps, else none. */
-function loadCollapsed(): Record<ProjectKey, true> {
+const FOLDED_HEADERS_KEY = 'godmode-folded-headers';
+
+/**
+ * The set of keys this device keeps under `storageKey`, else none: what is not an object of `true`s (`"null"`,
+ * an array, a value of another kind) is read as none, and an entry that is not `true` is dropped (#397).
+ */
+export function loadKeySet<K extends string>(storageKey: string): Record<K, true> {
   try {
-    return JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '{}');
+    const stored: unknown = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    if (typeof stored !== 'object' || stored === null || Array.isArray(stored)) return {} as Record<K, true>;
+    return Object.fromEntries(Object.entries(stored).filter(([, v]) => v === true)) as Record<K, true>;
   } catch {
-    return {};
+    return {} as Record<K, true>;
   }
+}
+function saveKeySet(storageKey: string, set: Record<string, true>) {
+  try { localStorage.setItem(storageKey, JSON.stringify(set)); } catch { /* kept for this page only */ }
+}
+/** The set with the key in it or out of it. */
+function toggled<K extends string>(set: Record<K, true>, key: K): Record<K, true> {
+  const next = { ...set };
+  if (next[key]) delete next[key]; else next[key] = true;
+  return next;
+}
+/** The set without the keys `drop` names; the same object when it has none of them. */
+function pruned<K extends string>(set: Record<K, true>, drop: (key: K) => boolean): Record<K, true> {
+  const keys = Object.keys(set) as K[];
+  if (!keys.some(drop)) return set;
+  return Object.fromEntries(keys.filter(k => !drop(k)).map(k => [k, true])) as Record<K, true>;
+}
+
+/**
+ * The folded headers without those of what the server no longer lists: its roots, once it has given them on
+ * this connection; and a profile, only once every server has given its lists and none has it, as a server not
+ * connected may still have it.
+ */
+function prunedHeaders(state: AppState, serverId: string, connections: ServerConnection[]): Record<string, true> {
+  const prefix = rootFoldPrefix(serverId);
+  const conn = connections.find(c => c.serverInfo.Id === serverId)!;
+  const roots = new Set(conn.roots.map(r => rootFoldKey(serverId, profileNameOf(r.ProfileName), r.Name)));
+  const listedAll = connections.every(c => c.serverInfo.Id === serverId || state.projectsListed[c.serverInfo.Id]);
+  const profiles = new Set(connections.flatMap(c => [
+    ...c.profiles.map(p => p.Name), ...c.roots.map(r => profileNameOf(r.ProfileName)),
+    ...c.projects.map(p => profileNameOf(p.ProfileName)),
+  ]).map(profileFoldKey));
+  const folded = pruned(state.foldedHeaders, key =>
+    (key.startsWith(prefix) && !roots.has(key)) || (listedAll && key.startsWith('profile:') && !profiles.has(key)));
+  if (folded !== state.foldedHeaders) saveKeySet(FOLDED_HEADERS_KEY, folded);
+  return folded;
 }
 
 /** What a call to a server that is not connected says: a server offline, reconnecting or not. */
@@ -497,12 +565,17 @@ export const useAppStore = create<AppState>((set, get) => {
     const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(get().serverConnections, get().profileFilter, next);
     set({ sidebarGroupBy: next, profileGroups, inactiveServers, profileFilterOptions });
   },
-  collapsedSessions: loadCollapsed(),
+  collapsedSessions: loadKeySet<ProjectKey>(COLLAPSED_KEY),
   toggleCollapsed: (key) => {
-    const collapsedSessions = { ...get().collapsedSessions };
-    if (collapsedSessions[key]) delete collapsedSessions[key]; else collapsedSessions[key] = true;
-    try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsedSessions)); } catch { /* kept for this page only */ }
+    const collapsedSessions = toggled(get().collapsedSessions, key);
+    saveKeySet(COLLAPSED_KEY, collapsedSessions);
     set({ collapsedSessions });
+  },
+  foldedHeaders: loadKeySet(FOLDED_HEADERS_KEY),
+  toggleFoldedHeader: (key) => {
+    const foldedHeaders = toggled(get().foldedHeaders, key);
+    saveKeySet(FOLDED_HEADERS_KEY, foldedHeaders);
+    set({ foldedHeaders });
   },
 
   lockedProfile: null,
@@ -975,6 +1048,7 @@ export const useAppStore = create<AppState>((set, get) => {
           serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
           ...updates, projectQuestions: pq, totalWaitingCount: computeTotalWaiting(connections, pq, dp),
           projectsListed: { ...state.projectsListed, [serverId]: true },
+          foldedHeaders: prunedHeaders(state, serverId, connections),
         };
       });
     } catch (err) {
@@ -990,6 +1064,7 @@ export const useAppStore = create<AppState>((set, get) => {
     const messages = state.transcripts[key]?.messages ?? [];
     const project = state.serverConnections.find(c => c.serverInfo.Id === serverId)?.projects.find(p => p.Id === projectId);
     return {
+      ...revealed(state, key),
       selectedProject: { serverId, projectId }, activePage: null, outputMessages: messages,
       // A resume replays only what is new, so the question comes from what is held
       question: heldQuestion(messages, project, state.dismissedProjects[key], state.lastInputSentAt),
