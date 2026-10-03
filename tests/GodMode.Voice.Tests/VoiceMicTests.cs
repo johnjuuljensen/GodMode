@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging.Abstractions;
 using VoiceBot.Core.Audio;
 using VoiceBot.Core.Pipeline;
@@ -12,7 +13,7 @@ namespace GodMode.Voice.Tests;
 /// </summary>
 public sealed class VoiceMicTests : IDisposable
 {
-    private static readonly VoiceMicOptions Options = new() { ToneWait = TimeSpan.Zero };
+    private static readonly VoiceMicOptions Options = new() { SilenceTimeout = TimeSpan.FromSeconds(10), ToneWait = TimeSpan.Zero };
 
     private readonly ConcurrentQueue<string> _log = new();
     private readonly ManualTime _time = new();
@@ -94,6 +95,89 @@ public sealed class VoiceMicTests : IDisposable
 
         _time.Advance(TimeSpan.FromSeconds(2.1));
         await Eventually.UntilAsync(() => _mic.State == VoiceMicState.Closed, () => "the mic did not close");
+    }
+
+    [Fact]
+    public void The_mic_stays_open_30_seconds_by_default()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(30), new VoiceMicOptions().SilenceTimeout);
+        Assert.Equal(30, VoiceSettings.Default.MicSilenceSeconds);
+    }
+
+    /// <summary>
+    /// Issue #451: the mic closed on silence 0.15 s before speech recognition's first partial of the user's sentence.
+    /// Their speech in the mic's audio, read by the session, starts the silence over before any transcript.
+    /// </summary>
+    [Fact]
+    public async Task The_users_speech_in_the_mics_audio_starts_the_silence_over()
+    {
+        var audio = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
+        var heard = _mic.Listening(new FakeSource(audio.Reader)).Audio;
+        await _mic.OpenAsync();
+
+        Read(heard, audio, Chunk(rms: 50));
+        _time.Advance(TimeSpan.FromSeconds(9.9));
+        Read(heard, audio, Chunk(rms: 3000));
+        _time.Advance(TimeSpan.FromSeconds(9.9));
+        Assert.Equal(VoiceMicState.Open, _mic.State);
+
+        _time.Advance(TimeSpan.FromSeconds(0.2));
+        await Eventually.UntilAsync(() => _mic.State == VoiceMicState.Closed, () => "the mic did not close");
+    }
+
+    /// <summary>Room noise is the floor: steady audio no louder than it does not keep the mic open.</summary>
+    [Fact]
+    public async Task Audio_at_the_noise_floor_does_not_start_the_silence_over()
+    {
+        var audio = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
+        var heard = _mic.Listening(new FakeSource(audio.Reader)).Audio;
+        await _mic.OpenAsync();
+
+        Read(heard, audio, Chunk(rms: 400));
+        for (var i = 0; i < 99; i++)
+        {
+            _time.Advance(TimeSpan.FromSeconds(0.1));
+            Read(heard, audio, Chunk(rms: 400));
+        }
+        _time.Advance(TimeSpan.FromSeconds(0.2));
+
+        await Eventually.UntilAsync(() => _mic.State == VoiceMicState.Closed, () => "the mic did not close");
+    }
+
+    /// <summary>Audio read while the mic is closed (none, but a device's tail) neither opens a timer nor sets the floor.</summary>
+    [Fact]
+    public async Task Speech_read_while_the_mic_is_closed_starts_no_silence()
+    {
+        var audio = Channel.CreateUnbounded<ReadOnlyMemory<byte>>();
+        var heard = _mic.Listening(new FakeSource(audio.Reader)).Audio;
+        Read(heard, audio, Chunk(rms: 50));
+        Read(heard, audio, Chunk(rms: 3000));
+        _time.Advance(TimeSpan.FromSeconds(60));
+
+        Assert.Equal((VoiceMicState.Closed, 0), (_mic.State, _switch.Closes));
+    }
+
+    private static void Read(ChannelReader<ReadOnlyMemory<byte>> heard, Channel<ReadOnlyMemory<byte>> audio, byte[] chunk)
+    {
+        audio.Writer.TryWrite(chunk);
+        Assert.True(heard.TryRead(out var read));
+        Assert.Equal(chunk, read.ToArray());
+    }
+
+    /// <summary>100 ms of a square wave at <paramref name="rms"/>, in the session's format.</summary>
+    private static byte[] Chunk(short rms)
+    {
+        var samples = AudioFormat.Pcm16kHz.SampleRate / 10 * AudioFormat.Pcm16kHz.Channels;
+        var bytes = new byte[samples * 2];
+        for (var i = 0; i < samples; i++)
+            BitConverter.TryWriteBytes(bytes.AsSpan(i * 2), (short)(i % 2 == 0 ? rms : -rms));
+        return bytes;
+    }
+
+    private sealed class FakeSource(ChannelReader<ReadOnlyMemory<byte>> audio) : IAudioSource
+    {
+        public AudioFormat Format => AudioFormat.Pcm16kHz;
+        public ChannelReader<ReadOnlyMemory<byte>> Audio => audio;
     }
 
     /// <summary>The silence counts only while voice listens: from the end of its speech, however long it thought and spoke.</summary>
