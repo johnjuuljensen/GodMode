@@ -49,6 +49,10 @@ public static class MauiProgram
         var relay = Services.GetRequiredService<LocalServer>();
         relay.Start();
         logger.LogInformation("LocalServer listening on {BaseUrl}", relay.BaseUrl);
+#if WINDOWS
+        // What interrupts makes a sound while the app runs (issue #438); Android's service does this on the phone
+        WindowsAttention.Start(Services, LoggerFactory);
+#endif
 
         var builder = MauiApp.CreateBuilder();
         builder

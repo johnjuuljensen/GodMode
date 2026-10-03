@@ -41,6 +41,7 @@ public sealed class HelpNode(string id, int priority) : INode
         (VoiceTools.ReadMore, "læs videre", "read on"),
         (VoiceTools.Answer, "svar at og dit svar", "answer that and your answer"),
         (VoiceTools.MarkSeen, "læst", "seen"),
+        (VoiceTools.SetImportance, "marker som vigtig", "mark as important"),
         (VoiceTools.StartSession, "start issue og et nummer", "start issue and a number"),
         (AnnouncementTools.Mute.Name, "stille", "quiet"),
         (AnnouncementTools.Unmute.Name, "sig til igen", "you can talk again"),

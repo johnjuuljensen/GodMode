@@ -31,6 +31,26 @@ public sealed class AttentionTrackerTests
         Assert.Equal(AttentionKind.Question, Assert.Single(_notifier.Shown.Values).Item.Kind);
     }
 
+    /// <summary>
+    /// The same item, from a session whose tier changed (issue #438): it goes to the notifier again, both ways, which takes
+    /// away a quiet one's and brings back one that notifies or interrupts.
+    /// </summary>
+    [Theory]
+    [InlineData(AttentionAlert.Notify, AttentionAlert.Inbox)]
+    [InlineData(AttentionAlert.Inbox, AttentionAlert.Notify)]
+    [InlineData(AttentionAlert.Notify, AttentionAlert.Interrupt)]
+    [InlineData(AttentionAlert.Interrupt, AttentionAlert.Notify)]
+    public void An_item_whose_alert_changed_is_shown_again_with_it(AttentionAlert was, AttentionAlert now)
+    {
+        var item = Item("Default/root/a", AttentionKind.Finished, "Done.");
+        _tracker.Update("alpha", "Alpha", [item with { Alert = was }]);
+        _tracker.Update("alpha", "Alpha", [item with { Alert = now }]);
+        _tracker.Update("alpha", "Alpha", [item with { Alert = now }]);
+
+        Assert.Equal(2, _notifier.Log.Count);
+        Assert.Equal(now, Assert.Single(_notifier.Shown.Values).Item.Alert);
+    }
+
     [Fact]
     public void An_item_its_server_no_longer_lists_is_cancelled()
     {

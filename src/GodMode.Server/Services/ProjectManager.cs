@@ -732,7 +732,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 Adopted: s.Adopted,
                 ParentId: s.ParentId,
                 SlashCommands: s.SlashCommands,
-                RecordedParentId: ServerParentOf(project)
+                RecordedParentId: ServerParentOf(project),
+                Importance: s.Importance
             ));
         }
 
@@ -1027,7 +1028,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             DangerouslySkipPermissions: skipPermissions,
             ActionName: action.Name,
             PermissionMode: action.PermissionMode,
-            SharedFolder: action.SharedFolder);
+            SharedFolder: action.SharedFolder,
+            Importance: action.Importance);
         return new CreateProjectResult(await LaunchNewSessionAsync(project, action, request.Inputs, name, kind, prompt, settings, request.FleetTools));
     }
 
@@ -1090,7 +1092,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         project.Status = project.Status with
         {
             Id = projectId, Name = name, Model = model, Effort = effort, Kind = kind, Adopted = settings.Adopted,
-            State = prompt == null ? ProjectState.Idle : project.Status.State,
+            Importance = settings.Importance, State = prompt == null ? ProjectState.Idle : project.Status.State,
         };
 
         // The session's state folder, now its id is final (scripts may have created the project dir without .godmode)
@@ -1526,6 +1528,27 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // Not UpdatedAt: it dates an Error, and seeing a result changes no state
         await _lifecycle.UpdateStatusAsync(project, status => status with { SeenAt = DateTime.UtcNow, Escalation = null });
+        await NotifyStatusChanged(project);
+    }
+
+    public async Task SetImportanceAsync(string projectId, Importance importance)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        if (!Enum.IsDefined(importance))
+            throw new ArgumentException($"{(int)importance} is no importance.");
+        if (project.Status.CreateFailed)
+            throw new InvalidOperationException($"Project {projectId} failed before its launch, and has no settings to keep an importance in.");
+
+        // settings.json is what a recovery reads it from; status.json's is never read. One that cannot be read is not
+        // replaced by the defaults, which would make a shared folder one a delete removes: the tier is refused
+        if (!ProjectFiles.ProjectSettings.TryLoad(project.StatePath, out var settings))
+            throw new InvalidOperationException($"Project {projectId} has no settings.json that can be read, so its importance cannot be kept: see the server log.");
+
+        _logger.LogInformation("Project {ProjectId} is now {Importance}", projectId, importance);
+        if (settings.Importance != importance)
+            (settings with { Importance = importance }).Save(project.StatePath);
+        await _lifecycle.UpdateStatusAsync(project, status => status with { Importance = importance });
         await NotifyStatusChanged(project);
     }
 
@@ -2582,7 +2605,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             // What the app is told of the session's settings is settings.json's, not status.json's
             // A session in the root itself shares it, whatever its settings say: its delete never takes the root
             var sharedFolder = !settingsRead || settings.SharedFolder || IsTheRoot(rootPath, projectPath);
-            var fromSettings = status with { ActionName = settings.ActionName, SharedFolder = sharedFolder, Adopted = settings.Adopted };
+            var fromSettings = status with { ActionName = settings.ActionName, SharedFolder = sharedFolder, Adopted = settings.Adopted, Importance = settings.Importance };
             var correctedStatus = stateChanged
                 ? fromSettings with { Id = id, Kind = kind, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
                 : fromSettings with { Id = id, Kind = kind, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };

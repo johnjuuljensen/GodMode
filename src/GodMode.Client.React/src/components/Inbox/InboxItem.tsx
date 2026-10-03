@@ -5,6 +5,7 @@ import { PermissionCard } from '../Project/PermissionCard';
 import { ReplyInput } from '../Project/ReplyInput';
 import { hubErrorMessage } from '../../signalr/hubError';
 import { deleteSession } from '../../deleteSession';
+import { ImportanceMark } from '../Importance/Importance';
 
 const KIND_LABELS: Record<AttentionKind, string> = {
   Permission: 'Permission',
@@ -145,6 +146,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
       <button className="inbox-item-header" onClick={open} title="Open the project">
         <span className="inbox-item-kind">{KIND_LABELS[kind]}</span>
         <span className="inbox-item-name">{item.ProjectName}</span>
+        {item.Importance === 'Important' && <ImportanceMark importance="Important" />}
         <span className="inbox-item-meta">{meta}</span>
       </button>
 

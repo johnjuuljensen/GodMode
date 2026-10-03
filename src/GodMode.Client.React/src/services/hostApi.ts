@@ -80,6 +80,13 @@ export const windowInfo = (): Promise<WindowInfo> => bridge.request('window.info
   return MAIN_WINDOW;
 });
 
+/** Whether this device makes a sound for what interrupts (#438), as the app keeps it. */
+export const attentionSound = async (): Promise<boolean> => (await bridge.request('attention.sound.get')).Enabled;
+
+/** Turns this device's sound for what interrupts on or off; resolves to what the app keeps now. */
+export const setAttentionSound = async (enabled: boolean): Promise<boolean> =>
+  (await bridge.request('attention.sound.set', { Enabled: enabled })).Enabled;
+
 export async function openProfileWindow(profile: string): Promise<void> {
   await bridge.request('window.openProfile', { Profile: profile });
 }

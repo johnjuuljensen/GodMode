@@ -81,6 +81,10 @@ namespace GodMode.Shared.Models;
 /// <see cref="AttentionKind.Escalation"/> whatever turns end after it, until the user has seen it: <see cref="Hubs.IProjectHub.MarkSeen"/>
 /// or the user's own input clears it (null), and nothing else does, the fleet's send and a resume included. Null when there is none.
 /// </param>
+/// <param name="Importance">
+/// How much the session may interrupt the user (issue #438): its <c>settings.json</c>'s, not status.json's. Set at its create
+/// from its action's <c>importance</c>, and by <see cref="Hubs.IProjectHub.SetImportance"/>.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -116,7 +120,8 @@ public record ProjectStatus(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool QuietResult = false,
     TurnResult? UnseenResult = null,
-    Escalation? Escalation = null
+    Escalation? Escalation = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal
 );
 
 /// <summary>A turn's end, as <see cref="ProjectStatus.UnseenResult"/> keeps it.</summary>

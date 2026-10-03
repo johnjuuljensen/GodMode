@@ -5,7 +5,7 @@
 import { create } from 'zustand';
 import { GodModeHub, type ConnectionState, type OutputMessage } from '../signalr/hub';
 import type {
-  ProjectSummary, ProjectStatus, ClaudeMessage, PermissionDecision, PermissionDetail, AttentionItem,
+  ProjectSummary, ProjectStatus, ClaudeMessage, PermissionDecision, PermissionDetail, AttentionItem, Importance,
 } from '../signalr/types';
 import * as api from '../services/hostApi';
 import type { AddServerRequest } from '../signalr/types';
@@ -48,7 +48,7 @@ function summaryOf(status: ProjectStatus): ProjectSummary {
     PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
     PullRequest: status.PullRequest, Kind: status.Kind,
     ActionName: status.ActionName, SharedFolder: status.SharedFolder, Adopted: status.Adopted,
-    ParentId: status.ParentId,
+    ParentId: status.ParentId, Importance: status.Importance,
   };
 }
 
@@ -242,6 +242,8 @@ interface AppState {
   /** Shows the inbox on one item: a tapped notification. */
   openInboxItem: (serverId: string, projectId: string) => void;
   markSeen: (serverId: string, projectId: string) => Promise<void>;
+  /** Sets how much the project may interrupt the user (#438); its StatusChanged and AttentionChanged bring it back. */
+  setImportance: (serverId: string, projectId: string, importance: Importance) => Promise<void>;
   /** Answers a project whether its claude runs or not (resuming it if needed). */
   replyAndResume: (serverId: string, projectId: string, text: string) => Promise<void>;
   /**
@@ -707,6 +709,7 @@ export const useAppStore = create<AppState>((set, get) => {
                       ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
                       PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
                       PullRequest: status.PullRequest, ParentId: status.ParentId, SlashCommands: status.SlashCommands,
+                      Importance: status.Importance,
                     }
                   : p) }
               : c
@@ -918,6 +921,9 @@ export const useAppStore = create<AppState>((set, get) => {
   }),
   markSeen: async (serverId, projectId) => {
     await hubFor(serverId).markSeen(projectId);
+  },
+  setImportance: async (serverId, projectId, importance) => {
+    await hubFor(serverId).setImportance(projectId, importance);
   },
   replyAndResume: async (serverId, projectId, text) => {
     await hubFor(serverId).replyAndResume(projectId, text);

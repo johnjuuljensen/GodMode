@@ -200,7 +200,7 @@ public sealed class VoiceSession : IAsyncDisposable
                 setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink,
                 new EventSink(setup.Events, state, tools.Creates, setup.Mic, setup.Media))
             {
-                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation), logger),
+                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board), logger),
                 Options = new SessionOptions
                 {
                     LogDirectory = setup.LogDirectory,

@@ -3,18 +3,26 @@ using Android.App;
 using Android.Content;
 using AndroidX.Core.App;
 using GodMode.ClientBase.Attention;
+using GodMode.Shared.Enums;
 using Microsoft.Extensions.Logging;
 
 namespace GodMode.Maui;
 
 /// <summary>
-/// Attention items as Android notifications on the <see cref="Channel"/> channel, one per item, tagged with the
-/// item's <see cref="AttentionLink.Key"/> (server and project), grouped under one summary. A tap opens
-/// <c>godmode://attention/{key}</c> in <see cref="MainActivity"/>.
+/// Attention items as Android notifications, one per item, tagged with the item's <see cref="AttentionLink.Key"/> (server
+/// and project), grouped under one summary. A tap opens <c>godmode://attention/{key}</c> in <see cref="MainActivity"/>.
+/// The item's alert (issue #438) picks the channel: one that interrupts goes on <see cref="InterruptChannel"/> (heads-up,
+/// sound), unless this device's sound is off (<see cref="AttentionSound"/>); one that notifies on <see cref="Channel"/>,
+/// silent; one for the inbox alone is not posted.
 /// </summary>
 public sealed class AttentionNotifier(Context context, ILogger logger) : IAttentionNotifier
 {
-    public const string Channel = "attention";
+    /// <summary>What notifies: silent, in the shade.</summary>
+    public const string Channel = "attention-notify";
+    /// <summary>What interrupts: heads-up, with the channel's sound.</summary>
+    public const string InterruptChannel = "attention-interrupt";
+    /// <summary>The one channel before tiers, high importance, which a channel cannot be turned down from by the app.</summary>
+    private const string FormerChannel = "attention";
     private const string Group = "godmode.attention";
     private const int ItemId = 1;
     private const int SummaryId = 2;
@@ -23,21 +31,34 @@ public sealed class AttentionNotifier(Context context, ILogger logger) : IAttent
     private readonly NotificationManagerCompat _manager = NotificationManagerCompat.From(context)!;
     private readonly ConcurrentDictionary<string, byte> _shown = new();
 
-    /// <summary>Creates the channel; the user can then turn it off or down in the system settings.</summary>
-    public static void CreateChannel(Context context)
+    /// <summary>Creates the channels, and drops the one from before tiers; the user can then turn each off or down in the system settings.</summary>
+    public static void CreateChannels(Context context)
     {
         if (!OperatingSystem.IsAndroidVersionAtLeast(26)) return;
-        var channel = new NotificationChannel(Channel, "Needs you", NotificationImportance.High)
+        var manager = (NotificationManager)context.GetSystemService(Context.NotificationService)!;
+        manager.CreateNotificationChannel(new NotificationChannel(Channel, "Needs you", NotificationImportance.Low)
         {
             Description = "A session asks a question, waits for a permission, failed or finished",
-        };
-        ((NotificationManager)context.GetSystemService(Context.NotificationService)!).CreateNotificationChannel(channel);
+        });
+        manager.CreateNotificationChannel(new NotificationChannel(InterruptChannel, "Important", NotificationImportance.High)
+        {
+            Description = "An important session needs you",
+        });
+        manager.DeleteNotificationChannel(FormerChannel);
     }
 
     public void Show(AttentionNotice notice)
     {
         var item = notice.Item;
-        var builder = new NotificationCompat.Builder(context, Channel);
+        // In the inbox alone: what showed under its key before (another kind, say) goes
+        if (item.Alert == AttentionAlert.Inbox)
+        {
+            logger.LogDebug("Notification {Key}: {Kind} is for the inbox alone", notice.Link.Key, item.Kind);
+            if (_shown.ContainsKey(notice.Link.Key) || Showing().Any(link => link.Key == notice.Link.Key)) Cancel(notice.Link);
+            return;
+        }
+        var interrupts = item.Alert == AttentionAlert.Interrupt && AttentionSound.Enabled;
+        var builder = new NotificationCompat.Builder(context, interrupts ? InterruptChannel : Channel);
         builder.SetSmallIcon(Resource.Drawable.ic_attention);
         // A question says it is one, and expanded it reads in full: every question, its options and their
         // descriptions (#454). What does not fit, a tap opens in the app
@@ -48,14 +69,14 @@ public sealed class AttentionNotifier(Context context, ILogger logger) : IAttent
         builder.SetWhen(new DateTimeOffset(DateTime.SpecifyKind(item.Since, DateTimeKind.Utc)).ToUnixTimeMilliseconds());
         builder.SetShowWhen(true);
         builder.SetCategory(NotificationCompat.CategoryMessage);
-        builder.SetPriority(NotificationCompat.PriorityHigh);
+        builder.SetPriority(interrupts ? NotificationCompat.PriorityHigh : NotificationCompat.PriorityLow);
         builder.SetGroup(Group);
         builder.SetAutoCancel(true);
         builder.SetContentIntent(OpenIntent(notice.Link));
         // A changed item alerts again. One this process has not shown yet alerts only if nothing shows under its
         // key: after a restart, the items still showing from before stay quiet
         builder.SetOnlyAlertOnce(!_shown.ContainsKey(notice.Link.Key));
-        logger.LogDebug("Notification {Key}: {Kind}", notice.Link.Key, item.Kind);
+        logger.LogDebug("Notification {Key}: {Kind}, {Alert}", notice.Link.Key, item.Kind, interrupts ? "interrupts" : "notifies");
         Notify(notice.Link.Key, ItemId, builder.Build()!);
         _shown[notice.Link.Key] = 0;
         UpdateSummary();

@@ -110,6 +110,13 @@ public sealed class ShellBridge : IDisposable
             await _directory.StopServerAsync(p.ServerId) ? Polling(p.ServerId) : throw NotFound(p));
         _bridge.Handle(ShellMessageTypes.AttentionTake, () => Task.FromResult(
             PendingAttentionLink.Take() is { } link ? new AttentionLinkPayload(link.ServerId, link.ProjectId) : null));
+        _bridge.Handle(ShellMessageTypes.AttentionSoundGet, () => Task.FromResult(new AttentionSoundPayload(AttentionSound.Enabled)));
+        _bridge.Handle<AttentionSoundPayload, AttentionSoundPayload>(ShellMessageTypes.AttentionSoundSet, p =>
+        {
+            AttentionSound.Enabled = p.Enabled;
+            _logger.LogInformation("Sound for what interrupts is {State} on this device", p.Enabled ? "on" : "off");
+            return Task.FromResult(new AttentionSoundPayload(AttentionSound.Enabled));
+        });
         _bridge.Handle(ShellMessageTypes.OpenDevTools, () =>
         {
             MainPage.OpenDevTools(_webView);
@@ -160,6 +167,8 @@ public sealed class ShellBridge : IDisposable
         _voice.ServersChanged();
 #if ANDROID
         AttentionService.Refresh();
+#elif WINDOWS
+        WindowsAttention.Refresh();
 #endif
         return result;
     }

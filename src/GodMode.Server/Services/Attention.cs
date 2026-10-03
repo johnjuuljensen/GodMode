@@ -64,8 +64,22 @@ public static partial class Attention
             },
             spoken is { Length: > 0 } ? spoken : null,
             kind == AttentionKind.Error && status.CreateFailed,
-            recordedParentId);
+            recordedParentId,
+            status.Importance,
+            AlertOf(status.Importance, kind));
     }
+
+    /// <summary>
+    /// How loudly an item of <paramref name="kind"/> from a session of <paramref name="importance"/> is brought to the user
+    /// (issue #438): an important session's interrupts, a normal one's notifies, and a quiet one's is in the inbox alone,
+    /// but what blocks it (a permission prompt, a question, an escalation), which notifies as a normal one's does.
+    /// </summary>
+    public static AttentionAlert AlertOf(Importance importance, AttentionKind kind) => importance switch
+    {
+        Importance.Important => AttentionAlert.Interrupt,
+        Importance.Quiet when kind is not (AttentionKind.Permission or AttentionKind.Question or AttentionKind.Escalation) => AttentionAlert.Inbox,
+        _ => AttentionAlert.Notify,
+    };
 
     private static string ResultText(string? result) => result is { Length: > 0 } ? result : "The turn finished.";
 
@@ -88,14 +102,15 @@ public static partial class Attention
 
     /// <summary>
     /// Whether two lists say the same: the same projects needing the same, since the same time,
-    /// with the same text, spoken text, request and pull request. Compared by those, not by record equality, which would
+    /// with the same text, spoken text, request, pull request, importance and alert. Compared by those, not by record equality, which would
     /// compare a pending request's input and questions by reference.
     /// </summary>
     public static bool Same(IReadOnlyList<AttentionItem> a, IReadOnlyList<AttentionItem> b) =>
         a.Select(Key).SequenceEqual(b.Select(Key));
 
-    private static (string, AttentionKind, DateTime, string, string?, string?, string?) Key(AttentionItem item) =>
-        (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId, item.PullRequestUrl, item.Spoken);
+    private static (string, AttentionKind, DateTime, string, string?, string?, string?, AttentionAlert, Importance) Key(AttentionItem item) =>
+        (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId, item.PullRequestUrl, item.Spoken,
+            item.Alert, item.Importance);
 
     /// <summary>
     /// Text to show on a phone or read aloud: code blocks become "(code)", markdown's backticks go,

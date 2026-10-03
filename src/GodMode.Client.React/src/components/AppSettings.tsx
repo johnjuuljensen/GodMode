@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
+import { attentionSound, setAttentionSound } from '../services/hostApi';
 import { Toggle } from './settings-shared';
 import { VoiceSettings } from './Voice/VoiceSettings';
 import { ThemePicker } from './ThemePicker';
@@ -15,6 +17,7 @@ export function AppSettings() {
 
   const values: Record<string, boolean> = { featureProfiles };
   const voice = useVoice();
+  const sound = useDeviceSound();
 
   return (
     <>
@@ -32,6 +35,17 @@ export function AppSettings() {
           </div>
         ))}
       </div>
+      {sound.enabled !== null && (
+        <div className="settings-list">
+          <div className="settings-item">
+            <div className="settings-item-info">
+              <div className="settings-item-name">Sound for important sessions</div>
+              <div className="settings-item-desc">On this device: a sound, or a heads-up on the phone, when an important session needs you</div>
+            </div>
+            <Toggle checked={sound.enabled} onChange={sound.set} />
+          </div>
+        </div>
+      )}
       <div className="settings-header settings-section-header">
         <h2>Theme</h2>
       </div>
@@ -39,4 +53,23 @@ export function AppSettings() {
       {voice?.Available && <VoiceSettings />}
     </>
   );
+}
+
+/** This device's sound switch (#438), the app's to keep: null until the app has said, and while it cannot. */
+function useDeviceSound() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    let live = true;
+    attentionSound().then(on => { if (live) setEnabled(on); })
+      .catch(err => console.warn('[settings] The app did not say whether this device makes a sound:', err));
+    return () => { live = false; };
+  }, []);
+  const set = (on: boolean) => {
+    setEnabled(on);
+    setAttentionSound(on).then(setEnabled).catch(err => {
+      console.error('Failed to set the sound:', err);
+      setEnabled(!on);
+    });
+  };
+  return { enabled, set };
 }

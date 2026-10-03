@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 
 namespace GodMode.Shared.Hubs;
@@ -98,6 +99,12 @@ public interface IProjectHub
     /// reply. Persisted, so it holds after a server restart. A pending permission or AskUserQuestion is unaffected.
     /// </summary>
     Task MarkSeen(string projectId);
+
+    /// <summary>
+    /// Sets how much the project may interrupt the user (issue #438), in its <c>settings.json</c>, so every client and voice
+    /// agree. Its <see cref="IProjectHubClient.StatusChanged"/> and <see cref="IProjectHubClient.AttentionChanged"/> follow.
+    /// </summary>
+    Task SetImportance(string projectId, Importance importance);
 
     /// <summary>
     /// Answers the project, whatever it is waiting on and whether or not its claude is running.
