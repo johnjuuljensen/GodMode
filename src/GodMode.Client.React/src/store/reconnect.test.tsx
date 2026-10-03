@@ -110,9 +110,9 @@ describe('the selected project and a tile, open over a reconnect', () => {
   });
 });
 
-/** The sidebar badge of p1 ('first'): WAIT when it asks, else its state's first four letters. */
+/** The state p1 ('first') shows in the sidebar, as its dot names it: waiting on you when it asks, else its state. */
 const badge = () => [...view!.container.querySelectorAll('.project-item')]
-  .find(el => el.querySelector('.project-name')?.textContent === 'first')?.querySelector('.project-state-badge')?.textContent;
+  .find(el => el.querySelector('.project-name')?.textContent === 'first')?.querySelector('.project-state-dot')?.getAttribute('aria-label');
 
 describe('a question in plain text (#239)', () => {
   it('is WAIT over a reconnect, as its status says (#441), and opening the project shows no prompt for it (#447)', async () => {
@@ -121,13 +121,13 @@ describe('a question in plain text (#239)', () => {
     await hub.reconnect();
     useAppStore.getState().selectProject('A', 'p1');
     view = await render(<><Sidebar /><ProjectView serverId="A" projectId="p1" /></>);
-    expect(badge()).toBe('WAIT');
+    expect(badge()).toBe('Waiting on you');
 
     await act(() => hub.drop());
     await act(() => hub.reconnect());
     await act(flush);
     // WAIT is the server's: the session still waits on an answer, and takes a message for one, in its composer
-    expect(badge()).toBe('WAIT');
+    expect(badge()).toBe('Waiting on you');
     expect(view.container.querySelector('.question-prompt')).toBeNull();
   });
 });
@@ -140,7 +140,7 @@ describe('after a sleep in which a question was answered elsewhere and a project
       hub.lastReplay('p2').answer(0, [10, 20]);
       hub.callbacks.onStatusChanged?.('p1', { ...status('p1', 'WaitingInput'), CurrentQuestion: 'Shall I go on?' });
     });
-    expect(badge()).toBe('WAIT');
+    expect(badge()).toBe('Waiting on you');
     expect(useAppStore.getState().outputMessages).toHaveLength(2);
 
     await act(() => hub.drop());
@@ -148,7 +148,7 @@ describe('after a sleep in which a question was answered elsewhere and a project
     await act(() => hub.reconnect());
     await act(flush);
 
-    expect(badge()).toBe('RUNN');
+    expect(badge()).toBe('Running');
     const el = view.container;
     expect(el.querySelector('.project-messages-empty')?.textContent).toBe('Project not found');
     expect(el.querySelector<HTMLTextAreaElement>('textarea.project-input')!.disabled).toBe(true);

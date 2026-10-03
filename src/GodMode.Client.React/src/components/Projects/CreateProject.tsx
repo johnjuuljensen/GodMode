@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useAppStore, inProfile, profileNameOf, sameProfile, type ActivePage } from '../../store';
+import { useAppStore, inProfile, profileNameOf, sameProfile, rootShownOf, type ActivePage } from '../../store';
 import type { CreateProjectResult, ProjectRootInfo } from '../../signalr/types';
 import { askConfirm } from '../../confirmDialog';
 import '../settings-common.css';
@@ -319,7 +319,7 @@ export function CreateProject({ context }: { context?: CreateContext }) {
                         className="root-picker-card"
                         onClick={() => selectRoot(root)}
                       >
-                        <div className="root-picker-card-name">{root.Name}</div>
+                        <div className="root-picker-card-name" title={root.Title != null ? root.Name : undefined}>{rootShownOf(root)}</div>
                         {root.Description && <div className="root-picker-card-desc">{root.Description}</div>}
                         {root.Actions && root.Actions.length > 1 && (
                           <div className="root-picker-card-actions">
@@ -341,7 +341,7 @@ export function CreateProject({ context }: { context?: CreateContext }) {
             <div className="form-group">
               <label>Root</label>
               <div className="selected-root-header">
-                <span className="selected-root-name">{selectedRoot?.Name ?? selectedRootName}</span>
+                <span className="selected-root-name" title={selectedRoot?.Title != null ? selectedRoot.Name : undefined}>{selectedRoot ? rootShownOf(selectedRoot) : selectedRootName}</span>
                 <span className="selected-root-server">on {server?.serverInfo.Name || server?.serverInfo.Url || selectedServerId}</span>
                 {roots.length > 1 && (
                   <button className="btn btn-secondary btn-sm" onClick={() => setStep(1)}>Change</button>

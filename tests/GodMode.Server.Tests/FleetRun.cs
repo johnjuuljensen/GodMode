@@ -32,6 +32,9 @@ internal sealed class FleetRun : IAsyncDisposable
     /// <summary>A second root of <see cref="Profile"/>, with a work action: crossing to it as a parent needs a link.</summary>
     public const string SiblingRoot = "sibling";
 
+    /// <summary>The <see cref="SiblingRoot"/>'s title (#434): what the app shows for it, its name still its key.</summary>
+    public const string SiblingTitle = "Sibling work";
+
     public static readonly string[] FleetToolNames = ["escalate", "list_roots", "list_sessions", "read", "resume", "send", "start_session", "stop"];
 
     private string _workDir = "";
@@ -53,9 +56,10 @@ internal sealed class FleetRun : IAsyncDisposable
         script.Save(scriptPath);
         var rootConfig = Path.Combine(run._workDir, "roots", RootName, ".godmode-root");
         Directory.CreateDirectory(rootConfig);
-        string BaseConfig(string profile) => JsonSerializer.Serialize(new
+        string BaseConfig(string profile, string? title = null) => JsonSerializer.Serialize(new
         {
             profileName = profile,
+            title,
             environment = new Dictionary<string, string>
             {
                 [FakeClaudeEnvironment.Script] = scriptPath,
@@ -66,7 +70,7 @@ internal sealed class FleetRun : IAsyncDisposable
         File.WriteAllText(Path.Combine(rootConfig, $"config.{WorkAction}.json"), "{}");
         var siblingConfig = Path.Combine(run._workDir, "roots", SiblingRoot, ".godmode-root");
         Directory.CreateDirectory(siblingConfig);
-        File.WriteAllText(Path.Combine(siblingConfig, "config.json"), BaseConfig(Profile));
+        File.WriteAllText(Path.Combine(siblingConfig, "config.json"), BaseConfig(Profile, SiblingTitle));
         File.WriteAllText(Path.Combine(siblingConfig, $"config.{WorkAction}.json"), "{}");
         var otherConfig = Path.Combine(run._workDir, "roots", OtherRoot, ".godmode-root");
         Directory.CreateDirectory(otherConfig);

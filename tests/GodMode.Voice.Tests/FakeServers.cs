@@ -17,6 +17,7 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
 
     public event Action<string, string, IReadOnlyList<AttentionItem>>? AttentionChanged;
     public event Action<string, string, IReadOnlyList<ProjectSummary>>? ProjectsChanged;
+    public event Action<string, IReadOnlyList<ProjectRootInfo>>? RootsChanged;
 
     public ConcurrentQueue<(ProjectRef Project, string Text)> Replies { get; } = new();
     public ConcurrentQueue<ProjectRef> Seen { get; } = new();
@@ -30,12 +31,30 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     public string? CreateError { get; set; }
 
     /// <summary>A root on a server, with its actions, as <c>ListProjectRoots</c> lists it.</summary>
-    public FakeServers AddRoot(string serverId, string name, string? profile, params CreateActionInfo[] actions)
+    public FakeServers AddRoot(string serverId, string name, string? profile, params CreateActionInfo[] actions) =>
+        AddTitledRoot(serverId, name, null, profile, actions);
+
+    /// <summary>A root with a title (#434), pushed as the hub pushes a change of the roots.</summary>
+    public FakeServers AddTitledRoot(string serverId, string name, string? title, string? profile, params CreateActionInfo[] actions)
     {
-        _roots.Enqueue(new ServerRoot(serverId, serverId, new ProjectRootInfo(name, null, actions, profile)));
+        _roots.Enqueue(new ServerRoot(serverId, serverId, new ProjectRootInfo(name, null, actions, profile, title)));
         _servers.TryAdd(serverId, 0);
+        PushRoots(serverId);
         return this;
     }
+
+    /// <summary>The root's title is changed on the host, and the roots pushed again.</summary>
+    public void Retitle(string serverId, string name, string? title)
+    {
+        var roots = new List<ServerRoot>();
+        while (_roots.TryDequeue(out var root))
+            roots.Add(root.ServerId == serverId && root.Root.Name == name ? root with { Root = root.Root with { Title = title } } : root);
+        foreach (var root in roots) _roots.Enqueue(root);
+        PushRoots(serverId);
+    }
+
+    private void PushRoots(string serverId) =>
+        RootsChanged?.Invoke(serverId, [.. _roots.Where(r => r.ServerId == serverId).Select(r => r.Root)]);
 
     /// <summary>What listing the roots waits on, as a slow server's answer; done at once when unset.</summary>
     public Task RootsGate { get; set; } = Task.CompletedTask;
@@ -115,7 +134,10 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     public Task ConnectAsync(CancellationToken ct)
     {
         foreach (var serverId in _servers.Keys)
+        {
+            PushRoots(serverId);
             PushProjects(serverId);
+        }
         return Task.CompletedTask;
     }
 

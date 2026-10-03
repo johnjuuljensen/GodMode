@@ -15,8 +15,9 @@ public sealed record SpokenName(string Label, string? Root = null, string? Profi
 /// <summary>
 /// How voice names projects, so the user can tell which is which across profiles and roots (#450). A project named
 /// alone is said with its root, when there are projects in more than one root, and with its profile, when there are
-/// several and another profile has a root of its root's name, or it is not in the profile spoken of last
-/// (<see cref="VoiceConversation.LastProfile"/>). Lists say each profile and root once, as a group's heading
+/// several and another profile has a root shown as its root is, or it is not in the profile spoken of last
+/// (<see cref="VoiceConversation.LastProfile"/>). A root is said as it is shown, by its title (#434,
+/// <see cref="ProjectBoard.RootShown"/>), so two profiles' roots of one title are told apart by their profiles. Lists say each profile and root once, as a group's heading
 /// (<see cref="Groups"/>).
 /// </summary>
 public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, VoiceConversation conversation)
@@ -36,14 +37,15 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
     {
         if (handles.LabelOf(project) is not { } label)
             return null;
-        if (projects.Find(project)?.Project is not { } summary)
+        if (projects.Find(project) is not { } found)
             return new SpokenName(label);
 
         var all = projects.Projects;
-        var profile = ProfileOf(summary);
-        var said = SeveralProfiles(all) && (SameRootElsewhere(all, profile, summary.RootName) || !Same(conversation.LastProfile, profile));
+        var profile = ProfileOf(found.Project);
+        var root = projects.RootShown(found);
+        var said = SeveralProfiles(all) && (SameRootElsewhere(all, profile, root) || !Same(conversation.LastProfile, profile));
         conversation.LastProfile = profile;
-        return new SpokenName(label, SeveralRoots(all) ? summary.RootName : null, said ? profile : null);
+        return new SpokenName(label, SeveralRoots(all) ? root : null, said ? profile : null);
     }
 
     /// <summary>
@@ -54,10 +56,10 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
     {
         if (handles.LabelOf(project) is not { } label)
             return null;
-        if (projects.Find(project)?.Project is not { } summary)
+        if (projects.Find(project) is not { } found)
             return new SpokenName(label);
         var all = projects.Projects;
-        return new SpokenName(label, SeveralRoots(all) ? summary.RootName : null, SeveralProfiles(all) ? ProfileOf(summary) : null);
+        return new SpokenName(label, SeveralRoots(all) ? projects.RootShown(found) : null, SeveralProfiles(all) ? ProfileOf(found.Project) : null);
     }
 
     /// <summary>
@@ -70,7 +72,7 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
         var groups = projects.Projects
             .GroupBy(p => (Profile: ProfileOf(p.Project), Root: p.Project.RootName ?? ""), Comparer)
             .OrderBy(g => g.Key.Profile, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Key.Root, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new Group(g.Key.Profile, g.Key.Root.Length > 0 ? g.Key.Root : null, [.. g]))
+            .Select(g => new Group(g.Key.Profile, projects.RootShown(g.First()), [.. g]))
             .ToList();
         conversation.LastProfile = groups.Select(g => g.Profile).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1 ? groups[0].Profile : null;
         return groups;
@@ -90,9 +92,9 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
     private static bool SeveralRoots(IReadOnlyList<ServerProject> all) =>
         all.Where(p => p.Project.RootName is not null).Select(p => (ProfileOf(p.Project), p.Project.RootName!)).Distinct(Comparer).Skip(1).Any();
 
-    /// <summary>Whether a project in another profile is in a root of this name.</summary>
-    private static bool SameRootElsewhere(IReadOnlyList<ServerProject> all, string profile, string? root) =>
-        root is not null && all.Any(p => Same(p.Project.RootName, root) && !Same(ProfileOf(p.Project), profile));
+    /// <summary>Whether a project in another profile is in a root shown as this one is.</summary>
+    private bool SameRootElsewhere(IReadOnlyList<ServerProject> all, string profile, string? root) =>
+        root is not null && all.Any(p => Same(projects.RootShown(p), root) && !Same(ProfileOf(p.Project), profile));
 
     private static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 }

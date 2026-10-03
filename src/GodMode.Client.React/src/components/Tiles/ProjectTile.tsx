@@ -12,6 +12,8 @@ const preview = (text: string) => (text.length > MAX_PREVIEW ? text.slice(0, MAX
 
 interface Props {
   project: ProjectSummary;
+  /** Its root as it is shown (#434): the root's title, else its name. */
+  rootShown?: string;
   messages: ClaudeMessage[];
   isLoading: boolean;
   isSelected: boolean;
@@ -28,7 +30,7 @@ function relativeTime(iso: string): string {
   return `${Math.floor(hrs / 24)}d`;
 }
 
-export function ProjectTile({ project, messages, isLoading, isSelected, onSelect }: Props) {
+export function ProjectTile({ project, rootShown, messages, isLoading, isSelected, onSelect }: Props) {
   const state = project.State;
   const isWaiting = waitsOnUser(project);
   const tileState = isWaiting ? 'WaitingInput' : state;
@@ -53,7 +55,7 @@ export function ProjectTile({ project, messages, isLoading, isSelected, onSelect
         <span className="tile-time">{relativeTime(project.UpdatedAt)}</span>
       </div>
       {project.ProfileName && project.ProfileName !== 'Default' && (
-        <div className="tile-profile">{project.ProfileName}{project.RootName ? ` / ${project.RootName}` : ''}</div>
+        <div className="tile-profile">{project.ProfileName}{project.RootName ? ` / ${rootShown ?? project.RootName}` : ''}</div>
       )}
 
       {/* Message preview area */}

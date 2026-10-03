@@ -5,6 +5,7 @@ import { KindLabel } from '../KindLabel/KindLabel';
 import { deleteSession } from '../../deleteSession';
 import { ImportanceMark } from '../Importance/Importance';
 import { IMPORTANCE_LABELS, IMPORTANCE_ORDER } from '../Importance/importanceTiers';
+import type { ProjectState } from '../../signalr/types';
 
 interface Props {
   item: SidebarItem;
@@ -41,8 +42,9 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
   const timeAgo = formatRelativeTime(project.UpdatedAt);
   const isMobile = useAppStore(s => s.isMobile);
   const isWaiting = waitsOnUser(project);
-  const stateStr = String(project.State ?? 'Idle');
-  const stateLabel = isWaiting ? 'WAIT' : stateStr.slice(0, 4).toUpperCase();
+  const state: ProjectState = isWaiting ? 'WaitingInput' : project.State;
+  // A state this client does not know yet is named as the server names it
+  const stateName = stateNames[state] ?? String(state);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -132,18 +134,16 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
       >
-        <span className={`project-state-badge ${isWaiting ? 'WaitingInput' : project.State}`}>
-          {stateLabel}
-        </span>
+        <span className={`project-state-dot ${state}`} role="img" aria-label={stateName} title={stateName} />
         <div className="project-info">
           <div className="project-name-row">
-            <div className="project-name">{project.Name}</div>
+            <div className="project-name" title={project.Name}>{project.Name}</div>
             <ImportanceMark importance={project.Importance} />
             <KindLabel kind={project.Kind} />
             {ownRoot && <span className="project-own-root" title={`In ${ownRoot}`}>{ownRoot}</span>}
           </div>
           <div className="project-meta">
-            {serverLabel && `${serverLabel} · `}{project.RootName && `${project.RootName} · `}{timeAgo}
+            {serverLabel && `${serverLabel} · `}{project.RootName && `${item.rootShown ?? project.RootName} · `}{timeAgo}
             {startedBy && <span className="project-started-by">{' · started by '}{startedBy}</span>}
             {isWaiting && project.CurrentQuestion && (
               <span className="project-question-hint" title={project.CurrentQuestion}>
@@ -160,7 +160,8 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             aria-expanded={!nested.collapsed}
             aria-label={`${nested.collapsed ? 'Show' : 'Hide'} the ${nested.count} under ${project.Name}`}
             title={nested.collapsed ? `Show the ${nested.count} under it` : 'Hide the sessions under it'}
-            onClick={e => { e.stopPropagation(); nested.onToggle(); }}
+            // A tap on an opened row closes it, as anywhere on the row does, rather than collapsing it (#397)
+            onClick={e => { e.stopPropagation(); if (revealed) close(); else nested.onToggle(); }}
           >
             {nested.collapsed && <span className="project-children-count">{nested.count}</span>}
             {nested.needsYou && <span className="project-children-attention" aria-label="needs you" />}
@@ -208,6 +209,16 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
     </div>
   );
 }
+
+/** A state's name, as its dot's tooltip and aria-label say it (#437). */
+const stateNames: Record<ProjectState, string> = {
+  Idle: 'Idle',
+  Running: 'Running',
+  WaitingInput: 'Waiting on you',
+  WaitingPermission: 'Waiting for your permission',
+  Error: 'Error',
+  Stopped: 'Stopped',
+};
 
 function formatRelativeTime(dateStr: string): string {
   const date = new Date(dateStr);

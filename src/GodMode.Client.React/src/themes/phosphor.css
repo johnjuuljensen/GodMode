@@ -143,6 +143,29 @@
   --duration:         0.15s;
   --duration-slow:    0.2s;
   --loop-iterations:  0;
+
+  /* ── The left list (#437) ── */
+  --state-running:    var(--success);
+  --state-waiting:    var(--warning);
+  --state-idle:       var(--text-secondary);
+  --state-error:      var(--error);
+  --state-stopped:    var(--text-tertiary);
+  --state-dot-size:   7px;
+  --list-indent:      11px;
+  --list-gutter:      6px;
+  --row-pad-x:        6px;
+  --row-pad-y:        4px;
+
+  /* ── The splitter on the left panel's edge (#436): always shown, over the panel's border ── */
+  --splitter-hit:          8px;    /* the width that takes the pointer */
+  --splitter-line:         transparent;
+  --splitter-line-width:   1px;
+  --splitter-active:       var(--accent);
+  --splitter-active-width: 2px;
+  --splitter-grip:         var(--glass-border-strong);
+  --splitter-grip-width:   3px;
+  --splitter-grip-length:  28px;
+  --splitter-grip-radius:  0;
 }
 
 /* ── The screen: text glows faintly, and the scanlines lie over everything ── */
@@ -174,45 +197,28 @@
 }
 
 /* ── Status labels in brackets: the state is on the element, the label is the theme's ── */
-[data-theme="phosphor"] .project-state-badge,
 [data-theme="phosphor"] .project-status-label {
   font-family: var(--font-display);
   font-size-adjust: var(--font-display-adjust);
 }
 
-[data-theme="phosphor"] .project-state-badge::before,
 [data-theme="phosphor"] .project-status-label::before { content: '['; }
-[data-theme="phosphor"] .project-state-badge::after,
 [data-theme="phosphor"] .project-status-label::after { content: ']'; }
 
 /* The known states say it short; any other keeps its own text, in brackets */
-[data-theme="phosphor"] .project-state-badge:is(.Running, .WaitingInput, .WaitingPermission, .Error, .Stopped, .Idle),
 [data-theme="phosphor"] .project-status-btn:is(.Running, .WaitingInput, .WaitingPermission, .Error, .Stopped, .Idle) .project-status-label {
   font-size: 0;
   /* The hidden text keeps no width: a spacing inherited in px would still space its letters */
   letter-spacing: 0;
 }
-[data-theme="phosphor"] :is(.project-state-badge, .project-status-label)::after { font-size: 11px; }
+[data-theme="phosphor"] .project-status-label::after { font-size: 11px; }
 
-[data-theme="phosphor"] .project-state-badge.Running::before,
 [data-theme="phosphor"] .project-status-btn.Running .project-status-label::before { content: '[RUN'; font-size: 11px; }
-[data-theme="phosphor"] .project-state-badge.WaitingInput::before,
 [data-theme="phosphor"] .project-status-btn.WaitingInput .project-status-label::before { content: '[WAIT'; font-size: 11px; }
-[data-theme="phosphor"] .project-state-badge.WaitingPermission::before,
 [data-theme="phosphor"] .project-status-btn.WaitingPermission .project-status-label::before { content: '[PERM'; font-size: 11px; }
-[data-theme="phosphor"] .project-state-badge.Error::before,
 [data-theme="phosphor"] .project-status-btn.Error .project-status-label::before { content: '[ERR'; font-size: 11px; }
-[data-theme="phosphor"] .project-state-badge.Stopped::before,
 [data-theme="phosphor"] .project-status-btn.Stopped .project-status-label::before { content: '[STOP'; font-size: 11px; }
-[data-theme="phosphor"] .project-state-badge.Idle::before,
 [data-theme="phosphor"] .project-status-btn.Idle .project-status-label::before { content: '[IDLE'; font-size: 11px; }
-
-[data-theme="phosphor"] .project-state-badge {
-  background: transparent;
-  padding: 0;
-  min-width: 6ch;
-  letter-spacing: 0;
-}
 
 /* A tile's status light is its label */
 [data-theme="phosphor"] .tile-dot {

@@ -80,7 +80,8 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
 
     [McpServerTool(Name = "list_roots", ReadOnly = true)]
     [Description("The server's profiles, and its roots with their actions: each action's name, description, input schema " +
-        "(JSON Schema), model, effort, and whether it starts a session. start_session takes a profile, a root, an action and its inputs.")]
+        "(JSON Schema), model, effort, and whether it starts a session. A root's Name is its key, which start_session's root takes; " +
+        "its Title, when it has one, is only what the app shows. start_session takes a profile, a root, an action and its inputs.")]
     public async Task<string> ListRootsAsync(RequestContext<CallToolRequestParams> context)
     {
         var scope = await ScopeOfAsync(context);
