@@ -1,0 +1,57 @@
+/* ── Splitter (#436): on a pane's right edge, over its border; the look is the theme's (--splitter-*) ── */
+.splitter {
+  position: relative;
+  z-index: 5;
+  flex: 0 0 var(--splitter-hit);
+  /* Takes no room: half over the pane's edge, half over the content's */
+  margin-inline: calc(var(--splitter-hit) / -2);
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+/* The line, over the pane's border: the theme's resting colour, the accent while used */
+.splitter::before {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 50%;
+  width: var(--splitter-line-width);
+  transform: translateX(-50%);
+  background: var(--splitter-line);
+  transition: background var(--duration), width var(--duration-fast);
+}
+
+/* The grip, always shown, so the edge reads as something to take hold of */
+.splitter::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: var(--splitter-grip-width);
+  height: var(--splitter-grip-length);
+  transform: translate(-50%, -50%);
+  border-radius: var(--splitter-grip-radius);
+  background: var(--splitter-grip);
+  transition: background var(--duration);
+}
+
+.splitter:hover::before,
+.splitter:focus-visible::before,
+.splitter-dragging .splitter::before {
+  background: var(--splitter-active);
+  width: var(--splitter-active-width);
+}
+
+.splitter:hover::after,
+.splitter:focus-visible::after,
+.splitter-dragging .splitter::after {
+  background: var(--splitter-active);
+}
+
+/* While dragging, the whole page is the splitter's: its cursor, and no text selected */
+body.splitter-dragging,
+body.splitter-dragging * {
+  cursor: col-resize !important;
+  user-select: none;
+  -webkit-user-select: none;
+}

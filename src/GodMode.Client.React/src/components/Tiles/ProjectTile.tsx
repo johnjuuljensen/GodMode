@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ProjectSummary, ClaudeMessage } from '../../signalr/types';
 import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
 import { callStatus, callStatusTitle, isConversation, resultLine } from '../Project/transcriptRow';
-import { useAppStore, projectKey } from '../../store';
+import { useAppStore, projectKey, rootShown } from '../../store';
 import { KindLabel } from '../KindLabel/KindLabel';
 import './ProjectTile.css';
 
@@ -32,6 +32,7 @@ function relativeTime(iso: string): string {
 export function ProjectTile({ project, serverId, messages, isLoading, isSelected, onSelect }: Props) {
   const state = project.State;
   const clientQuestion = useAppStore(s => s.projectQuestions[projectKey(serverId, project.Id)]);
+  const roots = useAppStore(s => s.serverConnections.find(c => c.serverInfo.Id === serverId)?.roots);
   const isWaiting = state === 'WaitingInput' || clientQuestion;
   const tileState = isWaiting ? 'WaitingInput' : state;
 
@@ -55,7 +56,7 @@ export function ProjectTile({ project, serverId, messages, isLoading, isSelected
         <span className="tile-time">{relativeTime(project.UpdatedAt)}</span>
       </div>
       {project.ProfileName && project.ProfileName !== 'Default' && (
-        <div className="tile-profile">{project.ProfileName}{project.RootName ? ` / ${project.RootName}` : ''}</div>
+        <div className="tile-profile">{project.ProfileName}{project.RootName ? ` / ${rootShown(roots, project.ProfileName, project.RootName)}` : ''}</div>
       )}
 
       {/* Message preview area */}

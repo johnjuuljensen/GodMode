@@ -37,8 +37,10 @@ export interface SidebarItem {
    * mixes (#308), or in another root with 'stay'.
    */
   startedBy?: string;
-  /** Its own root, when it is nested under a parent in another root. */
+  /** Its own root, when it is nested under a parent in another root: as it is shown (its title, else its name). */
   ownRoot?: string;
+  /** Its root as it is shown (#434): the root's title, else its name. */
+  rootShown?: string;
 }
 
 /**
@@ -50,8 +52,10 @@ export type OtherRootChildren = 'nest' | 'stay';
 export const DEFAULT_OTHER_ROOT_CHILDREN: OtherRootChildren = 'nest';
 
 export interface RootGroup {
-  name: string;          // display name (qualified with server name if multi-server)
+  name: string;          // display name: its title, else its name (qualified with the name on a clash, the server if multi-server)
   rootName: string;      // actual root name for API calls
+  /** The root's name, when it is shown by its title (#434): its header's tooltip. */
+  tooltip?: string;
   profileName: string;
   /** The server of a root's group; absent on a flat group, whose items may come from several servers. */
   serverId?: string;
@@ -60,6 +64,8 @@ export interface RootGroup {
   items: SidebarItem[];
   /** How many sessions the root has, wherever they are shown: one nested under a parent in another root is still its. */
   sessionCount: number;
+  /** How many of its sessions are nested under a parent in another root, so not listed under it (#397). */
+  nestedElsewhere: number;
   /** Whether the root's header offers +: the root has create actions and its server is connected. */
   canCreate: boolean;
   flat?: boolean;        // true = render projects directly without root header
@@ -90,6 +96,15 @@ export const isListed = (c: ServerConnection) => c.connectionState === 'connecte
  */
 export const profileNameOf = (name: string | null | undefined) => name ?? 'Default';
 export const sameProfile = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/** What a root is shown as (#434): its title, else its name, which stays its key. */
+export const rootShownOf = (root: ProjectRootInfo) => root.Title ?? root.Name;
+
+/** What the root of that name in that profile is shown as, among a server's roots: its name when it is not listed. */
+export const rootShown = (roots: readonly ProjectRootInfo[] | undefined, profileName: string | null | undefined, rootName: string) => {
+  const root = roots?.find(r => r.Name === rootName && sameProfile(profileNameOf(r.ProfileName), profileNameOf(profileName)));
+  return root ? rootShownOf(root) : rootName;
+};
 /** Whether a profile passes a filter: 'All', or the one it names. */
 export const inProfile = (name: string | null | undefined, filter: string) =>
   filter === 'All' || sameProfile(profileNameOf(name), filter);
@@ -129,7 +144,10 @@ function collectFilteredData(connections: ServerConnection[], filter: string) {
       if (!inProfile(profileName, filter)) continue;
       const items = itemsByRoot.get(rootKey(root.ProfileName, root.Name)) ?? [];
       const transient = new Set((root.Actions ?? []).filter(a => a.Transient).map(a => a.Name));
-      for (const item of items) item.transient = item.project.ActionName != null && transient.has(item.project.ActionName);
+      for (const item of items) {
+        item.transient = item.project.ActionName != null && transient.has(item.project.ActionName);
+        item.rootShown = rootShownOf(root);
+      }
       allRoots.push({ root, items, conn, profileName });
       representedServerIds.add(serverId);
     }
@@ -164,19 +182,20 @@ export function rebuildHierarchy(
   otherRoot: OtherRootChildren = DEFAULT_OTHER_ROOT_CHILDREN,
 ): HierarchyResult {
   const { allRoots, inactiveServers, profileFilterOptions } = collectFilteredData(connections, filter);
-  const build = { root: rootGroupsOf, recent: recentGroupOf, status: statusGroupOf }[groupBy];
+  const build = { root: rootGroupsOf, recent: flatGroupsOf, status: flatGroupsOf }[groupBy];
   // Every listed session, in the profile filter or not: a parent filtered out still names its child's note
   const names = new Map(connections.filter(isListed)
     .flatMap(c => c.projects.map(p => [projectKey(c.serverInfo.Id, p.Id), p.Name] as const)));
-  return { profileGroups: byProfile(allRoots, build, otherRoot, names), inactiveServers, profileFilterOptions };
+  return { profileGroups: byProfile(allRoots, build, ORDER[groupBy], otherRoot, names), inactiveServers, profileFilterOptions };
 }
 
 /**
  * One group per profile name, sorted, whatever servers it is on: a profile never mixes with another (#308).
- * `build` chooses what is under each profile, from that profile's roots; then each session nests under its parent.
+ * `build` chooses what is under each profile, from that profile's roots; then each session nests under its parent,
+ * and `order`, when there is one, sorts each level by what is under each session too (#397).
  */
 function byProfile(
-  allRoots: RootEntry[], build: (roots: RootEntry[]) => RootGroup[],
+  allRoots: RootEntry[], build: (roots: RootEntry[]) => RootGroup[], order: TreeOrder | undefined,
   otherRoot: OtherRootChildren, names: ReadonlyMap<ProjectKey, string>,
 ): ProfileGroup[] {
   const dict = new Map<string, RootEntry[]>();
@@ -189,6 +208,7 @@ function byProfile(
       const rootGroups = build(roots);
       const projectCount = rootGroups.reduce((n, rg) => n + rg.items.length, 0);
       nest(rootGroups, otherRoot, names);
+      if (order) for (const rg of rootGroups) sortTree(rg.items, order);
       return { key: name, name, rootGroups, projectCount };
     });
 }
@@ -242,49 +262,123 @@ function nest(groups: RootGroup[], otherRoot: OtherRootChildren, names: Readonly
     const parent = parents.get(i);
     if (!parent) continue;
     parent.children.push(i);
-    if (!groupOf.get(parent.key)!.flat && !sameRoot(i, parent)) i.ownRoot = i.project.RootName ?? undefined;
+    if (groupOf.get(parent.key) !== groupOf.get(i.key)) groupOf.get(i.key)!.nestedElsewhere++;
+    if (!groupOf.get(parent.key)!.flat && !sameRoot(i, parent)) i.ownRoot = i.rootShown ?? i.project.RootName ?? undefined;
   }
   for (const g of groups) g.items = g.items.filter(i => !parents.has(i));
 }
 
+// ── Folded headers (#427): kept on this device, by keys that stay the same whatever other servers are listed ──
+
+/** A profile's header, by its name, matched without case as profiles are (#308): one fold on every server. */
+export const profileFoldKey = (profileName: string) => `profile:${profileName.toLowerCase()}`;
+/** The start of every root fold key of a server: its roots are its own. */
+export const rootFoldPrefix = (serverId: string) => `root:${serverId}:`;
+/** A root's header, by server, profile and root: the root of one name on two servers, or in two profiles, is two. */
+export const rootFoldKey = (serverId: string, profileName: string, rootName: string) =>
+  `${rootFoldPrefix(serverId)}${rootKey(profileName, rootName)}`;
+/** The inactive servers' section. */
+export const INACTIVE_FOLD_KEY = 'inactive';
+
+/** What is folded above a session: the headers and the sessions to open to show its row. */
+export interface FoldPath { headers: string[]; sessions: ProjectKey[] }
+
+/** The folds above the session, from its profile down, or null when the list does not show it. */
+export function foldPathOf(profileGroups: ProfileGroup[], key: ProjectKey): FoldPath | null {
+  const find = (items: SidebarItem[], above: ProjectKey[]): ProjectKey[] | null => {
+    for (const item of items) {
+      if (item.key === key) return above;
+      const found = find(item.children, [...above, item.key]);
+      if (found) return found;
+    }
+    return null;
+  };
+  for (const group of profileGroups) {
+    for (const rg of group.rootGroups) {
+      const sessions = find(rg.items, []);
+      if (!sessions) continue;
+      const headers = [profileFoldKey(group.name)];
+      if (!rg.flat && rg.serverId) headers.push(rootFoldKey(rg.serverId, rg.profileName, rg.rootName));
+      return { headers, sessions };
+    }
+  }
+  return null;
+}
+
 /** A profile's projects listed directly, with no root header. */
 const flatGroup = (profileName: string, items: SidebarItem[]): RootGroup => ({
-  name: '', rootName: '', profileName, serverName: '', items, sessionCount: items.length, canCreate: false, flat: true,
+  name: '', rootName: '', profileName, serverName: '', items, sessionCount: items.length, nestedElsewhere: 0, canCreate: false, flat: true,
 });
 
-/** A root header per server, each with its +, then that root's projects. */
+/**
+ * A root header per server, each with its +, then that root's projects. A root is shown by its title (#434), with its
+ * name when another root here is shown as that title too, and with its server when another server has a root of its name.
+ */
 function rootGroupsOf(roots: RootEntry[]): RootGroup[] {
   const serversByRoot = new Map<string, number>();
   for (const { root } of roots) serversByRoot.set(root.Name, (serversByRoot.get(root.Name) ?? 0) + 1);
+  const namesByShown = new Map<string, Set<string>>();
+  for (const { root } of roots) namesByShown.set(rootShownOf(root), (namesByShown.get(rootShownOf(root)) ?? new Set()).add(root.Name));
+  const nameOf = (root: ProjectRootInfo) =>
+    root.Title != null && namesByShown.get(root.Title)!.size > 1 ? `${root.Title} (${root.Name})` : rootShownOf(root);
   return [...roots]
-    .sort((a, b) => a.root.Name.localeCompare(b.root.Name) || a.conn.serverInfo.Name.localeCompare(b.conn.serverInfo.Name))
+    .sort((a, b) => nameOf(a.root).localeCompare(nameOf(b.root)) || a.conn.serverInfo.Name.localeCompare(b.conn.serverInfo.Name))
     .map(({ root, items, conn, profileName }) => ({
-      name: serversByRoot.get(root.Name)! > 1 ? `${root.Name} (${conn.serverInfo.Name})` : root.Name,
+      name: serversByRoot.get(root.Name)! > 1 ? `${nameOf(root)} (${conn.serverInfo.Name})` : nameOf(root),
+      tooltip: root.Title != null ? root.Name : undefined,
       rootName: root.Name,
       profileName,
       serverId: conn.serverInfo.Id,
       serverName: conn.serverInfo.Name,
       items,
       sessionCount: items.length,
+      nestedElsewhere: 0,
       canCreate: (root.Actions?.length ?? 0) > 0 && conn.connectionState === 'connected',
     }));
 }
 
-const byUpdatedDesc = (a: SidebarItem, b: SidebarItem) =>
-  new Date(b.project.UpdatedAt).getTime() - new Date(a.project.UpdatedAt).getTime();
-
-function recentGroupOf(roots: RootEntry[]): RootGroup[] {
-  const items = roots.flatMap(r => r.items).sort(byUpdatedDesc);
-  return [flatGroup(roots[0].profileName, items)];
-}
+const updatedAt = (i: SidebarItem) => new Date(i.project.UpdatedAt).getTime();
 
 const STATUS_ORDER: Record<string, number> = { Running: 0, WaitingPermission: 1, WaitingInput: 1, Idle: 2, Error: 3, Stopped: 4 };
 const statusRank = (i: SidebarItem) => STATUS_ORDER[String(i.project.State ?? 'Idle')] ?? 99;
 
-/** A profile's projects by status, the most recent first within one. */
-function statusGroupOf(roots: RootEntry[]): RootGroup[] {
-  const items = roots.flatMap(r => r.items).sort((a, b) => statusRank(a) - statusRank(b) || byUpdatedDesc(a, b));
-  return [flatGroup(roots[0].profileName, items)];
+/** A flat grouping (recent, status): a profile's projects directly, ordered once they are nested (ORDER). */
+function flatGroupsOf(roots: RootEntry[]): RootGroup[] {
+  return [flatGroup(roots[0].profileName, roots.flatMap(r => r.items))];
+}
+
+/** What a session and everything nested under it rank by in a flat grouping: its best state, its latest change. */
+interface TreeRank { status: number; latest: number }
+type TreeOrder = (a: TreeRank, b: TreeRank) => number;
+
+/**
+ * How a flat grouping orders each level (#397): a parent by what is under it too, so a stopped parent of a running
+ * child ranks as running, and an old one is as recent as its most recent descendant. Recent is most recent first;
+ * Status by status, then most recent. Root keeps the order its profile lists them.
+ */
+const ORDER: Partial<Record<SidebarGroupBy, TreeOrder>> = {
+  recent: (a, b) => b.latest - a.latest,
+  status: (a, b) => a.status - b.status || b.latest - a.latest,
+};
+
+/** Sorts the items, and what is nested under each on every level, by their trees' ranks. */
+function sortTree(items: SidebarItem[], order: TreeOrder) {
+  const ranks = new Map<SidebarItem, TreeRank>();
+  const rankOf = (i: SidebarItem): TreeRank => {
+    let rank = ranks.get(i);
+    if (!rank) {
+      rank = i.children.map(rankOf).reduce(
+        (r, c) => ({ status: Math.min(r.status, c.status), latest: Math.max(r.latest, c.latest) }),
+        { status: statusRank(i), latest: updatedAt(i) });
+      ranks.set(i, rank);
+    }
+    return rank;
+  };
+  const sort = (list: SidebarItem[]) => {
+    list.sort((a, b) => order(rankOf(a), rankOf(b)));
+    for (const i of list) sort(i.children);
+  };
+  sort(items);
 }
 
 export function computeTotalWaiting(

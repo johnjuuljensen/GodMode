@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { useAppStore, transcriptKey } from '../../store';
+import { useAppStore, transcriptKey, rootShown } from '../../store';
 import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
-import { createTranscriptBuilder } from '../../signalr/parseMessage';
+import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
 import { QuestionPrompt } from './QuestionPrompt';
 import { PermissionCard } from './PermissionCard';
 import { ReplyInput } from './ReplyInput';
@@ -9,6 +9,7 @@ import { hubErrorMessage } from '../../signalr/hubError';
 import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import { deleteSession } from '../../deleteSession';
+import { useClickToCompose } from './clickToCompose';
 import './ProjectView.css';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
@@ -26,7 +27,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   const markInputSent = useAppStore(s => s.markInputSent);
   const respondToPermission = useAppStore(s => s.respondToPermission);
   const answerQuestion = useAppStore(s => s.answerQuestion);
-  const replyAndResume = useAppStore(s => s.replyAndResume);
+  const sendReply = useAppStore(s => s.sendReply);
+  const pendingSends = useAppStore(s => s.pendingSends[transcriptKey(serverId, projectId)]);
   const [inputText, setInputText] = useState('');
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
@@ -41,6 +43,8 @@ export function ProjectView({ serverId, projectId }: Props) {
 
   const hub = conn?.hub;
   const project = conn?.projects.find(p => p.Id === projectId);
+  // Its root as it is shown (#434): the title, else the name
+  const rootLabel = useAppStore(s => project?.RootName ? rootShown(s.serverConnections.find(c => c.serverInfo.Id === serverId)?.roots, project.ProfileName, project.RootName) : '');
   // Connected, the server's list taken on this connection, and the project not in it: deleted (here,
   // elsewhere, or while this client slept), or a link to one it does not have. Nothing here acts on it (#239)
   const projectsListed = useAppStore(s => !!s.projectsListed[serverId]);
@@ -74,6 +78,12 @@ export function ProjectView({ serverId, projectId }: Props) {
     () => simpleView ? transcript.filter(isConversation) : transcript,
     [transcript, simpleView],
   );
+  // What was sent from here and not echoed yet shows at once, after everything claude has written (#383)
+  const shownItems = useMemo((): TranscriptItem[] => pendingSends
+    ? [...visibleItems, ...pendingSends.map(p => ({
+      kind: 'userText' as const, key: `pending-${p.id}`, text: p.text, pending: p.notTaken ? 'notTaken' as const : 'waiting' as const,
+    }))]
+    : visibleItems, [visibleItems, pendingSends]);
 
   const state = project?.State ?? 'Idle';
   // Created with no prompt (#352): Idle with its output loaded and empty, claude has had no turn and
@@ -98,6 +108,8 @@ export function ProjectView({ serverId, projectId }: Props) {
   // and cleared by the next send
   const [refusal, setRefusal] = useState<{ projectId: string; message: string } | null>(null);
   const sendError = refusal?.projectId === projectId ? refusal.message : null;
+  // A click in the output focuses the composer, unless a question's options take the keys (#435, #240)
+  const clickToCompose = useClickToCompose(inputRef, !pendingPermission && (openQuestion?.Options.length ?? 0) > 0);
 
   // A failure (another client answered first, claude stopped waiting) is the card's to show
   const handlePermission = useCallback(async (allow: boolean) => {
@@ -128,14 +140,14 @@ export function ProjectView({ serverId, projectId }: Props) {
     transcriptRef.current?.scrollToLatest();
     try {
       // The server resumes a stopped project and sends once claude runs
-      await replyAndResume(serverId, projectId, text);
+      await sendReply(serverId, projectId, text);
     } catch (err) {
       console.error('Failed to send input:', err);
       setRefusal({ projectId, message: hubErrorMessage(err) });
       // What was typed comes back to be changed, unless something else has been typed since
       setInputText(current => current === '' ? text : current);
     }
-  }, [replyAndResume, serverId, projectId, markInputSent]);
+  }, [sendReply, serverId, projectId, markInputSent]);
 
   const handleSendInput = async () => {
     if (notFound || !inputText.trim()) return;
@@ -176,10 +188,10 @@ export function ProjectView({ serverId, projectId }: Props) {
         <div className="project-header-info">
           <span className="project-header-name">{projectName}</span>
           {(project?.ProfileName || project?.RootName) && (
-            <span className="project-header-root">
+            <span className="project-header-root" title={project?.RootName ?? undefined}>
               {project?.ProfileName && project.ProfileName !== 'Default' ? project.ProfileName : ''}
               {project?.ProfileName && project.ProfileName !== 'Default' && project?.RootName ? ' / ' : ''}
-              {project?.RootName ?? ''}
+              {rootLabel}
             </span>
           )}
         </div>
@@ -210,10 +222,10 @@ export function ProjectView({ serverId, projectId }: Props) {
         </div>
       </div>
 
-      {!notFound && phase === 'ready' && visibleItems.length > 0 ? (
-        <TranscriptList ref={transcriptRef} key={transcriptKey(serverId, projectId)} items={visibleItems} />
+      {!notFound && phase === 'ready' && shownItems.length > 0 ? (
+        <TranscriptList ref={transcriptRef} key={transcriptKey(serverId, projectId)} items={shownItems} {...clickToCompose} />
       ) : (
-        <div className="project-messages">
+        <div className="project-messages" {...clickToCompose}>
           <div className="project-messages-empty">
             {notFound ? 'Project not found'
               : phase === 'loading' ? 'Loading...' : conn?.connectionState !== 'connected' ? 'Not connected'
