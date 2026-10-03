@@ -1,4 +1,5 @@
 using GodMode.Server.Models;
+using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 
 namespace GodMode.Server.Services;
@@ -76,6 +77,9 @@ public interface IProjectManager
 
     /// <summary>The user has seen what the project needs: its result, review, question in plain text, error or escalation (hub MarkSeen).</summary>
     Task MarkSeenAsync(string projectId);
+
+    /// <summary>Sets how much the project may interrupt the user, in its settings.json (hub SetImportance, issue #438).</summary>
+    Task SetImportanceAsync(string projectId, Importance importance);
 
     /// <summary>
     /// The fleet's <c>escalate</c>: the session asks the user to decide <paramref name="text"/>, an

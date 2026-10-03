@@ -255,7 +255,8 @@ public partial class ProjectManager
             ActionName: action.Name,
             PermissionMode: action.PermissionMode,
             SharedFolder: action.SharedFolder,
-            Adopted: true);
+            Adopted: true,
+            Importance: action.Importance);
         return await LaunchNewSessionAsync(project, action, inputs, name, kind, prompt, settings);
     }
 
