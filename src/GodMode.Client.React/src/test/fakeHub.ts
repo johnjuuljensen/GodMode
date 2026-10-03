@@ -8,7 +8,7 @@
 import type { ConnectionState, HubCallbacks, OutputMessage } from '../signalr/hub';
 import type {
   CreateProjectResult, DeleteProjectResult, PermissionDecision, PermissionDetail, ProjectSummary, ProjectRootInfo, ProfileInfo, ProjectState, ProjectStatus, ServerInfo,
-  UnmanagedFolder,
+  UnmanagedFolder, Importance,
 } from '../signalr/types';
 import { parseClaudeMessage } from '../signalr/parseMessage';
 import { useAppStore, type ServerConnection } from '../store';
@@ -168,6 +168,14 @@ export class FakeHub {
     this.decisions.push({ projectId, requestId, decision });
   }
   async markSeen(projectId: string) { this.invoke(); this.seen.push(projectId); }
+  /** Every SetImportance, in order. The server pushes the project's status with it, as ProjectManager does. */
+  importances: { projectId: string; importance: Importance }[] = [];
+  async setImportance(projectId: string, importance: Importance) {
+    this.invoke();
+    this.importances.push({ projectId, importance });
+    const summary = this.projects.find(p => p.Id === projectId);
+    if (summary) this.callbacks.onStatusChanged?.(projectId, { ...status(projectId, summary.State), Name: summary.Name, Importance: importance });
+  }
   /** Every DeleteProject and RestoreProject, in order. A delete trashes a session that shares its folder, as the server does. */
   deletes: { projectId: string; force: boolean }[] = [];
   restores: string[] = [];

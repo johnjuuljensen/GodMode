@@ -49,6 +49,12 @@ public static class ShellMessageTypes
     /// <summary>Event from the shell: a notification was tapped; attention.take has its item.</summary>
     public const string AttentionOpen = "attention.open";
 
+    /// <summary>Request → <see cref="AttentionSoundPayload"/>: whether this device makes a sound for what interrupts.</summary>
+    public const string AttentionSoundGet = "attention.sound.get";
+
+    /// <summary>Request <see cref="AttentionSoundPayload"/> → <see cref="AttentionSoundPayload"/>: sets it, for this device.</summary>
+    public const string AttentionSoundSet = "attention.sound.set";
+
     /// <summary>Request → <see cref="VoiceStatus"/>: whether voice is available here, its state, and the conversation so far.</summary>
     public const string VoiceState = "voice.state";
 
@@ -136,6 +142,9 @@ public sealed record ServerIdPayload(string ServerId);
 public sealed record WindowInfo(string? Profile, bool CanOpenWindows);
 
 public sealed record ProfilePayload(string Profile);
+
+/// <summary>Whether this device makes a sound for what interrupts (<see cref="AttentionSound"/>).</summary>
+public sealed record AttentionSoundPayload(bool Enabled);
 
 /// <summary>An attention item to open in the inbox: a project on a server, both IDs as the server gave them.</summary>
 public sealed record AttentionLinkPayload(string ServerId, string ProjectId);

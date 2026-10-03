@@ -237,12 +237,11 @@ function FoldToggle({ folded, onToggle, what, children }: {
   );
 }
 
-/** Whether a session needs the user: something in the inbox for it, or a question it asks. */
+/** Whether a session needs the user: an item in the inbox for it, as its server says (#441). */
 function useNeedsYou(): (item: SidebarItem) => boolean {
   const attention = useAppStore(s => s.attention);
-  const projectQuestions = useAppStore(s => s.projectQuestions);
   const attentionKeys = new Set(attention.map(a => projectKey(a.serverId, a.ProjectId)));
-  return item => attentionKeys.has(item.key) || !!projectQuestions[item.key];
+  return item => attentionKeys.has(item.key);
 }
 
 /** Every session a root group lists, at the top or nested, on every level. */

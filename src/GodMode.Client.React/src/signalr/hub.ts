@@ -5,7 +5,7 @@
 import * as signalR from '@microsoft/signalr';
 import type {
   ProjectSummary, ProjectStatus, ProjectRootInfo, ProfileInfo, PermissionDecision, PermissionDetail, AttentionItem,
-  CreateProjectResult, DeleteProjectResult, IProjectHub, IProjectHubClient, UnmanagedFolder,
+  CreateProjectResult, DeleteProjectResult, IProjectHub, IProjectHubClient, UnmanagedFolder, Importance,
 } from './types';
 import { parseClaudeMessage } from './parseMessage';
 import type { ClaudeMessage } from './types';
@@ -304,6 +304,11 @@ export class GodModeHub {
   /** The user has seen the project's last result: it is no longer 'Finished', nor 'Review' until its pull request changes. */
   async markSeen(projectId: string): Promise<void> {
     await this.invoke('MarkSeen', projectId);
+  }
+
+  /** How much the project may interrupt the user (#438): kept with the session, so every device and voice agree. */
+  async setImportance(projectId: string, importance: Importance): Promise<void> {
+    await this.invoke('SetImportance', projectId, importance);
   }
 
   /**

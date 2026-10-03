@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.Logging;
 using VoiceBot.Core.Pipeline;
@@ -93,11 +94,13 @@ public sealed record ReplyReading(ProjectRef Project, string Handle, IReadOnlyLi
 /// project it names is what the conversation is about next (<see cref="VoiceConversation"/>), none when it names several.
 /// An announcement of no project (a create's outcome) leaves the conversation as it is, said alone.
 /// </summary>
-public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConversation conversation) : IAnnouncementFormatter
+public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConversation conversation, AttentionBoard? board = null)
+    : IAnnouncementFormatter
 {
     public string Format(IReadOnlyList<Announcement> announcements, SessionLanguages languages)
     {
-        string[] texts = [.. announcements.Select(a => Sentence(a.Text)).Where(t => t.Length > 0)];
+        // An important project's are said first (issue #438), the rest in the order they came
+        string[] texts = [.. announcements.OrderByDescending(Interrupts).Select(a => Sentence(a.Text)).Where(t => t.Length > 0)];
         var projects = announcements.Select(a => a.Source).Distinct().ToList();
         if (projects is not [null])
             conversation.Current = projects is [var only] ? ProjectRef.FromKey(only) : null;
@@ -109,6 +112,11 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
             _ => $"{phrases.Several(texts.Length)} {string.Join(" ", texts)}",
         };
     }
+
+    /// <summary>Whether the announcement is of an item that interrupts: an important project's.</summary>
+    private bool Interrupts(Announcement announcement) =>
+        board != null && ProjectRef.FromKey(announcement.Source) is { } project
+        && board.ItemOf(project)?.Item.Alert == AttentionAlert.Interrupt;
 
     /// <summary>The text as a sentence: ended with its own '?' or '!' (a session's spoken reply has them), else a '.'.</summary>
     internal static string Sentence(string text) =>
@@ -258,6 +266,8 @@ public sealed class AttentionBoard
     {
         foreach (var item in items)
         {
+            // In the inbox alone (a quiet session's result or error, issue #438): listed when asked, never announced
+            if (item.Item.Alert == AttentionAlert.Inbox) continue;
             if (_handles.Of(item.Project) is not { } handle) continue;
             if (!_announced.TryAdd(Key(item), 0)) continue;
 

@@ -77,7 +77,7 @@ public sealed class AttentionService : Service
     {
         base.OnCreate();
         _logger = MauiProgram.LoggerFactory.CreateLogger<AttentionService>();
-        AttentionNotifier.CreateChannel(this);
+        AttentionNotifier.CreateChannels(this);
         CreateServiceChannel();
         _notifier = new AttentionNotifier(this, MauiProgram.LoggerFactory.CreateLogger<AttentionNotifier>());
         var services = MauiProgram.Services;

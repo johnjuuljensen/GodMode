@@ -381,20 +381,6 @@ function sortTree(items: SidebarItem[], order: TreeOrder) {
   sort(items);
 }
 
-export function computeTotalWaiting(
-  connections: ServerConnection[], pq: Record<ProjectKey, boolean>, dp: Record<ProjectKey, true>,
-): number {
-  let total = 0;
-  for (const conn of connections) {
-    for (const p of conn.projects) {
-      const key = projectKey(conn.serverInfo.Id, p.Id);
-      // A permission prompt cannot be dismissed: claude waits until it is answered
-      if (p.State === 'WaitingPermission' || (!dp[key] && (p.State === 'WaitingInput' || pq[key]))) total++;
-    }
-  }
-  return total;
-}
-
 // ── Folding (#325): a root with many sessions stays readable. Nothing is deleted by it ──
 
 const DAY_MS = 24 * 60 * 60 * 1000;

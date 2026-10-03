@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useAppStore, type SidebarItem } from '../../store';
+import { useAppStore, waitsOnUser, type SidebarItem } from '../../store';
 import { KindLabel } from '../KindLabel/KindLabel';
 import { deleteSession } from '../../deleteSession';
+import { ImportanceMark } from '../Importance/Importance';
+import { IMPORTANCE_LABELS, IMPORTANCE_ORDER } from '../Importance/importanceTiers';
 import type { ProjectState } from '../../signalr/types';
 
 interface Props {
@@ -27,9 +29,9 @@ export const SWIPE_REVEAL_PX = 88;
 /** How far a touch moves sideways before it is a swipe rather than a tap or a scroll (px). */
 const SWIPE_SLOP_PX = 10;
 
-/** The row menu's size, as Sidebar.css gives it, to keep it on the screen. */
+/** The row menu's size, as Sidebar.css gives it, to keep it on the screen: the three tiers, a separator and Delete. */
 const MENU_WIDTH_PX = 160;
-const MENU_HEIGHT_PX = 44;
+const MENU_HEIGHT_PX = 150;
 
 /**
  * A session in the list. Its delete is never a bare button (#325): on a phone the row is swiped to the
@@ -38,9 +40,8 @@ const MENU_HEIGHT_PX = 44;
 export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
   const { project, serverLabel, ownRoot, startedBy } = item;
   const timeAgo = formatRelativeTime(project.UpdatedAt);
-  const clientQuestion = useAppStore(s => s.projectQuestions[item.key]);
   const isMobile = useAppStore(s => s.isMobile);
-  const isWaiting = project.State === 'WaitingInput' || clientQuestion;
+  const isWaiting = waitsOnUser(project);
   const state: ProjectState = isWaiting ? 'WaitingInput' : project.State;
   // A state this client does not know yet is named as the server names it
   const stateName = stateNames[state] ?? String(state);
@@ -71,6 +72,8 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
 
   const close = () => { setMenu(null); setRevealed(false); setOffset(0); };
   const handleDelete = () => { close(); void deleteSession(item.serverId, project); };
+  const setImportance = useAppStore(s => s.setImportance);
+  const importance = project.Importance ?? 'Normal';
 
   // Kept on the screen: a menu opened near its right or bottom edge opens back from it. It is portalled to
   // the body (below), so these are the viewport's edges and not the sidebar's, which clips it otherwise
@@ -135,6 +138,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
         <div className="project-info">
           <div className="project-name-row">
             <div className="project-name" title={project.Name}>{project.Name}</div>
+            <ImportanceMark importance={project.Importance} />
             <KindLabel kind={project.Kind} />
             {ownRoot && <span className="project-own-root" title={`In ${ownRoot}`}>{ownRoot}</span>}
           </div>
@@ -181,6 +185,21 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
       {/* Out of the sidebar: its backdrop-filter makes it the containing block of a fixed menu, and its overflow clips it */}
       {menu && createPortal(
         <div ref={menuRef} className="project-item-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={e => e.stopPropagation()}>
+          {IMPORTANCE_ORDER.map(tier => (
+            <button
+              key={tier}
+              className={`project-item-menu-item importance ${tier === importance ? 'current' : ''}`}
+              role="menuitemradio"
+              aria-checked={tier === importance}
+              onClick={() => {
+                close();
+                if (tier !== importance) void setImportance(item.serverId, project.Id, tier).catch(err => console.error('Failed to set the importance:', err));
+              }}
+            >
+              {tier === importance ? '✓ ' : ''}{IMPORTANCE_LABELS[tier]}
+            </button>
+          ))}
+          <div className="project-item-menu-separator" role="separator" />
           <button className="project-item-menu-item danger" role="menuitem" onClick={handleDelete}>
             {project.SharedFolder && !project.Adopted ? 'Delete' : 'Delete…'}
           </button>

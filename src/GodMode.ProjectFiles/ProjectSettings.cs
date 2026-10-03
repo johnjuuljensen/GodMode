@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using GodMode.Shared.Enums;
 
 namespace GodMode.ProjectFiles;
 
@@ -21,12 +22,17 @@ namespace GodMode.ProjectFiles;
 /// Whether the session was adopted: its working folder was there before it, and not made by its create.
 /// Its delete follows its root's rules as any session's does; the app offers Forget, which keeps the folder, beside it.
 /// </param>
+/// <param name="Importance">
+/// How much the session may interrupt the user (issue #438): its action's <c>importance</c> at its create or adopt, and the
+/// user's since (<c>SetImportance</c>). <see cref="Importance.Normal"/> for a session from before tiers.
+/// </param>
 public record ProjectSettings(
     bool DangerouslySkipPermissions = false,
     string? ActionName = null,
     string? PermissionMode = null,
     bool SharedFolder = false,
-    bool Adopted = false
+    bool Adopted = false,
+    Importance Importance = Importance.Normal
 )
 {
     private static readonly JsonSerializerOptions JsonOptions = new()

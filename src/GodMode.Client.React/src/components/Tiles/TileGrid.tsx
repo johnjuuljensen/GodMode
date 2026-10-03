@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useAppStore, TILE_TAIL_TURNS, projectKey, isListed, inProfile, type ProjectKey } from '../../store';
+import { useAppStore, TILE_TAIL_TURNS, projectKey, isListed, inProfile, rootShown, type ProjectKey } from '../../store';
 import { ProjectTile } from './ProjectTile';
 import './TileGrid.css';
 
@@ -48,7 +48,7 @@ export function TileGrid() {
   const listed = serverConnections.filter(isListed);
   const allProjects = listed.flatMap(conn => conn.projects
     .filter(p => inProfile(p.ProfileName, profile))
-    .map(p => ({ serverId: conn.serverInfo.Id, project: p })));
+    .map(p => ({ serverId: conn.serverInfo.Id, project: p, roots: conn.roots })));
 
   if (listed.length === 0) {
     return <div className="tile-grid-empty">No connected servers</div>;
@@ -61,11 +61,11 @@ export function TileGrid() {
   return (
     <div className="tile-grid-scroll">
       <div className="tile-grid">
-        {allProjects.map(({ serverId, project }) => (
+        {allProjects.map(({ serverId, project, roots }) => (
           <ProjectTile
             key={projectKey(serverId, project.Id)}
             project={project}
-            serverId={serverId}
+            rootShown={project.RootName ? rootShown(roots, project.ProfileName, project.RootName) : undefined}
             messages={tileMessages[projectKey(serverId, project.Id)] ?? []}
             isLoading={tileLoading[projectKey(serverId, project.Id)] ?? false}
             isSelected={

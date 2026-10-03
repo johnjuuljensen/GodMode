@@ -251,7 +251,9 @@ public class RootConfigReader : IRootConfigReader
         Session = overlay.Session ?? baseConfig.Session,
         Transient = overlay.Transient ?? baseConfig.Transient,
         Adopt = overlay.Adopt ?? baseConfig.Adopt,
-        FleetTools = overlay.FleetTools ?? baseConfig.FleetTools
+        FleetTools = overlay.FleetTools ?? baseConfig.FleetTools,
+        QuietTurns = overlay.QuietTurns ?? baseConfig.QuietTurns,
+        Importance = overlay.Importance ?? baseConfig.Importance
     };
 
     /// <summary>
@@ -305,7 +307,9 @@ public class RootConfigReader : IRootConfigReader
             Transient: raw.Transient ?? false,
             Adopt: raw.Adopt ?? false,
             Effort: raw.Effort,
-            FleetTools: ParseFleetTools(name, raw.FleetTools)
+            FleetTools: ParseFleetTools(name, raw.FleetTools),
+            QuietTurns: raw.QuietTurns ?? false,
+            Importance: ParseImportance(name, raw.Importance)
         );
     }
 
@@ -320,6 +324,19 @@ public class RootConfigReader : IRootConfigReader
         { ValueKind: JsonValueKind.String } grantable when grantable.GetString() == "grantable" => FleetToolsGrant.Grantable,
         { } other => throw new InvalidDataException(
             $"Action '{name}' has \"fleetTools\": {other.GetRawText()}, which is none of true, \"grantable\" and false."),
+    };
+
+    /// <summary>
+    /// The action's <c>importance</c>: <c>"quiet"</c>, <c>"normal"</c>, <c>"important"</c> (any case) or none, which is
+    /// <see cref="Importance.Normal"/>. Anything else is a config error (<see cref="InvalidDataException"/>).
+    /// </summary>
+    private static Importance ParseImportance(string name, string? value) => value?.ToLowerInvariant() switch
+    {
+        null or "normal" => Importance.Normal,
+        "quiet" => Importance.Quiet,
+        "important" => Importance.Important,
+        _ => throw new InvalidDataException(
+            $"Action '{name}' has \"importance\": \"{value}\", which is none of \"quiet\", \"normal\" and \"important\"."),
     };
 
     /// <summary>Why an action that starts no session cannot have <paramref name="raw"/>'s settings, or null when it can.</summary>
@@ -431,6 +448,9 @@ public class RootConfigReader : IRootConfigReader
         public bool? Adopt { get; init; }
         /// <summary>true, "grantable" or false: <see cref="ParseFleetTools"/>.</summary>
         public JsonElement? FleetTools { get; init; }
+        public bool? QuietTurns { get; init; }
+        /// <summary>"quiet", "normal" or "important": <see cref="ParseImportance"/>.</summary>
+        public string? Importance { get; init; }
         /// <summary>The root's list script: read from config.json alone, never an action's overlay.</summary>
         public JsonElement? List { get; init; }
         /// <summary>The root's issueInfo script: read from config.json alone, as <see cref="List"/> is.</summary>

@@ -1,23 +1,25 @@
 import { useState } from 'react';
 import { useAppStore, projectKey, type ServerAttentionItem } from '../../store';
-import type { AttentionKind } from '../../signalr/types';
+import type { AttentionKind, QuestionItem } from '../../signalr/types';
 import { PermissionCard } from '../Project/PermissionCard';
 import { ReplyInput } from '../Project/ReplyInput';
 import { hubErrorMessage } from '../../signalr/hubError';
 import { deleteSession } from '../../deleteSession';
+import { ImportanceMark } from '../Importance/Importance';
 
 const KIND_LABELS: Record<AttentionKind, string> = {
   Permission: 'Permission',
   Question: 'Question',
   Error: 'Error',
+  Escalation: 'Decision',
   Review: 'Changes requested',
   Finished: 'Finished',
 };
 
 /** Kinds answered with a typed reply (ReplyAndResume). */
-const REPLY_KINDS: ReadonlySet<AttentionKind> = new Set(['Question', 'Error', 'Finished']);
+const REPLY_KINDS: ReadonlySet<AttentionKind> = new Set(['Question', 'Error', 'Escalation', 'Finished']);
 /** Kinds to mark seen: a Question only in plain text, as a pending AskUserQuestion is answered (#426). */
-const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review', 'Question', 'Error']);
+const SEEN_KINDS: ReadonlySet<AttentionKind> = new Set(['Finished', 'Review', 'Question', 'Error', 'Escalation']);
 
 interface Props {
   item: ServerAttentionItem;
@@ -34,6 +36,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const replyAndResume = useAppStore(s => s.replyAndResume);
   const respondToPermission = useAppStore(s => s.respondToPermission);
   const markSeen = useAppStore(s => s.markSeen);
+  const answerQuestion = useAppStore(s => s.answerQuestion);
   const { serverId, ProjectId: projectId, Kind: kind } = item;
   // Held in the store, so a remount of this item (a layout change, the pane collapsed) keeps it
   const draft = useAppStore(s => s.inboxDrafts[projectKey(serverId, projectId)]);
@@ -46,10 +49,13 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   // The project needs the user anew (another kind, or the same kind again): nothing of the last one carries over (#218)
   const need = `${kind} ${item.Since}`;
   const [needSeen, setNeedSeen] = useState(need);
+  // A pending AskUserQuestion's choices so far, by question text, for a request answered all at once
+  const [chosen, setChosen] = useState<Record<string, readonly string[]>>({});
   if (need !== needSeen) {
     setNeedSeen(need);
     setBusy(false);
     setError(null);
+    setChosen({});
   }
 
   const permission = kind === 'Permission' ? item.Permission ?? null : null;
@@ -60,8 +66,10 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const setDenyMessage = (text: string) => {
     if (permission) setInboxDraft(serverId, projectId, { deny: text ? { requestId: permission.RequestId, message: text } : null });
   };
-  // A single AskUserQuestion is answered by a reply with the chosen label
-  const question = kind === 'Question' && item.Question?.Questions.length === 1 ? item.Question.Questions[0] : null;
+  // A pending AskUserQuestion shows every question in full (#454). A single single-select one is answered by a
+  // reply with the chosen label; several, or a multi-select, by one answer per question, sent together
+  const pending = kind === 'Question' ? item.Question ?? null : null;
+  const answersAtOnce = pending !== null && (pending.Questions.length > 1 || pending.Questions.some(q => q.MultiSelect));
   // A create that failed before its launch has no session to reply to: its delete is all that is left (#448)
   const createFailed = kind === 'Error' && item.CreateFailed === true;
   const canReply = !createFailed && (REPLY_KINDS.has(kind) || (kind === 'Permission' && !permission));
@@ -85,6 +93,24 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const send = async (text: string) => {
     if (!text.trim() || busy) return;
     if (await run(() => replyAndResume(serverId, projectId, text))) setReply('');
+  };
+
+  const pick = (q: QuestionItem, label: string) => {
+    if (!answersAtOnce) {
+      void send(label);
+      return;
+    }
+    const was = chosen[q.Question] ?? [];
+    const next = !q.MultiSelect ? [label] : was.includes(label) ? was.filter(l => l !== label) : [...was, label];
+    setChosen({ ...chosen, [q.Question]: next });
+  };
+  const allChosen = pending !== null && pending.Questions.every(q => (chosen[q.Question]?.length ?? 0) > 0);
+  const sendAnswers = async () => {
+    if (!pending || !allChosen || busy) return;
+    // A multi-select's labels in the order offered, joined as the hub takes them
+    const byQuestion = Object.fromEntries(pending.Questions.map(q =>
+      [q.Question, q.Options.filter(o => chosen[q.Question]?.includes(o.Label)).map(o => o.Label).join(', ')]));
+    if (await run(() => answerQuestion(serverId, projectId, pending.RequestId, byQuestion))) setChosen({});
   };
 
   const answerPermission = async (allow: boolean, message?: string) => {
@@ -120,24 +146,49 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
       <button className="inbox-item-header" onClick={open} title="Open the project">
         <span className="inbox-item-kind">{KIND_LABELS[kind]}</span>
         <span className="inbox-item-name">{item.ProjectName}</span>
+        {item.Importance === 'Important' && <ImportanceMark importance="Important" />}
         <span className="inbox-item-meta">{meta}</span>
       </button>
 
       {permission ? (
         // One card per request: the next one does not start out sending, as the last one was (#218)
         <PermissionCard key={permission.RequestId} serverId={serverId} projectId={projectId} permission={permission} onAnswer={answerPermission} denyMessage={{ value: denyMessage, onChange: setDenyMessage }} />
+      ) : pending ? (
+        <div className="inbox-questions">
+          {pending.Questions.map((q, qi) => (
+            <section key={q.Question} className="inbox-question">
+              {(pending.Questions.length > 1 || q.Header || q.MultiSelect) && (
+                <div className="inbox-question-header">
+                  {pending.Questions.length > 1 && <span className="inbox-question-num">{qi + 1}/{pending.Questions.length}</span>}
+                  {q.Header && <span className="inbox-question-title">{q.Header}</span>}
+                  {q.MultiSelect && <span className="inbox-question-multi">Choose any</span>}
+                </div>
+              )}
+              <div className="inbox-item-text inbox-question-text">{q.Question}</div>
+              {q.Options.length > 0 && (
+                <div className="inbox-item-options inbox-question-options">
+                  {q.Options.map(o => {
+                    const selected = chosen[q.Question]?.includes(o.Label) === true;
+                    return (
+                      <button key={o.Label} className={`btn btn-secondary inbox-option${selected ? ' inbox-option-selected' : ''}`}
+                        onClick={() => pick(q, o.Label)} disabled={busy} aria-pressed={answersAtOnce ? selected : undefined}>
+                        <span className="inbox-option-label">{o.Label}</span>
+                        {o.Description && <span className="inbox-option-desc">{o.Description}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          ))}
+          {answersAtOnce && (
+            <div className="inbox-item-actions">
+              <button className="btn btn-primary" onClick={sendAnswers} disabled={busy || !allChosen}>Send answers</button>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="inbox-item-text">{item.Text}</div>
-      )}
-
-      {question && question.Options.length > 0 && (
-        <div className="inbox-item-options">
-          {question.Options.map(o => (
-            <button key={o.Label} className="btn btn-secondary" onClick={() => send(o.Label)} disabled={busy} title={o.Description ?? undefined}>
-              {o.Label}
-            </button>
-          ))}
-        </div>
       )}
 
       {canReply && (
@@ -154,24 +205,23 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
         </div>
       )}
 
-      {canMarkSeen && (
-        <div className="inbox-item-actions">
-          {item.PullRequestUrl && (
-            <a className="btn btn-secondary" href={item.PullRequestUrl} target="_blank" rel="noreferrer">Open PR</a>
-          )}
+      {/* Every kind can be gone to: the header opens it too, but does not look like a button (#440) */}
+      <div className="inbox-item-actions">
+        <button className="btn btn-secondary" onClick={open} title="Open the project">Go to</button>
+        {canMarkSeen && item.PullRequestUrl && (
+          <a className="btn btn-secondary" href={item.PullRequestUrl} target="_blank" rel="noreferrer">Open PR</a>
+        )}
+        {canMarkSeen && (
           <button className="btn btn-secondary" onClick={() => run(() => markSeen(serverId, projectId))} disabled={busy}>
             Mark seen
           </button>
-        </div>
-      )}
-
-      {createFailed && (
-        <div className="inbox-item-actions">
+        )}
+        {createFailed && (
           <button className="btn btn-danger" onClick={remove} disabled={busy} title="Its create failed: delete it, or create it again">
             Delete
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {error && <div className="inbox-item-error">{error}</div>}
     </article>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GodMode.Shared.Hubs;
+using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using GodMode.Server.Models;
 using GodMode.Server.Services;
@@ -111,6 +112,19 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
             await _projectManager.MarkSeenAsync(projectId);
         }
         catch (KeyNotFoundException ex)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
+    public async Task SetImportance(string projectId, Importance importance)
+    {
+        _logger.LogInformation("Client {ConnectionId} sets project {ProjectId} {Importance}", Context.ConnectionId, projectId, importance);
+        try
+        {
+            await _projectManager.SetImportanceAsync(projectId, importance);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or ArgumentException or InvalidOperationException)
         {
             throw new HubException(ex.Message);
         }

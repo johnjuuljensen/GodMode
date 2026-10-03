@@ -962,3 +962,18 @@
     min-height: 44px;
   }
 }
+
+/* The row menu's tiers (#438): the current one checked, hovered without Delete's red */
+.project-item-menu-item.importance:hover {
+  background: var(--glass-border-strong);
+}
+
+.project-item-menu-item.importance.current {
+  color: var(--text-primary);
+}
+
+.project-item-menu-separator {
+  height: var(--border-width);
+  margin: 4px 2px;
+  background: var(--glass-border-strong);
+}

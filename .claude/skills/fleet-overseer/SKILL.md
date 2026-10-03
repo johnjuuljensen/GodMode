@@ -580,8 +580,18 @@ dispatched a fix for.
 **All of it reaches them by assignment, none of it by stopping.** Assign, comment, keep going. If you
 find yourself composing a message whose purpose is to wait for a reply, you have already made the
 mistake. That holds in every mode: inside GodMode, outside it, or in tabs. A worker's permission
-prompts and questions reach the user without you, through the app's inbox; your own last line is
-in that inbox too, as your state, never as a question.
+prompts and questions reach the user without you, through the app's inbox. A worker's finished
+turns and reviews do not: they are yours to hear and report on.
+
+**As a GodMode session, nudge with `escalate` too.** Your action may end your turns quietly
+(`quietTurns`): then a turn a worker's message or a notice woke raises nothing in the user's inbox,
+and a decision you found in it would sit unseen beside the assignment. Call the fleet's
+`escalate(text, url)` once per decision, when you assign it: one line naming what to decide and the
+issue (`#376 and #384 need your decision: …`), `url` the issue or pull request. It stays in the
+inbox until the user has seen it, whatever your later turns do, and a second call replaces the first,
+so name every decision still open in it. Never escalate per turn, progress, or a decision you
+already escalated: the assignment is the record, the item is the nudge. Your own last line is in the
+inbox as your state, never as a question; with quiet turns, only after a turn the user started.
 
 ## Limits
 

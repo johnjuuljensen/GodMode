@@ -23,8 +23,8 @@ afterEach(() => {
   useAppStore.setState(initialState, true);
 });
 
-const row = (state: ProjectState, name = 'a session') => {
-  const p = project('p1', name, state, new Date().toISOString());
+const row = (state: ProjectState, name = 'a session', currentQuestion?: string) => {
+  const p = { ...project('p1', name, state, new Date().toISOString()), CurrentQuestion: currentQuestion };
   return render(<ProjectItem item={{ key: projectKey('A', 'p1'), serverId: 'A', project: p, children: [] }} isSelected={false} onSelect={() => {}} />);
 };
 const dot = () => view!.container.querySelector<HTMLElement>('.project-item .project-state-dot')!;
@@ -48,9 +48,8 @@ describe("a session's state", () => {
     expect(view.container.querySelector('.project-state-badge')).toBeNull();
   });
 
-  it('is waiting on you while the session asks a question, whatever its state', async () => {
-    useAppStore.setState({ projectQuestions: { [projectKey('A', 'p1')]: true } });
-    view = await row('Idle');
+  it('is waiting on you while it was stopped on a question it still asks, as its server says (#441)', async () => {
+    view = await row('Stopped', 'a session', 'Shall I go on?');
     expect(dot().getAttribute('aria-label')).toBe('Waiting on you');
     expect(dot().classList.contains('WaitingInput')).toBe(true);
   });

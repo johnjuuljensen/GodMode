@@ -4,6 +4,22 @@
 // </auto-generated>
 
 /**
+ * How loudly an attention item is brought to the user (issue #438), from its session's Importance and its
+ * AttentionKind; least first. The server decides it, so every client and voice agree. Whether a device makes
+ * a sound at all is the device's own setting. AttentionAlert.Notify, what every item was before tiers, is 0,
+ * the default, so the JSON leaves it out.
+ */
+export type AttentionAlert =
+  /** In the inbox, and nowhere else: no notification, and voice does not announce it. */
+  | 'Inbox'
+  /** Also a notification on the phone, and voice announces it. */
+  | 'Notify'
+  /**
+   * Also interrupts: a sound, the phone's heads-up notification, and voice announces it before the others.
+   */
+  | 'Interrupt';
+
+/**
  * What a project needs from the user, most urgent first: a project is listed once, under the first that
  * applies.
  */
@@ -23,6 +39,13 @@ export type AttentionKind =
    */
   | 'Error'
   /**
+   * An overseer asked the user to decide something (its fleet tool `escalate`, ProjectStatus.Escalation): the
+   * item's text, and its URL as AttentionItem.PullRequestUrl when it gave one. Unlike AttentionKind.Finished,
+   * the turns that end after it leave it as it is. Cleared by IProjectHub.MarkSeen and by the user's own
+   * reply, answer or input, not by the fleet's send or a resume, until it asks again.
+   */
+  | 'Escalation'
+  /**
    * A reviewer asked for changes on the project's open pull request (ProjectStatus.PullRequest), and the
    * project is Idle or Stopped. Cleared by IProjectHub.MarkSeen and by any reply, until the pull request
    * changes again.
@@ -30,9 +53,35 @@ export type AttentionKind =
   | 'Review'
   /**
    * The turn ended with a result the user has not seen (ProjectStatus.LastResult), and the project is Idle or
-   * Stopped. Cleared by IProjectHub.MarkSeen and by any reply.
+   * Stopped. Cleared by IProjectHub.MarkSeen and by any reply. A quiet turn's end raises none
+   * (ProjectStatus.QuietResult).
    */
   | 'Finished';
+
+/**
+ * How much a session may interrupt the user (issue #438), least first: its `settings.json`'s `importance`,
+ * set at its create from its action's `importance` (else Importance.Normal), and by the user since
+ * (IProjectHub.SetImportance). Every item stays in the user's list whatever it is: it decides only how loudly
+ * an item is brought to the user (AttentionAlert). General enough for what is not a session (notices from
+ * outside services, #439). Importance.Normal is 0, the default, so the JSON leaves it out, and a session or
+ * server from before tiers reads as normal.
+ */
+export type Importance =
+  /**
+   * The inbox only: its result, review and error notify nobody. What blocks it (a permission prompt, a
+   * question, an escalation) still notifies, as Importance.Normal's does.
+   */
+  | 'Quiet'
+  /**
+   * What every session did before tiers: each item is in the inbox, a notification on the phone, and said by
+   * voice.
+   */
+  | 'Normal'
+  /**
+   * Each item interrupts too: a sound, the phone's heads-up notification, and voice says it before the
+   * others.
+   */
+  | 'Important';
 
 /** Represents the current state of a project. */
 export type ProjectState =
@@ -134,7 +183,8 @@ export interface AttentionItem {
    */
   Question?: PendingQuestion | null;
   /**
-   * The project's pull request, when Kind is AttentionKind.Review or AttentionKind.Finished and it has one.
+   * The project's pull request, when Kind is AttentionKind.Review or AttentionKind.Finished and it has one;
+   * for AttentionKind.Escalation, where to decide it (Escalation.Url), when the overseer gave one.
    */
   PullRequestUrl?: string | null;
   /**
@@ -149,6 +199,24 @@ export interface AttentionItem {
    * JSON when false.
    */
   CreateFailed?: boolean;
+  /**
+   * The session that started this one, as the server recorded it at its create: an overseer that runs it and
+   * hears of it. Null for a top-level session. Unlike ProjectStatus.ParentId, which the session can write,
+   * the session cannot change it. A child's AttentionKind.Finished and AttentionKind.Review are its parent's
+   * business, and not in the user's list; its permission prompts, questions and errors are.
+   */
+  RecordedParentId?: string | null;
+  /**
+   * How much its session may interrupt the user, as in ProjectStatus.Importance; the app marks an important
+   * one.
+   */
+  Importance?: Importance;
+  /**
+   * How loudly to bring it to the user, from Importance and Kind (issue #438): an AttentionAlert.Inbox item
+   * is in the list and nowhere else, a AttentionAlert.Notify one is a notification and an announcement too,
+   * and an AttentionAlert.Interrupt one makes a sound and is announced first.
+   */
+  Alert?: AttentionAlert;
 }
 
 /**
@@ -201,6 +269,16 @@ export interface DeleteProjectResult {
    * working folder, which nothing brings back.
    */
   Trashed: boolean;
+}
+
+/** A decision an overseer asked the user for: ProjectStatus.Escalation. */
+export interface Escalation {
+  /** When it asked. */
+  At: string;
+  /** What the user is to decide. */
+  Text: string;
+  /** Where to decide it (an issue or a pull request), if it gave one. */
+  Url?: string | null;
 }
 
 /** Git status information for a project. */
@@ -458,6 +536,29 @@ export interface ProjectStatus {
    * false.
    */
   CreateFailed?: boolean;
+  /**
+   * Whether LastResult ended a quiet turn (issue #401): its action has `quietTurns`, and the user did not
+   * start the turn, so its end raises no AttentionKind.Finished. The result still shows as the session's
+   * last. Left out of the JSON when false.
+   */
+  QuietResult?: boolean;
+  /**
+   * The last turn end that raised AttentionKind.Finished, while quiet turns have ended after it and the user
+   * has not seen it: its Finished stays, with its own result, until the user sees it. Null otherwise.
+   */
+  UnseenResult?: TurnResult | null;
+  /**
+   * What the session, an overseer, last asked the user to decide (its fleet tool `escalate`, issue #401): an
+   * AttentionKind.Escalation whatever turns end after it, until the user has seen it: IProjectHub.MarkSeen or
+   * the user's own input clears it (null), and nothing else does, the fleet's send and a resume included.
+   * Null when there is none.
+   */
+  Escalation?: Escalation | null;
+  /**
+   * How much the session may interrupt the user (issue #438): its `settings.json`'s, not status.json's. Set
+   * at its create from its action's `importance`, and by IProjectHub.SetImportance.
+   */
+  Importance?: Importance;
 }
 
 /** Summary information about a project. */
@@ -497,6 +598,13 @@ export interface ProjectSummary {
   ParentId?: string | null;
   /** The slash commands GodMode sends to the session, as in ProjectStatus.SlashCommands. */
   SlashCommands?: string[] | null;
+  /**
+   * The session that started this one as the server recorded it, as in AttentionItem.RecordedParentId: the
+   * overseer that runs it. Null for a top-level session.
+   */
+  RecordedParentId?: string | null;
+  /** How much the session may interrupt the user, as in ProjectStatus.Importance. */
+  Importance?: Importance;
 }
 
 /**
@@ -559,6 +667,16 @@ export interface TestStatus {
   Failed: number;
   /** The timestamp when tests were last run. */
   LastRun?: string | null;
+}
+
+/** A turn's end, as ProjectStatus.UnseenResult keeps it. */
+export interface TurnResult {
+  /** When it ended. */
+  At: string;
+  /** Its result, as ProjectStatus.LastResult had it. */
+  Result?: string | null;
+  /** Its spoken reply, as ProjectStatus.SpokenSummary had it. */
+  Spoken?: string | null;
 }
 
 /**
@@ -636,6 +754,11 @@ export interface IProjectHub {
    * pending permission or AskUserQuestion is unaffected.
    */
   MarkSeen(projectId: string): Promise<void>;
+  /**
+   * Sets how much the project may interrupt the user (issue #438), in its `settings.json`, so every client
+   * and voice agree. Its IProjectHubClient.StatusChanged and IProjectHubClient.AttentionChanged follow.
+   */
+  SetImportance(projectId: string, importance: Importance): Promise<void>;
   /**
    * Answers the project, whatever it is waiting on and whether or not its claude is running. With claude
    * running this is IProjectHub.SendInput: a pending permission request is denied with text as the reason, a

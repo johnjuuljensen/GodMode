@@ -15,8 +15,11 @@ public static partial class Attention
     /// <summary>About how long a text may be; it is cut at a word before this.</summary>
     public const int MaxTextLength = 500;
 
-    /// <summary>The project's attention item, or null when it needs nothing.</summary>
-    public static AttentionItem? Of(ProjectStatus status)
+    /// <summary>
+    /// The project's attention item, or null when it needs nothing; with <paramref name="recordedParentId"/>, its parent
+    /// as the server recorded it (<see cref="AttentionItem.RecordedParentId"/>).
+    /// </summary>
+    public static AttentionItem? Of(ProjectStatus status, string? recordedParentId = null)
     {
         var seenAt = status.SeenAt ?? DateTime.MinValue;
         // The turn's spoken reply goes with what its end left: a question in plain text, or its result
@@ -34,11 +37,18 @@ public static partial class Attention
             // Seen, the project stays Error, and needs the user again when it fails again
             { State: ProjectState.Error } when status.UpdatedAt > seenAt =>
                 (AttentionKind.Error, status.UpdatedAt, status.LastError ?? "The project failed.", null),
+            // An overseer's question for the user, whatever its turns did since, until the user sees it or writes:
+            // the status keeps it until then, and SeenAt, which the fleet's send and a resume move too, is not asked
+            { Escalation: { } escalation } =>
+                (AttentionKind.Escalation, escalation.At, escalation.Text, null),
             { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { IsOpen: true, Review: PullRequestReview.ChangesRequested } pr }
                 when pr.ChangedAt > seenAt =>
                 (AttentionKind.Review, pr.ChangedAt, $"Changes requested on pull request #{pr.Number}.", null),
-            { State: ProjectState.Idle or ProjectState.Stopped, LastResultAt: { } at } when at > seenAt =>
-                (AttentionKind.Finished, at, status.LastResult is { Length: > 0 } result ? result : "The turn finished.", status.SpokenSummary),
+            { State: ProjectState.Idle or ProjectState.Stopped, QuietResult: false, LastResultAt: { } at } when at > seenAt =>
+                (AttentionKind.Finished, at, ResultText(status.LastResult), status.SpokenSummary),
+            // Quiet turns ended after one that raised Finished: that one's stays until it is seen
+            { State: ProjectState.Idle or ProjectState.Stopped, QuietResult: true, UnseenResult: { } unseen } when unseen.At > seenAt =>
+                (AttentionKind.Finished, unseen.At, ResultText(unseen.Result), unseen.Spoken),
             _ => null,
         };
         if (found is not ({ } kind, var since, { } text, var spoken)) return null;
@@ -46,27 +56,61 @@ public static partial class Attention
         return new AttentionItem(status.Id, status.Name, status.ProfileName, status.RootName, kind, since, PlainText(text),
             kind == AttentionKind.Permission ? status.PendingPermission : null,
             kind == AttentionKind.Question ? status.PendingQuestion : null,
-            kind is AttentionKind.Review or AttentionKind.Finished ? status.PullRequest?.Url : null,
+            kind switch
+            {
+                AttentionKind.Review or AttentionKind.Finished => status.PullRequest?.Url,
+                AttentionKind.Escalation => status.Escalation?.Url,
+                _ => null,
+            },
             spoken is { Length: > 0 } ? spoken : null,
-            kind == AttentionKind.Error && status.CreateFailed);
+            kind == AttentionKind.Error && status.CreateFailed,
+            recordedParentId,
+            status.Importance,
+            AlertOf(status.Importance, kind));
     }
 
+    /// <summary>
+    /// How loudly an item of <paramref name="kind"/> from a session of <paramref name="importance"/> is brought to the user
+    /// (issue #438): an important session's interrupts, a normal one's notifies, and a quiet one's is in the inbox alone,
+    /// but what blocks it (a permission prompt, a question, an escalation), which notifies as a normal one's does.
+    /// </summary>
+    public static AttentionAlert AlertOf(Importance importance, AttentionKind kind) => importance switch
+    {
+        Importance.Important => AttentionAlert.Interrupt,
+        Importance.Quiet when kind is not (AttentionKind.Permission or AttentionKind.Question or AttentionKind.Escalation) => AttentionAlert.Inbox,
+        _ => AttentionAlert.Notify,
+    };
+
+    private static string ResultText(string? result) => result is { Length: > 0 } ? result : "The turn finished.";
+
     /// <summary>Every project's item, oldest first (by project ID when two are as old).</summary>
-    public static AttentionItem[] Of(IEnumerable<ProjectStatus> statuses) =>
-        statuses.Select(Of).OfType<AttentionItem>()
+    public static AttentionItem[] Of(IEnumerable<ProjectStatus> statuses) => Sorted(statuses.Select(status => Of(status)));
+
+    /// <summary>The items there are, oldest first (by project ID when two are as old).</summary>
+    public static AttentionItem[] Sorted(IEnumerable<AttentionItem?> items) =>
+        items.OfType<AttentionItem>()
             .OrderBy(item => item.Since).ThenBy(item => item.ProjectId, StringComparer.Ordinal)
             .ToArray();
 
     /// <summary>
+    /// Whether the item is the user's (issue #401): all but a child's <see cref="AttentionKind.Finished"/> and
+    /// <see cref="AttentionKind.Review"/>, which are its parent's business: the overseer that started it hears of them, and
+    /// reports on it. A child's permission prompt, question, error and escalation are the user's.
+    /// </summary>
+    public static bool IsTheUsers(AttentionItem item) =>
+        item is not { RecordedParentId: not null, Kind: AttentionKind.Finished or AttentionKind.Review };
+
+    /// <summary>
     /// Whether two lists say the same: the same projects needing the same, since the same time,
-    /// with the same text, spoken text, request and pull request. Compared by those, not by record equality, which would
+    /// with the same text, spoken text, request, pull request, importance and alert. Compared by those, not by record equality, which would
     /// compare a pending request's input and questions by reference.
     /// </summary>
     public static bool Same(IReadOnlyList<AttentionItem> a, IReadOnlyList<AttentionItem> b) =>
         a.Select(Key).SequenceEqual(b.Select(Key));
 
-    private static (string, AttentionKind, DateTime, string, string?, string?, string?) Key(AttentionItem item) =>
-        (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId, item.PullRequestUrl, item.Spoken);
+    private static (string, AttentionKind, DateTime, string, string?, string?, string?, AttentionAlert, Importance) Key(AttentionItem item) =>
+        (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId, item.PullRequestUrl, item.Spoken,
+            item.Alert, item.Importance);
 
     /// <summary>
     /// Text to show on a phone or read aloud: code blocks become "(code)", markdown's backticks go,
