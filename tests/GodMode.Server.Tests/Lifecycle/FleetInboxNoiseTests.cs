@@ -198,6 +198,63 @@ public class FleetInboxNoiseTests
         }
     }
 
+    /// <summary>The fleet's send moves SeenAt, and is not the user: the escalation stays.</summary>
+    [Fact]
+    public async Task TheFleetsSend_LeavesAnEscalation()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit()
+            .AwaitStdin().EmitResult("first")
+            .AwaitStdin().EmitResult("second")
+            .AwaitStdin());
+        var overseer = await harness.CreateProjectAsync("overseer");
+        await WaitForResultAsync(harness, overseer.Id, "first");
+        await harness.Projects.EscalateAsync(overseer.Id, "#376 needs your decision.", null);
+
+        await harness.Projects.SendOrHoldAsync(overseer.Id, "Worker 3 is done.", senderId: null);
+        await WaitForResultAsync(harness, overseer.Id, "second");
+
+        var item = Assert.Single(harness.Projects.GetAttention());
+        Assert.Equal((AttentionKind.Escalation, "#376 needs your decision."), (item.Kind, item.Text));
+    }
+
+    /// <summary>A restart that resumes a working session sends it its resume prompt, which is not the user: the escalation stays.</summary>
+    [Fact]
+    public async Task ARestartsResume_LeavesAnEscalation()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin().EmitAssistant("Working on it").AwaitStdin());
+        var overseer = await harness.CreateProjectAsync("overseer");
+        await harness.WaitForStdinAsync(overseer.Id);
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadOutputFile(overseer.Id).Contains("Working on it")), null,
+            () => $"claude did not start working.\n{harness.Describe(overseer.Id)}");
+        await harness.Projects.EscalateAsync(overseer.Id, "#376 needs your decision.", null);
+
+        await harness.RestartAsync();
+        await harness.WaitForStdinAsync(overseer.Id, index: 1);
+
+        Assert.Equal(AttentionKind.Escalation, Assert.Single(harness.Projects.GetAttention()).Kind);
+        Assert.NotNull((await harness.Projects.GetStatusAsync(overseer.Id)).Escalation);
+    }
+
+    /// <summary>The user's own reply has seen it: the escalation is cleared, and its turn's end is what the user sees next.</summary>
+    [Fact]
+    public async Task TheUsersReply_ClearsAnEscalation()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit()
+            .AwaitStdin().EmitResult("first")
+            .AwaitStdin().EmitResult("second")
+            .AwaitStdin());
+        var overseer = await harness.CreateProjectAsync("overseer");
+        await WaitForResultAsync(harness, overseer.Id, "first");
+        await harness.Projects.EscalateAsync(overseer.Id, "#376 needs your decision.", null);
+
+        await harness.Projects.ReplyAndResumeAsync(overseer.Id, "Merge #376.");
+        await WaitForResultAsync(harness, overseer.Id, "second");
+
+        Assert.Null((await harness.Projects.GetStatusAsync(overseer.Id)).Escalation);
+        var item = Assert.Single(harness.Projects.GetAttention());
+        Assert.Equal((AttentionKind.Finished, "second"), (item.Kind, item.Text));
+    }
+
     [Theory]
     [InlineData("", null)]
     [InlineData("Decide.", "file:///etc/passwd")]

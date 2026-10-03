@@ -37,8 +37,9 @@ public static partial class Attention
             // Seen, the project stays Error, and needs the user again when it fails again
             { State: ProjectState.Error } when status.UpdatedAt > seenAt =>
                 (AttentionKind.Error, status.UpdatedAt, status.LastError ?? "The project failed.", null),
-            // An overseer's question for the user, whatever its turns did since
-            { Escalation: { } escalation } when escalation.At > seenAt =>
+            // An overseer's question for the user, whatever its turns did since, until the user sees it or writes:
+            // the status keeps it until then, and SeenAt, which the fleet's send and a resume move too, is not asked
+            { Escalation: { } escalation } =>
                 (AttentionKind.Escalation, escalation.At, escalation.Text, null),
             { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { IsOpen: true, Review: PullRequestReview.ChangesRequested } pr }
                 when pr.ChangedAt > seenAt =>

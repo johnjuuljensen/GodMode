@@ -1325,15 +1325,15 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         : ProjectFiles.SessionState.ListTrashed(rootPath).FirstOrDefault() is { } trashed ? $"session {trashed} is in its trash"
         : null;
 
-    public Task SendInputAsync(string projectId, string input)
+    public async Task SendInputAsync(string projectId, string input)
     {
         if (_projects.TryGetValue(projectId, out var project))
         {
             RefuseFailedCreate(project);
             SlashCommands.Check(input, project.Status);
-            project.Process.MarkUserTurn();
+            await UserWritesAsync(project);
         }
-        return SendInputAsync(projectId, input, answersPending: true);
+        await SendInputAsync(projectId, input, answersPending: true);
     }
 
     /// <summary>
@@ -1375,7 +1375,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (!answersPending) RefuseWhilePending(project);
         SlashCommands.Check(text, project.Status);
         // The user's reply answers what is pending; the fleet's send, which does not, starts no turn of the user's
-        if (answersPending) project.Process.MarkUserTurn();
+        if (answersPending) await UserWritesAsync(project);
 
         // One reply at a time decides whether to resume: two would launch two processes. The wait
         // for the session to start comes after the lock, so a stop is not held behind it
@@ -1525,8 +1525,20 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             throw new KeyNotFoundException($"Project {projectId} not found");
 
         // Not UpdatedAt: it dates an Error, and seeing a result changes no state
-        await _lifecycle.UpdateStatusAsync(project, status => status with { SeenAt = DateTime.UtcNow });
+        await _lifecycle.UpdateStatusAsync(project, status => status with { SeenAt = DateTime.UtcNow, Escalation = null });
         await NotifyStatusChanged(project);
+    }
+
+    /// <summary>
+    /// The user writes to the project (the hub's SendInput, ReplyAndResume or AnswerQuestion): the turn that takes it is the
+    /// user's (<see cref="ProjectProcess.MarkUserTurn"/>), and the user has seen its escalation. Only this and
+    /// <see cref="MarkSeenAsync"/> clear one: the fleet's send and a resume move <see cref="ProjectStatus.SeenAt"/> too.
+    /// </summary>
+    private async Task UserWritesAsync(ProjectInfo project)
+    {
+        project.Process.MarkUserTurn();
+        if (project.Status.Escalation != null)
+            await _lifecycle.UpdateStatusAsync(project, status => status with { Escalation = null });
     }
 
     public async Task EscalateAsync(string projectId, string text, string? url)
@@ -1687,7 +1699,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             throw new ArgumentException("An answer needs at least one question answered", nameof(answers));
 
         // The turn carries on with the user's answer: its end is the user's to see
-        project.Process.MarkUserTurn();
+        await UserWritesAsync(project);
         await AnswerPendingAsync(project, pending, PermissionPromptResult.Allow(PermissionPrompts.WithAnswers(pending.Input, answers)));
         _logger.LogInformation("Project {ProjectId}: question {RequestId} answered", projectId, requestId);
     }

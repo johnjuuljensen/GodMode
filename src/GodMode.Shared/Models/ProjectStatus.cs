@@ -78,7 +78,8 @@ namespace GodMode.Shared.Models;
 /// </param>
 /// <param name="Escalation">
 /// What the session, an overseer, last asked the user to decide (its fleet tool <c>escalate</c>, issue #401): an
-/// <see cref="AttentionKind.Escalation"/> until the user has seen it, whatever turns end after it. Null when it never asked.
+/// <see cref="AttentionKind.Escalation"/> whatever turns end after it, until the user has seen it: <see cref="Hubs.IProjectHub.MarkSeen"/>
+/// or the user's own input clears it (null), and nothing else does, the fleet's send and a resume included. Null when there is none.
 /// </param>
 public record ProjectStatus(
     string Id,
