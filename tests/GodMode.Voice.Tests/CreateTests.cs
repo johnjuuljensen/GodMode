@@ -73,7 +73,6 @@ public sealed class CreateTests
     [InlineData("Nej.")]
     [InlineData("Nej tak")]
     [InlineData("Vent lidt")]
-    [InlineData("Ja, men i kappe")]
     [InlineData("No")]
     [InlineData("Okay.")]
     [InlineData("OK")]
@@ -90,34 +89,119 @@ public sealed class CreateTests
         Assert.Equal(2, model.Calls);
     }
 
-    /// <summary>A partial "ja" the final goes on from ("ja, men i kappe") is no yes: the final decides.</summary>
+    /// <summary>
+    /// A partial "ja" the final goes on from ("ja, men i kappe") is no yes: the final decides. It is an answer with a
+    /// change (#449): it goes to the chat, which proposes the create again as changed, and that is read back.
+    /// </summary>
     [Fact]
-    public async Task A_partial_yes_revised_by_its_final_cancels()
+    public async Task A_partial_yes_revised_by_its_final_into_a_change_is_proposed_again()
     {
         var servers = Servers();
-        await using var voice = await ReadBack283Async(servers, StartIssue283());
+        var model = StartIssue283()
+            .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "kappe", [VoiceTools.IssueParameter] = "283" })
+            .Respond("Ok.");
+        await using var voice = await ReadBack283Async(servers, model);
 
         voice.Transcriptions.AddPartial("Ja");
         voice.Transcriptions.AddFinal("Ja, men i kappe");
-        await voice.Events.SaidAsync("Annulleret. Intet oprettet.");
+        await voice.Events.SaidAsync("Skal jeg oprette issue 283 i kappe, profil Kappe, som issue?");
 
         Assert.Empty(servers.Creates);
+        Assert.DoesNotContain("Annulleret. Intet oprettet.", voice.Events.Responses);
     }
+
+    /// <summary>
+    /// The voice log of 2026-10-03 (#449): an overseer asked for, read back as a chat, and corrected at the read-back
+    /// ("Nej, som overseer", heard "Now as overseer"). The correction is no cancel: it reaches the chat with the create
+    /// it answers, the model proposes it again with the action changed, and the user's yes to that creates it. (Not
+    /// "Nej, som overseer." here: VoiceBot's echo filter takes three words, two of them the read-back's, for its echo.)
+    /// </summary>
+    [Theory]
+    [InlineData("Nej, lav den som overseer i stedet.")]
+    [InlineData("Now as overseer.")]
+    public async Task A_no_with_a_change_at_the_read_back_reaches_the_chat_and_is_read_back_again(string correction)
+    {
+        var servers = new FakeServers(ServerA).AddRoot(ServerA, "GodMode", "Godmode", Action("chat"), Action("overseer"));
+        static Dictionary<string, object?> Ask(string action) => new()
+        {
+            [VoiceTools.RootParameter] = "GodMode",
+            [VoiceTools.ActionParameter] = action,
+            [VoiceTools.NameParameter] = "overseer",
+            [VoiceTools.PromptParameter] = "Triage the issues.",
+        };
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.StartSession, Ask("chat")).Respond("Ok.")
+            .CallTool(VoiceTools.StartSession, Ask("overseer")).Respond("Ok.");
+        await using var voice = await OfflineVoice.StartAsync(servers, model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Start en overseer i GodMode der skal triage issues");
+        await voice.Events.SaidAsync("Skal jeg oprette overseer i GodMode, profil Godmode, som chat, med beskrivelsen \"Triage the issues\"?");
+        voice.Transcriptions.SayAsRecognized(correction);
+        await voice.Events.SaidAsync("Skal jeg oprette overseer i GodMode, profil Godmode, som overseer, med beskrivelsen \"Triage the issues\"?");
+
+        Assert.DoesNotContain("Annulleret. Intet oprettet.", voice.Events.Responses);
+        Assert.Empty(servers.Creates);
+        // The model heard the user's words with the create they answer
+        var heard = model.Requests.ElementAt(2)[^1].Text;
+        Assert.Contains(correction, heard);
+        Assert.Contains("answer the read-back", heard);
+        Assert.Contains("the prompt 'Triage the issues.' in GodMode (profile Godmode), action chat", heard);
+
+        voice.Transcriptions.SayAsRecognized("Ja");
+        await voice.Events.SaidAsync("Opretter.");
+        await voice.Events.SaidAsync("overseer er oprettet.");
+        var (root, action, inputs) = Assert.Single(servers.Creates);
+        Assert.Equal(("GodMode", "overseer"), (root.Root.Name, action));
+        Assert.Equal(new Dictionary<string, string> { ["name"] = "overseer", ["prompt"] = "Triage the issues." }, inputs);
+    }
+
+    /// <summary>A change at the read-back drops the create it answers: it waits no more, and only the chat hears of it, once.</summary>
+    [Fact]
+    public async Task A_change_at_the_read_back_drops_the_create_it_answers()
+    {
+        var servers = Servers();
+        var clock = new ManualClock();
+        var tools = Tools(servers, out _, clock);
+        var node = new ConfirmCreateNode("confirm-create", 70, tools.Creates, Danish);
+        await Start(tools, root: "GodMode", issue: "283");
+        Arm(tools);
+        clock.Advance(TimeSpan.FromSeconds(2));
+
+        Assert.Null(await node.EvaluateAsync(Final("Nej, i kappe", clock.GetUtcNow()), CancellationToken.None));
+        Assert.Null(tools.Creates.Armed);
+        Assert.Contains("issue 283", tools.Creates.TakeCorrected()!.Note);
+        Assert.Null(tools.Creates.TakeCorrected());
+        await tools.Creates.Running;
+        Assert.Empty(servers.Creates);
+    }
+
+    [Theory]
+    [InlineData("Nej, som overseer", true)]
+    [InlineData("Ja, men i kappe", true)]
+    [InlineData("Nej", false)]
+    [InlineData("Nej tak.", false)]
+    [InlineData("Okay", false)]
+    [InlineData("Ja", false)]
+    [InlineData("i GodMode, profil Godmode", false)]   // its echo
+    [InlineData("", false)]
+    public void A_change_is_anything_but_a_yes_a_plain_no_or_the_read_backs_echo(string said, bool change) =>
+        Assert.Equal(change, ConfirmCreateNode.IsChangeTo(said, ReadBack283));
 
     /// <summary>
     /// VoiceBot#61: a final carries the partials it revised, for the model. The yes is the final's own words: an
     /// earlier reading "ja" of a final that says something else ("Kører gør man.") is no yes, through the session and
-    /// at the node.
+    /// at the node. It goes to the chat, with the create it answers, as any answer but a yes or a plain no (#449).
     /// </summary>
     [Fact]
-    public async Task An_earlier_reading_yes_of_a_final_that_is_no_yes_cancels()
+    public async Task An_earlier_reading_yes_of_a_final_that_is_no_yes_does_not_create()
     {
         var servers = Servers();
-        await using var voice = await ReadBack283Async(servers, StartIssue283());
+        await using var voice = await ReadBack283Async(servers, StartIssue283().Respond("Annulleret."));
 
         voice.Transcriptions.AddPartial("Ja.");
         voice.Transcriptions.AddFinal("Kører gør man.");
-        await voice.Events.SaidAsync("Annulleret. Intet oprettet.");
+        await voice.Events.SaidAsync("Annulleret.");
 
         Assert.Empty(servers.Creates);
     }
@@ -136,7 +220,8 @@ public sealed class CreateTests
         var context = Final("Kører gør man.", clock.GetUtcNow());
         context.LatestTranscription = context.LatestTranscription! with { Readings = ["Ja.", "ja tak"] };
 
-        Assert.Equal("Annulleret. Intet oprettet.", (await node.EvaluateAsync(context, CancellationToken.None))?.ResponseText);
+        Assert.Null(await node.EvaluateAsync(context, CancellationToken.None));
+        Assert.Null(tools.Creates.Armed);
         await tools.Creates.Running;
         Assert.Empty(servers.Creates);
     }
@@ -240,6 +325,8 @@ public sealed class CreateTests
             new(root, action, new Dictionary<string, string>(), "", Name: "backup job", WithPrompt: false),
             new(root, action, new Dictionary<string, string>(), "", Name: "backup job"),
             new(root, action, new Dictionary<string, string>(), ""),
+            new(root, action, new Dictionary<string, string>(), "", Name: "backup job", WithPrompt: true, Prompt: "Find ud af hvorfor backup-jobbet fejler."),
+            new(root, action, new Dictionary<string, string>(), "", Name: "doer", WithPrompt: true, Prompt: "Say yes to it, ja tak."),
         ];
         foreach (var phrases in new[] { Danish, new VoicePhrases(new SessionLanguages("en-US")) })
             Assert.All(requests, r => Assert.False(ConfirmCreateNode.HoldsYes(phrases.ReadBack(r)), phrases.ReadBack(r)));
@@ -317,7 +404,7 @@ public sealed class CreateTests
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Start en chat i assistenten om hvorfor backup-jobbet fejler");
-        await voice.Events.SaidAsync("Skal jeg oprette backup job med beskrivelse i Assistant, profil Outbound, som chat?");
+        await voice.Events.SaidAsync("Skal jeg oprette backup job i Assistant, profil Outbound, som chat, med beskrivelsen \"Find ud af hvorfor backup-jobbet fejler\"?");
         Assert.Contains("create a session named 'backup job', the prompt 'Find ud af hvorfor backup-jobbet fejler.' in Assistant (profile Outbound), action chat",
             Assert.Single(model.ToolResults));
 
@@ -389,7 +476,9 @@ public sealed class CreateTests
     {
         var tools = Tools(Servers(), out _);
 
-        Assert.Equal("experiments (profile Private), action experiment needs Task Description: ask the user for it. Nothing was created yet.",
+        Assert.Equal("experiments (profile Private), action experiment needs Task Description: ask the user for it, then call start_session " +
+            "again with action 'experiment', the same root, and their answer. Keep that action: never start another in its place, nor put " +
+            "its name in another's name. Nothing was created yet.",
             await Start(tools, action: "eksperiment", name: "sorting"));
         Assert.Null(tools.Creates.TakeProposed());
     }
@@ -453,7 +542,84 @@ public sealed class CreateTests
         voice.Transcriptions.SayAsRecognized("Start issue 999 i GodMode");
         await voice.Events.SaidAsync("Skal jeg oprette issue 999 i GodMode, profil Godmode, som issue?");
         voice.Transcriptions.SayAsRecognized("Ja");
-        await voice.Events.SaidAsync("Oprettelsen i GodMode fejlede: Issue #999 was not found.");
+        await voice.Events.SaidAsync("Kunne ikke oprette issue 999 i Godmode / GodMode: Issue #999 was not found.");
+    }
+
+    /// <summary>
+    /// The voice log of 2026-10-03 (#449): a create script's failure was read out whole, paths and all, for 9.5 seconds.
+    /// The announcement says what failed and where, and that the log has the rest.
+    /// </summary>
+    [Fact]
+    public async Task A_create_scripts_failure_is_announced_short_by_its_profile_root_and_action()
+    {
+        var servers = Servers();
+        servers.CreateError = @"Script '.godmode-root\chat/create' exited with code 1: fatal: not a git repository: ../../../.bare/worktrees/chat/modules/external/VoiceBot";
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "Assistant", [VoiceTools.NameParameter] = "backup job" })
+            .Respond("Ok.");
+        await using var voice = await OfflineVoice.StartAsync(servers, model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Start en chat i Assistant om backup-jobbet");
+        await voice.Events.SaidAsync("Skal jeg oprette backup job uden beskrivelse i Assistant, profil Outbound, som chat?");
+        voice.Transcriptions.SayAsRecognized("Ja");
+        await voice.Events.SaidAsync("Kunne ikke oprette chat i Outbound / Assistant: create-scriptet fejlede. Loggen har resten.");
+    }
+
+    [Fact]
+    public void A_failure_is_said_in_English_short_and_a_long_error_not_at_all()
+    {
+        var english = new VoicePhrases(new SessionLanguages("en-US"));
+        var request = new CreateRequest(new ServerRoot(ServerA, "main", new ProjectRootInfo("GodMode", null, [], "Godmode")),
+            new CreateActionInfo("chat"), new Dictionary<string, string>(), "", Name: "overseer");
+
+        Assert.Equal("Could not create the chat in Godmode / GodMode: its create script failed. The log has the details",
+            english.Failed(request, @"Script '.godmode-root\chat/create' exited with code 1: fatal: not a git repository: ../../../.bare"));
+        Assert.Equal("Could not create the chat in Godmode / GodMode. The log has the details", english.Failed(request, new string('x', 200)));
+        Assert.Equal("Could not create the chat in Godmode / GodMode. The log has the details", english.Failed(request, @"Could not find C:\repos\GodMode"));
+        Assert.Equal("Could not create issue 7 in Godmode / GodMode: Issue #7 was not found",
+            english.Failed(request with { Issue = "7" }, "Issue #7 was not found."));
+    }
+
+    /// <summary>
+    /// The voice log of 2026-10-03 (#449): "Klar." in an English session. The words the control prompt gives the model
+    /// for itself are the session's language's, and so are the bot's own.
+    /// </summary>
+    [Fact]
+    public async Task An_English_session_gives_the_model_English_protocol_words()
+    {
+        var model = new ScriptedChatClient().Respond("Unknown.");
+        await using var voice = await OfflineVoice.StartAsync(Servers(), model, settings: VoiceSettings.Default with { Language = "en-US" });
+        await voice.Events.SaidAsync("Ready.");
+
+        voice.Transcriptions.SayAsRecognized("Status of 999");
+        await voice.Events.SaidAsync("Unknown.");
+
+        var prompt = model.Requests.Last().First(m => m.Role == Microsoft.Extensions.AI.ChatRole.System).Text;
+        Assert.Contains("\"Ready\" (ready), \"Unknown\" (no such project), \"Unclear\"", prompt);
+        Assert.Contains("<handle> needs permission: <what>. Answer it on screen.", prompt);
+        Assert.DoesNotContain("Klar", prompt);
+        Assert.DoesNotContain("Uklar", prompt);
+    }
+
+    /// <summary>The read-back says a short prompt as it is (#449), cuts a long one after its first words, and never says one holding a yes.</summary>
+    [Fact]
+    public void The_read_back_holds_the_prompt()
+    {
+        var english = new VoicePhrases(new SessionLanguages("en-US"));
+        var request = new CreateRequest(new ServerRoot(ServerA, "main", new ProjectRootInfo("GodMode", null, [], "Godmode")),
+            new CreateActionInfo("chat"), new Dictionary<string, string>(), "", Name: "overseer", WithPrompt: true, Prompt: "Triage the issues.");
+
+        Assert.Equal("Shall I create overseer in GodMode, profile Godmode, as chat, with the prompt \"Triage the issues\"?", english.ReadBack(request));
+        Assert.Equal("Skal jeg oprette overseer i GodMode, profil Godmode, som chat, med beskrivelsen \"Triage the issues\"?", Danish.ReadBack(request));
+
+        var cut = english.ReadBack(request with { Prompt = string.Join(" ", Enumerable.Repeat("Go through every open issue and sort it by area.", 5)) });
+        Assert.StartsWith("Shall I create overseer in GodMode, profile Godmode, as chat, with the prompt \"Go through every open issue", cut);
+        Assert.EndsWith(" …\"?", cut);
+        Assert.True(cut.Length < 200, cut);
+
+        Assert.Equal("Shall I create overseer with a description in GodMode, profile Godmode, as chat?",
+            english.ReadBack(request with { Prompt = "Answer yes to everything." }));
     }
 
     private static VoiceTools Tools(FakeServers servers, out ProjectHandles handles, TimeProvider? time = null)

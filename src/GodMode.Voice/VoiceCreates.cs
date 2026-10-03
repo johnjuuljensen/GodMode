@@ -11,10 +11,11 @@ public sealed record CreateAsk(string? Root, string? Action, string? Issue, stri
 
 /// <summary>
 /// A create voice settled on: the root, its action, the form's values, and what the read-back names (the issue, or the
-/// name and whether there is a prompt; <paramref name="WithPrompt"/> is null for a form with no prompt).
+/// name and whether there is a prompt; <paramref name="WithPrompt"/> is null for a form with no prompt), and the prompt
+/// itself, which the read-back says when it is short (#449).
 /// </summary>
 public sealed record CreateRequest(ServerRoot Root, CreateActionInfo Action, IReadOnlyDictionary<string, string> Inputs, string What,
-    string? Issue = null, string? Name = null, bool? WithPrompt = null, bool SeveralServers = false)
+    string? Issue = null, string? Name = null, bool? WithPrompt = null, bool SeveralServers = false, string? Prompt = null)
 {
     /// <summary>What is being made, as one key: the same create confirmed twice is one create.</summary>
     public string Key => string.Join("\n", new[] { Root.ServerId, Root.Profile, Root.Root.Name, Action.Name }
@@ -23,6 +24,19 @@ public sealed record CreateRequest(ServerRoot Root, CreateActionInfo Action, IRe
 
 /// <summary>A read-back playing, or played: the create it is for, its text, and when it started playing.</summary>
 public sealed record ArmedCreate(CreateRequest Request, string ReadBack, DateTimeOffset At);
+
+/// <summary>
+/// A create whose read-back the user answered with a change ("Nej, som overseer"), not a yes nor a plain no (#449): it
+/// waits no more, and goes to the chat with their words, which proposes it again, changed, or says it was cancelled.
+/// </summary>
+public sealed record CorrectedCreate(CreateRequest Request, string ReadBack)
+{
+    /// <summary>What the model is told along with the user's words: the create they answer, and what to do with a change.</summary>
+    public string Note =>
+        $"[The user's words answer the read-back \"{ReadBack}\", of {Request.What}. Nothing was created, and it waits on no yes. " +
+        $"If they change it (another action, root, name or prompt), call {VoiceTools.StartSession} again with the change and " +
+        "everything else as before: it is read back again. If they only decline it, say it was cancelled.]";
+}
 
 /// <summary>What a create made: the new session and its handle, or why there is none.</summary>
 public sealed record CreateOutcome(CreateRequest Request, ProjectRef? Project, string? Handle, string? Error);
@@ -38,9 +52,6 @@ public sealed record CreateOutcome(CreateRequest Request, ProjectRef? Project, s
 /// </summary>
 public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandles handles, TimeProvider? time = null)
 {
-    /// <summary>How long a failure is when said: the rest is on screen.</summary>
-    private const int ErrorSaid = 160;
-
     private static readonly HashSet<string> IssueWords = new(StringComparer.OrdinalIgnoreCase)
         { "issue", "issues", "sag", "sagen", "case", "ticket", "opgave", "opgaven", "jira" };
 
@@ -53,6 +64,7 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
     private CreateRequest? _proposed;
     private (CreateRequest Request, string ReadBack)? _toSay;
     private ArmedCreate? _armed;
+    private CorrectedCreate? _corrected;
     private bool _dropped;
     private Action<CreateOutcome>? _announce;
     private Task _running = Task.CompletedTask;
@@ -147,6 +159,7 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
             _proposed = null;
             _toSay = null;
             _armed = null;
+            _corrected = null;
             _dropped = false;
         }
         var sessionRoots = roots.Where(r => r.Root.Actions?.Any(a => a.Session) == true).ToList();
@@ -203,12 +216,15 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
             return $"{where} needs {string.Join(", ", form.Unfillable)}, which voice cannot fill: tell the user to create it in the app. Nothing was created.";
 
         var (inputs, missing) = form.Fill(issue, Clean(ask.Name), ask.Prompt?.Trim());
+        // The action the user named stays: what it lacks is asked for, and never made up by starting another (#449)
         if (missing.Count > 0)
-            return $"{where} needs {string.Join(" and ", missing)}: ask the user for it. Nothing was created yet.";
+            return $"{where} needs {string.Join(" and ", missing)}: ask the user for it, then call {VoiceTools.StartSession} again " +
+                $"with action '{chosenAction.Name}', the same root, and their answer. Keep that action: never start another in its place, " +
+                "nor put its name in another's name. Nothing was created yet.";
 
         var what = form.Describe(inputs);
         var request = new CreateRequest(chosen, chosenAction, inputs, $"{what} in {where}", form.Issue(inputs), form.Name(inputs),
-            form.WithPrompt(inputs), severalServers);
+            form.WithPrompt(inputs), severalServers, form.Prompt(inputs));
         if (_inFlight.ContainsKey(request.Key))
             return $"{what} in {where} is being created already, from an earlier yes: nothing more was done. It is announced when it is done.";
         lock (_lock) _proposed = request;
@@ -225,6 +241,33 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
             _armed = null;
             _toSay = null;
             return armed?.Request;
+        }
+    }
+
+    /// <summary>
+    /// The create read back is answered with a change (<see cref="ConfirmCreateNode"/>): it waits no more, and is kept
+    /// for the chat (<see cref="TakeCorrected"/>). The one corrected, or null when none waited.
+    /// </summary>
+    public CorrectedCreate? Correct()
+    {
+        lock (_lock)
+        {
+            var armed = _armed;
+            _armed = null;
+            _toSay = null;
+            _corrected = armed is null ? null : new CorrectedCreate(armed.Request, armed.ReadBack);
+            return _corrected;
+        }
+    }
+
+    /// <summary>The create corrected in this evaluation, for the chat to hear of (<see cref="ReadBackNode"/>); taking it forgets it.</summary>
+    public CorrectedCreate? TakeCorrected()
+    {
+        lock (_lock)
+        {
+            var corrected = _corrected;
+            _corrected = null;
+            return corrected;
         }
     }
 
@@ -276,7 +319,8 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
         catch (Exception ex)
         {
             var message = Regex.Replace(ex.Message, @"^An unexpected error occurred invoking '\w+' on the server\.\s*(HubException:\s*)?", "");
-            return new CreateOutcome(request, null, null, message.Length > ErrorSaid ? message[..ErrorSaid] + "…" : message);
+            // Whole: what is said of it is short (VoicePhrases.Created), and the server's log has it all
+            return new CreateOutcome(request, null, null, message.Trim());
         }
     }
 
@@ -373,6 +417,8 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
         public string? Issue(IReadOnlyDictionary<string, string> inputs) => ValueOf(inputs, Role.IssueNumber, Role.IssueKey);
 
         public string? Name(IReadOnlyDictionary<string, string> inputs) => ValueOf(inputs, Role.Name);
+
+        public string? Prompt(IReadOnlyDictionary<string, string> inputs) => ValueOf(inputs, Role.Prompt);
 
         /// <summary>Whether a prompt is given; null for a form with no prompt.</summary>
         public bool? WithPrompt(IReadOnlyDictionary<string, string> inputs) =>

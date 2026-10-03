@@ -5,9 +5,11 @@ namespace GodMode.Voice;
 
 /// <summary>
 /// The yes a create waits on (<see cref="SessionCreates.Armed"/>). The final of the first utterance the user starts after
-/// the read-back started playing is the answer, and only a clear yes creates. Anything else cancels it and says so: a no,
-/// another sentence, a yes queued before the read-back was heard, or a yes that is a fragment of the read-back itself
-/// (its echo). A create that waits no more (another utterance of the bot's came between, or
+/// the read-back started playing is the answer, and only a clear yes creates. A plain no (<see cref="No"/>), a yes queued
+/// before the read-back was heard, or a fragment of the read-back itself (its echo) cancels it and says so. Anything
+/// else is an answer with a change ("Nej, som overseer", "Ja, men i kappe", #449): the create waits no more, and the
+/// user's words go on to the chat with it (<see cref="SessionCreates.Correct"/>), which proposes it again, changed, or
+/// says it was cancelled. A create that waits no more (another utterance of the bot's came between, or
 /// <see cref="SessionCreates.ConfirmWindow"/> passed) takes no yes: a yes then is told there is nothing to confirm. The
 /// model never creates: the graph has no tool that does. The answer is the final's own words: the earlier readings a
 /// final carries (VoiceBot#61, "ja" revised into "Kører gør man.") never make it a yes. Partials pass (a "ja" may go on as "ja, men i kappe"), and so
@@ -23,6 +25,19 @@ public sealed class ConfirmCreateNode(string id, int priority, SessionCreates cr
     ];
 
     private static readonly IReadOnlyList<string[]> YesTokens = [.. Yes.Select(CommandResolver.Tokenize)];
+
+    /// <summary>
+    /// A plain no: the whole utterance, as recognized, declines the create and changes nothing in it. With "ok": an
+    /// acknowledgement, not consent, and no change either.
+    /// </summary>
+    public static readonly IReadOnlyList<string> No =
+    [
+        "nej", "nej tak", "nix", "nope", "annuller", "annuller den", "annullér", "stop", "glem det", "lad være", "drop det", "vent", "vent lidt",
+        "no", "no thanks", "no thank you", "cancel", "cancel it", "forget it", "never mind", "don't", "wait", "drop it",
+        "ok", "okay",
+    ];
+
+    private static readonly IReadOnlyList<string[]> NoTokens = [.. No.Select(CommandResolver.Tokenize)];
 
     public string Id => id;
     public int Priority => priority;
@@ -42,6 +57,17 @@ public sealed class ConfirmCreateNode(string id, int priority, SessionCreates cr
     }
 
     private static bool IsYes(string[] tokens) => YesTokens.Any(y => tokens.AsSpan().SequenceEqual(y));
+
+    /// <summary>
+    /// Whether <paramref name="said"/>, no yes, answers <paramref name="readBack"/> with a change, for the chat to make:
+    /// not a plain no (<see cref="No"/>), nor a fragment of the read-back (its echo), nor said before it.
+    /// </summary>
+    public static bool IsChangeTo(string said, string readBack)
+    {
+        var tokens = CommandResolver.Tokenize(said);
+        return tokens.Length > 0 && !IsYes(tokens) && !NoTokens.Any(n => tokens.AsSpan().SequenceEqual(n))
+            && !$" {string.Join(' ', CommandResolver.Tokenize(readBack))} ".Contains($" {string.Join(' ', tokens)} ", StringComparison.Ordinal);
+    }
 
     public Task<NodeResult?> EvaluateAsync(NodeContext context, CancellationToken ct)
     {
@@ -65,6 +91,11 @@ public sealed class ConfirmCreateNode(string id, int priority, SessionCreates cr
         string said;
         if (creates.Armed is { } armed)
         {
+            if (started >= armed.At && IsChangeTo(text, armed.ReadBack) && creates.Correct() is { } corrected)
+            {
+                context.Log?.Log("CREATE", $"'{text}' → change, to the chat: {corrected.Request.What}");
+                return Task.FromResult<NodeResult?>(null);
+            }
             var yes = started >= armed.At && IsYesTo(text, armed.ReadBack);
             var request = yes ? creates.Confirm(armed) : creates.Cancel();
             if (request is null)

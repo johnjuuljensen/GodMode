@@ -38,6 +38,10 @@ public static class GodModeGraph
     public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases,
         ServersHeard heard, Action? done = null)
     {
+        // The words the model uses itself are the session's language's: never Danish in an English session (#449)
+        var danish = languages.Primary.StartsWith("da", StringComparison.OrdinalIgnoreCase);
+        var (ready, unknown, unclear, sent) = danish ? ("Klar", "Ukendt", "Uklar", "Sendt") : ("Ready", "Unknown", "Unclear", "Sent");
+        var permission = danish ? "<handle> skal have tilladelse: <what>. Svar på skærmen." : "<handle> needs permission: <what>. Answer it on screen.";
         var systemPrompt = $$"""
             You are GodMode's voice: the user runs Claude Code sessions (projects) on several servers and follows them
             by voice, hands-free, with no screen in front of them.
@@ -83,6 +87,11 @@ public static class GodModeGraph
               back itself, in place of your reply: respond with one word. Otherwise say its question back, or why not. Only
               the user's yes to that read-back creates it, and that is not yours to answer: never say it was created. Actions that start no session (new
               root, promote) are not started by voice yet.
+              Keep the kind the user named: when {{VoiceTools.StartSession}} asks for a field, ask the user for it and call it
+              again with the same action and their answer. Never switch to another action in its place, nor use the kind
+              as a name, unless the user asks for another kind.
+              An answer to a read-back with a change in it ("Nej, som overseer", "Ja, men i kappe") comes to you with the
+              create it answers: call {{VoiceTools.StartSession}} again with the change and everything else as before.
 
             EARLIER READINGS: the user's message may list earlier readings, the transcriber's drafts before it settled on
             the text. They are mostly a word or two, a sentence still growing, or the same words in the other language, and
@@ -97,11 +106,12 @@ public static class GodModeGraph
             sense where it stands and a GodMode word that sounds like it does, act on the GodMode word ("tjek klokken for
             applikationen" → check the application's log), and send it so; never ask about it.
 
-            PERMISSION REQUESTS are never answered by voice. Say "<handle> skal have tilladelse: <what>. Svar på skærmen."
+            PERMISSION REQUESTS are never answered by voice. Say "{{permission}}"
 
-            PROTOCOL WORDS you use yourself: "Klar" (ready), "Ukendt" (no such project), "Uklar" (ambiguous: give two or
-            three options as a closed question, each in words the user would recognize). Never say an answer was sent
-            ("Sendt"): only the system says that, and only when {{VoiceTools.Answer}} sent it. A reply that says so
+            PROTOCOL WORDS you use yourself, in {language}: "{{ready}}" (ready), "{{unknown}}" (no such project), "{{unclear}}"
+            (ambiguous: give two or three options as a closed question, each in words the user would recognize). A
+            one-word reply is a word of {language} too, unless the user switched language. Never say an answer was sent
+            ("{{sent}}"): only the system says that, and only when {{VoiceTools.Answer}} sent it. A reply that says so
             otherwise is not said.
 
             Never use emoji, markdown or lists: the output is spoken.

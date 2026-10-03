@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using VoiceBot.Core.Resources;
@@ -5,8 +6,11 @@ using VoiceBot.Core.Resources;
 namespace GodMode.Voice;
 
 /// <summary>What the bot says itself, not through the model: announcements, the greeting and a create's answer. Danish, else English.</summary>
-public sealed class VoicePhrases
+public sealed partial class VoicePhrases
 {
+    /// <summary>How long a prompt the read-back says as it is; a longer one is said cut, after its first words.</summary>
+    public const int PromptReadBack = 100;
+
     private readonly bool _danish;
 
     public VoicePhrases(SessionLanguages languages) =>
@@ -62,8 +66,9 @@ public sealed class VoicePhrases
 
     /// <summary>
     /// A create read back, as the question its yes answers: the root, its profile (and server, when there are several),
-    /// the action, and what will be made. It holds no yes-word (<see cref="ConfirmCreateNode.HoldsYes"/>), so its echo
-    /// can never answer it.
+    /// the action, and what will be made, its prompt said as it is when short, and cut when long (#449). It holds no
+    /// yes-word (<see cref="ConfirmCreateNode.HoldsYes"/>), so its echo can never answer it: a prompt that holds one is
+    /// only said to be there.
     /// </summary>
     public string ReadBack(CreateRequest request)
     {
@@ -71,6 +76,11 @@ public sealed class VoicePhrases
         var where = _danish
             ? $"i {root.Root.Name}, profil {root.Profile}{(request.SeveralServers ? $", server {root.ServerName}" : "")}, som {request.Action.Name}"
             : $"in {root.Root.Name}, profile {root.Profile}{(request.SeveralServers ? $", server {root.ServerName}" : "")}, as {request.Action.Name}";
+        if (request is { Issue: null, Name: { } named, Prompt: { } prompt } && Said(prompt) is { } quoted)
+            return _danish
+                ? $"Skal jeg oprette {named} {where}, med beskrivelsen \"{quoted}\"?"
+                : $"Shall I create {named} {where}, with the prompt \"{quoted}\"?";
+
         var what = (request.Issue, request.Name, request.WithPrompt, _danish) switch
         {
             ({ } issue, _, _, _) => $"issue {issue}",
@@ -84,6 +94,21 @@ public sealed class VoicePhrases
         };
         return _danish ? $"Skal jeg oprette {what} {where}?" : $"Shall I create {what} {where}?";
     }
+
+    /// <summary>
+    /// A prompt as the read-back says it: as it is, up to <see cref="PromptReadBack"/>, else its first words and "…";
+    /// its last full stop left to the question. Null when it holds a yes-word, which the read-back must not.
+    /// </summary>
+    internal static string? Said(string prompt)
+    {
+        var text = Whitespace().Replace(prompt.Trim(), " ").TrimEnd('.', ' ');
+        if (text.Length > PromptReadBack)
+            text = (text.LastIndexOf(' ', PromptReadBack - 1) is var space and > 0 ? text[..space] : text[..PromptReadBack]).TrimEnd(',', ';', ':', '.', ' ') + " …";
+        return text.Length == 0 || ConfirmCreateNode.HoldsYes(text) ? null : text;
+    }
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex Whitespace();
 
     /// <summary>Answers went out this turn (<see cref="SentNode"/>): "Sendt til 283.", "Sendt til 283 og 101.".</summary>
     public string Sent(IReadOnlyList<string> handles)
@@ -106,16 +131,43 @@ public sealed class VoicePhrases
     /// <summary>The user said anything but yes to a create read back.</summary>
     public string CreateCancelled => _danish ? "Annulleret. Intet oprettet." : "Cancelled. Nothing created.";
 
-    /// <summary>A create is done: the new session by its handle, or why it failed.</summary>
+    /// <summary>A create is done: the new session by its handle, or that it failed (<see cref="Failed"/>).</summary>
     public string Created(CreateOutcome outcome) => (outcome, _danish) switch
     {
         ({ Handle: { } handle }, true) => $"{handle} er oprettet",
         ({ Handle: { } handle }, false) => $"{handle} is created",
-        ({ Error: { } error }, true) => $"Oprettelsen i {outcome.Request.Root.Root.Name} fejlede: {error}",
-        ({ Error: { } error }, false) => $"Creating in {outcome.Request.Root.Root.Name} failed: {error}",
+        ({ Error: { } error }, _) => Failed(outcome.Request, error),
         (_, true) => $"Færdig i {outcome.Request.Root.Root.Name}",
         (_, false) => $"Done in {outcome.Request.Root.Root.Name}",
     };
+
+    /// <summary>How long a server's error may be to be said as it is: one short sentence.</summary>
+    public const int ErrorSaid = 80;
+
+    /// <summary>
+    /// A create that failed, said short (#449): what (the issue, else the action), where (profile / root, and the server
+    /// when there are several) and why, in a few words. A short error is said as it is; a script's failure as that
+    /// script failing, and anything longer not at all: the log has it, and the app shows it whole.
+    /// </summary>
+    public string Failed(CreateRequest request, string error)
+    {
+        var what = request.Issue is { } issue ? $"issue {issue}" : _danish ? request.Action.Name : $"the {request.Action.Name}";
+        var where = $"{request.Root.Profile} / {request.Root.Root.Name}{(request.SeveralServers ? $"{(_danish ? " på" : " on")} {request.Root.ServerName}" : "")}";
+        var lead = _danish ? $"Kunne ikke oprette {what} i {where}" : $"Could not create {what} in {where}";
+        error = error.Trim();
+        if (ScriptFailure().Match(error) is { Success: true } script)
+        {
+            var name = Path.GetFileNameWithoutExtension(script.Groups["script"].Value.Replace('\\', '/').Split('/')[^1]);
+            return _danish ? $"{lead}: {name}-scriptet fejlede. Loggen har resten" : $"{lead}: its {name} script failed. The log has the details";
+        }
+        return error.Length is > 0 and <= ErrorSaid && !error.Contains('\n') && !error.Contains('\\') && !error.Contains('/')
+            ? $"{lead}: {error.TrimEnd('.')}"
+            : _danish ? $"{lead}. Loggen har resten" : $"{lead}. The log has the details";
+    }
+
+    /// <summary>A root script's failure, as the server's ScriptRunner words it.</summary>
+    [GeneratedRegex(@"^Script '(?<script>[^']+)' exited with code")]
+    private static partial Regex ScriptFailure();
 
     private static string PermissionSummary(AttentionItem item) => item.Permission?.Summary ?? item.Text;
 }

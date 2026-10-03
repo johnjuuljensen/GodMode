@@ -5,7 +5,9 @@ namespace GodMode.Voice;
 /// <summary>
 /// The chat node, whose reply is replaced by a create's read-back when its tools settled on one
 /// (<see cref="SessionCreates.TakeProposed"/>): the question a yes answers is the code's fixed words
-/// (<see cref="VoicePhrases.ReadBack"/>), never the model's, and the create is armed when they start playing.
+/// (<see cref="VoicePhrases.ReadBack"/>), never the model's, and the create is armed when they start playing. An answer
+/// to a read-back with a change in it (<see cref="SessionCreates.Correct"/>, #449) reaches the chat with the create it
+/// changes, so the model can propose it again as changed.
 /// </summary>
 public sealed class ReadBackNode(INode chat, SessionCreates creates, VoicePhrases phrases) : INode
 {
@@ -15,7 +17,16 @@ public sealed class ReadBackNode(INode chat, SessionCreates creates, VoicePhrase
     public async Task<NodeResult?> EvaluateAsync(NodeContext context, CancellationToken ct)
     {
         _ = creates.TakeProposed();   // one settled in an evaluation that failed is never read back later
-        var result = await chat.EvaluateAsync(context, ct);
+        NodeResult? result;
+        if (creates.TakeCorrected() is { } corrected && (context.CleanedText ?? context.LatestTranscription?.Text) is { } said)
+        {
+            var cleaned = context.CleanedText;
+            context.CleanedText = $"{said}\n{corrected.Note}";
+            try { result = await chat.EvaluateAsync(context, ct); }
+            finally { context.CleanedText = cleaned; }
+        }
+        else
+            result = await chat.EvaluateAsync(context, ct);
         if (creates.TakeProposed() is not { } request)
             return result;
 
