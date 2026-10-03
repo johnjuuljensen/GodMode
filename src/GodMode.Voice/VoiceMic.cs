@@ -65,10 +65,11 @@ public interface IHeadsetCall : IDisposable
     event Action? EndRequested;
 }
 
-/// <summary>How the mic behaves, with the defaults issue #422 names.</summary>
+/// <summary>How the mic behaves, with the defaults issue #422 names (the silence #451's).</summary>
 public sealed record VoiceMicOptions
 {
-    public const int DefaultSilenceSeconds = 10;
+    /// <summary>Time to think between turns (issue #451).</summary>
+    public const int DefaultSilenceSeconds = 30;
 
     /// <summary>Nothing heard while Listening for this long closes the mic.</summary>
     public TimeSpan SilenceTimeout { get; init; } = TimeSpan.FromSeconds(DefaultSilenceSeconds);
@@ -91,7 +92,8 @@ public sealed record VoiceMicOptions
 /// goes to speech recognition. <see cref="OpenAsync"/> pauses the music (<see cref="MediaPause"/>), opens the
 /// microphone (the switch to HFP), then plays the rising tone. It closes on <see cref="CloseAsync"/> (the button, a Done
 /// phrase), or when nothing is heard while Listening for <see cref="VoiceMicOptions.SilenceTimeout"/>, counted from
-/// the latest of the tone, the user's last words and the end of the bot's speech: the falling tone, then the microphone
+/// the latest of the tone, the user's last words (their speech in the mic's audio, <see cref="Listening"/>, or a
+/// transcript, <see cref="Heard"/>) and the end of the bot's speech: the falling tone, then the microphone
 /// is let go of, and the music resumes once the route is back at full quality. Pressed while the bot speaks, either
 /// waits for its speech to play out: the speaker moves with the mic, and the one it leaves drops what it holds.
 /// <para>
@@ -117,6 +119,7 @@ public sealed class VoiceMic : IDisposable
     private TaskCompletionSource _quiet = Quiet();
     private IVoiceInput? _input;
     private ITimer? _silence;
+    private MicSpeech? _speech;
     private int _silenceRound;
     private bool _disposed;
 
@@ -244,6 +247,8 @@ public sealed class VoiceMic : IDisposable
             throw;
         }
         var resumed = await resuming.ConfigureAwait(false);
+        // The noise floor is measured anew on each open: the device may be another one
+        lock (_lock) _speech = null;
         Set(VoiceMicState.Open);
         if (resumed is { } took)
             _logger.LogInformation("Voice: mic open in {Open} ms (speech recognition connected in {Resume} ms)",
@@ -302,6 +307,25 @@ public sealed class VoiceMic : IDisposable
 
     /// <summary>The user said something (a partial or a final): the silence starts again from now.</summary>
     public void Heard() => RestartSilence();
+
+    /// <summary>
+    /// The mic's audio as the session reads it, measured on the way (issue #451): speech in it, over the noise floor
+    /// (<see cref="MicSpeech"/>), starts the silence over as it is read, about a second before speech recognition's
+    /// first partial (<see cref="Heard"/>) would.
+    /// </summary>
+    public IAudioSource Listening(IAudioSource source) => new HeardAudioSource(source, chunk => HeardAudio(chunk, source.Format));
+
+    /// <summary>A chunk of the mic's audio: speech in it starts the silence over, while the mic is open.</summary>
+    private void HeardAudio(ReadOnlyMemory<byte> chunk, AudioFormat format)
+    {
+        lock (_lock)
+        {
+            if (_state != VoiceMicState.Open) return;
+            _speech ??= new MicSpeech(format);
+            if (!_speech.IsSpeech(chunk.Span)) return;
+        }
+        RestartSilence();
+    }
 
     /// <summary>
     /// The session's activity: the silence counts only while it listens, from the moment it is back at Listening (the

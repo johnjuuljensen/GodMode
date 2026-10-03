@@ -48,8 +48,8 @@ public sealed record VoiceSessionSetup
     public required IAudioSink AudioSink { get; init; }
 
     /// <summary>
-    /// The mic that opens on demand: it hears the session's transcripts and activity (its silence timer), and a Done
-    /// phrase closes it (<see cref="DoneNode"/>). Null where the mic is always open (Android, a test's text).
+    /// The mic that opens on demand: it hears the session's audio, transcripts and activity (its silence timer), and a
+    /// Done phrase closes it (<see cref="DoneNode"/>). Null where the mic is always open (Android, a test's text).
     /// </summary>
     public VoiceMic? Mic { get; init; }
 
@@ -186,7 +186,9 @@ public sealed class VoiceSession : IAsyncDisposable
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
                 GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null),
-                setup.Transcription,
+                setup.Mic is { } listening && setup.Transcription is TranscriptionInput.Audio audio
+                    ? TranscriptionInput.FromAudio(listening.Listening(audio.Source))
+                    : setup.Transcription,
                 setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink,
                 new EventSink(setup.Events, state, tools.Creates, setup.Mic, setup.Media))
             {
