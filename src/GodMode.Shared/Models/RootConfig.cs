@@ -10,10 +10,14 @@ namespace GodMode.Shared.Models;
 /// The root's <c>list</c> script (<c>config.json</c>'s, rootPath-relative), which prints the folders it
 /// offers to adopt; null when it has none, and its immediate subfolders are offered.
 /// </param>
-/// <param name="Environment">The environment in <c>config.json</c> itself, which the <c>list</c> script runs with; no action's overlay.</param>
+/// <param name="Environment">The environment in <c>config.json</c> itself, which the <c>list</c> and <c>issueInfo</c> scripts run with; no action's overlay.</param>
 /// <param name="Title">
 /// What the root is shown as (<c>config.json</c>'s <c>title</c>, else its explicit entry's <c>Title</c>);
 /// display only, its name stays its key. Null shows the name.
+/// </param>
+/// <param name="IssueInfo">
+/// The root's <c>issueInfo</c> script (<c>config.json</c>'s, rootPath-relative), which prints an issue's title and
+/// labels (<see cref="Models.IssueInfo"/>); null when it has none.
 /// </param>
 public record RootConfig(
     string? Description = null,
@@ -22,7 +26,8 @@ public record RootConfig(
     bool StripEnvVarProfile = false,
     string? List = null,
     Dictionary<string, string>? Environment = null,
-    string? Title = null)
+    string? Title = null,
+    string? IssueInfo = null)
 {
     /// <summary>
     /// Resolves a specific action by name (case-insensitive).
