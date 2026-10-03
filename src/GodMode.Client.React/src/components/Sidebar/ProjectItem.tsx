@@ -139,7 +139,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             {ownRoot && <span className="project-own-root" title={`In ${ownRoot}`}>{ownRoot}</span>}
           </div>
           <div className="project-meta">
-            {serverLabel && `${serverLabel} · `}{project.RootName && `${project.RootName} · `}{timeAgo}
+            {serverLabel && `${serverLabel} · `}{project.RootName && `${item.rootShown ?? project.RootName} · `}{timeAgo}
             {startedBy && <span className="project-started-by">{' · started by '}{startedBy}</span>}
             {isWaiting && project.CurrentQuestion && (
               <span className="project-question-hint" title={project.CurrentQuestion}>
