@@ -169,6 +169,28 @@ public sealed class VoiceSessionTests
     }
 
     /// <summary>
+    /// A create that failed before its launch has no session to answer (issue #448): voice sends nothing, and says
+    /// what is left to do, rather than a reply the server refuses.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_create_is_not_answered_by_voice()
+    {
+        var servers = new FakeServers();
+        var handles = new ProjectHandles();
+        var conversation = new VoiceConversation();
+        var projects = new ProjectBoard(servers, handles);
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, conversation);
+        servers.Set(ServerA, CreateFailed("p/r/283", "283-voice", "The create script failed with exit code 1"));
+        await tools.WhatNeedsMeAsync(CancellationToken.None);
+
+        var said = await tools.AnswerAsync(null, "Prøv igen.", CancellationToken.None);
+
+        Assert.Contains("failed to create", said);
+        Assert.Contains("Nothing was sent", said);
+        Assert.Empty(servers.Replies);
+    }
+
+    /// <summary>
     /// The same answer twice in a row, each to its own question, is answered twice: neither the session nor the
     /// chat node takes the second "ja" for a repeat of the first (VoiceBot#39). Said as ElevenLabs sends it.
     /// </summary>

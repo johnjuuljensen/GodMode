@@ -183,6 +183,10 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         new(projectId, name, "Default", "root", AttentionKind.Permission, DateTime.UtcNow.AddMinutes(-minutesAgo), summary,
             Permission: new PendingPermission("req-1", "Bash", summary, DateTime.UtcNow));
 
+    /// <summary>A create that failed before its launch (issue #448): Error, with no session to answer.</summary>
+    public static AttentionItem CreateFailed(string projectId, string name, string reason, int minutesAgo = 5) =>
+        new(projectId, name, "Default", "root", AttentionKind.Error, DateTime.UtcNow.AddMinutes(-minutesAgo), reason, CreateFailed: true);
+
     private void PushProjects(string serverId)
     {
         _servers.TryAdd(serverId, 0);
@@ -194,8 +198,14 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
 
     private static ProjectStatus Status(AttentionItem item) =>
         new(item.ProjectId, item.ProjectName,
-            item.Kind == AttentionKind.Permission ? ProjectState.WaitingPermission : ProjectState.WaitingInput,
+            item.Kind switch
+            {
+                AttentionKind.Permission => ProjectState.WaitingPermission,
+                AttentionKind.Error => ProjectState.Error,
+                _ => ProjectState.WaitingInput,
+            },
             item.Since, item.Since, item.Kind == AttentionKind.Question ? item.Text : null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0, RootName: item.Root, ProfileName: item.Profile,
-            PendingPermission: item.Permission);
+            LastError: item.Kind == AttentionKind.Error ? item.Text : null,
+            PendingPermission: item.Permission, CreateFailed: item.CreateFailed);
 }

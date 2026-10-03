@@ -1201,11 +1201,13 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
     /// <summary>
     /// A create that failed before its launch: its project is Error, saying why, for the user to see
-    /// and delete. It has the ID and folder the create claimed, so no tracked project has them.
+    /// and delete. It has the ID and folder the create claimed, so no tracked project has them. It has
+    /// no session (<see cref="ProjectStatus.CreateFailed"/>): input, a resume and a stop are refused
+    /// (<see cref="RefuseFailedCreate"/>), so nothing is written into a folder the create may never have made.
     /// </summary>
     private void RegisterFailedCreate(ProjectInfo project, string reason)
     {
-        project.Status = project.Status with { State = ProjectState.Error, LastError = reason, UpdatedAt = DateTime.UtcNow };
+        project.Status = project.Status with { State = ProjectState.Error, LastError = reason, CreateFailed = true, UpdatedAt = DateTime.UtcNow };
         if (!_projects.TryAdd(project.Status.Id, project))
             _logger.LogWarning("Project {ProjectId} failed to create, and another has its ID", project.Status.Id);
     }
@@ -1324,7 +1326,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
     public Task SendInputAsync(string projectId, string input)
     {
-        if (_projects.TryGetValue(projectId, out var project)) SlashCommands.Check(input, project.Status);
+        if (_projects.TryGetValue(projectId, out var project))
+        {
+            RefuseFailedCreate(project);
+            SlashCommands.Check(input, project.Status);
+        }
         return SendInputAsync(projectId, input, answersPending: true);
     }
 
@@ -1339,6 +1345,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
+        RefuseFailedCreate(project);
         if (!answersPending) RefuseWhilePending(project);
 
         // claude is blocked on a permission prompt and reads no input until it is answered: a reply
@@ -1362,6 +1369,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     {
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
+        RefuseFailedCreate(project);
         if (!answersPending) RefuseWhilePending(project);
         SlashCommands.Check(text, project.Status);
 
@@ -1474,6 +1482,15 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             _logger.LogInformation("Project {ProjectId}: the resumed process took no input ({Message})", project.Status.Id, ex.Message);
             return 0;
         }
+    }
+
+    /// <summary>
+    /// Refuses, changing nothing, a project whose create failed before its launch: it has no session to send to,
+    /// resume or stop, and a launch would write its state into a folder the create may never have made.
+    /// </summary>
+    private static void RefuseFailedCreate(ProjectInfo project)
+    {
+        if (project.Status.CreateFailed) throw new CreateFailedException(project.Status.Id);
     }
 
     /// <summary>Refuses, changing nothing, while the project's claude waits on a permission prompt or a question: those are the user's to answer.</summary>
@@ -1715,6 +1732,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
+        RefuseFailedCreate(project);
 
         // Before a launch or after it, never in the middle of one
         await WithTrackedLockAsync(project, () => _lifecycle.StopAsync(project));
@@ -1780,7 +1798,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 // An action that shares folders now shares this one too, whatever the session was created as
                 sharedFolder |= action?.SharedFolder == true;
 
-                if (action?.Delete is { Length: > 0 })
+                // A create that failed before it made its folder left nothing for the script to take down
+                if (project.Status.CreateFailed && !Directory.Exists(project.ProjectPath))
+                    _logger.LogInformation("Project {ProjectId} failed to create, and its folder {ProjectPath} was never made: no delete script runs", projectId, project.ProjectPath);
+                else if (action?.Delete is { Length: > 0 })
                 {
                     var scriptEnv = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), ProfileEnvironment(snap, profileName),
                         profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
@@ -1863,6 +1884,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         {
             throw new KeyNotFoundException($"Project {projectId} not found");
         }
+        RefuseFailedCreate(project);
 
         Task? sessionStart = null;
         await WithTrackedLockAsync(project, async () =>

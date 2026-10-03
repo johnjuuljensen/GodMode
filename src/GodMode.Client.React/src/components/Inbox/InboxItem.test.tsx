@@ -11,6 +11,9 @@ import { FakeHub, connectServers } from '../../test/fakeHub';
 import { render, typeInto, click, type Rendered } from '../../test/render';
 import { useAppStore, projectKey } from '../../store';
 import { Inbox } from './Inbox';
+import { ConfirmDialog } from '../ConfirmDialog';
+import { dismissConfirm } from '../../confirmDialog';
+import { dismissToast } from '../../toast';
 
 vi.mock('../../signalr/hub', () => ({ GodModeHub: class {} }));
 vi.mock('../../services/hostApi', () => ({
@@ -173,5 +176,32 @@ describe('the next need of a project (#218)', () => {
     await listA(item('p2', 'Finished', '2026-09-24T11:05:00Z'));
     expect(p2().querySelector('.inbox-item-kind')?.textContent).toBe('Finished');
     expect(p2().querySelector('.inbox-item-error')).toBeNull();
+  });
+});
+
+describe('a create that failed (#448)', () => {
+  const dialog = () => document.querySelector('.confirm-dialog');
+
+  beforeEach(async () => {
+    view.unmount();
+    await act(async () => hubA.callbacks.onAttentionChanged?.([
+      item('p3', 'Error', '2026-09-24T12:00:00Z', { Text: 'The create script failed: no worktree', CreateFailed: true }),
+    ]));
+    view = await render(<><Inbox variant="screen" /><ConfirmDialog /></>);
+  });
+
+  afterEach(() => act(() => { dismissToast(); dismissConfirm(); }));
+
+  it('takes no reply, says why, and offers its delete', async () => {
+    const el = itemEl('p3', 'Server A');
+    expect(el.querySelector('.inbox-item-text')?.textContent).toBe('The create script failed: no worktree');
+    expect(el.querySelector('textarea')).toBeNull();
+
+    await click(button(el, 'Delete'));
+    await vi.waitFor(() => expect(dialog()).not.toBeNull());
+    await click([...dialog()!.querySelectorAll('button')].find(b => b.textContent === 'Delete')!);
+
+    await vi.waitFor(() => expect(hubA.deletes).toEqual([{ projectId: 'p3', force: false }]));
+    expect(hubA.replies).toEqual([]);
   });
 });

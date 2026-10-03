@@ -319,6 +319,12 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             return await UnknownAsync(reference, ct);
 
         var status = await servers.GetStatusAsync(target, ct);
+        if (status.CreateFailed)
+        {
+            conversation.Current = target;
+            return $"{handle} failed to create, so it has no session to answer. " +
+                "Nothing was sent: tell the user to delete it, or create it again.";
+        }
         if (status.PendingPermission is { } permission)
         {
             conversation.Current = target;

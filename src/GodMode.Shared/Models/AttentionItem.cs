@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using GodMode.Shared.Enums;
 
 namespace GodMode.Shared.Models;
@@ -5,7 +6,8 @@ namespace GodMode.Shared.Models;
 /// <summary>
 /// One project that needs the user, from <see cref="Hubs.IProjectHub.GetAttention"/> and
 /// <see cref="Hubs.IProjectHubClient.AttentionChanged"/>. Answer any kind with
-/// <see cref="Hubs.IProjectHub.ReplyAndResume"/>; a permission or question also with
+/// <see cref="Hubs.IProjectHub.ReplyAndResume"/>, but a failed create's (<see cref="CreateFailed"/>), which is
+/// deleted; a permission or question also with
 /// <see cref="Hubs.IProjectHub.RespondToPermission"/> or <see cref="Hubs.IProjectHub.AnswerQuestion"/>.
 /// </summary>
 /// <param name="ProjectId">The project's ID, unique on its server (it contains '/').</param>
@@ -26,6 +28,10 @@ namespace GodMode.Shared.Models;
 /// <paramref name="Kind"/> is <see cref="AttentionKind.Finished"/>, or <see cref="AttentionKind.Question"/> asked in plain
 /// text at the turn's end, and the turn made one; voice says it word for word. Null otherwise.
 /// </param>
+/// <param name="CreateFailed">
+/// Whether the item is the <see cref="AttentionKind.Error"/> of a create that failed before its launch
+/// (<see cref="ProjectStatus.CreateFailed"/>): it takes no reply, and the app offers its delete instead. Left out of the JSON when false.
+/// </param>
 public record AttentionItem(
     string ProjectId,
     string ProjectName,
@@ -37,4 +43,5 @@ public record AttentionItem(
     PendingPermission? Permission = null,
     PendingQuestion? Question = null,
     string? PullRequestUrl = null,
-    string? Spoken = null);
+    string? Spoken = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false);
