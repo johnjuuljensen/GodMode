@@ -41,12 +41,12 @@ public sealed class EndToEndTests
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "283", [VoiceTools.TextParameter] = Answer }).Respond("Sendt til 283.");
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
-        await voice.Events.SaidAsync("101 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
 
         // A project asks while voice is on: the bot names it
         server.UseScript(Asking(Question));
         var asking = await CreateAsync(hub, "283-add-migration");
-        await voice.Events.SaidAsync("283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
 
         // As ElevenLabs sends it: a partial, then a final with the same text. The final reaches the model once
         voice.Transcriptions.SayAsRecognized("Hvad venter på mig?");
@@ -57,7 +57,7 @@ public sealed class EndToEndTests
         Assert.Contains($"283: question: {Question}", listed);
 
         voice.Transcriptions.SayAsRecognized("Svar 283 at den skal bruge den eksisterende migration");
-        await voice.Events.SaidAsync("Sendt til 283.");
+        await voice.Events.SaidAsync("Sendt til issue 283.");
         // Each utterance once: a tool round and a respond, no more
         Assert.Equal(4, model.Calls);
 
@@ -97,10 +97,13 @@ public sealed class EndToEndTests
 
         voice.Transcriptions.AddFinal("Hvilke projekter er der?");
         await voice.Events.SaidAsync("1 projekt: testing.");
-        Assert.StartsWith($"1 projects:\n- testing (testing, {TestServer.Root}", Assert.Single(model.ToolResults));
+        var listed = Assert.Single(model.ToolResults);
+        Assert.StartsWith("1 project, all in one group:\nProfile ", listed);
+        Assert.Contains($", root {TestServer.Root} (1 project):\n- ", listed);
+        Assert.Contains("testing (testing", listed);
 
         voice.Transcriptions.AddFinal($"Svar {TestServer.Root} at den skal bruge den eksisterende migration");
-        await voice.Events.SaidAsync("Sendt til testing.");
+        await voice.Events.SaidAsync("Sendt til create testing.");
         await Eventually.UntilAsync(() => server.StdinOf(created.Id).Count == 2, () => $"the answer on stdin: {string.Join(" | ", server.StdinOf(created.Id))}\n{server.Output}");
         Assert.Contains(JsonSerializer.Serialize(Answer), server.StdinOf(created.Id)[1]);
 

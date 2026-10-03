@@ -21,6 +21,18 @@ public sealed class VoiceConversation
         set => Volatile.Write(ref _current, value);
     }
 
+    private string? _lastProfile;
+
+    /// <summary>
+    /// The profile spoken of last (<see cref="ProjectNames"/>, #450): a project in another is named with its profile.
+    /// Null before any, and after a list of several profiles.
+    /// </summary>
+    public string? LastProfile
+    {
+        get => Volatile.Read(ref _lastProfile);
+        set => Volatile.Write(ref _lastProfile, value);
+    }
+
     private ReplyReading? _reading;
 
     /// <summary>
@@ -34,27 +46,27 @@ public sealed class VoiceConversation
         set => Volatile.Write(ref _reading, value);
     }
 
-    private ConcurrentQueue<string> _sent = new();
+    private ConcurrentQueue<SpokenName> _sent = new();
 
-    /// <summary>An answer reached <paramref name="handle"/>: <see cref="VoiceTools.AnswerAsync"/>, once the server took it.</summary>
-    public void Sent(string handle) => Volatile.Read(ref _sent).Enqueue(handle);
+    /// <summary>An answer reached the project named so: <see cref="VoiceTools.AnswerAsync"/>, once the server took it.</summary>
+    public void Sent(SpokenName name) => Volatile.Read(ref _sent).Enqueue(name);
 
     /// <summary>
-    /// The handles answers were sent to since the last take, and none from now on: <see cref="SentNode"/> takes them
+    /// The projects answers were sent to since the last take, and none from now on: <see cref="SentNode"/> takes them
     /// before the chat's evaluation and after it, so what it holds after is this turn's sends alone.
     /// </summary>
-    public IReadOnlyList<string> TakeSent() => [.. Interlocked.Exchange(ref _sent, new())];
+    public IReadOnlyList<SpokenName> TakeSent() => [.. Interlocked.Exchange(ref _sent, new())];
 
-    private ConcurrentQueue<(string Handle, AttentionItem Item)> _spoken = new();
+    private ConcurrentQueue<(SpokenName Name, AttentionItem Item)> _spoken = new();
 
     /// <summary>
-    /// A tool read out the item of <paramref name="handle"/>, which carries the session's own spoken reply
+    /// A tool read out the item of the project named so, which carries the session's own spoken reply
     /// (<see cref="AttentionItem.Spoken"/>): <see cref="SpokenNode"/> says it in place of the model's reply.
     /// </summary>
-    public void Spoke(string handle, AttentionItem item) => Volatile.Read(ref _spoken).Enqueue((handle, item));
+    public void Spoke(SpokenName name, AttentionItem item) => Volatile.Read(ref _spoken).Enqueue((name, item));
 
     /// <summary>The spoken replies read since the last take, oldest first, and none from now on: as <see cref="TakeSent"/>.</summary>
-    public IReadOnlyList<(string Handle, AttentionItem Item)> TakeSpoken() => [.. Interlocked.Exchange(ref _spoken, new())];
+    public IReadOnlyList<(SpokenName Name, AttentionItem Item)> TakeSpoken() => [.. Interlocked.Exchange(ref _spoken, new())];
 
     private ConcurrentQueue<string> _read = new();
 

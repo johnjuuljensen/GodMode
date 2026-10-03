@@ -35,6 +35,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <summary>What the conversation is about.</summary>
     public VoiceConversation Conversation => conversation;
 
+    /// <summary>How projects are named aloud: as what they are, with their root and profile when needed (#450).</summary>
+    public ProjectNames Names { get; } = new(projects, handles, conversation);
+
     /// <summary>The creates voice reads back, and makes on the user's yes.</summary>
     public SessionCreates Creates { get; } = new(servers, handles, time);
 
@@ -42,17 +45,18 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     private const int OptionsListed = 8;
 
     private static readonly ToolParameter ProjectReference = new(ProjectParameter,
-        "The project's handle as the user said it (a number such as 283, or a word), or its root or kind when the user " +
-        "names it so (\"Assistant\", \"chat\"). Leave it empty for the project last announced or talked about.", Required: false);
+        "The project as the user said it, or as a tool named it (\"issue 283\", \"branch master\", \"283\"), with the root or " +
+        "profile they said it with (\"branch master i GodMode, profil Mega\"), or its root or kind when the user names it so " +
+        "(\"Assistant\", \"chat\"). Leave it empty for the project last announced or talked about.", Required: false);
 
     public ToolSet AddTo(ToolSet tools) => tools
         .Add(WhatNeedsMe,
             "List what needs the user across all their servers: questions, permission requests, errors, reviews and " +
-            "finished results, one line per project, oldest first. Call when the user asks what needs them, what is waiting, or for status overall.",
+            "finished results, one line per project, oldest first, each named as it is said. Call when the user asks what needs them, what is waiting, or for status overall.",
             (_, _, ct) => WhatNeedsMeAsync(ct))
         .Add(ListProjects,
-            "List every project on every server, whether it needs the user or not: its handle, name, root, profile, kind " +
-            "and state, the one changed last first. Call when the user asks which projects there are, what runs, or " +
+            "List every project on every server, whether it needs the user or not, grouped by profile, then root: each by " +
+            "the name it is said by, with its name, kind and state. Call when the user asks which projects there are, what runs, or " +
             "about one they just started.",
             (_, _, _) => Task.FromResult(ListProjectsText()))
         .Add(ProjectStatus,
@@ -106,11 +110,12 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             return "Nothing needs the user.";
 
         var text = new StringBuilder($"{items.Count} need the user:\n");
-        foreach (var item in items)
-            text.AppendLine($"- {handles.Of(item.Project)}: {Describe(item.Item)}{InItsWords(item.Item)}");
+        var named = items.Select(i => (Item: i, Name: Names.Of(i.Project)!)).ToList();
+        foreach (var (item, name) in named)
+            text.AppendLine($"- {name}: {Describe(item.Item)}{InItsWords(item.Item)}");
         // One project, with its own spoken reply: the system says it, as status would
-        if (items is [{ Item.Spoken.Length: > 0 } one])
-            text.AppendLine(SpokenBySystem(handles.Of(one.Project)!, one.Item));
+        if (named is [{ Item.Item.Spoken.Length: > 0 } one])
+            text.AppendLine(SpokenBySystem(one.Name, one.Item.Item));
         return ReadOut(text.ToString().TrimEnd());
     }
 
@@ -122,26 +127,38 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         if (all.Count == 0)
             return "No projects on any server.";
 
-        var text = new StringBuilder($"{all.Count} projects:\n");
-        foreach (var project in all)
-            text.AppendLine($"- {Line(project)}");
-        return text.ToString().TrimEnd();
+        // Grouped by profile, then root, each said once (#450): a session's label alone ("branch master") says nothing of where it is
+        var groups = Names.Groups();
+        var text = new StringBuilder(groups is [_]
+            ? $"{Count(all.Count)}, all in one group:\n"
+            : $"{Count(all.Count)}, in {groups.Count} groups by profile and root:\n");
+        foreach (var group in groups)
+        {
+            text.Append($"{group.Heading} ({Count(group.Projects.Count)}):\n");
+            foreach (var project in group.Projects)
+                text.Append($"- {handles.LabelOf(project.Ref) ?? project.Project.Name} ({Details(project.Project.Name, project.Project.Kind)}): {project.Project.State}\n");
+        }
+        text.Append($"Say the count, {all.Count}, then each group once, by its profile and root, with its projects by the names given here. " +
+            "If you leave any out, say how many and why.");
+        return text.ToString();
     }
+
+    private static string Count(int projects) => projects == 1 ? "1 project" : $"{projects} projects";
 
     public async Task<string> ProjectStatusAsync(string? reference, CancellationToken ct)
     {
-        if (Target(reference) is not { } target || handles.Of(target) is not { } handle)
+        if (Target(reference) is not { } target || Names.Of(target) is not { } name)
             return await UnknownAsync(reference, ct);
 
         var status = await servers.GetStatusAsync(target, ct);
         Talked(target);
-        var text = new StringBuilder($"{handle} ({Where(status.Name, status.RootName, status.ProfileName, status.Kind)}): {status.State}.");
+        var text = new StringBuilder($"{name} ({Details(status.Name, status.Kind)}): {status.State}.");
         var item = board.ItemOf(target)?.Item;
         if (item is not null)
         {
             text.Append($" Needs the user: {Describe(item, InFull(item, status))}");
             if (item.Spoken is { Length: > 0 })
-                text.Append(' ').Append(SpokenBySystem(handle, item));
+                text.Append(' ').Append(SpokenBySystem(name, item));
         }
         else if (status.CurrentQuestion is { Length: > 0 } question)
             text.Append($" Asked: {Capped(question)}");
@@ -165,9 +182,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// The item's spoken reply goes to the system (<see cref="SpokenNode"/>), which says it word for word in place of the
     /// model's reply (issue #384), and what the tool's result tells the model of it.
     /// </summary>
-    private string SpokenBySystem(string handle, AttentionItem item)
+    private string SpokenBySystem(SpokenName name, AttentionItem item)
     {
-        conversation.Spoke(handle, item);
+        conversation.Spoke(name, item);
         return $"Its own spoken reply, \"{item.Spoken}\", is said word for word by the system itself, in place of your reply: respond with one word.";
     }
 
@@ -227,14 +244,14 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// </summary>
     public async Task<string> ReadReplyAsync(string? reference, string? turns, CancellationToken ct)
     {
-        if (Target(reference) is not { } target || handles.Of(target) is not { } handle)
+        if (Target(reference) is not { } target || Names.Of(target) is not { } name)
             return await UnknownAsync(reference, ct);
 
         var count = int.TryParse(turns, NumberStyles.Integer, CultureInfo.InvariantCulture, out var asked) && asked >= 1 ? Math.Min(asked, MaxTurnsRead) : 1;
         var status = await servers.GetStatusAsync(target, ct);
         var replies = await servers.GetLastRepliesAsync(target, count, ct);
         Talked(target);
-        var header = $"{handle} ({Where(status.Name, status.RootName, status.ProfileName, status.Kind)}): {status.State}.";
+        var header = $"{name} ({Details(status.Name, status.Kind)}): {status.State}.";
         if (replies.Count == 0)
         {
             conversation.Reading = null;
@@ -245,7 +262,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             ? $"Last reply{Flags(one)}: {one.Text.Trim()}"
             : $"Last {replies.Count} replies, oldest first:\n" + string.Join("\n", replies.Select((r, i) => $"Reply {i + 1}{Flags(r)}: {r.Text.Trim()}"));
         var parts = Parts(Capped(said));
-        conversation.Reading = new ReplyReading(target, handle, parts, 1, count, replies);
+        conversation.Reading = new ReplyReading(target, name.ToString(), parts, 1, count, replies);
         return ReadOut(parts.Count == 1
             ? $"{header} {parts[0]}"
             : $"{header} {parts[0]} [Part 1 of {parts.Count}: more follows; {ReadMore} reads it.]");
@@ -315,21 +332,21 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     {
         if (string.IsNullOrWhiteSpace(answer))
             return "No answer given: ask the user what to answer.";
-        if (Target(reference) is not { } target || handles.Of(target) is not { } handle)
+        if (Target(reference) is not { } target || Names.Of(target) is not { } name)
             return await UnknownAsync(reference, ct);
 
         var status = await servers.GetStatusAsync(target, ct);
         if (status.PendingPermission is { } permission)
         {
             conversation.Current = target;
-            return $"{handle} is waiting on a permission request ({permission.Summary}), which is answered on screen, " +
+            return $"{name} is waiting on a permission request ({permission.Summary}), which is answered on screen, " +
                 "not by voice. Nothing was sent: tell the user to answer it on screen.";
         }
 
         await servers.ReplyAsync(target, answer.Trim(), ct);
         conversation.Current = target;
-        conversation.Sent(handle);
-        return $"Sent to {handle}: \"{answer.Trim()}\". It continues. The system says it was sent itself.";
+        conversation.Sent(name);
+        return $"Sent to {name}: \"{answer.Trim()}\". It continues. The system says it was sent itself.";
     }
 
     public async Task<string> MarkSeenAsync(string? reference, CancellationToken ct)
@@ -339,7 +356,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
         await servers.MarkSeenAsync(target, ct);
         conversation.Current = target;
-        return $"{handles.Of(target) ?? target.ProjectId} is marked seen.";
+        return $"{Names.Of(target)?.ToString() ?? target.ProjectId} is marked seen.";
     }
 
     /// <summary>What the conversation is about from now on, from a tool that read it out.</summary>
@@ -360,28 +377,33 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     private async Task<string> UnknownAsync(string? reference, CancellationToken ct)
     {
-        var waiting = (await servers.GetAttentionAsync(ct)).Select(i => handles.Of(i.Project)).OfType<string>().ToList();
-        var which = waiting.Count > 0 ? $" Waiting now: {string.Join(", ", waiting)}." : " Nothing needs the user now.";
+        var waiting = (await servers.GetAttentionAsync(ct)).Select(i => Names.Full(i.Project)).OfType<SpokenName>().ToList();
+        var which = waiting.Count > 0 ? $" Waiting now: {string.Join("; ", waiting)}." : " Nothing needs the user now.";
         var all = projects.Projects;
         var options = all.Count == 0 ? " No projects on any server."
             : $" Projects: {string.Join("; ", all.Take(OptionsListed).Select(Line))}{(all.Count > OptionsListed ? $"; {all.Count - OptionsListed} more" : "")}.";
+        // A label several projects have ("branch master" in two profiles) names none of them: say which there are
+        var several = string.IsNullOrWhiteSpace(reference) ? [] : handles.Labelled(reference);
         return string.IsNullOrWhiteSpace(reference)
             ? $"No project is being talked about: ask the user which one.{which}{options}"
+            : several.Count > 1
+                ? $"'{reference}' names {several.Count} projects: {string.Join("; ", several.Select(Names.Full).OfType<SpokenName>())}. " +
+                    "Nothing was done: ask which, as a closed question naming each by its root and profile."
             : handles.IsRetired(reference)
                 ? $"Unknown project '{reference}': that project was deleted. Nothing was done.{which}{options}"
                 : $"Unknown project '{reference}'.{which}{options}";
     }
 
-    /// <summary>"testing (testing, Assistant, Outbound, chat): Idle".</summary>
+    /// <summary>"chat testing in Assistant, profile Outbound (testing, chat): Idle", its root and profile when there are several.</summary>
     private string Line(ServerProject project)
     {
         var p = project.Project;
-        return $"{handles.Of(project.Ref) ?? p.Name} ({Where(p.Name, p.RootName, p.ProfileName, p.Kind)}): {p.State}";
+        return $"{Names.Full(project.Ref)?.ToString() ?? p.Name} ({Details(p.Name, p.Kind)}): {p.State}";
     }
 
-    /// <summary>The project's name, then its root, profile and kind, those it has.</summary>
-    private static string Where(string name, string? root, string? profile, string? kind) =>
-        string.Join(", ", new[] { name, root, profile, kind }.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase));
+    /// <summary>The project's name and kind, those it has.</summary>
+    private static string Details(string name, string? kind) =>
+        string.Join(", ", new[] { name, kind }.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>The item as a line says it, with <paramref name="text"/> for its text: the item's own (cut) one when null.</summary>
     private static string Describe(AttentionItem item, string? text = null)

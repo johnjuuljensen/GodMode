@@ -175,7 +175,7 @@ public sealed class CreateTests
         await using var voice = await ReadBack283Async(servers, StartIssue283());
 
         servers.Set(ServerA, Permission("Kappe/kappe/260930-issue-12-a1b2", "12-deploy", "Bash: git push"));
-        await voice.Events.SaidAsync("12 skal have tilladelse: Bash: git push. Svar på skærmen.");
+        await voice.Events.SaidAsync("issue 12 skal have tilladelse: Bash: git push. Svar på skærmen.");
         voice.Transcriptions.SayAsRecognized("Ja.");
         await voice.Events.SaidAsync("Der venter ingen oprettelse. Sig start igen.");
 
@@ -260,14 +260,14 @@ public sealed class CreateTests
         var create = new TaskCompletionSource();
         servers.CreateGate = create.Task;
         var model = StartIssue283(new ScriptedChatClient()
-                .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "101" }).Respond("101 spørger om kolonnerne."))
+                .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "101" }).Respond("issue 101 spørger om kolonnerne."))
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Slet dem." }).Respond("Sendt til 101.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("Kappe/kappe/260930-issue-101-c3", "101-cleanup", "Slet kolonnerne?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("101 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
 
         voice.Transcriptions.SayAsRecognized("Status 101");
-        await voice.Events.SaidAsync("101 spørger om kolonnerne.");
+        await voice.Events.SaidAsync("issue 101 spørger om kolonnerne.");
         voice.Transcriptions.SayAsRecognized("Start issue 283 i GodMode");
         await voice.Events.SaidAsync(ReadBack283);
         voice.Transcriptions.SayAsRecognized("Ja");
@@ -276,7 +276,7 @@ public sealed class CreateTests
         await voice.Events.SaidAsync("283 er oprettet.");
 
         voice.Transcriptions.SayAsRecognized("Svar at den skal slette dem");
-        await voice.Events.SaidAsync("Sendt til 101.");
+        await voice.Events.SaidAsync("Sendt til issue 101 i root.");
         Assert.Equal(new ProjectRef(ServerA, "Kappe/kappe/260930-issue-101-c3"), Assert.Single(servers.Replies).Project);
     }
 
@@ -436,7 +436,7 @@ public sealed class CreateTests
         Assert.Equal("41", outcome!.Handle);
         Assert.Equal(outcome.Project, handles.Resolve("41"));
         Assert.Null(conversation.Current);
-        Assert.StartsWith("41 (issue_41, kappe, issue): Idle.", await tools.ProjectStatusAsync("41", CancellationToken.None));
+        Assert.StartsWith("issue 41 (issue_41, issue): Idle.", await tools.ProjectStatusAsync("41", CancellationToken.None));
     }
 
     [Fact]

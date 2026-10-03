@@ -21,7 +21,7 @@ public sealed class EarlierReadingsTests
         var servers = new FakeServers();
         var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
         return (servers, voice);
     }
 
@@ -58,10 +58,10 @@ public sealed class EarlierReadingsTests
         await using var _ = voice;
 
         voice.Transcriptions.Add(Heard(final, readings));
-        await voice.Events.SaidAsync("Sendt til 283.");
+        await voice.Events.SaidAsync("Sendt til issue 283.");
 
         Assert.Contains(model.UserTexts, t => t.Contains(final) && t.Contains("Earlier readings") && readings.All(t.Contains));
-        Assert.StartsWith("Sent to 283", Assert.Single(model.ToolResults));
+        Assert.StartsWith("Sent to issue 283", Assert.Single(model.ToolResults));
         Assert.Equal((P283, answer), Assert.Single(servers.Replies));
     }
 
@@ -108,12 +108,12 @@ public sealed class EarlierReadingsTests
             .Respond("Sendt.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
 
         voice.Transcriptions.Add(Heard("Status 101.", "Status 10"));
         await voice.Events.SaidAsync("101 er idle.");
         voice.Transcriptions.SayAsRecognized("Svar at den skal pushe");
-        await voice.Events.SaidAsync("Sendt til 101.");
+        await voice.Events.SaidAsync("Sendt til issue 101.");
 
         Assert.Equal(new ProjectRef(ServerA, "p/r/101-x"), Assert.Single(servers.Replies).Project);
     }

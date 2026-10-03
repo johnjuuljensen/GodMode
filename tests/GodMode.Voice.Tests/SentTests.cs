@@ -20,7 +20,7 @@ public sealed class SentTests
         var servers = new FakeServers();
         var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
         return (servers, voice);
     }
 
@@ -72,7 +72,7 @@ public sealed class SentTests
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Svar at den skal pushe");
-        await voice.Events.SaidAsync("Sendt til 283.");
+        await voice.Events.SaidAsync("Sendt til issue 283.");
 
         Assert.Equal((P283, "Push."), Assert.Single(servers.Replies));
         Assert.DoesNotContain("Sendt.", voice.Events.Responses);
@@ -90,7 +90,7 @@ public sealed class SentTests
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Svar at den skal pushe");
-        await voice.Events.SaidAsync("Sendt til 283.");
+        await voice.Events.SaidAsync("Sendt til issue 283.");
         voice.Transcriptions.SayAsRecognized("Det kan du skrive til dem");
         await voice.Events.SaidAsync(NothingSent);
 
@@ -108,7 +108,7 @@ public sealed class SentTests
             .Respond(Reply);
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Permission("p/r/283", "283-voice", "Bash: git push")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("283 skal have tilladelse: Bash: git push. Svar på skærmen.");
+        await voice.Events.SaidAsync("issue 283 skal have tilladelse: Bash: git push. Svar på skærmen.");
 
         voice.Transcriptions.SayAsRecognized("Svar ja");
         await voice.Events.SaidAsync(Reply);

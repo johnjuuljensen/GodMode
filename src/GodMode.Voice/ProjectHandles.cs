@@ -38,8 +38,11 @@ public sealed partial class ProjectHandles
     private readonly Dictionary<string, ProjectRef> _byHandle = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (ProjectRef Project, Entry Entry)> _retired = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>What a handle was given for: the project's name, and its root and kind once known.</summary>
-    private sealed record Entry(string Handle, string Name, string? Root, string? Kind);
+    /// <summary>What a handle was given for: the project's name, and its root, kind and profile once known.</summary>
+    private sealed record Entry(string Handle, string Name, string? Root, string? Kind, string? Profile = null)
+    {
+        public string Label => ProjectHandles.Label(Handle, Name, Kind);
+    }
 
     /// <summary>Every handle given so far, in the order they were given.</summary>
     public IReadOnlyList<string> All
@@ -49,24 +52,25 @@ public sealed partial class ProjectHandles
 
     /// <summary>
     /// The project's handle, given now if it has none yet. Its <paramref name="root"/> and <paramref name="kind"/>
-    /// (<see cref="GodMode.Shared.Models.ProjectSummary.Kind"/>) name it too, when no other project has them; given
+    /// (<see cref="GodMode.Shared.Models.ProjectSummary.Kind"/>) name it too, when no other project has them, and
+    /// its root or <paramref name="profile"/> said with its handle or label names it among several (#450); given
     /// later, they are kept, but the handle stays.
     /// </summary>
-    public string For(ProjectRef project, string name, string? root = null, string? kind = null)
+    public string For(ProjectRef project, string name, string? root = null, string? kind = null, string? profile = null)
     {
         lock (_lock)
         {
             if (_byProject.TryGetValue(project, out var known))
             {
-                if ((known.Root is null && root is not null) || (known.Kind is null && kind is not null))
-                    _byProject[project] = known with { Root = known.Root ?? root, Kind = known.Kind ?? kind };
+                if ((known.Root is null && root is not null) || (known.Kind is null && kind is not null) || (known.Profile is null && profile is not null))
+                    _byProject[project] = known with { Root = known.Root ?? root, Kind = known.Kind ?? kind, Profile = known.Profile ?? profile };
                 return known.Handle;
             }
 
             var handle = Returning(project, root)
                 ?? Candidates(name, kind).FirstOrDefault(Free) ?? Numbered(name, kind);
             _retired.Remove(handle);
-            _byProject[project] = new Entry(handle, name, root, kind);
+            _byProject[project] = new Entry(handle, name, root, kind, profile);
             _byHandle[handle] = project;
             return handle;
         }
@@ -76,6 +80,40 @@ public sealed partial class ProjectHandles
     public string? Of(ProjectRef project)
     {
         lock (_lock) return _byProject.TryGetValue(project, out var known) ? known.Handle : null;
+    }
+
+    /// <summary>The project's handle as it is said (<see cref="Label(string, string, string?)"/>), or null when it has none.</summary>
+    public string? LabelOf(ProjectRef project)
+    {
+        lock (_lock) return _byProject.TryGetValue(project, out var known) ? known.Label : null;
+    }
+
+    /// <summary>
+    /// A handle as it is said, so it says what it is (#450): an issue number as "issue 376", a word with the project's
+    /// kind before it ("branch master", "chat testing"), unless it is the kind already ("chat", "chat 2"). A handle that
+    /// is the kind alone, given when the name's word was taken ("branch" for a second "master"), says the name's word:
+    /// "branch master", as one numbered for it does ("master 2" of a third). Not unique, as a handle is: the root and profile it is said with tell two apart
+    /// (<see cref="ProjectNames"/>), and <see cref="Resolve"/> takes them.
+    /// </summary>
+    public static string Label(string handle, string name, string? kind)
+    {
+        if (handle.All(char.IsAsciiDigit))
+            return $"issue {handle}";
+        if (kind is null || Words(kind).FirstOrDefault(w => !w.All(char.IsDigit))?.ToLowerInvariant() is not { } kindWord)
+            return handle;
+        if (Same(StemOf(handle), kindWord) || handle.StartsWith(kindWord + " ", StringComparison.OrdinalIgnoreCase))
+            return Same(handle, kindWord) && Candidates(name, kind).FirstOrDefault(c => !c.All(char.IsAsciiDigit) && !Same(c, kindWord)) is { } word
+                ? $"{kindWord} {word}"
+                : handle;
+        // A number put after a word that was taken ("master 2") says nothing: the root and profile tell them apart
+        return $"{kindWord} {StemOf(handle)}";
+    }
+
+    /// <summary>The projects whose label (<see cref="Label(string, string, string?)"/>) the reference is, said alone.</summary>
+    public IReadOnlyList<ProjectRef> Labelled(string spoken)
+    {
+        var reference = Clean(spoken);
+        lock (_lock) return [.. _byProject.Where(p => Same(p.Value.Label, reference)).Select(p => p.Key)];
     }
 
     /// <summary>The project is gone: it names nothing any more, and its handle is retired.</summary>
@@ -100,7 +138,9 @@ public sealed partial class ProjectHandles
     /// The project a spoken reference names: a handle, a number said in digits or Danish words ("to hundrede og
     /// treogfirs"), a word of a project's name that only one project has, the root or kind of only one project
     /// ("Assistant", "chat"), or, with <paramref name="fuzzy"/>, a handle or such a root misheard slightly
-    /// ("Assistent"). A number is never matched fuzzily: "28" is not "283". Null when it names none, or more than one.
+    /// ("Assistent"). It may be said as it is spoken (#450): its label ("issue 283", "branch master"), with the root or
+    /// profile that tells it from another ("branch master i GodMode, profil Mega"). A number is never matched fuzzily:
+    /// "28" is not "283". Null when it names none, or more than one.
     /// </summary>
     public ProjectRef? Resolve(string spoken, bool fuzzy = true)
     {
@@ -113,6 +153,15 @@ public sealed partial class ProjectHandles
                 return byNumber;
             if (_byHandle.TryGetValue(reference, out var byHandle))
                 return byHandle;
+            // "issue 283", the number in digits or words, is the handle 283
+            if (IssueLead().Match(reference) is { Success: true } issue && DanishNumbers.Parse(issue.Groups[1].Value) is { } issued)
+                return _byHandle.GetValueOrDefault(issued.ToString());
+            // Said as it is spoken: its label, alone or with its root or profile; a label several have names none
+            var labelled = _byProject.Where(p => Same(p.Value.Label, reference)).Select(p => p.Key).ToList();
+            if (labelled.Count > 0)
+                return labelled is [var single] ? single : null;
+            if (Qualified(reference) is { } qualified)
+                return qualified is [var one] ? one : null;
             // A numbered handle said with its number in words ("chat to") is that handle; one no project has, or of a
             // project that is gone, names none: never the project with its stem ("chat"), nor one close to it ("chat 3")
             if (NumberedForm(reference) is { } numbered)
@@ -147,6 +196,52 @@ public sealed partial class ProjectHandles
             return roots is [var only] ? only : null;
         }
     }
+
+    /// <summary>
+    /// The projects a reference names with a root or profile said in it ("master i GodMode, profil Mega", "Mega
+    /// GodMode branch master"): those in every root or profile it says, whose handle, label, either without its number,
+    /// or a word of whose name is the rest. A place said after "profil"/"profile" is a profile only: a profile and a
+    /// root may have one name ("GodMode, profil Godmode"). Null when it says no root or profile, or nothing besides them.
+    /// </summary>
+    private List<ProjectRef>? Qualified(string reference)
+    {
+        const RegexOptions Options = RegexOptions.IgnoreCase | RegexOptions.CultureInvariant;
+        List<Func<Entry, bool>> said = [];
+        var rest = reference;
+        foreach (var profile in _byProject.Values.Select(e => e.Profile).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).OrderByDescending(n => n.Length))
+        {
+            var pattern = $@"\b(?:profil(?:en)?|profile)\s+{Regex.Escape(profile)}(?![\p{{L}}\p{{N}}])";
+            if (!Regex.IsMatch(rest, pattern, Options)) continue;
+            said.Add(e => Same(e.Profile, profile));
+            rest = Regex.Replace(rest, pattern, " ", Options);
+        }
+        var places = _byProject.Values.SelectMany(e => new[] { e.Root, e.Profile }).OfType<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase).OrderByDescending(n => n.Length).ToList();
+        foreach (var place in places)
+        {
+            var pattern = $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(place)}(?![\p{{L}}\p{{N}}])";
+            if (!Regex.IsMatch(rest, pattern, Options)) continue;
+            said.Add(e => Same(e.Root, place) || Same(e.Profile, place));
+            rest = Regex.Replace(rest, pattern, " ", Options);
+        }
+        if (said.Count == 0) return null;
+        rest = string.Join(' ', Words(rest).Where(w => !Connectives.Contains(w)));
+        if (rest.Length == 0) return null;
+
+        var number = DanishNumbers.Parse(rest)?.ToString();
+        return [.. _byProject
+            .Where(p => said.All(place => place(p.Value)))
+            .Where(p => Same(p.Value.Handle, rest) || Same(p.Value.Label, rest) || Same(StemOf(p.Value.Handle), rest)
+                || (!p.Value.Handle.All(char.IsAsciiDigit) && Same(StemOf(p.Value.Label), rest)) || (number is not null && Same(p.Value.Handle, number))
+                || Words(p.Value.Name).Any(w => Same(w, rest)))
+            .Select(p => p.Key)];
+    }
+
+    /// <summary>The words said between a root or profile and a project's name: "i GodMode, profil Mega".</summary>
+    private static readonly HashSet<string> Connectives = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "i", "in", "på", "hos", "under", "fra", "from", "of", "at", "profil", "profilen", "profile", "root", "roden", "rod",
+    };
 
     private bool Retired(string reference) =>
         _retired.ContainsKey(NumberedForm(reference) ?? reference)
@@ -234,6 +329,9 @@ public sealed partial class ProjectHandles
 
     [GeneratedRegex(@"(?<!\d)\d{1,6}(?!\d)")]
     private static partial Regex IssueNumber();
+
+    [GeneratedRegex(@"^issue\s+(.+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex IssueLead();
 
     [GeneratedRegex(@"[\p{L}\p{N}]+")]
     private static partial Regex Word();

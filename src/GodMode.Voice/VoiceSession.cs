@@ -203,7 +203,8 @@ public sealed class VoiceSession : IAsyncDisposable
                 scope.ServiceProvider.GetService<ElevenLabsSttKeyterms>(), logger);
             projects.Changed += voice.RefreshKeyterms;
             voice.RefreshKeyterms();
-            board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(phrases.Announce(handle, item.Item), item.Project.Key)));
+            board.Attach((item, handle) => session.Announcements.TryWrite(new Announcement(
+                phrases.Announce(tools.Names.Of(item.Project) ?? new SpokenName(handle), item.Item), item.Project.Key)));
             tools.Creates.Attach(outcome => session.Announcements.TryWrite(new Announcement(phrases.Created(outcome))));
             // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
             if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));

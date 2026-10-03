@@ -18,11 +18,11 @@ public sealed class VoiceSessionTests
         await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient(),
             connect: _ => { servers.Set(ServerA, Question("p/r/101-cleanup", "101-cleanup", "Skal jeg slette de gamle kolonner?")); return Task.CompletedTask; });
 
-        await voice.Events.SaidAsync("101 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
         servers.Set(ServerB, Permission("p/r/283-voice", "283-voice", "Bash: git push origin feature/283"));
-        await voice.Events.SaidAsync("283 skal have tilladelse: Bash: git push origin feature/283. Svar på skærmen.");
+        await voice.Events.SaidAsync("issue 283 skal have tilladelse: Bash: git push origin feature/283. Svar på skærmen.");
 
-        Assert.Equal(["Klar.", "101 har et spørgsmål.", "283 skal have tilladelse: Bash: git push origin feature/283. Svar på skærmen."], voice.Events.Responses);
+        Assert.Equal(["Klar.", "issue 101 har et spørgsmål.", "issue 283 skal have tilladelse: Bash: git push origin feature/283. Svar på skærmen."], voice.Events.Responses);
     }
 
     [Fact]
@@ -33,12 +33,12 @@ public sealed class VoiceSessionTests
         await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient());
 
         servers.Set(ServerA, item);
-        await voice.Events.SaidAsync("101 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
         servers.Set(ServerA, item);   // a reconnect takes the whole list again
         servers.Set(ServerA, item, Question("p/r/102", "102-docs", "Dansk eller engelsk?", minutesAgo: 1));
-        await voice.Events.SaidAsync("102 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 102 har et spørgsmål.");
 
-        Assert.Single(voice.Events.Responses, r => r == "101 har et spørgsmål.");
+        Assert.Single(voice.Events.Responses, r => r == "issue 101 har et spørgsmål.");
     }
 
     [Fact]
@@ -52,7 +52,7 @@ public sealed class VoiceSessionTests
             return Task.CompletedTask;
         });
 
-        await voice.Events.SaidAsync("3 venter på dig: 101 har et spørgsmål. 102 har et spørgsmål. 103 har et spørgsmål.");
+        await voice.Events.SaidAsync("3 venter på dig: issue 101 har et spørgsmål. issue 102 har et spørgsmål. issue 103 har et spørgsmål.");
     }
 
     /// <summary>
@@ -68,12 +68,12 @@ public sealed class VoiceSessionTests
             .Respond("Sendt til 283.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Slet kolonnerne?", minutesAgo: 30)); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("101 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
         servers.Set(ServerB, Question("p/r/283", "283-voice", "Ny migration eller den eksisterende?"));
-        await voice.Events.SaidAsync("283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
 
         voice.Transcriptions.AddFinal("Svar at den skal bruge den eksisterende migration");
-        await voice.Events.SaidAsync("Sendt til 283.");
+        await voice.Events.SaidAsync("Sendt til issue 283.");
 
         var (project, text) = Assert.Single(servers.Replies);
         Assert.Equal(new ProjectRef(ServerB, "p/r/283"), project);
@@ -92,10 +92,10 @@ public sealed class VoiceSessionTests
             servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Slet kolonnerne?", minutesAgo: 30), Question("p/r/283", "283-voice", "Migration?"));
             return Task.CompletedTask;
         });
-        await voice.Events.SaidAsync("2 venter på dig: 101 har et spørgsmål. 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("2 venter på dig: issue 101 har et spørgsmål. issue 283 har et spørgsmål.");
 
         voice.Transcriptions.AddFinal("Svar hundrede og et at den skal slette dem");
-        await voice.Events.SaidAsync("Sendt til 101.");
+        await voice.Events.SaidAsync("Sendt til issue 101.");
 
         Assert.Equal(new ProjectRef(ServerA, "p/r/101"), Assert.Single(servers.Replies).Project);
     }
@@ -114,10 +114,10 @@ public sealed class VoiceSessionTests
             .Respond("Sendt til 28.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerB, Question("p/r/283", "283-voice", "Migration?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
 
         voice.Transcriptions.AddFinal("Svar 28 at den skal køre testene");
-        await voice.Events.SaidAsync("Sendt til 28.");
+        await voice.Events.SaidAsync("Sendt til issue 28.");
 
         Assert.Equal(new ProjectRef(ServerA, "p/r/28-x"), Assert.Single(servers.Replies).Project);
     }
@@ -159,7 +159,7 @@ public sealed class VoiceSessionTests
             servers.Set(ServerA, Permission("p/r/283", "283-voice", "Bash: rm -rf build"));
             return Task.CompletedTask;
         });
-        await voice.Events.SaidAsync("283 skal have tilladelse: Bash: rm -rf build. Svar på skærmen.");
+        await voice.Events.SaidAsync("issue 283 skal have tilladelse: Bash: rm -rf build. Svar på skærmen.");
 
         voice.Transcriptions.AddFinal("ja gør det");
         await voice.Events.SaidAsync("283 skal have tilladelse. Svar på skærmen.");
@@ -181,14 +181,14 @@ public sealed class VoiceSessionTests
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." }).Respond("Sendt til 283.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Skal jeg slette kolonnerne?", minutesAgo: 30)); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("101 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
 
         voice.Transcriptions.SayAsRecognized("ja");
-        await voice.Events.SaidAsync("Sendt til 101.");
+        await voice.Events.SaidAsync("Sendt til issue 101.");
         servers.Set(ServerB, Question("p/r/283", "283-voice", "Skal jeg bruge den eksisterende migration?"));
-        await voice.Events.SaidAsync("283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
         voice.Transcriptions.SayAsRecognized("ja");
-        await voice.Events.SaidAsync("Sendt til 283.");
+        await voice.Events.SaidAsync("Sendt til issue 283.");
 
         Assert.Equal([new ProjectRef(ServerA, "p/r/101"), new ProjectRef(ServerB, "p/r/283")], servers.Replies.Select(r => r.Project));
         Assert.Equal(4, model.Calls);
@@ -390,7 +390,7 @@ public sealed class VoiceSessionTests
     {
         var formatter = new NeverThrowingFormatter(new ThrowsOnce(), Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
 
-        Assert.Equal("101 har et spørgsmål.", formatter.Format([new Announcement("101 har et spørgsmål")], new SessionLanguages("da-DK")));
+        Assert.Equal("issue 101 har et spørgsmål.", formatter.Format([new Announcement("issue 101 har et spørgsmål")], new SessionLanguages("da-DK")));
         Assert.Equal("fine: 102", formatter.Format([new Announcement("102")], new SessionLanguages("da-DK")));
     }
 
@@ -403,7 +403,7 @@ public sealed class VoiceSessionTests
         for (var n = 101; n <= 104; n++)
         {
             servers.Set(ServerA, Question($"p/r/{n}", $"{n}-x", "?"));
-            await voice.Events.SaidAsync($"{n} har et spørgsmål.");
+            await voice.Events.SaidAsync($"issue {n} har et spørgsmål.");
         }
     }
 
