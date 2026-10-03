@@ -163,6 +163,17 @@
   --list-gutter:      6px;
   --row-pad-x:        6px;
   --row-pad-y:        4px;
+
+  /* ── The splitter on the left panel's edge (#436): always shown, over the panel's border ── */
+  --splitter-hit:          10px;    /* the width that takes the pointer */
+  --splitter-line:         transparent;
+  --splitter-line-width:   2px;
+  --splitter-active:       var(--accent);
+  --splitter-active-width: 4px;
+  --splitter-grip:         var(--glass-border-strong);
+  --splitter-grip-width:   4px;
+  --splitter-grip-length:  32px;
+  --splitter-grip-radius:  0;
 }
 
 /* ── Pixels stay pixels: Pet Me 64 has one weight, never a smeared fake bold ── */

@@ -69,9 +69,10 @@ body::after {
   -webkit-backdrop-filter: var(--blur-lg);
 }
 
+/* A wide screen's width is its splitter's (#436), inline; the phone's is the screen's */
 .shell-sidebar {
-  width: 260px;
-  min-width: 220px;
+  width: 320px;
+  flex-shrink: 0;
   background: var(--sidebar-bg);
   backdrop-filter: var(--blur-lg);
   -webkit-backdrop-filter: var(--blur-lg);
