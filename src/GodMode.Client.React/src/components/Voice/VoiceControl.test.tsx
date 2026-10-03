@@ -180,6 +180,16 @@ it('shows an error while the transcript is folded, until it is dismissed, and a 
   expect(alertText()).not.toBeNull();
 });
 
+it('names what the × dismisses, and the transcript the toggle opens (#445)', async () => {
+  answer({ 'voice.state': status({ State: 'Listening', Error: { Service: 'Model', Kind: 'ModelError', Message: 'overloaded' } }) });
+  view = await render(<VoiceControl />);
+
+  expect(dismissButton()!.getAttribute('aria-label')).toBe('Dismiss the voice error');
+  await click(transcriptToggle()!);
+  expect(transcriptToggle()!.getAttribute('aria-controls')).toBe(transcript()!.id);
+  expect(transcript()!.id).not.toBe('');
+});
+
 it('says ElevenLabs refused the key, and clears it when that service recovers', async () => {
   answer({ 'voice.state': status({ State: 'Listening' }) });
   view = await render(<VoiceControl />);

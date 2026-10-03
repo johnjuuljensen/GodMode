@@ -10,6 +10,7 @@ import { AppSettings } from './AppSettings';
 import { ConfirmDialog } from './ConfirmDialog';
 import { Toast } from './Toast/Toast';
 import { Inbox, HomeTabBar } from './Inbox/Inbox';
+import { VoiceControl } from './Voice/VoiceControl';
 import { useAttentionTitle } from './Inbox/useAttentionTitle';
 import { formatRoute, goBack, useHashRoute } from '../routing';
 import { subscribeAttentionLinks } from '../services/hostApi';
@@ -97,6 +98,8 @@ export function Shell() {
     : (!isMobile || phoneHome) && (
       <div className={isMobile ? 'shell-sidebar shell-mobile-home' : 'shell-sidebar'}>
         <Sidebar inbox={!isMobile ? 'pane' : homeView === 'inbox' ? 'screen' : undefined} />
+        {/* The inbox tab has no sidebar foot, so voice is here, compact (#445); the Projects tab has the foot's */}
+        {isMobile && homeView === 'inbox' && <VoiceControl compact />}
         {isMobile && <HomeTabBar tab={homeView} onChange={setHomeView} />}
       </div>
     );
@@ -105,6 +108,7 @@ export function Shell() {
     <div className={isMobile ? 'page-back-bar' : 'shell-back-bar'}>
       <button className="btn btn-secondary btn-sm" onClick={() => goBack(clearSelection)}>{isMobile ? '← Back' : '← Tiles'}</button>
       {isMobile && <ProjectConnection serverId={project.serverId} />}
+      {isMobile && <VoiceControl compact />}
     </div>
   );
 
