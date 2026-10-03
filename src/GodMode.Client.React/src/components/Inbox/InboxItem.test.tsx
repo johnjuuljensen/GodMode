@@ -14,6 +14,8 @@ import { Inbox } from './Inbox';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { dismissConfirm } from '../../confirmDialog';
 import { dismissToast } from '../../toast';
+import { join } from 'node:path';
+import { classesIn, cuttingRules, longRequest, ruleOf, textsOf } from '../../test/readable';
 
 vi.mock('../../signalr/hub', () => ({ GodModeHub: class {} }));
 vi.mock('../../services/hostApi', () => ({
@@ -228,5 +230,65 @@ describe('a create that failed (#448)', () => {
 
     await vi.waitFor(() => expect(hubA.deletes).toEqual([{ projectId: 'p3', force: false }]));
     expect(hubA.replies).toEqual([]);
+  });
+});
+
+describe('a pending question, read in full (#454)', () => {
+  const css = join(import.meta.dirname, 'Inbox.css');
+  const option = (el: HTMLElement, label: string) => [...el.querySelectorAll<HTMLButtonElement>('.inbox-option')]
+    .find(b => b.querySelector('.inbox-option-label')?.textContent === label)!;
+  const asking = () => itemEl('p5', 'Server A');
+
+  beforeEach(async () => {
+    await act(async () => hubA.callbacks.onAttentionChanged?.([item('p5', 'Question', '2026-10-03T12:00:00Z', {
+      Text: longRequest.Questions.map(q => q.Question).join('\n'), Question: longRequest,
+    })]));
+  });
+
+  it('shows every word of every question, header, option and description', () => {
+    const shown = asking().textContent!;
+    for (const text of textsOf(longRequest)) expect(shown).toContain(text);
+    expect(asking().querySelectorAll('.inbox-question')).toHaveLength(3);
+  });
+
+  it('has no rule that cuts its text off', () => {
+    expect(cuttingRules(css, classesIn(asking().querySelector('.inbox-questions')!))).toEqual([]);
+  });
+
+  it('shows a description as text under its label, not in a tooltip, at a readable size and contrast', () => {
+    const description = longRequest.Questions[0].Options[0].Description!;
+    expect(option(asking(), 'Yes, repair now').querySelector('.inbox-option-desc')?.textContent).toBe(description);
+    expect([...asking().querySelectorAll('[title]')].map(el => el.getAttribute('title'))).not.toContain(description);
+    const desc = ruleOf(css, '.inbox-option-desc');
+    expect(Number(/font-size:\s*([\d.]+)px/.exec(desc)?.[1])).toBeGreaterThanOrEqual(12);
+    expect(desc).toContain('var(--text-secondary)');
+  });
+
+  it('takes one answer per question, a multi-select as one, and sends them together', async () => {
+    const send = button(asking(), 'Send answers');
+    expect(asking().querySelectorAll('.inbox-question-multi')).toHaveLength(1);
+    await click(option(asking(), 'No, leave it'));
+    await click(option(asking(), 'Yes, repair now'));
+    await click(option(asking(), 'The leak'));
+    await click(option(asking(), 'The crash'));
+    expect(send.disabled).toBe(true);
+    await click(option(asking(), 'Wait'));
+    await click(send);
+    expect(hubA.answers).toEqual([{ projectId: 'p5', requestId: 'long', answers: {
+      [longRequest.Questions[0].Question]: 'Yes, repair now',
+      [longRequest.Questions[1].Question]: 'The crash, The leak',
+      [longRequest.Questions[2].Question]: 'Wait',
+    } }]);
+    expect(hubA.replies).toEqual([]);
+  });
+
+  it('answers a single question with a tap on its option, its description shown', async () => {
+    const [first] = longRequest.Questions;
+    await act(async () => hubA.callbacks.onAttentionChanged?.([item('p5', 'Question', '2026-10-03T12:05:00Z', {
+      Text: first.Question, Question: { ...longRequest, Questions: [first] },
+    })]));
+    expect(option(asking(), 'No, leave it').textContent).toContain(first.Options[1].Description!);
+    await click(option(asking(), 'No, leave it'));
+    expect(hubA.replies).toEqual([{ projectId: 'p5', text: 'No, leave it' }]);
   });
 });
