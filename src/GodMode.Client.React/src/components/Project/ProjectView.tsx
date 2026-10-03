@@ -10,6 +10,7 @@ import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import { deleteSession } from '../../deleteSession';
 import './ProjectView.css';
+import { ImportancePicker } from '../Importance/Importance';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
 
@@ -174,6 +175,7 @@ export function ProjectView({ serverId, projectId }: Props) {
           )}
         </div>
         <div className="project-header-actions">
+          {project && <ImportancePicker serverId={serverId} projectId={projectId} importance={project.Importance} />}
           <button
             className={`btn btn-toggle ${simpleView ? 'active' : ''}`}
             onClick={toggleSimpleView}

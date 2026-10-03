@@ -48,6 +48,11 @@ interface ProfilePayload {
   Profile: string;
 }
 
+/** Whether this device makes a sound for what interrupts (#438): an important session's items. The device's own, not the session's. */
+export interface AttentionSound {
+  Enabled: boolean;
+}
+
 // ── Voice (the Windows app only: voice.state says whether it is Available) ──
 
 export type VoiceStateName = 'Off' | 'Starting' | 'Listening' | 'Thinking' | 'Speaking' | 'Error';
@@ -155,6 +160,8 @@ export interface BridgeRequests {
   'window.openProfile': [ProfilePayload, boolean];
   /** The item the last notification tap opened, once; null when there is none (or it was taken). */
   'attention.take': [void, AttentionLinkPayload | null];
+  'attention.sound.get': [void, AttentionSound];
+  'attention.sound.set': [AttentionSound, AttentionSound];
   'voice.state': [void, VoiceStatus];
   /** Fails saying why: a missing key, no microphone, voice not available here. */
   'voice.start': [void, VoiceStatus];

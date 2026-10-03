@@ -1,0 +1,45 @@
+/* A session's tier (#438): a star when important, a quiet tag when quiet */
+.importance-mark {
+  flex-shrink: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.importance-mark.important {
+  color: var(--warning);
+  font-size: 12px;
+}
+
+.importance-mark.quiet {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  border: var(--border-width) dashed var(--glass-border-strong);
+  color: var(--text-tertiary);
+}
+
+.importance-picker {
+  display: inline-flex;
+  border: var(--border-width) var(--border-style) var(--glass-border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.importance-choice {
+  padding: 3px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-body);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.importance-choice.active {
+  background: var(--glass-border-strong);
+  color: var(--text-primary);
+}
+
+.importance-choice.important.active {
+  color: var(--warning);
+}
