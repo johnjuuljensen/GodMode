@@ -150,15 +150,68 @@ interface ReplayOf {
  * from offset 0, or in another generation, is the whole file, so what was held is dropped first; a
  * batch that starts past the offset would leave a gap, and is not applied.
  */
-function appendLines(t: Transcript, lines: OutputMessage[], batch?: ReplayOf & { fromOffset: number }): { transcript: Transcript; added: ClaudeMessage[] } {
+function appendLines(t: Transcript, lines: OutputMessage[], batch?: ReplayOf & { fromOffset: number }): { transcript: Transcript; fresh: OutputMessage[] } {
   const base = batch && (batch.fromOffset === 0 || batch.generation !== t.generation)
     ? { ...t, messages: [], offset: 0, generation: batch.generation }
     : t;
-  if (batch && batch.fromOffset > base.offset) return { transcript: t, added: [] };
+  if (batch && batch.fromOffset > base.offset) return { transcript: t, fresh: [] };
   const fresh = lines.filter(l => l.offset > base.offset);
-  if (fresh.length === 0) return { transcript: base, added: [] };
+  if (fresh.length === 0) return { transcript: base, fresh };
   const added = fresh.map(l => l.message);
-  return { transcript: { ...base, messages: [...base.messages, ...added], offset: fresh[fresh.length - 1].offset }, added };
+  return { transcript: { ...base, messages: [...base.messages, ...added], offset: fresh[fresh.length - 1].offset }, fresh };
+}
+
+// ── Pending sends (#383) ───────────────────────────────────────
+
+/**
+ * A message this client sent that claude has not echoed yet (--replay-user-messages): shown at once,
+ * dimmed, until the echo takes its place. Transient: kept in this page only, never persisted or shared.
+ */
+export interface PendingSend {
+  id: string;
+  text: string;
+  /** Where the transcript ended when it was sent: only a line after it can be its echo. */
+  offset: number;
+  generation: string | null;
+  /** The session stopped or failed before claude took it. */
+  notTaken: boolean;
+}
+
+let pendingIds = 0;
+
+/** The text of a message the user typed, as claude echoes it; null for any other line (a tool result, a command's output). */
+function typedText(m: ClaudeMessage): string | null {
+  if (m.type !== 'user' || m.commandNote || m.contentItems.length === 0 || m.contentItems.some(c => c.type !== 'text')) return null;
+  return m.contentItems.map(c => c.text ?? '').join('');
+}
+
+/**
+ * The pending sends the lines leave: each echo takes the oldest one with its text sent before it,
+ * so the same text sent twice is matched in order. A slash command is echoed as what it does, not as
+ * its text: the end of the turn after it (its result, or the marker it puts in) takes it.
+ */
+function unechoed(pending: PendingSend[], lines: OutputMessage[], generation: string | null): PendingSend[] {
+  let left = pending;
+  for (const { offset, message } of lines) {
+    const after = (p: PendingSend) => p.generation !== generation || offset > p.offset;
+    const text = typedText(message)?.trim();
+    if (text !== undefined) {
+      const i = left.findIndex(p => after(p) && p.text.trim() === text);
+      if (i >= 0) left = left.filter((_, j) => j !== i);
+    } else if (message.type === 'result' || message.marker) {
+      left = left.filter(p => !(after(p) && p.text.trimStart().startsWith('/')));
+    }
+  }
+  return left;
+}
+
+/** The project's pending sends replaced: none drops its entry. */
+function withPending(all: Record<ProjectKey, PendingSend[]>, key: ProjectKey, pending: PendingSend[]): Record<ProjectKey, PendingSend[]> {
+  if (pending === (all[key] ?? [])) return all;
+  const next = { ...all };
+  if (pending.length > 0) next[key] = pending;
+  else delete next[key];
+  return next;
 }
 
 /**
@@ -296,6 +349,13 @@ interface AppState {
   /** Answers a project whether its claude runs or not (resuming it if needed). */
   replyAndResume: (serverId: string, projectId: string, text: string) => Promise<void>;
   /**
+   * The project's view's messages, by ProjectKey, until claude echoes them (#383): each shows at once, pending.
+   * Only this page's, and gone with a reload.
+   */
+  pendingSends: Record<ProjectKey, PendingSend[]>;
+  /** Sends as replyAndResume does, the message pending in the conversation meanwhile; a send that fails takes it away. */
+  sendReply: (serverId: string, projectId: string, text: string) => Promise<void>;
+  /**
    * The inbox items' unsent text, by ProjectKey: held here rather than in the item, so it survives the
    * item remounting (the phone's home left and come back to, the pane collapsed, a rotation) (#240).
    */
@@ -363,6 +423,7 @@ function forgotten(state: AppState, keys: ReadonlySet<ProjectKey>): Partial<AppS
   return {
     transcripts, dismissedProjects: dp,
     projectQuestions: without(state.projectQuestions, keys), inboxDrafts: without(state.inboxDrafts, keys),
+    pendingSends: without(state.pendingSends, keys),
     tiles: without(state.tiles, keys), tileMessages: without(state.tileMessages, keys), tileLoading: without(state.tileLoading, keys),
     ...(sel && keys.has(projectKey(sel.serverId, sel.projectId)) ? { outputMessages: [], question: emptyQuestion } : {}),
   };
@@ -653,8 +714,13 @@ export const useAppStore = create<AppState>((set, get) => {
 
         const held = state.transcripts[key];
         if (held && (batch ? answers(held, batch.subscription) : held.phase === 'live')) {
-          const { transcript, added } = appendLines(held, lines, batch);
+          const { transcript, fresh } = appendLines(held, lines, batch);
+          const added = fresh.map(l => l.message);
           updates.transcripts = { ...state.transcripts, [key]: transcript };
+          const pending = state.pendingSends[key];
+          if (pending && fresh.length > 0) {
+            updates.pendingSends = withPending(state.pendingSends, key, unechoed(pending, fresh, transcript.generation));
+          }
           const sel = state.selectedProject;
           if (sel?.serverId === serverId && sel.projectId === projectId) {
             updates.outputMessages = transcript.messages;
@@ -790,6 +856,13 @@ export const useAppStore = create<AppState>((set, get) => {
       }),
       onStatusChanged: (_projectId, status) => {
         set(state => {
+          // Stopped or failed with a message not echoed: claude never took it, and the message says so
+          const key = projectKey(serverId, status.Id);
+          const before = state.getConnection(serverId)?.projects.find(p => p.Id === status.Id)?.State;
+          const pending = state.pendingSends[key];
+          const notTaken = pending && before !== status.State && (status.State === 'Stopped' || status.State === 'Error')
+            ? { pendingSends: withPending(state.pendingSends, key, pending.map(p => p.notTaken ? p : { ...p, notTaken: true })) }
+            : {};
           const connections = state.serverConnections.map(c =>
             c.serverInfo.Id === serverId
               ? { ...c, projects: c.projects.map(p => p.Id === status.Id
@@ -803,7 +876,6 @@ export const useAppStore = create<AppState>((set, get) => {
           );
           const { profileGroups, inactiveServers, profileFilterOptions } = rebuildHierarchy(connections, state.profileFilter, state.sidebarGroupBy);
 
-          const key = projectKey(serverId, status.Id);
           const sel = state.selectedProject;
           let questionUpdate: Partial<AppState> = {};
           let pq = state.projectQuestions;
@@ -838,7 +910,7 @@ export const useAppStore = create<AppState>((set, get) => {
           return {
             serverConnections: connections, profileGroups, inactiveServers, profileFilterOptions,
             projectQuestions: pq, dismissedProjects: dp, totalWaitingCount: total,
-            ...questionUpdate,
+            ...questionUpdate, ...notTaken,
           };
         });
       },
@@ -883,6 +955,9 @@ export const useAppStore = create<AppState>((set, get) => {
           const held = state.transcripts[key];
           if (held?.phase === 'live') {
             updates.transcripts = { ...state.transcripts, [key]: { ...held, messages: [], offset: 0, generation } };
+            // A /clear sent from here is done: its output started over
+            const pending = state.pendingSends[key];
+            if (pending) updates.pendingSends = withPending(state.pendingSends, key, pending.filter(p => !p.text.trimStart().startsWith('/')));
             const sel = state.selectedProject;
             if (sel?.serverId === serverId && sel.projectId === projectId) {
               updates.outputMessages = [];
@@ -1069,6 +1144,19 @@ export const useAppStore = create<AppState>((set, get) => {
   },
   replyAndResume: async (serverId, projectId, text) => {
     await hubFor(serverId).replyAndResume(projectId, text);
+  },
+  pendingSends: {},
+  sendReply: async (serverId, projectId, text) => {
+    const key = projectKey(serverId, projectId);
+    const held = get().transcripts[key] ?? emptyTranscript;
+    const sent: PendingSend = { id: `p${++pendingIds}`, text, offset: held.offset, generation: held.generation, notTaken: false };
+    set(state => ({ pendingSends: withPending(state.pendingSends, key, [...state.pendingSends[key] ?? [], sent]) }));
+    try {
+      await get().replyAndResume(serverId, projectId, text);
+    } catch (err) {
+      set(state => ({ pendingSends: withPending(state.pendingSends, key, (state.pendingSends[key] ?? []).filter(p => p !== sent)) }));
+      throw err;
+    }
   },
   inboxDrafts: {},
   setInboxDraft: (serverId, projectId, patch) => set(state => {
