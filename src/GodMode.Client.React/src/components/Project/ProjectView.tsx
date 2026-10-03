@@ -21,9 +21,6 @@ interface Props {
 export function ProjectView({ serverId, projectId }: Props) {
   const conn = useAppStore(s => s.serverConnections.find(c => c.serverInfo.Id === serverId));
   const outputMessages = useAppStore(s => s.outputMessages);
-  const question = useAppStore(s => s.question);
-  const dismissQuestion = useAppStore(s => s.dismissQuestion);
-  const markInputSent = useAppStore(s => s.markInputSent);
   const respondToPermission = useAppStore(s => s.respondToPermission);
   const answerQuestion = useAppStore(s => s.answerQuestion);
   const replyAndResume = useAppStore(s => s.replyAndResume);
@@ -123,7 +120,6 @@ export function ProjectView({ serverId, projectId }: Props) {
   const sendText = useCallback(async (text: string) => {
     if (!text.trim()) return;
     setRefusal(null);
-    markInputSent();
     // The reader's own message is one they want to see, wherever they had scrolled to
     transcriptRef.current?.scrollToLatest();
     try {
@@ -135,7 +131,7 @@ export function ProjectView({ serverId, projectId }: Props) {
       // What was typed comes back to be changed, unless something else has been typed since
       setInputText(current => current === '' ? text : current);
     }
-  }, [replyAndResume, serverId, projectId, markInputSent]);
+  }, [replyAndResume, serverId, projectId]);
 
   const handleSendInput = async () => {
     if (notFound || !inputText.trim()) return;
@@ -144,15 +140,8 @@ export function ProjectView({ serverId, projectId }: Props) {
     await sendText(text);
   };
 
-  const handleOptionSelect = useCallback((label: string) => {
-    sendText(label);
-    inputRef.current?.focus();
-  }, [sendText]);
-
-  const handleDismiss = useCallback(() => {
-    dismissQuestion();
-    inputRef.current?.focus();
-  }, [dismissQuestion]);
+  // The question still waits: dismissing it goes to the composer, which answers it too
+  const handleDismiss = useCallback(() => inputRef.current?.focus(), []);
 
   const handleStop = async () => {
     // A stray tap on the status pill must never end a session
@@ -226,20 +215,13 @@ export function ProjectView({ serverId, projectId }: Props) {
         // One card per request: each fetches its own detail (#234)
         <PermissionCard key={pendingPermission.RequestId} serverId={serverId} projectId={projectId}
           permission={pendingPermission} onAnswer={handlePermission} />
-      ) : openQuestion ? (
+      ) : openQuestion && (
+        // A question in plain text has no prompt: it is the transcript's last line, and the composer answers it (#447)
         <QuestionPrompt
           text={openQuestion.Question}
           header={openQuestion.Header ?? null}
           options={openQuestion.Options}
           onSelectOption={handleQuestionAnswer}
-          onDismiss={handleDismiss}
-        />
-      ) : question.isActive && (
-        <QuestionPrompt
-          text={question.text}
-          header={question.header}
-          options={[]}
-          onSelectOption={handleOptionSelect}
           onDismiss={handleDismiss}
         />
       )}

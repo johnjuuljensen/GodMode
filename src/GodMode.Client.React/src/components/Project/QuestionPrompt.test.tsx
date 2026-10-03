@@ -100,8 +100,8 @@ describe('outside a text field', () => {
 describe('beside a dialog and the inbox (#240)', () => {
   const button = (label: string, within: ParentNode = view.container) =>
     [...within.querySelectorAll('button')].find(b => b.textContent === label)!;
-  /** The question was dismissed and the dismissal stored: what Escape on the prompt does. */
-  const dismissed = () => Object.keys(useAppStore.getState().dismissedProjects);
+  /** The question was dismissed: what Escape on the prompt does, which takes the focus to the composer. */
+  const dismissed = () => document.activeElement === input;
 
   /** Taps the status pill's Stop: its dialog opens with Cancel focused. */
   async function openStopDialog() {
@@ -124,7 +124,7 @@ describe('beside a dialog and the inbox (#240)', () => {
     await act(async () => (document.activeElement as HTMLElement).blur());
     await keyDown(null, 'Escape');
     expect(getOpenConfirm()).toBeNull();
-    expect(dismissed()).toEqual([]);
+    expect(dismissed()).toBe(false);
     expect(hub.answers).toEqual([]);
   });
 
@@ -153,7 +153,7 @@ describe('beside a dialog and the inbox (#240)', () => {
         }
       }
       expect(hub.answers).toEqual([]);
-      expect(dismissed()).toEqual([]);
+      expect(dismissed()).toBe(false);
     });
 
     it("Enter is the button's own click, and no answer", async () => {

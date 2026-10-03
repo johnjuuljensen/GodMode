@@ -114,25 +114,21 @@ describe('the selected project and a tile, open over a reconnect', () => {
 const badge = () => [...view!.container.querySelectorAll('.project-item')]
   .find(el => el.querySelector('.project-name')?.textContent === 'first')?.querySelector('.project-state-badge')?.textContent;
 
-describe('a question the user dismissed (#239)', () => {
-  it('stays dismissed over a reconnect, though its project still asks, which its badge says (#441)', async () => {
+describe('a question in plain text (#239)', () => {
+  it('is WAIT over a reconnect, as its status says (#441), and opening the project shows no prompt for it (#447)', async () => {
     hub.projects = [{ ...project('p1', 'first', 'WaitingInput', '2026-09-24T12:00:00Z'), CurrentQuestion: 'Shall I go on?' }, hub.projects[1]];
     await hub.drop();
     await hub.reconnect();
-    view = await render(<Sidebar />);
-    expect(badge()).toBe('WAIT');
-
     useAppStore.getState().selectProject('A', 'p1');
-    expect(useAppStore.getState().question.isActive).toBe(true);
-    await act(async () => useAppStore.getState().dismissQuestion());
-    expect(useAppStore.getState().question.isActive).toBe(false);
+    view = await render(<><Sidebar /><ProjectView serverId="A" projectId="p1" /></>);
+    expect(badge()).toBe('WAIT');
 
     await act(() => hub.drop());
     await act(() => hub.reconnect());
     await act(flush);
-    expect(useAppStore.getState().question.isActive).toBe(false);
-    // WAIT is the server's: the session still waits on an answer, and takes a message for one
+    // WAIT is the server's: the session still waits on an answer, and takes a message for one, in its composer
     expect(badge()).toBe('WAIT');
+    expect(view.container.querySelector('.question-prompt')).toBeNull();
   });
 });
 

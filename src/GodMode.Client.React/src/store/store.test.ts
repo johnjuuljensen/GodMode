@@ -17,8 +17,6 @@ vi.mock('../services/hostApi', () => ({
   getHubOptions: () => ({}),
 }));
 
-const DISMISSED_KEY = 'godmode-dismissed-projects-v2';
-
 const question = parseClaudeMessage(JSON.stringify({
   type: 'assistant', message: { content: [{ type: 'text', text: 'Shall I continue?' }] },
 }));
@@ -80,14 +78,6 @@ describe('grouping', () => {
 });
 
 describe('per-project state is per server', () => {
-  it('dismissing A:p1 leaves B:p1 waiting', () => {
-    useAppStore.getState().selectProject('A', 'p1');
-    useAppStore.getState().dismissQuestion();
-    const s = useAppStore.getState();
-    expect(s.dismissedProjects[projectKey('A', 'p1')]).toBe(true);
-    expect(s.dismissedProjects[projectKey('B', 'p1')]).toBeUndefined();
-  });
-
   it("A:p1's tile output does not reach B:p1's tile", async () => {
     useAppStore.getState().setTileView(true);
     await useAppStore.getState().subscribeTail('A', 'p1', 2);
@@ -102,32 +92,6 @@ describe('per-project state is per server', () => {
   });
 });
 
-describe('dismissedProjects', () => {
-  it('is pruned on refresh when the project is gone, on that server only', async () => {
-    useAppStore.getState().selectProject('A', 'p1');
-    useAppStore.getState().dismissQuestion();
-    useAppStore.getState().selectProject('B', 'p3');
-    useAppStore.getState().dismissQuestion();
-
-    hubA.projects = hubA.projects.filter(p => p.Id !== 'p1');
-    await useAppStore.getState().refreshProjects('A');
-
-    const dp = useAppStore.getState().dismissedProjects;
-    expect(Object.keys(dp)).toEqual([projectKey('B', 'p3')]);
-    expect(Object.keys(JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? '{}'))).toEqual([projectKey('B', 'p3')]);
-  });
-
-  it('is written once when a Running event clears it, not on every Running event', () => {
-    useAppStore.getState().selectProject('A', 'p1');
-    useAppStore.getState().dismissQuestion();
-    const setItem = vi.spyOn(localStorage, 'setItem');
-    for (let i = 0; i < 3; i++) hubA.callbacks.onStatusChanged?.('p1', status('p1', 'Running'));
-    hubB.callbacks.onStatusChanged?.('p3', status('p3', 'Running'));
-    expect(setItem.mock.calls.filter(([k]) => k === DISMISSED_KEY)).toHaveLength(1);
-    expect(useAppStore.getState().dismissedProjects).toEqual({});
-  });
-});
-
 describe('a project created elsewhere (#170)', () => {
   const created = status('p9', 'Running');
 
@@ -138,7 +102,6 @@ describe('a project created elsewhere (#170)', () => {
     const s = useAppStore.getState();
     expect(s.selectedProject).toEqual({ serverId: 'B', projectId: 'p3' });
     expect(s.outputMessages).toBe(before.outputMessages);
-    expect(s.question).toBe(before.question);
     expect(s.getConnection('A')?.projects.map(p => p.Id)).toEqual(['p1', 'p2', 'p9']);
   });
 
