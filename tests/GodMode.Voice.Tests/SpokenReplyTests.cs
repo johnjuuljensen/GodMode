@@ -126,6 +126,18 @@ public sealed class SpokenReplyTests
         Assert.Equal($"issue 283 spørger: {Spoken}", GodModeAnnouncementFormatter.Sentence($"issue 283 spørger: {Spoken}"));
     }
 
+    /// <summary>An overseer's escalation (#401) is announced as a decision the user is asked for, in either language.</summary>
+    [Fact]
+    public void An_escalation_is_announced_as_a_decision()
+    {
+        var escalation = Finished(Id, "470-epic", "#376 needs your decision.") with { Kind = AttentionKind.Escalation };
+
+        Assert.Equal("epic 470 har brug for din beslutning",
+            new VoicePhrases(new VoiceBot.Core.Resources.SessionLanguages("da-DK")).Announce(new SpokenName("epic 470"), escalation));
+        Assert.Equal("epic 470 needs your decision",
+            new VoicePhrases(new VoiceBot.Core.Resources.SessionLanguages("en-US")).Announce(new SpokenName("epic 470"), escalation));
+    }
+
     /// <summary>
     /// A spoken reply that starts with "Sendt" is the session's, not the bot's claim of a send (#375): it is said after
     /// the handle, so it is never taken for one and replaced by "Intet sendt".

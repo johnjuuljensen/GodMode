@@ -54,6 +54,8 @@ public sealed partial class VoicePhrases
         (var who, AttentionKind.Permission, false) => $"{who} needs permission: {PermissionSummary(item)}. Answer it on screen",
         (var who, AttentionKind.Error, true) => $"{who} fejlede",
         (var who, AttentionKind.Error, false) => $"{who} failed",
+        (var who, AttentionKind.Escalation, true) => $"{who} har brug for din beslutning",
+        (var who, AttentionKind.Escalation, false) => $"{who} needs your decision",
         (var who, AttentionKind.Review, true) => $"{who} har fået ændringsønsker",
         (var who, AttentionKind.Review, false) => $"{who} has changes requested",
         (var who, AttentionKind.Finished, true) => $"{who} er færdig",
