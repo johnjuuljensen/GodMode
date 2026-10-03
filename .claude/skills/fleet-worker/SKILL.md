@@ -44,6 +44,10 @@ the GodMode app, nested under it. Everything below holds, with these differences
   what you did.
 - **A permission prompt is the user's,** as always: it waits in their inbox. Your overseer cannot
   answer it and will not try.
+- **Your finished turns are your overseer's, not the user's.** The user's inbox leaves out a child's
+  finished turn and its pull request's review; your permission prompts, questions and errors still
+  reach it. So a result nobody reports is a result nobody sees: report it, as above. You have no
+  `escalate`: a decision for the user is parked on the issue, and your overseer escalates it.
 
 ## Your pull request is your status
 
