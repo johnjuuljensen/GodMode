@@ -105,9 +105,10 @@ export function ProjectView({ serverId, projectId }: Props) {
     await respondToPermission(serverId, projectId, pendingPermission.RequestId, { Allow: allow });
   }, [pendingPermission, respondToPermission, serverId, projectId]);
 
-  const handleQuestionAnswer = useCallback(async (label: string) => {
+  // Any question of the request may be answered, or its answer changed, until the last is chosen (#454)
+  const handleQuestionAnswer = useCallback(async (questionText: string, label: string) => {
     if (!pendingQuestion || !openQuestion) return;
-    const byQuestion = { ...answered, [openQuestion.Question]: label };
+    const byQuestion = { ...answered, [questionText]: label };
     setAnswers({ requestId: pendingQuestion.RequestId, byQuestion });
     if (pendingQuestion.Questions.some(q => byQuestion[q.Question] === undefined)) return;
     setAnswerError(null);
@@ -228,18 +229,15 @@ export function ProjectView({ serverId, projectId }: Props) {
           permission={pendingPermission} onAnswer={handlePermission} />
       ) : openQuestion ? (
         <QuestionPrompt
-          text={openQuestion.Question}
-          header={openQuestion.Header ?? null}
-          options={openQuestion.Options}
-          onSelectOption={handleQuestionAnswer}
+          questions={pendingQuestion!.Questions}
+          answered={answered}
+          onAnswer={handleQuestionAnswer}
           onDismiss={handleDismiss}
         />
       ) : question.isActive && (
         <QuestionPrompt
-          text={question.text}
-          header={question.header}
-          options={[]}
-          onSelectOption={handleOptionSelect}
+          questions={[{ Question: question.text ?? '', Header: question.header, Options: [], MultiSelect: false }]}
+          onAnswer={(_, label) => handleOptionSelect(label)}
           onDismiss={handleDismiss}
         />
       )}
