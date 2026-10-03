@@ -216,6 +216,26 @@ public class ImportanceTests
         Assert.Equal(Importance.Normal, Settings(harness, session.Id).Importance);
     }
 
+    /// <summary>
+    /// A settings.json that cannot be read is not replaced with the defaults, which would say the session does not share
+    /// its folder: the tier is refused, and the file is left as it was.
+    /// </summary>
+    [Fact]
+    public async Task SetImportance_OfASessionWhoseSettingsCannotBeRead_IsRefused_AndLeavesTheFile()
+    {
+        await using var harness = new LifecycleHarness(Finishing("done"),
+            rootConfig: new Dictionary<string, object> { ["sharedFolder"] = true });
+        var session = await harness.CreateProjectAsync("session");
+        await WaitForResultAsync(harness, session.Id, "done");
+        var path = Path.Combine(harness.StatePath(session.Id), "settings.json");
+        File.WriteAllText(path, "{ not json");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Projects.SetImportanceAsync(session.Id, Importance.Important));
+
+        Assert.Equal("{ not json", File.ReadAllText(path));
+        Assert.Equal(Importance.Normal, harness.Tracked(session.Id).Status.Importance);
+    }
+
     // ── Config ──
 
     private static RootConfig Read(params (string File, string Json)[] files)

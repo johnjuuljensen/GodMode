@@ -61,7 +61,10 @@ public sealed class AttentionTracker
             Remove(serverId);
     }
 
-    /// <summary>Same project, but what it needs is different (a new question, another tool call), or not known (shown before).</summary>
+    /// <summary>
+    /// Same project, but what it needs is different (a new question, another tool call), or how loudly (its session's
+    /// tier changed, issue #438: the notifier takes away or brings back what it shows), or not known (shown before).
+    /// </summary>
     private static bool Changed(AttentionItem? was, AttentionItem now) =>
-        was is null || was.Kind != now.Kind || was.Since != now.Since || was.Text != now.Text;
+        was is null || was.Kind != now.Kind || was.Since != now.Since || was.Text != now.Text || was.Alert != now.Alert;
 }

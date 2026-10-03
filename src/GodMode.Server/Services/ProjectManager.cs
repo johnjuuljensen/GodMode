@@ -1540,9 +1540,12 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (project.Status.CreateFailed)
             throw new InvalidOperationException($"Project {projectId} failed before its launch, and has no settings to keep an importance in.");
 
+        // settings.json is what a recovery reads it from; status.json's is never read. One that cannot be read is not
+        // replaced by the defaults, which would make a shared folder one a delete removes: the tier is refused
+        if (!ProjectFiles.ProjectSettings.TryLoad(project.StatePath, out var settings))
+            throw new InvalidOperationException($"Project {projectId} has no settings.json that can be read, so its importance cannot be kept: see the server log.");
+
         _logger.LogInformation("Project {ProjectId} is now {Importance}", projectId, importance);
-        // settings.json is what a recovery reads it from; status.json's is never read
-        var settings = ProjectFiles.ProjectSettings.Load(project.StatePath);
         if (settings.Importance != importance)
             (settings with { Importance = importance }).Save(project.StatePath);
         await _lifecycle.UpdateStatusAsync(project, status => status with { Importance = importance });
