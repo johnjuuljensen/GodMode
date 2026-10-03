@@ -53,13 +53,14 @@ public sealed class IssueInfoTests
     [InlineData("""Write-Output '{"labels": [1]}'""", "not a string")]
     [InlineData("""Write-Output '{"colour": "red"}'""", "unknown property 'colour'")]
     [InlineData("throw 'no gh today'", "failed")]
-    [InlineData("Start-Sleep -Seconds 20", "took longer")]
+    [InlineData("Start-Sleep -Seconds 60", "took longer")]
     public async Task AScriptThatPrintsAnythingButTheIssue_FailsSayingWhy(string script, string reason)
     {
         await using var harness = IssueRoot($"$ErrorActionPreference = 'Stop'\n{script}\n",
-            new Dictionary<string, string?> { [ProjectManager.ListScriptTimeoutSetting] = "3" });
+            new Dictionary<string, string?> { [ProjectManager.ListScriptTimeoutSetting] = "15" });
         await harness.Projects.RecoverProjectsAsync();
 
+        // 15 s: pwsh can take seconds to start on a loaded machine, and a slow start is no timeout
         var failed = await Assert.ThrowsAsync<Microsoft.AspNetCore.SignalR.HubException>(() =>
             harness.Connect("c1").DescribeIssueAsync(LifecycleHarness.ProfileName, LifecycleHarness.RootName, "471"));
 
