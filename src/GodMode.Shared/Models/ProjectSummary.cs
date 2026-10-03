@@ -23,6 +23,7 @@ namespace GodMode.Shared.Models;
 /// The session that started this one as the server recorded it, as in <see cref="AttentionItem.RecordedParentId"/>:
 /// the overseer that runs it. Null for a top-level session.
 /// </param>
+/// <param name="Importance">How much the session may interrupt the user, as in <see cref="ProjectStatus.Importance"/>.</param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -40,5 +41,6 @@ public record ProjectSummary(
     bool Adopted = false,
     string? ParentId = null,
     IReadOnlyList<string>? SlashCommands = null,
-    string? RecordedParentId = null
+    string? RecordedParentId = null,
+    Importance Importance = Importance.Normal
 );

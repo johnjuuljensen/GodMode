@@ -56,6 +56,11 @@ namespace GodMode.Shared.Models;
 /// its workers' messages, the server's notices and its own background tasks, and those turns' ends raise no
 /// <see cref="AttentionKind.Finished"/>; a turn the user started does. Off unless the root turns it on. Read at each launch.
 /// </param>
+/// <param name="Importance">
+/// How much the action's sessions may interrupt the user (<c>"importance": "quiet" | "normal" | "important"</c>, issue #438),
+/// as they are created or adopted: the session keeps it in its <c>settings.json</c>, where the user may change it, so a later
+/// change to the config leaves the sessions there are as they are. <see cref="Enums.Importance.Normal"/> unless the root sets it.
+/// </param>
 public record CreateAction(
     string Name,
     string? Description = null,
@@ -80,7 +85,8 @@ public record CreateAction(
     bool Adopt = false,
     string? Effort = null,
     FleetToolsGrant FleetTools = FleetToolsGrant.None,
-    bool QuietTurns = false
+    bool QuietTurns = false,
+    Importance Importance = Importance.Normal
 )
 {
     public const string DefaultResumePrompt = "The GodMode server restarted and interrupted you. Continue where you left off.";

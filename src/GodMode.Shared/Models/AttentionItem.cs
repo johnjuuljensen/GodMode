@@ -41,6 +41,12 @@ namespace GodMode.Shared.Models;
 /// session cannot change it. A child's <see cref="AttentionKind.Finished"/> and <see cref="AttentionKind.Review"/> are
 /// its parent's business, and not in the user's list; its permission prompts, questions and errors are.
 /// </param>
+/// <param name="Importance">How much its session may interrupt the user, as in <see cref="ProjectStatus.Importance"/>; the app marks an important one.</param>
+/// <param name="Alert">
+/// How loudly to bring it to the user, from <paramref name="Importance"/> and <paramref name="Kind"/> (issue #438): an
+/// <see cref="AttentionAlert.Inbox"/> item is in the list and nowhere else, a <see cref="AttentionAlert.Notify"/> one is a
+/// notification and an announcement too, and an <see cref="AttentionAlert.Interrupt"/> one makes a sound and is announced first.
+/// </param>
 public record AttentionItem(
     string ProjectId,
     string ProjectName,
@@ -54,4 +60,6 @@ public record AttentionItem(
     string? PullRequestUrl = null,
     string? Spoken = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false,
-    string? RecordedParentId = null);
+    string? RecordedParentId = null,
+    Importance Importance = Importance.Normal,
+    AttentionAlert Alert = AttentionAlert.Notify);
