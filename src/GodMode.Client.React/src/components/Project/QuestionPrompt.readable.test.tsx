@@ -7,7 +7,7 @@
 import { join } from 'node:path';
 import { act, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakeHub, project, root, connectServers } from '../../test/fakeHub';
+import { FakeHub, project, root, status, connectServers } from '../../test/fakeHub';
 import { render, click, keyDown, type Rendered } from '../../test/render';
 import { classesIn, cuttingRules, longRequest, ruleOf, textsOf } from '../../test/readable';
 import { useAppStore } from '../../store';
@@ -112,7 +112,7 @@ describe("a multi-select's checks (#489)", () => {
     .map(b => b.querySelector('.question-option-label')?.textContent);
   /** A StatusChanged for the project, its pending question copied into new objects, as the store takes every push. */
   const push = (request = longRequest) => act(async () => hub.callbacks.onStatusChanged?.('p1', {
-    ...project('p1', 'asking', 'WaitingInput', '2026-10-03T12:00:00Z'),
+    ...status('p1', 'WaitingInput'), Name: 'asking', UpdatedAt: '2026-10-03T12:00:00Z',
     PendingQuestion: structuredClone(request),
   }));
 
