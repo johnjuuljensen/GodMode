@@ -184,6 +184,8 @@ public sealed class VoiceSession : IAsyncDisposable
         collection.AddVoiceBotSessions();
         var services = collection.BuildServiceProvider();
 
+        // Earcons play before an announcement's words, after the music paused for them (#455)
+        var speaker = new CueingSink(setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink);
         var state = new VoiceStateTracker();
         state.Changed += setup.Events.StateChanged;
         AsyncServiceScope scope = default;
@@ -200,10 +202,10 @@ public sealed class VoiceSession : IAsyncDisposable
                 setup.Mic is { } listening && setup.Transcription is TranscriptionInput.Audio audio
                     ? TranscriptionInput.FromAudio(listening.Listening(audio.Source))
                     : setup.Transcription,
-                setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink,
+                speaker,
                 new EventSink(setup.Events, state, tools.Creates, conversation, setup.Mic, setup.Media))
             {
-                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board, tools.Names), logger),
+                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board, tools.Names, speaker.Cue), logger),
                 Options = new SessionOptions
                 {
                     LogDirectory = setup.LogDirectory,

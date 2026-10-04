@@ -262,10 +262,11 @@ public sealed record ListReading(IReadOnlyList<(string Result, string Said)> Pag
 /// (<see cref="Urgency"/>), else in the order they came. What is being said already is never cut off for them: only
 /// what waits for the pause is ordered. An item's announcement is worded here too, with <paramref name="names"/>, as it is
 /// said (#455): how much of its project it names depends on what was said just before it
-/// (<see cref="VoiceConversation.Mention"/>), which is known only now.
+/// (<see cref="VoiceConversation.Mention"/>), which is known only now. What is said is cued with <paramref name="cue"/>: the
+/// earcon of its first item (<see cref="Earcons.For"/>), played before its words (<see cref="CueingSink"/>).
 /// </summary>
 public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConversation conversation, AttentionBoard? board = null,
-    ProjectNames? names = null)
+    ProjectNames? names = null, Action<Earcon>? cue = null)
     : IAnnouncementFormatter
 {
     public string Format(IReadOnlyList<Announcement> announcements, SessionLanguages languages)
@@ -280,6 +281,10 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
         var projects = waiting.Select(a => a.Announcement.Source).Distinct().ToList();
         if (projects is not ([] or [null]))
             conversation.Announced(projects is [var only] ? ProjectRef.FromKey(only) : null);
+        // VoiceBot says it now: its earcon goes before it (#455), the first item's, which is the most urgent
+        if (texts.Length > 0 && waiting.Select(a => a.Item).OfType<ServerAttentionItem>().FirstOrDefault() is { } first
+            && Earcons.For(first.Item) is { } earcon)
+            cue?.Invoke(earcon);
 
         return texts switch
         {
