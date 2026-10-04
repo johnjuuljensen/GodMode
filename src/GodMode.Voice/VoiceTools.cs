@@ -187,8 +187,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         conversation.LastListed = now;
         DateTime ActivityOfItem(ServerAttentionItem i) => projects.Find(i.Project) is { } p ? ProjectListing.ActivityOf(p.Project, now) : i.Item.Since;
         var (items, left) = ProjectListing.Within(all.Where(i => scope.Takes(i.Project)), ask.Window, ActivityOfItem, _ => true);
-        // The rest are workers' (#469): each overseer's line counts those its workers have, in the window
-        var (held, _) = ProjectListing.Within(all.Where(i => !scope.Takes(i.Project)), ask.Window, ActivityOfItem, _ => true);
+        // Unasked, workers' are held back (#469): each overseer's line counts those its workers have, in the window
+        var (held, _) = ProjectListing.Within(all.Where(i => scope.Shown && projects.IsRun(i.Project)), ask.Window, ActivityOfItem, _ => true);
         var overseers = held.Select(i => projects.Find(i.Project)).OfType<ServerProject>().GroupBy(p => projects.TopOf(p).Ref)
             .Select(g => (Overseer: g.Key, Name: Names.Of(g.Key), Workers: projects.WorkersOf(g.Key).Count, Waiting: g.Count()))
             .Where(o => o.Name is not null).Select(o => (o.Overseer, Name: o.Name!, o.Workers, o.Waiting)).ToList();
@@ -249,8 +249,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         conversation.LastListed = now;
         // Unasked, an overseer stands for its workers: it is as recent as the last of them, and needs the user when one does
         IReadOnlyList<ServerProject> Stands(ServerProject p) => scope.Shown ? [p, .. projects.WorkersOf(p.Ref)] : [p];
-        var (kept, left) = ProjectListing.Within(all, ask.Window, p => Stands(p).Max(s => ActivityOf(s, now)),
-            p => Stands(p).Any(s => StateOf(s) == ListedState.NeedsYou));
+        DateTime Activity(ServerProject p) => Stands(p).Max(s => ActivityOf(s, now));
+        var (kept, left) = ProjectListing.Within(all, ask.Window, Activity, p => Stands(p).Any(s => StateOf(s) == ListedState.NeedsYou));
         // As what needs me: one project read out is the one talked about, several leave none
         Talked(kept is [var only] ? only.Ref : null);
         if (all.Count == 0)
@@ -266,9 +266,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // Grouped by profile, then root, each said once (#450): a session's label alone ("branch master") says nothing
         // of where it is. The group with the most recent first, and the most recent first in each (#468)
         var groups = Names.Groups()
-            .Select(g => g with { Projects = [.. g.Projects.Where(kept.Contains).OrderByDescending(p => ActivityOf(p, now))] })
+            .Select(g => g with { Projects = [.. g.Projects.Where(kept.Contains).OrderByDescending(Activity)] })
             .Where(g => g.Projects.Count > 0)
-            .OrderByDescending(g => ActivityOf(g.Projects[0], now))
+            .OrderByDescending(g => Activity(g.Projects[0]))
             .ToList();
         // An overseer's line counts its workers (#469), unless they are listed themselves
         string ListLabelOf(ServerProject p) => scope.Shown && projects.WorkersOf(p.Ref) is { Count: > 0 } run
@@ -295,7 +295,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             text.Append($"Say the count, {kept.Count}, then each group once, by its profile and root, with its projects by the names given here. " +
                 "If you leave any out, say how many and why.");
             // Workers listed: what each needs is said too, since no announcement said it (#469)
-            List<(SpokenName, AttentionItem)> needs = scope.Shown ? [] : [.. groups.SelectMany(g => g.Projects)
+            List<(SpokenName, AttentionItem)> needs = scope.Shown ? [] : [.. groups.SelectMany(g => g.Projects).Where(p => projects.IsRun(p.Ref))
                 .Select(p => (Name: Names.Of(p.Ref), Item: board.ItemOf(p.Ref)?.Item))
                 .Where(n => n.Name is not null && n.Item is not null).Select(n => (n.Name!, n.Item!))];
             return SaysItself(text.ToString(), _phrases.Projects([.. groups.Select(g =>
@@ -303,7 +303,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         }
 
         // Too many to keep (#457): a summary by state, then the projects it did not name, a page at a time, on "mere"
-        var (states, rest) = ProjectListing.Summarise(ProjectListing.Order(groups, StateOf, ListLabelOf, p => ActivityOf(p, now)));
+        var (states, rest) = ProjectListing.Summarise(ProjectListing.Order(groups, StateOf, ListLabelOf, Activity));
         var pages = ProjectListing.Pages(rest);
         conversation.Reading = pages.Count > 0
             ? new ListReading([.. pages.Select((page, i) => (ListPageResult(page, i, pages.Count, rest.Count), _phrases.ListPage(page, i + 1 < pages.Count)))], 0)
