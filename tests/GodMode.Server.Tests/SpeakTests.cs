@@ -277,12 +277,15 @@ internal static class SpeakScript
     /// <summary>
     /// The model's <c>speak</c> tool use (under <paramref name="parentToolUseId"/>, a subagent's, when given), the real
     /// call to the server (with <paramref name="call"/>; none for a server with no MCP endpoint), then its tool result,
-    /// an error when <paramref name="refused"/>, as claude writes it for a call the server refused.
+    /// an error when <paramref name="refused"/>, as claude writes it for a call the server refused. With its
+    /// <paramref name="recap"/> and <paramref name="outcome"/>, when given.
     /// </summary>
     public static FakeScript Speak(this FakeScript script, string text, string toolUseId = "toolu_speak", string? parentToolUseId = null,
-        bool refused = false, bool call = true, string? recap = null)
+        bool refused = false, bool call = true, string? recap = null, string? outcome = null)
     {
-        object input = recap is null ? new { text } : new { text, recap };
+        var input = new Dictionary<string, string> { ["text"] = text };
+        if (recap is not null) input["recap"] = recap;
+        if (outcome is not null) input["outcome"] = outcome;
         script.Emit(JsonSerializer.Serialize(new
         {
             type = "assistant",
