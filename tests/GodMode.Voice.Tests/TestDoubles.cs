@@ -97,11 +97,12 @@ internal sealed class TieredModel(ScriptedChatClient model) : IInferenceProvider
 internal sealed class RecordingEvents : IVoiceEvents
 {
     public ConcurrentQueue<string> Transcripts { get; } = new();
+    public ConcurrentQueue<string> Partials { get; } = new();
     public ConcurrentQueue<string> Responses { get; } = new();
     public ConcurrentQueue<VoiceState> States { get; } = new();
     public ConcurrentQueue<(SessionService Service, SessionErrorKind Kind, string Message)> Errors { get; } = new();
 
-    public void Transcript(string text, bool partial) { if (!partial) Transcripts.Enqueue(text); }
+    public void Transcript(string text, bool partial) => (partial ? Partials : Transcripts).Enqueue(text);
     public void Response(string text) => Responses.Enqueue(text);
     public void StateChanged(VoiceState state) => States.Enqueue(state);
     public void Error(SessionService service, SessionErrorKind kind, string message) => Errors.Enqueue((service, kind, message));
