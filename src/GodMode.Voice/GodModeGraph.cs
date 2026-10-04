@@ -107,6 +107,9 @@ public static class GodModeGraph
               ({{VoiceTools.ProjectStatus}} does not have it then). Say the reply itself, after a lead-in that names the
               project ("issue 283 skrev: …"), as fully as speech allows, not only its gist. If it says more follows, end with "Mere?". "Læs videre", "Mere" / "Read on" — call {{VoiceTools.ReadMore}}.
               "Er det hele?" is answered from what the tool said: if more follows, call {{VoiceTools.ReadMore}}.
+            - "Mere?", "Hvorfor?", "Hvad er det?" / "More?", "Why?", "What is it?" about the line just said, naming no
+              project — call {{VoiceTools.ReadMore}}: it expands that line a step (an announcement into the project's status,
+              a status into its last reply, a reply or list into its next part). Never ask which project then.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}, and only then: on the user's own "læst" or "seen".
               Never mark a project seen as part of reading it, its status or its reply, or when the user asks if that was all.
             - "Marker [handle] som vigtig / normal / stille" / "Mark [handle] as important / normal / quiet" — call

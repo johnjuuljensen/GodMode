@@ -158,9 +158,10 @@ public sealed class VoiceConversation(TimeProvider? time = null)
 
     /// <summary>
     /// What is being read in parts, and the part to read next: what "mere" and "læs videre" read on from
-    /// (<see cref="VoiceTools.ReadMoreAsync"/>). One for both: a reply (<see cref="VoiceTools.ReadReplyAsync"/>) or a long
-    /// project list (<see cref="VoiceTools.ListProjectsText"/>, #457), whichever was read last. Null before any was read; a
-    /// new reply read or list said replaces it (a list said whole leaves none), and a new reply of its project drops a reply.
+    /// (<see cref="VoiceTools.ReadMoreAsync"/>). One for all: a reply (<see cref="VoiceTools.ReadReplyAsync"/>), a long
+    /// project list (<see cref="VoiceTools.ListProjectsText"/>, #457), or the last line about one project, to expand (#455,
+    /// <see cref="ProjectLine"/>), whichever was said last. Null before any was read; a new reply read, list said, status
+    /// read or one project announced replaces it (a list said whole leaves none), and a new reply of its project drops a reply.
     /// </summary>
     public PagedReading? Reading
     {
@@ -243,8 +244,18 @@ public sealed record AnnouncedSwitch(ProjectRef From, ProjectRef To, DateTimeOff
 public sealed record ReplyReading(ProjectRef Project, string Handle, IReadOnlyList<string> Parts, int Next, int Turns, IReadOnlyList<AssistantReply> Replies)
     : PagedReading;
 
-/// <summary>What "mere" reads on in (<see cref="VoiceConversation.Reading"/>): a reply, or a long project list.</summary>
+/// <summary>
+/// What "mere" reads on in (<see cref="VoiceConversation.Reading"/>): a reply, a long project list, or the last line said
+/// of one project, which it expands (<see cref="ProjectLine"/>).
+/// </summary>
 public abstract record PagedReading;
+
+/// <summary>
+/// The last line was about <paramref name="Project"/> alone (#455), and "Mere?", "Hvorfor?" or "Hvad er det?" expand it a
+/// step: an announcement, or what needs me naming it alone (<paramref name="Read"/> false), into its status; its status
+/// (<paramref name="Read"/> true) into its last reply, which is then read in parts (<see cref="ReplyReading"/>).
+/// </summary>
+public sealed record ProjectLine(ProjectRef Project, bool Read) : PagedReading;
 
 /// <summary>
 /// A long project list's pages (#457), as they were when it was said, and the index of the page to read next (their
@@ -280,7 +291,12 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
         // A dropped announcement was never said: the conversation stays where it was (#461's switch included)
         var projects = waiting.Select(a => a.Announcement.Source).Distinct().ToList();
         if (projects is not ([] or [null]))
+        {
             conversation.Announced(projects is [var only] ? ProjectRef.FromKey(only) : null);
+            // One project announced is the last line, which "Mere?" expands (#455); several leave what was read before
+            if (projects is [var one] && ProjectRef.FromKey(one) is { } announced)
+                conversation.Reading = new ProjectLine(announced, Read: false);
+        }
         // VoiceBot says it now: its earcon goes before it (#455), the first item's, which is the most urgent
         if (texts.Length > 0 && waiting.Select(a => a.Item).OfType<ServerAttentionItem>().FirstOrDefault() is { } first
             && Earcons.For(first.Item) is { } earcon)

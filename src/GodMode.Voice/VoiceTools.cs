@@ -125,8 +125,11 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 ToolParameterType.Integer, Required: false)],
             (_, args, ct) => ReadReplyAsync(Argument(args, ProjectParameter), Argument(args, TurnsParameter), ct))
         .Add(ReadMore,
-            $"Read the next part of what was read in parts last: the reply {ReadReply} read, or the long list {ListProjects} said. " +
-            "Call when the user says \"læs videre\", \"mere\" or \"read on\".",
+            $"Read more of what was said last: the next part of the reply {ReadReply} read, or of the long list {ListProjects} said; " +
+            "or, after a line about one project (its announcement, or its status), that line a step further: an announcement " +
+            "into the project's status (its question, result or error), a status into its last reply. Call when the user says " +
+            "\"læs videre\", \"mere\" or \"read on\", or asks about what was just said: \"Hvorfor?\", \"Hvad er det?\", " +
+            "\"Mere?\" / \"Why?\", \"What is it?\".",
             (_, _, ct) => ReadMoreAsync(ct))
         .Add(Answer,
             "Send the user's answer to a project: it reaches the Claude session as the user's reply, and the session " +
@@ -196,12 +199,16 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             .Select(g => (Overseer: g.Key, Name: Names.Of(g.Key), Workers: projects.WorkersOf(g.Key).Count, Waiting: g.Count()))
             .Where(o => o.Name is not null).Select(o => (o.Overseer, Name: o.Name!, o.Workers, o.Waiting)).ToList();
         // What was read out is what the conversation is about now: one project, or none to answer unnamed
-        Talked((items, overseers) switch
+        var alone = (items, overseers) switch
         {
             ([var only], []) => only.Project,
             ([], [var overseer]) => overseer.Overseer,
             _ => null,
-        });
+        };
+        Talked(alone);
+        // One project said alone is the last line, which "Mere?" expands into its status (#455)
+        if (alone is not null)
+            conversation.Reading = new ProjectLine(alone, Read: false);
         if (items.Count == 0 && overseers.Count == 0)
             return left.Count > 0
                 ? SaysItself($"Nothing that needs the user has had activity {ask.Said}; {left.Count} need the user from before, not named.{ask.Note}",
@@ -461,13 +468,17 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     private static string Count(int projects) => projects == 1 ? "1 project" : $"{projects} projects";
 
-    public async Task<string> ProjectStatusAsync(string? reference, CancellationToken ct)
-    {
-        if (Target(reference) is not { } target || Names.Of(target) is not { } name)
-            return await UnknownAsync(reference, ct);
+    public async Task<string> ProjectStatusAsync(string? reference, CancellationToken ct) =>
+        Target(reference) is { } target && handles.LabelOf(target) is not null ? await StatusOfAsync(target, ct) : await UnknownAsync(reference, ct);
 
+    /// <summary>The project's state and what it waits on, as <see cref="ProjectStatus"/> reads them; it has a handle.</summary>
+    private async Task<string> StatusOfAsync(ProjectRef target, CancellationToken ct)
+    {
+        var name = Names.Of(target)!;
         var status = await servers.GetStatusAsync(target, ct);
         Talked(target);
+        // The last line is its status: "Mere?" expands it into its last reply (#455)
+        conversation.Reading = new ProjectLine(target, Read: true);
         var text = new StringBuilder($"{name} ({Details(status.Name, status.Kind)}): {status.State}.");
         var item = board.ItemOf(target)?.Item;
         var full = item is null ? null : InFull(item, status);
@@ -646,11 +657,13 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <see cref="MaxTurnsRead"/>), from its output on the server, whatever it waits on (issue #378). A reply longer than
     /// <see cref="ReplyPartLength"/> gives its first part, and is kept for <see cref="ReadMoreAsync"/>. Nothing is marked seen.
     /// </summary>
-    public async Task<string> ReadReplyAsync(string? reference, string? turns, CancellationToken ct)
-    {
-        if (Target(reference) is not { } target || Names.Of(target) is not { } name)
-            return await UnknownAsync(reference, ct);
+    public async Task<string> ReadReplyAsync(string? reference, string? turns, CancellationToken ct) =>
+        Target(reference) is { } target && handles.LabelOf(target) is not null ? await ReplyOfAsync(target, turns, ct) : await UnknownAsync(reference, ct);
 
+    /// <summary>The project's last replies, as <see cref="ReadReply"/> reads them; it has a handle.</summary>
+    private async Task<string> ReplyOfAsync(ProjectRef target, string? turns, CancellationToken ct)
+    {
+        var name = Names.Of(target)!;
         var count = int.TryParse(turns, NumberStyles.Integer, CultureInfo.InvariantCulture, out var asked) && asked >= 1 ? Math.Min(asked, MaxTurnsRead) : 1;
         var status = await servers.GetStatusAsync(target, ct);
         var replies = await servers.GetLastRepliesAsync(target, count, ct);
@@ -673,15 +686,24 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     }
 
     /// <summary>
-    /// The next page of the long project list said last (#457), in the code's words, when a list was what was read in parts
-    /// last (<see cref="VoiceConversation.Reading"/>). Else the next part of the reply <see cref="ReadReplyAsync"/> read last, or that there is none. A project that has
-    /// written since (a new reply, or more of one it was working on) has its old one dropped, and says so (#411):
-    /// "læs videre" never reads on in a reply that is no longer its last.
+    /// What "mere" reads on in, whatever was said last (<see cref="VoiceConversation.Reading"/>). The next page of a long
+    /// project list (#457), in the code's words. A line about one project expanded a step (#455, <see cref="ProjectLine"/>):
+    /// an announcement into its status, a status into its last reply. Else the next part of the reply
+    /// <see cref="ReadReplyAsync"/> read last, or that there is none. A project that has written since (a new reply, or
+    /// more of one it was working on) has its old one dropped, and says so (#411): "læs videre" never reads on in a reply
+    /// that is no longer its last.
     /// </summary>
     public async Task<string> ReadMoreAsync(CancellationToken ct)
     {
         switch (conversation.Reading)
         {
+            case ProjectLine { Read: false } line when handles.LabelOf(line.Project) is not null:
+                return await StatusOfAsync(line.Project, ct);
+            case ProjectLine line when handles.LabelOf(line.Project) is not null:
+                return await ReplyOfAsync(line.Project, null, ct);
+            case ProjectLine:
+                conversation.Reading = null;
+                return "Nothing more to read: the project the last line was about is gone. Say so.";
             case ListReading list when list.Next < list.Pages.Count:
                 conversation.Reading = list with { Next = list.Next + 1 };
                 return SaysItself(list.Pages[list.Next].Result, list.Pages[list.Next].Said);
