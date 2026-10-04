@@ -470,12 +470,15 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         var said = text ?? item.Text;
         return item.Kind switch
         {
+            AttentionKind.Question when item.Outcome == TurnOutcome.Blocked => $"blocked: {said}",
             AttentionKind.Question => $"question: {said}",
             AttentionKind.Permission => $"permission request ({item.Permission?.Summary ?? said}); answered on screen only",
             AttentionKind.Error => $"failed: {said}",
             AttentionKind.Escalation => $"needs the user's decision: {said}",
             AttentionKind.Review => $"changes requested on its pull request: {said}",
-            AttentionKind.Finished => $"finished: {said}",
+            // Done only when the session said so; with no outcome it is idle, which says nothing of the work (issue #467)
+            AttentionKind.Finished when item.Outcome == TurnOutcome.Done => $"finished: {said}",
+            AttentionKind.Finished => $"idle (it did not say it is done): {said}",
         };
     }
 

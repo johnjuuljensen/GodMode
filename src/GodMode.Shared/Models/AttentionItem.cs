@@ -47,6 +47,12 @@ namespace GodMode.Shared.Models;
 /// <see cref="AttentionAlert.Inbox"/> item is in the list and nowhere else, a <see cref="AttentionAlert.Notify"/> one is a
 /// notification and an announcement too, and an <see cref="AttentionAlert.Interrupt"/> one makes a sound and is announced first.
 /// </param>
+/// <param name="Outcome">
+/// How the turn that raised it ended, as the session said it (<see cref="ProjectStatus.EffectiveOutcome"/>, issue #467),
+/// for a <see cref="AttentionKind.Finished"/> or a <see cref="AttentionKind.Question"/> its turn's end raised: a
+/// Finished is done only with <see cref="TurnOutcome.Done"/>, and with none the session is idle, not done; a Question is
+/// <see cref="TurnOutcome.NeedsYou"/> or <see cref="TurnOutcome.Blocked"/> when the session said so. Null otherwise.
+/// </param>
 public record AttentionItem(
     string ProjectId,
     string ProjectName,
@@ -62,4 +68,5 @@ public record AttentionItem(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool CreateFailed = false,
     string? RecordedParentId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] AttentionAlert Alert = AttentionAlert.Notify);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] AttentionAlert Alert = AttentionAlert.Notify,
+    TurnOutcome? Outcome = null);

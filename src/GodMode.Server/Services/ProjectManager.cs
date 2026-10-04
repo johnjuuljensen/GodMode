@@ -737,7 +737,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 RecordedParentId: ServerParentOf(project),
                 Importance: s.Importance,
                 Recap: s.Recap,
-                RecapAt: s.RecapAt
+                RecapAt: s.RecapAt,
+                Outcome: s.EffectiveOutcome
             ));
         }
 
