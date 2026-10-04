@@ -45,6 +45,10 @@ public class StatusUpdater : IStatusUpdater
         var stateChanged = false;
         var status = project.Status;
         var process = project.Process;
+        // The session's activity (issue #468): each line of its main conversation, in memory only, as the output offset is
+        if (IsConversationLine(outputEvent, rawJson))
+            status = status with { LastOutputAt = DateTime.UtcNow };
+        var lastOutputAt = status.LastOutputAt;
         // Every result ends the turn the user's input started, if one did
         var userTurn = outputEvent.Type == OutputEventType.Result && process.TakeUserTurn();
 
@@ -186,8 +190,13 @@ public class StatusUpdater : IStatusUpdater
                 break;
         }
 
-        // Most lines (assistant text, tool use, echoed user messages) change nothing on disk
-        if (!stateChanged) return false;
+        // Most lines (assistant text, tool use, echoed user messages) change nothing on disk: status.json carries their
+        // time when something else changes
+        if (!stateChanged)
+        {
+            project.Status = project.Status with { LastOutputAt = lastOutputAt };
+            return false;
+        }
 
         // Update duration
         var duration = DateTime.UtcNow - status.CreatedAt;
@@ -297,6 +306,26 @@ public class StatusUpdater : IStatusUpdater
     /// <summary>A user message the user sent, echoed by claude as it takes it (<c>--replay-user-messages</c>).</summary>
     private static bool IsEcho(OutputEvent outputEvent) =>
         outputEvent.Metadata?.GetValueOrDefault(IsReplayKey) is true;
+
+    /// <summary>
+    /// A line of the session's main conversation (issue #468): a message of the user's or the model's, or a turn's end. Not
+    /// a system line, and not a subagent's, which names the tool use it runs under (<c>parent_tool_use_id</c>).
+    /// </summary>
+    private static bool IsConversationLine(OutputEvent outputEvent, string rawJson)
+    {
+        if (outputEvent.Type is not (OutputEventType.User or OutputEventType.Assistant or OutputEventType.Result)) return false;
+        if (!rawJson.Contains("\"parent_tool_use_id\"", StringComparison.Ordinal)) return true;
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            return !(doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String);
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+    }
 
     /// <summary><c>system/init</c>: claude (re)started its session. It writes it once it has read its first input.</summary>
     public static bool IsSessionStart(OutputEvent outputEvent) =>

@@ -196,13 +196,15 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
 
     /// <summary>A project on a server, that no attention item names: created, as the hub pushes it.</summary>
     /// <param name="state">What it is doing: Idle unless given.</param>
-    /// <param name="minutesAgo">How long ago it changed: lists say the one changed last first.</param>
+    /// <param name="minutesAgo">How long ago it changed: lists say the one changed last first, when it has written no line.</param>
+    /// <param name="outputMinutesAgo">How long ago its main conversation last wrote a line (#468), its activity; none when null.</param>
     public void AddProject(string serverId, string projectId, string name, string? root = null, string? kind = null, string? profile = null,
-        ProjectState state = ProjectState.Idle, int minutesAgo = 0)
+        ProjectState state = ProjectState.Idle, int minutesAgo = 0, int? outputMinutesAgo = null)
     {
         _statuses[new ProjectRef(serverId, projectId)] = new ProjectStatus(projectId, name, state,
             DateTime.UtcNow, DateTime.UtcNow.AddMinutes(-minutesAgo), null, new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0,
-            RootName: root, ProfileName: profile, Kind: kind);
+            RootName: root, ProfileName: profile, Kind: kind,
+            LastOutputAt: outputMinutesAgo is { } output ? DateTime.UtcNow.AddMinutes(-output) : null);
         PushProjects(serverId);
     }
 
@@ -242,7 +244,8 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     }
 
     private static ProjectSummary Summary(ProjectStatus s) =>
-        new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission, Kind: s.Kind);
+        new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission, Kind: s.Kind,
+            LastResultAt: s.LastResultAt, LastOutputAt: s.LastOutputAt);
 
     private static ProjectStatus Status(AttentionItem item) =>
         new(item.ProjectId, item.ProjectName,

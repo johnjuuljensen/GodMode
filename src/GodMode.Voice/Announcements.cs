@@ -86,6 +86,19 @@ public sealed class VoiceConversation(TimeProvider? time = null)
         set => Volatile.Write(ref _lastProfile, value);
     }
 
+    private long _lastListed;
+
+    /// <summary>
+    /// When this voice session last listed projects (<see cref="VoiceTools.ListProjects"/>, <see cref="VoiceTools.WhatNeedsMe"/>):
+    /// what "siden jeg sidst spurgte" lists from (#468). Null before any list. The session's own: another session, on
+    /// this machine or another, keeps its own.
+    /// </summary>
+    public DateTime? LastListed
+    {
+        get => Interlocked.Read(ref _lastListed) is var ticks and > 0 ? new DateTime(ticks, DateTimeKind.Utc) : null;
+        set => Interlocked.Exchange(ref _lastListed, value?.ToUniversalTime().Ticks ?? 0);
+    }
+
     private PagedReading? _reading;
 
     /// <summary>

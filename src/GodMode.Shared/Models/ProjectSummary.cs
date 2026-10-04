@@ -28,6 +28,8 @@ namespace GodMode.Shared.Models;
 /// <param name="Recap">The session's one-line recap of where it stands, as in <see cref="ProjectStatus.Recap"/>.</param>
 /// <param name="RecapAt">When the session last gave its recap, as in <see cref="ProjectStatus.RecapAt"/>.</param>
 /// <param name="Outcome">What the session's last turn's end counts as, as in <see cref="ProjectStatus.EffectiveOutcome"/>: done once its pull request is merged.</param>
+/// <param name="LastResultAt">When the session's last turn ended, as in <see cref="ProjectStatus.LastResultAt"/>.</param>
+/// <param name="LastOutputAt">When its main conversation last wrote a line, as in <see cref="ProjectStatus.LastOutputAt"/> (issue #468).</param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -49,5 +51,36 @@ public record ProjectSummary(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
     string? Recap = null,
     DateTime? RecapAt = null,
-    TurnOutcome? Outcome = null
-);
+    TurnOutcome? Outcome = null,
+    DateTime? LastResultAt = null,
+    DateTime? LastOutputAt = null
+)
+{
+    /// <summary>
+    /// The summary of <paramref name="status"/>, as the status has it: the server's list sets what it knows better (the
+    /// profile it holds the session in, the parent it recorded), and a client makes one of each status it hears.
+    /// </summary>
+    public static ProjectSummary Of(ProjectStatus status) => new(
+        status.Id,
+        status.Name,
+        status.State,
+        status.UpdatedAt,
+        status.CurrentQuestion,
+        status.RootName,
+        status.ProfileName,
+        status.PendingPermission,
+        status.PendingQuestion,
+        status.PullRequest,
+        status.Kind,
+        status.ActionName,
+        status.SharedFolder,
+        status.Adopted,
+        status.ParentId,
+        status.SlashCommands,
+        Importance: status.Importance,
+        Recap: status.Recap,
+        RecapAt: status.RecapAt,
+        Outcome: status.EffectiveOutcome,
+        LastResultAt: status.LastResultAt,
+        LastOutputAt: status.LastOutputAt);
+}

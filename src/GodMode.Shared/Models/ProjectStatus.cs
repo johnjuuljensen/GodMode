@@ -98,6 +98,12 @@ namespace GodMode.Shared.Models;
 /// turn that gave none or ended in error, and cleared as the next turn starts, as <paramref name="SpokenSummary"/> is.
 /// What it counts as is <see cref="EffectiveOutcome"/>.
 /// </param>
+/// <param name="LastOutputAt">
+/// When the session's main conversation last wrote a line (issue #468): an assistant message, a tool result or a turn's
+/// end, a subagent's lines not counted. Its activity, where <paramref name="UpdatedAt"/> changes on every status write.
+/// Kept in memory as each line comes, as <paramref name="OutputOffset"/> is: status.json carries it when something else
+/// changes, at the latest as the turn ends. Null until the session has written a line since it was recorded.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -137,7 +143,8 @@ public record ProjectStatus(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
     string? Recap = null,
     DateTime? RecapAt = null,
-    TurnOutcome? Outcome = null
+    TurnOutcome? Outcome = null,
+    DateTime? LastOutputAt = null
 )
 {
     /// <summary>

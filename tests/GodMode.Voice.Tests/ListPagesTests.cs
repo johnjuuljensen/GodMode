@@ -111,7 +111,8 @@ public sealed class ListPagesTests
         AddSixteen(servers);
         servers.AddProject(ServerA, "Private/voicebot/260930-branch-main-p", "main", root: "voicebot", kind: "branch", profile: "Private");
 
-        Assert.Equal("17 projekter. branch master i GodMode, profil Mega og branch main i voicebot, profil Private er idle, resten er stoppet. Mere?",
+        // The most recent first in each state (#468): main changed now, master 30 minutes ago
+        Assert.Equal("17 projekter. branch main i voicebot, profil Private og branch master i GodMode, profil Mega er idle, resten er stoppet. Mere?",
             conversation.TakeSaid(tools.ListProjectsText()));
         conversation.TakeSaid(tools.ListProjectsText("Private"));
         Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
