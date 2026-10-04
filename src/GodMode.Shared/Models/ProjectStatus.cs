@@ -92,6 +92,12 @@ namespace GodMode.Shared.Models;
 /// running session has one too. Plain text voice can say; null until the session has given one.
 /// </param>
 /// <param name="RecapAt">When the session last gave <paramref name="Recap"/>.</param>
+/// <param name="Outcome">
+/// How the session said its last turn ended (issue #467): the <c>outcome</c> of the <c>speak</c> call that turn made in
+/// its main conversation, which the server accepted. Set with <paramref name="LastResult"/> as the turn ends, null for a
+/// turn that gave none or ended in error, and cleared as the next turn starts, as <paramref name="SpokenSummary"/> is.
+/// What it counts as is <see cref="EffectiveOutcome"/>.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -130,14 +136,24 @@ public record ProjectStatus(
     Escalation? Escalation = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
     string? Recap = null,
-    DateTime? RecapAt = null
-);
+    DateTime? RecapAt = null,
+    TurnOutcome? Outcome = null
+)
+{
+    /// <summary>
+    /// What the last turn's end counts as (issue #467): <see cref="TurnOutcome.Done"/> once the session's pull request is
+    /// merged, whatever the session said, else its <see cref="Outcome"/>.
+    /// </summary>
+    [JsonIgnore]
+    public TurnOutcome? EffectiveOutcome => PullRequest?.State == PullRequestState.Merged ? TurnOutcome.Done : Outcome;
+}
 
 /// <summary>A turn's end, as <see cref="ProjectStatus.UnseenResult"/> keeps it.</summary>
 /// <param name="At">When it ended.</param>
 /// <param name="Result">Its result, as <see cref="ProjectStatus.LastResult"/> had it.</param>
 /// <param name="Spoken">Its spoken reply, as <see cref="ProjectStatus.SpokenSummary"/> had it.</param>
-public record TurnResult(DateTime At, string? Result, string? Spoken = null);
+/// <param name="Outcome">How the session said it ended, as <see cref="ProjectStatus.Outcome"/> had it.</param>
+public record TurnResult(DateTime At, string? Result, string? Spoken = null, TurnOutcome? Outcome = null);
 
 /// <summary>A decision an overseer asked the user for: <see cref="ProjectStatus.Escalation"/>.</summary>
 /// <param name="At">When it asked.</param>

@@ -115,11 +115,18 @@ public sealed class ProjectProcess
     /// </summary>
     public string? Spoken { get; set; }
 
-    /// <summary>Forgets the turn's spoken reply and the calls waiting to give one: a new turn starts, or the turn ended.</summary>
+    /// <summary>
+    /// The outcome of this turn's last <c>speak</c> call the server accepted with one (issue #467), which its result makes
+    /// the status's <see cref="Shared.Models.ProjectStatus.Outcome"/>. Reset when a new turn starts. Only the consumer touches it.
+    /// </summary>
+    public Shared.Enums.TurnOutcome? Outcome { get; set; }
+
+    /// <summary>Forgets the turn's spoken reply, its outcome and the calls waiting to give them: a new turn starts, or the turn ended.</summary>
     public void ForgetSpoken()
     {
         SpeakCalls.Clear();
         Spoken = null;
+        Outcome = null;
     }
 
     private int _userTurn;

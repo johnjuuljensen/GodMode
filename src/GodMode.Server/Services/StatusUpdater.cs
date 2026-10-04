@@ -60,9 +60,9 @@ public class StatusUpdater : IStatusUpdater
                     // A message the user sent starts the reply over: the last turn's spoken reply, and one this
                     // turn gave before it, say nothing of the reply to come (issue #384)
                     process.ForgetSpoken();
-                    if (status.SpokenSummary != null)
+                    if (status is not { SpokenSummary: null, Outcome: null })
                     {
-                        status = status with { SpokenSummary = null };
+                        status = status with { SpokenSummary = null, Outcome = null };
                         stateChanged = true;
                     }
                 }
@@ -111,6 +111,7 @@ public class StatusUpdater : IStatusUpdater
                     CurrentQuestion = null,
                     LastError = outputEvent.Content is { Length: > 0 } text ? text : Subtype(outputEvent) ?? "error result",
                     SpokenSummary = null,
+                    Outcome = null,
                 };
                 process.LastAssistantText = null;
                 process.ForgetSpoken();
@@ -131,13 +132,21 @@ public class StatusUpdater : IStatusUpdater
                 // last assistant text block (trimmed) ends with '?'. See issue #131.
                 // The result's text is claude's summary of the turn, whichever it is
                 var endedAt = DateTime.UtcNow;
-                // and its spoken version the one the session gave in it, or none (issue #384)
-                status = WithTurnEnd(status, IsQuietTurnEnd(project, userTurn)) with
+                // and its spoken version the one the session gave in it, or none (issue #384), and its outcome the one it
+                // said, or none (issue #467)
+                var outcome = process.Outcome;
+                status = WithTurnEnd(status, IsQuietTurnEnd(project, userTurn, outcome)) with
                 {
                     LastResult = outputEvent.Content, LastResultAt = endedAt, LastError = null, SpokenSummary = process.Spoken,
+                    Outcome = outcome,
                 };
-                status = QuestionDetection.IsQuestion(process.LastAssistantText)
-                    ? status with { State = ProjectState.WaitingInput, CurrentQuestion = process.LastAssistantText, QuestionAt = endedAt }
+                // A turn that says it needs the user, or is blocked, waits on the user as one that ended on a question does
+                status = QuestionDetection.IsQuestion(process.LastAssistantText) || outcome is TurnOutcome.NeedsYou or TurnOutcome.Blocked
+                    ? status with
+                    {
+                        State = ProjectState.WaitingInput, QuestionAt = endedAt,
+                        CurrentQuestion = process.LastAssistantText ?? (outputEvent.Content is { Length: > 0 } said ? said : WaitsText(outcome)),
+                    }
                     : status with { State = ProjectState.Idle, CurrentQuestion = null };
                 process.LastAssistantText = null;
                 process.ForgetSpoken();
@@ -172,8 +181,8 @@ public class StatusUpdater : IStatusUpdater
             case OutputEventType.ConversationReset:
                 // /clear: the conversation that had the last reply and question is gone
                 process.LastAssistantText = null;
-                stateChanged = status is not { LastResult: null, LastResultAt: null, CurrentQuestion: null, QuietResult: false, UnseenResult: null };
-                status = status with { LastResult = null, LastResultAt = null, CurrentQuestion = null, QuietResult = false, UnseenResult = null };
+                stateChanged = status is not { LastResult: null, LastResultAt: null, CurrentQuestion: null, QuietResult: false, UnseenResult: null, Outcome: null };
+                status = status with { LastResult = null, LastResultAt = null, CurrentQuestion = null, QuietResult = false, UnseenResult = null, Outcome = null };
                 break;
         }
 
@@ -194,12 +203,19 @@ public class StatusUpdater : IStatusUpdater
     }
 
     /// <summary>
-    /// Whether the turn ending now raises no Finished (issue #401): the one place that decides it. Its action has
+    /// Whether the turn ending now raises no Finished (issues #401, #467): the one place that decides it. Its action has
     /// <c>quietTurns</c> (<see cref="ProjectInfo.QuietTurns"/>), and the user did not start the turn
     /// (<paramref name="userTurn"/>): an overseer woken by a worker's message, a notice or its own background task, which
-    /// the server cannot always tell apart, so the setting is the action's, not the turn's origin's.
+    /// the server cannot always tell apart, so the setting is the action's, not the turn's origin's. Or the session said
+    /// the turn is <see cref="TurnOutcome.Continuing"/>: it carries on by itself, and nothing is the user's yet. A turn
+    /// that said it is done is quiet still on a quiet action, whose setting decides for every turn the user did not start.
     /// </summary>
-    public static bool IsQuietTurnEnd(ProjectInfo project, bool userTurn) => project.QuietTurns && !userTurn;
+    public static bool IsQuietTurnEnd(ProjectInfo project, bool userTurn, TurnOutcome? outcome = null) =>
+        project.QuietTurns && !userTurn || outcome == TurnOutcome.Continuing;
+
+    /// <summary>What a turn that needs the user, or is blocked, asks, when it ended with no text at all.</summary>
+    private static string WaitsText(TurnOutcome? outcome) =>
+        outcome == TurnOutcome.Blocked ? "The session is blocked." : "The session needs you.";
 
     /// <summary>
     /// <paramref name="status"/> as a turn's end leaves its Finished: a quiet one keeps the
@@ -211,14 +227,14 @@ public class StatusUpdater : IStatusUpdater
         if (!quiet) return status with { QuietResult = false, UnseenResult = null };
         var unseen = status.QuietResult
             ? status.UnseenResult
-            : status.LastResultAt is { } at ? new TurnResult(at, status.LastResult, status.SpokenSummary) : null;
+            : status.LastResultAt is { } at ? new TurnResult(at, status.LastResult, status.SpokenSummary, status.Outcome) : null;
         return status with { QuietResult = true, UnseenResult = unseen is { } kept && kept.At > (status.SeenAt ?? DateTime.MinValue) ? kept : null };
     }
 
     /// <summary>
     /// The results a user line gives this turn's <c>speak</c> calls: an accepted one's text is the turn's spoken reply,
-    /// the last accepted the one kept; a refused or denied one gives none. Returns the recap of the last accepted call
-    /// that gave one, or null.
+    /// the last accepted the one kept, with its outcome, which a later accepted call without one leaves as it is; a refused
+    /// or denied one gives none. Returns the recap of the last accepted call that gave one, or null.
     /// </summary>
     private static string? TakeSpeakResults(ProjectProcess process, string rawJson)
     {
@@ -228,8 +244,11 @@ public class StatusUpdater : IStatusUpdater
         {
             if (!process.SpeakCalls.Remove(toolUseId, out var call) || isError) continue;
             // The tool checked them as the stream has them; a call it would refuse is never said, nor its recap kept
-            if (SpeakTool.Check(call.Text).Refused is not null || SpeakTool.CheckRecap(call.Recap).Refused is not null) continue;
+            var (outcome, outcomeRefused) = SpeakTool.CheckOutcome(call.Outcome);
+            if (SpeakTool.Check(call.Text).Refused is not null || SpeakTool.CheckRecap(call.Recap).Refused is not null
+                || outcomeRefused is not null) continue;
             process.Spoken = call.Text;
+            process.Outcome = outcome ?? process.Outcome;
             recap = call.Recap ?? recap;
         }
         return recap;

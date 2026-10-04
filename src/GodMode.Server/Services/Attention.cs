@@ -22,36 +22,45 @@ public static partial class Attention
     public static AttentionItem? Of(ProjectStatus status, string? recordedParentId = null)
     {
         var seenAt = status.SeenAt ?? DateTime.MinValue;
-        // The turn's spoken reply goes with what its end left: a question in plain text, or its result
-        (AttentionKind Kind, DateTime Since, string Text, string? Spoken)? found = status switch
+        // The turn's spoken reply and outcome go with what its end left: a question in plain text, or its result
+        (AttentionKind Kind, DateTime Since, string Text, string? Spoken, TurnOutcome? Outcome)? found = status switch
         {
-            { PendingPermission: { } permission } => (AttentionKind.Permission, permission.RequestedAt, permission.Summary, null),
+            { PendingPermission: { } permission } => (AttentionKind.Permission, permission.RequestedAt, permission.Summary, null, null),
             // claude is blocked on an AskUserQuestion: only an answer clears it, whatever the user has seen
             { PendingQuestion: { } question } => (AttentionKind.Question, question.RequestedAt,
-                string.Join("\n", question.Questions.Select(q => q.Question)), null),
+                string.Join("\n", question.Questions.Select(q => q.Question)), null, null),
             // Stopped keeps the question claude was waiting on (a shutdown, or a stop by the user): it still asks.
-            // Seen, it needs the user no more, and stays the question a reply answers, until a turn asks again
+            // Seen, it needs the user no more, and stays the question a reply answers, until a turn asks again. A turn
+            // that said it needs the user, or is blocked, is one (issue #467)
             { CurrentQuestion: { } question, State: ProjectState.WaitingInput or ProjectState.Stopped }
                 when (status.QuestionAt ?? status.UpdatedAt) > seenAt =>
-                (AttentionKind.Question, status.QuestionAt ?? status.UpdatedAt, question, status.SpokenSummary),
+                (AttentionKind.Question, status.QuestionAt ?? status.UpdatedAt, question, status.SpokenSummary,
+                    status.Outcome is TurnOutcome.NeedsYou or TurnOutcome.Blocked ? status.Outcome : null),
             // Seen, the project stays Error, and needs the user again when it fails again
             { State: ProjectState.Error } when status.UpdatedAt > seenAt =>
-                (AttentionKind.Error, status.UpdatedAt, status.LastError ?? "The project failed.", null),
+                (AttentionKind.Error, status.UpdatedAt, status.LastError ?? "The project failed.", null, null),
             // An overseer's question for the user, whatever its turns did since, until the user sees it or writes:
             // the status keeps it until then, and SeenAt, which the fleet's send and a resume move too, is not asked
             { Escalation: { } escalation } =>
-                (AttentionKind.Escalation, escalation.At, escalation.Text, null),
+                (AttentionKind.Escalation, escalation.At, escalation.Text, null, null),
             { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { IsOpen: true, Review: PullRequestReview.ChangesRequested } pr }
                 when pr.ChangedAt > seenAt =>
-                (AttentionKind.Review, pr.ChangedAt, $"Changes requested on pull request #{pr.Number}.", null),
+                (AttentionKind.Review, pr.ChangedAt, $"Changes requested on pull request #{pr.Number}.", null, null),
+            // A turn that said it continues is quiet (StatusUpdater.IsQuietTurnEnd): only done, or none, raises Finished.
+            // Once its pull request is merged, it is done whatever it said (issue #467)
             { State: ProjectState.Idle or ProjectState.Stopped, QuietResult: false, LastResultAt: { } at } when at > seenAt =>
-                (AttentionKind.Finished, at, ResultText(status.LastResult), status.SpokenSummary),
+                (AttentionKind.Finished, at, ResultText(status.LastResult), status.SpokenSummary, status.EffectiveOutcome),
+            // The merge itself is news once, at its own time, when no turn's Finished has told it: after a quiet or
+            // continuing turn, or one the user has seen. A turn that ends later follows the rules above, and raises no
+            // new item for the merge, which stays seen once the user has seen it
+            { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { State: PullRequestState.Merged } pr } when pr.ChangedAt > seenAt =>
+                (AttentionKind.Finished, pr.ChangedAt, $"Pull request #{pr.Number} is merged.", null, TurnOutcome.Done),
             // Quiet turns ended after one that raised Finished: that one's stays until it is seen
             { State: ProjectState.Idle or ProjectState.Stopped, QuietResult: true, UnseenResult: { } unseen } when unseen.At > seenAt =>
-                (AttentionKind.Finished, unseen.At, ResultText(unseen.Result), unseen.Spoken),
+                (AttentionKind.Finished, unseen.At, ResultText(unseen.Result), unseen.Spoken, unseen.Outcome),
             _ => null,
         };
-        if (found is not ({ } kind, var since, { } text, var spoken)) return null;
+        if (found is not ({ } kind, var since, { } text, var spoken, var outcome)) return null;
 
         return new AttentionItem(status.Id, status.Name, status.ProfileName, status.RootName, kind, since, PlainText(text),
             kind == AttentionKind.Permission ? status.PendingPermission : null,
@@ -66,7 +75,8 @@ public static partial class Attention
             kind == AttentionKind.Error && status.CreateFailed,
             recordedParentId,
             status.Importance,
-            AlertOf(status.Importance, kind));
+            AlertOf(status.Importance, kind),
+            outcome);
     }
 
     /// <summary>
@@ -102,15 +112,15 @@ public static partial class Attention
 
     /// <summary>
     /// Whether two lists say the same: the same projects needing the same, since the same time,
-    /// with the same text, spoken text, request, pull request, importance and alert. Compared by those, not by record equality, which would
+    /// with the same text, spoken text, request, pull request, importance, alert and outcome. Compared by those, not by record equality, which would
     /// compare a pending request's input and questions by reference.
     /// </summary>
     public static bool Same(IReadOnlyList<AttentionItem> a, IReadOnlyList<AttentionItem> b) =>
         a.Select(Key).SequenceEqual(b.Select(Key));
 
-    private static (string, AttentionKind, DateTime, string, string?, string?, string?, AttentionAlert, Importance) Key(AttentionItem item) =>
+    private static (string, AttentionKind, DateTime, string, string?, string?, string?, AttentionAlert, Importance, TurnOutcome?) Key(AttentionItem item) =>
         (item.ProjectId, item.Kind, item.Since, item.Text, item.Permission?.RequestId ?? item.Question?.RequestId, item.PullRequestUrl, item.Spoken,
-            item.Alert, item.Importance);
+            item.Alert, item.Importance, item.Outcome);
 
     /// <summary>
     /// Text to show on a phone or read aloud: code blocks become "(code)", markdown's backticks go,

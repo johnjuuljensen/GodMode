@@ -223,8 +223,9 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     public static AttentionItem Question(string projectId, string name, string text, int minutesAgo = 5) =>
         new(projectId, name, "Default", "root", AttentionKind.Question, DateTime.UtcNow.AddMinutes(-minutesAgo), text);
 
-    public static AttentionItem Finished(string projectId, string name, string text, int minutesAgo = 5) =>
-        new(projectId, name, "Default", "root", AttentionKind.Finished, DateTime.UtcNow.AddMinutes(-minutesAgo), text);
+    /// <summary>A finished turn the session said is done (issue #467), unless <paramref name="outcome"/> says otherwise.</summary>
+    public static AttentionItem Finished(string projectId, string name, string text, int minutesAgo = 5, TurnOutcome? outcome = TurnOutcome.Done) =>
+        new(projectId, name, "Default", "root", AttentionKind.Finished, DateTime.UtcNow.AddMinutes(-minutesAgo), text, Outcome: outcome);
 
     public static AttentionItem Permission(string projectId, string name, string summary, int minutesAgo = 5) =>
         new(projectId, name, "Default", "root", AttentionKind.Permission, DateTime.UtcNow.AddMinutes(-minutesAgo), summary,

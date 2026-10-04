@@ -199,6 +199,13 @@ public sealed class SaidByCodeTests
             await StatusSaidAsync(Status(ProjectState.Idle, result: "Færdig med migrationen.", recap: Recap),
                 Finished("p/r/283", "283-voice", "Færdig med migrationen.")));
 
+    /// <summary>A finished turn that said no outcome is idle in the code's words too, never done (#467).</summary>
+    [Fact]
+    public async Task A_finished_turn_with_no_outcome_is_said_as_idle() =>
+        Assert.Equal($"issue 283: {Recap} issue 283 er idle: Venter på CI.",
+            await StatusSaidAsync(Status(ProjectState.Idle, result: "Venter på CI.", recap: Recap),
+                Finished("p/r/283", "283-voice", "Venter på CI.", outcome: null)));
+
     /// <summary>A recap beside a question too long to say as it is: the model says both, so neither is lost.</summary>
     [Fact]
     public async Task A_recap_beside_a_question_the_code_cannot_say_goes_to_the_model() =>

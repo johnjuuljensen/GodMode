@@ -16,6 +16,16 @@ const KIND_LABELS: Record<AttentionKind, string> = {
   Finished: 'Finished',
 };
 
+/**
+ * The item's label: what the session said its turn's end is (#467). A finished turn is Done only when it said so, and
+ * Idle otherwise, which says nothing of the work; a question it said it is blocked on, or needs the user for, says that.
+ */
+const kindLabel = ({ Kind: kind, Outcome: outcome }: ServerAttentionItem): string =>
+  kind === 'Finished' ? (outcome === 'done' ? 'Done' : 'Idle')
+    : kind === 'Question' && outcome === 'blocked' ? 'Blocked'
+    : kind === 'Question' && outcome === 'needs-you' ? 'Needs you'
+    : KIND_LABELS[kind];
+
 /** Kinds answered with a typed reply (ReplyAndResume). */
 const REPLY_KINDS: ReadonlySet<AttentionKind> = new Set(['Question', 'Error', 'Escalation', 'Finished']);
 /** Kinds to mark seen: a Question only in plain text, as a pending AskUserQuestion is answered (#426). */
@@ -144,7 +154,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   return (
     <article className={`inbox-item inbox-kind-${kind}${focused ? ' inbox-item-focused' : ''}${offline ? ' inbox-item-offline' : ''}`}>
       <button className="inbox-item-header" onClick={open} title="Open the project">
-        <span className="inbox-item-kind">{KIND_LABELS[kind]}</span>
+        <span className="inbox-item-kind">{kindLabel(item)}</span>
         <span className="inbox-item-name">{item.ProjectName}</span>
         {item.Importance === 'Important' && <ImportanceMark importance="Important" />}
         <span className="inbox-item-meta">{meta}</span>

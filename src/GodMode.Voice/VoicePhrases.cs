@@ -44,10 +44,13 @@ public sealed partial class VoicePhrases
 
     /// <summary>
     /// One project that needs the user, by its name (<see cref="Named"/>): short, since the model reads the rest when
-    /// asked, or, when the session gave its own spoken reply, that reply word for word (<see cref="Spoken"/>).
+    /// asked, or, when the session gave its own spoken reply, that reply word for word (<see cref="Spoken"/>). A finished
+    /// turn is done only when the session said so, and idle otherwise (issue #467).
     /// </summary>
     public string Announce(SpokenName name, AttentionItem item) => Spoken(name, item) ?? (Subject(name), item.Kind, _danish) switch
     {
+        (var who, AttentionKind.Question, true) when item.Outcome == TurnOutcome.Blocked => $"{who} er blokeret",
+        (var who, AttentionKind.Question, false) when item.Outcome == TurnOutcome.Blocked => $"{who} is blocked",
         (var who, AttentionKind.Question, true) => $"{who} har et spørgsmål",
         (var who, AttentionKind.Question, false) => $"{who} has a question",
         (var who, AttentionKind.Permission, true) => $"{who} skal have tilladelse: {PermissionSummary(item)}. Svar på skærmen",
@@ -58,28 +61,36 @@ public sealed partial class VoicePhrases
         (var who, AttentionKind.Escalation, false) => $"{who} needs your decision",
         (var who, AttentionKind.Review, true) => $"{who} har fået ændringsønsker",
         (var who, AttentionKind.Review, false) => $"{who} has changes requested",
-        (var who, AttentionKind.Finished, true) => $"{who} er færdig",
-        (var who, AttentionKind.Finished, false) => $"{who} is done",
+        (var who, AttentionKind.Finished, true) when item.Outcome == TurnOutcome.Done => $"{who} er færdig",
+        (var who, AttentionKind.Finished, false) when item.Outcome == TurnOutcome.Done => $"{who} is done",
+        (var who, AttentionKind.Finished, true) => $"{who} er idle",
+        (var who, AttentionKind.Finished, false) => $"{who} is idle",
     };
 
     /// <summary>
     /// The session's own spoken reply (<see cref="AttentionItem.Spoken"/>, issue #384), word for word, after a lead-in
-    /// that names the project and what it needs: "issue 283 er færdig: …", "issue 283 spørger: …". The session wrote it,
+    /// that names the project and what it needs: "issue 283 er færdig: …" (only when it said it is done, issue #467, else
+    /// "issue 283 er idle: …"), "issue 283 spørger: …", "issue 283 er blokeret: …". The session wrote it,
     /// not the bot, so it never starts the line, where a "Sendt" in it would be the bot's own word (<see cref="SentNode"/>).
     /// Null when the session gave none.
     /// </summary>
-    public string? Spoken(SpokenName name, AttentionItem item) => item.Spoken is { Length: > 0 } spoken ? Reads(name, item.Kind, spoken) : null;
+    public string? Spoken(SpokenName name, AttentionItem item) => item.Spoken is { Length: > 0 } spoken ? Reads(name, item, spoken) : null;
 
     /// <summary>
     /// A project's own words read out, after a lead-in that names it and what it needs: "issue 283 spørger: …" for a
-    /// question, "issue 283 er færdig: …" for anything else (a session's spoken reply, a finished result).
+    /// question, "issue 283 er blokeret: …" for one it said it is blocked on, "issue 283 er færdig: …" for a finished
+    /// turn it said is done, and "issue 283 er idle: …" for one that said nothing of the work (issue #467).
     /// </summary>
-    public string Reads(SpokenName name, AttentionKind kind, string text) => (kind, _danish) switch
+    public string Reads(SpokenName name, AttentionItem item, string text) => (item.Kind, item.Outcome, _danish) switch
     {
-        (AttentionKind.Question, true) => $"{Subject(name)} spørger: {text}",
-        (AttentionKind.Question, false) => $"{Subject(name)} asks: {text}",
-        (_, true) => $"{Subject(name)} er færdig: {text}",
-        (_, false) => $"{Subject(name)} is done: {text}",
+        (AttentionKind.Question, TurnOutcome.Blocked, true) => $"{Subject(name)} er blokeret: {text}",
+        (AttentionKind.Question, TurnOutcome.Blocked, false) => $"{Subject(name)} is blocked: {text}",
+        (AttentionKind.Question, _, true) => $"{Subject(name)} spørger: {text}",
+        (AttentionKind.Question, _, false) => $"{Subject(name)} asks: {text}",
+        (_, TurnOutcome.Done, true) => $"{Subject(name)} er færdig: {text}",
+        (_, TurnOutcome.Done, false) => $"{Subject(name)} is done: {text}",
+        (_, _, true) => $"{Subject(name)} er idle: {text}",
+        (_, _, false) => $"{Subject(name)} is idle: {text}",
     };
 
     /// <summary>Where a project stands, in the recap the session keeps of it (#466), after its name: "issue 283: …".</summary>

@@ -122,6 +122,24 @@ export type ServerState =
   /** Host state is unknown. */
   | 'Unknown';
 
+/**
+ * How a session says its turn ended (issue #467), with its `speak` call's `outcome`: a turn that ended with
+ * the session idle is not, for that, done. A turn that gave none has none (null), and its end raises
+ * AttentionKind.Finished as every turn's did before outcomes, which voice says as idle, never as done.
+ */
+export type TurnOutcome =
+  /** The work is complete: the turn's end raises AttentionKind.Finished, said as done. */
+  | 'done'
+  /** A decision or input is needed: the session waits on the user, a AttentionKind.Question. */
+  | 'needs-you'
+  /**
+   * The session carries on by itself (a background task, waiting on CI or a review): its end raises nothing,
+   * as a quiet turn's does (ProjectStatus.QuietResult).
+   */
+  | 'continuing'
+  /** It cannot go on, and says why: the session waits on the user, a AttentionKind.Question. */
+  | 'blocked';
+
 /** Request to add or update a GodMode server registration. */
 export interface AddServerRequest {
   DisplayName: string;
@@ -217,6 +235,13 @@ export interface AttentionItem {
    * and an AttentionAlert.Interrupt one makes a sound and is announced first.
    */
   Alert?: AttentionAlert;
+  /**
+   * How the turn that raised it ended, as the session said it (ProjectStatus.EffectiveOutcome, issue #467),
+   * for a AttentionKind.Finished or a AttentionKind.Question its turn's end raised: a Finished is done only
+   * with TurnOutcome.Done, and with none the session is idle, not done; a Question is TurnOutcome.NeedsYou or
+   * TurnOutcome.Blocked when the session said so. Null otherwise.
+   */
+  Outcome?: TurnOutcome | null;
 }
 
 /**
@@ -569,6 +594,13 @@ export interface ProjectStatus {
   Recap?: string | null;
   /** When the session last gave Recap. */
   RecapAt?: string | null;
+  /**
+   * How the session said its last turn ended (issue #467): the `outcome` of the `speak` call that turn made
+   * in its main conversation, which the server accepted. Set with LastResult as the turn ends, null for a
+   * turn that gave none or ended in error, and cleared as the next turn starts, as SpokenSummary is. What it
+   * counts as is ProjectStatus.EffectiveOutcome.
+   */
+  Outcome?: TurnOutcome | null;
 }
 
 /** Summary information about a project. */
@@ -619,6 +651,11 @@ export interface ProjectSummary {
   Recap?: string | null;
   /** When the session last gave its recap, as in ProjectStatus.RecapAt. */
   RecapAt?: string | null;
+  /**
+   * What the session's last turn's end counts as, as in ProjectStatus.EffectiveOutcome: done once its pull
+   * request is merged.
+   */
+  Outcome?: TurnOutcome | null;
 }
 
 /**
@@ -691,6 +728,8 @@ export interface TurnResult {
   Result?: string | null;
   /** Its spoken reply, as ProjectStatus.SpokenSummary had it. */
   Spoken?: string | null;
+  /** How the session said it ended, as ProjectStatus.Outcome had it. */
+  Outcome?: TurnOutcome | null;
 }
 
 /**
