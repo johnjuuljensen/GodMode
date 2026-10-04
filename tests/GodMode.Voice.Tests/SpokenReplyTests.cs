@@ -39,21 +39,16 @@ public sealed class SpokenReplyTests
         return (servers, voice);
     }
 
-    /// <summary>The bot says <paramref name="text"/> once more after the announcement that said it first: the reply to the user.</summary>
-    private static Task SaidAgainAsync(OfflineVoice voice, string text) =>
-        Eventually.UntilAsync(() => voice.Events.Responses.Count(r => r == text) >= 2,
-            () => $"the bot to say \"{text}\" in reply, after its announcement; it said: {string.Join(" | ", voice.Events.Responses)}");
-
     [Fact]
     public async Task A_spoken_reply_is_said_word_for_word_through_project_status_not_retold()
     {
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" });
-        var (_, voice) = await AskedAsync(model, Spoken, $"issue 283 spørger: {Spoken}");
+        var (_, voice) = await AskedAsync(model, Spoken, $"issue 283, voice, spørger: {Spoken}");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Hvad spørger 283 om?");
-        await SaidAgainAsync(voice, $"issue 283 spørger: {Spoken}");
+        await voice.Events.SaidAsync($"issue 283 spørger: {Spoken}");
 
         // The code says it (#456): the model picked the tool, and is not asked to retell what it read
         Assert.Equal(1, model.Calls);
@@ -65,11 +60,11 @@ public sealed class SpokenReplyTests
     {
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.WhatNeedsMe);
-        var (_, voice) = await AskedAsync(model, Spoken, $"issue 283 spørger: {Spoken}");
+        var (_, voice) = await AskedAsync(model, Spoken, $"issue 283, voice, spørger: {Spoken}");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Hvad venter?");
-        await SaidAgainAsync(voice, $"issue 283 spørger: {Spoken}");
+        await voice.Events.SaidAsync($"issue 283 spørger: {Spoken}");
 
         Assert.Equal(1, model.Calls);
     }
@@ -82,7 +77,7 @@ public sealed class SpokenReplyTests
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
             .Respond(Summary);
-        var (_, voice) = await AskedAsync(model, spoken: null, "issue 283 har et spørgsmål.");
+        var (_, voice) = await AskedAsync(model, spoken: null, "issue 283, voice, har et spørgsmål.");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Hvad spørger 283 om?");
@@ -108,7 +103,7 @@ public sealed class SpokenReplyTests
 
         var result = await tools.WhatNeedsMeAsync(CancellationToken.None);
 
-        Assert.Contains($"- issue 283: finished: {Written} In its own spoken words: \"{Spoken}\"", result);
+        Assert.Contains($"- issue 283, voice: finished: {Written} In its own spoken words: \"{Spoken}\"", result);
         Assert.Contains("- issue 101: question: Hvilken titel?", result);
         Assert.Empty(conversation.TakeSpoken());
     }
@@ -147,11 +142,11 @@ public sealed class SpokenReplyTests
         const string SentForReview = "Sendt til review. Skal jeg merge, når den er godkendt?";
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" });
-        var (servers, voice) = await AskedAsync(model, SentForReview, $"issue 283 spørger: {SentForReview}");
+        var (servers, voice) = await AskedAsync(model, SentForReview, $"issue 283, voice, spørger: {SentForReview}");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Status 283");
-        await SaidAgainAsync(voice, $"issue 283 spørger: {SentForReview}");
+        await voice.Events.SaidAsync($"issue 283 spørger: {SentForReview}");
 
         Assert.Empty(servers.Replies);
         Assert.DoesNotContain("Intet sendt. Sig svaret igen.", voice.Events.Responses);

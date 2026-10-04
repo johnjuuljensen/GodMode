@@ -32,15 +32,15 @@ public sealed partial class VoicePhrases
     public string Several(int count) => _danish ? $"{count} venter på dig:" : $"{count} need you:";
 
     /// <summary>
-    /// A project named alone (#450): its label, then its root and profile, those it is said with: "issue 376 i GodMode,
-    /// profil Mega" / "issue 376 in GodMode, profile Mega".
+    /// A project named alone (#450): its label, then its topic (#455), root and profile, those it is said with: "issue
+    /// 376, mic-timeout i GodMode, profil Mega" / "issue 376, mic-timeout in GodMode, profile Mega".
     /// </summary>
     public string Named(SpokenName name) =>
-        name.Label + (name.Root is { } root ? _danish ? $" i {root}" : $" in {root}" : "")
+        name.Label + (name.Topic is { } topic ? $", {topic}" : "") + (name.Root is { } root ? _danish ? $" i {root}" : $" in {root}" : "")
         + (name.Profile is { } profile ? _danish ? $", profil {profile}" : $", profile {profile}" : "");
 
-    /// <summary>The project named as a sentence's subject: <see cref="Named"/>, with a comma after a profile, before the verb.</summary>
-    private string Subject(SpokenName name) => Named(name) + (name.Profile is null ? "" : ",");
+    /// <summary>The project named as a sentence's subject: <see cref="Named"/>, with a comma after a topic or profile, before the verb.</summary>
+    private string Subject(SpokenName name) => Named(name) + (name.Topic is null && name.Profile is null ? "" : ",");
 
     /// <summary>
     /// One project that needs the user, by its name (<see cref="Named"/>): short, since the model reads the rest when
@@ -343,7 +343,7 @@ public sealed partial class VoicePhrases
     /// about, then the one an announcement just named. "Til issue 283 eller issue 101?".
     /// </summary>
     public string Which(SpokenName before, SpokenName announced) =>
-        _danish ? $"Til {Named(before)} eller {Named(announced)}?" : $"To {Named(before)} or {Named(announced)}?";
+        _danish ? $"Til {Subject(before)} eller {Named(announced)}?" : $"To {Subject(before)} or {Named(announced)}?";
 
     /// <summary>Answers went out this turn (<see cref="SentNode"/>): "Sendt til issue 283.", "Sendt til issue 283 og issue 101.".</summary>
     public string Sent(IReadOnlyList<SpokenName> names)

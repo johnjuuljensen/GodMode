@@ -40,7 +40,7 @@ public sealed class ProjectStatusTests
             servers.SetStatus(ServerA, Status(ProjectState.WaitingInput, question: Long));
             return Task.CompletedTask;
         });
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
 
         voice.Transcriptions.SayAsRecognized("Hvad spørger 283 om?");
         await voice.Events.SaidAsync("issue 283 spørger om den skal merge.");
@@ -63,7 +63,7 @@ public sealed class ProjectStatusTests
 
         var result = await tools.ProjectStatusAsync("283", CancellationToken.None);
 
-        Assert.Equal($"issue 283 (283-voice): Idle. Needs the user: finished: {Long}", result);
+        Assert.Equal($"issue 283, voice (283-voice): Idle. Needs the user: finished: {Long}", result);
     }
 
     /// <summary>A result far past any reply read whole keeps its start and its end, where the question is, and says it was cut.</summary>
@@ -80,7 +80,7 @@ public sealed class ProjectStatusTests
 
         var result = await tools.ProjectStatusAsync("283", CancellationToken.None);
 
-        Assert.StartsWith("issue 283 (283-voice): Idle. Needs the user: finished: Start på svaret. ", result);
+        Assert.StartsWith("issue 283, voice (283-voice): Idle. Needs the user: finished: Start på svaret. ", result);
         Assert.EndsWith(Ending, result);
         Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"[... {huge.Length - VoiceTools.MaxStatusTextLength} characters cut here;"), result);
         Assert.InRange(result.Length, VoiceTools.MaxStatusTextLength, VoiceTools.MaxStatusTextLength + 200);
@@ -97,7 +97,7 @@ public sealed class ProjectStatusTests
         servers.Set(ServerA, new AttentionItem(Id, "283-voice", "Default", "root", AttentionKind.Error, DateTime.UtcNow, Cut(Long)));
         servers.SetStatus(ServerA, Status(ProjectState.Error) with { LastError = Long });
 
-        Assert.Equal($"issue 283 (283-voice): Error. Needs the user: failed: {Long}",
+        Assert.Equal($"issue 283, voice (283-voice): Error. Needs the user: failed: {Long}",
             await tools.ProjectStatusAsync("283", CancellationToken.None));
     }
     private const string Recap = "Pull request 456 er åben, testene er grønne, den venter på review.";
@@ -126,7 +126,7 @@ public sealed class ProjectStatusTests
     {
         var tools = Tools(Status(state, result: Long) with { SpokenSummary = Spoken, Recap = Recap, RecapAt = DateTime.UtcNow });
 
-        Assert.Equal($"issue 283 (283-voice): {state}. Where it stands, in its own words: \"{Recap}\"",
+        Assert.Equal($"issue 283, voice (283-voice): {state}. Where it stands, in its own words: \"{Recap}\"",
             await tools.ProjectStatusAsync("283", CancellationToken.None));
     }
 
@@ -135,7 +135,7 @@ public sealed class ProjectStatusTests
     public async Task Without_a_recap_the_spoken_reply_is_read_then_the_result_shortened()
     {
         var spoken = Tools(Status(ProjectState.Idle, result: Long) with { SpokenSummary = Spoken });
-        Assert.Equal($"issue 283 (283-voice): Idle. Its last reply, in its own spoken words: \"{Spoken}\"",
+        Assert.Equal($"issue 283, voice (283-voice): Idle. Its last reply, in its own spoken words: \"{Spoken}\"",
             await spoken.ProjectStatusAsync("283", CancellationToken.None));
 
         var result = await Tools(Status(ProjectState.Idle, result: Long)).ProjectStatusAsync("283", CancellationToken.None);
@@ -151,7 +151,7 @@ public sealed class ProjectStatusTests
     {
         var tools = Tools(Status(ProjectState.Idle, result: Ending) with { Recap = Recap }, Finished(Id, "283-voice", Ending));
 
-        Assert.Equal($"issue 283 (283-voice): Idle. Where it stands, in its own words: \"{Recap}\" Needs the user: finished: {Ending}",
+        Assert.Equal($"issue 283, voice (283-voice): Idle. Where it stands, in its own words: \"{Recap}\" Needs the user: finished: {Ending}",
             await tools.ProjectStatusAsync("283", CancellationToken.None));
     }
 }

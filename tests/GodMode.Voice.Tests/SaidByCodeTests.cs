@@ -28,11 +28,11 @@ public sealed class SaidByCodeTests
                 Finished("p/r/283", "283-voice", "Færdig med migrationen.", minutesAgo: 3));
             return Task.CompletedTask;
         });
-        await voice.Events.SaidAsync($"{Danish.Several(2)} issue 101 har et spørgsmål. issue 283 er færdig.");
+        await voice.Events.SaidAsync($"{Danish.Several(2)} issue 101, cleanup, har et spørgsmål. issue 283, voice, er færdig.");
 
         // Announced oldest first, as they came; listed the most recent first (#468)
         voice.Transcriptions.SayAsRecognized("Hvad venter?");
-        await voice.Events.SaidAsync("2 venter på dig: issue 283 er færdig. issue 101 har et spørgsmål.");
+        await voice.Events.SaidAsync("2 venter på dig: issue 283 er færdig. issue 101, cleanup, har et spørgsmål.");
 
         Assert.Equal(1, model.Calls);
     }
@@ -79,7 +79,7 @@ public sealed class SaidByCodeTests
         var model = new ScriptedChatClient().CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" });
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe til master?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
 
         voice.Transcriptions.SayAsRecognized("Hvad spørger 283 om?");
         await voice.Events.SaidAsync("issue 283 spørger: Skal jeg pushe til master?");
@@ -96,7 +96,7 @@ public sealed class SaidByCodeTests
             .Respond("Ukendt. Mente du issue 283?");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
 
         voice.Transcriptions.SayAsRecognized("Status 999");
         await voice.Events.SaidAsync("Ukendt. Mente du issue 283?");
@@ -115,7 +115,7 @@ public sealed class SaidByCodeTests
             .Respond("Status for issue 283 kunne ikke hentes.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
         servers.StatusError = new InvalidOperationException("The server is gone.");
 
         voice.Transcriptions.SayAsRecognized("Status 283");
@@ -155,7 +155,7 @@ public sealed class SaidByCodeTests
             servers.Set(ServerA, new AttentionItem("p/r/283", "283-voice", "Default", "root", AttentionKind.Error, DateTime.UtcNow, "Build failed"));
             return Task.CompletedTask;
         });
-        await voice.Events.SaidAsync("issue 283 fejlede.");
+        await voice.Events.SaidAsync("issue 283, voice, fejlede.");
 
         voice.Transcriptions.SayAsRecognized("Status 283");
         await voice.Events.SaidAsync("issue 283 fejlede: build fejl.");
@@ -191,18 +191,18 @@ public sealed class SaidByCodeTests
     [InlineData(ProjectState.Running)]
     [InlineData(ProjectState.Idle)]
     public async Task The_recap_is_said_by_the_code_over_the_spoken_reply_and_the_result(ProjectState state) =>
-        Assert.Equal($"issue 283: {Recap}", await StatusSaidAsync(Status(state, result: "Alt er grønt.", spoken: "Rettelsen er pushet.", recap: Recap)));
+        Assert.Equal($"issue 283, voice: {Recap}", await StatusSaidAsync(Status(state, result: "Alt er grønt.", spoken: "Rettelsen er pushet.", recap: Recap)));
 
     [Fact]
     public async Task Beside_an_item_the_recap_is_said_before_what_needs_the_user() =>
-        Assert.Equal($"issue 283: {Recap} issue 283 er færdig: Færdig med migrationen.",
+        Assert.Equal($"issue 283, voice: {Recap} issue 283 er færdig: Færdig med migrationen.",
             await StatusSaidAsync(Status(ProjectState.Idle, result: "Færdig med migrationen.", recap: Recap),
                 Finished("p/r/283", "283-voice", "Færdig med migrationen.")));
 
     /// <summary>A finished turn that said no outcome is idle in the code's words too, never done (#467).</summary>
     [Fact]
     public async Task A_finished_turn_with_no_outcome_is_said_as_idle() =>
-        Assert.Equal($"issue 283: {Recap} issue 283 er idle: Venter på CI.",
+        Assert.Equal($"issue 283, voice: {Recap} issue 283 er idle: Venter på CI.",
             await StatusSaidAsync(Status(ProjectState.Idle, result: "Venter på CI.", recap: Recap),
                 Finished("p/r/283", "283-voice", "Venter på CI.", outcome: null)));
 
@@ -215,13 +215,13 @@ public sealed class SaidByCodeTests
     [Fact]
     public async Task Without_a_recap_or_an_item_the_spoken_reply_then_the_result_is_said_by_the_code()
     {
-        Assert.Equal("issue 283 sagde sidst: Rettelsen er pushet.",
+        Assert.Equal("issue 283, voice, sagde sidst: Rettelsen er pushet.",
             await StatusSaidAsync(Status(ProjectState.Idle, result: "Alt er grønt.", spoken: "Rettelsen er pushet.")));
-        Assert.Equal("Sidste resultat fra issue 283: Alt er grønt.", await StatusSaidAsync(Status(ProjectState.Idle, result: "Alt er grønt.")));
+        Assert.Equal("Sidste resultat fra issue 283, voice: Alt er grønt.", await StatusSaidAsync(Status(ProjectState.Idle, result: "Alt er grønt.")));
 
         // A long plain result is said shortened, as the tool's text has it
         var shortened = await StatusSaidAsync(Status(ProjectState.Idle, result: string.Join(" ", Enumerable.Repeat("Testene er grønne", 40))));
-        Assert.StartsWith("Sidste resultat fra issue 283: Testene er grønne", shortened);
+        Assert.StartsWith("Sidste resultat fra issue 283, voice: Testene er grønne", shortened);
         Assert.EndsWith("…", shortened);
     }
 

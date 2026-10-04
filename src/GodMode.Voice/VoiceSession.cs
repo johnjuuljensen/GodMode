@@ -203,7 +203,7 @@ public sealed class VoiceSession : IAsyncDisposable
                 setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink,
                 new EventSink(setup.Events, state, tools.Creates, conversation, setup.Mic, setup.Media))
             {
-                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board), logger),
+                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board, tools.Names), logger),
                 Options = new SessionOptions
                 {
                     LogDirectory = setup.LogDirectory,
@@ -218,8 +218,9 @@ public sealed class VoiceSession : IAsyncDisposable
             voice.RefreshKeyterms();
             // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement
             var announcements = new HeldAnnouncements(session.Announcements, tools.Creates);
+            // Worded again as it is said, anchored by what was said before it (#455): this text is the log's, and the fallback's
             board.Attach((item, handle) => announcements.Write(board.AnnouncementOf(item,
-                phrases.Announce(tools.Names.Of(item.Project) ?? new SpokenName(handle), item.Item))));
+                phrases.Announce(tools.Names.Full(item.Project) ?? new SpokenName(handle), item.Item))));
             tools.Creates.Attach(outcome => announcements.Write(new Announcement(phrases.Created(outcome))));
             // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
             if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));

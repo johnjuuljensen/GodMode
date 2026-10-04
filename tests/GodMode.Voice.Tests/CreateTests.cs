@@ -334,7 +334,7 @@ public sealed class CreateTests
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Slet dem." }).Respond("Sendt til 101.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("Kappe/kappe/260930-issue-101-c3", "101-cleanup", "Slet kolonnerne?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 101, cleanup, har et spørgsmål.");
 
         voice.Transcriptions.SayAsRecognized("Status 101");
         await voice.Events.SaidAsync("issue 101 spørger: Slet kolonnerne?");
@@ -346,7 +346,7 @@ public sealed class CreateTests
         await voice.Events.SaidAsync("283 er oprettet.");
 
         voice.Transcriptions.SayAsRecognized("Svar at den skal slette dem");
-        await voice.Events.SaidAsync("Sendt til issue 101 i root.");
+        await voice.Events.SaidAsync("Sendt til issue 101.");
         Assert.Equal(new ProjectRef(ServerA, "Kappe/kappe/260930-issue-101-c3"), Assert.Single(servers.Replies).Project);
     }
 

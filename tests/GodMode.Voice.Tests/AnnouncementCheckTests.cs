@@ -47,7 +47,7 @@ public sealed class AnnouncementCheckTests
 
         await Eventually.UntilAsync(() => voice.Events.Responses.Any(r => r.Contains("283")),
             () => $"the bot to announce 283; it said: {string.Join(" | ", voice.Events.Responses)}");
-        Assert.Equal(["Klar.", "issue 283 har et spørgsmål."], voice.Events.Responses);
+        Assert.Equal(["Klar.", "issue 283, voice, har et spørgsmål."], voice.Events.Responses);
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class AnnouncementCheckTests
             return Task.CompletedTask;
         });
 
-        await voice.Events.SaidAsync("2 venter på dig: issue 283 skal have tilladelse: Bash: git push. Svar på skærmen. issue 101 er færdig.");
+        await voice.Events.SaidAsync("2 venter på dig: issue 283, voice, skal have tilladelse: Bash: git push. Svar på skærmen. issue 101, cleanup, er færdig.");
     }
 
     [Fact]

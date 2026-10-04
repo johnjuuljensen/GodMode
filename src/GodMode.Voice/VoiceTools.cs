@@ -190,6 +190,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // workers have, in the window
         var (items, left) = ProjectListing.Within(all.Where(i => scope.Shown ? !projects.Holds(i) : scope.Takes(i.Project)), ask.Window, ActivityOfItem, _ => true);
         var (held, _) = ProjectListing.Within(all.Where(i => scope.Shown && projects.Holds(i)), ask.Window, ActivityOfItem, _ => true);
+        // Named in the order they are said (#455): the items, then the overseers' lines
+        var named = items.Select(i => (Item: i, Name: Names.Of(i.Project)!)).ToList();
         var overseers = held.Select(i => projects.Find(i.Project)).OfType<ServerProject>().GroupBy(p => projects.TopOf(p).Ref)
             .Select(g => (Overseer: g.Key, Name: Names.Of(g.Key), Workers: projects.WorkersOf(g.Key).Count, Waiting: g.Count()))
             .Where(o => o.Name is not null).Select(o => (o.Overseer, Name: o.Name!, o.Workers, o.Waiting)).ToList();
@@ -207,7 +209,6 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 : SaysItself((string.IsNullOrWhiteSpace(root) ? "Nothing needs the user." : $"Nothing in {root} needs the user.") + ask.Note, _phrases.Waiting([]));
 
         var text = new StringBuilder(items.Count > 0 ? $"{items.Count} need the user:\n" : "Nothing needs the user directly:\n");
-        var named = items.Select(i => (Item: i, Name: Names.Of(i.Project)!)).ToList();
         foreach (var (item, name) in named)
             text.AppendLine($"- {name}: {Describe(item.Item)}{InItsWords(item.Item)}");
         foreach (var overseer in overseers)
@@ -310,7 +311,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             ? new ListReading([.. pages.Select((page, i) => (ListPageResult(page, i, pages.Count, rest.Count), _phrases.ListPage(page, i + 1 < pages.Count)))], 0)
             : null;
         var said = _phrases.ListSummary(kept.Count,
-            [.. states.Select(s => (s.State, s.Count, (IReadOnlyList<SpokenName>)[.. s.Named.Select(p => Names.Full(p.Project.Ref) ?? new SpokenName(p.Label))]))],
+            [.. states.Select(s => (s.State, s.Count, (IReadOnlyList<SpokenName>)[.. s.Named.Select(p => Names.Full(p.Project.Ref) is { } full ? full with { Topic = null } : new SpokenName(p.Label))]))],
             pages.Count > 0, left);
         text.Append($"The system said a summary by state itself: \"{said}\"");
         if (pages.Count > 0)
@@ -490,7 +491,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             text.Append($" Runs {OverseerLine(run.Count, waiting)}: {WhatNeedsMe} or {ListProjects} with {WorkersParameter} \"{WorkersCurrent}\" lists them.");
         var result = ReadOut(text.ToString());
         return !failed && StatusSaid(name, status, item, full, standing) is { } said
-            ? SaysItself(result, run.Count > 0 ? $"{said} {GodModeAnnouncementFormatter.Sentence(_phrases.Workers(name, run.Count, waiting))}" : said)
+            ? SaysItself(result, run.Count > 0 ? $"{said} {GodModeAnnouncementFormatter.Sentence(_phrases.Workers(new SpokenName(name.Label), run.Count, waiting))}" : said)
             : result;
     }
 
@@ -545,12 +546,14 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             (StandingKind.Result, var result) when SaidAsIs(result.TrimEnd('…')) => _phrases.LastResult(name, result),
             _ => null,
         };
+        // Named once in a line (#455): after where it stands, by its label alone
+        var again = stands is { Length: > 0 } ? new SpokenName(name.Label) : name;
         var needs = item switch
         {
             null when status.CurrentQuestion is { Length: > 0 } => null,
             null => "",
-            { Spoken.Length: > 0 } => _phrases.Spoken(name, item),
-            { Kind: AttentionKind.Question or AttentionKind.Finished } when SaidAsIs(full) => _phrases.Reads(name, item, full!.Trim()),
+            { Spoken.Length: > 0 } => _phrases.Spoken(again, item),
+            { Kind: AttentionKind.Question or AttentionKind.Finished } when SaidAsIs(full) => _phrases.Reads(again, item, full!.Trim()),
             _ => null,
         };
         return stands is null || needs is null ? null
@@ -742,15 +745,18 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     {
         if (string.IsNullOrWhiteSpace(answer))
             return "No answer given: ask the user what to answer.";
-        if (Target(reference) is not { } target || Names.Of(target) is not { } name)
+        if (Target(reference) is not { } target || handles.LabelOf(target) is null)
             return await UnknownAsync(reference, ct);
         // An announcement that just changed the project talked about never decides where an unnamed answer goes (#461)
         if (string.IsNullOrWhiteSpace(reference) && conversation.TakeAnnouncedSwitch() is { } switched
+            && handles.LabelOf(switched.From) is not null && handles.LabelOf(switched.To) is not null
             && Names.Of(switched.From) is { } before && Names.Of(switched.To) is { } announced)
             return SaysItself($"Nothing was sent: {announced} was announced just before this answer, which names no project, " +
                 $"and the user was talking about {before} before it. The system asks which of the two it is for. When the user " +
                 $"says one, call {Answer} again with the same text and that project named.", _phrases.Which(before, announced));
 
+        // Named once it is known what is said of it: the line names it (#455)
+        var name = Names.Of(target)!;
         var status = await servers.GetStatusAsync(target, ct);
         if (status.CreateFailed)
         {

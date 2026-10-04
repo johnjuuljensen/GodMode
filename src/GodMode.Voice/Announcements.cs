@@ -87,6 +87,60 @@ public sealed class VoiceConversation(TimeProvider? time = null)
         set => Volatile.Write(ref _lastProfile, value);
     }
 
+    private string? _lastRoot;
+
+    /// <summary>
+    /// The root spoken of last (<see cref="ProjectNames"/>, #455): a line about another project in it need not say it
+    /// again. Null before any, and after a list of several roots.
+    /// </summary>
+    public string? LastRoot
+    {
+        get => Volatile.Read(ref _lastRoot);
+        set => Volatile.Write(ref _lastRoot, value);
+    }
+
+    /// <summary>
+    /// How long a project may go unmentioned before a line about it gives its full anchor again (#455): its topic, root
+    /// and profile, as if it were new. Also how long a silence makes the project talked about need it again.
+    /// </summary>
+    public static readonly TimeSpan FullAnchorAfter = TimeSpan.FromMinutes(10);
+
+    /// <summary>How many other projects mentioned since a project make a line about it give its full anchor again (#455).</summary>
+    public const int FullAnchorAfterOthers = 2;
+
+    /// <summary>How many projects' mentions are kept: more than <see cref="FullAnchorAfterOthers"/> ever looks back.</summary>
+    private const int MentionsKept = 16;
+
+    private readonly Lock _mentionsLock = new();
+    // Each project once, the one mentioned last at the end: those after a project are the others mentioned since
+    private readonly List<(ProjectRef Project, DateTimeOffset At)> _mentions = [];
+
+    /// <summary>
+    /// A line names <paramref name="project"/> now (#455): how much of its anchor it gives, by what was said before it.
+    /// <see cref="Anchor.Bare"/> when it is the project the last line named, within <see cref="FullAnchorAfter"/>;
+    /// <see cref="Anchor.Full"/> when it was never named, not within <see cref="FullAnchorAfter"/>, or
+    /// <see cref="FullAnchorAfterOthers"/> other projects were named since; <see cref="Anchor.Other"/> otherwise.
+    /// </summary>
+    public Anchor Mention(ProjectRef project)
+    {
+        var now = _time.GetUtcNow();
+        lock (_mentionsLock)
+        {
+            var at = _mentions.FindLastIndex(m => m.Project == project);
+            var anchor = at < 0 || now - _mentions[at].At >= FullAnchorAfter ? Anchor.Full
+                : (_mentions.Count - 1 - at) switch
+                {
+                    0 => Anchor.Bare,
+                    >= FullAnchorAfterOthers => Anchor.Full,
+                    _ => Anchor.Other,
+                };
+            if (at >= 0) _mentions.RemoveAt(at);
+            _mentions.Add((project, now));
+            if (_mentions.Count > MentionsKept) _mentions.RemoveAt(0);
+            return anchor;
+        }
+    }
+
     private long _lastListed;
 
     /// <summary>
@@ -162,6 +216,19 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     private sealed record SaidByCode(string Result, string Said);
 }
 
+/// <summary>How much of a project's anchor a line gives (#455, <see cref="VoiceConversation.Mention"/>).</summary>
+public enum Anchor
+{
+    /// <summary>The project the last line was about: its label alone ("issue 283").</summary>
+    Bare,
+
+    /// <summary>Another project than the last line's: its label and topic, and its root and profile when they are not obvious.</summary>
+    Other,
+
+    /// <summary>A project not named recently: its label, topic, root and profile, as there are several.</summary>
+    Full,
+}
+
 /// <summary>
 /// An announcement changed the project talked about from <paramref name="From"/> to <paramref name="To"/>; its speech
 /// ended at <paramref name="Said"/>, null while it is still being said.
@@ -193,9 +260,12 @@ public sealed record ListReading(IReadOnlyList<(string Result, string Said)> Pag
 /// needs the user (<see cref="AttentionBoard.Waits"/>) is dropped, and leaves the conversation as it is. Those still
 /// waiting are said most urgent first: an important project's (#438), then by what they need
 /// (<see cref="Urgency"/>), else in the order they came. What is being said already is never cut off for them: only
-/// what waits for the pause is ordered.
+/// what waits for the pause is ordered. An item's announcement is worded here too, with <paramref name="names"/>, as it is
+/// said (#455): how much of its project it names depends on what was said just before it
+/// (<see cref="VoiceConversation.Mention"/>), which is known only now.
 /// </summary>
-public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConversation conversation, AttentionBoard? board = null)
+public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConversation conversation, AttentionBoard? board = null,
+    ProjectNames? names = null)
     : IAnnouncementFormatter
 {
     public string Format(IReadOnlyList<Announcement> announcements, SessionLanguages languages)
@@ -205,7 +275,7 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
             .OrderByDescending(a => a.Item?.Item.Alert == AttentionAlert.Interrupt)
             .ThenBy(a => Urgency(a.Item?.Item.Kind))
             .ToList();
-        string[] texts = [.. waiting.Select(a => Sentence(a.Announcement.Text)).Where(t => t.Length > 0)];
+        string[] texts = [.. waiting.Select(a => Sentence(TextOf(a.Announcement))).Where(t => t.Length > 0)];
         // A dropped announcement was never said: the conversation stays where it was (#461's switch included)
         var projects = waiting.Select(a => a.Announcement.Source).Distinct().ToList();
         if (projects is not ([] or [null]))
@@ -232,6 +302,19 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
         AttentionKind.Finished => 3,
         _ => 4,
     };
+
+    /// <summary>
+    /// What the announcement says: an item's, the board's own (<see cref="AttentionBoard.AnnouncementOf"/>), worded now with
+    /// its project anchored as this line names it; any other as it was made, its project mentioned all the same.
+    /// </summary>
+    private string TextOf(Announcement announcement)
+    {
+        if (names is not null && board?.AnnouncedItem(announcement) is { } item && names.Of(item.Project) is { } name)
+            return phrases.Announce(name, item.Item);
+        if (ProjectRef.FromKey(announcement.Source) is { } project)
+            conversation.Mention(project);
+        return announcement.Text;
+    }
 
     /// <summary>The item the announcement is of, as the board has it now; null for one of no project.</summary>
     private ServerAttentionItem? ItemOf(Announcement announcement) =>
@@ -372,6 +455,10 @@ public sealed class AttentionBoard
         _announcements.AddOrUpdate(announcement, item);
         return announcement;
     }
+
+    /// <summary>The item the board made <paramref name="announcement"/> of (<see cref="AnnouncementOf"/>); null for one it did not make.</summary>
+    public ServerAttentionItem? AnnouncedItem(Announcement announcement) =>
+        _announcements.TryGetValue(announcement, out var item) ? item : null;
 
     /// <summary>
     /// Whether the item <paramref name="announcement"/> is of still needs the user, as the board has it now (#462): it
