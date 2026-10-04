@@ -165,6 +165,28 @@ public class OutcomeTests
         Assert.Equal(TurnOutcome.Done, Attention.Of(IdleAfter(null) with { PullRequest = merged.PullRequest })?.Outcome);
     }
 
+    /// <summary>
+    /// The merge is news once: continuing and quiet turns that end after it raise no new item (#401), and while it is
+    /// unseen they leave its time as it was.
+    /// </summary>
+    [Theory]
+    [InlineData(TurnOutcome.Continuing)]
+    [InlineData(null)]
+    public void AfterAMerge_AContinuingOrQuietTurn_RaisesNoNewItem(TurnOutcome? outcome)
+    {
+        var mergedAt = Ended.AddMinutes(5);
+        var later = IdleAfter(outcome, quiet: true) with
+        {
+            LastResultAt = Ended.AddHours(1), PullRequest = PullRequest(PullRequestState.Merged, mergedAt),
+        };
+
+        // Seen since it merged: the later turn raises nothing
+        Assert.Null(Attention.Of(later with { SeenAt = mergedAt.AddMinutes(1) }));
+        // Unseen: still the merge's one item, at its own time
+        var item = Attention.Of(later);
+        Assert.Equal((AttentionKind.Finished, TurnOutcome.Done, mergedAt), (item?.Kind, item?.Outcome, item?.Since));
+    }
+
     /// <summary>A done turn whose pull request merged keeps its own result and spoken reply.</summary>
     [Fact]
     public void ADoneTurn_WithItsPullRequestMerged_KeepsItsOwnResult()

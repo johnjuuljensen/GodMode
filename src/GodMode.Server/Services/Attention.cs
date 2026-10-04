@@ -46,16 +46,15 @@ public static partial class Attention
             { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { IsOpen: true, Review: PullRequestReview.ChangesRequested } pr }
                 when pr.ChangedAt > seenAt =>
                 (AttentionKind.Review, pr.ChangedAt, $"Changes requested on pull request #{pr.Number}.", null, null),
-            // A merged pull request is done, whatever the session said (issue #467): its turn's own Finished when that
-            // said done, else one of its own, since it merged or the turn ended, whichever was later
-            { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { State: PullRequestState.Merged } pr, LastResultAt: { } at }
-                when Later(at, pr.ChangedAt) > seenAt =>
-                status is { QuietResult: false, Outcome: TurnOutcome.Done }
-                    ? (AttentionKind.Finished, Later(at, pr.ChangedAt), ResultText(status.LastResult), status.SpokenSummary, TurnOutcome.Done)
-                    : (AttentionKind.Finished, Later(at, pr.ChangedAt), $"Pull request #{pr.Number} is merged.", null, TurnOutcome.Done),
-            // A turn that said it continues is quiet (StatusUpdater.IsQuietTurnEnd): only done, or none, raises Finished
+            // A turn that said it continues is quiet (StatusUpdater.IsQuietTurnEnd): only done, or none, raises Finished.
+            // Once its pull request is merged, it is done whatever it said (issue #467)
             { State: ProjectState.Idle or ProjectState.Stopped, QuietResult: false, LastResultAt: { } at } when at > seenAt =>
-                (AttentionKind.Finished, at, ResultText(status.LastResult), status.SpokenSummary, status.Outcome),
+                (AttentionKind.Finished, at, ResultText(status.LastResult), status.SpokenSummary, status.EffectiveOutcome),
+            // The merge itself is news once, at its own time, when no turn's Finished has told it: after a quiet or
+            // continuing turn, or one the user has seen. A turn that ends later follows the rules above, and raises no
+            // new item for the merge, which stays seen once the user has seen it
+            { State: ProjectState.Idle or ProjectState.Stopped, PullRequest: { State: PullRequestState.Merged } pr } when pr.ChangedAt > seenAt =>
+                (AttentionKind.Finished, pr.ChangedAt, $"Pull request #{pr.Number} is merged.", null, TurnOutcome.Done),
             // Quiet turns ended after one that raised Finished: that one's stays until it is seen
             { State: ProjectState.Idle or ProjectState.Stopped, QuietResult: true, UnseenResult: { } unseen } when unseen.At > seenAt =>
                 (AttentionKind.Finished, unseen.At, ResultText(unseen.Result), unseen.Spoken, unseen.Outcome),
@@ -79,8 +78,6 @@ public static partial class Attention
             AlertOf(status.Importance, kind),
             outcome);
     }
-
-    private static DateTime Later(DateTime a, DateTime b) => a > b ? a : b;
 
     /// <summary>
     /// How loudly an item of <paramref name="kind"/> from a session of <paramref name="importance"/> is brought to the user
