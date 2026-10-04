@@ -163,8 +163,11 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     /// <summary>Each project asked for its recap (#513), in order.</summary>
     public ConcurrentQueue<ProjectRef> RecapAsks { get; } = new();
 
-    /// <summary>What the server answers an ask for a recap: sent, unless set.</summary>
-    public RecapAsk RecapAnswer { get; set; } = RecapAsk.Sent;
+    /// <summary>
+    /// What the server answers an ask for a recap: busy (nothing sent, nothing to say of it) unless a test about recaps
+    /// sets it, so a status read elsewhere is read as it was before #513.
+    /// </summary>
+    public RecapAsk RecapAnswer { get; set; } = RecapAsk.Busy;
 
     public Task<RecapAsk> AskForRecapAsync(ProjectRef project, CancellationToken ct)
     {
