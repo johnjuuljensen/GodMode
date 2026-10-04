@@ -149,8 +149,11 @@ public sealed class AnnouncedSwitchTests
         voice.Transcriptions.AddFinal("hvad spørger 283 om");
         await voice.Events.SaidAsync("issue 283 spørger: Skal jeg bruge den eksisterende migration?");
 
+        var spoken = voice.Events.States.Count(s => s == VoiceState.Speaking);
         servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Skal jeg slette kolonnerne?"));
         await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
+        // Said to its end, so the answer comes in the window after it rather than over it
+        await SpeechEndedAsync(voice, spoken);
         voice.Transcriptions.AddFinal("svar at ja");
         await voice.Events.SaidAsync("Til issue 283 eller issue 101?");
         Assert.Empty(servers.Replies);
@@ -159,4 +162,9 @@ public sealed class AnnouncedSwitchTests
         await voice.Events.SaidAsync("Sendt til issue 283.");
         Assert.Equal(P283, Assert.Single(servers.Replies).Project);
     }
+
+    /// <summary>The session spoke once more than <paramref name="spoken"/> times, and listens again.</summary>
+    internal static Task SpeechEndedAsync(OfflineVoice voice, int spoken) =>
+        Eventually.UntilAsync(() => voice.Events.States.Count(s => s == VoiceState.Speaking) > spoken && voice.Events.States.Last() == VoiceState.Listening,
+            () => $"the speech to end; states: {string.Join(", ", voice.Events.States)}");
 }

@@ -75,8 +75,7 @@ public sealed class VoiceSessionTests
         servers.Set(ServerB, Question("p/r/283", "283-voice", "Ny migration eller den eksisterende?"));
         await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
         // Its speech ended: the window runs from there
-        await Eventually.UntilAsync(() => voice.Events.States.Where(s => s == VoiceState.Speaking).Count() > spoken && voice.Events.States.Last() == VoiceState.Listening,
-            () => $"the announcement's speech to end; states: {string.Join(", ", voice.Events.States)}");
+        await AnnouncedSwitchTests.SpeechEndedAsync(voice, spoken);
         time.Advance(VoiceConversation.AnnouncedSwitchWindow + TimeSpan.FromSeconds(1));
 
         voice.Transcriptions.AddFinal("Svar at den skal bruge den eksisterende migration");
