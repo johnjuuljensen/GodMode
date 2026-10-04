@@ -44,6 +44,13 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string TurnsParameter = "turns";
     public const string ImportanceParameter = "importance";
     public const string SinceParameter = "since";
+    public const string WorkersParameter = "workers";
+
+    /// <summary>The <see cref="WorkersParameter"/> that takes in every overseer's workers (#469).</summary>
+    public const string WorkersAll = "all";
+
+    /// <summary>The <see cref="WorkersParameter"/> for the workers of the overseer talked about ("overseerens workers").</summary>
+    public const string WorkersCurrent = "current";
 
     /// <summary>The <see cref="SinceParameter"/> that lists every project, stale ones too.</summary>
     public const string SinceAll = "all";
@@ -79,21 +86,30 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         $"ones too (\"alle\", \"også de gamle\"). \"{SinceLastAsked}\" for what happened since they last asked (\"siden jeg " +
         "sidst spurgte\"). A number of minutes for a time window they named (\"den sidste time\": 60).", Required: false);
 
+    /// <summary>Which of the sessions overseers run a list takes in (#469), as the model gives it from what the user said.</summary>
+    private static readonly ToolParameter Workers = new(WorkersParameter,
+        "Sessions an overseer runs (its workers) are left out, and counted on their overseer's line: the overseer handles " +
+        $"them. Empty for that. \"{WorkersAll}\" when the user asks for every worker too (\"alle\", \"også workers\"). An " +
+        "overseer as the user named it, for its workers alone (\"hvad laver voice-epics' workers\": \"voice-epics\"); " +
+        $"\"{WorkersCurrent}\" for those of the overseer talked about (\"overseerens workers\"). A worker the user names by its " +
+        $"handle needs none of this: {ProjectStatus} reads it.", Required: false);
+
     private string StaleHoursSaid => _staleAfter.TotalHours.ToString("0.#", CultureInfo.InvariantCulture);
 
     public ToolSet AddTo(ToolSet tools) => tools
         .Add(WhatNeedsMe,
             "List what needs the user across all their servers: questions, permission requests, errors, reviews and " +
-            "finished results, one line per project, the most recent first, each named as it is said. Call when the user asks what needs them, what is waiting, or for status overall.",
-            [InRoot, Since],
-            (_, args, ct) => WhatNeedsMeAsync(ct, Argument(args, RootParameter), Argument(args, SinceParameter)))
+            "finished results, one line per project, the most recent first, each named as it is said; an overseer's workers " +
+            "on its own line, counted, unless the user asks for them. Call when the user asks what needs them, what is waiting, or for status overall.",
+            [InRoot, Since, Workers],
+            (_, args, ct) => WhatNeedsMeAsync(ct, Argument(args, RootParameter), Argument(args, SinceParameter), Argument(args, WorkersParameter)))
         .Add(ListProjects,
             "List the projects on every server, whether they need the user or not, the most recent first, grouped by profile, " +
             "then root: each by the name it is said by, with its name, kind and state. Stale ones are left out and counted " +
-            "unless the user asks for all. Call when the user asks which projects there are, what runs, what has happened, or " +
-            "about one they just started.",
-            [InRoot, Since],
-            (_, args, _) => Task.FromResult(ListProjectsText(Argument(args, RootParameter), Argument(args, SinceParameter))))
+            "unless the user asks for all; an overseer's workers are counted on its line, unless the user asks for them. Call " +
+            "when the user asks which projects there are, what runs, what has happened, or about one they just started.",
+            [InRoot, Since, Workers],
+            (_, args, _) => Task.FromResult(ListProjectsText(Argument(args, RootParameter), Argument(args, SinceParameter), Argument(args, WorkersParameter))))
         .Add(ProjectStatus,
             "Read one project's state and what it waits on (its question, result, error or permission request) in full: " +
             "a very long one has its middle cut, and says so. " +
@@ -148,34 +164,57 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// The window the user asked for (<see cref="Since"/>, #468), the most recent first in any: what needs the user is never
     /// stale, so only a window they named leaves any out, and counts them.
     /// </param>
-    public async Task<string> WhatNeedsMeAsync(CancellationToken ct, string? root = null, string? since = null)
+    /// <param name="workers">
+    /// Which workers it takes in (<see cref="Workers"/>, #469): by default an item of a session a live overseer runs is not
+    /// named, and its overseer has a line that counts it.
+    /// </param>
+    public async Task<string> WhatNeedsMeAsync(CancellationToken ct, string? root = null, string? since = null, string? workers = null)
     {
         var now = Now;
         if (AskOf(since, now) is not { } ask)
             return NoSuchWindow(since!);
+        if (ScopeOf(workers, since) is not { } scope)
+            return NoSuchOverseer(workers!);
         // Those of projects voice knows: an item of one it has not heard of (yet, or any more) has no handle to say
         var all = (await servers.GetAttentionAsync(ct)).Where(i => handles.Of(i.Project) is not null).ToList();
         if (!string.IsNullOrWhiteSpace(root))
         {
             if (!projects.Projects.Any(p => In(p, root)))
                 return NoSuchRoot(root);
-            all = [.. all.Where(i => projects.Find(i.Project) is { } p && In(p, root))];
+            // A worker's item goes with its overseer's line, so its overseer's root decides
+            all = [.. all.Where(i => projects.Find(i.Project) is { } p && In(scope.Shown && projects.Holds(i) ? projects.TopOf(p) : p, root))];
         }
         conversation.LastListed = now;
-        var (items, left) = ProjectListing.Within(all, ask.Window,
-            i => projects.Find(i.Project) is { } p ? ProjectListing.ActivityOf(p.Project, now) : i.Item.Since, _ => true);
+        DateTime ActivityOfItem(ServerAttentionItem i) => projects.Find(i.Project) is { } p ? ProjectListing.ActivityOf(p.Project, now) : i.Item.Since;
+        // Unasked, workers' are held back (#469), but for a nested overseer's escalation: each overseer's line counts those its
+        // workers have, in the window
+        var (items, left) = ProjectListing.Within(all.Where(i => scope.Shown ? !projects.Holds(i) : scope.Takes(i.Project)), ask.Window, ActivityOfItem, _ => true);
+        var (held, _) = ProjectListing.Within(all.Where(i => scope.Shown && projects.Holds(i)), ask.Window, ActivityOfItem, _ => true);
+        var overseers = held.Select(i => projects.Find(i.Project)).OfType<ServerProject>().GroupBy(p => projects.TopOf(p).Ref)
+            .Select(g => (Overseer: g.Key, Name: Names.Of(g.Key), Workers: projects.WorkersOf(g.Key).Count, Waiting: g.Count()))
+            .Where(o => o.Name is not null).Select(o => (o.Overseer, Name: o.Name!, o.Workers, o.Waiting)).ToList();
         // What was read out is what the conversation is about now: one project, or none to answer unnamed
-        Talked(items is [var only] ? only.Project : null);
-        if (items.Count == 0)
+        Talked((items, overseers) switch
+        {
+            ([var only], []) => only.Project,
+            ([], [var overseer]) => overseer.Overseer,
+            _ => null,
+        });
+        if (items.Count == 0 && overseers.Count == 0)
             return left.Count > 0
                 ? SaysItself($"Nothing that needs the user has had activity {ask.Said}; {left.Count} need the user from before, not named.{ask.Note}",
                     _phrases.WaitingFromBefore(left.Count, saidAny: false))
                 : SaysItself((string.IsNullOrWhiteSpace(root) ? "Nothing needs the user." : $"Nothing in {root} needs the user.") + ask.Note, _phrases.Waiting([]));
 
-        var text = new StringBuilder($"{items.Count} need the user:\n");
+        var text = new StringBuilder(items.Count > 0 ? $"{items.Count} need the user:\n" : "Nothing needs the user directly:\n");
         var named = items.Select(i => (Item: i, Name: Names.Of(i.Project)!)).ToList();
         foreach (var (item, name) in named)
             text.AppendLine($"- {name}: {Describe(item.Item)}{InItsWords(item.Item)}");
+        foreach (var overseer in overseers)
+            text.AppendLine($"- {overseer.Name}: runs {OverseerLine(overseer.Workers, overseer.Waiting)}");
+        if (overseers.Count > 0)
+            text.AppendLine($"Workers' items are their overseer's to handle, and not named. If the user asks for them, call {WhatNeedsMe} " +
+                $"with {WorkersParameter} the overseer, or \"{WorkersAll}\".");
         if (left.Count > 0)
             text.AppendLine($"{left.Count} more need the user from before, with no activity {ask.Said}: not named.");
         if (ask.Note.Length > 0)
@@ -183,7 +222,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // One project, with its own spoken reply: the system says it, as status would
         if (named is [{ Item.Item.Spoken.Length: > 0 } one])
             text.AppendLine(SpokenBySystem(one.Name, one.Item.Item));
-        var waiting = _phrases.Waiting([.. named.Select(n => (n.Name, n.Item.Item))]);
+        var waiting = _phrases.Waiting([.. named.Select(n => (n.Name, n.Item.Item))], [.. overseers.Select(o => (o.Name, o.Workers, o.Waiting))]);
         return SaysItself(ReadOut(text.ToString().TrimEnd()),
             left.Count > 0 ? $"{waiting} {_phrases.WaitingFromBefore(left.Count, saidAny: true)}" : waiting);
     }
@@ -193,21 +232,32 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// The window (<see cref="Since"/>, #468): by default the stale projects are left out, but for those that need the
     /// user, and counted; <see cref="SinceAll"/> takes in all; a window the user named takes in those with activity in it.
     /// </param>
-    public string ListProjectsText(string? root = null, string? since = null)
+    /// <param name="workers">
+    /// Which workers it takes in (<see cref="Workers"/>, #469): by default a session a live overseer runs is left out, and
+    /// its overseer's line counts it; its overseer's activity, and whether it needs the user, take its workers' in.
+    /// </param>
+    public string ListProjectsText(string? root = null, string? since = null, string? workers = null)
     {
         var now = Now;
         if (AskOf(since, now) is not { } ask)
             return NoSuchWindow(since!);
+        if (ScopeOf(workers, since) is not { } scope)
+            return NoSuchOverseer(workers!);
         var filtered = !string.IsNullOrWhiteSpace(root);
-        var all = filtered ? [.. projects.Projects.Where(p => In(p, root!))] : projects.Projects;
-        if (filtered && all.Count == 0)
+        var all = filtered ? [.. scope.Projects.Where(p => In(p, root!))] : scope.Projects;
+        if (filtered && all.Count == 0 && scope.Overseer is null)
             return NoSuchRoot(root!);
         conversation.LastListed = now;
-        var (kept, left) = ProjectListing.Within(all, ask.Window, p => ActivityOf(p, now), p => StateOf(p) == ListedState.NeedsYou);
+        // Unasked, an overseer stands for its workers: it is as recent as the last of them, and needs the user when one does
+        IReadOnlyList<ServerProject> Stands(ServerProject p) => scope.Shown ? [p, .. projects.WorkersOf(p.Ref)] : [p];
+        DateTime Activity(ServerProject p) => Stands(p).Max(s => ActivityOf(s, now));
+        var (kept, left) = ProjectListing.Within(all, ask.Window, Activity, p => Stands(p).Any(s => StateOf(s) == ListedState.NeedsYou));
         // As what needs me: one project read out is the one talked about, several leave none
         Talked(kept is [var only] ? only.Ref : null);
         if (all.Count == 0)
-            return SaysItself("No projects on any server.", _phrases.Projects([]));
+            return scope.Overseer is { } none
+                ? SaysItself($"{Names.Of(none)} runs no workers{(filtered ? $" in {root}" : "")} now.", _phrases.Projects([]))
+                : SaysItself("No projects on any server.", _phrases.Projects([]));
         if (kept.Count == 0)
         {
             conversation.Reading = null;
@@ -217,18 +267,23 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // Grouped by profile, then root, each said once (#450): a session's label alone ("branch master") says nothing
         // of where it is. The group with the most recent first, and the most recent first in each (#468)
         var groups = Names.Groups()
-            .Select(g => g with { Projects = [.. g.Projects.Where(kept.Contains).OrderByDescending(p => ActivityOf(p, now))] })
+            .Select(g => g with { Projects = [.. g.Projects.Where(kept.Contains).OrderByDescending(Activity)] })
             .Where(g => g.Projects.Count > 0)
-            .OrderByDescending(g => ActivityOf(g.Projects[0], now))
+            .OrderByDescending(g => Activity(g.Projects[0]))
             .ToList();
-        var text = new StringBuilder(groups is [_]
+        // An overseer's line counts its workers (#469), unless they are listed themselves
+        string ListLabelOf(ServerProject p) => scope.Shown && projects.WorkersOf(p.Ref) is { Count: > 0 } run
+            ? $"{LabelOf(p)} ({_phrases.RunsWorkers(run.Count, run.Count(w => StateOf(w) == ListedState.NeedsYou))})"
+            : LabelOf(p);
+        var text = new StringBuilder(scope.Overseer is { } of ? $"The workers {Names.Of(of)} runs: " : "");
+        text.Append(groups is [_]
             ? $"{Count(kept.Count)}, all in one group:\n"
             : $"{Count(kept.Count)}, in {groups.Count} groups by profile and root:\n");
         foreach (var group in groups)
         {
             text.Append($"{group.Heading} ({Count(group.Projects.Count)}):\n");
             foreach (var project in group.Projects)
-                text.Append($"- {LabelOf(project)} ({Details(project.Project.Name, project.Project.Kind)}): {project.Project.State}\n");
+                text.Append($"- {LabelOf(project)} ({Details(project.Project.Name, project.Project.Kind)}): {project.Project.State}{ListedLine(project, scope)}\n");
         }
         if (left.Count > 0)
             text.Append(LeftOutText(left, ask)).Append(' ');
@@ -240,12 +295,16 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             conversation.Reading = null;
             text.Append($"Say the count, {kept.Count}, then each group once, by its profile and root, with its projects by the names given here. " +
                 "If you leave any out, say how many and why.");
+            // Workers listed: what each needs is said too, since no announcement said it (#469)
+            List<(SpokenName, AttentionItem)> needs = scope.Shown ? [] : [.. groups.SelectMany(g => g.Projects).Where(p => projects.IsRun(p.Ref))
+                .Select(p => (Name: Names.Of(p.Ref), Item: board.ItemOf(p.Ref)?.Item))
+                .Where(n => n.Name is not null && n.Item is not null).Select(n => (n.Name!, n.Item!))];
             return SaysItself(text.ToString(), _phrases.Projects([.. groups.Select(g =>
-                (g.Profile, g.Root, (IReadOnlyList<string>)[.. g.Projects.Select(LabelOf)]))], left));
+                (g.Profile, g.Root, (IReadOnlyList<string>)[.. g.Projects.Select(ListLabelOf)]))], left, needs));
         }
 
         // Too many to keep (#457): a summary by state, then the projects it did not name, a page at a time, on "mere"
-        var (states, rest) = ProjectListing.Summarise(ProjectListing.Order(groups, StateOf, LabelOf, p => ActivityOf(p, now)));
+        var (states, rest) = ProjectListing.Summarise(ProjectListing.Order(groups, StateOf, ListLabelOf, Activity));
         var pages = ProjectListing.Pages(rest);
         conversation.Reading = pages.Count > 0
             ? new ListReading([.. pages.Select((page, i) => (ListPageResult(page, i, pages.Count, rest.Count), _phrases.ListPage(page, i + 1 < pages.Count)))], 0)
@@ -260,6 +319,70 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     }
 
     private DateTime Now => _time.GetUtcNow().UtcDateTime;
+
+    /// <summary>
+    /// Which projects a list takes in (#469): those no live overseer runs (<see cref="ProjectBoard.Shown"/>), every one
+    /// (<paramref name="All"/>), or the workers of <paramref name="Overseer"/> alone.
+    /// </summary>
+    private sealed record ListScope(ProjectBoard Board, bool All, ProjectRef? Overseer)
+    {
+        /// <summary>Unasked: overseers stand for their workers.</summary>
+        public bool Shown => !All && Overseer is null;
+
+        public IReadOnlyList<ServerProject> Projects =>
+            All ? Board.Projects : Overseer is { } of ? Board.WorkersOf(of) : Board.Shown;
+
+        /// <summary>Whether the scope names the project itself, not on its overseer's line.</summary>
+        public bool Takes(ProjectRef project) =>
+            All || (Overseer is { } of ? Board.WorkersOf(of).Any(w => w.Ref == project) : !Board.IsRun(project));
+    }
+
+    /// <summary>
+    /// The scope <paramref name="workers"/> names (<see cref="Workers"/>): every worker for "all", and for a window of all
+    /// (<paramref name="since"/> "all", "alle"), which the user said of everything; an overseer's own workers when it names
+    /// one, or the one talked about ("current"), or the one overseer there is; none unasked. Null for a name that is no overseer.
+    /// </summary>
+    private ListScope? ScopeOf(string? workers, string? since)
+    {
+        var asked = workers?.Trim().ToLowerInvariant();
+        switch (asked)
+        {
+            case null or "":
+                return new ListScope(projects, since?.Trim().ToLowerInvariant() is SinceAll or "alle", null);
+            case WorkersAll or "alle":
+                return new ListScope(projects, true, null);
+        }
+        var overseer = asked == WorkersCurrent ? conversation.Current : handles.Resolve(workers!);
+        if (overseer is not null && projects.WorkersOf(overseer).Count > 0)
+            return new ListScope(projects, false, overseer);
+        // "Overseerens workers" with no overseer talked about: the one overseer there is
+        return asked == WorkersCurrent && Overseers() is [var only] ? new ListScope(projects, false, only.Ref) : null;
+    }
+
+    /// <summary>The overseers voice says, those that run workers now.</summary>
+    private List<ServerProject> Overseers() => [.. projects.Shown.Where(p => projects.WorkersOf(p.Ref).Count > 0)];
+
+    /// <summary>A <see cref="WorkersParameter"/> that names no overseer: for the model, with the overseers there are.</summary>
+    private string NoSuchOverseer(string workers)
+    {
+        var overseers = Overseers().Select(p => Names.Full(p.Ref)).OfType<SpokenName>().ToList();
+        return $"'{workers}' is no overseer that runs workers now. Nothing was listed. " + (overseers.Count > 0
+            ? $"Overseers: {string.Join("; ", overseers)}. Ask which, or give {WorkersParameter} \"{WorkersAll}\"."
+            : "No overseer runs any worker now.");
+    }
+
+    /// <summary>"6 workers, 2 of them waiting on it, which it handles", as a tool's text tells the model.</summary>
+    private static string OverseerLine(int workers, int waiting) =>
+        (workers == 1 ? "1 worker" : $"{workers} workers") + (waiting > 0 ? $", {waiting} of them waiting on it, which it handles" : "");
+
+    /// <summary>
+    /// What a list's line adds for the model (#469): an overseer's workers, counted, when they are not listed; what a
+    /// worker needs, when they are.
+    /// </summary>
+    private string ListedLine(ServerProject project, ListScope scope) =>
+        scope.Shown
+            ? projects.WorkersOf(project.Ref) is { Count: > 0 } run ? $"; runs {OverseerLine(run.Count, run.Count(w => StateOf(w) == ListedState.NeedsYou))}" : ""
+            : board.ItemOf(project.Ref)?.Item is { } item ? $"; needs the user: {Describe(item)}" : "";
 
     /// <summary>When the project last did something (<see cref="ProjectListing.ActivityOf"/>).</summary>
     private static DateTime ActivityOf(ServerProject project, DateTime now) => ProjectListing.ActivityOf(project.Project, now);
@@ -360,6 +483,11 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         var failed = status.LastError is { Length: > 0 } && status.State == ProjectState.Error && item?.Kind != AttentionKind.Error;
         if (failed)
             text.Append($" Error: {Capped(status.LastError!)}");
+        // An overseer's own line counts the workers it stands for (#469)
+        var run = projects.WorkersOf(target);
+        var waiting = run.Count(w => StateOf(w) == ListedState.NeedsYou);
+        if (run.Count > 0)
+            text.Append($" Runs {OverseerLine(run.Count, waiting)}: {WhatNeedsMe} or {ListProjects} with {WorkersParameter} \"{WorkersCurrent}\" lists them.");
         var recap = await AskForRecapAsync(target, status, ct);
         text.Append(recap switch
         {
@@ -368,10 +496,10 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             _ => "",
         });
         var result = ReadOut(text.ToString());
-        return !failed && StatusSaid(name, status, item, full, standing) is { } said
-            ? SaysItself(result, recap is RecapAsk.Sent or RecapAsk.Asked
-                ? $"{said} {_phrases.RecapAsked(before: recap == RecapAsk.Asked)}" : said)
-            : result;
+        if (failed || StatusSaid(name, status, item, full, standing) is not { } said) return result;
+        if (run.Count > 0) said = $"{said} {GodModeAnnouncementFormatter.Sentence(_phrases.Workers(name, run.Count, waiting))}";
+        if (recap is RecapAsk.Sent or RecapAsk.Asked) said = $"{said} {_phrases.RecapAsked(before: recap == RecapAsk.Asked)}";
+        return SaysItself(result, said);
     }
 
     /// <summary>
@@ -715,9 +843,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     private async Task<string> UnknownAsync(string? reference, CancellationToken ct)
     {
-        var waiting = (await servers.GetAttentionAsync(ct)).Select(i => Names.Full(i.Project)).OfType<SpokenName>().ToList();
+        var waiting = (await servers.GetAttentionAsync(ct)).Where(i => !projects.Holds(i)).Select(i => Names.Full(i.Project)).OfType<SpokenName>().ToList();
         var which = waiting.Count > 0 ? $" Waiting now: {string.Join("; ", waiting)}." : " Nothing needs the user now.";
-        var all = projects.Projects;
+        var all = projects.Shown;
         var options = all.Count == 0 ? " No projects on any server."
             : $" Projects: {string.Join("; ", all.Take(OptionsListed).Select(Line))}{(all.Count > OptionsListed ? $"; {all.Count - OptionsListed} more" : "")}.";
         // A label several projects have ("branch master" in two profiles) names none of them: say which there are

@@ -230,6 +230,15 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         PushProjects(serverId);
     }
 
+    private readonly ConcurrentDictionary<ProjectRef, string> _parents = new();
+
+    /// <summary>The overseer the server recorded for the project (#401, <see cref="ProjectSummary.RecordedParentId"/>), as the hub pushes it.</summary>
+    public void SetRecordedParent(string serverId, string projectId, string parentId)
+    {
+        _parents[new ProjectRef(serverId, projectId)] = parentId;
+        PushProjects(serverId);
+    }
+
     /// <summary>The project is deleted, as the hub pushes it.</summary>
     public void DeleteProject(string serverId, string projectId)
     {
@@ -255,7 +264,8 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     private void PushProjects(string serverId)
     {
         _servers.TryAdd(serverId, 0);
-        ProjectsChanged?.Invoke(serverId, serverId, [.. _statuses.Where(s => s.Key.ServerId == serverId).Select(s => Summary(s.Value))]);
+        ProjectsChanged?.Invoke(serverId, serverId, [.. _statuses.Where(s => s.Key.ServerId == serverId)
+            .Select(s => Summary(s.Value) with { RecordedParentId = _parents.GetValueOrDefault(s.Key) })]);
     }
 
     private static ProjectSummary Summary(ProjectStatus s) =>
