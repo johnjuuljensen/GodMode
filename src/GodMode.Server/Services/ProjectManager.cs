@@ -735,7 +735,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 ParentId: s.ParentId,
                 SlashCommands: s.SlashCommands,
                 RecordedParentId: ServerParentOf(project),
-                Importance: s.Importance
+                Importance: s.Importance,
+                Recap: s.Recap,
+                RecapAt: s.RecapAt
             ));
         }
 

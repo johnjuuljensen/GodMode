@@ -25,6 +25,8 @@ namespace GodMode.Shared.Models;
 /// the overseer that runs it. Null for a top-level session.
 /// </param>
 /// <param name="Importance">How much the session may interrupt the user, as in <see cref="ProjectStatus.Importance"/>.</param>
+/// <param name="Recap">The session's one-line recap of where it stands, as in <see cref="ProjectStatus.Recap"/>.</param>
+/// <param name="RecapAt">When the session last gave its recap, as in <see cref="ProjectStatus.RecapAt"/>.</param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -43,5 +45,7 @@ public record ProjectSummary(
     string? ParentId = null,
     IReadOnlyList<string>? SlashCommands = null,
     string? RecordedParentId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
+    string? Recap = null,
+    DateTime? RecapAt = null
 );

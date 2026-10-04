@@ -85,6 +85,13 @@ namespace GodMode.Shared.Models;
 /// How much the session may interrupt the user (issue #438): its <c>settings.json</c>'s, not status.json's. Set at its create
 /// from its action's <c>importance</c>, and by <see cref="Hubs.IProjectHub.SetImportance"/>.
 /// </param>
+/// <param name="Recap">
+/// The session's one-line recap of where it stands (issue #466), as opposed to its turn's reply: the <c>recap</c> of the
+/// last <c>speak</c> call of its main conversation that the server accepted with one. Set as the call's result is read,
+/// mid-turn, and kept until the session gives another: a turn's start, its end or its error does not clear it, so a
+/// running session has one too. Plain text voice can say; null until the session has given one.
+/// </param>
+/// <param name="RecapAt">When the session last gave <paramref name="Recap"/>.</param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -121,7 +128,9 @@ public record ProjectStatus(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool QuietResult = false,
     TurnResult? UnseenResult = null,
     Escalation? Escalation = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
+    string? Recap = null,
+    DateTime? RecapAt = null
 );
 
 /// <summary>A turn's end, as <see cref="ProjectStatus.UnseenResult"/> keeps it.</summary>

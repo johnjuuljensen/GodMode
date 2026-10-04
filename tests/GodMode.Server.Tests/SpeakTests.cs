@@ -69,6 +69,69 @@ public class SpeakTests
         File.Delete(go);
     }
 
+    /// <summary>
+    /// A recap is the session's standing (issue #466): kept with its time as soon as the server accepted its call, on the
+    /// status and the list's summary, through the next turn's start and a turn that gives none, until another replaces it.
+    /// </summary>
+    [Fact]
+    public async Task ASpeakWithARecap_KeepsItWithItsTime_UntilAnotherReplacesIt()
+    {
+        const string recap = "Pull request 456 er åben, testene er grønne, venter på review.";
+        const string next = "Pull request 456 er merget, arbejdet er færdigt.";
+        var go = Path.Combine(Path.GetTempPath(), $"speak-go-{Guid.NewGuid():N}");
+        var done = Path.Combine(Path.GetTempPath(), $"speak-done-{Guid.NewGuid():N}");
+        var script = new FakeScript().EmitInit()
+            .AwaitStdin().EmitUser("Start", echo: true).Speak(Spoken, recap: recap).EmitAssistant("Skal jeg merge?").EmitResult("asked")
+            // The next turn starts, and is held: it gives no recap, then one that replaces the first
+            .AwaitStdin().EmitUser("Ja", echo: true).AwaitFile(go).Speak("Merget.", "toolu_plain")
+            .AwaitFile(done).Speak("Færdig.", "toolu_next", recap: next).EmitAssistant("Merget.").EmitResult("merged")
+            .AwaitStdin();
+        var (run, id) = await StartAsync(script);
+        await using var _ = run;
+
+        var asked = await run.Client.WaitForAsync(id, s => s.State == ProjectState.WaitingInput, run.Server);
+        Assert.Equal(recap, asked.Recap);
+        var at = Assert.NotNull(asked.RecapAt);
+        Assert.Contains("and as the session's recap", Assert.Single((await run.WaitForLaunchAsync(id, l => l.Calls.Count > 0)).Calls));
+        var listed = Assert.Single(await run.Client.Hub.InvokeAsync<ProjectSummary[]>(nameof(IProjectHub.ListProjects)), p => p.Id == id);
+        Assert.Equal((recap, at), (listed.Recap, listed.RecapAt));
+
+        // The next turn's start clears its spoken reply, not its recap
+        await run.Client.Hub.InvokeAsync(nameof(IProjectHub.ReplyAndResume), id, "Ja");
+        var running = await run.Client.WaitForAsync(id, s => s is { State: ProjectState.Running, SpokenSummary: null }, run.Server);
+        Assert.Equal((recap, at), (running.Recap, running.RecapAt));
+
+        // A speak with no recap leaves it, and one with a recap replaces it, mid-turn
+        File.WriteAllText(go, "");
+        await run.WaitForLaunchAsync(id, l => l.Calls.Count > 1);
+        Assert.Equal((recap, at), ((await StatusAsync(run, id)).Recap, (await StatusAsync(run, id)).RecapAt));
+        File.WriteAllText(done, "");
+        var merged = await run.Client.WaitForAsync(id, s => s is { State: ProjectState.Idle, LastResult: "merged" }, run.Server);
+        Assert.Equal(next, merged.Recap);
+        Assert.True(merged.RecapAt > at);
+        File.Delete(go);
+        File.Delete(done);
+    }
+
+    /// <summary>A recap voice cannot say refuses the whole call, with why: neither its text nor its recap is kept.</summary>
+    [Fact]
+    public async Task ARefusedRecap_RefusesTheCall_AndNothingIsKept()
+    {
+        var script = new FakeScript().EmitInit()
+            .AwaitStdin().EmitUser("Start", echo: true).Speak(Spoken, recap: "PR #456 er åben.", refused: true)
+            .EmitAssistant("Done.").EmitResult("done").AwaitStdin();
+        var (run, id) = await StartAsync(script);
+        await using var _ = run;
+
+        var done = await run.Client.WaitForAsync(id, s => s.State == ProjectState.Idle, run.Server);
+        Assert.Null(done.SpokenSummary);
+        Assert.Null(done.Recap);
+        Assert.Null(done.RecapAt);
+        var call = Assert.Single((await run.WaitForLaunchAsync(id, l => l.Calls.Count > 0)).Calls);
+        Assert.StartsWith($"{SpeakTool.Name} error:", call);
+        Assert.Contains("The recap has '#'", call);
+    }
+
     /// <summary>A text voice cannot say is refused with why, and the turn has no spoken reply: voice falls back to the result.</summary>
     [Fact]
     public async Task ARefusedText_IsRefusedWithWhy_AndTheTurnHasNoSpokenReply()
@@ -176,6 +239,28 @@ public class SpeakTests
         else Assert.Contains(refusedFor, refused);
     }
 
+    [Theory]
+    [InlineData(null, null, null)]
+    [InlineData("  \n ", null, null)]
+    [InlineData("Pull request 456 er åben,\n venter på review.","Pull request 456 er åben, venter på review.", null)]
+    [InlineData("Se https://github.com/x/y.", "Se https://github.com/x/y.", "The recap has a URL")]
+    [InlineData("PR #456 er åben.", "PR #456 er åben.", "The recap has '#'")]
+    public void CheckRecap_SaysTheRecapAsVoiceSaysIt_NoneForBlank_OrWhyNot(string? recap, string? said, string? refusedFor)
+    {
+        var (kept, refused) = SpeakTool.CheckRecap(recap);
+        Assert.Equal(said, kept);
+        if (refusedFor is null) Assert.Null(refused);
+        else Assert.StartsWith(refusedFor, refused);
+    }
+
+    [Fact]
+    public void CheckRecap_RefusesMoreThanALine_SayingHowLong()
+    {
+        var (_, refused) = SpeakTool.CheckRecap(new string('a', SpeakTool.RecapMaxLength + 1));
+        Assert.StartsWith($"The recap is {SpeakTool.RecapMaxLength + 1} characters, and at most {SpeakTool.RecapMaxLength}", refused);
+        Assert.Null(SpeakTool.CheckRecap(new string('a', SpeakTool.RecapMaxLength)).Refused);
+    }
+
     [Fact]
     public void Check_RefusesALongText_SayingHowLong()
     {
@@ -194,17 +279,18 @@ internal static class SpeakScript
     /// an error when <paramref name="refused"/>, as claude writes it for a call the server refused.
     /// </summary>
     public static FakeScript Speak(this FakeScript script, string text, string toolUseId = "toolu_speak", string? parentToolUseId = null,
-        bool refused = false, bool call = true)
+        bool refused = false, bool call = true, string? recap = null)
     {
+        object input = recap is null ? new { text } : new { text, recap };
         script.Emit(JsonSerializer.Serialize(new
         {
             type = "assistant",
-            message = new { role = "assistant", content = new object[] { new { type = "tool_use", id = toolUseId, name = SpokenReply.ToolName, input = new { text } } } },
+            message = new { role = "assistant", content = new object[] { new { type = "tool_use", id = toolUseId, name = SpokenReply.ToolName, input } } },
             parent_tool_use_id = parentToolUseId,
             session_id = FakeScript.SessionIdPlaceholder,
         }));
         if (call)
-            script.CallTool("godmode", SpeakTool.Name, new { text });
+            script.CallTool("godmode", SpeakTool.Name, input);
         return script.Emit(JsonSerializer.Serialize(new
         {
             type = "user",
