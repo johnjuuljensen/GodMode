@@ -559,6 +559,16 @@ export interface ProjectStatus {
    * at its create from its action's `importance`, and by IProjectHub.SetImportance.
    */
   Importance?: Importance;
+  /**
+   * The session's one-line recap of where it stands (issue #466), as opposed to its turn's reply: the `recap`
+   * of the last `speak` call of its main conversation that the server accepted with one. Set as the call's
+   * result is read, mid-turn, and kept until the session gives another: a turn's start, its end or its error
+   * does not clear it, so a running session has one too. Plain text voice can say; null until the session has
+   * given one.
+   */
+  Recap?: string | null;
+  /** When the session last gave Recap. */
+  RecapAt?: string | null;
 }
 
 /** Summary information about a project. */
@@ -605,6 +615,10 @@ export interface ProjectSummary {
   RecordedParentId?: string | null;
   /** How much the session may interrupt the user, as in ProjectStatus.Importance. */
   Importance?: Importance;
+  /** The session's one-line recap of where it stands, as in ProjectStatus.Recap. */
+  Recap?: string | null;
+  /** When the session last gave its recap, as in ProjectStatus.RecapAt. */
+  RecapAt?: string | null;
 }
 
 /**
