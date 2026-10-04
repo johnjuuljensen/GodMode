@@ -82,6 +82,17 @@ public sealed partial class VoicePhrases
         (_, false) => $"{Subject(name)} is done: {text}",
     };
 
+    /// <summary>Where a project stands, in the recap the session keeps of it (#466), after its name: "issue 283: …".</summary>
+    public string Stands(SpokenName name, string recap) => $"{Named(name)}: {recap}";
+
+    /// <summary>A project's last spoken reply, when nothing of it needs the user (#466): "issue 283 sagde sidst: …".</summary>
+    public string SaidLast(SpokenName name, string spoken) =>
+        _danish ? $"{Subject(name)} sagde sidst: {spoken}" : $"{Subject(name)} said last: {spoken}";
+
+    /// <summary>A project's last result, shortened, when nothing of it needs the user (#466): "Sidste resultat fra issue 283: …".</summary>
+    public string LastResult(SpokenName name, string result) =>
+        _danish ? $"Sidste resultat fra {Named(name)}: {result}" : $"Last result from {Named(name)}: {result}";
+
     /// <summary>
     /// What needs the user, as <see cref="VoiceTools.WhatNeedsMe"/> found it, in the code's words (#456): each project as
     /// its announcement says it (<see cref="Announce"/>), several after their count, "Intet venter." for none.

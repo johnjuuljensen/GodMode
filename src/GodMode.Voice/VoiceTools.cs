@@ -208,6 +208,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         var text = new StringBuilder($"{name} ({Details(status.Name, status.Kind)}): {status.State}.");
         var item = board.ItemOf(target)?.Item;
         var full = item is null ? null : InFull(item, status);
+        var standing = StandingOf(status, item);
+        text.Append(Standing(standing));
         if (item is not null)
         {
             text.Append($" Needs the user: {Describe(item, full)}");
@@ -220,20 +222,71 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         if (failed)
             text.Append($" Error: {Capped(status.LastError!)}");
         var result = ReadOut(text.ToString());
-        return !failed && StatusSaid(name, item, full) is { } said ? SaysItself(result, said) : result;
+        return !failed && StatusSaid(name, status, item, full, standing) is { } said ? SaysItself(result, said) : result;
     }
 
+    /// <summary>How much of a last result <see cref="Standing"/> reads when the session gave no line of its own: its start, a few sentences.</summary>
+    public const int StandingResultLength = 300;
+
+    /// <summary>What <see cref="StandingOf"/> found: the session's recap, its last spoken reply, or its last result shortened.</summary>
+    private enum StandingKind { Recap, Spoken, Result }
+
     /// <summary>
-    /// What the code says itself of a project's status (#456), when it has something to read that is said as it is: its
-    /// own spoken reply, or a question or result short and plain enough (<see cref="SaidAsIs"/>). Null for the rest,
-    /// which the model says: a status with nothing to read, an error, a permission request, a long or marked-up text.
+    /// Where the project stands (issue #466), in this order: the recap the session keeps of it
+    /// (<see cref="ProjectStatus.Recap"/>), else, with no attention item to read the turn from, its last spoken reply, else
+    /// its last result shortened. Null when it has none of them.
     /// </summary>
-    private string? StatusSaid(SpokenName name, AttentionItem? item, string? full) => item switch
+    private static (StandingKind Kind, string Text)? StandingOf(ProjectStatus status, AttentionItem? item) => status switch
     {
-        { Spoken.Length: > 0 } => _phrases.Spoken(name, item),
-        { Kind: AttentionKind.Question or AttentionKind.Finished } when SaidAsIs(full) => _phrases.Reads(name, item.Kind, full!.Trim()),
+        { Recap: { Length: > 0 } recap } => (StandingKind.Recap, recap),
+        _ when item is not null => null,
+        { SpokenSummary: { Length: > 0 } spoken } => (StandingKind.Spoken, spoken),
+        { LastResult: { Length: > 0 } result } => (StandingKind.Result, Shortened(result.Trim())),
         _ => null,
     };
+
+    /// <summary>Where the project stands (<see cref="StandingOf"/>), as the tool's text tells the model; nothing when it has none.</summary>
+    private static string Standing((StandingKind Kind, string Text)? standing) => standing switch
+    {
+        (StandingKind.Recap, var recap) => $" Where it stands, in its own words: \"{recap}\"",
+        (StandingKind.Spoken, var spoken) => $" Its last reply, in its own spoken words: \"{spoken}\"",
+        (StandingKind.Result, var result) => $" Its last result: {result}",
+        _ => "",
+    };
+
+    /// <summary>The text, or its start to a word at about <see cref="StandingResultLength"/> characters with "…".</summary>
+    private static string Shortened(string text) =>
+        text.Length <= StandingResultLength ? text
+            : text[..(text.LastIndexOf(' ', StandingResultLength) is var at and > 0 ? at : Whole(text, StandingResultLength))] + "…";
+
+    /// <summary>
+    /// What the code says itself of a project's status (#456), when all it has to read is said as it is, in the order the
+    /// tool's text has it (#466): where it stands (its recap; with no attention item, its last spoken reply, else its last
+    /// result shortened), then what it needs (its own spoken reply, or a question or result short and plain enough,
+    /// <see cref="SaidAsIs"/>). Null when any of it is not, which the model says: a status with nothing to read, an error, a
+    /// permission request, a question asked with no attention item, a long or marked-up text.
+    /// </summary>
+    private string? StatusSaid(SpokenName name, ProjectStatus status, AttentionItem? item, string? full, (StandingKind Kind, string Text)? standing)
+    {
+        var stands = standing switch
+        {
+            null => "",
+            (StandingKind.Recap, var recap) => _phrases.Stands(name, recap),
+            (StandingKind.Spoken, var spoken) => _phrases.SaidLast(name, spoken),
+            (StandingKind.Result, var result) when SaidAsIs(result.TrimEnd('…')) => _phrases.LastResult(name, result),
+            _ => null,
+        };
+        var needs = item switch
+        {
+            null when status.CurrentQuestion is { Length: > 0 } => null,
+            null => "",
+            { Spoken.Length: > 0 } => _phrases.Spoken(name, item),
+            { Kind: AttentionKind.Question or AttentionKind.Finished } when SaidAsIs(full) => _phrases.Reads(name, item.Kind, full!.Trim()),
+            _ => null,
+        };
+        return stands is null || needs is null ? null
+            : string.Join(" ", new[] { stands, needs }.Where(t => t.Length > 0).Select(GodModeAnnouncementFormatter.Sentence)) is { Length: > 0 } said ? said : null;
+    }
 
     /// <summary>How long a question or result the code says as it is may be: a few sentences. A longer one is the model's to shorten.</summary>
     public const int SaidAsIsLength = 300;

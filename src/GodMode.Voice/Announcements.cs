@@ -134,7 +134,7 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
 
     /// <summary>The text as a sentence: ended with its own '?' or '!' (a session's spoken reply has them), else a '.'.</summary>
     internal static string Sentence(string text) =>
-        text.Trim().TrimEnd('.') is { Length: > 0 } t ? t[^1] is '?' or '!' ? t : t + "." : "";
+        text.Trim().TrimEnd('.') is { Length: > 0 } t ? t[^1] is '?' or '!' or '…' ? t : t + "." : "";
 }
 
 /// <summary>

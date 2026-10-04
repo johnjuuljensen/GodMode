@@ -112,12 +112,23 @@ internal sealed class TestServer : IAsyncDisposable
         new OneServer(serverId, new RelayTarget("http://127.0.0.1:1/hubs/projects", ApiKey));
 
     /// <summary>What the fake claude of a project read from its stdin, over all its launches.</summary>
-    public IReadOnlyList<string> StdinOf(string projectId)
+    public IReadOnlyList<string> StdinOf(string projectId) =>
+        [.. FakeRecording.Read(Path.Combine(FolderOf(projectId), RecordFileName)).SelectMany(l => l.Stdin)];
+
+    /// <summary>What the server logged as the project's input (its session's input.jsonl), oldest first.</summary>
+    public IReadOnlyList<string> InputOf(string projectId)
     {
-        // The working folder with the session's state in it: .godmode/sessions/{id}/, its id the ID's last part
+        var path = Path.Combine(FolderOf(projectId), ".godmode", "sessions", projectId.Split('/')[^1], "input.jsonl");
+        return File.Exists(path)
+            ? [.. File.ReadAllLines(path).Select(line => JsonDocument.Parse(line).RootElement.GetProperty("content").GetString()!)]
+            : [];
+    }
+
+    /// <summary>The working folder with the session's state in it: .godmode/sessions/{id}/, its id the ID's last part.</summary>
+    private string FolderOf(string projectId)
+    {
         var id = projectId.Split('/')[^1];
-        var folder = Directory.GetDirectories(RootPath).Single(f => Directory.Exists(Path.Combine(f, ".godmode", "sessions", id)));
-        return [.. FakeRecording.Read(Path.Combine(folder, RecordFileName)).SelectMany(l => l.Stdin)];
+        return Directory.GetDirectories(RootPath).Single(f => Directory.Exists(Path.Combine(f, ".godmode", "sessions", id)));
     }
 
     public async ValueTask DisposeAsync()

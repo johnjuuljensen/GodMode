@@ -45,7 +45,7 @@ public sealed class StartTests
         // Right then
         voice.Transcriptions.SayAsRecognized("Status på 283");
         // Its result in the code's words (#456) once its turn is done, else the model's line on it while it runs; never "Ukendt"
-        await Eventually.UntilAsync(() => voice.Events.Responses.Any(r => r is "issue 283 er færdig: done" or "283 er i gang."),
+        await Eventually.UntilAsync(() => voice.Events.Responses.Any(r => r is "issue 283 er færdig: done." or "283 er i gang."),
             () => $"the status of 283; it said: {string.Join(" | ", voice.Events.Responses)}");
         Assert.DoesNotContain(model.ToolResults, r => r.Contains("Unknown project", StringComparison.Ordinal));
         Assert.NotNull(voice.Session.Handles.Resolve("283"));

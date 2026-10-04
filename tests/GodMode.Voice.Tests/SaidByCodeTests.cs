@@ -163,6 +163,68 @@ public sealed class SaidByCodeTests
         Assert.Equal(2, model.Calls);
     }
 
+    private const string Recap = "Pull request 456 er åben, testene er grønne, den venter på review.";
+
+    private static ProjectStatus Status(ProjectState state, string? result = null, string? spoken = null, string? recap = null) =>
+        new("p/r/283", "283-voice", state, DateTime.UtcNow, DateTime.UtcNow, null, new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0),
+            null, null, 0, RootName: "root", ProfileName: "Default", LastResult: result,
+            LastResultAt: result is null ? null : DateTime.UtcNow, SpokenSummary: spoken, Recap: recap, RecapAt: recap is null ? null : DateTime.UtcNow);
+
+    /// <summary>
+    /// What the code says of <paramref name="status"/> through project_status, beside <paramref name="item"/> if given;
+    /// null when the model says it.
+    /// </summary>
+    private static async Task<string?> StatusSaidAsync(ProjectStatus status, AttentionItem? item = null)
+    {
+        var servers = new FakeServers();
+        var handles = new ProjectHandles();
+        var projects = new ProjectBoard(servers, handles);
+        var conversation = new VoiceConversation();
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, conversation);
+        if (item is not null) servers.Set(ServerA, item);
+        servers.SetStatus(ServerA, status);
+        return conversation.TakeSaid(await tools.ProjectStatusAsync("283", CancellationToken.None));
+    }
+
+    /// <summary>#466's order, in the code's words: the recap first, over the spoken reply and the result.</summary>
+    [Theory]
+    [InlineData(ProjectState.Running)]
+    [InlineData(ProjectState.Idle)]
+    public async Task The_recap_is_said_by_the_code_over_the_spoken_reply_and_the_result(ProjectState state) =>
+        Assert.Equal($"issue 283: {Recap}", await StatusSaidAsync(Status(state, result: "Alt er grønt.", spoken: "Rettelsen er pushet.", recap: Recap)));
+
+    [Fact]
+    public async Task Beside_an_item_the_recap_is_said_before_what_needs_the_user() =>
+        Assert.Equal($"issue 283: {Recap} issue 283 er færdig: Færdig med migrationen.",
+            await StatusSaidAsync(Status(ProjectState.Idle, result: "Færdig med migrationen.", recap: Recap),
+                Finished("p/r/283", "283-voice", "Færdig med migrationen.")));
+
+    /// <summary>A recap beside a question too long to say as it is: the model says both, so neither is lost.</summary>
+    [Fact]
+    public async Task A_recap_beside_a_question_the_code_cannot_say_goes_to_the_model() =>
+        Assert.Null(await StatusSaidAsync(Status(ProjectState.WaitingInput, recap: Recap) with { CurrentQuestion = "## Valg\n\nSkal jeg `merge`?" },
+            Question("p/r/283", "283-voice", "## Valg\n\nSkal jeg `merge`?")));
+
+    [Fact]
+    public async Task Without_a_recap_or_an_item_the_spoken_reply_then_the_result_is_said_by_the_code()
+    {
+        Assert.Equal("issue 283 sagde sidst: Rettelsen er pushet.",
+            await StatusSaidAsync(Status(ProjectState.Idle, result: "Alt er grønt.", spoken: "Rettelsen er pushet.")));
+        Assert.Equal("Sidste resultat fra issue 283: Alt er grønt.", await StatusSaidAsync(Status(ProjectState.Idle, result: "Alt er grønt.")));
+
+        // A long plain result is said shortened, as the tool's text has it
+        var shortened = await StatusSaidAsync(Status(ProjectState.Idle, result: string.Join(" ", Enumerable.Repeat("Testene er grønne", 40))));
+        Assert.StartsWith("Sidste resultat fra issue 283: Testene er grønne", shortened);
+        Assert.EndsWith("…", shortened);
+    }
+
+    [Fact]
+    public async Task A_marked_up_result_or_nothing_to_read_goes_to_the_model()
+    {
+        Assert.Null(await StatusSaidAsync(Status(ProjectState.Idle, result: "## Done\n\n- `ProjectHub.cs` fixed")));
+        Assert.Null(await StatusSaidAsync(Status(ProjectState.Idle)));
+    }
+
     [Theory]
     [InlineData("Skal jeg pushe til master?", true)]
     [InlineData("Færdig: alle 126 tests er grønne, og PR'en er klar.", true)]
