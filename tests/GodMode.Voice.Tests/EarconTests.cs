@@ -132,15 +132,15 @@ public sealed class EarconTests
         var speaker = new RecordingAudioSink();
         await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient(), speaker: speaker);
         await voice.Events.SaidAsync("Klar.");
-        await speaker.WaitForAsync(SinkCallKind.Audio);
+        await Eventually.UntilAsync(() => speaker.Calls.Any(c => c.Kind == SinkCallKind.Audio), () => "the greeting's audio");
         var greeting = speaker.Calls.Count;
 
         servers.Set(Server, Error("p/r/283", "283-voice", "Build failed."));
         await voice.Events.SaidAsync("issue 283, voice, fejlede.");
 
         var failed = Earcons.Pcm(Earcon.Failed, speaker.Format).Length;
-        await speaker.WaitForAsync(c => c.Kind == SinkCallKind.Audio && c.AudioBytes == failed);
-        await Eventually.UntilAsync(() => speaker.Calls.Count > greeting + 1, () => "the announcement's words after its earcon");
+        await Eventually.UntilAsync(() => speaker.Calls.Count(c => c.Kind == SinkCallKind.Audio) > 2,
+            () => $"the announcement's audio; the speaker had: {string.Join(", ", speaker.Calls.Select(c => c.AudioBytes))}");
         var calls = speaker.Calls;
         Assert.DoesNotContain(calls.Take(greeting), c => c.AudioBytes == failed);
         Assert.Equal(failed, calls.Skip(greeting).First(c => c.Kind == SinkCallKind.Audio).AudioBytes);
