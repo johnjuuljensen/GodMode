@@ -35,14 +35,15 @@ public sealed class VoiceConversation
         set => Volatile.Write(ref _lastProfile, value);
     }
 
-    private ReplyReading? _reading;
+    private PagedReading? _reading;
 
     /// <summary>
-    /// The reply being read in parts (<see cref="VoiceTools.ReadReplyAsync"/>), and the part to read next: what
-    /// "læs videre" reads on from (<see cref="VoiceTools.ReadMoreAsync"/>). Null before any was read; a new read replaces
-    /// it, and a new reply of its project drops it.
+    /// What is being read in parts, and the part to read next: what "mere" and "læs videre" read on from
+    /// (<see cref="VoiceTools.ReadMoreAsync"/>). One for both: a reply (<see cref="VoiceTools.ReadReplyAsync"/>) or a long
+    /// project list (<see cref="VoiceTools.ListProjectsText"/>, #457), whichever was read last. Null before any was read; a
+    /// new reply read or list said replaces it (a list said whole leaves none), and a new reply of its project drops a reply.
     /// </summary>
-    public ReplyReading? Reading
+    public PagedReading? Reading
     {
         get => Volatile.Read(ref _reading);
         set => Volatile.Write(ref _reading, value);
@@ -101,7 +102,17 @@ public sealed class VoiceConversation
 /// read). <paramref name="Replies"/> are the replies it was read from, the last <paramref name="Turns"/>: while the
 /// project's are still these, the parts are what it said last.
 /// </summary>
-public sealed record ReplyReading(ProjectRef Project, string Handle, IReadOnlyList<string> Parts, int Next, int Turns, IReadOnlyList<AssistantReply> Replies);
+public sealed record ReplyReading(ProjectRef Project, string Handle, IReadOnlyList<string> Parts, int Next, int Turns, IReadOnlyList<AssistantReply> Replies)
+    : PagedReading;
+
+/// <summary>What "mere" reads on in (<see cref="VoiceConversation.Reading"/>): a reply, or a long project list.</summary>
+public abstract record PagedReading;
+
+/// <summary>
+/// A long project list's pages (#457), as they were when it was said, and the index of the page to read next (their
+/// count once all were read). Each page is its text for the model and what the code says of it.
+/// </summary>
+public sealed record ListReading(IReadOnlyList<(string Result, string Said)> Pages, int Next) : PagedReading;
 
 /// <summary>
 /// GodMode's wording of the announcements queued up to a pause: one as it is, several after "3 venter på dig:". The

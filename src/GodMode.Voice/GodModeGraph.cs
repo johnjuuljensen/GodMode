@@ -82,7 +82,8 @@ public static class GodModeGraph
               also those that need nothing, grouped by profile and root; with the root or profile the user asked about, if
               any, only those. Say the tool's count, then each group once, by
               its profile and root ("Godmode, root GodMode: issue 376, issue 382. Private, root voicebot: branch master."),
-              with its projects. If you leave any out, say how many and why. Never answer which projects there are
+              with its projects. If you leave any out, say how many and why. A long list is said by the system as a
+              summary by state, the rest a page at a time: "Mere" after it — call {{VoiceTools.ReadMore}}. Never answer which projects there are
               from {{VoiceTools.WhatNeedsMe}}: it lists only those that need the user.
             - A project the user names by its root or kind ("Assistant", "chat") is named so to the tools; if the tool
               says it is unknown, give the names it lists as options. One the user names with its root or profile
