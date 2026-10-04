@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
@@ -188,16 +189,26 @@ public sealed record ListReading(IReadOnlyList<(string Result, string Said)> Pag
 /// GodMode's wording of the announcements queued up to a pause: one as it is, several after "3 venter på dig:". The
 /// project it names is what the conversation is about next (<see cref="VoiceConversation"/>), none when it names several.
 /// An announcement of no project (a create's outcome) leaves the conversation as it is, said alone.
+/// Each is checked again here, when it is about to be said, not only when it was queued (#462): an item that no longer
+/// needs the user (<see cref="AttentionBoard.Waits"/>) is dropped, and leaves the conversation as it is. Those still
+/// waiting are said most urgent first: an important project's (#438), then by what they need
+/// (<see cref="Urgency"/>), else in the order they came. What is being said already is never cut off for them: only
+/// what waits for the pause is ordered.
 /// </summary>
 public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConversation conversation, AttentionBoard? board = null)
     : IAnnouncementFormatter
 {
     public string Format(IReadOnlyList<Announcement> announcements, SessionLanguages languages)
     {
-        // An important project's are said first (issue #438), the rest in the order they came
-        string[] texts = [.. announcements.OrderByDescending(Interrupts).Select(a => Sentence(a.Text)).Where(t => t.Length > 0)];
-        var projects = announcements.Select(a => a.Source).Distinct().ToList();
-        if (projects is not [null])
+        var waiting = announcements.Select(a => (Announcement: a, Item: ItemOf(a)))
+            .Where(a => board?.Waits(a.Announcement) != false)
+            .OrderByDescending(a => a.Item?.Item.Alert == AttentionAlert.Interrupt)
+            .ThenBy(a => Urgency(a.Item?.Item.Kind))
+            .ToList();
+        string[] texts = [.. waiting.Select(a => Sentence(a.Announcement.Text)).Where(t => t.Length > 0)];
+        // A dropped announcement was never said: the conversation stays where it was (#461's switch included)
+        var projects = waiting.Select(a => a.Announcement.Source).Distinct().ToList();
+        if (projects is not ([] or [null]))
             conversation.Announced(projects is [var only] ? ProjectRef.FromKey(only) : null);
 
         return texts switch
@@ -208,10 +219,23 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
         };
     }
 
-    /// <summary>Whether the announcement is of an item that interrupts: an important project's.</summary>
-    private bool Interrupts(Announcement announcement) =>
-        board != null && ProjectRef.FromKey(announcement.Source) is { } project
-        && board.ItemOf(project)?.Item.Alert == AttentionAlert.Interrupt;
+    /// <summary>
+    /// How soon an item of <paramref name="kind"/> is said among others, lowest first (#462): a permission, a question
+    /// or an escalation holds its session until the user answers, an error stopped it, a review and a result wait. An
+    /// announcement of no item (a create's outcome) comes last.
+    /// </summary>
+    internal static int Urgency(AttentionKind? kind) => kind switch
+    {
+        AttentionKind.Permission or AttentionKind.Question or AttentionKind.Escalation => 0,
+        AttentionKind.Error => 1,
+        AttentionKind.Review => 2,
+        AttentionKind.Finished => 3,
+        _ => 4,
+    };
+
+    /// <summary>The item the announcement is of, as the board has it now; null for one of no project.</summary>
+    private ServerAttentionItem? ItemOf(Announcement announcement) =>
+        board != null && ProjectRef.FromKey(announcement.Source) is { } project ? board.ItemOf(project) : null;
 
     /// <summary>The text as a sentence: ended with its own '?' or '!' (a session's spoken reply has them), else a '.'.</summary>
     internal static string Sentence(string text) =>
@@ -311,6 +335,8 @@ public sealed class AttentionBoard
     private readonly Lock _lock = new();
     private Action<ServerAttentionItem, string>? _announce;
     private readonly List<ServerAttentionItem> _unannounced = [];
+    // By the announcement itself, not by its value: two of the same words are two announcements
+    private readonly ConditionalWeakTable<Announcement, ServerAttentionItem> _announcements = new();
 
     public AttentionBoard(IGodModeServers servers, ProjectHandles handles, ProjectBoard projects)
     {
@@ -330,6 +356,27 @@ public sealed class AttentionBoard
     /// <summary>The project's item, if it needs the user.</summary>
     public ServerAttentionItem? ItemOf(ProjectRef project) =>
         _lists.TryGetValue(project.ServerId, out var list) ? list.FirstOrDefault(i => i.Item.ProjectId == project.ProjectId) : null;
+
+    /// <summary>
+    /// The announcement of <paramref name="item"/>, saying <paramref name="text"/>: the board remembers which item it is
+    /// of, so that it is checked again when it is about to be said (<see cref="Waits"/>).
+    /// </summary>
+    public Announcement AnnouncementOf(ServerAttentionItem item, string text)
+    {
+        var announcement = new Announcement(text, item.Project.Key);
+        _announcements.AddOrUpdate(announcement, item);
+        return announcement;
+    }
+
+    /// <summary>
+    /// Whether the item <paramref name="announcement"/> is of still needs the user, as the board has it now (#462): it
+    /// is still its project's item, and still announced. False once it was answered, on screen or by voice, marked
+    /// seen, or the session moved on (its project needs something else now, or nothing), or it went to the inbox alone.
+    /// An announcement the board did not make (<see cref="AnnouncementOf"/>), of no item, always waits.
+    /// </summary>
+    public bool Waits(Announcement announcement) =>
+        !_announcements.TryGetValue(announcement, out var item)
+        || ItemOf(item.Project) is { } now && Key(now) == Key(item) && now.Item.Alert != AttentionAlert.Inbox;
 
     /// <summary>
     /// From now on, each new item goes to <paramref name="announce"/> with its project's handle; those that came before

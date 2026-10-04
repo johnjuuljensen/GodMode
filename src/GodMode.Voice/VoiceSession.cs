@@ -218,8 +218,8 @@ public sealed class VoiceSession : IAsyncDisposable
             voice.RefreshKeyterms();
             // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement
             var announcements = new HeldAnnouncements(session.Announcements, tools.Creates);
-            board.Attach((item, handle) => announcements.Write(new Announcement(
-                phrases.Announce(tools.Names.Of(item.Project) ?? new SpokenName(handle), item.Item), item.Project.Key)));
+            board.Attach((item, handle) => announcements.Write(board.AnnouncementOf(item,
+                phrases.Announce(tools.Names.Of(item.Project) ?? new SpokenName(handle), item.Item))));
             tools.Creates.Attach(outcome => announcements.Write(new Announcement(phrases.Created(outcome))));
             // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
             if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));
