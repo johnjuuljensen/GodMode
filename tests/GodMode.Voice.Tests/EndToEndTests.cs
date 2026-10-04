@@ -37,7 +37,7 @@ public sealed class EndToEndTests
         await WaitForAttentionAsync(hub, older.Id);
 
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.WhatNeedsMe).Respond("2 venter: 101 og 283 har spørgsmål.")
+            .CallTool(VoiceTools.WhatNeedsMe)
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "283", [VoiceTools.TextParameter] = Answer }).Respond("Sendt til 283.");
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
@@ -50,16 +50,14 @@ public sealed class EndToEndTests
 
         // As ElevenLabs sends it: a partial, then a final with the same text. The final reaches the model once
         voice.Transcriptions.SayAsRecognized("Hvad venter på mig?");
-        await voice.Events.SaidAsync("2 venter: 101 og 283 har spørgsmål.");
-        Assert.Equal(2, model.Calls);
-        var listed = Assert.Single(model.ToolResults);
-        Assert.Contains($"101: question: {OlderQuestion}", listed);
-        Assert.Contains($"283: question: {Question}", listed);
+        // In the code's words (#456): one model call, the tool's, and no respond round to retell it
+        await voice.Events.SaidAsync("2 venter på dig: issue 101 har et spørgsmål. issue 283 har et spørgsmål.");
+        Assert.Equal(1, model.Calls);
 
         voice.Transcriptions.SayAsRecognized("Svar 283 at den skal bruge den eksisterende migration");
         await voice.Events.SaidAsync("Sendt til issue 283.");
-        // Each utterance once: a tool round and a respond, no more
-        Assert.Equal(4, model.Calls);
+        // Each utterance once: the answer's tool round and its respond, no more
+        Assert.Equal(3, model.Calls);
 
         // It reached FakeClaude's stdin through ReplyAndResume, and the session carried on
         await Eventually.UntilAsync(() => server.StdinOf(asking.Id).Count == 2, () => $"the answer on stdin: {string.Join(" | ", server.StdinOf(asking.Id))}\n{server.Output}");
@@ -81,9 +79,9 @@ public sealed class EndToEndTests
         await hub.StartAsync();
 
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.ListProjects).Respond("1 projekt: testing.")
+            .CallTool(VoiceTools.ListProjects)
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = TestServer.Root, [VoiceTools.TextParameter] = Answer }).Respond("Sendt til testing.")
-            .CallTool(VoiceTools.ListProjects).Respond("Ingen projekter.");
+            .CallTool(VoiceTools.ListProjects);
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
         await voice.Events.SaidAsync("Klar.");
@@ -96,11 +94,9 @@ public sealed class EndToEndTests
             () => $"voice to know testing: {string.Join(", ", voice.Session.Projects.Projects.Select(p => p.Project.Name))}");
 
         voice.Transcriptions.AddFinal("Hvilke projekter er der?");
-        await voice.Events.SaidAsync("1 projekt: testing.");
-        var listed = Assert.Single(model.ToolResults);
-        Assert.StartsWith("1 project, all in one group:\nProfile ", listed);
-        Assert.Contains($", root {TestServer.Root} (1 project):\n- ", listed);
-        Assert.Contains("testing (testing", listed);
+        await Eventually.UntilAsync(() => voice.Events.Responses.Any(r => r.StartsWith("1 projekt. Profil ", StringComparison.Ordinal)
+                && r.EndsWith($", root {TestServer.Root}: create testing.", StringComparison.Ordinal)),
+            () => $"the list in the code's words; it said: {string.Join(" | ", voice.Events.Responses)}");
 
         voice.Transcriptions.AddFinal($"Svar {TestServer.Root} at den skal bruge den eksisterende migration");
         await voice.Events.SaidAsync("Sendt til create testing.");
@@ -112,7 +108,6 @@ public sealed class EndToEndTests
             () => $"voice to forget it: {string.Join(", ", voice.Session.Handles.All)}");
         voice.Transcriptions.AddFinal("Hvilke projekter er der?");
         await voice.Events.SaidAsync("Ingen projekter.");
-        Assert.Equal("No projects on any server.", model.ToolResults[^1]);
     }
 
     /// <summary>Issue #354: a session started by voice is read back, created on the server on the yes, as the app creates it, and named by its handle.</summary>

@@ -48,31 +48,30 @@ public sealed class SpokenReplyTests
     public async Task A_spoken_reply_is_said_word_for_word_through_project_status_not_retold()
     {
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
-            .Respond(Retold);
+            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" });
         var (_, voice) = await AskedAsync(model, Spoken, $"issue 283 spørger: {Spoken}");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Hvad spørger 283 om?");
         await SaidAgainAsync(voice, $"issue 283 spørger: {Spoken}");
 
+        // The code says it (#456): the model picked the tool, and is not asked to retell what it read
+        Assert.Equal(1, model.Calls);
         Assert.DoesNotContain(Retold, voice.Events.Responses);
-        Assert.Contains($"\"{Spoken}\", is said word for word by the system", Assert.Single(model.ToolResults));
     }
 
     [Fact]
     public async Task A_spoken_reply_is_said_word_for_word_through_what_needs_me()
     {
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.WhatNeedsMe)
-            .Respond($"1 venter: {Retold}");
+            .CallTool(VoiceTools.WhatNeedsMe);
         var (_, voice) = await AskedAsync(model, Spoken, $"issue 283 spørger: {Spoken}");
         await using var _ = voice;
 
         voice.Transcriptions.SayAsRecognized("Hvad venter?");
         await SaidAgainAsync(voice, $"issue 283 spørger: {Spoken}");
 
-        Assert.DoesNotContain($"1 venter: {Retold}", voice.Events.Responses);
+        Assert.Equal(1, model.Calls);
     }
 
     /// <summary>A turn without one falls back as today: the announcement is short, and the model says the status, from the full question.</summary>
@@ -147,8 +146,7 @@ public sealed class SpokenReplyTests
     {
         const string SentForReview = "Sendt til review. Skal jeg merge, når den er godkendt?";
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
-            .Respond("Sendt.");
+            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" });
         var (servers, voice) = await AskedAsync(model, SentForReview, $"issue 283 spørger: {SentForReview}");
         await using var _ = voice;
 
