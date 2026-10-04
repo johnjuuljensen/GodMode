@@ -107,7 +107,7 @@ public sealed class ProjectProcess
     /// This turn's <c>speak</c> calls of the main conversation that wait for their result, by tool use id
     /// (<see cref="Services.SpokenReply"/>). Reset when a new turn starts. In memory only; only the consumer touches it.
     /// </summary>
-    public Dictionary<string, string> SpeakCalls { get; } = [];
+    public Dictionary<string, Services.SpeakCall> SpeakCalls { get; } = [];
 
     /// <summary>
     /// The text of this turn's last <c>speak</c> call the server accepted, which its result makes the status's

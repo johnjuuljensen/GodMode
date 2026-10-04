@@ -163,6 +163,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         Talked(target);
         var text = new StringBuilder($"{name} ({Details(status.Name, status.Kind)}): {status.State}.");
         var item = board.ItemOf(target)?.Item;
+        text.Append(Standing(status, item));
         if (item is not null)
         {
             text.Append($" Needs the user: {Describe(item, InFull(item, status))}");
@@ -175,6 +176,28 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             text.Append($" Error: {Capped(error)}");
         return ReadOut(text.ToString());
     }
+
+    /// <summary>How much of a last result <see cref="Standing"/> reads when the session gave no line of its own: its start, a few sentences.</summary>
+    public const int StandingResultLength = 300;
+
+    /// <summary>
+    /// Where the project stands (issue #466), in this order: the recap the session keeps of it
+    /// (<see cref="ProjectStatus.Recap"/>), else, with no attention item to read the turn from, its last spoken reply, else
+    /// its last result shortened. Nothing when it has none of them.
+    /// </summary>
+    private static string Standing(ProjectStatus status, AttentionItem? item) => status switch
+    {
+        { Recap: { Length: > 0 } recap } => $" Where it stands, in its own words: \"{recap}\"",
+        _ when item is not null => "",
+        { SpokenSummary: { Length: > 0 } spoken } => $" Its last reply, in its own spoken words: \"{spoken}\"",
+        { LastResult: { Length: > 0 } result } => $" Its last result: {Shortened(result.Trim())}",
+        _ => "",
+    };
+
+    /// <summary>The text, or its start to a word at about <see cref="StandingResultLength"/> characters with "…".</summary>
+    private static string Shortened(string text) =>
+        text.Length <= StandingResultLength ? text
+            : text[..(text.LastIndexOf(' ', StandingResultLength) is var at and > 0 ? at : Whole(text, StandingResultLength))] + "…";
 
     /// <summary>A tool's text, which reads out a project's own words, for the model to say: kept for <see cref="SentNode"/>.</summary>
     private string ReadOut(string text)

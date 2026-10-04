@@ -66,8 +66,13 @@ public class StatusUpdater : IStatusUpdater
                         stateChanged = true;
                     }
                 }
-                else
-                    TakeSpeakResults(process, rawJson);
+                // A recap is the session's standing, not the turn's reply: kept as soon as its call is, until another
+                // replaces it, so no turn's start, end or error clears it (issue #466)
+                else if (TakeSpeakResults(process, rawJson) is { } recap)
+                {
+                    status = status with { Recap = recap, RecapAt = DateTime.UtcNow };
+                    stateChanged = true;
+                }
                 // claude has taken a message the user sent: it is working on it, whatever a result
                 // of an earlier turn, handled after the send, said. It echoes it at once between
                 // turns, and at its next step in one
@@ -86,8 +91,8 @@ public class StatusUpdater : IStatusUpdater
                 // a previously-seen text block in that case.
                 var lastText = QuestionDetection.ExtractLastAssistantText(rawJson);
                 if (lastText != null) process.LastAssistantText = lastText;
-                foreach (var (toolUseId, spoken) in SpokenReply.Calls(rawJson))
-                    process.SpeakCalls[toolUseId] = spoken;
+                foreach (var (toolUseId, call) in SpokenReply.Calls(rawJson))
+                    process.SpeakCalls[toolUseId] = call;
                 break;
 
             // Error events are stderr lines shown in the UI; the process's exit and error results
@@ -212,17 +217,22 @@ public class StatusUpdater : IStatusUpdater
 
     /// <summary>
     /// The results a user line gives this turn's <c>speak</c> calls: an accepted one's text is the turn's spoken reply,
-    /// the last accepted the one kept; a refused or denied one gives none.
+    /// the last accepted the one kept; a refused or denied one gives none. Returns the recap of the last accepted call
+    /// that gave one, or null.
     /// </summary>
-    private static void TakeSpeakResults(ProjectProcess process, string rawJson)
+    private static string? TakeSpeakResults(ProjectProcess process, string rawJson)
     {
-        if (process.SpeakCalls.Count == 0) return;
+        if (process.SpeakCalls.Count == 0) return null;
+        string? recap = null;
         foreach (var (toolUseId, isError) in SpokenReply.Results(rawJson))
         {
-            if (!process.SpeakCalls.Remove(toolUseId, out var text) || isError) continue;
-            // The tool checked it as the stream has it; one it would refuse is never said
-            if (SpeakTool.Check(text).Refused is null) process.Spoken = text;
+            if (!process.SpeakCalls.Remove(toolUseId, out var call) || isError) continue;
+            // The tool checked them as the stream has them; a call it would refuse is never said, nor its recap kept
+            if (SpeakTool.Check(call.Text).Refused is not null || SpeakTool.CheckRecap(call.Recap).Refused is not null) continue;
+            process.Spoken = call.Text;
+            recap = call.Recap ?? recap;
         }
+        return recap;
     }
 
     /// <summary>The metadata key a <c>system</c> event carries claude's session ID under.</summary>
