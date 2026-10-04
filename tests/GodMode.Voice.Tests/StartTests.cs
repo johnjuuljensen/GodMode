@@ -37,15 +37,17 @@ public sealed class StartTests
         var late = new LateDirectory(server.ServerDirectory());
         _ = Task.Delay(InitialWait * 3).ContinueWith(_ => late.Open());
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" });
+            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" }).Respond("283 er i gang.");
         await using var servers = new HubServers(late, NullLoggerFactory.Instance, retryDelay: TimeSpan.FromMilliseconds(100));
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(InitialWait, ct));
         await voice.Events.SaidAsync("Klar.");
 
         // Right then
         voice.Transcriptions.SayAsRecognized("Status på 283");
-        // Its result, in the code's words (#456): an unknown project would have gone back to the model, which has no more script
-        await voice.Events.SaidAsync("issue 283 er færdig: done");
+        // Its result in the code's words (#456) once its turn is done, else the model's line on it while it runs; never "Ukendt"
+        await Eventually.UntilAsync(() => voice.Events.Responses.Any(r => r is "issue 283 er færdig: done" or "283 er i gang."),
+            () => $"the status of 283; it said: {string.Join(" | ", voice.Events.Responses)}");
+        Assert.DoesNotContain(model.ToolResults, r => r.Contains("Unknown project", StringComparison.Ordinal));
         Assert.NotNull(voice.Session.Handles.Resolve("283"));
         Assert.Equal(new ProjectRef("local", project.Id), voice.Session.Handles.Resolve("283"));
     }
