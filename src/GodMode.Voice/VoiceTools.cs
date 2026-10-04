@@ -86,7 +86,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 ToolParameterType.Integer, Required: false)],
             (_, args, ct) => ReadReplyAsync(Argument(args, ProjectParameter), Argument(args, TurnsParameter), ct))
         .Add(ReadMore,
-            $"Read the next part of the reply {ReadReply} read last. Call when the user says \"læs videre\", \"mere\" or \"read on\".",
+            $"Read the next part of what was read in parts last: the reply {ReadReply} read, or the long list {ListProjects} said. " +
+            "Call when the user says \"læs videre\", \"mere\" or \"read on\".",
             (_, _, ct) => ReadMoreAsync(ct))
         .Add(Answer,
             "Send the user's answer to a project: it reaches the Claude session as the user's reply, and the session " +
@@ -166,13 +167,42 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         {
             text.Append($"{group.Heading} ({Count(group.Projects.Count)}):\n");
             foreach (var project in group.Projects)
-                text.Append($"- {handles.LabelOf(project.Ref) ?? project.Project.Name} ({Details(project.Project.Name, project.Project.Kind)}): {project.Project.State}\n");
+                text.Append($"- {LabelOf(project)} ({Details(project.Project.Name, project.Project.Kind)}): {project.Project.State}\n");
         }
-        text.Append($"Say the count, {all.Count}, then each group once, by its profile and root, with its projects by the names given here. " +
-            "If you leave any out, say how many and why.");
-        return SaysItself(text.ToString(), _phrases.Projects([.. groups.Select(g =>
-            (g.Profile, g.Root, (IReadOnlyList<string>)[.. g.Projects.Select(p => handles.LabelOf(p.Ref) ?? p.Project.Name)]))]));
+        if (all.Count <= ProjectListing.Page)
+        {
+            // Said whole: nothing is left for "mere" to read on in
+            conversation.Reading = null;
+            text.Append($"Say the count, {all.Count}, then each group once, by its profile and root, with its projects by the names given here. " +
+                "If you leave any out, say how many and why.");
+            return SaysItself(text.ToString(), _phrases.Projects([.. groups.Select(g =>
+                (g.Profile, g.Root, (IReadOnlyList<string>)[.. g.Projects.Select(LabelOf)]))]));
+        }
+
+        // Too many to keep (#457): a summary by state, then the projects it did not name, a page at a time, on "mere"
+        var (states, left) = ProjectListing.Summarise(ProjectListing.Order(groups,
+            p => ProjectListing.StateOf(p.Project.State, board.ItemOf(p.Ref) is not null), LabelOf));
+        var pages = ProjectListing.Pages(left);
+        conversation.Reading = pages.Count > 0
+            ? new ListReading([.. pages.Select((page, i) => (ListPageResult(page, i, pages.Count, left.Count), _phrases.ListPage(page, i + 1 < pages.Count)))], 0)
+            : null;
+        var said = _phrases.ListSummary(all.Count,
+            [.. states.Select(s => (s.State, s.Count, (IReadOnlyList<SpokenName>)[.. s.Named.Select(p => Names.Full(p.Project.Ref) ?? new SpokenName(p.Label))]))],
+            pages.Count > 0);
+        text.Append($"The system said a summary by state itself: \"{said}\"");
+        if (pages.Count > 0)
+            text.Append($" The {left.Count} it did not name are read {ProjectListing.Page} at a time: when the user says \"mere\", call {ReadMore}.");
+        return SaysItself(text.ToString(), said);
     }
+
+    /// <summary>The label the project is said by in a list.</summary>
+    private string LabelOf(ServerProject project) => handles.LabelOf(project.Ref) ?? project.Project.Name;
+
+    /// <summary>A page of a long list (#457), as the tool's text tells the model what the system said of it.</summary>
+    private static string ListPageResult(IReadOnlyList<ListedProject> page, int index, int pages, int left) =>
+        $"The list's projects not named in its summary ({left}), part {index + 1} of {pages}, said by the system itself: " +
+        string.Join("; ", page.Select(p => $"{p.Label} ({p.State}, profile {p.Profile}, root {p.Root ?? "none"})")) +
+        (index + 1 < pages ? $". More follows: {ReadMore} reads it." : ". That was the end of the list.");
 
     /// <summary>
     /// Whether the project is in the root or profile the user named: its profile, its root's name, or its root as it is
@@ -401,13 +431,22 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     }
 
     /// <summary>
-    /// The next part of the reply <see cref="ReadReplyAsync"/> read last, or that there is none. A project that has
+    /// The next page of the long project list said last (#457), in the code's words, when a list was what was read in parts
+    /// last (<see cref="VoiceConversation.Reading"/>). Else the next part of the reply <see cref="ReadReplyAsync"/> read last, or that there is none. A project that has
     /// written since (a new reply, or more of one it was working on) has its old one dropped, and says so (#411):
     /// "læs videre" never reads on in a reply that is no longer its last.
     /// </summary>
     public async Task<string> ReadMoreAsync(CancellationToken ct)
     {
-        if (conversation.Reading is not { } reading || reading.Next >= reading.Parts.Count)
+        switch (conversation.Reading)
+        {
+            case ListReading list when list.Next < list.Pages.Count:
+                conversation.Reading = list with { Next = list.Next + 1 };
+                return SaysItself(list.Pages[list.Next].Result, list.Pages[list.Next].Said);
+            case ListReading:
+                return $"Nothing more to read: the project list was read to its end. {ListProjects} lists them again.";
+        }
+        if (conversation.Reading is not ReplyReading reading || reading.Next >= reading.Parts.Count)
             return $"Nothing more to read: the last reply read was read to its end. {ReadReply} reads a project's reply.";
 
         Talked(reading.Project);

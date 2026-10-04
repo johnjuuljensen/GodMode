@@ -195,10 +195,13 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     }
 
     /// <summary>A project on a server, that no attention item names: created, as the hub pushes it.</summary>
-    public void AddProject(string serverId, string projectId, string name, string? root = null, string? kind = null, string? profile = null)
+    /// <param name="state">What it is doing: Idle unless given.</param>
+    /// <param name="minutesAgo">How long ago it changed: lists say the one changed last first.</param>
+    public void AddProject(string serverId, string projectId, string name, string? root = null, string? kind = null, string? profile = null,
+        ProjectState state = ProjectState.Idle, int minutesAgo = 0)
     {
-        _statuses[new ProjectRef(serverId, projectId)] = new ProjectStatus(projectId, name, ProjectState.Idle,
-            DateTime.UtcNow, DateTime.UtcNow, null, new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0,
+        _statuses[new ProjectRef(serverId, projectId)] = new ProjectStatus(projectId, name, state,
+            DateTime.UtcNow, DateTime.UtcNow.AddMinutes(-minutesAgo), null, new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0,
             RootName: root, ProfileName: profile, Kind: kind);
         PushProjects(serverId);
     }

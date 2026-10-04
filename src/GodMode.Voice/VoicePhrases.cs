@@ -124,18 +124,98 @@ public sealed partial class VoicePhrases
     public string Projects(IReadOnlyList<(string Profile, string? Root, IReadOnlyList<string> Labels)> groups)
     {
         var count = groups.Sum(g => g.Labels.Count);
-        if (count == 0)
-            return _danish ? "Ingen projekter." : "No projects.";
-        var lines = groups.Select(g => $"{(_danish ? "Profil" : "Profile")} {g.Profile}{(g.Root is { } root ? $", root {root}" : "")}: {string.Join(", ", g.Labels)}.");
-        var total = (count, _danish) switch
-        {
-            (1, true) => "1 projekt.",
-            (_, true) => $"{count} projekter.",
-            (1, false) => "1 project.",
-            (_, false) => $"{count} projects.",
-        };
-        return $"{total} {string.Join(" ", lines)}";
+        return count == 0
+            ? _danish ? "Ingen projekter." : "No projects."
+            : $"{Total(count)} {string.Join(" ", groups.Select(g => GroupLine(g.Profile, g.Root, g.Labels)))}";
     }
+
+    /// <summary>"3 projekter." / "3 projects.".</summary>
+    private string Total(int count) => (count, _danish) switch
+    {
+        (1, true) => "1 projekt.",
+        (_, true) => $"{count} projekter.",
+        (1, false) => "1 project.",
+        (_, false) => $"{count} projects.",
+    };
+
+    /// <summary>A group of a list, by its profile and root: "Profil Mega, root GodMode: issue 376, issue 382.".</summary>
+    private string GroupLine(string profile, string? root, IEnumerable<string> labels) =>
+        $"{(_danish ? "Profil" : "Profile")} {profile}{(root is { } r ? $", root {r}" : "")}: {string.Join(", ", labels)}.";
+
+    /// <summary>The question that ends a part when more follows, which "mere" answers.</summary>
+    public string More => _danish ? "Mere?" : "More?";
+
+    /// <summary>
+    /// A long project list, summarised by state (#457, <see cref="ProjectListing"/>): the count, then each state, its
+    /// projects by name when it names them, else their count, "the rest" for the one state counted after all named. "16
+    /// projekter. branch master er idle, resten er stoppet. Mere?"
+    /// </summary>
+    public string ListSummary(int count, IReadOnlyList<(ListedState State, int Count, IReadOnlyList<SpokenName> Named)> states, bool more)
+    {
+        var counted = states.Select((s, i) => (s, i)).Where(x => x.s.Named.Count == 0).ToList();
+        var rest = counted is [var only] && only.i > 0 && states.Take(only.i).All(s => s.Named.Count > 0) ? only.s.State : (ListedState?)null;
+        var parts = states.Select(s =>
+            s.Named.Count > 0 ? $"{And([.. s.Named.Select(Named)])} {Doing(s.State, s.Named.Count)}"
+            : s.State == rest ? $"{(_danish ? "resten" : "the rest")} {Doing(s.State, 2)}"
+            : $"{s.Count} {Doing(s.State, s.Count)}");
+        return $"{Total(count)} {string.Join(", ", parts)}.{(more ? $" {More}" : "")}";
+    }
+
+    /// <summary>
+    /// A page of a long project list (#457): its projects by profile and root, each state said before its first, "Mere?"
+    /// when more follows. "Stoppet. Profil Mega, root GodMode: issue 1, issue 2. Mere?"
+    /// </summary>
+    public string ListPage(IReadOnlyList<ListedProject> page, bool more)
+    {
+        List<string> sentences = [];
+        ListedState? state = null;
+        for (var i = 0; i < page.Count;)
+        {
+            var first = page[i];
+            var group = page.Skip(i).TakeWhile(p => p.State == first.State && p.Profile == first.Profile && p.Root == first.Root).ToList();
+            if (first.State != state)
+                sentences.Add($"{Heading(first.State)}.");
+            state = first.State;
+            sentences.Add(GroupLine(first.Profile, first.Root, group.Select(p => p.Label)));
+            i += group.Count;
+        }
+        return string.Join(" ", sentences) + (more ? $" {More}" : "");
+    }
+
+    /// <summary>What <paramref name="count"/> projects in the state are doing, after their names or count: "er stoppet", "are stopped".</summary>
+    private string Doing(ListedState state, int count) => (state, _danish, count == 1) switch
+    {
+        (ListedState.NeedsYou, true, _) => "venter på dig",
+        (ListedState.Running, true, _) => "kører",
+        (ListedState.Idle, true, _) => "er idle",
+        (ListedState.Stopped, true, _) => "er stoppet",
+        (ListedState.NeedsYou, false, true) => "needs you",
+        (ListedState.Running, false, true) => "is running",
+        (ListedState.Idle, false, true) => "is idle",
+        (ListedState.Stopped, false, true) => "is stopped",
+        (ListedState.NeedsYou, false, false) => "need you",
+        (ListedState.Running, false, false) => "are running",
+        (ListedState.Idle, false, false) => "are idle",
+        (ListedState.Stopped, false, false) => "are stopped",
+        _ => throw new ArgumentOutOfRangeException(nameof(state)),
+    };
+
+    /// <summary>A state as a page's heading: "Venter på dig", "Kører", "Idle", "Stoppet".</summary>
+    private string Heading(ListedState state) => (state, _danish) switch
+    {
+        (ListedState.NeedsYou, true) => "Venter på dig",
+        (ListedState.Running, true) => "Kører",
+        (ListedState.Idle, _) => "Idle",
+        (ListedState.Stopped, true) => "Stoppet",
+        (ListedState.NeedsYou, false) => "Needs you",
+        (ListedState.Running, false) => "Running",
+        (ListedState.Stopped, false) => "Stopped",
+        _ => throw new ArgumentOutOfRangeException(nameof(state)),
+    };
+
+    /// <summary>"a", "a og b", "a, b og c" / "a, b and c".</summary>
+    private string And(IReadOnlyList<string> items) =>
+        items.Count == 1 ? items[0] : $"{string.Join(", ", items.Take(items.Count - 1))} {(_danish ? "og" : "and")} {items[^1]}";
 
     /// <summary>
     /// A create read back, as the question its yes answers: the root, its profile (and server, when there are several),
@@ -191,9 +271,7 @@ public sealed partial class VoicePhrases
     /// <summary>Answers went out this turn (<see cref="SentNode"/>): "Sendt til issue 283.", "Sendt til issue 283 og issue 101.".</summary>
     public string Sent(IReadOnlyList<SpokenName> names)
     {
-        var distinct = names.Select(Named).Distinct().ToList();
-        var to = distinct.Count == 1 ? distinct[0]
-            : $"{string.Join(", ", distinct[..^1])} {(_danish ? "og" : "and")} {distinct[^1]}";
+        var to = And([.. names.Select(Named).Distinct()]);
         return _danish ? $"Sendt til {to}." : $"Sent to {to}.";
     }
 
