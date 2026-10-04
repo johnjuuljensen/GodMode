@@ -173,6 +173,31 @@ public sealed class OverseerTests
     }
 
     /// <summary>
+    /// A nested overseer, one a coordinating chat started: its own escalation is for the user, so it is announced and named,
+    /// while its worker's question stays on the top overseer's line.
+    /// </summary>
+    [Fact]
+    public async Task A_nested_overseers_escalation_is_announced_and_named()
+    {
+        var fleet = Fleet();
+        const string Coordinator = "Mega/Assistant/261004-chat-coordinator-k1m2";
+        fleet.Servers.AddProject(ServerA, Coordinator, "coordinator", root: "Assistant", kind: "chat", profile: "Mega", outputMinutesAgo: 60);
+        fleet.Servers.SetRecordedParent(ServerA, Overseer, Coordinator);
+        Assert.True(fleet.Projects.IsRun(new ProjectRef(ServerA, Overseer)));
+
+        fleet.Servers.Set(ServerA,
+            FakeServers.Question(Asking, "462-queue", "Skal køen tømmes ved genstart?") with { Profile = "Mega", Root = "GodMode", RecordedParentId = Overseer },
+            new AttentionItem(Overseer, "voice-epics", "Mega", "GodMode", AttentionKind.Escalation, DateTime.UtcNow, "Skal #462 vente på #469?", RecordedParentId: Coordinator));
+
+        Assert.Equal(["500", "voice"], fleet.Announced);
+        var result = await fleet.Tools.WhatNeedsMeAsync(CancellationToken.None);
+        Assert.Contains("- epic voice in GodMode: needs the user's decision: Skal #462 vente på #469?", result);
+        Assert.DoesNotContain("issue 462", result);
+        Assert.Equal("2 venter på dig: epic voice i GodMode har brug for din beslutning. chat coordinator i Assistant: 3 workers, 1 venter på den.",
+            fleet.Conversation.TakeSaid(result));
+    }
+
+    /// <summary>
     /// The keyterms are of what voice says: the overseer's handle, not a worker's, nor the root only a worker is in. With
     /// the overseer deleted, they are the worker's again.
     /// </summary>

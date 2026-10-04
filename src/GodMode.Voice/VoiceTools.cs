@@ -182,13 +182,14 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             if (!projects.Projects.Any(p => In(p, root)))
                 return NoSuchRoot(root);
             // A worker's item goes with its overseer's line, so its overseer's root decides
-            all = [.. all.Where(i => projects.Find(i.Project) is { } p && In(scope.Takes(p.Ref) ? p : projects.TopOf(p), root))];
+            all = [.. all.Where(i => projects.Find(i.Project) is { } p && In(scope.Shown && projects.Holds(i) ? projects.TopOf(p) : p, root))];
         }
         conversation.LastListed = now;
         DateTime ActivityOfItem(ServerAttentionItem i) => projects.Find(i.Project) is { } p ? ProjectListing.ActivityOf(p.Project, now) : i.Item.Since;
-        var (items, left) = ProjectListing.Within(all.Where(i => scope.Takes(i.Project)), ask.Window, ActivityOfItem, _ => true);
-        // Unasked, workers' are held back (#469): each overseer's line counts those its workers have, in the window
-        var (held, _) = ProjectListing.Within(all.Where(i => scope.Shown && projects.IsRun(i.Project)), ask.Window, ActivityOfItem, _ => true);
+        // Unasked, workers' are held back (#469), but for a nested overseer's escalation: each overseer's line counts those its
+        // workers have, in the window
+        var (items, left) = ProjectListing.Within(all.Where(i => scope.Shown ? !projects.Holds(i) : scope.Takes(i.Project)), ask.Window, ActivityOfItem, _ => true);
+        var (held, _) = ProjectListing.Within(all.Where(i => scope.Shown && projects.Holds(i)), ask.Window, ActivityOfItem, _ => true);
         var overseers = held.Select(i => projects.Find(i.Project)).OfType<ServerProject>().GroupBy(p => projects.TopOf(p).Ref)
             .Select(g => (Overseer: g.Key, Name: Names.Of(g.Key), Workers: projects.WorkersOf(g.Key).Count, Waiting: g.Count()))
             .Where(o => o.Name is not null).Select(o => (o.Overseer, Name: o.Name!, o.Workers, o.Waiting)).ToList();
@@ -819,7 +820,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     private async Task<string> UnknownAsync(string? reference, CancellationToken ct)
     {
-        var waiting = (await servers.GetAttentionAsync(ct)).Where(i => !projects.IsRun(i.Project)).Select(i => Names.Full(i.Project)).OfType<SpokenName>().ToList();
+        var waiting = (await servers.GetAttentionAsync(ct)).Where(i => !projects.Holds(i)).Select(i => Names.Full(i.Project)).OfType<SpokenName>().ToList();
         var which = waiting.Count > 0 ? $" Waiting now: {string.Join("; ", waiting)}." : " Nothing needs the user now.";
         var all = projects.Shown;
         var options = all.Count == 0 ? " No projects on any server."

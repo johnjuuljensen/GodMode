@@ -326,8 +326,9 @@ public sealed class NeverThrowingFormatter(IAnnouncementFormatter inner, ILogger
 /// first appears (at the start, everything waiting then), and not again when a connection is made again. An item is
 /// the same while its project needs the same thing since the same time. Handles are the <see cref="ProjectBoard"/>'s
 /// to give: an item of a project it has not heard of (yet, or any more) is announced once it has, and never before.
-/// An item of a project a live overseer runs (<see cref="ProjectBoard.IsRun"/>, #469) is not announced: the overseer
-/// handles it, and escalates what needs the user. Should its overseer go, it is announced then.
+/// An item of a project a live overseer runs (<see cref="ProjectBoard.Holds"/>, #469) is not announced: the overseer
+/// handles it, and escalates what needs the user. Should its overseer go, it is announced then. An escalation is
+/// announced whoever runs its project: a nested overseer's is for the user.
 /// </summary>
 public sealed class AttentionBoard
 {
@@ -415,7 +416,7 @@ public sealed class AttentionBoard
             // In the inbox alone (a quiet session's result or error, issue #438): listed when asked, never announced
             if (item.Item.Alert == AttentionAlert.Inbox) continue;
             // Its overseer's to handle (#469): which items become announcements, before any is marked announced
-            if (_projects.IsRun(item.Project)) continue;
+            if (_projects.Holds(item)) continue;
             if (_handles.Of(item.Project) is not { } handle) continue;
             if (!_announced.TryAdd(Key(item), 0)) continue;
 

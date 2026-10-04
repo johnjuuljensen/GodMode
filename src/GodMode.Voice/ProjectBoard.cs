@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 
 namespace GodMode.Voice;
@@ -52,6 +53,12 @@ public sealed class ProjectBoard
 
     /// <summary>Whether a live overseer runs the project (<see cref="TopOf"/>): voice leaves it out unless the user asks for it.</summary>
     public bool IsRun(ProjectRef project) => Find(project) is { } found && ParentsOf(found).Any();
+
+    /// <summary>
+    /// Whether the item is its overseer's to handle (#469): one of a project a live overseer runs (<see cref="IsRun"/>), but
+    /// for an escalation, which a nested overseer (one a chat or another overseer started) raises for the user.
+    /// </summary>
+    public bool Holds(ServerAttentionItem item) => item.Item.Kind != AttentionKind.Escalation && IsRun(item.Project);
 
     /// <summary>The projects no live overseer runs (<see cref="IsRun"/>): what voice says unasked, the one changed last first.</summary>
     public IReadOnlyList<ServerProject> Shown => [.. Projects.Where(p => !ParentsOf(p).Any())];
