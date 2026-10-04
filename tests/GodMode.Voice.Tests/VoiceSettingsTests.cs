@@ -34,6 +34,18 @@ public sealed class VoiceSettingsTests : IDisposable
         Assert.False(view.AnthropicKeySet);
     }
 
+    /// <summary>How long without activity leaves a session out of voice's lists (#468): a day, unless set; none or less is the day.</summary>
+    [Fact]
+    public async Task The_stale_hours_are_a_day_unless_set()
+    {
+        Assert.Equal(VoiceSettings.DefaultStaleHours, (await _store.GetViewAsync()).StaleHours);
+        Assert.Equal(TimeSpan.FromHours(24), VoiceSettings.Default.StaleAfter);
+
+        Assert.Equal(6, (await _store.UpdateAsync(new VoiceSettingsUpdate(StaleHours: 6))).StaleHours);
+        Assert.Equal(TimeSpan.FromHours(6), (await new VoiceSettingsStore(_dir, _secrets).LoadAsync()).StaleAfter);
+        Assert.Equal(VoiceSettings.DefaultStaleHours, (await _store.UpdateAsync(new VoiceSettingsUpdate(StaleHours: 0))).StaleHours);
+    }
+
     /// <summary>A file saved when voice kept its own models (#475) loads as it is, and its next save drops them.</summary>
     [Fact]
     public async Task A_file_with_the_old_models_loads_and_its_next_save_drops_them()

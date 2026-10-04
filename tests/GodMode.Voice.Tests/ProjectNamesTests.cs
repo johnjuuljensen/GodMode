@@ -26,8 +26,9 @@ public sealed class ProjectNamesTests
         var projects = new ProjectBoard(servers, handles);
         var board = new AttentionBoard(servers, handles, projects);
         var tools = new VoiceTools(servers, board, projects, handles, new VoiceConversation());
-        foreach (var (project, name, root, kind, profile) in sessions)
-            servers.AddProject(Server, project.ProjectId, name, root: root, kind: kind, profile: profile);
+        // The first given the most recent, so lists, which say the most recent first (#468), keep the order given
+        foreach (var ((project, name, root, kind, profile), i) in sessions.Select((s, i) => (s, i)))
+            servers.AddProject(Server, project.ProjectId, name, root: root, kind: kind, profile: profile, minutesAgo: i);
         return new Voice(servers, handles, board, tools);
     }
 
