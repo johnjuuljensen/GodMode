@@ -172,7 +172,7 @@ public sealed class VoiceSession : IAsyncDisposable
         {
             SttLanguageCode = ElevenLabsLanguageCode.Primary,
             SttSecondaryLanguages = [.. languages.MixedIn.Select(TwoLetter)],
-            SttKeyterms = Keyterms(projects.Projects, handles),
+            SttKeyterms = Keyterms(projects.Shown, handles),
             TtsLanguageCode = ElevenLabsLanguageCode.Primary,
         };
 
@@ -243,6 +243,8 @@ public sealed class VoiceSession : IAsyncDisposable
     /// characters): the projects' roots ("Assistant"), their profiles ("Outbound"), then their handles ("kappe"), each
     /// in the order of the projects, the one changed last first. A handle that is a number needs none: numbers are
     /// recognized as they are. A name too long to be a keyterm is left out, not cut: a cut name is not what is said.
+    /// The session gives it the projects it says unasked (<see cref="ProjectBoard.Shown"/>, #469): an overseer's workers
+    /// would take the places of the names voice says.
     /// </summary>
     public static IReadOnlyList<string> Keyterms(IEnumerable<ServerProject> projects, ProjectHandles handles)
     {
@@ -268,7 +270,7 @@ public sealed class VoiceSession : IAsyncDisposable
     {
         lock (_keytermsLock)
         {
-            var terms = Keyterms(Projects.Projects, Handles);
+            var terms = Keyterms(Projects.Shown, Handles);
             if (_keytermsSent?.SetEquals(terms) == true) return;
             _keyterms?.Set(terms);
             _keytermsSent = new HashSet<string>(terms, StringComparer.Ordinal);

@@ -35,6 +35,32 @@ public sealed class ProjectBoard
         _lists.TryGetValue(project.ServerId, out var list) ? list.FirstOrDefault(p => p.Project.Id == project.ProjectId) : null;
 
     /// <summary>
+    /// The overseer that stands for the project in what voice says unasked (#469): the top of the chain of live parents the
+    /// server recorded (<see cref="ProjectSummary.RecordedParentId"/>), the project itself when it has none. A parent is
+    /// live while its server lists it, stopped or not: a deleted or forgotten one is not listed, and its children are
+    /// top level again. The session's own <see cref="ProjectSummary.ParentId"/>, which it can write, decides nothing.
+    /// </summary>
+    public ServerProject TopOf(ServerProject project) => ParentsOf(project).LastOrDefault() ?? project;
+
+    /// <summary>The project's live parents as the server recorded them, its own first, up to the top; a loop is cut where it closes.</summary>
+    private IEnumerable<ServerProject> ParentsOf(ServerProject project)
+    {
+        HashSet<string> seen = [project.Project.Id];
+        for (var at = project; at.Project.RecordedParentId is { } parent && seen.Add(parent) && Find(new ProjectRef(at.ServerId, parent)) is { } live; at = live)
+            yield return live;
+    }
+
+    /// <summary>Whether a live overseer runs the project (<see cref="TopOf"/>): voice leaves it out unless the user asks for it.</summary>
+    public bool IsRun(ProjectRef project) => Find(project) is { } found && ParentsOf(found).Any();
+
+    /// <summary>The projects no live overseer runs (<see cref="IsRun"/>): what voice says unasked, the one changed last first.</summary>
+    public IReadOnlyList<ServerProject> Shown => [.. Projects.Where(p => !ParentsOf(p).Any())];
+
+    /// <summary>The projects the overseer runs: its workers, and theirs (#469). None for a project that runs none.</summary>
+    public IReadOnlyList<ServerProject> WorkersOf(ProjectRef overseer) =>
+        [.. Projects.Where(p => ParentsOf(p).Any(parent => parent.Ref == overseer))];
+
+    /// <summary>
     /// What the project's root is shown as (#434): its title, or its name when it has none, or when another root of its
     /// profile on its server is shown as that title. Null when it is in no root.
     /// </summary>
