@@ -55,5 +55,5 @@ public class SlashCommandsTests
 
     [Fact]
     public void Passed_IsTheSupportedCommandsThenTheSkills_EachOnce() =>
-        Assert.Equal(["clear", "compact", "context", "loop"], SlashCommands.Passed(["loop", "clear", "", "loop"]));
+        Assert.Equal(["clear", "compact", "context", "recap", "loop"], SlashCommands.Passed(["loop", "clear", "", "loop"]));
 }

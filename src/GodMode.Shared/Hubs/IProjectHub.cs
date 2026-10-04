@@ -126,6 +126,15 @@ public interface IProjectHub
     Task ReplyByVoice(string projectId, string text);
 
     /// <summary>
+    /// Asks the project for its recap (issue #513): sends it <c>/recap</c>, whose answer becomes its
+    /// <see cref="ProjectStatus.Recap"/> and <see cref="ProjectStatus.RecapAt"/>, leaves its last result as it is and raises no
+    /// attention item. Only to a project with no recap, whose claude runs and is idle (nothing pending, no question), and once
+    /// for as long as the server tracks it, whoever asks; anything else sends nothing, and says why. No turn of the user's,
+    /// and the user has not seen the last result for it. Voice asks it when the user asks about a project.
+    /// </summary>
+    Task<RecapAsk> AskForRecap(string projectId);
+
+    /// <summary>
     /// Subscribes to a project's output. The server replays output.jsonl from fromOffset in
     /// <see cref="IProjectHubClient.OutputBatch"/> messages, sends
     /// <see cref="IProjectHubClient.OutputReplayComplete"/>, and only then live lines, so each line

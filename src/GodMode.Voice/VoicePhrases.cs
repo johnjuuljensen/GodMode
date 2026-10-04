@@ -96,6 +96,18 @@ public sealed partial class VoicePhrases
     /// <summary>Where a project stands, in the recap the session keeps of it (#466), after its name: "issue 283: …".</summary>
     public string Stands(SpokenName name, string recap) => $"{Named(name)}: {recap}";
 
+    /// <summary>
+    /// That the project, which keeps no recap, has been asked for one (#513): "Jeg har bedt den om et resumé, som jeg læser
+    /// næste gang du spørger.", or, asked before, that it has not come yet.
+    /// </summary>
+    public string RecapAsked(bool before) => (before, _danish) switch
+    {
+        (false, true) => "Jeg har bedt den om et resumé, som jeg læser næste gang du spørger.",
+        (false, false) => "I've asked it for a recap, which I'll read the next time you ask.",
+        (true, true) => "Den er bedt om et resumé, som ikke er kommet endnu.",
+        (true, false) => "It has been asked for a recap, which hasn't come yet.",
+    };
+
     /// <summary>A project's last spoken reply, when nothing of it needs the user (#466): "issue 283 sagde sidst: …".</summary>
     public string SaidLast(SpokenName name, string spoken) =>
         _danish ? $"{Subject(name)} sagde sidst: {spoken}" : $"{Subject(name)} said last: {spoken}";

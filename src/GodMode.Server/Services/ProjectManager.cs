@@ -1373,6 +1373,25 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (reply.SessionStart is { } sessionStart) await sessionStart;
     }
 
+    public async Task<RecapAsk> AskForRecapAsync(string projectId)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        RefuseFailedCreate(project);
+        if (project.Status.Recap is { Length: > 0 }) return RecapAsk.HasRecap;
+        if (!project.Process.TryAskRecap()) return RecapAsk.Asked;
+        // Only to an idle claude, checked and sent in one step, so it never answers a prompt or joins a turn; as held
+        // input is, it is no reply of the user's. Its answer brings the session back to Idle (StatusUpdater)
+        if (!await _lifecycle.TrySendHeldAsync(project, $"/{SlashCommands.Recap}"))
+        {
+            project.Process.UnaskRecap();
+            return RecapAsk.Busy;
+        }
+        _logger.LogInformation("Project {ProjectId} is asked for its recap", projectId);
+        await NotifyStatusChanged(project);
+        return RecapAsk.Sent;
+    }
+
     /// <summary>What a reply did under the resume lock, and, when it resumed, the wait for the session to start that follows.</summary>
     private readonly record struct ReplyOutcome(bool Delivered, Task? SessionStart = null);
 
