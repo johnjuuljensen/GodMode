@@ -122,6 +122,25 @@ public sealed class AnnouncedSwitchTests
         Assert.Equal(P101, Assert.Single(voice.Servers.Replies).Project);
     }
 
+    /// <summary>
+    /// "Hvad spørger den om?" right after the announcement asks about the announced project: only an answer asks which,
+    /// and the status, naming 101, is the user's choice.
+    /// </summary>
+    [Fact]
+    public async Task An_unnamed_status_ask_just_after_an_announcement_reads_the_announced_project_and_asks_nothing()
+    {
+        var voice = await TalkingAbout283Async();
+        Announce(voice, P101, "issue 101 har et spørgsmål");
+
+        var result = await voice.Tools.ProjectStatusAsync(null, CancellationToken.None);
+
+        Assert.Contains("Skal jeg slette kolonnerne?", result);
+        Assert.DoesNotContain("Nothing was sent", result);
+        Assert.Equal(P101, voice.Conversation.Current);
+        await voice.Tools.AnswerAsync(null, "Ja.", CancellationToken.None);
+        Assert.Equal(P101, Assert.Single(voice.Servers.Replies).Project);
+    }
+
     [Fact]
     public async Task A_named_answer_just_after_an_announcement_goes_where_it_names()
     {
