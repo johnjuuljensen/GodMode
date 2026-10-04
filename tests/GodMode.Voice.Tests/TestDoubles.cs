@@ -133,7 +133,8 @@ internal sealed class OfflineVoice : IAsyncDisposable
     public static async Task<OfflineVoice> StartAsync(IGodModeServers servers, ScriptedChatClient model,
         Func<CancellationToken, Task>? connect = null, VoiceSettings? settings = null, ILoggerFactory? loggerFactory = null,
         TimeSpan? speech = null, IAudioSource? microphone = null, IInferenceProvider? inference = null,
-        VoiceMic? mic = null, MediaPause? media = null, IAudioSink? speaker = null, ScriptedSpeechEngine? engine = null)
+        VoiceMic? mic = null, MediaPause? media = null, IAudioSink? speaker = null, ScriptedSpeechEngine? engine = null,
+        TimeProvider? time = null)
     {
         // How long anything the bot says plays: short, unless a test watches it speak
         var voice = new OfflineVoice(model, inference ?? model, speech ?? TimeSpan.FromMilliseconds(50), engine);
@@ -157,6 +158,7 @@ internal sealed class OfflineVoice : IAsyncDisposable
             Events = voice.Events,
             LoggerFactory = loggerFactory ?? NullLoggerFactory.Instance,
             LogDirectory = voice._logDirectory,
+            Time = time,
         }, CancellationToken.None);
         return voice;
     }
