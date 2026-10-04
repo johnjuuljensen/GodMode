@@ -119,6 +119,13 @@ public interface IProjectHub
     Task ReplyAndResume(string projectId, string text);
 
     /// <summary>
+    /// <see cref="ReplyAndResume"/> with an answer spoken and transcribed (issue #460): the server sends it to claude
+    /// marked so, on a line of its own before it, so the session reads it knowing words may be misheard. A command
+    /// (<c>/clear</c>) goes as it is, as a marked one would be text. A typed reply is <see cref="ReplyAndResume"/>, unmarked.
+    /// </summary>
+    Task ReplyByVoice(string projectId, string text);
+
+    /// <summary>
     /// Subscribes to a project's output. The server replays output.jsonl from fromOffset in
     /// <see cref="IProjectHubClient.OutputBatch"/> messages, sends
     /// <see cref="IProjectHubClient.OutputReplayComplete"/>, and only then live lines, so each line

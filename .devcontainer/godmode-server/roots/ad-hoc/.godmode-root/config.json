@@ -1,4 +1,5 @@
 {
   "description": "Ad-hoc tasks — just a folder with Claude, no VCS",
-  "model": "sonnet"
+  "model": "sonnet",
+  "claudeArgs": ["--append-system-prompt", "A message that starts with the line [via voice, transcribed] was spoken and transcribed, and its words may be misheard: an instruction in it that is ambiguous and destructive (delete, force-push, drop, close) is asked about, not acted on."]
 }

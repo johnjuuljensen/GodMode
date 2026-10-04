@@ -479,7 +479,9 @@ A session and its parent talk two ways: through Claude Code's own cross-session 
 
 ### Slash commands
 
-claude runs a message that starts with `/name` as its command `name`, and takes a `/word` it does not know (`/frobnicate`, `/tmp/x is full`) as text. GodMode sends a short list of them, and refuses claude's others, which never reach claude. Every message that reaches claude is checked: `SendInput`, `ReplyAndResume` (the app, and voice), the fleet's `send` and a create's prompt (refused before any script runs).
+claude runs a message that starts with `/name` as its command `name`, and takes a `/word` it does not know (`/frobnicate`, `/tmp/x is full`) as text. GodMode sends a short list of them, and refuses claude's others, which never reach claude. Every message that reaches claude is checked: `SendInput`, `ReplyAndResume` (the app), `ReplyByVoice` (voice), the fleet's `send` and a create's prompt (refused before any script runs).
+
+An answer sent by voice (`ReplyByVoice`, #460) is `ReplyAndResume` with the line `[via voice, transcribed]` before it, which the server adds (`SpokenInput`), so the session reads it knowing words may be misheard; a command goes as it is. A typed reply is never marked.
 
 | Input | What GodMode does |
 |---|---|

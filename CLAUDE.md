@@ -117,7 +117,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - Client tests run as the app's page: jsdom at `https://0.0.0.1/`, with a fake shell behind `window.HybridWebView` (`src/test/appShell.ts`)
 
 **Slash commands** (#31, server README *Slash commands*)
-- GodMode sends `/clear`, `/compact`, `/context` and the session's skills (its last `system/init`'s `skills`), and refuses claude's other commands (`SlashCommands.WhyRefused`), on every input path: `SendInput`, `ReplyAndResume`, the fleet's `send`, a create's prompt. A `/word` claude does not know is text, as claude takes it
+- GodMode sends `/clear`, `/compact`, `/context` and the session's skills (its last `system/init`'s `skills`), and refuses claude's other commands (`SlashCommands.WhyRefused`), on every input path: `SendInput`, `ReplyAndResume`, `ReplyByVoice`, the fleet's `send`, a create's prompt. A `/word` claude does not know is text, as claude takes it
 - `ProjectStatus.SlashCommands` (sent, what the composer completes) and `ClaudeCommands` (all claude listed) come from each `system/init`
 - `/clear`'s `conversation_reset` starts the output over (`OutputLog.RestartAsync`, `OutputRestarted`); a result with no text and `num_turns` 0 (`/clear`, `/compact`) raises no `Finished`. `/model` and `/effort` stay GodMode's, per root and action
 
@@ -295,4 +295,5 @@ When doing work initiated by GodMode, indicated by the presence of a `.godmode` 
 - When asked to merge master into a branch always use origin/master as local master is likely stale
 - Branches for issues are named by `ac-gwt-issue` from the issue's labels: `feature/<n>-<slug>`, `bug/<n>-<slug>`, `epic/<n>-<slug>`. Use the same scheme when creating one by hand.
 - Refer to work by its issue, never by its pull request alone: `#375` (or `IS#375`), or `IS#375/PR#408` once it has one, never just `PR#408`. This goes for messages to the user, PR descriptions, comments, commits, and reports to an overseer.
+- **A message that starts with the line `[via voice, transcribed]` was spoken, and its words may be misheard** (the server adds the line to a reply sent by voice, never to a typed one). An instruction in it that is ambiguous and destructive (delete, force-push, drop, close) is asked about, with AskUserQuestion, not acted on.
 - **A question the user must answer goes through the AskUserQuestion tool, with options. Never end a turn on a plain-text question**, and that includes asking for a confirmation ("Shall I…?"). GodMode makes AskUserQuestion a pending question the user can answer from the inbox, the phone or voice. A turn that ends on a `?` in text leaves GodMode to guess. If no answer is needed, state what you'll do or did, and end on that.

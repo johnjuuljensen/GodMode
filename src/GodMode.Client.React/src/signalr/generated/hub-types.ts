@@ -770,6 +770,13 @@ export interface IProjectHub {
    */
   ReplyAndResume(projectId: string, text: string): Promise<void>;
   /**
+   * IProjectHub.ReplyAndResume with an answer spoken and transcribed (issue #460): the server sends it to
+   * claude marked so, on a line of its own before it, so the session reads it knowing words may be misheard.
+   * A command (`/clear`) goes as it is, as a marked one would be text. A typed reply is
+   * IProjectHub.ReplyAndResume, unmarked.
+   */
+  ReplyByVoice(projectId: string, text: string): Promise<void>;
+  /**
    * Subscribes to a project's output. The server replays output.jsonl from fromOffset in
    * IProjectHubClient.OutputBatch messages, sends IProjectHubClient.OutputReplayComplete, and only then live
    * lines, so each line arrives once and in order. fromOffset is the offset of the last line the client has
