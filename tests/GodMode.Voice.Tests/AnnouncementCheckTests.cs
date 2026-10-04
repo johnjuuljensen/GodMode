@@ -118,11 +118,12 @@ public sealed class AnnouncementCheckTests
     public void Of_two_one_dropped_the_other_is_said_alone_and_is_what_the_conversation_is_about()
     {
         var (servers, board, conversation, formatter) = Voice();
-        servers.Set(ServerA, Question(P101.ProjectId, "101-cleanup", "Hvilken?"), Question(P283.ProjectId, "283-voice", "Ny?"));
+        var question = Question(P283.ProjectId, "283-voice", "Ny?");
+        servers.Set(ServerA, Question(P101.ProjectId, "101-cleanup", "Hvilken?"), question);
         var first = Of(board, P101, "101 har et spørgsmål");
         var second = Of(board, P283, "283 har et spørgsmål");
 
-        servers.Set(ServerA, Question(P283.ProjectId, "283-voice", "Ny?"));   // 101 answered on screen
+        servers.Set(ServerA, question);   // 101 answered on screen
 
         Assert.Equal("283 har et spørgsmål.", formatter.Format([first, second], Danish));
         Assert.Equal(P283, conversation.Current);
