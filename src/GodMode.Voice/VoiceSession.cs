@@ -190,7 +190,7 @@ public sealed class VoiceSession : IAsyncDisposable
             scope = services.CreateAsyncScope();
 
             var inference = scope.ServiceProvider.GetRequiredService<IInferenceProvider>();
-            var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation);
+            var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation, phrases: phrases);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
                 GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null, roots),
