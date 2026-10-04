@@ -145,8 +145,12 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         Task.FromResult<IReadOnlyList<ServerAttentionItem>>(
             [.. _lists.SelectMany(l => l.Value.Items.Select(i => new ServerAttentionItem(l.Key, l.Value.Name, i))).OrderBy(i => i.Item.Since)]);
 
+    /// <summary>What reading a project's status throws, as a hub call that fails does; none when null.</summary>
+    public Exception? StatusError { get; set; }
+
     public Task<ProjectStatus> GetStatusAsync(ProjectRef project, CancellationToken ct) =>
-        _statuses.TryGetValue(project, out var status)
+        StatusError is { } error ? Task.FromException<ProjectStatus>(error)
+        : _statuses.TryGetValue(project, out var status)
             ? Task.FromResult(status)
             : Task.FromException<ProjectStatus>(new KeyNotFoundException(project.ProjectId));
 

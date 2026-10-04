@@ -14,7 +14,9 @@ namespace GodMode.Voice;
 /// earlier readings (VoiceBot#61), and the chat acts on it as on any other (#376). "Sendt" is the code's word, said
 /// only for an answer sent in that turn (<see cref="SentNode"/>). Where the mic opens on demand, a final that is a Done
 /// phrase alone closes it (<see cref="DoneNode"/>), above help. A session's own spoken reply that a tool read out is
-/// said word for word by the code, not retold by the model (<see cref="SpokenNode"/>, #384).
+/// said word for word by the code, not retold by the model (<see cref="SpokenNode"/>, #384). A tool result the code can
+/// say itself (what needs me, the projects, a short question or result) is said so, with no second model call to retell
+/// it (<see cref="CodeSaysInference"/>, #456).
 /// </summary>
 public static class GodModeGraph
 {
@@ -74,10 +76,11 @@ public static class GodModeGraph
             - After a tool call, say its result in one compressed line with respond.
 
             COMMANDS (Danish first, English accepted):
-            - "Hvad venter?" / "What needs me?" — call {{VoiceTools.WhatNeedsMe}}. Say the count, then each project by its
-              name and what it needs.
+            - "Hvad venter?" / "What needs me?" — call {{VoiceTools.WhatNeedsMe}}, with the root or profile the user asked
+              about, if any ("Hvad venter i GodMode?"). Say the count, then each project by its name and what it needs.
             - "Hvilke projekter er der?", "Hvad kører?" / "Which projects?" — call {{VoiceTools.ListProjects}}: every project,
-              also those that need nothing, grouped by profile and root. Say the tool's count, then each group once, by
+              also those that need nothing, grouped by profile and root; with the root or profile the user asked about, if
+              any, only those. Say the tool's count, then each group once, by
               its profile and root ("Godmode, root GodMode: issue 376, issue 382. Private, root voicebot: branch master."),
               with its projects. If you leave any out, say how many and why. Never answer which projects there are
               from {{VoiceTools.WhatNeedsMe}}: it lists only those that need the user.
@@ -150,7 +153,8 @@ public static class GodModeGraph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
-            .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt),
+            .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Medium,
+                new CodeSaysInference(inference, tools.Conversation), systemPrompt),
                 tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
     }

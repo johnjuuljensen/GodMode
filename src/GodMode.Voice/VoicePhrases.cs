@@ -68,14 +68,63 @@ public sealed partial class VoicePhrases
     /// not the bot, so it never starts the line, where a "Sendt" in it would be the bot's own word (<see cref="SentNode"/>).
     /// Null when the session gave none.
     /// </summary>
-    public string? Spoken(SpokenName name, AttentionItem item) => (item.Spoken, item.Kind, _danish) switch
+    public string? Spoken(SpokenName name, AttentionItem item) => item.Spoken is { Length: > 0 } spoken ? Reads(name, item.Kind, spoken) : null;
+
+    /// <summary>
+    /// A project's own words read out, after a lead-in that names it and what it needs: "issue 283 spørger: …" for a
+    /// question, "issue 283 er færdig: …" for anything else (a session's spoken reply, a finished result).
+    /// </summary>
+    public string Reads(SpokenName name, AttentionKind kind, string text) => (kind, _danish) switch
     {
-        (null or "", _, _) => null,
-        (var spoken, AttentionKind.Question, true) => $"{Subject(name)} spørger: {spoken}",
-        (var spoken, AttentionKind.Question, false) => $"{Subject(name)} asks: {spoken}",
-        (var spoken, _, true) => $"{Subject(name)} er færdig: {spoken}",
-        (var spoken, _, false) => $"{Subject(name)} is done: {spoken}",
+        (AttentionKind.Question, true) => $"{Subject(name)} spørger: {text}",
+        (AttentionKind.Question, false) => $"{Subject(name)} asks: {text}",
+        (_, true) => $"{Subject(name)} er færdig: {text}",
+        (_, false) => $"{Subject(name)} is done: {text}",
     };
+
+    /// <summary>Where a project stands, in the recap the session keeps of it (#466), after its name: "issue 283: …".</summary>
+    public string Stands(SpokenName name, string recap) => $"{Named(name)}: {recap}";
+
+    /// <summary>A project's last spoken reply, when nothing of it needs the user (#466): "issue 283 sagde sidst: …".</summary>
+    public string SaidLast(SpokenName name, string spoken) =>
+        _danish ? $"{Subject(name)} sagde sidst: {spoken}" : $"{Subject(name)} said last: {spoken}";
+
+    /// <summary>A project's last result, shortened, when nothing of it needs the user (#466): "Sidste resultat fra issue 283: …".</summary>
+    public string LastResult(SpokenName name, string result) =>
+        _danish ? $"Sidste resultat fra {Named(name)}: {result}" : $"Last result from {Named(name)}: {result}";
+
+    /// <summary>
+    /// What needs the user, as <see cref="VoiceTools.WhatNeedsMe"/> found it, in the code's words (#456): each project as
+    /// its announcement says it (<see cref="Announce"/>), several after their count, "Intet venter." for none.
+    /// </summary>
+    public string Waiting(IReadOnlyList<(SpokenName Name, AttentionItem Item)> items) =>
+        items.Select(i => GodModeAnnouncementFormatter.Sentence(Announce(i.Name, i.Item))).ToList() switch
+        {
+            [] => _danish ? "Intet venter." : "Nothing needs you.",
+            [var one] => one,
+            var several => $"{Several(several.Count)} {string.Join(" ", several)}",
+        };
+
+    /// <summary>
+    /// The projects <see cref="VoiceTools.ListProjects"/> listed, in the code's words (#456): the count, then each group
+    /// once, by its profile and root, with its projects by their labels. "3 projekter. Profil Mega, root GodMode: issue 376,
+    /// issue 382. Profil Private, root voicebot: branch master."
+    /// </summary>
+    public string Projects(IReadOnlyList<(string Profile, string? Root, IReadOnlyList<string> Labels)> groups)
+    {
+        var count = groups.Sum(g => g.Labels.Count);
+        if (count == 0)
+            return _danish ? "Ingen projekter." : "No projects.";
+        var lines = groups.Select(g => $"{(_danish ? "Profil" : "Profile")} {g.Profile}{(g.Root is { } root ? $", root {root}" : "")}: {string.Join(", ", g.Labels)}.");
+        var total = (count, _danish) switch
+        {
+            (1, true) => "1 projekt.",
+            (_, true) => $"{count} projekter.",
+            (1, false) => "1 project.",
+            (_, false) => $"{count} projects.",
+        };
+        return $"{total} {string.Join(" ", lines)}";
+    }
 
     /// <summary>
     /// A create read back, as the question its yes answers: the root, its profile (and server, when there are several),

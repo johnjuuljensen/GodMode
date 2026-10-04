@@ -11,7 +11,7 @@ public sealed class ControlModelTests
     [Fact]
     public async Task The_control_chat_runs_on_Sonnet_by_default()
     {
-        var model = new ScriptedChatClient().CallTool(VoiceTools.WhatNeedsMe).Respond("Intet venter.");
+        var model = new ScriptedChatClient().CallTool(VoiceTools.WhatNeedsMe);
         var tiered = new TieredModel(model);
         await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model, inference: tiered);
 

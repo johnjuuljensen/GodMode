@@ -20,7 +20,7 @@ public sealed class ProjectListTests
         // The server is there when voice starts, with no projects yet
         var servers = new FakeServers(ServerA);
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.ListProjects).Respond("1 projekt: testing.")
+            .CallTool(VoiceTools.ListProjects)
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "Assistent", [VoiceTools.TextParameter] = "Skift til outbound profil." })
             .Respond("Sendt til testing.");
         await using var voice = await OfflineVoice.StartAsync(servers, model);
@@ -29,9 +29,7 @@ public sealed class ProjectListTests
         servers.AddProject(ServerA, Chat, "testing", root: "Assistant", kind: "chat", profile: "Outbound");
 
         voice.Transcriptions.AddFinal("Hvilke projekter er i gang?");
-        await voice.Events.SaidAsync("1 projekt: testing.");
-        Assert.StartsWith("1 project, all in one group:\nProfile Outbound, root Assistant (1 project):\n- chat testing (testing, chat): Idle\nSay the count, 1,",
-            Assert.Single(model.ToolResults));
+        await voice.Events.SaidAsync("1 projekt. Profil Outbound, root Assistant: chat testing.");
 
         voice.Transcriptions.AddFinal("Sig til Assistent at den skal skifte til outbound profil");
         await voice.Events.SaidAsync("Sendt til chat testing.");
