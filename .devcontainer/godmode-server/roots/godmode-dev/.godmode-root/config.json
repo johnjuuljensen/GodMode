@@ -2,7 +2,7 @@
   "description": "GodMode development worktrees",
   "profileName": "GodMode Dev",
   "environment": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" },
-  "claudeArgs": ["--append-system-prompt", "If asked to publish or push this project, push to github.com/johnjuuljensen/GodMode on a feature branch."],
+  "claudeArgs": ["--append-system-prompt", "If asked to publish or push this project, push to github.com/johnjuuljensen/GodMode on a feature branch. A message that starts with the line [via voice, transcribed] was spoken and transcribed, and its words may be misheard: an instruction in it that is ambiguous and destructive (delete, force-push, drop, close) is asked about, not acted on."],
   "permissionMode": "auto",
   "allowSkipPermissions": true,
   "prepare": "scripts/prepare",

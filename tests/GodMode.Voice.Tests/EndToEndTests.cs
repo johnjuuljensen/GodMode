@@ -1,6 +1,7 @@
 using System.Text.Json;
 using GodMode.ClientBase.Hub;
 using GodMode.FakeClaude;
+using GodMode.Server.Services;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
@@ -61,12 +62,31 @@ public sealed class EndToEndTests
         // Each utterance once: a tool round and a respond, no more
         Assert.Equal(4, model.Calls);
 
-        // It reached FakeClaude's stdin through ReplyAndResume, and the session carried on
+        // It reached FakeClaude's stdin through ReplyByVoice, marked as transcribed speech (#460), and the session carried on
         await Eventually.UntilAsync(() => server.StdinOf(asking.Id).Count == 2, () => $"the answer on stdin: {string.Join(" | ", server.StdinOf(asking.Id))}\n{server.Output}");
-        Assert.Contains(JsonSerializer.Serialize(Answer), server.StdinOf(asking.Id)[1]);
+        Assert.Contains(JsonSerializer.Serialize(SpokenInput.Mark(Answer)), server.StdinOf(asking.Id)[1]);
+        Assert.Equal(SpokenInput.Mark(Answer), server.InputOf(asking.Id)[^1]);
         Assert.Single(server.StdinOf(older.Id));
         await Eventually.UntilAsync(() => Status(hub, asking.Id) is { State: ProjectState.Idle, LastResult: "Okay." },
             () => $"the session to carry on: {Status(hub, asking.Id)}");
+    }
+
+    /// <summary>Issue #460: a reply typed in the app (the hub's ReplyAndResume) reaches the session as it was typed, unmarked.</summary>
+    [Fact]
+    public async Task A_typed_reply_reaches_the_session_unmarked()
+    {
+        await using var server = await TestServer.StartAsync(Asking(Question));
+        await using var hub = HubConnections.Build(new RelayTarget($"{server.Url}/hubs/projects", TestServer.ApiKey));
+        await hub.StartAsync();
+        var asking = await CreateAsync(hub, "283-add-migration");
+        await WaitForAttentionAsync(hub, asking.Id);
+
+        await hub.InvokeAsync(nameof(IProjectHub.ReplyAndResume), asking.Id, Answer);
+
+        await Eventually.UntilAsync(() => server.StdinOf(asking.Id).Count == 2, () => $"the answer on stdin: {string.Join(" | ", server.StdinOf(asking.Id))}\n{server.Output}");
+        Assert.Contains(JsonSerializer.Serialize(Answer), server.StdinOf(asking.Id)[1]);
+        Assert.Equal(Answer, server.InputOf(asking.Id)[^1]);
+        Assert.DoesNotContain(server.InputOf(asking.Id), input => input.Contains(SpokenInput.Marker));
     }
 
     /// <summary>
@@ -105,7 +125,7 @@ public sealed class EndToEndTests
         voice.Transcriptions.AddFinal($"Svar {TestServer.Root} at den skal bruge den eksisterende migration");
         await voice.Events.SaidAsync("Sendt til create testing.");
         await Eventually.UntilAsync(() => server.StdinOf(created.Id).Count == 2, () => $"the answer on stdin: {string.Join(" | ", server.StdinOf(created.Id))}\n{server.Output}");
-        Assert.Contains(JsonSerializer.Serialize(Answer), server.StdinOf(created.Id)[1]);
+        Assert.Contains(JsonSerializer.Serialize(SpokenInput.Mark(Answer)), server.StdinOf(created.Id)[1]);
 
         await hub.InvokeAsync<DeleteProjectResult>(nameof(IProjectHub.DeleteProject), created.Id, true);
         await Eventually.UntilAsync(() => voice.Session.Projects.Projects.Count == 0 && voice.Session.Handles.All.Count == 0,

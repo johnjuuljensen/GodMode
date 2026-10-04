@@ -45,8 +45,10 @@ public interface IProjectManager
     /// one, else a resume, the input, and a wait for claude to report its session started. Without
     /// <paramref name="answersPending"/> (the fleet's <c>send</c>), a pending permission prompt or
     /// question refuses it (<see cref="InvalidOperationException"/>), changing nothing: those are the user's.
+    /// <paramref name="spoken"/> (hub ReplyByVoice): the text was transcribed from speech, and reaches claude marked so
+    /// (<see cref="SpokenInput.Mark"/>).
     /// </summary>
-    Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true);
+    Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true, bool spoken = false);
 
     /// <summary>
     /// The MCP <c>message_parent</c> tool: holds <paramref name="text"/> for the project's parent, labelled with the

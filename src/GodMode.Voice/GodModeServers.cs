@@ -67,7 +67,7 @@ public interface IGodModeServers
 
     Task<ProjectStatus> GetStatusAsync(ProjectRef project, CancellationToken ct);
 
-    /// <summary><see cref="IProjectHub.ReplyAndResume"/>.</summary>
+    /// <summary><see cref="IProjectHub.ReplyByVoice"/>: the answer reaches the session marked as transcribed speech.</summary>
     Task ReplyAsync(ProjectRef project, string text, CancellationToken ct);
 
     Task MarkSeenAsync(ProjectRef project, CancellationToken ct);
@@ -182,7 +182,7 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
         Hub(project).InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), project.ProjectId, ct);
 
     public Task ReplyAsync(ProjectRef project, string text, CancellationToken ct) =>
-        Hub(project).InvokeAsync(nameof(IProjectHub.ReplyAndResume), project.ProjectId, text, ct);
+        Hub(project).InvokeAsync(nameof(IProjectHub.ReplyByVoice), project.ProjectId, text, ct);
 
     public Task MarkSeenAsync(ProjectRef project, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.MarkSeen), project.ProjectId, ct);

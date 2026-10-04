@@ -1371,13 +1371,14 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         await NotifyStatusChanged(project);
     }
 
-    public async Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true)
+    public async Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true, bool spoken = false)
     {
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
         RefuseFailedCreate(project);
         if (!answersPending) RefuseWhilePending(project);
         SlashCommands.Check(text, project.Status);
+        if (spoken) text = SpokenInput.Mark(text);
         // The user's reply answers what is pending; the fleet's send, which does not, starts no turn of the user's
         if (answersPending) await UserWritesAsync(project);
 
