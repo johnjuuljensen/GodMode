@@ -108,8 +108,10 @@ public sealed partial class VoicePhrases
     /// What needs the user, as <see cref="VoiceTools.WhatNeedsMe"/> found it, in the code's words (#456): each project as
     /// its announcement says it (<see cref="Announce"/>), several after their count, "Intet venter." for none.
     /// </summary>
-    public string Waiting(IReadOnlyList<(SpokenName Name, AttentionItem Item)> items) =>
-        items.Select(i => GodModeAnnouncementFormatter.Sentence(Announce(i.Name, i.Item))).ToList() switch
+    /// <param name="overseers">The overseers whose workers need someone (#469), each said by its line (<see cref="Workers"/>) after the items.</param>
+    public string Waiting(IReadOnlyList<(SpokenName Name, AttentionItem Item)> items, IReadOnlyList<(SpokenName Name, int Workers, int Waiting)>? overseers = null) =>
+        items.Select(i => GodModeAnnouncementFormatter.Sentence(Announce(i.Name, i.Item)))
+            .Concat((overseers ?? []).Select(o => GodModeAnnouncementFormatter.Sentence(Workers(o.Name, o.Workers, o.Waiting)))).ToList() switch
         {
             [] => _danish ? "Intet venter." : "Nothing needs you.",
             [var one] => one,
@@ -117,16 +119,38 @@ public sealed partial class VoicePhrases
         };
 
     /// <summary>
+    /// An overseer's line for the workers it runs (#469), which voice leaves out: "voice-epics: 6 workers, 2 venter på den" /
+    /// "voice-epics: 6 workers, 2 waiting on it". <paramref name="waiting"/> are those that need someone, which the overseer handles.
+    /// </summary>
+    public string Workers(SpokenName name, int workers, int waiting) => $"{Named(name)}: {RunsWorkers(workers, waiting)}";
+
+    /// <summary>"6 workers, 2 venter på den" / "6 workers, 2 waiting on it"; "1 worker" when none waits.</summary>
+    public string RunsWorkers(int workers, int waiting) =>
+        (workers == 1 ? "1 worker" : $"{workers} workers") + (waiting, _danish) switch
+        {
+            (0, _) => "",
+            (var n, true) => $", {n} venter på den",
+            (var n, false) => $", {n} waiting on it",
+        };
+
+    /// <summary>
     /// The projects <see cref="VoiceTools.ListProjects"/> listed, in the code's words (#456): the count, then each group
     /// once, by its profile and root, with its projects by their labels. "3 projekter. Profil Mega, root GodMode: issue 376,
     /// issue 382. Profil Private, root voicebot: branch master."
     /// </summary>
-    public string Projects(IReadOnlyList<(string Profile, string? Root, IReadOnlyList<string> Labels)> groups, LeftOut? left = null)
+    /// <param name="needs">
+    /// What the listed projects need, each as its announcement says it (<see cref="Announce"/>), said after the groups:
+    /// a list of an overseer's workers (#469) says their questions, which no announcement said.
+    /// </param>
+    public string Projects(IReadOnlyList<(string Profile, string? Root, IReadOnlyList<string> Labels)> groups, LeftOut? left = null,
+        IReadOnlyList<(SpokenName Name, AttentionItem Item)>? needs = null)
     {
         var count = groups.Sum(g => g.Labels.Count);
         return count == 0
             ? left is { Count: > 0 } ? NothingNew(left) : _danish ? "Ingen projekter." : "No projects."
-            : $"{Total(count)} {string.Join(" ", groups.Select(g => GroupLine(g.Profile, g.Root, g.Labels)))}{Then(left is null ? "" : LeftOut(left))}";
+            : $"{Total(count)} {string.Join(" ", groups.Select(g => GroupLine(g.Profile, g.Root, g.Labels)))}"
+                + string.Concat((needs ?? []).Select(n => Then(GodModeAnnouncementFormatter.Sentence(Announce(n.Name, n.Item)))))
+                + Then(left is null ? "" : LeftOut(left));
     }
 
     /// <summary>A sentence after another: a space before it; nothing for none.</summary>
