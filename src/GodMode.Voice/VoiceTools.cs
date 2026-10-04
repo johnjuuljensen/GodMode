@@ -360,8 +360,33 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         var failed = status.LastError is { Length: > 0 } && status.State == ProjectState.Error && item?.Kind != AttentionKind.Error;
         if (failed)
             text.Append($" Error: {Capped(status.LastError!)}");
+        var recap = await AskForRecapAsync(target, status, ct);
+        text.Append(recap switch
+        {
+            RecapAsk.Sent => " It keeps no recap of where it stands: you have asked it for one, which is read the next time the user asks about it.",
+            RecapAsk.Asked => " It has been asked for a recap of where it stands, which has not come yet.",
+            _ => "",
+        });
         var result = ReadOut(text.ToString());
-        return !failed && StatusSaid(name, status, item, full, standing) is { } said ? SaysItself(result, said) : result;
+        return !failed && StatusSaid(name, status, item, full, standing) is { } said
+            ? SaysItself(result, recap is RecapAsk.Sent or RecapAsk.Asked
+                ? $"{said} {_phrases.RecapAsked(before: recap == RecapAsk.Asked)}" : said)
+            : result;
+    }
+
+    /// <summary>
+    /// Asks a project the user asks about for its recap (#513), when it keeps none and its claude is idle, with nothing
+    /// pending and no question: never one that runs or waits on the user. The server sends <c>/recap</c> once for as long
+    /// as it tracks the project, whoever asks, so a restart of voice asks no more often; its answer is the project's
+    /// <see cref="ProjectStatus.Recap"/>, read the next time it is asked about. Null when it was not asked, or the server
+    /// could not be (one that does not know the call, or fails it): the status is read all the same.
+    /// </summary>
+    private async Task<RecapAsk?> AskForRecapAsync(ProjectRef target, ProjectStatus status, CancellationToken ct)
+    {
+        if (status is not { Recap: null or "", State: ProjectState.Idle, CurrentQuestion: null or "", PendingPermission: null, PendingQuestion: null })
+            return null;
+        try { return await servers.AskForRecapAsync(target, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
     }
 
     /// <summary>How much of a last result <see cref="Standing"/> reads when the session gave no line of its own: its start, a few sentences.</summary>

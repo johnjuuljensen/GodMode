@@ -160,6 +160,18 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         return Task.CompletedTask;
     }
 
+    /// <summary>Each project asked for its recap (#513), in order.</summary>
+    public ConcurrentQueue<ProjectRef> RecapAsks { get; } = new();
+
+    /// <summary>What the server answers an ask for a recap: sent, unless set.</summary>
+    public RecapAsk RecapAnswer { get; set; } = RecapAsk.Sent;
+
+    public Task<RecapAsk> AskForRecapAsync(ProjectRef project, CancellationToken ct)
+    {
+        RecapAsks.Enqueue(project);
+        return Task.FromResult(RecapAnswer);
+    }
+
     /// <summary>Each tier set, in order.</summary>
     public ConcurrentQueue<(ProjectRef Project, Importance Importance)> Importances { get; } = new();
 

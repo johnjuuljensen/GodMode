@@ -134,6 +134,19 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
 
     public Task ReplyByVoice(string projectId, string text) => ReplyAsync(projectId, text, spoken: true);
 
+    public async Task<RecapAsk> AskForRecap(string projectId)
+    {
+        _logger.LogInformation("Client {ConnectionId} asks project {ProjectId} for its recap", Context.ConnectionId, projectId);
+        try
+        {
+            return await _projectManager.AskForRecapAsync(projectId);
+        }
+        catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException)
+        {
+            throw new HubException(ex.Message);
+        }
+    }
+
     private async Task ReplyAsync(string projectId, string text, bool spoken)
     {
         _logger.LogInformation("Client {ConnectionId} replying to project {ProjectId}{ByVoice}", Context.ConnectionId, projectId, spoken ? " by voice" : "");
