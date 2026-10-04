@@ -49,10 +49,12 @@ public class StatusUpdater : IStatusUpdater
         if (IsConversationLine(outputEvent, rawJson))
             status = status with { LastOutputAt = DateTime.UtcNow };
         var lastOutputAt = status.LastOutputAt;
-        // Every result ends the turn the user's input started, if one did
-        var userTurn = outputEvent.Type == OutputEventType.Result && process.TakeUserTurn();
-        // and the first result after a /recap answers it (issue #513)
-        var recapTurn = outputEvent.Type == OutputEventType.Result && process.TakeRecap();
+        // A result in a recap's shape, after a /recap, answers it (issue #513): a turn's result that comes first leaves the
+        // mark for it
+        var recapTurn = outputEvent.Type == OutputEventType.Result && IsRecapResult(outputEvent) && process.TakeRecap();
+        // Every other result ends the turn the user's input started, if one did: a reply sent while the recap runs is
+        // the turn after it
+        var userTurn = outputEvent.Type == OutputEventType.Result && !recapTurn && process.TakeUserTurn();
 
         // Parse Claude output events to update state
         switch (outputEvent.Type)
@@ -127,7 +129,7 @@ public class StatusUpdater : IStatusUpdater
 
             // /recap's answer (issue #513) is the session's standing, not a turn's reply: it is kept as the recap a speak call
             // gives, and the last reply, its spoken version and outcome stay, and nobody is told a turn finished
-            case OutputEventType.Result when recapTurn && IsRecapResult(outputEvent):
+            case OutputEventType.Result when recapTurn:
                 status = status with
                 {
                     Recap = outputEvent.Content!.Trim(), RecapAt = DateTime.UtcNow, State = ProjectState.Idle, CurrentQuestion = null,

@@ -142,6 +142,62 @@ public class RecapTests : IDisposable
         Assert.Equal(ProjectState.WaitingInput, (await harness.Projects.GetStatusAsync(created.Id)).State);
     }
 
+    /// <summary>
+    /// The user replies while voice's <c>/recap</c> runs, on a root with quiet turns: the recap's answer does not take the
+    /// user's turn, whose end still raises Finished.
+    /// </summary>
+    [Fact]
+    public async Task AReplySentWhileTheRecapRuns_OnAQuietRoot_StillRaisesFinished()
+    {
+        var script = new FakeScript().EmitInit().AwaitStdin().EmitAssistant("first").Sleep(50).EmitResult("first")
+            .AwaitStdin().AwaitStdin().Emit(SyntheticAssistant).Emit(RecapResult)
+            .EmitUser("go on", echo: true).EmitAssistant("answered").Sleep(50).EmitResult("answered").AwaitStdin();
+        await using var harness = new LifecycleHarness(script, rootConfig: new Dictionary<string, object> { ["quietTurns"] = true });
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
+        Assert.Empty(harness.Projects.GetAttention());
+
+        Assert.Equal(RecapAsk.Sent, await harness.Projects.AskForRecapAsync(created.Id));
+        await harness.Projects.ReplyAndResumeAsync(created.Id, "go on");
+        await LifecycleHarness.WaitUntilAsync(
+            async () => (await harness.Projects.GetStatusAsync(created.Id)) is { LastResult: "answered", State: ProjectState.Idle },
+            null, () => $"the user's turn did not end.\n{harness.Describe(created.Id)}");
+
+        Assert.Equal(RecapText, (await harness.Projects.GetStatusAsync(created.Id)).Recap);
+        Assert.Contains(harness.Projects.GetAttention(), item => item.ProjectId == created.Id && item.Kind == AttentionKind.Finished);
+    }
+
+    /// <summary>
+    /// <c>/recap</c> sent from the composer while a turn runs: that turn's result is its last result, and the recap that
+    /// answers after it is its recap.
+    /// </summary>
+    [Fact]
+    public async Task ARecapSentMidTurn_LeavesTheTurnsResult_AndIsTheRecap()
+    {
+        var turnEnds = Path.Combine(Path.GetTempPath(), $"godmode-turn-{Guid.NewGuid():N}");
+        try
+        {
+            var script = new FakeScript().EmitInit().AwaitStdin().EmitAssistant("working").AwaitFile(turnEnds).EmitResult("hello")
+                .AwaitStdin().Emit(SyntheticAssistant).Emit(RecapResult).AwaitStdin();
+            await using var harness = new LifecycleHarness(script);
+            var created = await harness.CreateProjectAsync();
+            await harness.WaitForStdinAsync(created.Id);
+            await harness.WaitForStateAsync(created.Id, ProjectState.Running);
+
+            await harness.Projects.SendInputAsync(created.Id, "/recap");
+            await harness.WaitForStdinAsync(created.Id, count: 2);
+            File.WriteAllText(turnEnds, "");
+            await WaitForRecapAsync(harness, created.Id);
+
+            var status = await harness.Projects.GetStatusAsync(created.Id);
+            Assert.Equal((RecapText, "hello"), (status.Recap, status.LastResult));
+        }
+        finally
+        {
+            File.Delete(turnEnds);
+        }
+    }
+
     [Fact]
     public void Recap_IsPassed_AndIsNoTextToMark()
     {
