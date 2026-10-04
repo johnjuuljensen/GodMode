@@ -80,6 +80,20 @@ public sealed class VoiceConversation
 
     /// <summary>The texts read out since the last take, and none from now on: as <see cref="TakeSent"/>.</summary>
     public IReadOnlyList<string> TakeReadOut() => [.. Interlocked.Exchange(ref _read, new())];
+
+    private SaidByCode? _said;
+
+    /// <summary>
+    /// A tool's <paramref name="result"/> that the code says itself as <paramref name="said"/> (#456): the model's round
+    /// after it is not run (<see cref="CodeSaysInference"/>). The last one a tool gave replaces any before it.
+    /// </summary>
+    public void SaysItself(string result, string said) => Volatile.Write(ref _said, new SaidByCode(result, said));
+
+    /// <summary>What the code says for <paramref name="result"/>, the tool result the model would read next, and nothing from now on; null when it says nothing for it.</summary>
+    public string? TakeSaid(string result) =>
+        Volatile.Read(ref _said) is { } said && said.Result == result && Interlocked.CompareExchange(ref _said, null, said) == said ? said.Said : null;
+
+    private sealed record SaidByCode(string Result, string Said);
 }
 
 /// <summary>
@@ -120,7 +134,7 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
 
     /// <summary>The text as a sentence: ended with its own '?' or '!' (a session's spoken reply has them), else a '.'.</summary>
     internal static string Sentence(string text) =>
-        text.Trim().TrimEnd('.') is { Length: > 0 } t ? t[^1] is '?' or '!' ? t : t + "." : "";
+        text.Trim().TrimEnd('.') is { Length: > 0 } t ? t[^1] is '?' or '!' or '…' ? t : t + "." : "";
 }
 
 /// <summary>

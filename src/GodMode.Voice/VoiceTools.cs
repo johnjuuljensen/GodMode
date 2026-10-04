@@ -9,11 +9,15 @@ namespace GodMode.Voice;
 /// <summary>
 /// The graph's tools on the servers: what needs the user, which projects there are, a project's status, its last reply
 /// (in parts), answer it, mark it seen, and start one (read back only: the user's yes creates it, <see cref="ConfirmCreateNode"/>). Their results are for the model, which says them in the user's language. A permission request is
-/// never answered here: that is the screen's (issue #285).
+/// never answered here: that is the screen's (issue #285). What needs the user, the projects, and a project's question
+/// or result short enough to say as it is are said in the code's words (<paramref name="phrases"/>), and the model does
+/// not retell them (<see cref="VoiceConversation.SaysItself"/>, #456).
 /// </summary>
 public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, ProjectBoard projects, ProjectHandles handles,
-    VoiceConversation conversation, TimeProvider? time = null)
+    VoiceConversation conversation, TimeProvider? time = null, VoicePhrases? phrases = null)
 {
+    private readonly VoicePhrases _phrases = phrases ?? new VoicePhrases(VoiceSettings.Default.Languages);
+
     public const string WhatNeedsMe = "what_needs_me";
     public const string ListProjects = "list_projects";
     public const string ProjectStatus = "project_status";
@@ -51,16 +55,22 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         "profile they said it with (\"branch master i GodMode, profil Mega\"), or its root or kind when the user names it so " +
         "(\"Assistant\", \"chat\"). Leave it empty for the project last announced or talked about.", Required: false);
 
+    private static readonly ToolParameter InRoot = new(RootParameter,
+        "Only those of one root or profile, as the user named it (\"i GodMode\", \"i Mega\"), when they asked about one. " +
+        "Empty for all of them.", Required: false);
+
     public ToolSet AddTo(ToolSet tools) => tools
         .Add(WhatNeedsMe,
             "List what needs the user across all their servers: questions, permission requests, errors, reviews and " +
             "finished results, one line per project, oldest first, each named as it is said. Call when the user asks what needs them, what is waiting, or for status overall.",
-            (_, _, ct) => WhatNeedsMeAsync(ct))
+            [InRoot],
+            (_, args, ct) => WhatNeedsMeAsync(ct, Argument(args, RootParameter)))
         .Add(ListProjects,
             "List every project on every server, whether it needs the user or not, grouped by profile, then root: each by " +
             "the name it is said by, with its name, kind and state. Call when the user asks which projects there are, what runs, or " +
             "about one they just started.",
-            (_, _, _) => Task.FromResult(ListProjectsText()))
+            [InRoot],
+            (_, args, _) => Task.FromResult(ListProjectsText(Argument(args, RootParameter))))
         .Add(ProjectStatus,
             "Read one project's state and what it waits on (its question, result, error or permission request) in full: " +
             "a very long one has its middle cut, and says so. " +
@@ -109,14 +119,21 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             (_, args, ct) => StartSessionAsync(new CreateAsk(Argument(args, RootParameter), Argument(args, ActionParameter),
                 Argument(args, IssueParameter), Argument(args, NameParameter), Argument(args, PromptParameter)), ct));
 
-    public async Task<string> WhatNeedsMeAsync(CancellationToken ct)
+    /// <param name="root">Only the items of the projects in this root or profile (<see cref="In"/>); all when empty.</param>
+    public async Task<string> WhatNeedsMeAsync(CancellationToken ct, string? root = null)
     {
         // Those of projects voice knows: an item of one it has not heard of (yet, or any more) has no handle to say
         var items = (await servers.GetAttentionAsync(ct)).Where(i => handles.Of(i.Project) is not null).ToList();
+        if (!string.IsNullOrWhiteSpace(root))
+        {
+            if (!projects.Projects.Any(p => In(p, root)))
+                return NoSuchRoot(root);
+            items = [.. items.Where(i => projects.Find(i.Project) is { } p && In(p, root))];
+        }
         // What was read out is what the conversation is about now: one project, or none to answer unnamed
         Talked(items is [var only] ? only.Project : null);
         if (items.Count == 0)
-            return "Nothing needs the user.";
+            return SaysItself(string.IsNullOrWhiteSpace(root) ? "Nothing needs the user." : $"Nothing in {root} needs the user.", _phrases.Waiting([]));
 
         var text = new StringBuilder($"{items.Count} need the user:\n");
         var named = items.Select(i => (Item: i, Name: Names.Of(i.Project)!)).ToList();
@@ -125,19 +142,23 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // One project, with its own spoken reply: the system says it, as status would
         if (named is [{ Item.Item.Spoken.Length: > 0 } one])
             text.AppendLine(SpokenBySystem(one.Name, one.Item.Item));
-        return ReadOut(text.ToString().TrimEnd());
+        return SaysItself(ReadOut(text.ToString().TrimEnd()), _phrases.Waiting([.. named.Select(n => (n.Name, n.Item.Item))]));
     }
 
-    public string ListProjectsText()
+    /// <param name="root">Only the projects in this root or profile (<see cref="In"/>); all when empty.</param>
+    public string ListProjectsText(string? root = null)
     {
-        var all = projects.Projects;
+        var filtered = !string.IsNullOrWhiteSpace(root);
+        var all = filtered ? [.. projects.Projects.Where(p => In(p, root!))] : projects.Projects;
+        if (filtered && all.Count == 0)
+            return NoSuchRoot(root!);
         // As what needs me: one project read out is the one talked about, several leave none
         Talked(all is [var only] ? only.Ref : null);
         if (all.Count == 0)
-            return "No projects on any server.";
+            return SaysItself("No projects on any server.", _phrases.Projects([]));
 
         // Grouped by profile, then root, each said once (#450): a session's label alone ("branch master") says nothing of where it is
-        var groups = Names.Groups();
+        var groups = Names.Groups().Select(g => g with { Projects = [.. g.Projects.Where(all.Contains)] }).Where(g => g.Projects.Count > 0).ToList();
         var text = new StringBuilder(groups is [_]
             ? $"{Count(all.Count)}, all in one group:\n"
             : $"{Count(all.Count)}, in {groups.Count} groups by profile and root:\n");
@@ -149,7 +170,30 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         }
         text.Append($"Say the count, {all.Count}, then each group once, by its profile and root, with its projects by the names given here. " +
             "If you leave any out, say how many and why.");
-        return text.ToString();
+        return SaysItself(text.ToString(), _phrases.Projects([.. groups.Select(g =>
+            (g.Profile, g.Root, (IReadOnlyList<string>)[.. g.Projects.Select(p => handles.LabelOf(p.Ref) ?? p.Project.Name)]))]));
+    }
+
+    /// <summary>
+    /// Whether the project is in the root or profile the user named: its profile, its root's name, or its root as it is
+    /// shown (its title), case ignored.
+    /// </summary>
+    private bool In(ServerProject project, string root) =>
+        new[] { project.Project.ProfileName ?? "Default", project.Project.RootName, projects.RootShown(project) }
+            .Any(n => string.Equals(n, root.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>A root or profile no project is in: for the model, with the groups there are, which it offers as options.</summary>
+    private string NoSuchRoot(string root) =>
+        $"No root or profile '{root}' has any project. Nothing was listed. There are: {string.Join("; ", Names.Groups().Select(g => g.Heading))}.";
+
+    /// <summary>
+    /// <paramref name="result"/>, the tool's text for the model, which the code says itself as <paramref name="said"/>: the
+    /// model's round after it is not run (#456).
+    /// </summary>
+    private string SaysItself(string result, string said)
+    {
+        conversation.SaysItself(result, said);
+        return result;
     }
 
     private static string Count(int projects) => projects == 1 ? "1 project" : $"{projects} projects";
@@ -163,34 +207,50 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         Talked(target);
         var text = new StringBuilder($"{name} ({Details(status.Name, status.Kind)}): {status.State}.");
         var item = board.ItemOf(target)?.Item;
-        text.Append(Standing(status, item));
+        var full = item is null ? null : InFull(item, status);
+        var standing = StandingOf(status, item);
+        text.Append(Standing(standing));
         if (item is not null)
         {
-            text.Append($" Needs the user: {Describe(item, InFull(item, status))}");
+            text.Append($" Needs the user: {Describe(item, full)}");
             if (item.Spoken is { Length: > 0 })
                 text.Append(' ').Append(SpokenBySystem(name, item));
         }
         else if (status.CurrentQuestion is { Length: > 0 } question)
             text.Append($" Asked: {Capped(question)}");
-        if (status.LastError is { Length: > 0 } error && status.State == ProjectState.Error && item?.Kind != AttentionKind.Error)
-            text.Append($" Error: {Capped(error)}");
-        return ReadOut(text.ToString());
+        var failed = status.LastError is { Length: > 0 } && status.State == ProjectState.Error && item?.Kind != AttentionKind.Error;
+        if (failed)
+            text.Append($" Error: {Capped(status.LastError!)}");
+        var result = ReadOut(text.ToString());
+        return !failed && StatusSaid(name, status, item, full, standing) is { } said ? SaysItself(result, said) : result;
     }
 
     /// <summary>How much of a last result <see cref="Standing"/> reads when the session gave no line of its own: its start, a few sentences.</summary>
     public const int StandingResultLength = 300;
 
+    /// <summary>What <see cref="StandingOf"/> found: the session's recap, its last spoken reply, or its last result shortened.</summary>
+    private enum StandingKind { Recap, Spoken, Result }
+
     /// <summary>
     /// Where the project stands (issue #466), in this order: the recap the session keeps of it
     /// (<see cref="ProjectStatus.Recap"/>), else, with no attention item to read the turn from, its last spoken reply, else
-    /// its last result shortened. Nothing when it has none of them.
+    /// its last result shortened. Null when it has none of them.
     /// </summary>
-    private static string Standing(ProjectStatus status, AttentionItem? item) => status switch
+    private static (StandingKind Kind, string Text)? StandingOf(ProjectStatus status, AttentionItem? item) => status switch
     {
-        { Recap: { Length: > 0 } recap } => $" Where it stands, in its own words: \"{recap}\"",
-        _ when item is not null => "",
-        { SpokenSummary: { Length: > 0 } spoken } => $" Its last reply, in its own spoken words: \"{spoken}\"",
-        { LastResult: { Length: > 0 } result } => $" Its last result: {Shortened(result.Trim())}",
+        { Recap: { Length: > 0 } recap } => (StandingKind.Recap, recap),
+        _ when item is not null => null,
+        { SpokenSummary: { Length: > 0 } spoken } => (StandingKind.Spoken, spoken),
+        { LastResult: { Length: > 0 } result } => (StandingKind.Result, Shortened(result.Trim())),
+        _ => null,
+    };
+
+    /// <summary>Where the project stands (<see cref="StandingOf"/>), as the tool's text tells the model; nothing when it has none.</summary>
+    private static string Standing((StandingKind Kind, string Text)? standing) => standing switch
+    {
+        (StandingKind.Recap, var recap) => $" Where it stands, in its own words: \"{recap}\"",
+        (StandingKind.Spoken, var spoken) => $" Its last reply, in its own spoken words: \"{spoken}\"",
+        (StandingKind.Result, var result) => $" Its last result: {result}",
         _ => "",
     };
 
@@ -198,6 +258,46 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     private static string Shortened(string text) =>
         text.Length <= StandingResultLength ? text
             : text[..(text.LastIndexOf(' ', StandingResultLength) is var at and > 0 ? at : Whole(text, StandingResultLength))] + "…";
+
+    /// <summary>
+    /// What the code says itself of a project's status (#456), when all it has to read is said as it is, in the order the
+    /// tool's text has it (#466): where it stands (its recap; with no attention item, its last spoken reply, else its last
+    /// result shortened), then what it needs (its own spoken reply, or a question or result short and plain enough,
+    /// <see cref="SaidAsIs"/>). Null when any of it is not, which the model says: a status with nothing to read, an error, a
+    /// permission request, a question asked with no attention item, a long or marked-up text.
+    /// </summary>
+    private string? StatusSaid(SpokenName name, ProjectStatus status, AttentionItem? item, string? full, (StandingKind Kind, string Text)? standing)
+    {
+        var stands = standing switch
+        {
+            null => "",
+            (StandingKind.Recap, var recap) => _phrases.Stands(name, recap),
+            (StandingKind.Spoken, var spoken) => _phrases.SaidLast(name, spoken),
+            (StandingKind.Result, var result) when SaidAsIs(result.TrimEnd('…')) => _phrases.LastResult(name, result),
+            _ => null,
+        };
+        var needs = item switch
+        {
+            null when status.CurrentQuestion is { Length: > 0 } => null,
+            null => "",
+            { Spoken.Length: > 0 } => _phrases.Spoken(name, item),
+            { Kind: AttentionKind.Question or AttentionKind.Finished } when SaidAsIs(full) => _phrases.Reads(name, item, full!.Trim()),
+            _ => null,
+        };
+        return stands is null || needs is null ? null
+            : string.Join(" ", new[] { stands, needs }.Where(t => t.Length > 0).Select(GodModeAnnouncementFormatter.Sentence)) is { Length: > 0 } said ? said : null;
+    }
+
+    /// <summary>How long a question or result the code says as it is may be: a few sentences. A longer one is the model's to shorten.</summary>
+    public const int SaidAsIsLength = 300;
+
+    /// <summary>
+    /// Whether a project's text can be said as it is: at most <see cref="SaidAsIsLength"/>, one paragraph, and nothing
+    /// speech would read out as symbols (markdown, code, paths), which the model summarizes.
+    /// </summary>
+    internal static bool SaidAsIs(string? text) =>
+        text?.Trim() is { Length: > 0 and <= SaidAsIsLength } trimmed && !trimmed.Contains("\n\n", StringComparison.Ordinal)
+        && trimmed.IndexOfAny(['`', '*', '#', '|', '[', ']', '{', '}', '<', '>', '\\', '/', '_', '~']) < 0;
 
     /// <summary>A tool's text, which reads out a project's own words, for the model to say: kept for <see cref="SentNode"/>.</summary>
     private string ReadOut(string text)
