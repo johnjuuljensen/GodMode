@@ -360,9 +360,7 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
         private void Push() => push(serverId, serverName, [.. _projects.Values]);
 
-        private static ProjectSummary Summary(ProjectStatus s) =>
-            new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission,
-                s.PendingQuestion, s.PullRequest, s.Kind, s.ActionName, s.SharedFolder);
+        private static ProjectSummary Summary(ProjectStatus s) => ProjectSummary.Of(s);
     }
 
     void IServerConnectionHandler.OnListedCompletely(IReadOnlySet<string> serverIds) { }

@@ -717,29 +717,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         foreach (var project in _projects.Values)
         {
             var s = project.Status;
-            summaries.Add(new ProjectSummary(
-                s.Id,
-                s.Name,
-                s.State,
-                s.UpdatedAt,
-                s.CurrentQuestion,
-                s.RootName,
-                ProfileName: project.ProfileName ?? s.ProfileName,
-                PendingPermission: s.PendingPermission,
-                PendingQuestion: s.PendingQuestion,
-                PullRequest: s.PullRequest,
-                Kind: s.Kind,
-                ActionName: s.ActionName,
-                SharedFolder: s.SharedFolder,
-                Adopted: s.Adopted,
-                ParentId: s.ParentId,
-                SlashCommands: s.SlashCommands,
-                RecordedParentId: ServerParentOf(project),
-                Importance: s.Importance,
-                Recap: s.Recap,
-                RecapAt: s.RecapAt,
-                Outcome: s.EffectiveOutcome
-            ));
+            summaries.Add(ProjectSummary.Of(s) with
+            {
+                ProfileName = project.ProfileName ?? s.ProfileName,
+                RecordedParentId = ServerParentOf(project),
+            });
         }
 
         return summaries.ToArray();

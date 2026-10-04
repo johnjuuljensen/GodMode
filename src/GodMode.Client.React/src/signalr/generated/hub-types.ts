@@ -601,6 +601,13 @@ export interface ProjectStatus {
    * counts as is ProjectStatus.EffectiveOutcome.
    */
   Outcome?: TurnOutcome | null;
+  /**
+   * When the session's main conversation last wrote a line (issue #468): an assistant message, a tool result
+   * or a turn's end, a subagent's lines not counted. Its activity, where UpdatedAt changes on every status
+   * write. Kept in memory as each line comes, as OutputOffset is: status.json carries it when something else
+   * changes, at the latest as the turn ends. Null until the session has written a line since it was recorded.
+   */
+  LastOutputAt?: string | null;
 }
 
 /** Summary information about a project. */
@@ -656,6 +663,10 @@ export interface ProjectSummary {
    * request is merged.
    */
   Outcome?: TurnOutcome | null;
+  /** When the session's last turn ended, as in ProjectStatus.LastResultAt. */
+  LastResultAt?: string | null;
+  /** When its main conversation last wrote a line, as in ProjectStatus.LastOutputAt (issue #468). */
+  LastOutputAt?: string | null;
 }
 
 /**
