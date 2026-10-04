@@ -268,6 +268,13 @@ public sealed partial class VoicePhrases
     [GeneratedRegex(@"\s+")]
     private static partial Regex Whitespace();
 
+    /// <summary>
+    /// Which of two projects an answer naming none is for, as a closed question naming both (#461): the one talked
+    /// about, then the one an announcement just named. "Til issue 283 eller issue 101?".
+    /// </summary>
+    public string Which(SpokenName before, SpokenName announced) =>
+        _danish ? $"Til {Named(before)} eller {Named(announced)}?" : $"To {Named(before)} or {Named(announced)}?";
+
     /// <summary>Answers went out this turn (<see cref="SentNode"/>): "Sendt til issue 283.", "Sendt til issue 283 og issue 101.".</summary>
     public string Sent(IReadOnlyList<SpokenName> names)
     {

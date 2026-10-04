@@ -505,6 +505,12 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             return "No answer given: ask the user what to answer.";
         if (Target(reference) is not { } target || Names.Of(target) is not { } name)
             return await UnknownAsync(reference, ct);
+        // An announcement that just changed the project talked about never decides where an unnamed answer goes (#461)
+        if (string.IsNullOrWhiteSpace(reference) && conversation.TakeAnnouncedSwitch() is { } switched
+            && Names.Of(switched.From) is { } before && Names.Of(switched.To) is { } announced)
+            return SaysItself($"Nothing was sent: {announced} was announced just before this answer, which names no project, " +
+                $"and the user was talking about {before} before it. The system asks which of the two it is for. When the user " +
+                $"says one, call {Answer} again with the same text and that project named.", _phrases.Which(before, announced));
 
         var status = await servers.GetStatusAsync(target, ct);
         if (status.CreateFailed)

@@ -57,20 +57,26 @@ public sealed class VoiceSessionTests
 
     /// <summary>
     /// Answer routing: an answer that names no project goes to the one announced last, not to another that also
-    /// waits. The model is scripted to leave the project out, as the prompt tells it to for "Svar at …".
+    /// waits. The model is scripted to leave the project out, as the prompt tells it to for "Svar at …". It comes after
+    /// the announcement's window (#461): within it, it would be asked about (<see cref="AnnouncedSwitchTests"/>).
     /// </summary>
     [Fact]
     public async Task An_answer_that_names_no_project_goes_to_the_one_announced()
     {
         var servers = new FakeServers();
+        var time = new ManualTime();
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Brug den eksisterende migration." })
             .Respond("Sendt til 283.");
-        await using var voice = await OfflineVoice.StartAsync(servers, model,
+        await using var voice = await OfflineVoice.StartAsync(servers, model, time: time,
             connect: _ => { servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Slet kolonnerne?", minutesAgo: 30)); return Task.CompletedTask; });
         await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
+        var spoken = voice.Events.States.Count(s => s == VoiceState.Speaking);
         servers.Set(ServerB, Question("p/r/283", "283-voice", "Ny migration eller den eksisterende?"));
         await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        // Its speech ended: the window runs from there
+        await AnnouncedSwitchTests.SpeechEndedAsync(voice, spoken);
+        time.Advance(VoiceConversation.AnnouncedSwitchWindow + TimeSpan.FromSeconds(1));
 
         voice.Transcriptions.AddFinal("Svar at den skal bruge den eksisterende migration");
         await voice.Events.SaidAsync("Sendt til issue 283.");
@@ -192,7 +198,8 @@ public sealed class VoiceSessionTests
 
     /// <summary>
     /// The same answer twice in a row, each to its own question, is answered twice: neither the session nor the
-    /// chat node takes the second "ja" for a repeat of the first (VoiceBot#39). Said as ElevenLabs sends it.
+    /// chat node takes the second "ja" for a repeat of the first (VoiceBot#39). Said as ElevenLabs sends it. The second
+    /// names its project: an unnamed one, this soon after 283's announcement took the conversation from 101, would be asked about (#461).
     /// </summary>
     [Fact]
     public async Task The_same_answer_twice_to_two_questions_is_answered_both_times()
@@ -200,7 +207,7 @@ public sealed class VoiceSessionTests
         var servers = new FakeServers();
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." }).Respond("Sendt til 101.")
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." }).Respond("Sendt til 283.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja.", [VoiceTools.ProjectParameter] = "283" }).Respond("Sendt til 283.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Skal jeg slette kolonnerne?", minutesAgo: 30)); return Task.CompletedTask; });
         await voice.Events.SaidAsync("issue 101 har et spørgsmål.");

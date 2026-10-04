@@ -65,6 +65,9 @@ public sealed record VoiceSessionSetup
 
     /// <summary>Where the session writes its log (<see cref="SessionOptions.LogDirectory"/>).</summary>
     public required string LogDirectory { get; init; }
+
+    /// <summary>The conversation's clock: when an announcement's window ends (<see cref="VoiceConversation.AnnouncedSwitchWindow"/>). The system's when null.</summary>
+    public TimeProvider? Time { get; init; }
 }
 
 /// <summary>
@@ -153,7 +156,7 @@ public sealed class VoiceSession : IAsyncDisposable
         var handles = new ProjectHandles();
         var projects = new ProjectBoard(setup.Servers, handles);
         var board = new AttentionBoard(setup.Servers, handles, projects);
-        var conversation = new VoiceConversation();
+        var conversation = new VoiceConversation(setup.Time);
 
         var heard = await setup.ConnectAsync(ct);
         // The roots as they are now, for the prompt's kinds of session (#473); none when no server answers
@@ -198,7 +201,7 @@ public sealed class VoiceSession : IAsyncDisposable
                     ? TranscriptionInput.FromAudio(listening.Listening(audio.Source))
                     : setup.Transcription,
                 setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink,
-                new EventSink(setup.Events, state, tools.Creates, setup.Mic, setup.Media))
+                new EventSink(setup.Events, state, tools.Creates, conversation, setup.Mic, setup.Media))
             {
                 AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board), logger),
                 Options = new SessionOptions
@@ -324,7 +327,8 @@ public sealed class VoiceSession : IAsyncDisposable
     }
 
     /// <summary>The session's events, to the host and the state.</summary>
-    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates, VoiceMic? mic, MediaPause? media)
+    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates, VoiceConversation conversation,
+        VoiceMic? mic, MediaPause? media)
         : ISessionEventSink
     {
         public Task OnTranscriptionAsync(TranscriptionEvent evt, string? cleanedText)
@@ -374,6 +378,8 @@ public sealed class VoiceSession : IAsyncDisposable
             media?.Activity(activity);
             mic?.Activity(activity);
             state.Activity(activity);
+            // An announcement that changed the project talked about has been said: its window starts (#461)
+            if (activity != SessionActivity.Speaking) conversation.SpeechEnded();
             return Task.CompletedTask;
         }
     }

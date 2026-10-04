@@ -11,17 +11,68 @@ namespace GodMode.Voice;
 /// <summary>
 /// What the conversation is about: the project an answer goes to when the user names none. It is the project last
 /// announced alone, read out, or answered. An announcement of several projects at once leaves it unset, so a reply
-/// then must name one.
+/// then must name one. An announcement that changed it is kept for <see cref="AnnouncedSwitchWindow"/> after it was
+/// said (#461): an answer with no name then asks which project first (<see cref="TakeAnnouncedSwitch"/>).
 /// </summary>
-public sealed class VoiceConversation
+public sealed class VoiceConversation(TimeProvider? time = null)
 {
-    private ProjectRef? _current;
+    /// <summary>
+    /// How long after an announcement that changed the current project was said an answer that names none asks which
+    /// project it is for (#461). Counted from the end of its speech: an answer the user had begun before it, or began
+    /// over it, reaches the tool after their words end, the transcript is final, and the model has called it, which is
+    /// two to four seconds; five leaves a margin and still lets a "ja" said deliberately a little later go through.
+    /// </summary>
+    public static readonly TimeSpan AnnouncedSwitchWindow = TimeSpan.FromSeconds(5);
 
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private Topic _topic = new(null, null);
+
+    /// <summary>The project talked about. Setting it (a tool read, answered or named one) drops an announced switch.</summary>
     public ProjectRef? Current
     {
-        get => Volatile.Read(ref _current);
-        set => Volatile.Write(ref _current, value);
+        get => Volatile.Read(ref _topic).Project;
+        set => Volatile.Write(ref _topic, new Topic(value, null));
     }
+
+    /// <summary>
+    /// An announcement of <paramref name="project"/> alone (null for several) is being said: it is what the
+    /// conversation is about now. When it changes the project from another one, the switch is kept: its window runs
+    /// from now until the speech ends (<see cref="SpeechEnded"/>), then for <see cref="AnnouncedSwitchWindow"/>. An
+    /// announcement of the project already current keeps whatever switch there was.
+    /// </summary>
+    public void Announced(ProjectRef? project)
+    {
+        var before = Volatile.Read(ref _topic);
+        Volatile.Write(ref _topic, (before.Project, project) switch
+        {
+            ({ } from, { } to) when from == to => before,
+            ({ } from, { } to) => new Topic(to, new AnnouncedSwitch(from, to, null)),
+            _ => new Topic(project, null),
+        });
+    }
+
+    /// <summary>The session stopped speaking: an announced switch's window starts now, unless it started already.</summary>
+    public void SpeechEnded()
+    {
+        var topic = Volatile.Read(ref _topic);
+        if (topic.Switched is { Said: null } switched)
+            Interlocked.CompareExchange(ref _topic, topic with { Switched = switched with { Said = _time.GetUtcNow() } }, topic);
+    }
+
+    /// <summary>
+    /// The announced switch an answer naming no project must not go through (#461): one being said, or said less than
+    /// <see cref="AnnouncedSwitchWindow"/> ago. It is taken: asked about once, the next unnamed answer goes to the
+    /// current project. Null when there is none.
+    /// </summary>
+    public AnnouncedSwitch? TakeAnnouncedSwitch()
+    {
+        var topic = Volatile.Read(ref _topic);
+        if (topic.Switched is not { } switched) return null;
+        Interlocked.CompareExchange(ref _topic, topic with { Switched = null }, topic);
+        return switched.Said is not { } said || _time.GetUtcNow() - said < AnnouncedSwitchWindow ? switched : null;
+    }
+
+    private sealed record Topic(ProjectRef? Project, AnnouncedSwitch? Switched);
 
     private string? _lastProfile;
 
@@ -98,6 +149,12 @@ public sealed class VoiceConversation
 }
 
 /// <summary>
+/// An announcement changed the project talked about from <paramref name="From"/> to <paramref name="To"/>; its speech
+/// ended at <paramref name="Said"/>, null while it is still being said.
+/// </summary>
+public sealed record AnnouncedSwitch(ProjectRef From, ProjectRef To, DateTimeOffset? Said);
+
+/// <summary>
 /// A project's reply in the parts voice reads it in, and the index of the part to read next (its count once all were
 /// read). <paramref name="Replies"/> are the replies it was read from, the last <paramref name="Turns"/>: while the
 /// project's are still these, the parts are what it said last.
@@ -128,7 +185,7 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
         string[] texts = [.. announcements.OrderByDescending(Interrupts).Select(a => Sentence(a.Text)).Where(t => t.Length > 0)];
         var projects = announcements.Select(a => a.Source).Distinct().ToList();
         if (projects is not [null])
-            conversation.Current = projects is [var only] ? ProjectRef.FromKey(only) : null;
+            conversation.Announced(projects is [var only] ? ProjectRef.FromKey(only) : null);
 
         return texts switch
         {
