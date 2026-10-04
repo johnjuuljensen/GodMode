@@ -117,9 +117,9 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - Client tests run as the app's page: jsdom at `https://0.0.0.1/`, with a fake shell behind `window.HybridWebView` (`src/test/appShell.ts`)
 
 **Slash commands** (#31, server README *Slash commands*)
-- GodMode sends `/clear`, `/compact`, `/context` and the session's skills (its last `system/init`'s `skills`), and refuses claude's other commands (`SlashCommands.WhyRefused`), on every input path: `SendInput`, `ReplyAndResume`, `ReplyByVoice`, the fleet's `send`, a create's prompt. A `/word` claude does not know is text, as claude takes it
+- GodMode sends `/clear`, `/compact`, `/context`, `/recap` and the session's skills (its last `system/init`'s `skills`), and refuses claude's other commands (`SlashCommands.WhyRefused`), on every input path: `SendInput`, `ReplyAndResume`, `ReplyByVoice`, the fleet's `send`, a create's prompt. A `/word` claude does not know is text, as claude takes it
 - `ProjectStatus.SlashCommands` (sent, what the composer completes) and `ClaudeCommands` (all claude listed) come from each `system/init`
-- `/clear`'s `conversation_reset` starts the output over (`OutputLog.RestartAsync`, `OutputRestarted`); a result with no text and `num_turns` 0 (`/clear`, `/compact`) raises no `Finished`. `/model` and `/effort` stay GodMode's, per root and action
+- `/clear`'s `conversation_reset` starts the output over (`OutputLog.RestartAsync`, `OutputRestarted`); a result with no text and `num_turns` 0 (`/clear`, `/compact`) raises no `Finished`. `/recap`'s answer (`num_turns` 0, with text) is the session's `Recap`/`RecapAt`, keeps `LastResult` and raises nothing; voice asks a session it is asked about for one with the hub's `AskForRecap` (#513), once, only when it has none and is idle. `/model` and `/effort` stay GodMode's, per root and action
 
 **Process Management**
 - `ClaudeProcessManager` uses `System.Diagnostics.Process` directly (not CliWrap) for proper stdin handling
