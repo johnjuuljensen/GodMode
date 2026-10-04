@@ -13,13 +13,14 @@ namespace GodMode.Server.Services;
 /// <item><c>/clear</c>: claude starts a new conversation (<c>conversation_reset</c>), and the session's output starts over (<see cref="OutputLog.RestartAsync"/>).</item>
 /// <item><c>/compact</c>: claude summarises the conversation (<c>compact_boundary</c>), which the app shows as a marker.</item>
 /// <item><c>/context</c>: claude's context usage, as a turn's reply.</item>
+/// <item><c>/recap</c>: claude's one-line recap of where the session stands, which becomes its <see cref="ProjectStatus.Recap"/>, not a turn's reply (issue #513).</item>
 /// <item>Skills: prompts, all of them, as the session's last <c>system/init</c> named them.</item>
 /// </list>
 /// </summary>
 public static partial class SlashCommands
 {
     /// <summary>claude's commands that GodMode passes, besides the session's skills.</summary>
-    public static readonly IReadOnlyList<string> Supported = ["clear", "compact", "context"];
+    public static readonly IReadOnlyList<string> Supported = ["clear", "compact", "context", "recap"];
 
     /// <summary>
     /// claude's commands that GodMode refuses even before a session's first <c>system/init</c> has listed its own
@@ -79,6 +80,12 @@ public static partial class SlashCommands
             _ => null,
         };
     }
+
+    /// <summary>Whether <paramref name="input"/> is <c>/recap</c>, whose result is the session's recap (issue #513).</summary>
+    public static bool IsRecap(string? input) => string.Equals(CommandOf(input), Recap, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>claude's command that gives the session's recap (issue #513).</summary>
+    public const string Recap = "recap";
 
     /// <summary>Refuses <paramref name="input"/> (<see cref="InvalidOperationException"/>) when <see cref="WhyRefused"/> says why.</summary>
     public static void Check(string? input, ProjectStatus? status)

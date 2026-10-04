@@ -109,6 +109,20 @@ export type PullRequestReview =
 /** Where a project's pull request is (PullRequestStatus.State). */
 export type PullRequestState = 'Draft' | 'Open' | 'Merged' | 'Closed';
 
+/** What became of asking a session for its recap (the hub's AskForRecap, issue #513). */
+export type RecapAsk =
+  /** `/recap` was sent: its answer becomes the session's ProjectStatus.Recap when it comes. */
+  | 'sent'
+  /** It was asked before, and nothing is sent: the recap is on its way, or it gave none. */
+  | 'asked'
+  /** The session has a recap: nothing is sent. */
+  | 'has-recap'
+  /**
+   * The session cannot take it now (it runs, waits on a permission or a question, or its claude is stopped):
+   * nothing is sent.
+   */
+  | 'busy';
+
 /** Represents the current state of a host provider. */
 export type ServerState =
   /** Host is running and active. */
@@ -840,6 +854,15 @@ export interface IProjectHub {
    * IProjectHub.ReplyAndResume, unmarked.
    */
   ReplyByVoice(projectId: string, text: string): Promise<void>;
+  /**
+   * Asks the project for its recap (issue #513): sends it `/recap`, whose answer becomes its
+   * ProjectStatus.Recap and ProjectStatus.RecapAt, leaves its last result as it is and raises no attention
+   * item. Only to a project with no recap, whose claude runs and is idle (nothing pending, no question), and
+   * once for as long as the server tracks it, whoever asks; anything else sends nothing, and says why. No
+   * turn of the user's, and the user has not seen the last result for it. Voice asks it when the user asks
+   * about a project.
+   */
+  AskForRecap(projectId: string): Promise<RecapAsk>;
   /**
    * Subscribes to a project's output. The server replays output.jsonl from fromOffset in
    * IProjectHubClient.OutputBatch messages, sends IProjectHubClient.OutputReplayComplete, and only then live

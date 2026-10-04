@@ -51,6 +51,12 @@ public interface IProjectManager
     Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true, bool spoken = false);
 
     /// <summary>
+    /// Asks the project for its recap (hub AskForRecap, issue #513): sends <c>/recap</c> to a project with no recap whose claude
+    /// can take input now, once for as long as the server tracks it. No turn of the user's, and no seeing of its last result.
+    /// </summary>
+    Task<RecapAsk> AskForRecapAsync(string projectId);
+
+    /// <summary>
     /// The MCP <c>message_parent</c> tool: holds <paramref name="text"/> for the project's parent, labelled with the
     /// project, and delivers it if the parent can take input now. Refused (<see cref="InvalidOperationException"/>)
     /// when the project has no parent or its parent is gone, and (<see cref="ArgumentException"/>) for an empty text

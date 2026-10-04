@@ -70,6 +70,9 @@ public interface IGodModeServers
     /// <summary><see cref="IProjectHub.ReplyByVoice"/>: the answer reaches the session marked as transcribed speech.</summary>
     Task ReplyAsync(ProjectRef project, string text, CancellationToken ct);
 
+    /// <summary><see cref="IProjectHub.AskForRecap"/>: sends <c>/recap</c> to a project with no recap, once (#513).</summary>
+    Task<RecapAsk> AskForRecapAsync(ProjectRef project, CancellationToken ct);
+
     Task MarkSeenAsync(ProjectRef project, CancellationToken ct);
 
     /// <summary><see cref="IProjectHub.SetImportance"/>: how much the project may interrupt the user.</summary>
@@ -183,6 +186,9 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
     public Task ReplyAsync(ProjectRef project, string text, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.ReplyByVoice), project.ProjectId, text, ct);
+
+    public Task<RecapAsk> AskForRecapAsync(ProjectRef project, CancellationToken ct) =>
+        Hub(project).InvokeAsync<RecapAsk>(nameof(IProjectHub.AskForRecap), project.ProjectId, ct);
 
     public Task MarkSeenAsync(ProjectRef project, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.MarkSeen), project.ProjectId, ct);

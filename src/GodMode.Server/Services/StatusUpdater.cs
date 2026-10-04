@@ -49,8 +49,12 @@ public class StatusUpdater : IStatusUpdater
         if (IsConversationLine(outputEvent, rawJson))
             status = status with { LastOutputAt = DateTime.UtcNow };
         var lastOutputAt = status.LastOutputAt;
-        // Every result ends the turn the user's input started, if one did
-        var userTurn = outputEvent.Type == OutputEventType.Result && process.TakeUserTurn();
+        // A result in a recap's shape, after a /recap, answers it (issue #513): a turn's result that comes first leaves the
+        // mark for it
+        var recapTurn = outputEvent.Type == OutputEventType.Result && IsRecapResult(outputEvent) && process.TakeRecap();
+        // Every other result ends the turn the user's input started, if one did: a reply sent while the recap runs is
+        // the turn after it
+        var userTurn = outputEvent.Type == OutputEventType.Result && !recapTurn && process.TakeUserTurn();
 
         // Parse Claude output events to update state
         switch (outputEvent.Type)
@@ -59,7 +63,7 @@ public class StatusUpdater : IStatusUpdater
                 // A new turn is starting — clear any memo of the previous turn's
                 // trailing assistant text so stale questions don't leak forward.
                 process.LastAssistantText = null;
-                if (IsEcho(outputEvent))
+                if (IsUsersMessage(outputEvent))
                 {
                     // A message the user sent starts the reply over: the last turn's spoken reply, and one this
                     // turn gave before it, say nothing of the reply to come (issue #384)
@@ -80,7 +84,7 @@ public class StatusUpdater : IStatusUpdater
                 // claude has taken a message the user sent: it is working on it, whatever a result
                 // of an earlier turn, handled after the send, said. It echoes it at once between
                 // turns, and at its next step in one
-                if (IsEcho(outputEvent) && status is { PendingPermission: null, PendingQuestion: null }
+                if (IsUsersMessage(outputEvent) && status is { PendingPermission: null, PendingQuestion: null }
                     && (status.State != ProjectState.Running || status.CurrentQuestion != null))
                 {
                     status = status with { State = ProjectState.Running, CurrentQuestion = null };
@@ -121,6 +125,17 @@ public class StatusUpdater : IStatusUpdater
                 process.ForgetSpoken();
                 stateChanged = true;
                 status = WithTokenMetrics(status, outputEvent);
+                break;
+
+            // /recap's answer (issue #513) is the session's standing, not a turn's reply: it is kept as the recap a speak call
+            // gives, and the last reply, its spoken version and outcome stay, and nobody is told a turn finished
+            case OutputEventType.Result when recapTurn:
+                status = status with
+                {
+                    Recap = outputEvent.Content!.Trim(), RecapAt = DateTime.UtcNow, State = ProjectState.Idle, CurrentQuestion = null,
+                };
+                process.LastAssistantText = null;
+                stateChanged = true;
                 break;
 
             // A command's turn that says nothing (/clear, /compact): the session is idle, and has no new reply to
@@ -299,6 +314,21 @@ public class StatusUpdater : IStatusUpdater
     /// </summary>
     private static bool IsSilentCommandResult(OutputEvent outputEvent) =>
         outputEvent.Metadata?.GetValueOrDefault(NumTurnsKey) is 0L && string.IsNullOrWhiteSpace(outputEvent.Content);
+
+    /// <summary>
+    /// The result of a <c>/recap</c> (issue #513): no error, the model took no turn (<c>num_turns</c> 0), and its text is
+    /// the recap. claude writes a synthetic assistant line with the same text before it.
+    /// </summary>
+    private static bool IsRecapResult(OutputEvent outputEvent) =>
+        !IsErrorResult(outputEvent) && outputEvent.Metadata?.GetValueOrDefault(NumTurnsKey) is 0L
+        && !string.IsNullOrWhiteSpace(outputEvent.Content);
+
+    /// <summary>
+    /// A message the user sent, echoed (<see cref="IsEcho"/>): not a <c>/recap</c>, which asks the session where it stands
+    /// and starts no turn of the user's (issue #513).
+    /// </summary>
+    private static bool IsUsersMessage(OutputEvent outputEvent) =>
+        IsEcho(outputEvent) && !SlashCommands.IsRecap(outputEvent.Content);
 
     /// <summary>The metadata key a <c>user</c> event that claude echoed (<c>isReplay</c>) carries.</summary>
     public const string IsReplayKey = "is_replay";

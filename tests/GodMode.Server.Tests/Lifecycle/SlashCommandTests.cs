@@ -54,7 +54,7 @@ public class SlashCommandTests
         var created = await harness.CreateProjectAsync();
         var status = await harness.WaitForStateAsync(created.Id, ProjectState.Idle);
 
-        Assert.Equal(["clear", "compact", "context", "my-skill"], status.SlashCommands);
+        Assert.Equal(["clear", "compact", "context", "recap", "my-skill"], status.SlashCommands);
         Assert.Equal(ClaudeCommands, status.ClaudeCommands);
         Assert.Equal(status.SlashCommands, harness.ReadStatusFile(created.Id).SlashCommands);
     }
