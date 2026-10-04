@@ -98,7 +98,8 @@ public class SpeakTests
 
         // The next turn's start clears its spoken reply, not its recap
         await run.Client.Hub.InvokeAsync(nameof(IProjectHub.ReplyAndResume), id, "Ja");
-        var running = await run.Client.WaitForAsync(id, s => s is { State: ProjectState.Running, SpokenSummary: null }, run.Server);
+        // The next turn: the last one's result, and no spoken reply (turn 1's own recap push, mid-turn, has no result)
+        var running = await run.Client.WaitForAsync(id, s => s is { State: ProjectState.Running, SpokenSummary: null, LastResult: "asked" }, run.Server);
         Assert.Equal((recap, at), (running.Recap, running.RecapAt));
 
         // A speak with no recap leaves it, and one with a recap replaces it, mid-turn
