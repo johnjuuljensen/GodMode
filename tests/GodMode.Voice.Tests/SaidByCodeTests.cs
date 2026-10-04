@@ -30,9 +30,9 @@ public sealed class SaidByCodeTests
         });
         await voice.Events.SaidAsync($"{Danish.Several(2)} issue 101 har et spørgsmål. issue 283 er færdig.");
 
+        // Announced oldest first, as they came; listed the most recent first (#468)
         voice.Transcriptions.SayAsRecognized("Hvad venter?");
-        await Eventually.UntilAsync(() => voice.Events.Responses.Count(r => r == "2 venter på dig: issue 101 har et spørgsmål. issue 283 er færdig.") == 2,
-            () => $"the list said again, in the code's words; it said: {string.Join(" | ", voice.Events.Responses)}");
+        await voice.Events.SaidAsync("2 venter på dig: issue 283 er færdig. issue 101 har et spørgsmål.");
 
         Assert.Equal(1, model.Calls);
     }
@@ -55,9 +55,9 @@ public sealed class SaidByCodeTests
     public async Task The_projects_of_one_profile_are_said_by_the_code_and_only_those()
     {
         var servers = new FakeServers();
-        servers.AddProject(ServerA, "Mega/GodMode/260930-issue-376-a", "376-x", root: "GodMode", kind: "issue", profile: "Mega");
-        servers.AddProject(ServerA, "Mega/GodMode/260930-issue-382-b", "382-y", root: "GodMode", kind: "issue", profile: "Mega");
-        servers.AddProject(ServerA, "Private/voicebot/260930-branch-master-c", "master", root: "voicebot", kind: "branch", profile: "Private");
+        servers.AddProject(ServerA, "Mega/GodMode/260930-issue-376-a", "376-x", root: "GodMode", kind: "issue", profile: "Mega", minutesAgo: 2);
+        servers.AddProject(ServerA, "Mega/GodMode/260930-issue-382-b", "382-y", root: "GodMode", kind: "issue", profile: "Mega", minutesAgo: 1);
+        servers.AddProject(ServerA, "Private/voicebot/260930-branch-master-c", "master", root: "voicebot", kind: "branch", profile: "Private", minutesAgo: 3);
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ListProjects, new() { [VoiceTools.RootParameter] = "mega" })
             .CallTool(VoiceTools.ListProjects);
@@ -129,7 +129,7 @@ public sealed class SaidByCodeTests
     public async Task A_root_no_project_is_in_goes_back_to_the_model()
     {
         var servers = new FakeServers();
-        servers.AddProject(ServerA, "Mega/GodMode/260930-issue-376-a", "376-x", root: "GodMode", kind: "issue", profile: "Mega");
+        servers.AddProject(ServerA, "Mega/GodMode/260930-issue-376-a", "376-x", root: "GodMode", kind: "issue", profile: "Mega", minutesAgo: 2);
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ListProjects, new() { [VoiceTools.RootParameter] = "kappe" })
             .Respond("Ingen projekter i kappe.");

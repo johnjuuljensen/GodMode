@@ -121,13 +121,59 @@ public sealed partial class VoicePhrases
     /// once, by its profile and root, with its projects by their labels. "3 projekter. Profil Mega, root GodMode: issue 376,
     /// issue 382. Profil Private, root voicebot: branch master."
     /// </summary>
-    public string Projects(IReadOnlyList<(string Profile, string? Root, IReadOnlyList<string> Labels)> groups)
+    public string Projects(IReadOnlyList<(string Profile, string? Root, IReadOnlyList<string> Labels)> groups, LeftOut? left = null)
     {
         var count = groups.Sum(g => g.Labels.Count);
         return count == 0
-            ? _danish ? "Ingen projekter." : "No projects."
-            : $"{Total(count)} {string.Join(" ", groups.Select(g => GroupLine(g.Profile, g.Root, g.Labels)))}";
+            ? left is { Count: > 0 } ? NothingNew(left) : _danish ? "Ingen projekter." : "No projects."
+            : $"{Total(count)} {string.Join(" ", groups.Select(g => GroupLine(g.Profile, g.Root, g.Labels)))}{Then(left is null ? "" : LeftOut(left))}";
     }
+
+    /// <summary>A sentence after another: a space before it; nothing for none.</summary>
+    private static string Then(string sentence) => sentence.Length > 0 ? $" {sentence}" : "";
+
+    /// <summary>
+    /// What a list left out (#468), as its last sentence: "Og 9 gamle." for stale ones, "Og 2 uden nyt." for those with
+    /// nothing new in the window the user asked for. Empty when it left none out.
+    /// </summary>
+    public string LeftOut(LeftOut left) => (left.Count, left.Asked, _danish) switch
+    {
+        (0, _, _) => "",
+        (1, false, true) => "Og 1 gammel.",
+        (var n, false, true) => $"Og {n} gamle.",
+        (1, false, false) => "And 1 old one.",
+        (var n, false, false) => $"And {n} old ones.",
+        (var n, true, true) => $"Og {n} uden nyt.",
+        (var n, true, false) => $"And {n} with nothing new.",
+    };
+
+    /// <summary>
+    /// A list that left out every project it had (#468): "Intet nyt. 9 gamle." for stale ones, "Intet nyt." when the user
+    /// asked for a window nothing happened in.
+    /// </summary>
+    public string NothingNew(LeftOut left) => (left.Count, left.Asked, _danish) switch
+    {
+        (_, true, true) => "Intet nyt.",
+        (_, true, false) => "Nothing new.",
+        (1, false, true) => "Intet nyt. 1 gammel.",
+        (var n, false, true) => $"Intet nyt. {n} gamle.",
+        (1, false, false) => "Nothing new. 1 old one.",
+        (var n, false, false) => $"Nothing new. {n} old ones.",
+    };
+
+    /// <summary>
+    /// What needs the user that the window asked for left out (#468): "Og 2 fra før." after what it said, "Intet nyt
+    /// venter. 2 venter fra før." when it said none. Empty when it left none out.
+    /// </summary>
+    public string WaitingFromBefore(int count, bool saidAny) => (count, saidAny, _danish) switch
+    {
+        (0, _, _) => "",
+        (var n, true, true) => $"Og {n} fra før.",
+        (var n, true, false) => $"And {n} from before.",
+        (var n, false, true) => $"Intet nyt venter. {n} venter fra før.",
+        (1, false, false) => "Nothing new needs you. 1 needs you from before.",
+        (var n, false, false) => $"Nothing new needs you. {n} need you from before.",
+    };
 
     /// <summary>"3 projekter." / "3 projects.".</summary>
     private string Total(int count) => (count, _danish) switch
@@ -150,7 +196,7 @@ public sealed partial class VoicePhrases
     /// projects by name when it names them, else their count, "the rest" for the one state counted after all named. "16
     /// projekter. branch master er idle, resten er stoppet. Mere?"
     /// </summary>
-    public string ListSummary(int count, IReadOnlyList<(ListedState State, int Count, IReadOnlyList<SpokenName> Named)> states, bool more)
+    public string ListSummary(int count, IReadOnlyList<(ListedState State, int Count, IReadOnlyList<SpokenName> Named)> states, bool more, LeftOut? left = null)
     {
         var counted = states.Select((s, i) => (s, i)).Where(x => x.s.Named.Count == 0).ToList();
         var rest = counted is [var only] && only.i > 0 && states.Take(only.i).All(s => s.Named.Count > 0) ? only.s.State : (ListedState?)null;
@@ -158,7 +204,7 @@ public sealed partial class VoicePhrases
             s.Named.Count > 0 ? $"{And([.. s.Named.Select(Named)])} {Doing(s.State, s.Named.Count)}"
             : s.State == rest ? $"{(_danish ? "resten" : "the rest")} {Doing(s.State, 2)}"
             : $"{s.Count} {Doing(s.State, s.Count)}");
-        return $"{Total(count)} {string.Join(", ", parts)}.{(more ? $" {More}" : "")}";
+        return $"{Total(count)} {string.Join(", ", parts)}.{Then(left is null ? "" : LeftOut(left))}{(more ? $" {More}" : "")}";
     }
 
     /// <summary>

@@ -47,6 +47,19 @@ public sealed record VoiceSettings
     /// <summary>How many seconds of silence while voice listens close the mic (<see cref="VoiceMicOptions.SilenceTimeout"/>).</summary>
     public int MicSilenceSeconds { get; init; } = VoiceMicOptions.DefaultSilenceSeconds;
 
+    /// <summary>How many hours without activity make a session stale by default (#468): a day.</summary>
+    public const int DefaultStaleHours = 24;
+
+    /// <summary>
+    /// How many hours without activity leave a session out of voice's lists unless the user asks for all (#468): it is
+    /// counted ("og 9 gamle"), not named. A session that needs the user is never left out so.
+    /// </summary>
+    public int StaleHours { get; init; } = DefaultStaleHours;
+
+    /// <summary><see cref="StaleHours"/> as a span.</summary>
+    [JsonIgnore]
+    public TimeSpan StaleAfter => TimeSpan.FromHours(StaleHours);
+
     public static readonly VoiceSettings Default = new();
 
     /// <summary>The session's languages from <see cref="Language"/>.</summary>
@@ -82,7 +95,8 @@ public sealed record VoiceSettingsView(
     AudioDevice? Speaker,
     int MicSilenceSeconds,
     bool ElevenLabsKeySet,
-    bool AnthropicKeySet);
+    bool AnthropicKeySet,
+    int StaleHours = VoiceSettings.DefaultStaleHours);
 
 /// <summary>
 /// What <c>voice.settings.set</c> changes: a null field is left as it is. A key that is blank removes the key, and a
@@ -96,7 +110,8 @@ public sealed record VoiceSettingsUpdate(
     AudioDevice? Speaker = null,
     string? ElevenLabsKey = null,
     string? AnthropicKey = null,
-    int? MicSilenceSeconds = null);
+    int? MicSilenceSeconds = null,
+    int? StaleHours = null);
 
 /// <summary>Reads and writes the voice settings: <c>voice.json</c> in a directory, the keys in secure storage.</summary>
 public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
@@ -107,6 +122,9 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
 
     /// <summary>The longest silence timeout: an hour.</summary>
     public const int MaxMicSilenceSeconds = 3600;
+
+    /// <summary>The longest a session may go without activity before voice leaves it out: a year.</summary>
+    public const int MaxStaleHours = 24 * 365;
 
     private readonly SemaphoreSlim _writing = new(1, 1);
 
@@ -137,7 +155,8 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
         return new VoiceSettingsView(settings.Language, settings.VoiceId, settings.EchoCancellation, settings.Microphone, settings.Speaker,
             settings.MicSilenceSeconds,
             ElevenLabsKeySet: !string.IsNullOrEmpty(keys.ElevenLabs),
-            AnthropicKeySet: !string.IsNullOrEmpty(keys.Anthropic));
+            AnthropicKeySet: !string.IsNullOrEmpty(keys.Anthropic),
+            StaleHours: settings.StaleHours);
     }
 
     /// <summary>Applies <paramref name="update"/> and returns what is set now.</summary>
@@ -159,6 +178,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
                 Microphone = update.Microphone ?? current.Microphone,
                 Speaker = update.Speaker ?? current.Speaker,
                 MicSilenceSeconds = update.MicSilenceSeconds ?? current.MicSilenceSeconds,
+                StaleHours = update.StaleHours ?? current.StaleHours,
             });
             if (next != current)
             {
@@ -187,6 +207,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
         Microphone = Device(settings.Microphone),
         Speaker = Device(settings.Speaker),
         MicSilenceSeconds = settings.MicSilenceSeconds > 0 ? Math.Min(settings.MicSilenceSeconds, MaxMicSilenceSeconds) : VoiceMicOptions.DefaultSilenceSeconds,
+        StaleHours = settings.StaleHours > 0 ? Math.Min(settings.StaleHours, MaxStaleHours) : VoiceSettings.DefaultStaleHours,
     };
 
     private static AudioDevice? Device(AudioDevice? device) =>

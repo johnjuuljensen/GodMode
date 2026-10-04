@@ -52,7 +52,8 @@ public sealed class EndToEndTests
         // As ElevenLabs sends it: a partial, then a final with the same text. The final reaches the model once
         voice.Transcriptions.SayAsRecognized("Hvad venter på mig?");
         // In the code's words (#456): one model call, the tool's, and no respond round to retell it
-        await voice.Events.SaidAsync("2 venter på dig: issue 101 har et spørgsmål. issue 283 har et spørgsmål.");
+        // The most recent first (#468): 283's conversation wrote last, as the server recorded it
+        await voice.Events.SaidAsync("2 venter på dig: issue 283 har et spørgsmål. issue 101 har et spørgsmål.");
         Assert.Equal(1, model.Calls);
 
         voice.Transcriptions.SayAsRecognized("Svar 283 at den skal bruge den eksisterende migration");
