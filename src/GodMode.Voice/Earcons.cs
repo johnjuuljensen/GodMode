@@ -1,5 +1,6 @@
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
+using Microsoft.Extensions.Logging;
 using VoiceBot.Core.Audio;
 
 namespace GodMode.Voice;
@@ -53,12 +54,23 @@ public static class Earcons
     };
 
     /// <summary>The earcon's sound in <paramref name="format"/> (16-bit PCM), with <see cref="Gap"/> of silence after it.</summary>
-    public static byte[] Pcm(Earcon earcon, AudioFormat format, float volume = Volume)
+    public static byte[] Pcm(Earcon earcon, AudioFormat format, float volume = Volume) => Render(Notes(earcon), Gap, format, volume);
+
+    /// <summary>How loud the "heard you" tone is, of full scale: quieter than the earcons, as it plays on every turn.</summary>
+    public const float HeardVolume = 0.08f;
+
+    /// <summary>
+    /// The "heard you" tone (#458), played as a final is taken as a turn: one short note, higher than the earcons' and
+    /// out of the mic's sweeps (<see cref="VoiceMic.Tone"/>), so it reads as neither. No gap: nothing follows it at once.
+    /// </summary>
+    public static byte[] Heard(AudioFormat format, float volume = HeardVolume) => Render([(1174.7, 70)], TimeSpan.Zero, format, volume);
+
+    /// <summary><paramref name="notes"/> one after the other, each with short fades, then <paramref name="gap"/> of silence.</summary>
+    private static byte[] Render(IReadOnlyList<(double Hz, int Ms)> notes, TimeSpan gap, AudioFormat format, float volume)
     {
-        var notes = Notes(earcon);
         var frames = notes.Select(n => n.Ms * format.SampleRate / 1000).ToList();
-        var gap = (int)(Gap.TotalSeconds * format.SampleRate);
-        var bytes = new byte[(frames.Sum() + gap) * format.Channels * 2];
+        var silence = (int)(gap.TotalSeconds * format.SampleRate);
+        var bytes = new byte[(frames.Sum() + silence) * format.Channels * 2];
         var fade = Math.Max(1, format.SampleRate / 100);
         var at = 0;
         for (var n = 0; n < notes.Count; n++)
@@ -81,10 +93,20 @@ public static class Earcons
 /// announcement: it formats under the session's graph lock, when nothing is speaking, and starts the speech at once, so
 /// the next audio is the announcement's. An interrupt drops a cue not yet played. A cue is any sound in the speaker's
 /// format (<see cref="Earcons.Pcm"/>, or another's to play before a line).
+/// <para>
+/// It also plays a sound now, between lines (<see cref="Heard"/>, #458): only when the speaker is quiet, so it never
+/// plays over speech, nor speech over it. Quiet is reckoned here, from what was sent: each send plays from when it is
+/// sent, or when the audio before it ends, in real time (as VoiceBot reckons its own speech), and an interrupt ends what
+/// was sent. Sends are one at a time, so speech that comes while the sound is sent plays after it.
+/// </para>
 /// </summary>
-public sealed class CueingSink(IAudioSink speaker) : IAudioSink
+public sealed class CueingSink(IAudioSink speaker, ILogger? logger = null, TimeProvider? time = null) : IAudioSink
 {
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private readonly SemaphoreSlim _sending = new(1, 1);
+    private readonly Lock _lock = new();
     private byte[]? _cue;
+    private long _playsUntil;
 
     public AudioFormat Format => speaker.Format;
 
@@ -94,11 +116,69 @@ public sealed class CueingSink(IAudioSink speaker) : IAudioSink
     /// <summary>Plays <paramref name="pcm"/>, in <see cref="Format"/>, before the next speech; it replaces a cue not played yet.</summary>
     public void Cue(byte[] pcm) => Volatile.Write(ref _cue, pcm);
 
+    /// <summary>
+    /// The "heard you" tone (<see cref="Earcons.Heard"/>) now, when the speaker is quiet: nothing playing, nothing being
+    /// sent, no cue waiting for its line; nothing otherwise. Returns at once, the tone's send started: speech sent after
+    /// it plays after it.
+    /// </summary>
+    public void Heard() => _ = PlayIfQuietAsync(Earcons.Heard(speaker.Format));
+
+    /// <summary>
+    /// Plays <paramref name="pcm"/>, in <see cref="Format"/>, now, when the speaker is quiet (<see cref="Heard"/>); whether
+    /// it did. Takes the send before its first await, so what is sent after it was called waits for it. Never throws.
+    /// </summary>
+    public async Task<bool> PlayIfQuietAsync(byte[] pcm)
+    {
+        if (!_sending.Wait(0))
+            return false;
+        try
+        {
+            if (Volatile.Read(ref _cue) is not null || !Quiet)
+                return false;
+            await SendHeldAsync(pcm, CancellationToken.None).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Voice: a sound did not play");
+            return false;
+        }
+        finally
+        {
+            _sending.Release();
+        }
+    }
+
+    /// <summary>Nothing sent is still playing, as reckoned from what was sent.</summary>
+    private bool Quiet
+    {
+        get
+        {
+            lock (_lock) return _time.GetTimestamp() >= _playsUntil;
+        }
+    }
+
     public async Task SendAudioAsync(ReadOnlyMemory<byte> audio, CancellationToken ct)
     {
-        if (Interlocked.Exchange(ref _cue, null) is { } cue)
-            await speaker.SendAudioAsync(cue, ct).ConfigureAwait(false);
+        await _sending.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (Interlocked.Exchange(ref _cue, null) is { } cue)
+                await SendHeldAsync(cue, ct).ConfigureAwait(false);
+            await SendHeldAsync(audio, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sending.Release();
+        }
+    }
+
+    /// <summary>Sends <paramref name="audio"/>, holding the send, and reckons when it ends playing.</summary>
+    private async Task SendHeldAsync(ReadOnlyMemory<byte> audio, CancellationToken ct)
+    {
         await speaker.SendAudioAsync(audio, ct).ConfigureAwait(false);
+        var length = (long)(audio.Length / (double)speaker.Format.BytesPerSecond * _time.TimestampFrequency);
+        lock (_lock) _playsUntil = Math.Max(_time.GetTimestamp(), _playsUntil) + length;
     }
 
     public Task SendStatusAsync(string message, CancellationToken ct) => speaker.SendStatusAsync(message, ct);
@@ -106,6 +186,7 @@ public sealed class CueingSink(IAudioSink speaker) : IAudioSink
     public Task InterruptAsync(CancellationToken ct)
     {
         Volatile.Write(ref _cue, null);
+        lock (_lock) _playsUntil = 0;
         return speaker.InterruptAsync(ct);
     }
 }

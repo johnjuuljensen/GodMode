@@ -47,6 +47,13 @@ public sealed record VoiceSettings
     /// <summary>How many seconds of silence while voice listens close the mic (<see cref="VoiceMicOptions.SilenceTimeout"/>).</summary>
     public int MicSilenceSeconds { get; init; } = VoiceMicOptions.DefaultSilenceSeconds;
 
+    /// <summary>
+    /// Voice's short sounds: the "heard you" tone as what the user said is taken as a turn (<see cref="GodMode.Voice.Earcons.Heard"/>,
+    /// #458), and the earcons before announcements (<see cref="Earcon"/>, #455). On by default; off plays neither. The mic's
+    /// rising and falling tones are not among them: they say the mic opened or closed, and always play.
+    /// </summary>
+    public bool Earcons { get; init; } = true;
+
     /// <summary>How many hours without activity make a session stale by default (#468): a day.</summary>
     public const int DefaultStaleHours = 24;
 
@@ -96,7 +103,8 @@ public sealed record VoiceSettingsView(
     int MicSilenceSeconds,
     bool ElevenLabsKeySet,
     bool AnthropicKeySet,
-    int StaleHours = VoiceSettings.DefaultStaleHours);
+    int StaleHours = VoiceSettings.DefaultStaleHours,
+    bool Earcons = true);
 
 /// <summary>
 /// What <c>voice.settings.set</c> changes: a null field is left as it is. A key that is blank removes the key, and a
@@ -111,7 +119,8 @@ public sealed record VoiceSettingsUpdate(
     string? ElevenLabsKey = null,
     string? AnthropicKey = null,
     int? MicSilenceSeconds = null,
-    int? StaleHours = null);
+    int? StaleHours = null,
+    bool? Earcons = null);
 
 /// <summary>Reads and writes the voice settings: <c>voice.json</c> in a directory, the keys in secure storage.</summary>
 public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
@@ -156,7 +165,8 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
             settings.MicSilenceSeconds,
             ElevenLabsKeySet: !string.IsNullOrEmpty(keys.ElevenLabs),
             AnthropicKeySet: !string.IsNullOrEmpty(keys.Anthropic),
-            StaleHours: settings.StaleHours);
+            StaleHours: settings.StaleHours,
+            Earcons: settings.Earcons);
     }
 
     /// <summary>Applies <paramref name="update"/> and returns what is set now.</summary>
@@ -179,6 +189,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
                 Speaker = update.Speaker ?? current.Speaker,
                 MicSilenceSeconds = update.MicSilenceSeconds ?? current.MicSilenceSeconds,
                 StaleHours = update.StaleHours ?? current.StaleHours,
+                Earcons = update.Earcons ?? current.Earcons,
             });
             if (next != current)
             {

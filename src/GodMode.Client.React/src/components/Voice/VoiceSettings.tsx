@@ -47,6 +47,7 @@ export function VoiceSettings() {
   const [voiceId, setVoiceId] = useState('');
   const [language, setLanguage] = useState('');
   const [echoCancellation, setEchoCancellation] = useState(false);
+  const [earcons, setEarcons] = useState(true);
   const [devices, setDevices] = useState<VoiceDeviceList | null>(null);
   const [microphone, setMicrophone] = useState<AudioDevice>(DEFAULT);
   const [speaker, setSpeaker] = useState<AudioDevice>(DEFAULT);
@@ -59,6 +60,7 @@ export function VoiceSettings() {
     setVoiceId(settings.VoiceId);
     setLanguage(settings.Language);
     setEchoCancellation(settings.EchoCancellation);
+    setEarcons(settings.Earcons ?? true);
     setMicrophone(settings.Microphone ?? DEFAULT);
     setSpeaker(settings.Speaker ?? DEFAULT);
     setMicSilence(String(settings.MicSilenceSeconds));
@@ -97,6 +99,7 @@ export function VoiceSettings() {
     VoiceId: voiceId,
     Language: language,
     EchoCancellation: echoCancellation,
+    Earcons: earcons,
     ...(devices?.Supported && { Microphone: microphone, Speaker: speaker }),
     ...(devices?.Supported && Number(micSilence) > 0 && { MicSilenceSeconds: Math.round(Number(micSilence)) }),
     ...(elevenLabsKey.trim() && { ElevenLabsKey: elevenLabsKey }),
@@ -151,6 +154,13 @@ export function VoiceSettings() {
           <div className="settings-item-desc">For speakers instead of a headset, with Default for both devices. Off until it is measured to hold up on laptop speakers.</div>
         </div>
         <Toggle checked={echoCancellation} onChange={setEchoCancellation} />
+      </div>
+      <div className="settings-item">
+        <div className="settings-item-info">
+          <div className="settings-item-name">Sounds</div>
+          <div className="settings-item-desc">A short tone when voice has heard you and takes its turn, and a sound before each announcement. The mic's open and close tones always play.</div>
+        </div>
+        <Toggle checked={earcons} onChange={setEarcons} />
       </div>
 
       {message && <div className={message.error ? 'settings-error' : 'form-description'} role={message.error ? 'alert' : 'status'}>{message.text}</div>}
