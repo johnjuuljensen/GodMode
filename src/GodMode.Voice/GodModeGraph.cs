@@ -14,7 +14,9 @@ namespace GodMode.Voice;
 /// earlier readings (VoiceBot#61), and the chat acts on it as on any other (#376). "Sendt" is the code's word, said
 /// only for an answer sent in that turn (<see cref="SentNode"/>). Where the mic opens on demand, a final that is a Done
 /// phrase alone closes it (<see cref="DoneNode"/>), above help. A session's own spoken reply that a tool read out is
-/// said word for word by the code, not retold by the model (<see cref="SpokenNode"/>, #384).
+/// said word for word by the code, not retold by the model (<see cref="SpokenNode"/>, #384). A tool result the code can
+/// say itself (what needs me, the projects, a short question or result) is said so, with no second model call to retell
+/// it (<see cref="CodeSaysInference"/>, #456).
 /// </summary>
 public static class GodModeGraph
 {
@@ -40,7 +42,8 @@ public static class GodModeGraph
     /// before the servers' names (<see cref="VoiceSession.Keyterms"/>).
     /// </summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "færdig", "det var alt", "done", "that's all", "GodMode", "pull request", "review", "start issue", "opret",
+        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "færdig", "det var alt", "done", "that's all", "GodMode", "pull request", "review", "start issue", "opret", "diktér til",
+         .. Dictation.Phrases.Select(p => p.Phrase),
          "log", "loggen", "session", "sessionen", "branch", "worktree", "commit", "push", "merge", "issue"];
 
     /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
@@ -66,20 +69,29 @@ public static class GodModeGraph
             unless the user switches language; then answer in theirs until they switch back.
 
             RULES:
-            - Maximum brevity: one short sentence, two at most. No filler, no social language, no affirmations.
-            - Refer to a project by the name the tools give it, which says what it is ("issue 283", "branch master"),
-              with the root and profile they give with it ("issue 283 i GodMode, profil Mega"): never by a bare number
-              or word. Say numbers as digits.
+            - Brief in words, never in context: one short sentence, two at most. No filler, no social language, no
+              affirmations. Cut words, never the anchor: a line names the project it is about before what it says.
+            - Refer to a project by the name the tools give it, exactly as they give it this time, which says what it is
+              ("issue 283", "branch master"), with the topic, root and profile they give with it ("issue 283, mic-timeout
+              i GodMode, profil Mega"): never by a bare number or word. The tools give as much as the user needs to place
+              it: the label alone for the project just talked about, its topic and root when the talk turns to it, all of
+              it after a while. Never drop what they give, and never add what they leave out. Say numbers as digits.
             - Never read out code, paths or long identifiers; summarize them.
             - After a tool call, say its result in one compressed line with respond.
+            - Several asks in one breath ("Hvad venter, og læs 283"): call their tools one after the other, each with
+              then set to what is still to do after it, and the last one without. The system says what each found.
 
             COMMANDS (Danish first, English accepted):
-            - "Hvad venter?" / "What needs me?" — call {{VoiceTools.WhatNeedsMe}}. Say the count, then each project by its
-              name and what it needs.
+            - "Hvad venter?" / "What needs me?" — call {{VoiceTools.WhatNeedsMe}}, with the root or profile the user asked
+              about, if any ("Hvad venter i GodMode?"). Say the count, then each project by its name and what it needs.
+              A long one is said by the system as a summary by what they need, the rest a page at a time: "Mere" after
+              it — call {{VoiceTools.ReadMore}}.
             - "Hvilke projekter er der?", "Hvad kører?" / "Which projects?" — call {{VoiceTools.ListProjects}}: every project,
-              also those that need nothing, grouped by profile and root. Say the tool's count, then each group once, by
+              also those that need nothing, grouped by profile and root; with the root or profile the user asked about, if
+              any, only those. Say the tool's count, then each group once, by
               its profile and root ("Godmode, root GodMode: issue 376, issue 382. Private, root voicebot: branch master."),
-              with its projects. If you leave any out, say how many and why. Never answer which projects there are
+              with its projects. If you leave any out, say how many and why. A long list is said by the system as a
+              summary by state, the rest a page at a time: "Mere" after it — call {{VoiceTools.ReadMore}}. Never answer which projects there are
               from {{VoiceTools.WhatNeedsMe}}: it lists only those that need the user.
             - A project the user names by its root or kind ("Assistant", "chat") is named so to the tools; if the tool
               says it is unknown, give the names it lists as options. One the user names with its root or profile
@@ -100,6 +112,12 @@ public static class GodModeGraph
               ({{VoiceTools.ProjectStatus}} does not have it then). Say the reply itself, after a lead-in that names the
               project ("issue 283 skrev: …"), as fully as speech allows, not only its gist. If it says more follows, end with "Mere?". "Læs videre", "Mere" / "Read on" — call {{VoiceTools.ReadMore}}.
               "Er det hele?" is answered from what the tool said: if more follows, call {{VoiceTools.ReadMore}}.
+            - "Mere?", "Hvorfor?", "Hvad er det?" / "More?", "Why?", "What is it?" about the line just said, naming no
+              project — call {{VoiceTools.ReadMore}}: it expands that line a step (an announcement into the project's status,
+              a status into its last reply, a reply or list into its next part). Never ask which project then.
+            - "Diktér til [handle]" / "Dictate to [handle]" is taken by the system itself, word for word, until the user
+              says "diktat slut" or "annullér diktat" / "end dictation" or "cancel dictation": you never see it. A "diktér" that names no project: ask which, as a closed
+              question, and tell the user to say "Diktér til" and the project.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}, and only then: on the user's own "læst" or "seen".
               Never mark a project seen as part of reading it, its status or its reply, or when the user asks if that was all.
             - "Marker [handle] som vigtig / normal / stille" / "Mark [handle] as important / normal / quiet" — call
@@ -145,12 +163,15 @@ public static class GodModeGraph
             """;
 
         var graph = new CompositeBuilder(Id).WithTools(t => AddTools(t, tools));
+        // Above Done and help: while dictating, "færdig" and "hjælp" are words of the dictation (#459)
+        graph = graph.Node(new DictationNode("dictation", 95, tools.Dictation, phrases));
         if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));
         return graph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
-            .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Medium, inference, systemPrompt),
+            .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Medium,
+                new CodeSaysInference(inference, tools.Conversation, phrases), systemPrompt),
                 tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
     }

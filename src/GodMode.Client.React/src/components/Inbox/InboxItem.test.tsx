@@ -201,8 +201,26 @@ describe('the next need of a project (#218)', () => {
     expect(p2().querySelector('.inbox-item-error')?.textContent).toBe('No request r1 is pending');
 
     await listA(item('p2', 'Finished', '2026-09-24T11:05:00Z'));
-    expect(p2().querySelector('.inbox-item-kind')?.textContent).toBe('Finished');
+    expect(p2().querySelector('.inbox-item-kind')?.textContent).toBe('Idle');
     expect(p2().querySelector('.inbox-item-error')).toBeNull();
+  });
+});
+
+describe('what the session said its turn is (#467)', () => {
+  const kindOf = async (extra: Partial<AttentionItem>, kind: AttentionItem['Kind'] = 'Finished') => {
+    await act(async () => { hubB.callbacks.onAttentionChanged?.([item('p1', kind, '2026-09-24T09:00:00Z', extra)]); });
+    return itemEl('p1', 'Server B').querySelector('.inbox-item-kind')?.textContent;
+  };
+
+  it('is Done only when it said done, and Idle with no outcome', async () => {
+    expect(await kindOf({ Outcome: 'done' })).toBe('Done');
+    expect(await kindOf({})).toBe('Idle');
+  });
+
+  it('is Blocked, or Needs you, for a question it said so of', async () => {
+    expect(await kindOf({ Outcome: 'blocked' }, 'Question')).toBe('Blocked');
+    expect(await kindOf({ Outcome: 'needs-you' }, 'Question')).toBe('Needs you');
+    expect(await kindOf({}, 'Question')).toBe('Question');
   });
 });
 

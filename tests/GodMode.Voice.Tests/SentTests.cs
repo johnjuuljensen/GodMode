@@ -20,7 +20,7 @@ public sealed class SentTests
         var servers = new FakeServers();
         var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
         return (servers, voice);
     }
 
@@ -108,7 +108,7 @@ public sealed class SentTests
             .Respond(Reply);
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Permission("p/r/283", "283-voice", "Bash: git push")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 skal have tilladelse: Bash: git push. Svar på skærmen.");
+        await voice.Events.SaidAsync("issue 283, voice, skal have tilladelse: Bash: git push. Svar på skærmen.");
 
         voice.Transcriptions.SayAsRecognized("Svar ja");
         await voice.Events.SaidAsync(Reply);
@@ -116,18 +116,21 @@ public sealed class SentTests
         Assert.Empty(servers.Replies);
     }
 
-    /// <summary>A project's own text read out in a turn with no send is said as the model put it, "sendt" and all.</summary>
+    /// <summary>
+    /// A project's own text read out in a turn with no send is said as the model put it, "sendt" and all: through
+    /// read_reply, whose result the model says (a short status is the code's, #456).
+    /// </summary>
     [Fact]
     public async Task A_projects_text_that_says_sendt_is_said_as_written()
     {
-        const string Reply = "283 spørger: PR'en er sendt til review, skal jeg merge?";
+        const string Reply = "283 skrev: PR'en er sendt til review, skal jeg merge?";
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
+            .CallTool(VoiceTools.ReadReply, new() { [VoiceTools.ProjectParameter] = "283" })
             .Respond(Reply);
         var (servers, voice) = await AskedAsync(model);
         await using var _ = voice;
 
-        voice.Transcriptions.SayAsRecognized("Status 283");
+        voice.Transcriptions.SayAsRecognized("Hvad svarede 283?");
         await voice.Events.SaidAsync(Reply);
 
         Assert.Empty(servers.Replies);

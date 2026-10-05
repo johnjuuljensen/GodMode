@@ -145,8 +145,12 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         Task.FromResult<IReadOnlyList<ServerAttentionItem>>(
             [.. _lists.SelectMany(l => l.Value.Items.Select(i => new ServerAttentionItem(l.Key, l.Value.Name, i))).OrderBy(i => i.Item.Since)]);
 
+    /// <summary>What reading a project's status throws, as a hub call that fails does; none when null.</summary>
+    public Exception? StatusError { get; set; }
+
     public Task<ProjectStatus> GetStatusAsync(ProjectRef project, CancellationToken ct) =>
-        _statuses.TryGetValue(project, out var status)
+        StatusError is { } error ? Task.FromException<ProjectStatus>(error)
+        : _statuses.TryGetValue(project, out var status)
             ? Task.FromResult(status)
             : Task.FromException<ProjectStatus>(new KeyNotFoundException(project.ProjectId));
 
@@ -154,6 +158,21 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     {
         Replies.Enqueue((project, text));
         return Task.CompletedTask;
+    }
+
+    /// <summary>Each project asked for its recap (#513), in order.</summary>
+    public ConcurrentQueue<ProjectRef> RecapAsks { get; } = new();
+
+    /// <summary>
+    /// What the server answers an ask for a recap: busy (nothing sent, nothing to say of it) unless a test about recaps
+    /// sets it, so a status read elsewhere is read as it was before #513.
+    /// </summary>
+    public RecapAsk RecapAnswer { get; set; } = RecapAsk.Busy;
+
+    public Task<RecapAsk> AskForRecapAsync(ProjectRef project, CancellationToken ct)
+    {
+        RecapAsks.Enqueue(project);
+        return Task.FromResult(RecapAnswer);
     }
 
     /// <summary>Each tier set, in order.</summary>
@@ -191,11 +210,16 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     }
 
     /// <summary>A project on a server, that no attention item names: created, as the hub pushes it.</summary>
-    public void AddProject(string serverId, string projectId, string name, string? root = null, string? kind = null, string? profile = null)
+    /// <param name="state">What it is doing: Idle unless given.</param>
+    /// <param name="minutesAgo">How long ago it changed: lists say the one changed last first, when it has written no line.</param>
+    /// <param name="outputMinutesAgo">How long ago its main conversation last wrote a line (#468), its activity; none when null.</param>
+    public void AddProject(string serverId, string projectId, string name, string? root = null, string? kind = null, string? profile = null,
+        ProjectState state = ProjectState.Idle, int minutesAgo = 0, int? outputMinutesAgo = null)
     {
-        _statuses[new ProjectRef(serverId, projectId)] = new ProjectStatus(projectId, name, ProjectState.Idle,
-            DateTime.UtcNow, DateTime.UtcNow, null, new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0,
-            RootName: root, ProfileName: profile, Kind: kind);
+        _statuses[new ProjectRef(serverId, projectId)] = new ProjectStatus(projectId, name, state,
+            DateTime.UtcNow, DateTime.UtcNow.AddMinutes(-minutesAgo), null, new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0,
+            RootName: root, ProfileName: profile, Kind: kind,
+            LastOutputAt: outputMinutesAgo is { } output ? DateTime.UtcNow.AddMinutes(-output) : null);
         PushProjects(serverId);
     }
 
@@ -203,6 +227,15 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     public void SetStatus(string serverId, ProjectStatus status)
     {
         _statuses[new ProjectRef(serverId, status.Id)] = status;
+        PushProjects(serverId);
+    }
+
+    private readonly ConcurrentDictionary<ProjectRef, string> _parents = new();
+
+    /// <summary>The overseer the server recorded for the project (#401, <see cref="ProjectSummary.RecordedParentId"/>), as the hub pushes it.</summary>
+    public void SetRecordedParent(string serverId, string projectId, string parentId)
+    {
+        _parents[new ProjectRef(serverId, projectId)] = parentId;
         PushProjects(serverId);
     }
 
@@ -216,8 +249,9 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     public static AttentionItem Question(string projectId, string name, string text, int minutesAgo = 5) =>
         new(projectId, name, "Default", "root", AttentionKind.Question, DateTime.UtcNow.AddMinutes(-minutesAgo), text);
 
-    public static AttentionItem Finished(string projectId, string name, string text, int minutesAgo = 5) =>
-        new(projectId, name, "Default", "root", AttentionKind.Finished, DateTime.UtcNow.AddMinutes(-minutesAgo), text);
+    /// <summary>A finished turn the session said is done (issue #467), unless <paramref name="outcome"/> says otherwise.</summary>
+    public static AttentionItem Finished(string projectId, string name, string text, int minutesAgo = 5, TurnOutcome? outcome = TurnOutcome.Done) =>
+        new(projectId, name, "Default", "root", AttentionKind.Finished, DateTime.UtcNow.AddMinutes(-minutesAgo), text, Outcome: outcome);
 
     public static AttentionItem Permission(string projectId, string name, string summary, int minutesAgo = 5) =>
         new(projectId, name, "Default", "root", AttentionKind.Permission, DateTime.UtcNow.AddMinutes(-minutesAgo), summary,
@@ -230,11 +264,13 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     private void PushProjects(string serverId)
     {
         _servers.TryAdd(serverId, 0);
-        ProjectsChanged?.Invoke(serverId, serverId, [.. _statuses.Where(s => s.Key.ServerId == serverId).Select(s => Summary(s.Value))]);
+        ProjectsChanged?.Invoke(serverId, serverId, [.. _statuses.Where(s => s.Key.ServerId == serverId)
+            .Select(s => Summary(s.Value) with { RecordedParentId = _parents.GetValueOrDefault(s.Key) })]);
     }
 
     private static ProjectSummary Summary(ProjectStatus s) =>
-        new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission, Kind: s.Kind);
+        new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission, Kind: s.Kind,
+            LastResultAt: s.LastResultAt, LastOutputAt: s.LastOutputAt);
 
     private static ProjectStatus Status(AttentionItem item) =>
         new(item.ProjectId, item.ProjectName,

@@ -107,7 +107,7 @@ public sealed class ProjectProcess
     /// This turn's <c>speak</c> calls of the main conversation that wait for their result, by tool use id
     /// (<see cref="Services.SpokenReply"/>). Reset when a new turn starts. In memory only; only the consumer touches it.
     /// </summary>
-    public Dictionary<string, string> SpeakCalls { get; } = [];
+    public Dictionary<string, Services.SpeakCall> SpeakCalls { get; } = [];
 
     /// <summary>
     /// The text of this turn's last <c>speak</c> call the server accepted, which its result makes the status's
@@ -115,11 +115,18 @@ public sealed class ProjectProcess
     /// </summary>
     public string? Spoken { get; set; }
 
-    /// <summary>Forgets the turn's spoken reply and the calls waiting to give one: a new turn starts, or the turn ended.</summary>
+    /// <summary>
+    /// The outcome of this turn's last <c>speak</c> call the server accepted with one (issue #467), which its result makes
+    /// the status's <see cref="Shared.Models.ProjectStatus.Outcome"/>. Reset when a new turn starts. Only the consumer touches it.
+    /// </summary>
+    public Shared.Enums.TurnOutcome? Outcome { get; set; }
+
+    /// <summary>Forgets the turn's spoken reply, its outcome and the calls waiting to give them: a new turn starts, or the turn ended.</summary>
     public void ForgetSpoken()
     {
         SpeakCalls.Clear();
         Spoken = null;
+        Outcome = null;
     }
 
     private int _userTurn;
@@ -134,6 +141,33 @@ public sealed class ProjectProcess
 
     /// <summary>Whether the turn ending now is the user's (<see cref="MarkUserTurn"/>); clears it.</summary>
     public bool TakeUserTurn() => Interlocked.Exchange(ref _userTurn, 0) == 1;
+
+    private int _recapsExpected;
+
+    /// <summary>
+    /// A <c>/recap</c> has been written to claude (issue #513): the next result is its recap, the session's standing, not
+    /// a turn's reply. Set before the input is written; the next result takes it (<see cref="TakeRecap"/>).
+    /// </summary>
+    public void ExpectRecap() => Interlocked.Increment(ref _recapsExpected);
+
+    /// <summary>Whether the result ending now answers a <c>/recap</c> (<see cref="ExpectRecap"/>); takes one.</summary>
+    public bool TakeRecap()
+    {
+        for (var expected = Volatile.Read(ref _recapsExpected); expected > 0; expected = Volatile.Read(ref _recapsExpected))
+            if (Interlocked.CompareExchange(ref _recapsExpected, expected - 1, expected) == expected) return true;
+        return false;
+    }
+
+    private int _recapAsked;
+
+    /// <summary>
+    /// Voice asks the session for its recap (the hub's AskForRecap, issue #513): once for as long as the server tracks
+    /// it, whoever asks. False when it has been asked already. In memory: a server restart may ask once more.
+    /// </summary>
+    public bool TryAskRecap() => Interlocked.Exchange(ref _recapAsked, 1) == 0;
+
+    /// <summary>The ask <see cref="TryAskRecap"/> took sent nothing: a later one may.</summary>
+    public void UnaskRecap() => Volatile.Write(ref _recapAsked, 0);
 
     private readonly ConcurrentDictionary<string, PendingRequest> _pending = new();
 

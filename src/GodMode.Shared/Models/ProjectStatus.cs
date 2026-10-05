@@ -85,6 +85,25 @@ namespace GodMode.Shared.Models;
 /// How much the session may interrupt the user (issue #438): its <c>settings.json</c>'s, not status.json's. Set at its create
 /// from its action's <c>importance</c>, and by <see cref="Hubs.IProjectHub.SetImportance"/>.
 /// </param>
+/// <param name="Recap">
+/// The session's one-line recap of where it stands (issue #466), as opposed to its turn's reply: the <c>recap</c> of the
+/// last <c>speak</c> call of its main conversation that the server accepted with one. Set as the call's result is read,
+/// mid-turn, and kept until the session gives another: a turn's start, its end or its error does not clear it, so a
+/// running session has one too. Plain text voice can say; null until the session has given one.
+/// </param>
+/// <param name="RecapAt">When the session last gave <paramref name="Recap"/>.</param>
+/// <param name="Outcome">
+/// How the session said its last turn ended (issue #467): the <c>outcome</c> of the <c>speak</c> call that turn made in
+/// its main conversation, which the server accepted. Set with <paramref name="LastResult"/> as the turn ends, null for a
+/// turn that gave none or ended in error, and cleared as the next turn starts, as <paramref name="SpokenSummary"/> is.
+/// What it counts as is <see cref="EffectiveOutcome"/>.
+/// </param>
+/// <param name="LastOutputAt">
+/// When the session's main conversation last wrote a line (issue #468): an assistant message, a tool result or a turn's
+/// end, a subagent's lines not counted. Its activity, where <paramref name="UpdatedAt"/> changes on every status write.
+/// Kept in memory as each line comes, as <paramref name="OutputOffset"/> is: status.json carries it when something else
+/// changes, at the latest as the turn ends. Null until the session has written a line since it was recorded.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -121,14 +140,27 @@ public record ProjectStatus(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool QuietResult = false,
     TurnResult? UnseenResult = null,
     Escalation? Escalation = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal
-);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
+    string? Recap = null,
+    DateTime? RecapAt = null,
+    TurnOutcome? Outcome = null,
+    DateTime? LastOutputAt = null
+)
+{
+    /// <summary>
+    /// What the last turn's end counts as (issue #467): <see cref="TurnOutcome.Done"/> once the session's pull request is
+    /// merged, whatever the session said, else its <see cref="Outcome"/>.
+    /// </summary>
+    [JsonIgnore]
+    public TurnOutcome? EffectiveOutcome => PullRequest?.State == PullRequestState.Merged ? TurnOutcome.Done : Outcome;
+}
 
 /// <summary>A turn's end, as <see cref="ProjectStatus.UnseenResult"/> keeps it.</summary>
 /// <param name="At">When it ended.</param>
 /// <param name="Result">Its result, as <see cref="ProjectStatus.LastResult"/> had it.</param>
 /// <param name="Spoken">Its spoken reply, as <see cref="ProjectStatus.SpokenSummary"/> had it.</param>
-public record TurnResult(DateTime At, string? Result, string? Spoken = null);
+/// <param name="Outcome">How the session said it ended, as <see cref="ProjectStatus.Outcome"/> had it.</param>
+public record TurnResult(DateTime At, string? Result, string? Spoken = null, TurnOutcome? Outcome = null);
 
 /// <summary>A decision an overseer asked the user for: <see cref="ProjectStatus.Escalation"/>.</summary>
 /// <param name="At">When it asked.</param>

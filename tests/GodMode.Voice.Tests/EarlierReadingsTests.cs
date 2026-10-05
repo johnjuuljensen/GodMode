@@ -21,7 +21,7 @@ public sealed class EarlierReadingsTests
         var servers = new FakeServers();
         var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
         return (servers, voice);
     }
 
@@ -108,7 +108,7 @@ public sealed class EarlierReadingsTests
             .Respond("Sendt.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
 
         voice.Transcriptions.Add(Heard("Status 101.", "Status 10"));
         await voice.Events.SaidAsync("101 er idle.");

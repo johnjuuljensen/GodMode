@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using GodMode.Server.Auth;
+using GodMode.Shared.Enums;
 using Microsoft.AspNetCore.Authorization;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
@@ -35,46 +36,97 @@ public sealed partial class SpeakTool(ILogger<SpeakTool> logger)
         "listening now, call the " + Name + " tool once, as the last thing before your final reply, with a short spoken " +
         "version of that reply: one or two plain sentences, at most 300 characters, in the language you reply in, ending " +
         "with your question if you have one. Then write your full reply as usual. Call it from your main conversation " +
-        "only, never from a subagent. If it refuses the text, it says why: fix the text and call it again.";
+        "only, never from a subagent. If it refuses the text, it says why: fix the text and call it again. " +
+        "When where the session stands changes (a pull request opened, the tests went green, you are blocked, the work " +
+        "is done), also give its recap: one plain line of where the session stands, not what this turn did, e.g. \"Pull " +
+        "request 456 is open, the tests pass, waiting for review\". It is kept until you give another, so not every turn. " +
+        "Give every call its outcome, how this turn ends: done when the work is complete, needs-you when you need a " +
+        "decision or input, continuing when you carry on by yourself (a background task, waiting on CI or a review), " +
+        "blocked when you cannot go on and say why. Only done is told to the user as done.";
+
+    /// <summary>The most characters a recap may have, its whitespace collapsed: one line (issue #466).</summary>
+    public const int RecapMaxLength = 200;
 
     [McpServerTool(Name = Name)]
     [Description("Gives the spoken version of this turn's reply, which GodMode's voice says word for word to a user who " +
         "listens rather than reads. Call it once on every turn, as the last thing before your final reply, from your main " +
         "conversation (never a subagent): one or two plain spoken sentences, at most 300 characters, ending with your " +
         "question if you have one. No markdown, code, paths, URLs or lists: say what they are instead. The full reply is " +
-        "still written as usual, and stays on screen. A later call in the same turn replaces an earlier one. Refused, " +
-        "with why, for a text voice cannot say; fix it and call again.")]
+        "still written as usual, and stays on screen. A later call in the same turn replaces an earlier one. With a " +
+        "recap, it also keeps the session's one line of where it stands until another replaces it. With its outcome, it says " +
+        "how the turn ends: only done is told to the user as done. Refused, with why, for a text or recap voice cannot " +
+        "say, or an outcome that is not one of the four; fix it and call again.")]
     public string Speak(
         RequestContext<CallToolRequestParams> context,
-        [Description("What to say, e.g. \"The fix is pushed and the tests pass. Shall I open the pull request?\"")] string text)
+        [Description("What to say, e.g. \"The fix is pushed and the tests pass. Shall I open the pull request?\"")] string text,
+        [Description("Only when where the session stands changed: one plain line of where it stands now, not what this " +
+            "turn did, e.g. \"Pull request 456 is open, the tests pass, waiting for review\". At most 200 characters. " +
+            "Kept until a later call gives another.")] string? recap = null,
+        [Description("How this turn ends: \"done\" (the work is complete), \"needs-you\" (a decision or input is " +
+            "needed), \"continuing\" (you carry on by yourself: a background task, waiting on CI or a review) or " +
+            "\"blocked\" (you cannot go on, and the text says why).")] string? outcome = null)
     {
         var projectId = context.User?.FindFirstValue(GodModeAuthExtensions.ProjectIdClaim)
             ?? throw new McpException("The caller is not a project");
         var (spoken, refused) = Check(text);
-        if (refused is not null)
+        var (recapped, recapRefused) = CheckRecap(recap);
+        var (_, outcomeRefused) = CheckOutcome(outcome);
+        if ((refused ?? recapRefused ?? outcomeRefused) is { } why)
         {
-            logger.LogInformation("Project {ProjectId}: speak refused: {Reason}", projectId, refused);
-            throw new McpException(refused);
+            logger.LogInformation("Project {ProjectId}: speak refused: {Reason}", projectId, why);
+            throw new McpException(why);
         }
-        return $"Kept as this turn's spoken reply: \"{spoken}\". Now write your full reply as usual, unless you already have.";
+        return recapped is null
+            ? $"Kept as this turn's spoken reply: \"{spoken}\". Now write your full reply as usual, unless you already have."
+            : $"Kept as this turn's spoken reply: \"{spoken}\", and as the session's recap: \"{recapped}\". Now write your full reply as usual, unless you already have.";
     }
 
     /// <summary>
     /// The text as voice says it, its whitespace collapsed, or why it cannot be said: it is empty, longer than
     /// <see cref="MaxLength"/>, or written for a screen (markdown, code, a URL, a list).
     /// </summary>
-    public static (string Spoken, string? Refused) Check(string? text)
+    public static (string Spoken, string? Refused) Check(string? text) => Check(text, "text", MaxLength,
+        "say less, in one or two sentences; the full reply on screen has the rest.");
+
+    /// <summary>
+    /// The recap as voice says it, or why it cannot be said, as <see cref="Check(string?)"/> checks a text, at most
+    /// <see cref="RecapMaxLength"/> characters. A recap that is missing or blank is none: (null, null).
+    /// </summary>
+    public static (string? Recap, string? Refused) CheckRecap(string? recap) =>
+        string.IsNullOrWhiteSpace(recap) ? (null, null)
+            : Check(recap, "recap", RecapMaxLength, "say only where the session stands, in one line.");
+
+    /// <summary>The outcomes as <c>speak</c> takes them, by their names on the wire.</summary>
+    public static readonly IReadOnlyDictionary<string, TurnOutcome> Outcomes = new Dictionary<string, TurnOutcome>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["done"] = TurnOutcome.Done,
+        ["needs-you"] = TurnOutcome.NeedsYou,
+        ["continuing"] = TurnOutcome.Continuing,
+        ["blocked"] = TurnOutcome.Blocked,
+    };
+
+    /// <summary>
+    /// The turn's outcome (issue #467), or why it is none of the four. An outcome that is missing or blank is none:
+    /// (null, null), and the turn's end is told as it was before outcomes.
+    /// </summary>
+    public static (TurnOutcome? Outcome, string? Refused) CheckOutcome(string? outcome) => outcome?.Trim() switch
+    {
+        null or "" => (null, null),
+        var named when Outcomes.TryGetValue(named, out var known) => (known, null),
+        var named => (null, $"The outcome '{named}' is not one GodMode knows: give {string.Join(", ", Outcomes.Keys)}."),
+    };
+
+    private static (string Spoken, string? Refused) Check(string? text, string what, int maxLength, string sayLess)
     {
         var spoken = Normalize(text);
         return spoken switch
         {
-            "" => (spoken, "The text is empty: give one or two spoken sentences."),
-            { Length: > MaxLength } => (spoken, $"The text is {spoken.Length} characters, and at most {MaxLength} can be spoken: " +
-                "say less, in one or two sentences; the full reply on screen has the rest."),
-            _ when Url().IsMatch(spoken) => (spoken, "The text has a URL, which cannot be spoken: say what it is instead."),
-            _ when ListItem().IsMatch(text!) => (spoken, "The text is a list: say it as one or two plain sentences."),
+            "" => (spoken, $"The {what} is empty: give one or two spoken sentences."),
+            _ when spoken.Length > maxLength => (spoken, $"The {what} is {spoken.Length} characters, and at most {maxLength} can be spoken: {sayLess}"),
+            _ when Url().IsMatch(spoken) => (spoken, $"The {what} has a URL, which cannot be spoken: say what it is instead."),
+            _ when ListItem().IsMatch(text!) => (spoken, $"The {what} is a list: say it as plain sentences."),
             _ when spoken.IndexOfAny(ScreenCharacters) is var at and >= 0 => (spoken,
-                $"The text has '{spoken[at]}', which is markdown or code and cannot be spoken: write plain sentences, " +
+                $"The {what} has '{spoken[at]}', which is markdown or code and cannot be spoken: write plain sentences, " +
                 "with no markdown, code or paths (say \"pull request 413\", not \"#413\")."),
             _ => (spoken, null),
         };

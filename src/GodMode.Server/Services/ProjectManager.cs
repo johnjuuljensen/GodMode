@@ -717,26 +717,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         foreach (var project in _projects.Values)
         {
             var s = project.Status;
-            summaries.Add(new ProjectSummary(
-                s.Id,
-                s.Name,
-                s.State,
-                s.UpdatedAt,
-                s.CurrentQuestion,
-                s.RootName,
-                ProfileName: project.ProfileName ?? s.ProfileName,
-                PendingPermission: s.PendingPermission,
-                PendingQuestion: s.PendingQuestion,
-                PullRequest: s.PullRequest,
-                Kind: s.Kind,
-                ActionName: s.ActionName,
-                SharedFolder: s.SharedFolder,
-                Adopted: s.Adopted,
-                ParentId: s.ParentId,
-                SlashCommands: s.SlashCommands,
-                RecordedParentId: ServerParentOf(project),
-                Importance: s.Importance
-            ));
+            summaries.Add(ProjectSummary.Of(s) with
+            {
+                ProfileName = project.ProfileName ?? s.ProfileName,
+                RecordedParentId = ServerParentOf(project),
+            });
         }
 
         return summaries.ToArray();
@@ -1371,13 +1356,14 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         await NotifyStatusChanged(project);
     }
 
-    public async Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true)
+    public async Task ReplyAndResumeAsync(string projectId, string text, bool answersPending = true, bool spoken = false)
     {
         if (!_projects.TryGetValue(projectId, out var project))
             throw new KeyNotFoundException($"Project {projectId} not found");
         RefuseFailedCreate(project);
         if (!answersPending) RefuseWhilePending(project);
         SlashCommands.Check(text, project.Status);
+        if (spoken) text = SpokenInput.Mark(text);
         // The user's reply answers what is pending; the fleet's send, which does not, starts no turn of the user's
         if (answersPending) await UserWritesAsync(project);
 
@@ -1385,6 +1371,25 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // for the session to start comes after the lock, so a stop is not held behind it
         var reply = await WithTrackedLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false, answersPending));
         if (reply.SessionStart is { } sessionStart) await sessionStart;
+    }
+
+    public async Task<RecapAsk> AskForRecapAsync(string projectId)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        RefuseFailedCreate(project);
+        if (project.Status.Recap is { Length: > 0 }) return RecapAsk.HasRecap;
+        if (!project.Process.TryAskRecap()) return RecapAsk.Asked;
+        // Only to an idle claude, checked and sent in one step, so it never answers a prompt or joins a turn; as held
+        // input is, it is no reply of the user's. Its answer brings the session back to Idle (StatusUpdater)
+        if (!await _lifecycle.TrySendHeldAsync(project, $"/{SlashCommands.Recap}"))
+        {
+            project.Process.UnaskRecap();
+            return RecapAsk.Busy;
+        }
+        _logger.LogInformation("Project {ProjectId} is asked for its recap", projectId);
+        await NotifyStatusChanged(project);
+        return RecapAsk.Sent;
     }
 
     /// <summary>What a reply did under the resume lock, and, when it resumed, the wait for the session to start that follows.</summary>

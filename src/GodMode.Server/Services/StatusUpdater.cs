@@ -45,8 +45,16 @@ public class StatusUpdater : IStatusUpdater
         var stateChanged = false;
         var status = project.Status;
         var process = project.Process;
-        // Every result ends the turn the user's input started, if one did
-        var userTurn = outputEvent.Type == OutputEventType.Result && process.TakeUserTurn();
+        // The session's activity (issue #468): each line of its main conversation, in memory only, as the output offset is
+        if (IsConversationLine(outputEvent, rawJson))
+            status = status with { LastOutputAt = DateTime.UtcNow };
+        var lastOutputAt = status.LastOutputAt;
+        // A result in a recap's shape, after a /recap, answers it (issue #513): a turn's result that comes first leaves the
+        // mark for it
+        var recapTurn = outputEvent.Type == OutputEventType.Result && IsRecapResult(outputEvent) && process.TakeRecap();
+        // Every other result ends the turn the user's input started, if one did: a reply sent while the recap runs is
+        // the turn after it
+        var userTurn = outputEvent.Type == OutputEventType.Result && !recapTurn && process.TakeUserTurn();
 
         // Parse Claude output events to update state
         switch (outputEvent.Type)
@@ -55,23 +63,28 @@ public class StatusUpdater : IStatusUpdater
                 // A new turn is starting — clear any memo of the previous turn's
                 // trailing assistant text so stale questions don't leak forward.
                 process.LastAssistantText = null;
-                if (IsEcho(outputEvent))
+                if (IsUsersMessage(outputEvent))
                 {
                     // A message the user sent starts the reply over: the last turn's spoken reply, and one this
                     // turn gave before it, say nothing of the reply to come (issue #384)
                     process.ForgetSpoken();
-                    if (status.SpokenSummary != null)
+                    if (status is not { SpokenSummary: null, Outcome: null })
                     {
-                        status = status with { SpokenSummary = null };
+                        status = status with { SpokenSummary = null, Outcome = null };
                         stateChanged = true;
                     }
                 }
-                else
-                    TakeSpeakResults(process, rawJson);
+                // A recap is the session's standing, not the turn's reply: kept as soon as its call is, until another
+                // replaces it, so no turn's start, end or error clears it (issue #466)
+                else if (TakeSpeakResults(process, rawJson) is { } recap)
+                {
+                    status = status with { Recap = recap, RecapAt = DateTime.UtcNow };
+                    stateChanged = true;
+                }
                 // claude has taken a message the user sent: it is working on it, whatever a result
                 // of an earlier turn, handled after the send, said. It echoes it at once between
                 // turns, and at its next step in one
-                if (IsEcho(outputEvent) && status is { PendingPermission: null, PendingQuestion: null }
+                if (IsUsersMessage(outputEvent) && status is { PendingPermission: null, PendingQuestion: null }
                     && (status.State != ProjectState.Running || status.CurrentQuestion != null))
                 {
                     status = status with { State = ProjectState.Running, CurrentQuestion = null };
@@ -86,8 +99,8 @@ public class StatusUpdater : IStatusUpdater
                 // a previously-seen text block in that case.
                 var lastText = QuestionDetection.ExtractLastAssistantText(rawJson);
                 if (lastText != null) process.LastAssistantText = lastText;
-                foreach (var (toolUseId, spoken) in SpokenReply.Calls(rawJson))
-                    process.SpeakCalls[toolUseId] = spoken;
+                foreach (var (toolUseId, call) in SpokenReply.Calls(rawJson))
+                    process.SpeakCalls[toolUseId] = call;
                 break;
 
             // Error events are stderr lines shown in the UI; the process's exit and error results
@@ -106,11 +119,23 @@ public class StatusUpdater : IStatusUpdater
                     CurrentQuestion = null,
                     LastError = outputEvent.Content is { Length: > 0 } text ? text : Subtype(outputEvent) ?? "error result",
                     SpokenSummary = null,
+                    Outcome = null,
                 };
                 process.LastAssistantText = null;
                 process.ForgetSpoken();
                 stateChanged = true;
                 status = WithTokenMetrics(status, outputEvent);
+                break;
+
+            // /recap's answer (issue #513) is the session's standing, not a turn's reply: it is kept as the recap a speak call
+            // gives, and the last reply, its spoken version and outcome stay, and nobody is told a turn finished
+            case OutputEventType.Result when recapTurn:
+                status = status with
+                {
+                    Recap = outputEvent.Content!.Trim(), RecapAt = DateTime.UtcNow, State = ProjectState.Idle, CurrentQuestion = null,
+                };
+                process.LastAssistantText = null;
+                stateChanged = true;
                 break;
 
             // A command's turn that says nothing (/clear, /compact): the session is idle, and has no new reply to
@@ -126,13 +151,21 @@ public class StatusUpdater : IStatusUpdater
                 // last assistant text block (trimmed) ends with '?'. See issue #131.
                 // The result's text is claude's summary of the turn, whichever it is
                 var endedAt = DateTime.UtcNow;
-                // and its spoken version the one the session gave in it, or none (issue #384)
-                status = WithTurnEnd(status, IsQuietTurnEnd(project, userTurn)) with
+                // and its spoken version the one the session gave in it, or none (issue #384), and its outcome the one it
+                // said, or none (issue #467)
+                var outcome = process.Outcome;
+                status = WithTurnEnd(status, IsQuietTurnEnd(project, userTurn, outcome)) with
                 {
                     LastResult = outputEvent.Content, LastResultAt = endedAt, LastError = null, SpokenSummary = process.Spoken,
+                    Outcome = outcome,
                 };
-                status = QuestionDetection.IsQuestion(process.LastAssistantText)
-                    ? status with { State = ProjectState.WaitingInput, CurrentQuestion = process.LastAssistantText, QuestionAt = endedAt }
+                // A turn that says it needs the user, or is blocked, waits on the user as one that ended on a question does
+                status = QuestionDetection.IsQuestion(process.LastAssistantText) || outcome is TurnOutcome.NeedsYou or TurnOutcome.Blocked
+                    ? status with
+                    {
+                        State = ProjectState.WaitingInput, QuestionAt = endedAt,
+                        CurrentQuestion = process.LastAssistantText ?? (outputEvent.Content is { Length: > 0 } said ? said : WaitsText(outcome)),
+                    }
                     : status with { State = ProjectState.Idle, CurrentQuestion = null };
                 process.LastAssistantText = null;
                 process.ForgetSpoken();
@@ -167,13 +200,18 @@ public class StatusUpdater : IStatusUpdater
             case OutputEventType.ConversationReset:
                 // /clear: the conversation that had the last reply and question is gone
                 process.LastAssistantText = null;
-                stateChanged = status is not { LastResult: null, LastResultAt: null, CurrentQuestion: null, QuietResult: false, UnseenResult: null };
-                status = status with { LastResult = null, LastResultAt = null, CurrentQuestion = null, QuietResult = false, UnseenResult = null };
+                stateChanged = status is not { LastResult: null, LastResultAt: null, CurrentQuestion: null, QuietResult: false, UnseenResult: null, Outcome: null };
+                status = status with { LastResult = null, LastResultAt = null, CurrentQuestion = null, QuietResult = false, UnseenResult = null, Outcome = null };
                 break;
         }
 
-        // Most lines (assistant text, tool use, echoed user messages) change nothing on disk
-        if (!stateChanged) return false;
+        // Most lines (assistant text, tool use, echoed user messages) change nothing on disk: status.json carries their
+        // time when something else changes
+        if (!stateChanged)
+        {
+            project.Status = project.Status with { LastOutputAt = lastOutputAt };
+            return false;
+        }
 
         // Update duration
         var duration = DateTime.UtcNow - status.CreatedAt;
@@ -189,12 +227,19 @@ public class StatusUpdater : IStatusUpdater
     }
 
     /// <summary>
-    /// Whether the turn ending now raises no Finished (issue #401): the one place that decides it. Its action has
+    /// Whether the turn ending now raises no Finished (issues #401, #467): the one place that decides it. Its action has
     /// <c>quietTurns</c> (<see cref="ProjectInfo.QuietTurns"/>), and the user did not start the turn
     /// (<paramref name="userTurn"/>): an overseer woken by a worker's message, a notice or its own background task, which
-    /// the server cannot always tell apart, so the setting is the action's, not the turn's origin's.
+    /// the server cannot always tell apart, so the setting is the action's, not the turn's origin's. Or the session said
+    /// the turn is <see cref="TurnOutcome.Continuing"/>: it carries on by itself, and nothing is the user's yet. A turn
+    /// that said it is done is quiet still on a quiet action, whose setting decides for every turn the user did not start.
     /// </summary>
-    public static bool IsQuietTurnEnd(ProjectInfo project, bool userTurn) => project.QuietTurns && !userTurn;
+    public static bool IsQuietTurnEnd(ProjectInfo project, bool userTurn, TurnOutcome? outcome = null) =>
+        project.QuietTurns && !userTurn || outcome == TurnOutcome.Continuing;
+
+    /// <summary>What a turn that needs the user, or is blocked, asks, when it ended with no text at all.</summary>
+    private static string WaitsText(TurnOutcome? outcome) =>
+        outcome == TurnOutcome.Blocked ? "The session is blocked." : "The session needs you.";
 
     /// <summary>
     /// <paramref name="status"/> as a turn's end leaves its Finished: a quiet one keeps the
@@ -206,23 +251,31 @@ public class StatusUpdater : IStatusUpdater
         if (!quiet) return status with { QuietResult = false, UnseenResult = null };
         var unseen = status.QuietResult
             ? status.UnseenResult
-            : status.LastResultAt is { } at ? new TurnResult(at, status.LastResult, status.SpokenSummary) : null;
+            : status.LastResultAt is { } at ? new TurnResult(at, status.LastResult, status.SpokenSummary, status.Outcome) : null;
         return status with { QuietResult = true, UnseenResult = unseen is { } kept && kept.At > (status.SeenAt ?? DateTime.MinValue) ? kept : null };
     }
 
     /// <summary>
     /// The results a user line gives this turn's <c>speak</c> calls: an accepted one's text is the turn's spoken reply,
-    /// the last accepted the one kept; a refused or denied one gives none.
+    /// the last accepted the one kept, with its outcome, which a later accepted call without one leaves as it is; a refused
+    /// or denied one gives none. Returns the recap of the last accepted call that gave one, or null.
     /// </summary>
-    private static void TakeSpeakResults(ProjectProcess process, string rawJson)
+    private static string? TakeSpeakResults(ProjectProcess process, string rawJson)
     {
-        if (process.SpeakCalls.Count == 0) return;
+        if (process.SpeakCalls.Count == 0) return null;
+        string? recap = null;
         foreach (var (toolUseId, isError) in SpokenReply.Results(rawJson))
         {
-            if (!process.SpeakCalls.Remove(toolUseId, out var text) || isError) continue;
-            // The tool checked it as the stream has it; one it would refuse is never said
-            if (SpeakTool.Check(text).Refused is null) process.Spoken = text;
+            if (!process.SpeakCalls.Remove(toolUseId, out var call) || isError) continue;
+            // The tool checked them as the stream has them; a call it would refuse is never said, nor its recap kept
+            var (outcome, outcomeRefused) = SpeakTool.CheckOutcome(call.Outcome);
+            if (SpeakTool.Check(call.Text).Refused is not null || SpeakTool.CheckRecap(call.Recap).Refused is not null
+                || outcomeRefused is not null) continue;
+            process.Spoken = call.Text;
+            process.Outcome = outcome ?? process.Outcome;
+            recap = call.Recap ?? recap;
         }
+        return recap;
     }
 
     /// <summary>The metadata key a <c>system</c> event carries claude's session ID under.</summary>
@@ -262,12 +315,73 @@ public class StatusUpdater : IStatusUpdater
     private static bool IsSilentCommandResult(OutputEvent outputEvent) =>
         outputEvent.Metadata?.GetValueOrDefault(NumTurnsKey) is 0L && string.IsNullOrWhiteSpace(outputEvent.Content);
 
+    /// <summary>
+    /// The result of a <c>/recap</c> (issue #513): no error, the model took no turn (<c>num_turns</c> 0), and its text is
+    /// the recap. claude writes a synthetic assistant line with the same text before it.
+    /// </summary>
+    private static bool IsRecapResult(OutputEvent outputEvent) =>
+        !IsErrorResult(outputEvent) && outputEvent.Metadata?.GetValueOrDefault(NumTurnsKey) is 0L
+        && !string.IsNullOrWhiteSpace(outputEvent.Content);
+
+    /// <summary>
+    /// A message the user sent, echoed (<see cref="IsEcho"/>): not a <c>/recap</c>, which asks the session where it stands
+    /// and starts no turn of the user's (issue #513).
+    /// </summary>
+    private static bool IsUsersMessage(OutputEvent outputEvent) =>
+        IsEcho(outputEvent) && !SlashCommands.IsRecap(outputEvent.Content);
+
     /// <summary>The metadata key a <c>user</c> event that claude echoed (<c>isReplay</c>) carries.</summary>
     public const string IsReplayKey = "is_replay";
 
     /// <summary>A user message the user sent, echoed by claude as it takes it (<c>--replay-user-messages</c>).</summary>
     private static bool IsEcho(OutputEvent outputEvent) =>
         outputEvent.Metadata?.GetValueOrDefault(IsReplayKey) is true;
+
+    /// <summary>
+    /// A line of the session's main conversation (issue #468): a message of the user's or the model's, or a turn's end. Not
+    /// a system line, and not a subagent's, which names the tool use it runs under (<c>parent_tool_use_id</c>). Only a
+    /// line that gives it a value other than null is parsed to tell (#507): claude writes it, as null, on nearly every line.
+    /// </summary>
+    internal static bool IsConversationLine(OutputEvent outputEvent, string rawJson)
+    {
+        if (outputEvent.Type is not (OutputEventType.User or OutputEventType.Assistant or OutputEventType.Result)) return false;
+        if (NoParentToolUse(rawJson)) return true;
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            return !(doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("parent_tool_use_id", out var parent) && parent.ValueKind == JsonValueKind.String);
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+    }
+
+    private const string ParentToolUseKey = "\"parent_tool_use_id\"";
+
+    /// <summary>
+    /// Whether every <c>"parent_tool_use_id"</c> in the line, if any, is followed by <c>: null</c>, read without parsing
+    /// it: such a line is the main conversation's. False for one that may name a tool use, which is parsed to tell.
+    /// </summary>
+    internal static bool NoParentToolUse(string rawJson)
+    {
+        for (var at = rawJson.IndexOf(ParentToolUseKey, StringComparison.Ordinal); at >= 0;
+             at = rawJson.IndexOf(ParentToolUseKey, at + ParentToolUseKey.Length, StringComparison.Ordinal))
+        {
+            var i = SkipWhitespace(rawJson, at + ParentToolUseKey.Length);
+            if (i >= rawJson.Length || rawJson[i] != ':') return false;
+            i = SkipWhitespace(rawJson, i + 1);
+            if (string.CompareOrdinal(rawJson, i, "null", 0, 4) != 0) return false;
+        }
+        return true;
+    }
+
+    private static int SkipWhitespace(string text, int at)
+    {
+        while (at < text.Length && char.IsWhiteSpace(text[at])) at++;
+        return at;
+    }
 
     /// <summary><c>system/init</c>: claude (re)started its session. It writes it once it has read its first input.</summary>
     public static bool IsSessionStart(OutputEvent outputEvent) =>

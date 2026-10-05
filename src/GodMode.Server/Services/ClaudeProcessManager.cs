@@ -435,6 +435,8 @@ public class ClaudeProcessManager : IClaudeProcessManager
         await stdinLock.WaitAsync();
         try
         {
+            // Whoever sends it, /recap's result is the session's recap (issue #513): marked before claude can answer it
+            if (SlashCommands.IsRecap(input)) project.Process.ExpectRecap();
             await launch.Process.StandardInput.WriteLineAsync(json);
             await launch.Process.StandardInput.FlushAsync();
 

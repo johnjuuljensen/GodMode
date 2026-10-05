@@ -65,6 +65,9 @@ public sealed record VoiceSessionSetup
 
     /// <summary>Where the session writes its log (<see cref="SessionOptions.LogDirectory"/>).</summary>
     public required string LogDirectory { get; init; }
+
+    /// <summary>The conversation's clock: when an announcement's window ends (<see cref="VoiceConversation.AnnouncedSwitchWindow"/>). The system's when null.</summary>
+    public TimeProvider? Time { get; init; }
 }
 
 /// <summary>
@@ -153,7 +156,7 @@ public sealed class VoiceSession : IAsyncDisposable
         var handles = new ProjectHandles();
         var projects = new ProjectBoard(setup.Servers, handles);
         var board = new AttentionBoard(setup.Servers, handles, projects);
-        var conversation = new VoiceConversation();
+        var conversation = new VoiceConversation(setup.Time);
 
         var heard = await setup.ConnectAsync(ct);
         // The roots as they are now, for the prompt's kinds of session (#473); none when no server answers
@@ -169,7 +172,7 @@ public sealed class VoiceSession : IAsyncDisposable
         {
             SttLanguageCode = ElevenLabsLanguageCode.Primary,
             SttSecondaryLanguages = [.. languages.MixedIn.Select(TwoLetter)],
-            SttKeyterms = Keyterms(projects.Projects, handles),
+            SttKeyterms = Keyterms(projects.Shown, handles),
             TtsLanguageCode = ElevenLabsLanguageCode.Primary,
         };
 
@@ -181,6 +184,10 @@ public sealed class VoiceSession : IAsyncDisposable
         collection.AddVoiceBotSessions();
         var services = collection.BuildServiceProvider();
 
+        // Earcons play before an announcement's words, after the music paused for them (#455), and the "heard you" tone
+        // as a final is taken (#458); the setting turns both off
+        var speaker = new CueingSink(setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink, logger);
+        var sounds = setup.Settings.Earcons ? speaker : null;
         var state = new VoiceStateTracker();
         state.Changed += setup.Events.StateChanged;
         AsyncServiceScope scope = default;
@@ -190,17 +197,18 @@ public sealed class VoiceSession : IAsyncDisposable
             scope = services.CreateAsyncScope();
 
             var inference = scope.ServiceProvider.GetRequiredService<IInferenceProvider>();
-            var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation);
+            var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation, phrases: phrases, staleAfter: setup.Settings.StaleAfter);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
                 GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null, roots),
                 setup.Mic is { } listening && setup.Transcription is TranscriptionInput.Audio audio
                     ? TranscriptionInput.FromAudio(listening.Listening(audio.Source))
                     : setup.Transcription,
-                setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink,
-                new EventSink(setup.Events, state, tools.Creates, setup.Mic, setup.Media))
+                speaker,
+                new EventSink(setup.Events, state, tools.Creates, conversation, setup.Mic, setup.Media, sounds, tools.Dictation))
             {
-                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board), logger),
+                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board, tools.Names,
+                    sounds is null ? null : sounds.Cue), logger),
                 Options = new SessionOptions
                 {
                     LogDirectory = setup.LogDirectory,
@@ -214,9 +222,14 @@ public sealed class VoiceSession : IAsyncDisposable
             projects.Changed += voice.RefreshKeyterms;
             voice.RefreshKeyterms();
             // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement
-            var announcements = new HeldAnnouncements(session.Announcements, tools.Creates);
-            board.Attach((item, handle) => announcements.Write(new Announcement(
-                phrases.Announce(tools.Names.Of(item.Project) ?? new SpokenName(handle), item.Item), item.Project.Key)));
+            // and while a dictation is taken (#459): one in a pause to think would break it
+            var announcements = new HeldAnnouncements(session.Announcements, tools.Creates, tools.Dictation);
+            // A dictation the mic closed on, with no "diktat slut", is dropped: nothing is sent (#459)
+            if (setup.Mic is { } dictationMic)
+                dictationMic.Changed += micState => { if (micState == VoiceMicState.Closed) tools.Dictation.Abandon(); };
+            // Worded again as it is said, anchored by what was said before it (#455): this text is the log's, and the fallback's
+            board.Attach((item, handle) => announcements.Write(board.AnnouncementOf(item,
+                phrases.Announce(tools.Names.Full(item.Project) ?? new SpokenName(handle), item.Item))));
             tools.Creates.Attach(outcome => announcements.Write(new Announcement(phrases.Created(outcome))));
             // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
             if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));
@@ -240,6 +253,8 @@ public sealed class VoiceSession : IAsyncDisposable
     /// characters): the projects' roots ("Assistant"), their profiles ("Outbound"), then their handles ("kappe"), each
     /// in the order of the projects, the one changed last first. A handle that is a number needs none: numbers are
     /// recognized as they are. A name too long to be a keyterm is left out, not cut: a cut name is not what is said.
+    /// The session gives it the projects it says unasked (<see cref="ProjectBoard.Shown"/>, #469): an overseer's workers
+    /// would take the places of the names voice says.
     /// </summary>
     public static IReadOnlyList<string> Keyterms(IEnumerable<ServerProject> projects, ProjectHandles handles)
     {
@@ -265,7 +280,7 @@ public sealed class VoiceSession : IAsyncDisposable
     {
         lock (_keytermsLock)
         {
-            var terms = Keyterms(Projects.Projects, Handles);
+            var terms = Keyterms(Projects.Shown, Handles);
             if (_keytermsSent?.SetEquals(terms) == true) return;
             _keyterms?.Set(terms);
             _keytermsSent = new HashSet<string>(terms, StringComparer.Ordinal);
@@ -324,12 +339,18 @@ public sealed class VoiceSession : IAsyncDisposable
     }
 
     /// <summary>The session's events, to the host and the state.</summary>
-    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates, VoiceMic? mic, MediaPause? media)
+    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates, VoiceConversation conversation,
+        VoiceMic? mic, MediaPause? media, CueingSink? sounds, Dictation dictation)
         : ISessionEventSink
     {
         public Task OnTranscriptionAsync(TranscriptionEvent evt, string? cleanedText)
         {
             mic?.Heard();
+            // VoiceBot reports a transcription only once it is past its echo, dedup and noise filters, and answers a final
+            // right after: a final here is a turn taken, and the tone says so before its answer (#458). A dictation's
+            // parts get none, only its start and its terminator: a sound at every pause to think would break the thought
+            if (!evt.IsPartial && (!dictation.Active || Dictation.Ends(cleanedText ?? evt.Text).Terminator is not null))
+                sounds?.Heard();
             events.Transcript(cleanedText ?? evt.Text, evt.IsPartial);
             return Task.CompletedTask;
         }
@@ -374,6 +395,8 @@ public sealed class VoiceSession : IAsyncDisposable
             media?.Activity(activity);
             mic?.Activity(activity);
             state.Activity(activity);
+            // An announcement that changed the project talked about has been said: its window starts (#461)
+            if (activity != SessionActivity.Speaking) conversation.SpeechEnded();
             return Task.CompletedTask;
         }
     }

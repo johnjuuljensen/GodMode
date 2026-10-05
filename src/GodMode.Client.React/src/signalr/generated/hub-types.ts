@@ -109,6 +109,20 @@ export type PullRequestReview =
 /** Where a project's pull request is (PullRequestStatus.State). */
 export type PullRequestState = 'Draft' | 'Open' | 'Merged' | 'Closed';
 
+/** What became of asking a session for its recap (the hub's AskForRecap, issue #513). */
+export type RecapAsk =
+  /** `/recap` was sent: its answer becomes the session's ProjectStatus.Recap when it comes. */
+  | 'sent'
+  /** It was asked before, and nothing is sent: the recap is on its way, or it gave none. */
+  | 'asked'
+  /** The session has a recap: nothing is sent. */
+  | 'has-recap'
+  /**
+   * The session cannot take it now (it runs, waits on a permission or a question, or its claude is stopped):
+   * nothing is sent.
+   */
+  | 'busy';
+
 /** Represents the current state of a host provider. */
 export type ServerState =
   /** Host is running and active. */
@@ -121,6 +135,24 @@ export type ServerState =
   | 'Stopping'
   /** Host state is unknown. */
   | 'Unknown';
+
+/**
+ * How a session says its turn ended (issue #467), with its `speak` call's `outcome`: a turn that ended with
+ * the session idle is not, for that, done. A turn that gave none has none (null), and its end raises
+ * AttentionKind.Finished as every turn's did before outcomes, which voice says as idle, never as done.
+ */
+export type TurnOutcome =
+  /** The work is complete: the turn's end raises AttentionKind.Finished, said as done. */
+  | 'done'
+  /** A decision or input is needed: the session waits on the user, a AttentionKind.Question. */
+  | 'needs-you'
+  /**
+   * The session carries on by itself (a background task, waiting on CI or a review): its end raises nothing,
+   * as a quiet turn's does (ProjectStatus.QuietResult).
+   */
+  | 'continuing'
+  /** It cannot go on, and says why: the session waits on the user, a AttentionKind.Question. */
+  | 'blocked';
 
 /** Request to add or update a GodMode server registration. */
 export interface AddServerRequest {
@@ -217,6 +249,13 @@ export interface AttentionItem {
    * and an AttentionAlert.Interrupt one makes a sound and is announced first.
    */
   Alert?: AttentionAlert;
+  /**
+   * How the turn that raised it ended, as the session said it (ProjectStatus.EffectiveOutcome, issue #467),
+   * for a AttentionKind.Finished or a AttentionKind.Question its turn's end raised: a Finished is done only
+   * with TurnOutcome.Done, and with none the session is idle, not done; a Question is TurnOutcome.NeedsYou or
+   * TurnOutcome.Blocked when the session said so. Null otherwise.
+   */
+  Outcome?: TurnOutcome | null;
 }
 
 /**
@@ -559,6 +598,30 @@ export interface ProjectStatus {
    * at its create from its action's `importance`, and by IProjectHub.SetImportance.
    */
   Importance?: Importance;
+  /**
+   * The session's one-line recap of where it stands (issue #466), as opposed to its turn's reply: the `recap`
+   * of the last `speak` call of its main conversation that the server accepted with one. Set as the call's
+   * result is read, mid-turn, and kept until the session gives another: a turn's start, its end or its error
+   * does not clear it, so a running session has one too. Plain text voice can say; null until the session has
+   * given one.
+   */
+  Recap?: string | null;
+  /** When the session last gave Recap. */
+  RecapAt?: string | null;
+  /**
+   * How the session said its last turn ended (issue #467): the `outcome` of the `speak` call that turn made
+   * in its main conversation, which the server accepted. Set with LastResult as the turn ends, null for a
+   * turn that gave none or ended in error, and cleared as the next turn starts, as SpokenSummary is. What it
+   * counts as is ProjectStatus.EffectiveOutcome.
+   */
+  Outcome?: TurnOutcome | null;
+  /**
+   * When the session's main conversation last wrote a line (issue #468): an assistant message, a tool result
+   * or a turn's end, a subagent's lines not counted. Its activity, where UpdatedAt changes on every status
+   * write. Kept in memory as each line comes, as OutputOffset is: status.json carries it when something else
+   * changes, at the latest as the turn ends. Null until the session has written a line since it was recorded.
+   */
+  LastOutputAt?: string | null;
 }
 
 /** Summary information about a project. */
@@ -605,6 +668,19 @@ export interface ProjectSummary {
   RecordedParentId?: string | null;
   /** How much the session may interrupt the user, as in ProjectStatus.Importance. */
   Importance?: Importance;
+  /** The session's one-line recap of where it stands, as in ProjectStatus.Recap. */
+  Recap?: string | null;
+  /** When the session last gave its recap, as in ProjectStatus.RecapAt. */
+  RecapAt?: string | null;
+  /**
+   * What the session's last turn's end counts as, as in ProjectStatus.EffectiveOutcome: done once its pull
+   * request is merged.
+   */
+  Outcome?: TurnOutcome | null;
+  /** When the session's last turn ended, as in ProjectStatus.LastResultAt. */
+  LastResultAt?: string | null;
+  /** When its main conversation last wrote a line, as in ProjectStatus.LastOutputAt (issue #468). */
+  LastOutputAt?: string | null;
 }
 
 /**
@@ -677,6 +753,8 @@ export interface TurnResult {
   Result?: string | null;
   /** Its spoken reply, as ProjectStatus.SpokenSummary had it. */
   Spoken?: string | null;
+  /** How the session said it ended, as ProjectStatus.Outcome had it. */
+  Outcome?: TurnOutcome | null;
 }
 
 /**
@@ -769,6 +847,22 @@ export interface IProjectHub {
    * it within the server's timeout.
    */
   ReplyAndResume(projectId: string, text: string): Promise<void>;
+  /**
+   * IProjectHub.ReplyAndResume with an answer spoken and transcribed (issue #460): the server sends it to
+   * claude marked so, on a line of its own before it, so the session reads it knowing words may be misheard.
+   * A command (`/clear`) goes as it is, as a marked one would be text. A typed reply is
+   * IProjectHub.ReplyAndResume, unmarked.
+   */
+  ReplyByVoice(projectId: string, text: string): Promise<void>;
+  /**
+   * Asks the project for its recap (issue #513): sends it `/recap`, whose answer becomes its
+   * ProjectStatus.Recap and ProjectStatus.RecapAt, leaves its last result as it is and raises no attention
+   * item. Only to a project with no recap, whose claude runs and is idle (nothing pending, no question), and
+   * once for as long as the server tracks it, whoever asks; anything else sends nothing, and says why. No
+   * turn of the user's, and the user has not seen the last result for it. Voice asks it when the user asks
+   * about a project.
+   */
+  AskForRecap(projectId: string): Promise<RecapAsk>;
   /**
    * Subscribes to a project's output. The server replays output.jsonl from fromOffset in
    * IProjectHubClient.OutputBatch messages, sends IProjectHubClient.OutputReplayComplete, and only then live

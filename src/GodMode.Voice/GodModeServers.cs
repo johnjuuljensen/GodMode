@@ -67,8 +67,11 @@ public interface IGodModeServers
 
     Task<ProjectStatus> GetStatusAsync(ProjectRef project, CancellationToken ct);
 
-    /// <summary><see cref="IProjectHub.ReplyAndResume"/>.</summary>
+    /// <summary><see cref="IProjectHub.ReplyByVoice"/>: the answer reaches the session marked as transcribed speech.</summary>
     Task ReplyAsync(ProjectRef project, string text, CancellationToken ct);
+
+    /// <summary><see cref="IProjectHub.AskForRecap"/>: sends <c>/recap</c> to a project with no recap, once (#513).</summary>
+    Task<RecapAsk> AskForRecapAsync(ProjectRef project, CancellationToken ct);
 
     Task MarkSeenAsync(ProjectRef project, CancellationToken ct);
 
@@ -182,7 +185,10 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
         Hub(project).InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), project.ProjectId, ct);
 
     public Task ReplyAsync(ProjectRef project, string text, CancellationToken ct) =>
-        Hub(project).InvokeAsync(nameof(IProjectHub.ReplyAndResume), project.ProjectId, text, ct);
+        Hub(project).InvokeAsync(nameof(IProjectHub.ReplyByVoice), project.ProjectId, text, ct);
+
+    public Task<RecapAsk> AskForRecapAsync(ProjectRef project, CancellationToken ct) =>
+        Hub(project).InvokeAsync<RecapAsk>(nameof(IProjectHub.AskForRecap), project.ProjectId, ct);
 
     public Task MarkSeenAsync(ProjectRef project, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.MarkSeen), project.ProjectId, ct);
@@ -360,9 +366,7 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
         private void Push() => push(serverId, serverName, [.. _projects.Values]);
 
-        private static ProjectSummary Summary(ProjectStatus s) =>
-            new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission,
-                s.PendingQuestion, s.PullRequest, s.Kind, s.ActionName, s.SharedFolder);
+        private static ProjectSummary Summary(ProjectStatus s) => ProjectSummary.Of(s);
     }
 
     void IServerConnectionHandler.OnListedCompletely(IReadOnlySet<string> serverIds) { }
