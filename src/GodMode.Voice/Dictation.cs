@@ -214,9 +214,21 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
 
         End();
         conversation.Current = target;
+        return phrases.DictationSending(name, Sentences(text).Count, Opening(text));
+    }
+
+    /// <summary>
+    /// How <paramref name="text"/> starts, for the read-back: its first <see cref="WordsReadBack"/> words, or its first
+    /// sentence when that is shorter, its last punctuation dropped, with "…" when more follows.
+    /// </summary>
+    public static string Opening(string text)
+    {
         var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        var start = string.Join(" ", words.Take(WordsReadBack)).TrimEnd('.', ',', ';', ':', '!', '?');
-        return phrases.DictationSending(name, Sentences(text).Count, words.Length > WordsReadBack ? $"{start} …" : start);
+        var count = 0;
+        while (count < Math.Min(words.Length, WordsReadBack) && (count == 0 || words[count - 1][^1] is not ('.' or '!' or '?' or '…')))
+            count++;
+        var start = string.Join(" ", words.Take(count)).TrimEnd('.', ',', ';', ':', '!', '?', '…', ' ');
+        return count < words.Length ? $"{start} …" : start;
     }
 
     private string Cancel(ProjectRef target)
