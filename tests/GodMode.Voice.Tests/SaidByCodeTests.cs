@@ -309,6 +309,35 @@ public sealed class SaidByCodeTests
         Assert.False(VoiceTools.SaidAsIs(new string('a', VoiceTools.SaidAsIsLength + 1)));
     }
 
+    /// <summary>#507: the issue's test. A Danish session where the user switches to English gets the code's words in English, and back.</summary>
+    [Fact]
+    public async Task The_codes_words_follow_the_user_switching_to_English_and_back()
+    {
+        var model = new ScriptedChatClient().CallTool(VoiceTools.WhatNeedsMe).CallTool(VoiceTools.WhatNeedsMe).CallTool(VoiceTools.WhatNeedsMe);
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("What needs me?");
+        await voice.Events.SaidAsync("Nothing needs you.");
+        // A final that tells no language keeps the one spoken last
+        voice.Transcriptions.SayAsRecognized("Status?");
+        await Eventually.UntilAsync(() => voice.Events.Responses.Count(r => r == "Nothing needs you.") == 2,
+            () => $"English again; it said: {string.Join(" | ", voice.Events.Responses)}");
+        voice.Transcriptions.SayAsRecognized("Hvad venter?");
+        await voice.Events.SaidAsync("Intet venter.");
+    }
+
+    [Theory]
+    [InlineData("Hvad venter?", true)]
+    [InlineData("Læs 283", true)]
+    [InlineData("Svar at den skal merge the branch", true)]
+    [InlineData("What needs me?", false)]
+    [InlineData("Read the reply of issue 283", false)]
+    [InlineData("Status 283", null)]
+    [InlineData("pull request", null)]
+    public void The_language_of_a_final_is_told_by_its_small_words(string final, bool? danish) =>
+        Assert.Equal(danish, SpokenLanguage.IsDanish(final));
+
     [Fact]
     public void The_lists_are_worded_in_the_sessions_language()
     {

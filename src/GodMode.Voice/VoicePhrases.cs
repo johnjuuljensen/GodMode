@@ -5,16 +5,30 @@ using VoiceBot.Core.Resources;
 
 namespace GodMode.Voice;
 
-/// <summary>What the bot says itself, not through the model: announcements, the greeting and a create's answer. Danish, else English.</summary>
+/// <summary>
+/// What the bot says itself, not through the model: announcements, the greeting and a create's answer. In the session's
+/// language, Danish, else English, until the user switches to the other one (<see cref="Heard"/>, #507), as the model
+/// answers in theirs; then in theirs until they switch back.
+/// </summary>
 public sealed partial class VoicePhrases
 {
     /// <summary>How long a prompt the read-back says as it is; a longer one is said cut, after its first words.</summary>
     public const int PromptReadBack = 100;
 
-    private readonly bool _danish;
+    private volatile bool _danish;
 
     public VoicePhrases(SessionLanguages languages) =>
         _danish = languages.Primary.StartsWith("da", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The user said <paramref name="text"/>, a final: the code's words are in its language from now on, when it tells one (<see cref="SpokenLanguage"/>).</summary>
+    public void Heard(string text)
+    {
+        if (SpokenLanguage.IsDanish(text) is { } danish)
+            _danish = danish;
+    }
+
+    /// <summary>Whether the code speaks Danish now.</summary>
+    public bool Danish => _danish;
 
     /// <summary>
     /// What the session says as it starts listening: "Klar.", and, when there are servers and none answered in time,
@@ -246,13 +260,14 @@ public sealed partial class VoicePhrases
 
     /// <summary>
     /// A long project list, summarised by state (#457, <see cref="ProjectListing"/>): the count, then each state, its
-    /// projects by name when it names them, else their count, "the rest" for the one state counted after all named. "16
-    /// projekter. branch master er idle, resten er stoppet. Mere?"
+    /// projects by name when it names them, else their count, "the rest" for the one state counted after all named, when
+    /// it is said last (#507): before a state named after it, "resten" would not be the rest. "16 projekter. branch
+    /// master er idle, resten er stoppet. Mere?"
     /// </summary>
     public string ListSummary(int count, IReadOnlyList<(ListedState State, int Count, IReadOnlyList<SpokenName> Named)> states, bool more, LeftOut? left = null)
     {
         var counted = states.Select((s, i) => (s, i)).Where(x => x.s.Named.Count == 0).ToList();
-        var rest = counted is [var only] && only.i > 0 && states.Take(only.i).All(s => s.Named.Count > 0) ? only.s.State : (ListedState?)null;
+        var rest = counted is [var only] && only.i > 0 && only.i == states.Count - 1 ? only.s.State : (ListedState?)null;
         var parts = states.Select(s =>
             s.Named.Count > 0 ? $"{And([.. s.Named.Select(Named)])} {Doing(s.State, s.Named.Count)}"
             : s.State == rest ? $"{(_danish ? "resten" : "the rest")} {Doing(s.State, 2)}"

@@ -172,6 +172,10 @@ public sealed class ListPagesTests
             English.ListSummary(8, [(ListedState.NeedsYou, 6, []), (ListedState.Running, 2, [new SpokenName("issue 1"), new SpokenName("issue 2")])], more: false));
         Assert.Equal("7 projects. 1 needs you, 6 are stopped. More?",
             English.ListSummary(7, [(ListedState.NeedsYou, 1, []), (ListedState.Stopped, 6, [])], more: true));
+        // #507: a state named after the counted one leaves it no "rest"
+        Assert.Equal("9 projects. issue 1 needs you, 7 are running, issue 9 is stopped. More?",
+            English.ListSummary(9, [(ListedState.NeedsYou, 1, [new SpokenName("issue 1")]), (ListedState.Running, 7, []),
+                (ListedState.Stopped, 1, [new SpokenName("issue 9")])], more: true));
     }
 
     private static AttentionItem InMega(string id, string name, AttentionKind kind) =>

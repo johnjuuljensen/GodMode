@@ -162,7 +162,7 @@ public static class GodModeGraph
 
         var graph = new CompositeBuilder(Id).WithTools(t => AddTools(t, tools));
         // Above Done and help: while dictating, "færdig" and "hjælp" are words of the dictation (#459)
-        graph = graph.Node(new DictationNode("dictation", 95, tools.Dictation));
+        graph = graph.Node(new DictationNode("dictation", 95, tools.Dictation, phrases));
         if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));
         return graph
             .Node(new HelpNode("help", 80))
