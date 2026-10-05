@@ -339,12 +339,13 @@ public class StatusUpdater : IStatusUpdater
 
     /// <summary>
     /// A line of the session's main conversation (issue #468): a message of the user's or the model's, or a turn's end. Not
-    /// a system line, and not a subagent's, which names the tool use it runs under (<c>parent_tool_use_id</c>).
+    /// a system line, and not a subagent's, which names the tool use it runs under (<c>parent_tool_use_id</c>). Only a
+    /// line that gives it a value other than null is parsed to tell (#507): claude writes it, as null, on nearly every line.
     /// </summary>
-    private static bool IsConversationLine(OutputEvent outputEvent, string rawJson)
+    internal static bool IsConversationLine(OutputEvent outputEvent, string rawJson)
     {
         if (outputEvent.Type is not (OutputEventType.User or OutputEventType.Assistant or OutputEventType.Result)) return false;
-        if (!rawJson.Contains("\"parent_tool_use_id\"", StringComparison.Ordinal)) return true;
+        if (NoParentToolUse(rawJson)) return true;
         try
         {
             using var doc = JsonDocument.Parse(rawJson);
@@ -355,6 +356,31 @@ public class StatusUpdater : IStatusUpdater
         {
             return true;
         }
+    }
+
+    private const string ParentToolUseKey = "\"parent_tool_use_id\"";
+
+    /// <summary>
+    /// Whether every <c>"parent_tool_use_id"</c> in the line, if any, is followed by <c>: null</c>, read without parsing
+    /// it: such a line is the main conversation's. False for one that may name a tool use, which is parsed to tell.
+    /// </summary>
+    internal static bool NoParentToolUse(string rawJson)
+    {
+        for (var at = rawJson.IndexOf(ParentToolUseKey, StringComparison.Ordinal); at >= 0;
+             at = rawJson.IndexOf(ParentToolUseKey, at + ParentToolUseKey.Length, StringComparison.Ordinal))
+        {
+            var i = SkipWhitespace(rawJson, at + ParentToolUseKey.Length);
+            if (i >= rawJson.Length || rawJson[i] != ':') return false;
+            i = SkipWhitespace(rawJson, i + 1);
+            if (string.CompareOrdinal(rawJson, i, "null", 0, 4) != 0) return false;
+        }
+        return true;
+    }
+
+    private static int SkipWhitespace(string text, int at)
+    {
+        while (at < text.Length && char.IsWhiteSpace(text[at])) at++;
+        return at;
     }
 
     /// <summary><c>system/init</c>: claude (re)started its session. It writes it once it has read its first input.</summary>

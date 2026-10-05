@@ -1,5 +1,6 @@
 using System.Text.Json;
 using GodMode.FakeClaude;
+using GodMode.Server.Services;
 using GodMode.Server.Tests.Lifecycle;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
@@ -70,6 +71,23 @@ public class LastActivityTests
     }
 
     /// <summary>An assistant line of a subagent's, under the Task call it runs in.</summary>
+    /// <summary>
+    /// #507: a line whose <c>parent_tool_use_id</c> is null, or that has none, is the main conversation's without being
+    /// parsed; only one that may name a tool use is parsed, and a key inside a string or a nested object decides nothing.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"type":"assistant","parent_tool_use_id":null}""", true, true)]
+    [InlineData("""{"type":"assistant","parent_tool_use_id" :  null ,"x":1}""", true, true)]
+    [InlineData("""{"type":"assistant"}""", true, true)]
+    [InlineData("""{"type":"assistant","parent_tool_use_id":"toolu_1"}""", false, false)]
+    [InlineData("""{"type":"assistant","input":{"parent_tool_use_id":"x"},"parent_tool_use_id":null}""", false, true)]
+    [InlineData("""{"type":"user","text":"say \"parent_tool_use_id\": 1","parent_tool_use_id":null}""", true, true)]
+    public void Only_a_line_that_may_name_a_tool_use_is_parsed(string line, bool unparsed, bool main)
+    {
+        Assert.Equal(unparsed, StatusUpdater.NoParentToolUse(line));
+        Assert.Equal(main, StatusUpdater.IsConversationLine(new OutputEvent(DateTime.UtcNow, OutputEventType.Assistant, ""), line));
+    }
+
     private static string SubagentLine(string text) => JsonSerializer.Serialize(new
     {
         type = "assistant",
