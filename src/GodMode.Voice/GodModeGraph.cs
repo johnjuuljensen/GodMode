@@ -78,6 +78,8 @@ public static class GodModeGraph
               it after a while. Never drop what they give, and never add what they leave out. Say numbers as digits.
             - Never read out code, paths or long identifiers; summarize them.
             - After a tool call, say its result in one compressed line with respond.
+            - Several asks in one breath ("Hvad venter, og læs 283"): call their tools one after the other, each with
+              then set to what is still to do after it, and the last one without. The system says what each found.
 
             COMMANDS (Danish first, English accepted):
             - "Hvad venter?" / "What needs me?" — call {{VoiceTools.WhatNeedsMe}}, with the root or profile the user asked

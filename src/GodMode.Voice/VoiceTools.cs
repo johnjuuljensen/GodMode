@@ -45,6 +45,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string ImportanceParameter = "importance";
     public const string SinceParameter = "since";
     public const string WorkersParameter = "workers";
+    public const string ThenParameter = "then";
 
     /// <summary>The <see cref="WorkersParameter"/> that takes in every overseer's workers (#469).</summary>
     public const string WorkersAll = "all";
@@ -97,6 +98,23 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         $"\"{WorkersCurrent}\" for those of the overseer talked about (\"overseerens workers\"). A worker the user names by its " +
         $"handle needs none of this: {ProjectStatus} reads it.", Required: false);
 
+    /// <summary>
+    /// What the user asked for after this call, in the same breath (#507): the code does not end the turn on its words for
+    /// it (<see cref="CodeSaysInference"/>), and the model makes the next call.
+    /// </summary>
+    private static readonly ToolParameter Then = new(ThenParameter,
+        "What the user asked for after this, in the same breath, which another call does (\"læs 283\" in \"hvad venter, og " +
+        "læs 283\"). Empty when they asked for nothing more.", Required: false);
+
+    /// <summary>The tool's result, which the code says after the rest the user asked for (<see cref="Then"/>), when they asked for more.</summary>
+    private async Task<string> AndThen(IDictionary<string, object?> args, Task<string> call)
+    {
+        var result = await call;
+        if (Argument(args, ThenParameter) is { } then && !string.IsNullOrWhiteSpace(then))
+            conversation.Then(result, then.Trim());
+        return result;
+    }
+
     private string StaleHoursSaid => _staleAfter.TotalHours.ToString("0.#", CultureInfo.InvariantCulture);
 
     public ToolSet AddTo(ToolSet tools) => tools
@@ -104,21 +122,21 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             "List what needs the user across all their servers: questions, permission requests, errors, reviews and " +
             "finished results, one line per project, the most recent first, each named as it is said; an overseer's workers " +
             "on its own line, counted, unless the user asks for them. Call when the user asks what needs them, what is waiting, or for status overall.",
-            [InRoot, Since, Workers],
-            (_, args, ct) => WhatNeedsMeAsync(ct, Argument(args, RootParameter), Argument(args, SinceParameter), Argument(args, WorkersParameter)))
+            [InRoot, Since, Workers, Then],
+            (_, args, ct) => AndThen(args, WhatNeedsMeAsync(ct, Argument(args, RootParameter), Argument(args, SinceParameter), Argument(args, WorkersParameter))))
         .Add(ListProjects,
             "List the projects on every server, whether they need the user or not, the most recent first, grouped by profile, " +
             "then root: each by the name it is said by, with its name, kind and state. Stale ones are left out and counted " +
             "unless the user asks for all; an overseer's workers are counted on its line, unless the user asks for them. Call " +
             "when the user asks which projects there are, what runs, what has happened, or about one they just started.",
-            [InRoot, Since, Workers],
-            (_, args, _) => Task.FromResult(ListProjectsText(Argument(args, RootParameter), Argument(args, SinceParameter), Argument(args, WorkersParameter))))
+            [InRoot, Since, Workers, Then],
+            (_, args, _) => AndThen(args, Task.FromResult(ListProjectsText(Argument(args, RootParameter), Argument(args, SinceParameter), Argument(args, WorkersParameter)))))
         .Add(ProjectStatus,
             "Read one project's state and what it waits on (its question, result, error or permission request) in full: " +
             "a very long one has its middle cut, and says so. " +
             "Call when the user asks about one project, or to hear a question or result.",
-            [ProjectReference],
-            (_, args, ct) => ProjectStatusAsync(Argument(args, ProjectParameter), ct))
+            [ProjectReference, Then],
+            (_, args, ct) => AndThen(args, ProjectStatusAsync(Argument(args, ProjectParameter), ct)))
         .Add(ReadReply,
             "Read what a project said last: its last reply, from its output, whether or not it needs the user, also once it " +
             "is seen or idle. A long one comes in parts, the first now, and says how many; read_more gives the next. It marks nothing seen. " +
@@ -133,7 +151,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             "into the project's status (its question, result or error), a status into its last reply. Call when the user says " +
             "\"læs videre\", \"mere\" or \"read on\", or asks about what was just said: \"Hvorfor?\", \"Hvad er det?\", " +
             "\"Mere?\" / \"Why?\", \"What is it?\".",
-            (_, _, ct) => ReadMoreAsync(ct))
+            [Then],
+            (_, args, ct) => AndThen(args, ReadMoreAsync(ct)))
         .Add(Answer,
             "Send the user's answer to a project: it reaches the Claude session as the user's reply, and the session " +
             "continues. Give the answer as the instruction the user meant, in their words.",

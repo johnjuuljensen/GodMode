@@ -210,12 +210,29 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     /// </summary>
     public void SaysItself(string result, string said) => Volatile.Write(ref _said, new SaidByCode(result, said));
 
-    /// <summary>What the code says for <paramref name="result"/>, the tool result the model would read next, and nothing from now on; null when it says nothing for it.</summary>
-    public string? TakeSaid(string result) =>
-        Volatile.Read(ref _said) is { } said && said.Result == result && Interlocked.CompareExchange(ref _said, null, said) == said ? said.Said : null;
+    /// <summary>
+    /// The user asked for <paramref name="then"/> too, in the same breath as the call that gave <paramref name="result"/>
+    /// (#507): what the code says for it waits for the rest, and the model's round after it is run, for the next call.
+    /// </summary>
+    public void Then(string result, string then)
+    {
+        if (Volatile.Read(ref _said) is { } said && said.Result == result)
+            Interlocked.CompareExchange(ref _said, said with { Then = then }, said);
+    }
 
-    private sealed record SaidByCode(string Result, string Said);
+    /// <summary>What the code says for <paramref name="result"/>, the tool result the model would read next, and nothing from now on; null when it says nothing for it.</summary>
+    public string? TakeSaid(string result) => TakeSaidByCode(result)?.Said;
+
+    /// <summary>As <see cref="TakeSaid"/>, with what the user asked for after it (<see cref="Then"/>).</summary>
+    public SaidByCode? TakeSaidByCode(string result) =>
+        Volatile.Read(ref _said) is { } said && said.Result == result && Interlocked.CompareExchange(ref _said, null, said) == said ? said : null;
 }
+
+/// <summary>
+/// What the code says for a tool's <paramref name="Result"/> (<see cref="VoiceConversation.SaysItself"/>), and what the user
+/// asked for after it in the same breath, if anything (<see cref="VoiceConversation.Then"/>, #507).
+/// </summary>
+public sealed record SaidByCode(string Result, string Said, string? Then = null);
 
 /// <summary>How much of a project's anchor a line gives (#455, <see cref="VoiceConversation.Mention"/>).</summary>
 public enum Anchor

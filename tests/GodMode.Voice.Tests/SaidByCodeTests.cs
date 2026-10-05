@@ -30,11 +30,69 @@ public sealed class SaidByCodeTests
         });
         await voice.Events.SaidAsync($"{Danish.Several(2)} issue 101, cleanup, har et spørgsmål. issue 283, voice, er færdig.");
 
-        // Announced oldest first, as they came; listed the most recent first (#468)
+        // Announced most urgent first, the question before the result (#462); listed the most recent first (#468)
         voice.Transcriptions.SayAsRecognized("Hvad venter?");
         await voice.Events.SaidAsync("2 venter på dig: issue 283 er færdig. issue 101, cleanup, har et spørgsmål.");
 
         Assert.Equal(1, model.Calls);
+    }
+
+    /// <summary>
+    /// #507: two asks in one breath. The first call says what more the user asked for (<see cref="VoiceTools.ThenParameter"/>),
+    /// so the code's words for it wait and the model makes the second call; the code says both, in the order asked.
+    /// </summary>
+    [Fact]
+    public async Task What_needs_me_and_then_a_status_in_one_breath_are_both_said()
+    {
+        var servers = new FakeServers();
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "læs 283" })
+            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" });
+        await using var voice = await OfflineVoice.StartAsync(servers, model,
+            connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe til master?")); return Task.CompletedTask; });
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og læs 283");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål. issue 283 spørger: Skal jeg pushe til master?");
+
+        Assert.Equal(2, model.Calls);
+        // The model's second round knew the first was said, and what was left to do
+        var told = Assert.Single(model.ToolResults);
+        Assert.Contains("The system has said this to the user itself already", told);
+        Assert.Contains("\"læs 283\"", told);
+    }
+
+    /// <summary>The model's own reply after a held part (an unknown project it explains) is said after the code's words.</summary>
+    [Fact]
+    public async Task A_second_ask_the_model_answers_itself_is_said_after_the_codes_words()
+    {
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "status 999" })
+            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "999" })
+            .Respond("Ukendt: 999.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og status 999");
+        await voice.Events.SaidAsync("Intet venter. Ukendt: 999.");
+
+        Assert.Equal(3, model.Calls);
+    }
+
+    /// <summary>The model ends the turn on a protocol word alone after a held part: the code's words are said, not "Klar".</summary>
+    [Fact]
+    public async Task A_one_word_reply_after_a_held_part_adds_nothing()
+    {
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "og så?" })
+            .Respond("Klar.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og så?");
+        await voice.Events.SaidAsync("Intet venter.");
+
+        Assert.Equal(2, model.Calls);
     }
 
     [Fact]
