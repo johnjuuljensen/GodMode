@@ -523,10 +523,20 @@ public sealed class AttentionBoard
     /// is still its project's item, and still announced. False once it was answered, on screen or by voice, marked
     /// seen, or the session moved on (its project needs something else now, or nothing), or it went to the inbox alone.
     /// An announcement the board did not make (<see cref="AnnouncementOf"/>), of no item, always waits.
+    /// An item gone from the board when its announcement is dropped was never said, so it is announced again should it
+    /// come back as it was (#507): its server's list went empty while it was away, and the item is still there after.
     /// </summary>
-    public bool Waits(Announcement announcement) =>
-        !_announcements.TryGetValue(announcement, out var item)
-        || ItemOf(item.Project) is { } now && Key(now) == Key(item) && now.Item.Alert != AttentionAlert.Inbox;
+    public bool Waits(Announcement announcement)
+    {
+        if (!_announcements.TryGetValue(announcement, out var item))
+            return true;
+        if (ItemOf(item.Project) is not { } now)
+        {
+            _announced.TryRemove(Key(item), out _);
+            return false;
+        }
+        return Key(now) == Key(item) && now.Item.Alert != AttentionAlert.Inbox;
+    }
 
     /// <summary>
     /// From now on, each new item goes to <paramref name="announce"/> with its project's handle; those that came before
