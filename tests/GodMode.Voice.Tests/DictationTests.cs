@@ -7,6 +7,7 @@ using GodMode.Shared.Models;
 using Microsoft.Extensions.Logging.Abstractions;
 using SignalR.Proxy;
 using VoiceBot.Core.Pipeline;
+using VoiceBot.Providers.ElevenLabs;
 using VoiceBot.Core.Resources;
 using static GodMode.Voice.Tests.FakeServers;
 
@@ -14,7 +15,7 @@ namespace GodMode.Voice.Tests;
 
 /// <summary>
 /// Dictation (#459): "Diktér til 283", then the user speaks freely, across pauses, and the text is sent as said, never
-/// rephrased by the model, on "send"; "annullér" or "stop" drops it. Each final is what the transcriber commits after a
+/// rephrased by the model, on "diktat slut"; "annullér diktat" drops it (#520: a bare "send" or "stop" is dictated). Each final is what the transcriber commits after a
 /// pause longer than its threshold, so three finals are three parts said with two pauses between them.
 /// </summary>
 public sealed class DictationTests
@@ -22,7 +23,7 @@ public sealed class DictationTests
     private const string ServerA = "server-a";
     private static readonly ProjectRef P283 = new(ServerA, "p/r/283");
     private static readonly SessionLanguages Danish = new("da-DK");
-    private const string Started = "Diktat til issue 283. Sig send, eller annullér.";
+    private const string Started = "Diktat til issue 283. Sig diktat slut, eller annullér diktat.";
 
     private const string First = "Brug den eksisterende migration, ikke en ny.";
     private const string Second = "Og når testene er grønne, så skriv en kort note og send den til Peter.";
@@ -52,7 +53,7 @@ public sealed class DictationTests
             () => $"the bot to say \"{start}…\"; it said: {string.Join(" | ", voice.Events.Responses)}");
 
     [Fact]
-    public async Task Dictation_across_two_pauses_then_send_is_one_answer_with_all_three_parts_word_for_word()
+    public async Task Dictation_across_two_pauses_then_diktat_slut_is_one_answer_with_all_three_parts_word_for_word()
     {
         var model = new ScriptedChatClient();
         var (servers, voice) = await AskedAsync(model);
@@ -63,16 +64,16 @@ public sealed class DictationTests
         Say(voice, First);
         Say(voice, Second);
         Say(voice, Third);
-        Say(voice, "Send.");
+        Say(voice, "Diktat slut.");
         await voice.Events.SaidAsync("Sender 4 sætninger til issue 283, der starter: Brug den eksisterende migration, ikke en ny …");
 
         Assert.Equal((P283, $"{First} {Second} {Third}"), Assert.Single(servers.Replies));
-        // The model never heard a word of it: not the start, the parts, "Hvad venter?" in them, nor "send"
+        // The model never heard a word of it: not the start, the parts, "Hvad venter?" in them, nor "diktat slut"
         Assert.Equal(0, model.Calls);
     }
 
     [Fact]
-    public async Task Annuller_drops_the_dictation_and_nothing_is_sent()
+    public async Task Annuller_diktat_drops_the_dictation_and_nothing_is_sent()
     {
         var model = new ScriptedChatClient();
         var (servers, voice) = await AskedAsync(model);
@@ -81,16 +82,19 @@ public sealed class DictationTests
         Say(voice, "Diktér til 283");
         await voice.Events.SaidAsync(Started);
         Say(voice, First);
-        Say(voice, "Annullér.");
+        Say(voice, "Annullér diktat.");
         await voice.Events.SaidAsync("Annulleret. Intet sendt til issue 283.");
 
         Assert.Empty(servers.Replies);
         Assert.Equal(0, model.Calls);
     }
 
-    /// <summary>"Stop" while dictating is the safe reading: the dictation is dropped, nothing sent.</summary>
+    /// <summary>
+    /// A bare "send", "stop" or "annullér" is dictated like any other word (#520): "send" is too likely to be said in the
+    /// text, and a "stop" that dropped it lost the user's words. Only the explicit phrase ends it.
+    /// </summary>
     [Fact]
-    public async Task Stop_drops_the_dictation_and_nothing_is_sent()
+    public async Task Bare_send_stop_and_annuller_are_dictated_and_diktat_slut_sends_them_all()
     {
         var (servers, voice) = await AskedAsync();
         await using var _ = voice;
@@ -98,10 +102,30 @@ public sealed class DictationTests
         Say(voice, "Diktér til 283");
         await voice.Events.SaidAsync(Started);
         Say(voice, First);
-        Say(voice, "Stop.");
-        await voice.Events.SaidAsync("Annulleret. Intet sendt til issue 283.");
+        Say(voice, "Og så send den. Stop.");
+        Say(voice, "Send.");
+        Say(voice, "Annullér.");
+        Say(voice, "Stop");
+        Say(voice, "Diktat slut.");
+        await SaidStartingAsync(voice, "Sender 6 sætninger til issue 283");
 
-        Assert.Empty(servers.Replies);
+        Assert.Equal((P283, $"{First} Og så send den. Stop. Send. Annullér. Stop"), Assert.Single(servers.Replies));
+    }
+
+    /// <summary>"Diktat slut" with an ellipsis, as the transcriber may end a trailing-off phrase (#507, #520), sends.</summary>
+    [Fact]
+    public async Task Diktat_slut_with_an_ellipsis_sends()
+    {
+        var (servers, voice) = await AskedAsync();
+        await using var _ = voice;
+
+        Say(voice, "Diktér til 283");
+        await voice.Events.SaidAsync(Started);
+        Say(voice, First);
+        Say(voice, "Diktat slut…");
+        await SaidStartingAsync(voice, "Sender 1 sætning til issue 283");
+
+        Assert.Equal((P283, First), Assert.Single(servers.Replies));
     }
 
     /// <summary>After a dictation, the next words are the chat's again.</summary>
@@ -115,7 +139,7 @@ public sealed class DictationTests
         Say(voice, "Diktér til 283");
         await voice.Events.SaidAsync(Started);
         Say(voice, First);
-        Say(voice, "Send");
+        Say(voice, "Diktat slut");
         await SaidStartingAsync(voice, "Sender 1 sætning til issue 283");
         Say(voice, "Hvad venter?");
         await Eventually.UntilAsync(() => model.Calls == 1, () => "the chat to hear what came after");
@@ -126,14 +150,14 @@ public sealed class DictationTests
 
     /// <summary>The terminator as the last sentence of a final, after a sentence break, ends it, and the words before it are sent.</summary>
     [Fact]
-    public async Task Send_as_its_own_sentence_at_the_end_of_a_final_sends()
+    public async Task Diktat_slut_as_its_own_sentence_at_the_end_of_a_final_sends()
     {
         var (servers, voice) = await AskedAsync();
         await using var _ = voice;
 
         Say(voice, "Diktér til 283. Brug den eksisterende migration.");
         await voice.Events.SaidAsync(Started);
-        Say(voice, "Det var det. Send.");
+        Say(voice, "Det var det. Diktat slut.");
         await SaidStartingAsync(voice, "Sender 2 sætninger til issue 283");
 
         Assert.Equal((P283, "Brug den eksisterende migration. Det var det."), Assert.Single(servers.Replies));
@@ -187,18 +211,78 @@ public sealed class DictationTests
 
     // The rules, on their own
 
+    /// <summary>
+    /// The phrases, as the transcriber may render them: matched leniently on the phrase (case, punctuation, accents, a
+    /// "c" for a "k", the two words run together or split by a full stop), strictly on it being a sentence of its own.
+    /// </summary>
     [Theory]
-    [InlineData("Send.", Dictation.Terminator.Send, "")]
-    [InlineData("send den", Dictation.Terminator.Send, "")]
-    [InlineData("Det var det. Send.", Dictation.Terminator.Send, "Det var det.")]
-    [InlineData("Annullér.", Dictation.Terminator.Cancel, "")]
-    [InlineData("Stop", Dictation.Terminator.Cancel, "")]
-    [InlineData("og send den til Peter", null, "og send den til Peter")]
-    [InlineData("Skriv en note og send.", null, "Skriv en note og send.")]
-    [InlineData("Send en besked til Peter.", null, "Send en besked til Peter.")]
-    [InlineData("Stop ikke før testene er grønne.", null, "Stop ikke før testene er grønne.")]
-    public void A_terminator_counts_only_as_a_sentence_on_its_own(string final, Dictation.Terminator? terminator, string before) =>
+    [InlineData("Diktat slut.", Dictation.Terminator.Send, "")]
+    [InlineData("diktat slut", Dictation.Terminator.Send, "")]
+    [InlineData("Diktat slut…", Dictation.Terminator.Send, "")]
+    [InlineData("Diktat slut;", Dictation.Terminator.Send, "")]
+    [InlineData("Diktat slut:", Dictation.Terminator.Send, "")]
+    [InlineData("Diktat, slut!", Dictation.Terminator.Send, "")]
+    [InlineData("Diktat-slut.", Dictation.Terminator.Send, "")]
+    [InlineData("Diktatslut.", Dictation.Terminator.Send, "")]
+    [InlineData("Dictat slut.", Dictation.Terminator.Send, "")]
+    [InlineData("Diktat. Slut.", Dictation.Terminator.Send, "")]
+    [InlineData("\"Diktat slut.\"", Dictation.Terminator.Send, "")]
+    [InlineData("Send diktat.", Dictation.Terminator.Send, "")]
+    [InlineData("End dictation.", Dictation.Terminator.Send, "")]
+    [InlineData("Dictation end.", Dictation.Terminator.Send, "")]
+    [InlineData("Send dictation.", Dictation.Terminator.Send, "")]
+    [InlineData("Det var det. Diktat slut.", Dictation.Terminator.Send, "Det var det.")]
+    [InlineData("Det var det. Diktat. Slut.", Dictation.Terminator.Send, "Det var det.")]
+    [InlineData("Annullér diktat.", Dictation.Terminator.Cancel, "")]
+    [InlineData("Annuller diktat", Dictation.Terminator.Cancel, "")]
+    [InlineData("Slet diktat.", Dictation.Terminator.Cancel, "")]
+    [InlineData("Cancel dictation.", Dictation.Terminator.Cancel, "")]
+    [InlineData("Det var forkert. Annullér diktat.", Dictation.Terminator.Cancel, "Det var forkert.")]
+    public void A_phrase_as_a_sentence_on_its_own_ends_it(string final, Dictation.Terminator terminator, string before) =>
         Assert.Equal((terminator, before), Dictation.Ends(final));
+
+    /// <summary>A bare word, or a phrase inside a sentence, is the dictation's (#520).</summary>
+    [Theory]
+    [InlineData("Send.")]
+    [InlineData("send den")]
+    [InlineData("Send it.")]
+    [InlineData("Stop")]
+    [InlineData("Stop.")]
+    [InlineData("Annullér.")]
+    [InlineData("Cancel.")]
+    [InlineData("Afbryd.")]
+    [InlineData("Og så send den. Stop.")]
+    [InlineData("og send den til Peter")]
+    [InlineData("Send en besked til Peter.")]
+    [InlineData("Stop ikke før testene er grønne.")]
+    [InlineData("Skriv diktat slut i filen.")]
+    [InlineData("Og så diktat slut.")]
+    [InlineData("Diktat slut og send den.")]
+    [InlineData("Det var det; diktat slut.")]
+    [InlineData("Det var et diktat. Slut.")]
+    [InlineData("Slut.")]
+    [InlineData("Diktat.")]
+    public void Other_words_are_dictated(string final) => Assert.Equal(((Dictation.Terminator?)null, final), Dictation.Ends(final));
+
+    /// <summary>The phrases are keyterms, so speech recognition hears them, and each fits in one.</summary>
+    [Fact]
+    public void The_phrases_are_keyterms() =>
+        Assert.All(Dictation.Phrases, p =>
+        {
+            Assert.Contains(p.Phrase, GodModeGraph.CommandWords);
+            Assert.InRange(p.Phrase.Length, 1, ElevenLabsLanguageOptions.MaxRealtimeKeytermLength);
+        });
+
+    /// <summary>What the bot tells the user to say ends a dictation as it says: in Danish and in English.</summary>
+    [Theory]
+    [InlineData("da-DK", "Sig diktat slut, eller annullér diktat.", "diktat slut", "annullér diktat")]
+    [InlineData("en-US", "Say end dictation, or cancel dictation.", "end dictation", "cancel dictation")]
+    public void The_phrases_the_bot_names_end_a_dictation(string language, string told, string send, string cancel)
+    {
+        Assert.EndsWith(told, new VoicePhrases(new SessionLanguages(language)).DictationStarted(new SpokenName("283")));
+        Assert.Equal(Dictation.Terminator.Send, Dictation.Ends(send).Terminator);
+        Assert.Equal(Dictation.Terminator.Cancel, Dictation.Ends(cancel).Terminator);
+    }
 
     [Theory]
     [InlineData("Diktér til 283", "283", "")]
@@ -236,7 +320,7 @@ public sealed class DictationTests
         return (servers, dictation, time);
     }
 
-    /// <summary>The mic closed, or voice stopped, with no terminator: dropped, and a later "send" sends nothing.</summary>
+    /// <summary>The mic closed, or voice stopped, with no terminator: dropped, and a later "diktat slut" sends nothing.</summary>
     [Fact]
     public async Task A_dictation_abandoned_is_dropped_and_never_sent()
     {
@@ -245,7 +329,7 @@ public sealed class DictationTests
         dictation.Abandon();
 
         Assert.False(dictation.Active);
-        Assert.Null(await dictation.HearAsync("Send", CancellationToken.None));
+        Assert.Null(await dictation.HearAsync("Diktat slut", CancellationToken.None));
         Assert.Empty(servers.Replies);
     }
 
@@ -275,7 +359,7 @@ public sealed class DictationTests
             PendingPermission = new PendingPermission("req-1", "Bash", "git push", DateTime.UtcNow),
         });
 
-        var said = await dictation.HearAsync("Send", CancellationToken.None);
+        var said = await dictation.HearAsync("Diktat slut", CancellationToken.None);
 
         Assert.StartsWith("Intet sendt.", said);
         Assert.True(dictation.Active);
@@ -297,7 +381,7 @@ public sealed class DictationTests
         announcements.Write(new Announcement("issue 101 har et spørgsmål"));
         Assert.False(channel.Reader.TryRead(out _));
 
-        await dictation.HearAsync("Send", CancellationToken.None);
+        await dictation.HearAsync("Diktat slut", CancellationToken.None);
 
         Assert.True(channel.Reader.TryRead(out var said));
         Assert.Equal("issue 101 har et spørgsmål", said.Text);
@@ -325,7 +409,7 @@ public sealed class DictationTests
         await SaidStartingAsync(voice, "Diktat til issue 283");
         Say(voice, First);
         Say(voice, Second);
-        Say(voice, "Send");
+        Say(voice, "Diktat slut");
         await SaidStartingAsync(voice, "Sender 2 sætninger til issue 283");
 
         var dictated = $"{First} {Second}";

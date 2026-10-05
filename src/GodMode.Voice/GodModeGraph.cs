@@ -42,7 +42,8 @@ public static class GodModeGraph
     /// before the servers' names (<see cref="VoiceSession.Keyterms"/>).
     /// </summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "færdig", "det var alt", "done", "that's all", "GodMode", "pull request", "review", "start issue", "opret", "diktér til", "send", "annullér",
+        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "færdig", "det var alt", "done", "that's all", "GodMode", "pull request", "review", "start issue", "opret", "diktér til",
+         .. Dictation.Phrases.Select(p => p.Phrase),
          "log", "loggen", "session", "sessionen", "branch", "worktree", "commit", "push", "merge", "issue"];
 
     /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
@@ -111,7 +112,7 @@ public static class GodModeGraph
               project — call {{VoiceTools.ReadMore}}: it expands that line a step (an announcement into the project's status,
               a status into its last reply, a reply or list into its next part). Never ask which project then.
             - "Diktér til [handle]" / "Dictate to [handle]" is taken by the system itself, word for word, until the user
-              says "send" or "annullér": you never see it. A "diktér" that names no project: ask which, as a closed
+              says "diktat slut" or "annullér diktat" / "end dictation" or "cancel dictation": you never see it. A "diktér" that names no project: ask which, as a closed
               question, and tell the user to say "Diktér til" and the project.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}, and only then: on the user's own "læst" or "seen".
               Never mark a project seen as part of reading it, its status or its reply, or when the user asks if that was all.
