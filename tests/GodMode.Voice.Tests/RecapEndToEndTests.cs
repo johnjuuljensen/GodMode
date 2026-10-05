@@ -51,7 +51,7 @@ public sealed class RecapEndToEndTests
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Hvordan går det med 283?");
-        await voice.Events.SaidAsync("Sidste resultat fra issue 283: done. Jeg har bedt den om et resumé, som jeg læser næste gang du spørger.");
+        await voice.Events.SaidAsync("Sidste resultat fra issue 283, voice: done. Jeg har bedt den om et resumé, som jeg læser næste gang du spørger.");
 
         // /recap reached claude as it is, not marked as speech; its answer is the recap, and the last result stays
         await Eventually.UntilAsync(() => Status(hub, project.Id) is { Recap: RecapText, State: ProjectState.Idle },

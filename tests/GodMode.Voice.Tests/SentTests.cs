@@ -20,7 +20,7 @@ public sealed class SentTests
         var servers = new FakeServers();
         var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
         return (servers, voice);
     }
 
@@ -108,7 +108,7 @@ public sealed class SentTests
             .Respond(Reply);
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Permission("p/r/283", "283-voice", "Bash: git push")); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 skal have tilladelse: Bash: git push. Svar på skærmen.");
+        await voice.Events.SaidAsync("issue 283, voice, skal have tilladelse: Bash: git push. Svar på skærmen.");
 
         voice.Transcriptions.SayAsRecognized("Svar ja");
         await voice.Events.SaidAsync(Reply);

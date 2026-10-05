@@ -38,7 +38,7 @@ public sealed class RecapAskTests
 
         Assert.Equal(new ProjectRef(ServerA, "p/r/283"), Assert.Single(servers.RecapAsks));
         Assert.EndsWith("you have asked it for one, which is read the next time the user asks about it.", result);
-        Assert.Equal($"Sidste resultat fra issue 283: {Result} Jeg har bedt den om et resumé, som jeg læser næste gang du spørger.",
+        Assert.Equal($"Sidste resultat fra issue 283, voice: {Result} Jeg har bedt den om et resumé, som jeg læser næste gang du spørger.",
             conversation.TakeSaid(result));
     }
 
@@ -61,7 +61,7 @@ public sealed class RecapAskTests
         var result = await tools.ProjectStatusAsync("283", CancellationToken.None);
 
         Assert.Empty(servers.RecapAsks);
-        Assert.Equal("issue 283: Pull request 456 er åben.", conversation.TakeSaid(result));
+        Assert.Equal("issue 283, voice: Pull request 456 er åben.", conversation.TakeSaid(result));
     }
 
     [Theory]
@@ -99,6 +99,6 @@ public sealed class RecapAskTests
 
         Assert.Single(servers.RecapAsks);
         Assert.DoesNotContain("recap", result, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal($"Sidste resultat fra issue 283: {Result}", conversation.TakeSaid(result));
+        Assert.Equal($"Sidste resultat fra issue 283, voice: {Result}", conversation.TakeSaid(result));
     }
 }

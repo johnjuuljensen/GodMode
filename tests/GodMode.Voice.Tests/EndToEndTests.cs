@@ -42,22 +42,23 @@ public sealed class EndToEndTests
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "283", [VoiceTools.TextParameter] = Answer }).Respond("Sendt til 283.");
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
-        await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 101, drop columns, har et spørgsmål.");
 
         // A project asks while voice is on: the bot names it
         server.UseScript(Asking(Question));
         var asking = await CreateAsync(hub, "283-add-migration");
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, add migration, har et spørgsmål.");
 
         // As ElevenLabs sends it: a partial, then a final with the same text. The final reaches the model once
         voice.Transcriptions.SayAsRecognized("Hvad venter på mig?");
         // In the code's words (#456): one model call, the tool's, and no respond round to retell it
         // The most recent first (#468): 283's conversation wrote last, as the server recorded it
-        await voice.Events.SaidAsync("2 venter på dig: issue 283 har et spørgsmål. issue 101 har et spørgsmål.");
+        // Anchored by what was said before (#455): 283 was the last line's, 101 the one before
+        await voice.Events.SaidAsync("2 venter på dig: issue 283 har et spørgsmål. issue 101, drop columns, har et spørgsmål.");
         Assert.Equal(1, model.Calls);
 
         voice.Transcriptions.SayAsRecognized("Svar 283 at den skal bruge den eksisterende migration");
-        await voice.Events.SaidAsync("Sendt til issue 283.");
+        await voice.Events.SaidAsync("Sendt til issue 283, add migration.");
         // Each utterance once: the answer's tool round and its respond, no more
         Assert.Equal(3, model.Calls);
 

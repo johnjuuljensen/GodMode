@@ -53,10 +53,12 @@ public sealed class RootTitleTests
         var voice = TwoAssistants();
         var names = voice.Tools.Names;
 
-        // Another profile has an Assistant too: the profile is said every time
+        // Another profile has an Assistant too: the profile is said whenever it is anchored, but not on the same
+        // project's next line (#455), which is its label alone
         Assert.Equal("chat backup i Assistant, profil Mega", Danish.Named(names.Of(MegaBackup)!));
-        Assert.Equal("chat backup i Assistant, profil Mega", Danish.Named(names.Of(MegaBackup)!));
+        Assert.Equal("chat backup", Danish.Named(names.Of(MegaBackup)!));
         Assert.Equal("chat backup i Assistant, profil Outbound", Danish.Named(names.Of(OutboundBackup)!));
+        Assert.Equal("chat backup i Assistant, profil Mega", Danish.Named(names.Of(MegaBackup)!));
 
         Assert.Equal(MegaBackup, voice.Handles.Resolve("chat backup i Assistant, profil Mega"));
         Assert.Equal(OutboundBackup, voice.Handles.Resolve("backup i Assistant, profil Outbound"));
@@ -85,8 +87,9 @@ public sealed class RootTitleTests
 
         // The roots change on the server (RootsChanged): its title is said from now on, and taken
         voice.Servers.Retitle(Server, "Mega-Assistant", "Assistant");
-        // No other profile's root is shown as Assistant, and Mega was spoken of last: no profile
-        Assert.Equal("chat backup i Assistant", Danish.Named(voice.Tools.Names.Of(MegaBackup)!));
+        // The same project's next line is its label alone (#455); named in full, its root is its title
+        Assert.Equal("chat backup", Danish.Named(voice.Tools.Names.Of(MegaBackup)!));
+        Assert.Equal("chat backup i Assistant, profil Mega", Danish.Named(voice.Tools.Names.Full(MegaBackup)!));
         Assert.Equal(MegaBackup, voice.Handles.Resolve("backup i Assistant, profil Mega"));
     }
 

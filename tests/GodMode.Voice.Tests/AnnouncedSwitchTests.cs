@@ -57,7 +57,7 @@ public sealed class AnnouncedSwitchTests
 
         Assert.Empty(voice.Servers.Replies);
         Assert.Contains("Nothing was sent", result);
-        Assert.Equal("Til issue 283 eller issue 101?", voice.Conversation.TakeSaid(result));
+        Assert.Equal("Til issue 283, voice, eller issue 101, cleanup?", voice.Conversation.TakeSaid(result));
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public sealed class AnnouncedSwitchTests
         var result = await voice.Tools.AnswerAsync(null, "Ja.", CancellationToken.None);
 
         Assert.Empty(voice.Servers.Replies);
-        Assert.Equal("Til issue 283 eller issue 101?", voice.Conversation.TakeSaid(result));
+        Assert.Equal("Til issue 283, voice, eller issue 101, cleanup?", voice.Conversation.TakeSaid(result));
     }
 
     [Fact]
@@ -164,21 +164,21 @@ public sealed class AnnouncedSwitchTests
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja.", [VoiceTools.ProjectParameter] = "283" }).Respond("Sendt til issue 283.");
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerB, Question("p/r/283", "283-voice", "Skal jeg bruge den eksisterende migration?", minutesAgo: 30)); return Task.CompletedTask; });
-        await voice.Events.SaidAsync("issue 283 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
         voice.Transcriptions.AddFinal("hvad spørger 283 om");
         await voice.Events.SaidAsync("issue 283 spørger: Skal jeg bruge den eksisterende migration?");
 
         var spoken = voice.Events.States.Count(s => s == VoiceState.Speaking);
         servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Skal jeg slette kolonnerne?"));
-        await voice.Events.SaidAsync("issue 101 har et spørgsmål.");
+        await voice.Events.SaidAsync("issue 101, cleanup, har et spørgsmål.");
         // Said to its end, so the answer comes in the window after it rather than over it
         await SpeechEndedAsync(voice, spoken);
         voice.Transcriptions.AddFinal("svar at ja");
-        await voice.Events.SaidAsync("Til issue 283 eller issue 101?");
+        await voice.Events.SaidAsync("Til issue 283, voice, eller issue 101, cleanup?");
         Assert.Empty(servers.Replies);
 
         voice.Transcriptions.AddFinal("283");
-        await voice.Events.SaidAsync("Sendt til issue 283.");
+        await voice.Events.SaidAsync("Sendt til issue 283, voice.");
         Assert.Equal(P283, Assert.Single(servers.Replies).Project);
     }
 

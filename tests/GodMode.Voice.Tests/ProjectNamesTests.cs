@@ -114,10 +114,12 @@ public sealed class ProjectNamesTests
             (master, "master", "voicebot", "branch", "Private"));
         var names = voice.Tools.Names;
 
-        Assert.Equal("issue 376 i GodMode, profil Godmode", Danish.Named(names.Of(issue)!));
-        Assert.Equal("issue 376 i GodMode", Danish.Named(names.Of(issue)!));
+        // New: all of its anchor (#455), its topic too; then the same project again: its label alone
+        Assert.Equal("issue 376, voice names i GodMode, profil Godmode", Danish.Named(names.Of(issue)!));
+        Assert.Equal("issue 376", Danish.Named(names.Of(issue)!));
         Assert.Equal("branch master i voicebot, profil Private", Danish.Named(names.Of(master)!));
-        Assert.Equal("issue 376 in GodMode, profile Godmode", English.Named(names.Of(issue)!));
+        // Back to it after another: its topic, and the root and profile it changed back to
+        Assert.Equal("issue 376, voice names in GodMode, profile Godmode", English.Named(names.Of(issue)!));
 
         // Said as it is named, it is found
         Assert.Equal(issue, voice.Handles.Resolve("issue 376"));

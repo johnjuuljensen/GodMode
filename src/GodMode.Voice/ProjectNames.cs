@@ -2,23 +2,28 @@ namespace GodMode.Voice;
 
 /// <summary>
 /// A project as it is named aloud (#450): its label (<see cref="ProjectHandles.Label(string, string, string?)"/>,
-/// "issue 376", "branch master"), and the root and profile it is in, those it is said with. <see cref="ToString"/> is
-/// the name in a tool's result, for the model; <see cref="VoicePhrases"/> says it in the user's language.
+/// "issue 376", "branch master"), its spoken topic (<see cref="ProjectTopics"/>, #455), and the root and profile it is in,
+/// those it is said with. <see cref="ToString"/> is the name in a tool's result, for the model; <see cref="VoicePhrases"/>
+/// says it in the user's language.
 /// </summary>
-public sealed record SpokenName(string Label, string? Root = null, string? Profile = null)
+public sealed record SpokenName(string Label, string? Root = null, string? Profile = null, string? Topic = null)
 {
-    /// <summary>"issue 376 in GodMode, profile Mega".</summary>
+    /// <summary>"issue 376, mic-timeout in GodMode, profile Mega".</summary>
     public override string ToString() =>
-        Label + (Root is { } root ? $" in {root}" : "") + (Profile is { } profile ? $", profile {profile}" : "");
+        Label + (Topic is { } topic ? $", {topic}" : "") + (Root is { } root ? $" in {root}" : "") + (Profile is { } profile ? $", profile {profile}" : "");
 }
 
 /// <summary>
-/// How voice names projects, so the user can tell which is which across profiles and roots (#450). A project named
-/// alone is said with its root, when there are projects in more than one root, and with its profile, when there are
-/// several and another profile has a root shown as its root is, or it is not in the profile spoken of last
-/// (<see cref="VoiceConversation.LastProfile"/>). A root is said as it is shown, by its title (#434,
-/// <see cref="ProjectBoard.RootShown"/>), so two profiles' roots of one title are told apart by their profiles. Lists say each profile and root once, as a group's heading
-/// (<see cref="Groups"/>).
+/// How voice names projects, so the user can tell which is which across profiles and roots (#450), and can place a line
+/// about one whatever they had in mind before it (#455): brief in words, never in context. How much a line says of the
+/// project it names is its anchor (<see cref="VoiceConversation.Mention"/>), by what the lines before it were about: the
+/// label alone for the project the last line was about; its label and topic for another, with its root when that is
+/// not the root spoken of last (<see cref="VoiceConversation.LastRoot"/>) or another project has its label, and its
+/// profile when another profile has a root shown as its root is, or it is not in the profile spoken of last
+/// (<see cref="VoiceConversation.LastProfile"/>); and all of it, its root and profile whenever there are several, for a
+/// project not named in a while. A root is said as it is shown, by its title (#434, <see cref="ProjectBoard.RootShown"/>),
+/// so two profiles' roots of one title are told apart by their profiles. Lists say each profile and root once, as a
+/// group's heading (<see cref="Groups"/>).
 /// </summary>
 public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, VoiceConversation conversation)
 {
@@ -30,27 +35,36 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
     }
 
     /// <summary>
-    /// The project named alone, as it is said now: with its root and profile as the class says. It is spoken of
-    /// from now on: its profile is the last one. Null when it has no handle.
+    /// The project named alone, in a line said now: anchored as the class says. It is mentioned from now on: the
+    /// project, its root and its profile are the last ones. Null when it has no handle.
     /// </summary>
     public SpokenName? Of(ProjectRef project)
     {
         if (handles.LabelOf(project) is not { } label)
             return null;
+        var anchor = conversation.Mention(project);
         if (projects.Find(project) is not { } found)
             return new SpokenName(label);
 
         var all = projects.Projects;
         var profile = ProfileOf(found.Project);
         var root = projects.RootShown(found);
-        var said = SeveralProfiles(all) && (SameRootElsewhere(all, profile, root) || !Same(conversation.LastProfile, profile));
+        var (saysRoot, saysProfile) = anchor switch
+        {
+            Anchor.Bare => (false, false),
+            Anchor.Full => (SeveralRoots(all), SeveralProfiles(all)),
+            _ => (SeveralRoots(all) && (!Same(conversation.LastRoot, root) || handles.Labelled(label).Count > 1),
+                SeveralProfiles(all) && (SameRootElsewhere(all, profile, root) || !Same(conversation.LastProfile, profile))),
+        };
         conversation.LastProfile = profile;
-        return new SpokenName(label, SeveralRoots(all) ? root : null, said ? profile : null);
+        conversation.LastRoot = root;
+        return new SpokenName(label, saysRoot ? root : null, saysProfile ? profile : null,
+            anchor == Anchor.Bare ? null : TopicOf(found, label));
     }
 
     /// <summary>
-    /// The project with its root and profile whenever there are several, as a list of options names it: it does not
-    /// change what was spoken of last.
+    /// The project with its topic, and its root and profile whenever there are several, as a list of options names it:
+    /// it is no line about it, and changes nothing of what was spoken of last.
     /// </summary>
     public SpokenName? Full(ProjectRef project)
     {
@@ -59,13 +73,17 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
         if (projects.Find(project) is not { } found)
             return new SpokenName(label);
         var all = projects.Projects;
-        return new SpokenName(label, SeveralRoots(all) ? projects.RootShown(found) : null, SeveralProfiles(all) ? ProfileOf(found.Project) : null);
+        return new SpokenName(label, SeveralRoots(all) ? projects.RootShown(found) : null, SeveralProfiles(all) ? ProfileOf(found.Project) : null,
+            TopicOf(found, label));
     }
+
+    /// <summary>The project's spoken topic (<see cref="ProjectTopics"/>); null when its name gives none.</summary>
+    private static string? TopicOf(ServerProject project, string label) => ProjectTopics.Of(project.Project.Name, project.Project.Kind, label);
 
     /// <summary>
     /// Every project, grouped by profile, then root: the profiles in their names' order, the roots in each too, and the
     /// projects in each the one changed last first. A list that names several profiles leaves none the last spoken of;
-    /// one of one profile leaves it.
+    /// one of one profile leaves it, and the same of roots.
     /// </summary>
     public IReadOnlyList<Group> Groups()
     {
@@ -75,6 +93,7 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
             .Select(g => new Group(g.Key.Profile, projects.RootShown(g.First()), [.. g]))
             .ToList();
         conversation.LastProfile = groups.Select(g => g.Profile).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1 ? groups[0].Profile : null;
+        conversation.LastRoot = groups is [var one] ? one.Root : null;
         return groups;
     }
 

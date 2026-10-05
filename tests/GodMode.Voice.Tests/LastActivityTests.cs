@@ -169,9 +169,9 @@ public sealed class LastActivityTests
             FakeServers.Question("p/r/101", "101-cleanup", "Slet kolonnerne?", minutesAgo: 90),
             FakeServers.Question("p/r/283", "283-voice", "Skal jeg pushe?", minutesAgo: 3));
 
-        Assert.Equal("2 venter på dig: issue 283 har et spørgsmål. issue 101 har et spørgsmål.",
+        Assert.Equal("2 venter på dig: issue 283, voice, har et spørgsmål. issue 101, cleanup, har et spørgsmål.",
             conversation.TakeSaid(await tools.WhatNeedsMeAsync(CancellationToken.None)));
-        Assert.Equal("issue 283 har et spørgsmål. Og 1 fra før.",
+        Assert.Equal("issue 283, voice, har et spørgsmål. Og 1 fra før.",
             conversation.TakeSaid(await tools.WhatNeedsMeAsync(CancellationToken.None, since: "60")));
         Assert.Equal("Intet nyt venter. 2 venter fra før.",
             conversation.TakeSaid(await tools.WhatNeedsMeAsync(CancellationToken.None, since: VoiceTools.SinceLastAsked)));
