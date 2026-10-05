@@ -164,6 +164,55 @@ public sealed partial class VoicePhrases
         };
 
     /// <summary>
+    /// A long what-needs-me (#507), summarised as a long list is (<see cref="ListSummary"/>): the count, then what they need,
+    /// most urgent first, by name while they fit in a page, else counted; then the overseers' lines, those waiting from
+    /// before a window left out (<see cref="WaitingFromBefore"/>), and "Mere?" when more follows. "8 venter på dig: issue
+    /// 1 og issue 2 skal have tilladelse, 6 har et spørgsmål. Mere?"
+    /// </summary>
+    public string WaitingSummary(int count, IReadOnlyList<(WaitingKind Kind, int Count, IReadOnlyList<SpokenName> Named)> kinds,
+        IReadOnlyList<(SpokenName Name, int Workers, int Waiting)> overseers, int fromBefore, bool more) =>
+        $"{Several(count)} {string.Join(", ", kinds.Select(k => k.Named.Count > 0
+            ? $"{And([.. k.Named.Select(Listed)])} {Needs(k.Kind, k.Named.Count)}"
+            : $"{k.Count} {Needs(k.Kind, k.Count)}"))}."
+        + string.Concat(overseers.Select(o => Then(GodModeAnnouncementFormatter.Sentence(Workers(o.Name, o.Workers, o.Waiting)))))
+        + Then(WaitingFromBefore(fromBefore, saidAny: true))
+        + (more ? $" {More}" : "");
+
+    /// <summary>A page of a long what-needs-me (#507): each project as its announcement says it, "Mere?" when more follows.</summary>
+    public string WaitingPage(IReadOnlyList<(SpokenName Name, AttentionItem Item)> page, bool more) =>
+        string.Join(" ", page.Select(i => GodModeAnnouncementFormatter.Sentence(Announce(i.Name, i.Item)))) + (more ? $" {More}" : "");
+
+    /// <summary>What <paramref name="count"/> projects of the kind need, after their names or count: "har et spørgsmål", "need permission".</summary>
+    private string Needs(WaitingKind kind, int count) => (kind, _danish, count == 1) switch
+    {
+        (WaitingKind.Permission, true, _) => "skal have tilladelse",
+        (WaitingKind.Question, true, _) => "har et spørgsmål",
+        (WaitingKind.Blocked, true, _) => "er blokeret",
+        (WaitingKind.Escalation, true, _) => "har brug for din beslutning",
+        (WaitingKind.Error, true, _) => "fejlede",
+        (WaitingKind.Review, true, _) => "har fået ændringsønsker",
+        (WaitingKind.Done, true, true) => "er færdig",
+        (WaitingKind.Done, true, false) => "er færdige",
+        (WaitingKind.Idle, true, _) => "er idle",
+        (WaitingKind.Permission, false, true) => "needs permission",
+        (WaitingKind.Permission, false, false) => "need permission",
+        (WaitingKind.Question, false, true) => "has a question",
+        (WaitingKind.Question, false, false) => "have a question",
+        (WaitingKind.Blocked, false, true) => "is blocked",
+        (WaitingKind.Blocked, false, false) => "are blocked",
+        (WaitingKind.Escalation, false, true) => "needs your decision",
+        (WaitingKind.Escalation, false, false) => "need your decision",
+        (WaitingKind.Error, false, _) => "failed",
+        (WaitingKind.Review, false, true) => "has changes requested",
+        (WaitingKind.Review, false, false) => "have changes requested",
+        (WaitingKind.Done, false, true) => "is done",
+        (WaitingKind.Done, false, false) => "are done",
+        (WaitingKind.Idle, false, true) => "is idle",
+        (WaitingKind.Idle, false, false) => "are idle",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    /// <summary>
     /// An overseer's line for the workers it runs (#469), which voice leaves out: "voice-epics: 6 workers, 2 venter på den" /
     /// "voice-epics: 6 workers, 2 waiting on it". <paramref name="waiting"/> are those that need someone, which the overseer handles.
     /// </summary>

@@ -15,6 +15,12 @@ public sealed record ListedProject(ListedState State, string Profile, string? Ro
 /// <summary>A group of a list said whole (<see cref="VoicePhrases.Projects"/>): its profile and root, its projects as said, and its server when it needs it.</summary>
 public sealed record ListedGroup(string Profile, string? Root, IReadOnlyList<string> Labels, string? Server = null);
 
+/// <summary>
+/// What a project needs, as a long what-needs-me's summary says it (#507), in the order it says them: most urgent first,
+/// as announcements are (<see cref="GodModeAnnouncementFormatter.Urgency"/>).
+/// </summary>
+public enum WaitingKind { Permission, Question, Blocked, Escalation, Error, Review, Done, Idle }
+
 /// <summary>A state as a long list's summary says it: its count, and the projects it names, none when it only counts them.</summary>
 public sealed record StateCount(ListedState State, int Count, IReadOnlyList<ListedProject> Named);
 
@@ -79,19 +85,43 @@ public static class ProjectListing
     /// </summary>
     public static (IReadOnlyList<StateCount> States, IReadOnlyList<ListedProject> Left) Summarise(IReadOnlyList<ListedProject> listed)
     {
-        var left = Page;
-        List<StateCount> states = [];
-        foreach (var state in listed.GroupBy(p => p.State).OrderBy(g => g.Key))
-        {
-            var projects = state.ToList();
-            var named = projects.Count <= left;
-            if (named)
-                left -= projects.Count;
-            states.Add(new StateCount(state.Key, projects.Count, named ? projects : []));
-        }
-        var said = states.SelectMany(s => s.Named).ToHashSet();
-        return (states, [.. listed.Where(p => !said.Contains(p))]);
+        var (states, left) = Summarise(listed, p => p.State);
+        return ([.. states.Select(s => new StateCount(s.Key, s.Count, s.Named))], left);
     }
+
+    /// <summary>
+    /// The summary of <paramref name="items"/> by <paramref name="key"/>, the keys in their order: each named while its
+    /// items fit in what is left of a <see cref="Page"/>, else counted; and the items it leaves for the pages, in order.
+    /// </summary>
+    public static (IReadOnlyList<(TKey Key, int Count, IReadOnlyList<T> Named)> Keys, IReadOnlyList<T> Left) Summarise<T, TKey>(
+        IReadOnlyList<T> items, Func<T, TKey> key) where T : notnull
+    {
+        var room = Page;
+        List<(TKey, int, IReadOnlyList<T>)> keys = [];
+        foreach (var group in items.GroupBy(key).OrderBy(g => g.Key))
+        {
+            var all = group.ToList();
+            var named = all.Count <= room;
+            if (named)
+                room -= all.Count;
+            keys.Add((group.Key, all.Count, named ? all : []));
+        }
+        var said = keys.SelectMany(k => k.Item3).ToHashSet();
+        return (keys, [.. items.Where(i => !said.Contains(i))]);
+    }
+
+    /// <summary>What <paramref name="item"/> needs, as a long what-needs-me's summary counts it (#507).</summary>
+    public static WaitingKind KindOf(AttentionItem item) => item.Kind switch
+    {
+        AttentionKind.Permission => WaitingKind.Permission,
+        AttentionKind.Question when item.Outcome == TurnOutcome.Blocked => WaitingKind.Blocked,
+        AttentionKind.Question => WaitingKind.Question,
+        AttentionKind.Escalation => WaitingKind.Escalation,
+        AttentionKind.Error => WaitingKind.Error,
+        AttentionKind.Review => WaitingKind.Review,
+        AttentionKind.Finished when item.Outcome == TurnOutcome.Done => WaitingKind.Done,
+        _ => WaitingKind.Idle,
+    };
 
     /// <summary>
     /// The projects in pages of <see cref="Page"/>, in order: each page the next most recent, its projects of one state,

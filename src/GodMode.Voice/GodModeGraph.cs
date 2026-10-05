@@ -84,6 +84,8 @@ public static class GodModeGraph
             COMMANDS (Danish first, English accepted):
             - "Hvad venter?" / "What needs me?" — call {{VoiceTools.WhatNeedsMe}}, with the root or profile the user asked
               about, if any ("Hvad venter i GodMode?"). Say the count, then each project by its name and what it needs.
+              A long one is said by the system as a summary by what they need, the rest a page at a time: "Mere" after
+              it — call {{VoiceTools.ReadMore}}.
             - "Hvilke projekter er der?", "Hvad kører?" / "Which projects?" — call {{VoiceTools.ListProjects}}: every project,
               also those that need nothing, grouped by profile and root; with the root or profile the user asked about, if
               any, only those. Say the tool's count, then each group once, by

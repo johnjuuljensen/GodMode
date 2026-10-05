@@ -163,6 +163,47 @@ public sealed class ListPagesTests
         Assert.StartsWith("branch master's reply, part 2 of", await tools.ReadMoreAsync(CancellationToken.None));
     }
 
+    /// <summary>
+    /// #507: what needs me past a page is summarised and paged as a list is: what they need, most urgent first, named while
+    /// it fits and counted after, then "mere" reads the rest, each as its announcement says it.
+    /// </summary>
+    [Fact]
+    public async Task What_needs_me_past_a_page_is_summarised_by_what_they_need_and_paged()
+    {
+        var (servers, tools, conversation) = Tools();
+        servers.Set(ServerA, [
+            FakeServers.Permission("p/r/1", "1-x", "Bash: git push", minutesAgo: 1),
+            FakeServers.Permission("p/r/2", "2-x", "Bash: rm", minutesAgo: 2),
+            .. Enumerable.Range(3, 6).Select(i => FakeServers.Question($"p/r/{i}", $"{i}-x", "Hvilken?", minutesAgo: i)),
+        ]);
+
+        var result = await tools.WhatNeedsMeAsync(CancellationToken.None);
+
+        Assert.Equal("8 venter på dig: issue 1 og issue 2 skal have tilladelse, 6 har et spørgsmål. Mere?", conversation.TakeSaid(result));
+        Assert.Contains("The 6 it did not name are read 5 at a time", result);
+        Assert.Equal("issue 3 har et spørgsmål. issue 4 har et spørgsmål. issue 5 har et spørgsmål. issue 6 har et spørgsmål. issue 7 har et spørgsmål. Mere?",
+            await SaidOnMoreAsync(tools, conversation));
+        Assert.Equal("issue 8 har et spørgsmål.", await SaidOnMoreAsync(tools, conversation));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+    }
+
+    /// <summary>#507: a what needs me said whole, of several, leaves nothing for "mere", as a list said whole does.</summary>
+    [Fact]
+    public async Task What_needs_me_said_whole_leaves_nothing_for_mere()
+    {
+        var (servers, tools, conversation) = Tools();
+        AddSixteen(servers);
+        conversation.TakeSaid(tools.ListProjectsText());
+        servers.Set(ServerA, FakeServers.Question("p/r/101", "101-cleanup", "Hvilken?"), FakeServers.Question("p/r/283", "283-voice", "Ny?", minutesAgo: 1));
+
+        Assert.StartsWith("2 venter på dig:", conversation.TakeSaid(await tools.WhatNeedsMeAsync(CancellationToken.None)));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+        Assert.Equal("3 venter på dig: issue 1 skal have tilladelse, 2 har et spørgsmål. Og 1 fra før. Mere?",
+            new VoicePhrases(new SessionLanguages("da-DK")).WaitingSummary(3, [(WaitingKind.Permission, 1, [new SpokenName("issue 1")]), (WaitingKind.Question, 2, [])], [], 1, more: true));
+        Assert.Equal("6 need you: issue 1 needs permission, 5 have a question.",
+            English.WaitingSummary(6, [(WaitingKind.Permission, 1, [new SpokenName("issue 1")]), (WaitingKind.Question, 5, [])], [], 0, more: false));
+    }
+
     [Fact]
     public void The_summary_and_pages_in_English()
     {

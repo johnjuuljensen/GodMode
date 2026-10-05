@@ -146,7 +146,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 ToolParameterType.Integer, Required: false)],
             (_, args, ct) => ReadReplyAsync(Argument(args, ProjectParameter), Argument(args, TurnsParameter), ct))
         .Add(ReadMore,
-            $"Read more of what was said last: the next part of the reply {ReadReply} read, or of the long list {ListProjects} said; " +
+            $"Read more of what was said last: the next part of the reply {ReadReply} read, or of the long list {ListProjects} or {WhatNeedsMe} said; " +
             "or, after a line about one project (its announcement, or its status), that line a step further: an announcement " +
             "into the project's status (its question, result or error), a status into its last reply. Call when the user says " +
             "\"læs videre\", \"mere\" or \"read on\", or asks about what was just said: \"Hvorfor?\", \"Hvad er det?\", " +
@@ -228,9 +228,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             _ => null,
         };
         Talked(alone);
-        // One project said alone is the last line, which "Mere?" expands into its status (#455)
-        if (alone is not null)
-            conversation.Reading = new ProjectLine(alone, Read: false);
+        // One project said alone is the last line, which "Mere?" expands into its status (#455); several said whole leave
+        // nothing for "mere" (#507), as a list does
+        conversation.Reading = alone is not null ? new ProjectLine(alone, Read: false) : null;
         if (items.Count == 0 && overseers.Count == 0)
         {
             // Nothing read out: nothing for "mere" to read on in, whatever was before (#507)
@@ -256,10 +256,34 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // One project, with its own spoken reply: the system says it, as status would
         if (named is [{ Item.Item.Spoken.Length: > 0 } one])
             text.AppendLine(SpokenBySystem(one.Name, one.Item.Item));
-        var waiting = _phrases.Waiting([.. named.Select(n => (n.Name, n.Item.Item))], [.. overseers.Select(o => (o.Name, o.Workers, o.Waiting))]);
+        List<(SpokenName, int, int)> lines = [.. overseers.Select(o => (o.Name, o.Workers, o.Waiting))];
+        if (named.Count > ProjectListing.Page)
+        {
+            // Too many to keep (#507), as a long list (#457): a summary by what they need, most urgent first, then those it
+            // did not name, the most recent first in each, a page at a time on "mere"
+            var (kinds, rest) = ProjectListing.Summarise([.. named.OrderBy(n => ProjectListing.KindOf(n.Item.Item))], n => ProjectListing.KindOf(n.Item.Item));
+            var pages = rest.Chunk(ProjectListing.Page).ToList();
+            conversation.Reading = pages.Count > 0
+                ? new ListReading([.. pages.Select((page, i) => (WaitingPageResult(page, i, pages.Count, rest.Count),
+                    _phrases.WaitingPage([.. page.Select(n => (n.Name, n.Item.Item))], i + 1 < pages.Count)))], 0)
+                : null;
+            var summary = _phrases.WaitingSummary(named.Count, [.. kinds.Select(k => (k.Key, k.Count, (IReadOnlyList<SpokenName>)[.. k.Named.Select(n => n.Name)]))],
+                lines, left.Count, pages.Count > 0);
+            text.AppendLine($"The system said a summary by what each needs itself: \"{summary}\"");
+            if (pages.Count > 0)
+                text.AppendLine($"The {rest.Count} it did not name are read {ProjectListing.Page} at a time: when the user says \"mere\", call {ReadMore}.");
+            return SaysItself(ReadOut(text.ToString().TrimEnd()), summary);
+        }
+        var waiting = _phrases.Waiting([.. named.Select(n => (n.Name, n.Item.Item))], lines);
         return SaysItself(ReadOut(text.ToString().TrimEnd()),
             left.Count > 0 ? $"{waiting} {_phrases.WaitingFromBefore(left.Count, saidAny: true)}" : waiting);
     }
+
+    /// <summary>A page of a long what-needs-me (#507), as the tool's text tells the model what the system said of it.</summary>
+    private static string WaitingPageResult(IReadOnlyList<(ServerAttentionItem Item, SpokenName Name)> page, int index, int pages, int left) =>
+        $"What needs the user not named in its summary ({left}), part {index + 1} of {pages}, said by the system itself: " +
+        string.Join("; ", page.Select(n => $"{n.Name}: {Describe(n.Item.Item)}")) +
+        (index + 1 < pages ? $". More follows: {ReadMore} reads it." : ". That was the end of it.");
 
     /// <param name="root">Only the projects in this root or profile (<see cref="In"/>); all when empty.</param>
     /// <param name="since">
