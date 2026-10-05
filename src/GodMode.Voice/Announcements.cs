@@ -144,15 +144,28 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     private long _lastListed;
 
     /// <summary>
-    /// When this voice session last listed projects (<see cref="VoiceTools.ListProjects"/>, <see cref="VoiceTools.WhatNeedsMe"/>):
+    /// When this voice session last listed every project (<see cref="VoiceTools.ListProjects"/>, <see cref="VoiceTools.WhatNeedsMe"/>):
     /// what "siden jeg sidst spurgte" lists from (#468). Null before any list. The session's own: another session, on
-    /// this machine or another, keeps its own.
+    /// this machine or another, keeps its own. A list of one root or profile, or of an overseer's workers, said nothing
+    /// of the rest, and moves it not (#507): <see cref="ListedIn"/>.
     /// </summary>
     public DateTime? LastListed
     {
         get => Interlocked.Read(ref _lastListed) is var ticks and > 0 ? new DateTime(ticks, DateTimeKind.Utc) : null;
         set => Interlocked.Exchange(ref _lastListed, value?.ToUniversalTime().Ticks ?? 0);
     }
+
+    private readonly ConcurrentDictionary<string, DateTime> _listedIn = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The projects of <paramref name="root"/>, a root or profile as the user named it, were listed at <paramref name="at"/>.</summary>
+    public void ListedIn(string root, DateTime at) => _listedIn[root.Trim()] = at;
+
+    /// <summary>
+    /// What "siden jeg sidst spurgte" lists from for <paramref name="root"/> (all when null): the last list of every
+    /// project, or of that root, whichever was later. Null before any.
+    /// </summary>
+    public DateTime? LastListedIn(string? root) =>
+        root is not null && _listedIn.TryGetValue(root.Trim(), out var at) && (LastListed is not { } all || at > all) ? at : LastListed;
 
     private PagedReading? _reading;
 

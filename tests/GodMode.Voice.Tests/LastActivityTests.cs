@@ -102,6 +102,46 @@ public sealed class LastActivityTests
         Assert.Equal("Intet nyt.", conversation.TakeSaid(tools.ListProjectsText(since: VoiceTools.SinceLastAsked)));
     }
 
+    /// <summary>
+    /// #507: a list of one root said nothing of the others, so "siden sidst" across all of them still counts from the last
+    /// list of all, and takes in what another root did since; one of that root counts from its own.
+    /// </summary>
+    [Fact]
+    public void A_list_of_one_root_moves_since_last_asked_for_that_root_alone()
+    {
+        var (servers, tools, conversation) = Tools();
+        servers.AddProject(ServerA, "Mega/GodMode/261004-issue-2-a", "2-x", root: "GodMode", kind: "issue", profile: "Mega", outputMinutesAgo: 5);
+        servers.AddProject(ServerA, "Private/voicebot/261004-issue-7-v", "7-x", root: "voicebot", kind: "issue", profile: "Private", outputMinutesAgo: 5);
+        tools.ListProjectsText();
+
+        // voicebot's issue 7 writes, then only GodMode is listed
+        servers.AddProject(ServerA, "Private/voicebot/261004-issue-7-v", "7-x", root: "voicebot", kind: "issue", profile: "Private", outputMinutesAgo: 0);
+        conversation.TakeSaid(tools.ListProjectsText("GodMode"));
+
+        Assert.Equal("Intet nyt.", conversation.TakeSaid(tools.ListProjectsText("GodMode", since: VoiceTools.SinceLastAsked)));
+        Assert.Equal("1 projekt. Profil Private, root voicebot: issue 7. Og 1 uden nyt.",
+            conversation.TakeSaid(tools.ListProjectsText(since: VoiceTools.SinceLastAsked)));
+    }
+
+    /// <summary>
+    /// #507: in a window the user asked for, a session that needs the user from before is left out as "uden nyt", and
+    /// said to wait on them, as what needs me says "fra før".
+    /// </summary>
+    [Fact]
+    public void A_window_says_that_one_left_out_needs_the_user()
+    {
+        var (servers, tools, conversation) = Tools();
+        servers.Set(ServerA, FakeServers.Question("Mega/GodMode/261004-issue-101-q", "101-cleanup", "Slet kolonnerne?", minutesAgo: 90) with { Profile = "Mega", Root = "GodMode" });
+        servers.AddProject(ServerA, "Mega/GodMode/261004-issue-2-a", "2-x", root: "GodMode", kind: "issue", profile: "Mega", outputMinutesAgo: 5);
+        servers.AddProject(ServerA, "Mega/GodMode/261004-issue-3-a", "3-x", root: "GodMode", kind: "issue", profile: "Mega", outputMinutesAgo: 120);
+
+        var result = tools.ListProjectsText(since: "30");
+        Assert.Equal("1 projekt. Profil Mega, root GodMode: issue 2. Og 2 uden nyt. 1 af dem venter på dig.", conversation.TakeSaid(result));
+        Assert.Contains("1 of them need the user from before", result);
+        Assert.Equal("Intet nyt. 1 venter på dig fra før.", conversation.TakeSaid(tools.ListProjectsText(since: "1")));
+        Assert.Equal("And 1 with nothing new. It needs you.", English.LeftOut(new LeftOut(1, Asked: true, Waiting: 1)));
+    }
+
     /// <summary>The time is the voice session's own: another session that has listed nothing gets the default list, and is told so.</summary>
     [Fact]
     public void The_last_list_is_each_voice_sessions_own()

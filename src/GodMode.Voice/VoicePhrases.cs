@@ -170,10 +170,13 @@ public sealed partial class VoicePhrases
 
     /// <summary>
     /// What a list left out (#468), as its last sentence: "Og 9 gamle." for stale ones, "Og 2 uden nyt." for those with
-    /// nothing new in the window the user asked for. Empty when it left none out.
+    /// nothing new in the window the user asked for, and how many of those need the user from before (#507), as what
+    /// needs me says "fra før": "Og 2 uden nyt. 1 af dem venter på dig." Empty when it left none out.
     /// </summary>
     public string LeftOut(LeftOut left) => (left.Count, left.Asked, _danish) switch
     {
+        (> 0, true, true) when left.Waiting > 0 => $"Og {left.Count} uden nyt. {WaitingOfThem(left.Waiting, left.Count)}",
+        (> 0, true, false) when left.Waiting > 0 => $"And {left.Count} with nothing new. {WaitingOfThem(left.Waiting, left.Count)}",
         (0, _, _) => "",
         (1, false, true) => "Og 1 gammel.",
         (var n, false, true) => $"Og {n} gamle.",
@@ -185,16 +188,30 @@ public sealed partial class VoicePhrases
 
     /// <summary>
     /// A list that left out every project it had (#468): "Intet nyt. 9 gamle." for stale ones, "Intet nyt." when the user
-    /// asked for a window nothing happened in.
+    /// asked for a window nothing happened in, with those that need the user from before (#507): "Intet nyt. 1 venter
+    /// på dig fra før."
     /// </summary>
     public string NothingNew(LeftOut left) => (left.Count, left.Asked, _danish) switch
     {
+        (_, true, true) when left.Waiting > 0 => $"Intet nyt. {left.Waiting} venter på dig fra før.",
+        (_, true, false) when left.Waiting == 1 => "Nothing new. 1 needs you from before.",
+        (_, true, false) when left.Waiting > 0 => $"Nothing new. {left.Waiting} need you from before.",
         (_, true, true) => "Intet nyt.",
         (_, true, false) => "Nothing new.",
         (1, false, true) => "Intet nyt. 1 gammel.",
         (var n, false, true) => $"Intet nyt. {n} gamle.",
         (1, false, false) => "Nothing new. 1 old one.",
         (var n, false, false) => $"Nothing new. {n} old ones.",
+    };
+
+    /// <summary>"1 af dem venter på dig." / "1 of them needs you.", of <paramref name="of"/> left out; "Den venter på dig." for the only one.</summary>
+    private string WaitingOfThem(int waiting, int of) => (waiting, of, _danish) switch
+    {
+        (1, 1, true) => "Den venter på dig.",
+        (1, 1, false) => "It needs you.",
+        (var n, _, true) => $"{n} af dem venter på dig.",
+        (1, _, false) => "1 of them needs you.",
+        (var n, _, false) => $"{n} of them need you.",
     };
 
     /// <summary>

@@ -123,6 +123,29 @@ public sealed class ListPagesTests
         Assert.Equal("Stoppet. Profil Mega, root GodMode: issue 1, issue 2, issue 3, issue 4, issue 5. Mere?", await SaidOnMoreAsync(tools, conversation));
     }
 
+    /// <summary>
+    /// #507: an unknown root, or a list with nothing in it, read nothing out, so "mere" right after it reads no page of
+    /// the list before it.
+    /// </summary>
+    [Fact]
+    public async Task An_unknown_root_or_an_empty_list_leaves_nothing_for_mere()
+    {
+        var (servers, tools, conversation) = Tools();
+        AddSixteen(servers);
+
+        conversation.TakeSaid(tools.ListProjectsText());
+        Assert.StartsWith("No root or profile 'kappe' has any project.", tools.ListProjectsText("kappe"));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+
+        conversation.TakeSaid(tools.ListProjectsText());
+        Assert.StartsWith("No root or profile 'kappe' has any project.", await tools.WhatNeedsMeAsync(CancellationToken.None, root: "kappe"));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+
+        conversation.TakeSaid(tools.ListProjectsText());
+        Assert.Equal("Intet venter.", conversation.TakeSaid(await tools.WhatNeedsMeAsync(CancellationToken.None)));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+    }
+
     /// <summary>One cursor: "mere" reads on in what was read in parts last, a list after a reply, a reply after a list.</summary>
     [Fact]
     public async Task Mere_reads_on_in_what_was_read_in_parts_last()

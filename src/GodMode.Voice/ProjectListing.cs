@@ -54,7 +54,8 @@ public static class ProjectListing
     {
         var all = projects.Select(p => (Project: p, At: activity(p))).OrderByDescending(p => p.At).ToList();
         List<T> kept = [.. all.Where(p => window.Since is not { } since || p.At >= since || !window.Asked && needsUser(p.Project)).Select(p => p.Project)];
-        return (kept, new LeftOut(all.Count - kept.Count, window.Asked));
+        var left = all.Select(p => p.Project).Except(kept).ToList();
+        return (kept, new LeftOut(left.Count, window.Asked, left.Count(needsUser)));
     }
 
     /// <summary>
@@ -111,5 +112,8 @@ public sealed record ListWindow(DateTime? Since, bool Asked)
     public static ListWindow After(DateTime since) => new(since, true);
 }
 
-/// <summary>How many projects a list left out (#468): stale ones, or, <paramref name="Asked"/>, those with nothing new in the window asked for.</summary>
-public sealed record LeftOut(int Count, bool Asked);
+/// <summary>
+/// How many projects a list left out (#468): stale ones, or, <paramref name="Asked"/>, those with nothing new in the window
+/// asked for, of which <paramref name="Waiting"/> need the user from before (#507), which only a window asked for leaves out.
+/// </summary>
+public sealed record LeftOut(int Count, bool Asked, int Waiting = 0);

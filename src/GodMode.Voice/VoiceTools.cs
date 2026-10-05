@@ -196,7 +196,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public async Task<string> WhatNeedsMeAsync(CancellationToken ct, string? root = null, string? since = null, string? workers = null)
     {
         var now = Now;
-        if (AskOf(since, now) is not { } ask)
+        if (AskOf(since, now, root) is not { } ask)
             return NoSuchWindow(since!);
         if (ScopeOf(workers, since) is not { } scope)
             return NoSuchOverseer(workers!);
@@ -209,7 +209,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             // A worker's item goes with its overseer's line, so its overseer's root decides
             all = [.. all.Where(i => projects.Find(i.Project) is { } p && In(scope.Shown && projects.Holds(i) ? projects.TopOf(p) : p, root))];
         }
-        conversation.LastListed = now;
+        Listed(root, scope, now);
         DateTime ActivityOfItem(ServerAttentionItem i) => projects.Find(i.Project) is { } p ? ProjectListing.ActivityOf(p.Project, now) : i.Item.Since;
         // Unasked, workers' are held back (#469), but for a nested overseer's escalation: each overseer's line counts those its
         // workers have, in the window
@@ -232,10 +232,14 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         if (alone is not null)
             conversation.Reading = new ProjectLine(alone, Read: false);
         if (items.Count == 0 && overseers.Count == 0)
+        {
+            // Nothing read out: nothing for "mere" to read on in, whatever was before (#507)
+            conversation.Reading = null;
             return left.Count > 0
                 ? SaysItself($"Nothing that needs the user has had activity {ask.Said}; {left.Count} need the user from before, not named.{ask.Note}",
                     _phrases.WaitingFromBefore(left.Count, saidAny: false))
                 : SaysItself((string.IsNullOrWhiteSpace(root) ? "Nothing needs the user." : $"Nothing in {root} needs the user.") + ask.Note, _phrases.Waiting([]));
+        }
 
         var text = new StringBuilder(items.Count > 0 ? $"{items.Count} need the user:\n" : "Nothing needs the user directly:\n");
         foreach (var (item, name) in named)
@@ -269,7 +273,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public string ListProjectsText(string? root = null, string? since = null, string? workers = null)
     {
         var now = Now;
-        if (AskOf(since, now) is not { } ask)
+        if (AskOf(since, now, root) is not { } ask)
             return NoSuchWindow(since!);
         if (ScopeOf(workers, since) is not { } scope)
             return NoSuchOverseer(workers!);
@@ -277,7 +281,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         var all = filtered ? [.. scope.Projects.Where(p => In(p, root!))] : scope.Projects;
         if (filtered && all.Count == 0 && scope.Overseer is null)
             return NoSuchRoot(root!);
-        conversation.LastListed = now;
+        Listed(root, scope, now);
         // Unasked, an overseer stands for its workers: it is as recent as the last of them, and needs the user when one does
         IReadOnlyList<ServerProject> Stands(ServerProject p) => scope.Shown ? [p, .. projects.WorkersOf(p.Ref)] : [p];
         DateTime Activity(ServerProject p) => Stands(p).Max(s => ActivityOf(s, now));
@@ -285,9 +289,12 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // As what needs me: one project read out is the one talked about, several leave none
         Talked(kept is [var only] ? only.Ref : null);
         if (all.Count == 0)
+        {
+            conversation.Reading = null;
             return scope.Overseer is { } none
                 ? SaysItself($"{Names.Of(none)} runs no workers{(filtered ? $" in {root}" : "")} now.", _phrases.Projects([]))
                 : SaysItself("No projects on any server.", _phrases.Projects([]));
+        }
         if (kept.Count == 0)
         {
             conversation.Reading = null;
@@ -427,14 +434,15 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     private sealed record ListAsk(ListWindow Window, string Said, string Note = "");
 
     /// <summary>The window <paramref name="since"/> names; null for one it does not.</summary>
-    private ListAsk? AskOf(string? since, DateTime now)
+    /// <param name="root">The root or profile the list is of: "siden sidst" counts from its own last list too (<see cref="VoiceConversation.LastListedIn"/>).</param>
+    private ListAsk? AskOf(string? since, DateTime now, string? root)
     {
         var recent = new ListAsk(ListWindow.Recent(now, _staleAfter), $"in the last {StaleHoursSaid} hours");
         return since?.Trim().ToLowerInvariant() switch
         {
             null or "" => recent,
             SinceAll or "alle" => new ListAsk(ListWindow.All, "ever"),
-            SinceLastAsked or "sidst" => conversation.LastListed is { } last
+            SinceLastAsked or "sidst" => conversation.LastListedIn(string.IsNullOrWhiteSpace(root) ? null : root) is { } last
                 ? new ListAsk(ListWindow.After(last), $"since the user last asked, at {last:HH:mm} UTC")
                 : recent with { Note = " Nothing was listed before in this voice session, so this is the default list: say so." },
             var minutes when int.TryParse(minutes, NumberStyles.Integer, CultureInfo.InvariantCulture, out var m) && m > 0 =>
@@ -452,7 +460,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     private static string LeftOutText(LeftOut left, ListAsk ask) => left switch
     {
         { Count: 0 } => "",
-        { Asked: true } => $"{left.Count} more had no activity {ask.Said}: left out, and not named.",
+        { Asked: true, Waiting: 0 } => $"{left.Count} more had no activity {ask.Said}: left out, and not named.",
+        { Asked: true } => $"{left.Count} more had no activity {ask.Said}: left out, and not named; {left.Waiting} of them need the user from before, which the system says.",
         _ => $"{left.Count} stale ones, with no activity {ask.Said}, were left out and not named. If the user asks for all of " +
             $"them, or the old ones too, call {ListProjects} with {SinceParameter} \"{SinceAll}\".",
     };
@@ -475,8 +484,25 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             .Any(n => string.Equals(n, root.Trim(), StringComparison.OrdinalIgnoreCase));
 
     /// <summary>A root or profile no project is in: for the model, with the groups there are, which it offers as options.</summary>
-    private string NoSuchRoot(string root) =>
-        $"No root or profile '{root}' has any project. Nothing was listed. There are: {string.Join("; ", Names.Groups().Select(g => g.Heading))}.";
+    private string NoSuchRoot(string root)
+    {
+        // Nothing listed: "mere" reads on in no earlier list (#507)
+        conversation.Reading = null;
+        return $"No root or profile '{root}' has any project. Nothing was listed. There are: {string.Join("; ", Names.Groups().Select(g => g.Heading))}.";
+    }
+
+    /// <summary>
+    /// A list was said at <paramref name="now"/>: what "siden sidst" counts from (#468). One of every project moves it for
+    /// all; one of a root or profile for that one alone, and one of an overseer's workers for none (#507), since neither
+    /// said anything of the rest.
+    /// </summary>
+    private void Listed(string? root, ListScope scope, DateTime now)
+    {
+        if (!string.IsNullOrWhiteSpace(root))
+            conversation.ListedIn(root, now);
+        else if (scope.Overseer is null)
+            conversation.LastListed = now;
+    }
 
     /// <summary>
     /// <paramref name="result"/>, the tool's text for the model, which the code says itself as <paramref name="said"/>: the
