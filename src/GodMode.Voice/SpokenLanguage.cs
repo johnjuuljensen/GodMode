@@ -9,6 +9,11 @@ namespace GodMode.Voice;
 /// by æ, ø and å: the English terms of GodMode's work inside a Danish sentence ("svar at den skal merge the branch") are
 /// outweighed by its Danish words, and a final of no such words ("status 283", "pull request") tells nothing.
 /// </summary>
+/// <remarks>
+/// The transcriber hears Danish as English now and then ("Nej, som overseer" as "Now as overseer", #449), a few words at
+/// most: so a switch away from the session's language takes a whole sentence of the other (<see cref="SwitchAway"/>), and
+/// one back to it a word (<see cref="VoicePhrases.Heard"/>).
+/// </remarks>
 public static partial class SpokenLanguage
 {
     // Words of one language that are not words of the other ("i", "to", "at", "for", "men", "her" are both)
@@ -30,8 +35,11 @@ public static partial class SpokenLanguage
         "my", "you", "your", "about", "with", "on", "in", "a", "an", "projects", "project", "dictate", "create", "who",
     ], StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>True for Danish, false for English, null when the final tells neither apart from the other.</summary>
-    public static bool? IsDanish(string text)
+    /// <summary>How far ahead of the session's language the other's words must be in a final to switch to it: a sentence's worth.</summary>
+    public const int SwitchAway = 3;
+
+    /// <summary>How Danish the final is: its Danish words less its English ones; below zero for English, zero when it tells neither.</summary>
+    public static int Lean(string text)
     {
         var (danish, english) = (0, 0);
         foreach (var word in Words().Matches(text).Select(m => m.Value))
@@ -39,7 +47,7 @@ public static partial class SpokenLanguage
             if (DanishWords.Contains(word) || word.AsSpan().IndexOfAny("æøåÆØÅ") >= 0) danish++;
             else if (EnglishWords.Contains(word)) english++;
         }
-        return danish == english ? null : danish > english;
+        return danish - english;
     }
 
     [GeneratedRegex(@"\p{L}+")]

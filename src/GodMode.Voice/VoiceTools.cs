@@ -309,9 +309,11 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             .OrderByDescending(g => Activity(g.Projects[0]))
             .ToList();
         // An overseer's line counts its workers (#469), unless they are listed themselves
-        string ListLabelOf(ServerProject p) => scope.Shown && projects.WorkersOf(p.Ref) is { Count: > 0 } run
-            ? $"{LabelOf(p)} ({_phrases.RunsWorkers(run.Count, run.Count(w => StateOf(w) == ListedState.NeedsYou))})"
-            : LabelOf(p);
+        // Each with its topic (#507), as a list says it
+        string ListLabelOf(ServerProject p) => _phrases.Listed(new SpokenName(LabelOf(p), Topic: Names.Full(p.Ref)?.Topic))
+            + (scope.Shown && projects.WorkersOf(p.Ref) is { Count: > 0 } run
+                ? $" ({_phrases.RunsWorkers(run.Count, run.Count(w => StateOf(w) == ListedState.NeedsYou))})"
+                : "");
         var text = new StringBuilder(scope.Overseer is { } of ? $"The workers {Names.Of(of)} runs: " : "");
         text.Append(groups is [_]
             ? $"{Count(kept.Count)}, all in one group:\n"
@@ -337,7 +339,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 .Select(p => (Name: Names.Of(p.Ref), Item: board.ItemOf(p.Ref)?.Item))
                 .Where(n => n.Name is not null && n.Item is not null).Select(n => (n.Name!, n.Item!))];
             return SaysItself(text.ToString(), _phrases.Projects([.. groups.Select(g =>
-                (g.Profile, g.Root, (IReadOnlyList<string>)[.. g.Projects.Select(ListLabelOf)]))], left, needs));
+                new ListedGroup(g.Profile, g.Root, [.. g.Projects.Select(ListLabelOf)], g.Server))], left, needs));
         }
 
         // Too many to keep (#457): a summary by state, then the projects it did not name, a page at a time, on "mere"
@@ -347,7 +349,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             ? new ListReading([.. pages.Select((page, i) => (ListPageResult(page, i, pages.Count, rest.Count), _phrases.ListPage(page, i + 1 < pages.Count)))], 0)
             : null;
         var said = _phrases.ListSummary(kept.Count,
-            [.. states.Select(s => (s.State, s.Count, (IReadOnlyList<SpokenName>)[.. s.Named.Select(p => Names.Full(p.Project.Ref) is { } full ? full with { Topic = null } : new SpokenName(p.Label))]))],
+            [.. states.Select(s => (s.State, s.Count, (IReadOnlyList<SpokenName>)[.. s.Named.Select(p => Names.Full(p.Project.Ref) ?? new SpokenName(p.Label))]))],
             pages.Count > 0, left);
         text.Append($"The system said a summary by state itself: \"{said}\"");
         if (pages.Count > 0)
@@ -472,7 +474,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <summary>A page of a long list (#457), as the tool's text tells the model what the system said of it.</summary>
     private static string ListPageResult(IReadOnlyList<ListedProject> page, int index, int pages, int left) =>
         $"The list's projects not named in its summary ({left}), part {index + 1} of {pages}, said by the system itself: " +
-        string.Join("; ", page.Select(p => $"{p.Label} ({p.State}, profile {p.Profile}, root {p.Root ?? "none"})")) +
+        string.Join("; ", page.Select(p => $"{p.Label} ({p.State}, profile {p.Profile}, root {p.Root ?? "none"}{(p.Server is { } server ? $", server {server}" : "")})")) +
         (index + 1 < pages ? $". More follows: {ReadMore} reads it." : ". That was the end of the list.");
 
     /// <summary>

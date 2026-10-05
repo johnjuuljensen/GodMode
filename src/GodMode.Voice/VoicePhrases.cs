@@ -15,16 +15,25 @@ public sealed partial class VoicePhrases
     /// <summary>How long a prompt the read-back says as it is; a longer one is said cut, after its first words.</summary>
     public const int PromptReadBack = 100;
 
+    private readonly bool _primaryDanish;
     private volatile bool _danish;
 
     public VoicePhrases(SessionLanguages languages) =>
-        _danish = languages.Primary.StartsWith("da", StringComparison.OrdinalIgnoreCase);
+        _danish = _primaryDanish = languages.Primary.StartsWith("da", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>The user said <paramref name="text"/>, a final: the code's words are in its language from now on, when it tells one (<see cref="SpokenLanguage"/>).</summary>
+    /// <summary>
+    /// The user said <paramref name="text"/>, a final: the code's words are in its language from now on, when it tells one
+    /// (<see cref="SpokenLanguage"/>): the other language's by a sentence of it (<see cref="SpokenLanguage.SwitchAway"/>),
+    /// since a few words heard in it may be the session's misheard, and the session's own back by a word.
+    /// </summary>
     public void Heard(string text)
     {
-        if (SpokenLanguage.IsDanish(text) is { } danish)
-            _danish = danish;
+        var lean = SpokenLanguage.Lean(text);
+        var towardsPrimary = _primaryDanish ? lean : -lean;
+        if (towardsPrimary > 0)
+            _danish = _primaryDanish;
+        else if (towardsPrimary <= -SpokenLanguage.SwitchAway)
+            _danish = !_primaryDanish;
     }
 
     /// <summary>Whether the code speaks Danish now.</summary>
@@ -52,6 +61,16 @@ public sealed partial class VoicePhrases
     public string Named(SpokenName name) =>
         name.Label + (name.Topic is { } topic ? $", {topic}" : "") + (name.Root is { } root ? _danish ? $" i {root}" : $" in {root}" : "")
         + (name.Profile is { } profile ? _danish ? $", profil {profile}" : $", profile {profile}" : "");
+
+    /// <summary>
+    /// A project as a list names it (#507): its label, then its topic after "om" / "about", so that a list's commas part
+    /// its projects, not a project from its topic, then its root and profile as <see cref="Named"/> says them: "issue 376
+    /// om mic-timeout i GodMode".
+    /// </summary>
+    public string Listed(SpokenName name) =>
+        Named(name with { Topic = null }) is var named && name.Topic is { } topic
+            ? named.Insert(name.Label.Length, _danish ? $" om {topic}" : $" about {topic}")
+            : Named(name);
 
     /// <summary>The project named as a sentence's subject: <see cref="Named"/>, with a comma after a topic or profile, before the verb.</summary>
     private string Subject(SpokenName name) => Named(name) + (name.Topic is null && name.Profile is null ? "" : ",");
@@ -168,13 +187,13 @@ public sealed partial class VoicePhrases
     /// What the listed projects need, each as its announcement says it (<see cref="Announce"/>), said after the groups:
     /// a list of an overseer's workers (#469) says their questions, which no announcement said.
     /// </param>
-    public string Projects(IReadOnlyList<(string Profile, string? Root, IReadOnlyList<string> Labels)> groups, LeftOut? left = null,
+    public string Projects(IReadOnlyList<ListedGroup> groups, LeftOut? left = null,
         IReadOnlyList<(SpokenName Name, AttentionItem Item)>? needs = null)
     {
         var count = groups.Sum(g => g.Labels.Count);
         return count == 0
             ? left is { Count: > 0 } ? NothingNew(left) : _danish ? "Ingen projekter." : "No projects."
-            : $"{Total(count)} {string.Join(" ", groups.Select(g => GroupLine(g.Profile, g.Root, g.Labels)))}"
+            : $"{Total(count)} {string.Join(" ", groups.Select(g => GroupLine(g.Profile, g.Root, g.Server, g.Labels)))}"
                 + string.Concat((needs ?? []).Select(n => Then(GodModeAnnouncementFormatter.Sentence(Announce(n.Name, n.Item)))))
                 + Then(left is null ? "" : LeftOut(left));
     }
@@ -251,9 +270,12 @@ public sealed partial class VoicePhrases
         (_, false) => $"{count} projects.",
     };
 
-    /// <summary>A group of a list, by its profile and root: "Profil Mega, root GodMode: issue 376, issue 382.".</summary>
-    private string GroupLine(string profile, string? root, IEnumerable<string> labels) =>
-        $"{(_danish ? "Profil" : "Profile")} {profile}{(root is { } r ? $", root {r}" : "")}: {string.Join(", ", labels)}.";
+    /// <summary>
+    /// A group of a list, by its profile and root, and its server when another server's is said alike (#507): "Profil
+    /// Mega, root GodMode: issue 376, issue 382.", "Profil Mega, root GodMode, server work-pc: issue 1.".
+    /// </summary>
+    private string GroupLine(string profile, string? root, string? server, IEnumerable<string> labels) =>
+        $"{(_danish ? "Profil" : "Profile")} {profile}{(root is { } r ? $", root {r}" : "")}{(server is { } s ? $", server {s}" : "")}: {string.Join(", ", labels)}.";
 
     /// <summary>The question that ends a part when more follows, which "mere" answers.</summary>
     public string More => _danish ? "Mere?" : "More?";
@@ -269,7 +291,7 @@ public sealed partial class VoicePhrases
         var counted = states.Select((s, i) => (s, i)).Where(x => x.s.Named.Count == 0).ToList();
         var rest = counted is [var only] && only.i > 0 && only.i == states.Count - 1 ? only.s.State : (ListedState?)null;
         var parts = states.Select(s =>
-            s.Named.Count > 0 ? $"{And([.. s.Named.Select(Named)])} {Doing(s.State, s.Named.Count)}"
+            s.Named.Count > 0 ? $"{And([.. s.Named.Select(Listed)])} {Doing(s.State, s.Named.Count)}"
             : s.State == rest ? $"{(_danish ? "resten" : "the rest")} {Doing(s.State, 2)}"
             : $"{s.Count} {Doing(s.State, s.Count)}");
         return $"{Total(count)} {string.Join(", ", parts)}.{Then(left is null ? "" : LeftOut(left))}{(more ? $" {More}" : "")}";
@@ -286,11 +308,11 @@ public sealed partial class VoicePhrases
         for (var i = 0; i < page.Count;)
         {
             var first = page[i];
-            var group = page.Skip(i).TakeWhile(p => p.State == first.State && p.Profile == first.Profile && p.Root == first.Root).ToList();
+            var group = page.Skip(i).TakeWhile(p => p.State == first.State && p.Profile == first.Profile && p.Root == first.Root && p.Server == first.Server).ToList();
             if (first.State != state)
                 sentences.Add($"{Heading(first.State)}.");
             state = first.State;
-            sentences.Add(GroupLine(first.Profile, first.Root, group.Select(p => p.Label)));
+            sentences.Add(GroupLine(first.Profile, first.Root, first.Server, group.Select(p => p.Label)));
             i += group.Count;
         }
         return string.Join(" ", sentences) + (more ? $" {More}" : "");

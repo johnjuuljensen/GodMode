@@ -78,7 +78,7 @@ public sealed class LastActivityTests
         servers.AddProject(ServerA, "Mega/GodMode/261004-issue-2-a", "2-x", root: "GodMode", kind: "issue", profile: "Mega", outputMinutesAgo: 5);
         servers.AddProject(ServerA, "Mega/GodMode/261002-issue-11-s", "11-x", root: "GodMode", kind: "issue", profile: "Mega", state: ProjectState.Stopped, outputMinutesAgo: TwoDays);
 
-        Assert.Equal("2 projekter. Profil Mega, root GodMode: issue 2, issue 101. Og 1 gammel.", conversation.TakeSaid(tools.ListProjectsText()));
+        Assert.Equal("2 projekter. Profil Mega, root GodMode: issue 2, issue 101 om cleanup. Og 1 gammel.", conversation.TakeSaid(tools.ListProjectsText()));
     }
 
     /// <summary>"Siden jeg sidst spurgte": only what was active after this voice session's last list.</summary>
@@ -221,7 +221,7 @@ public sealed class LastActivityTests
     public void The_left_out_in_English()
     {
         Assert.Equal("3 projects. Profile Mega, root GodMode: issue 2, issue 3, issue 1. And 13 old ones.",
-            English.Projects([("Mega", "GodMode", ["issue 2", "issue 3", "issue 1"])], new LeftOut(13, Asked: false)));
+            English.Projects([new("Mega", "GodMode", ["issue 2", "issue 3", "issue 1"])], new LeftOut(13, Asked: false)));
         Assert.Equal("Nothing new. 1 old one.", English.NothingNew(new LeftOut(1, Asked: false)));
         Assert.Equal("Nothing new.", English.NothingNew(new LeftOut(4, Asked: true)));
         Assert.Equal("16 projects. 3 are idle, 13 are stopped. And 2 with nothing new. More?",

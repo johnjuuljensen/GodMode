@@ -328,15 +328,42 @@ public sealed class SaidByCodeTests
     }
 
     [Theory]
-    [InlineData("Hvad venter?", true)]
-    [InlineData("Læs 283", true)]
-    [InlineData("Svar at den skal merge the branch", true)]
-    [InlineData("What needs me?", false)]
-    [InlineData("Read the reply of issue 283", false)]
-    [InlineData("Status 283", null)]
-    [InlineData("pull request", null)]
-    public void The_language_of_a_final_is_told_by_its_small_words(string final, bool? danish) =>
-        Assert.Equal(danish, SpokenLanguage.IsDanish(final));
+    [InlineData("Hvad venter?", 2)]
+    [InlineData("Læs 283", 1)]
+    [InlineData("Svar at den skal merge the branch", 2)]
+    [InlineData("What needs me?", -3)]
+    [InlineData("Read the reply of issue 283", -4)]
+    [InlineData("Status 283", 0)]
+    [InlineData("pull request", 0)]
+    public void The_language_of_a_final_is_told_by_its_small_words(string final, int lean) =>
+        Assert.Equal(lean, SpokenLanguage.Lean(final));
+
+    /// <summary>
+    /// A few English words in a Danish session may be Danish misheard ("Nej, som overseer" as "Now as overseer", #449):
+    /// only a sentence of English switches, and one Danish word switches back.
+    /// </summary>
+    [Fact]
+    public void A_few_english_words_switch_nothing_and_a_danish_word_switches_back()
+    {
+        var phrases = new VoicePhrases(new SessionLanguages("da-DK"));
+        phrases.Heard("Now as overseer.");
+        phrases.Heard("No");
+        Assert.True(phrases.Danish);
+        phrases.Heard("What needs me?");
+        Assert.False(phrases.Danish);
+        phrases.Heard("Status 283");
+        Assert.False(phrases.Danish);
+        phrases.Heard("Mere");
+        Assert.True(phrases.Danish);
+
+        var english = new VoicePhrases(new SessionLanguages("en-US"));
+        english.Heard("Hvad venter?");
+        Assert.True(english.Danish == false);
+        english.Heard("Hvad venter der nu?");
+        Assert.True(english.Danish);
+        english.Heard("More");
+        Assert.False(english.Danish);
+    }
 
     [Fact]
     public void The_lists_are_worded_in_the_sessions_language()
@@ -346,7 +373,7 @@ public sealed class SaidByCodeTests
         Assert.Equal("Nothing needs you.", english.Waiting([]));
         Assert.Equal("issue 283 has a question.", english.Waiting([(new SpokenName("issue 283"), item)]));
         Assert.Equal("No projects.", english.Projects([]));
-        Assert.Equal("1 project. Profile Mega, root GodMode: issue 283.", english.Projects([("Mega", "GodMode", ["issue 283"])]));
-        Assert.Equal("1 projekt. Profil Mega: issue 283.", Danish.Projects([("Mega", null, ["issue 283"])]));
+        Assert.Equal("1 project. Profile Mega, root GodMode: issue 283.", english.Projects([new("Mega", "GodMode", ["issue 283"])]));
+        Assert.Equal("1 projekt. Profil Mega: issue 283.", Danish.Projects([new("Mega", null, ["issue 283"])]));
     }
 }

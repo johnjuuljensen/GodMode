@@ -170,4 +170,45 @@ public sealed class ProjectListTests
         Assert.Equal("Unknown project 'vonage'. Nothing needs the user now. Projects: chat testing (testing, chat): Idle.",
             await tools.ProjectStatusAsync("vonage", CancellationToken.None));
     }
+
+    /// <summary>
+    /// #507: two servers with a root of one profile and name are two groups, told apart by their servers' names; a group
+    /// no other server has is said as before.
+    /// </summary>
+    [Fact]
+    public void Same_named_groups_on_two_servers_are_told_apart_by_their_servers()
+    {
+        var servers = new FakeServers("work-pc", "home-pc");
+        var handles = new ProjectHandles();
+        var projects = new ProjectBoard(servers, handles);
+        var conversation = new VoiceConversation();
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, conversation);
+        servers.AddProject("work-pc", "Mega/GodMode/261004-issue-1-a", "1-x", root: "GodMode", kind: "issue", profile: "Mega", minutesAgo: 1);
+        servers.AddProject("home-pc", "Mega/GodMode/261004-issue-2-b", "2-x", root: "GodMode", kind: "issue", profile: "Mega", minutesAgo: 2);
+        servers.AddProject("home-pc", "Private/voicebot/261004-branch-master-c", "master", root: "voicebot", kind: "branch", profile: "Private", minutesAgo: 3);
+
+        var result = tools.ListProjectsText();
+
+        Assert.Equal("3 projekter. Profil Mega, root GodMode, server work-pc: issue 1. Profil Mega, root GodMode, server home-pc: issue 2. " +
+            "Profil Private, root voicebot: branch master.", conversation.TakeSaid(result));
+        Assert.Contains("Profile Mega, root GodMode, server home-pc (1 project):", result);
+        Assert.Contains("Profile Private, root voicebot (1 project):", result);
+    }
+
+    /// <summary>#507: a list says each project's topic, after "om", so its commas part the projects.</summary>
+    [Fact]
+    public void A_list_says_each_projects_topic()
+    {
+        var servers = new FakeServers(ServerA);
+        var handles = new ProjectHandles();
+        var projects = new ProjectBoard(servers, handles);
+        var conversation = new VoiceConversation();
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, conversation);
+        servers.AddProject(ServerA, "Mega/GodMode/261004-issue-376-a", "376-mic-timeout", root: "GodMode", kind: "issue", profile: "Mega", minutesAgo: 1);
+        servers.AddProject(ServerA, "Mega/GodMode/261004-branch-master-m", "master", root: "GodMode", kind: "branch", profile: "Mega", minutesAgo: 2);
+
+        Assert.Equal("2 projekter. Profil Mega, root GodMode: issue 376 om mic timeout, branch master.", conversation.TakeSaid(tools.ListProjectsText()));
+        Assert.Equal("issue 376 about mic-timeout in GodMode, profile Mega",
+            new VoicePhrases(new VoiceBot.Core.Resources.SessionLanguages("en-US")).Listed(new SpokenName("issue 376", "GodMode", "Mega", "mic-timeout")));
+    }
 }

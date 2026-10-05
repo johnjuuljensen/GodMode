@@ -86,7 +86,7 @@ public sealed class ListPagesTests
 
         var said = conversation.TakeSaid(tools.ListProjectsText());
         Assert.NotNull(said);
-        Assert.Matches(@"^16 projekter\. issue (101|283) og issue (101|283) venter på dig, 4 kører, 10 er stoppet\. Mere\?$", said);
+        Assert.Matches(@"^16 projekter\. issue (101 om cleanup|283 om voice) og issue (101 om cleanup|283 om voice) venter på dig, 4 kører, 10 er stoppet\. Mere\?$", said);
         Assert.Equal("Kører. Profil Mega, root GodMode: issue 1, issue 2, issue 3, issue 4. Stoppet. Profil Mega, root GodMode: issue 11. Mere?",
             await SaidOnMoreAsync(tools, conversation));
     }

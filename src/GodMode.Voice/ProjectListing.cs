@@ -6,8 +6,14 @@ namespace GodMode.Voice;
 /// <summary>What a listed project is doing, as a long list says it (#457), in the order it says them.</summary>
 public enum ListedState { NeedsYou, Running, Idle, Stopped }
 
-/// <summary>A project as a list says it: what it is doing, its profile and root (as shown), and its label.</summary>
-public sealed record ListedProject(ListedState State, string Profile, string? Root, ServerProject Project, string Label);
+/// <summary>
+/// A project as a list says it: what it is doing, its profile and root (as shown), its label, and its server's name when
+/// its group is told apart by it (<see cref="ProjectNames.Group.Server"/>).
+/// </summary>
+public sealed record ListedProject(ListedState State, string Profile, string? Root, ServerProject Project, string Label, string? Server = null);
+
+/// <summary>A group of a list said whole (<see cref="VoicePhrases.Projects"/>): its profile and root, its projects as said, and its server when it needs it.</summary>
+public sealed record ListedGroup(string Profile, string? Root, IReadOnlyList<string> Labels, string? Server = null);
 
 /// <summary>A state as a long list's summary says it: its count, and the projects it names, none when it only counts them.</summary>
 public sealed record StateCount(ListedState State, int Count, IReadOnlyList<ListedProject> Named);
@@ -64,7 +70,7 @@ public static class ProjectListing
     /// </summary>
     public static IReadOnlyList<ListedProject> Order(IReadOnlyList<ProjectNames.Group> groups, Func<ServerProject, ListedState> state,
         Func<ServerProject, string> label, Func<ServerProject, DateTime> activity) =>
-        [.. groups.SelectMany(g => g.Projects.Select(p => new ListedProject(state(p), g.Profile, g.Root, p, label(p))))
+        [.. groups.SelectMany(g => g.Projects.Select(p => new ListedProject(state(p), g.Profile, g.Root, p, label(p), g.Server)))
             .OrderBy(p => p.State).ThenByDescending(p => activity(p.Project))];
 
     /// <summary>
@@ -92,7 +98,7 @@ public static class ProjectListing
     /// profile and root said together, so a page names each group once.
     /// </summary>
     public static IReadOnlyList<IReadOnlyList<ListedProject>> Pages(IReadOnlyList<ListedProject> rest) =>
-        [.. rest.Chunk(Page).Select(page => (IReadOnlyList<ListedProject>)[.. page.GroupBy(p => (p.State, p.Profile, p.Root)).SelectMany(g => g)])];
+        [.. rest.Chunk(Page).Select(page => (IReadOnlyList<ListedProject>)[.. page.GroupBy(p => (p.State, p.Profile, p.Root, p.Server)).SelectMany(g => g)])];
 }
 
 /// <summary>
