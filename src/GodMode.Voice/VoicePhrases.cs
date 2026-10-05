@@ -418,6 +418,10 @@ public sealed partial class VoicePhrases
     public string DictationRunning(SpokenName name) =>
         _danish ? $"{Subject(name)} arbejder. Diktér, når den venter på dig." : $"{Subject(name)} is working. Dictate when it waits for you.";
 
+    /// <summary>A dictation sent to a project that started working while it was taken (#507): it is kept, for when it waits again.</summary>
+    public string DictationBusy(SpokenName name) =>
+        _danish ? $"{Subject(name)} er gået i gang og arbejder nu." : $"{Subject(name)} has started working.";
+
     /// <summary>A dictation to a project that waits on a permission, answered on screen only.</summary>
     public string DictationPermission(SpokenName name, string? summary) => (summary, _danish) switch
     {
