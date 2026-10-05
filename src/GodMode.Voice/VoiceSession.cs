@@ -184,8 +184,10 @@ public sealed class VoiceSession : IAsyncDisposable
         collection.AddVoiceBotSessions();
         var services = collection.BuildServiceProvider();
 
-        // Earcons play before an announcement's words, after the music paused for them (#455)
-        var speaker = new CueingSink(setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink);
+        // Earcons play before an announcement's words, after the music paused for them (#455), and the "heard you" tone
+        // as a final is taken (#458); the setting turns both off
+        var speaker = new CueingSink(setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink, logger);
+        var sounds = setup.Settings.Earcons ? speaker : null;
         var state = new VoiceStateTracker();
         state.Changed += setup.Events.StateChanged;
         AsyncServiceScope scope = default;
@@ -203,9 +205,10 @@ public sealed class VoiceSession : IAsyncDisposable
                     ? TranscriptionInput.FromAudio(listening.Listening(audio.Source))
                     : setup.Transcription,
                 speaker,
-                new EventSink(setup.Events, state, tools.Creates, conversation, setup.Mic, setup.Media))
+                new EventSink(setup.Events, state, tools.Creates, conversation, setup.Mic, setup.Media, sounds, tools.Dictation))
             {
-                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board, tools.Names, speaker.Cue), logger),
+                AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board, tools.Names,
+                    sounds is null ? null : sounds.Cue), logger),
                 Options = new SessionOptions
                 {
                     LogDirectory = setup.LogDirectory,
@@ -337,12 +340,17 @@ public sealed class VoiceSession : IAsyncDisposable
 
     /// <summary>The session's events, to the host and the state.</summary>
     private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates, VoiceConversation conversation,
-        VoiceMic? mic, MediaPause? media)
+        VoiceMic? mic, MediaPause? media, CueingSink? sounds, Dictation dictation)
         : ISessionEventSink
     {
         public Task OnTranscriptionAsync(TranscriptionEvent evt, string? cleanedText)
         {
             mic?.Heard();
+            // VoiceBot reports a transcription only once it is past its echo, dedup and noise filters, and answers a final
+            // right after: a final here is a turn taken, and the tone says so before its answer (#458). A dictation's
+            // parts get none, only its start and its terminator: a sound at every pause to think would break the thought
+            if (!evt.IsPartial && (!dictation.Active || Dictation.Ends(cleanedText ?? evt.Text).Terminator is not null))
+                sounds?.Heard();
             events.Transcript(cleanedText ?? evt.Text, evt.IsPartial);
             return Task.CompletedTask;
         }
