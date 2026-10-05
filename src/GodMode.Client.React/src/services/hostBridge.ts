@@ -121,6 +121,8 @@ export interface VoiceSettingsView {
   MicSilenceSeconds: number;
   /** Voice's short sounds: the tone as what you said is taken, and the earcons before announcements. */
   Earcons: boolean;
+  /** How many hours without activity leave a session out of voice's lists, unless asked for all. */
+  StaleHours: number;
   ElevenLabsKeySet: boolean;
   AnthropicKeySet: boolean;
 }
@@ -137,6 +139,7 @@ export interface VoiceSettingsUpdate {
   Speaker?: AudioDevice;
   MicSilenceSeconds?: number;
   Earcons?: boolean;
+  StaleHours?: number;
   ElevenLabsKey?: string;
   AnthropicKey?: string;
 }
