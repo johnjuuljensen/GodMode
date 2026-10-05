@@ -144,15 +144,28 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     private long _lastListed;
 
     /// <summary>
-    /// When this voice session last listed projects (<see cref="VoiceTools.ListProjects"/>, <see cref="VoiceTools.WhatNeedsMe"/>):
+    /// When this voice session last listed every project (<see cref="VoiceTools.ListProjects"/>, <see cref="VoiceTools.WhatNeedsMe"/>):
     /// what "siden jeg sidst spurgte" lists from (#468). Null before any list. The session's own: another session, on
-    /// this machine or another, keeps its own.
+    /// this machine or another, keeps its own. A list of one root or profile, or of an overseer's workers, said nothing
+    /// of the rest, and moves it not (#507): <see cref="ListedIn"/>.
     /// </summary>
     public DateTime? LastListed
     {
         get => Interlocked.Read(ref _lastListed) is var ticks and > 0 ? new DateTime(ticks, DateTimeKind.Utc) : null;
         set => Interlocked.Exchange(ref _lastListed, value?.ToUniversalTime().Ticks ?? 0);
     }
+
+    private readonly ConcurrentDictionary<string, DateTime> _listedIn = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The projects of <paramref name="root"/>, a root or profile as the user named it, were listed at <paramref name="at"/>.</summary>
+    public void ListedIn(string root, DateTime at) => _listedIn[root.Trim()] = at;
+
+    /// <summary>
+    /// What "siden jeg sidst spurgte" lists from for <paramref name="root"/> (all when null): the last list of every
+    /// project, or of that root, whichever was later. Null before any.
+    /// </summary>
+    public DateTime? LastListedIn(string? root) =>
+        root is not null && _listedIn.TryGetValue(root.Trim(), out var at) && (LastListed is not { } all || at > all) ? at : LastListed;
 
     private PagedReading? _reading;
 
@@ -180,6 +193,9 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     /// </summary>
     public IReadOnlyList<SpokenName> TakeSent() => [.. Interlocked.Exchange(ref _sent, new())];
 
+    /// <summary>Whether an answer was sent since the last take, which is left for <see cref="TakeSent"/>.</summary>
+    public bool AnySent => !Volatile.Read(ref _sent).IsEmpty;
+
     private ConcurrentQueue<(SpokenName Name, AttentionItem Item)> _spoken = new();
 
     /// <summary>
@@ -202,6 +218,9 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     /// <summary>The texts read out since the last take, and none from now on: as <see cref="TakeSent"/>.</summary>
     public IReadOnlyList<string> TakeReadOut() => [.. Interlocked.Exchange(ref _read, new())];
 
+    /// <summary>The texts read out since the last take, left for <see cref="TakeReadOut"/>.</summary>
+    public IReadOnlyList<string> ReadOutSoFar => [.. Volatile.Read(ref _read)];
+
     private SaidByCode? _said;
 
     /// <summary>
@@ -210,12 +229,29 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     /// </summary>
     public void SaysItself(string result, string said) => Volatile.Write(ref _said, new SaidByCode(result, said));
 
-    /// <summary>What the code says for <paramref name="result"/>, the tool result the model would read next, and nothing from now on; null when it says nothing for it.</summary>
-    public string? TakeSaid(string result) =>
-        Volatile.Read(ref _said) is { } said && said.Result == result && Interlocked.CompareExchange(ref _said, null, said) == said ? said.Said : null;
+    /// <summary>
+    /// The user asked for <paramref name="then"/> too, in the same breath as the call that gave <paramref name="result"/>
+    /// (#507): what the code says for it waits for the rest, and the model's round after it is run, for the next call.
+    /// </summary>
+    public void Then(string result, string then)
+    {
+        if (Volatile.Read(ref _said) is { } said && said.Result == result)
+            Interlocked.CompareExchange(ref _said, said with { Then = then }, said);
+    }
 
-    private sealed record SaidByCode(string Result, string Said);
+    /// <summary>What the code says for <paramref name="result"/>, the tool result the model would read next, and nothing from now on; null when it says nothing for it.</summary>
+    public string? TakeSaid(string result) => TakeSaidByCode(result)?.Said;
+
+    /// <summary>As <see cref="TakeSaid"/>, with what the user asked for after it (<see cref="Then"/>).</summary>
+    public SaidByCode? TakeSaidByCode(string result) =>
+        Volatile.Read(ref _said) is { } said && said.Result == result && Interlocked.CompareExchange(ref _said, null, said) == said ? said : null;
 }
+
+/// <summary>
+/// What the code says for a tool's <paramref name="Result"/> (<see cref="VoiceConversation.SaysItself"/>), and what the user
+/// asked for after it in the same breath, if anything (<see cref="VoiceConversation.Then"/>, #507).
+/// </summary>
+public sealed record SaidByCode(string Result, string Said, string? Then = null);
 
 /// <summary>How much of a project's anchor a line gives (#455, <see cref="VoiceConversation.Mention"/>).</summary>
 public enum Anchor
@@ -493,10 +529,20 @@ public sealed class AttentionBoard
     /// is still its project's item, and still announced. False once it was answered, on screen or by voice, marked
     /// seen, or the session moved on (its project needs something else now, or nothing), or it went to the inbox alone.
     /// An announcement the board did not make (<see cref="AnnouncementOf"/>), of no item, always waits.
+    /// An item gone from the board when its announcement is dropped was never said, so it is announced again should it
+    /// come back as it was (#507): its server's list went empty while it was away, and the item is still there after.
     /// </summary>
-    public bool Waits(Announcement announcement) =>
-        !_announcements.TryGetValue(announcement, out var item)
-        || ItemOf(item.Project) is { } now && Key(now) == Key(item) && now.Item.Alert != AttentionAlert.Inbox;
+    public bool Waits(Announcement announcement)
+    {
+        if (!_announcements.TryGetValue(announcement, out var item))
+            return true;
+        if (ItemOf(item.Project) is not { } now)
+        {
+            _announced.TryRemove(Key(item), out _);
+            return false;
+        }
+        return Key(now) == Key(item) && now.Item.Alert != AttentionAlert.Inbox;
+    }
 
     /// <summary>
     /// From now on, each new item goes to <paramref name="announce"/> with its project's handle; those that came before

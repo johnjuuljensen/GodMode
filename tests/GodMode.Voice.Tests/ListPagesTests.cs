@@ -86,7 +86,7 @@ public sealed class ListPagesTests
 
         var said = conversation.TakeSaid(tools.ListProjectsText());
         Assert.NotNull(said);
-        Assert.Matches(@"^16 projekter\. issue (101|283) og issue (101|283) venter på dig, 4 kører, 10 er stoppet\. Mere\?$", said);
+        Assert.Matches(@"^16 projekter\. issue (101 om cleanup|283 om voice) og issue (101 om cleanup|283 om voice) venter på dig, 4 kører, 10 er stoppet\. Mere\?$", said);
         Assert.Equal("Kører. Profil Mega, root GodMode: issue 1, issue 2, issue 3, issue 4. Stoppet. Profil Mega, root GodMode: issue 11. Mere?",
             await SaidOnMoreAsync(tools, conversation));
     }
@@ -123,6 +123,29 @@ public sealed class ListPagesTests
         Assert.Equal("Stoppet. Profil Mega, root GodMode: issue 1, issue 2, issue 3, issue 4, issue 5. Mere?", await SaidOnMoreAsync(tools, conversation));
     }
 
+    /// <summary>
+    /// #507: an unknown root, or a list with nothing in it, read nothing out, so "mere" right after it reads no page of
+    /// the list before it.
+    /// </summary>
+    [Fact]
+    public async Task An_unknown_root_or_an_empty_list_leaves_nothing_for_mere()
+    {
+        var (servers, tools, conversation) = Tools();
+        AddSixteen(servers);
+
+        conversation.TakeSaid(tools.ListProjectsText());
+        Assert.StartsWith("No root or profile 'kappe' has any project.", tools.ListProjectsText("kappe"));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+
+        conversation.TakeSaid(tools.ListProjectsText());
+        Assert.StartsWith("No root or profile 'kappe' has any project.", await tools.WhatNeedsMeAsync(CancellationToken.None, root: "kappe"));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+
+        conversation.TakeSaid(tools.ListProjectsText());
+        Assert.Equal("Intet venter.", conversation.TakeSaid(await tools.WhatNeedsMeAsync(CancellationToken.None)));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+    }
+
     /// <summary>One cursor: "mere" reads on in what was read in parts last, a list after a reply, a reply after a list.</summary>
     [Fact]
     public async Task Mere_reads_on_in_what_was_read_in_parts_last()
@@ -140,6 +163,47 @@ public sealed class ListPagesTests
         Assert.StartsWith("branch master's reply, part 2 of", await tools.ReadMoreAsync(CancellationToken.None));
     }
 
+    /// <summary>
+    /// #507: what needs me past a page is summarised and paged as a list is: what they need, most urgent first, named while
+    /// it fits and counted after, then "mere" reads the rest, each as its announcement says it.
+    /// </summary>
+    [Fact]
+    public async Task What_needs_me_past_a_page_is_summarised_by_what_they_need_and_paged()
+    {
+        var (servers, tools, conversation) = Tools();
+        servers.Set(ServerA, [
+            FakeServers.Permission("p/r/1", "1-x", "Bash: git push", minutesAgo: 1),
+            FakeServers.Permission("p/r/2", "2-x", "Bash: rm", minutesAgo: 2),
+            .. Enumerable.Range(3, 6).Select(i => FakeServers.Question($"p/r/{i}", $"{i}-x", "Hvilken?", minutesAgo: i)),
+        ]);
+
+        var result = await tools.WhatNeedsMeAsync(CancellationToken.None);
+
+        Assert.Equal("8 venter på dig: issue 1 og issue 2 skal have tilladelse, 6 har et spørgsmål. Mere?", conversation.TakeSaid(result));
+        Assert.Contains("The 6 it did not name are read 5 at a time", result);
+        Assert.Equal("issue 3 har et spørgsmål. issue 4 har et spørgsmål. issue 5 har et spørgsmål. issue 6 har et spørgsmål. issue 7 har et spørgsmål. Mere?",
+            await SaidOnMoreAsync(tools, conversation));
+        Assert.Equal("issue 8 har et spørgsmål.", await SaidOnMoreAsync(tools, conversation));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+    }
+
+    /// <summary>#507: a what needs me said whole, of several, leaves nothing for "mere", as a list said whole does.</summary>
+    [Fact]
+    public async Task What_needs_me_said_whole_leaves_nothing_for_mere()
+    {
+        var (servers, tools, conversation) = Tools();
+        AddSixteen(servers);
+        conversation.TakeSaid(tools.ListProjectsText());
+        servers.Set(ServerA, FakeServers.Question("p/r/101", "101-cleanup", "Hvilken?"), FakeServers.Question("p/r/283", "283-voice", "Ny?", minutesAgo: 1));
+
+        Assert.StartsWith("2 venter på dig:", conversation.TakeSaid(await tools.WhatNeedsMeAsync(CancellationToken.None)));
+        Assert.StartsWith("Nothing more to read", await tools.ReadMoreAsync(CancellationToken.None));
+        Assert.Equal("3 venter på dig: issue 1 skal have tilladelse, 2 har et spørgsmål. Og 1 fra før. Mere?",
+            new VoicePhrases(new SessionLanguages("da-DK")).WaitingSummary(3, [(WaitingKind.Permission, 1, [new SpokenName("issue 1")]), (WaitingKind.Question, 2, [])], [], 1, more: true));
+        Assert.Equal("6 need you: issue 1 needs permission, 5 have a question.",
+            English.WaitingSummary(6, [(WaitingKind.Permission, 1, [new SpokenName("issue 1")]), (WaitingKind.Question, 5, [])], [], 0, more: false));
+    }
+
     [Fact]
     public void The_summary_and_pages_in_English()
     {
@@ -149,6 +213,10 @@ public sealed class ListPagesTests
             English.ListSummary(8, [(ListedState.NeedsYou, 6, []), (ListedState.Running, 2, [new SpokenName("issue 1"), new SpokenName("issue 2")])], more: false));
         Assert.Equal("7 projects. 1 needs you, 6 are stopped. More?",
             English.ListSummary(7, [(ListedState.NeedsYou, 1, []), (ListedState.Stopped, 6, [])], more: true));
+        // #507: a state named after the counted one leaves it no "rest"
+        Assert.Equal("9 projects. issue 1 needs you, 7 are running, issue 9 is stopped. More?",
+            English.ListSummary(9, [(ListedState.NeedsYou, 1, [new SpokenName("issue 1")]), (ListedState.Running, 7, []),
+                (ListedState.Stopped, 1, [new SpokenName("issue 9")])], more: true));
     }
 
     private static AttentionItem InMega(string id, string name, AttentionKind kind) =>

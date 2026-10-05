@@ -154,6 +154,45 @@ public sealed class AnnouncementCheckTests
         Assert.Equal("", formatter.Format([announcement], Danish));
     }
 
+    /// <summary>
+    /// #507: the server's list goes empty while an announcement waits (it was gone from the servers listed), so it is
+    /// dropped; when the server is back with the same item, it is announced then, having never been said.
+    /// </summary>
+    [Fact]
+    public void An_item_dropped_while_its_server_was_gone_is_announced_when_it_is_back()
+    {
+        var (servers, board, _, formatter) = Voice();
+        List<ServerAttentionItem> announced = [];
+        board.Attach((item, _) => announced.Add(item));
+        var question = Question(P101.ProjectId, "101-cleanup", "Hvilken?");
+        servers.Set(ServerA, question);
+        var announcement = Of(board, P101, "101 har et spørgsmål");
+
+        servers.Set(ServerA);   // gone: its list is empty
+        Assert.Equal("", formatter.Format([announcement], Danish));
+        servers.Set(ServerA, question);   // back, with the item as it was
+
+        Assert.Equal([question, question], announced.Select(i => i.Item));
+        Assert.Equal("101 har et spørgsmål.", formatter.Format([Of(board, P101, "101 har et spørgsmål")], Danish));
+    }
+
+    /// <summary>One that was said is not announced again when its server comes back with it (#507 changes only what was dropped).</summary>
+    [Fact]
+    public void An_item_said_before_its_server_was_gone_is_not_announced_again()
+    {
+        var (servers, board, _, formatter) = Voice();
+        List<ServerAttentionItem> announced = [];
+        board.Attach((item, _) => announced.Add(item));
+        var question = Question(P101.ProjectId, "101-cleanup", "Hvilken?");
+        servers.Set(ServerA, question);
+        Assert.Equal("101 har et spørgsmål.", formatter.Format([Of(board, P101, "101 har et spørgsmål")], Danish));
+
+        servers.Set(ServerA);
+        servers.Set(ServerA, question);
+
+        Assert.Single(announced);
+    }
+
     [Fact]
     public void The_same_item_pushed_again_with_new_text_is_still_said()
     {

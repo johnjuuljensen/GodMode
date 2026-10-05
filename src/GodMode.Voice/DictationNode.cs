@@ -8,9 +8,10 @@ namespace GodMode.Voice;
 /// said nothing to, and partials are no one's (help never answers one), so no command is acted on but its terminators.
 /// A terminator's outcome, and a dictation dropped on a tick, are said in the code's words. Built in GodMode, over
 /// VoiceBot's finals as they are: a pause the transcriber commits on (johnjuuljensen/VoiceBot#73) ends a part, not the
-/// dictation.
+/// dictation. Every other final is first heard for its language (<see cref="VoicePhrases.Heard"/>, #507): this node sees
+/// each final first, and a dictation's own words, whatever language they are in, change nothing of the code's.
 /// </summary>
-public sealed class DictationNode(string id, int priority, Dictation dictation) : INode
+public sealed class DictationNode(string id, int priority, Dictation dictation, VoicePhrases? phrases = null) : INode
 {
     public string Id => id;
     public int Priority => priority;
@@ -33,6 +34,7 @@ public sealed class DictationNode(string id, int priority, Dictation dictation) 
             return said is null ? new NodeResult() : Say(context, text, said);
         }
 
+        phrases?.Heard(text);
         if (await dictation.StartAsync(text, ct) is not { } answer)
             return null;
         context.Log?.Log("DICTATION", $"'{text}' → \"{answer}\"");

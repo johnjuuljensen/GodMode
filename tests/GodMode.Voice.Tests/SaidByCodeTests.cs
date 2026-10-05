@@ -30,11 +30,90 @@ public sealed class SaidByCodeTests
         });
         await voice.Events.SaidAsync($"{Danish.Several(2)} issue 101, cleanup, har et spørgsmål. issue 283, voice, er færdig.");
 
-        // Announced oldest first, as they came; listed the most recent first (#468)
+        // Announced most urgent first, the question before the result (#462); listed the most recent first (#468)
         voice.Transcriptions.SayAsRecognized("Hvad venter?");
         await voice.Events.SaidAsync("2 venter på dig: issue 283 er færdig. issue 101, cleanup, har et spørgsmål.");
 
         Assert.Equal(1, model.Calls);
+    }
+
+    /// <summary>
+    /// #507: two asks in one breath. The first call says what more the user asked for (<see cref="VoiceTools.ThenParameter"/>),
+    /// so the code's words for it wait and the model makes the second call; the code says both, in the order asked.
+    /// </summary>
+    [Fact]
+    public async Task What_needs_me_and_then_a_status_in_one_breath_are_both_said()
+    {
+        var servers = new FakeServers();
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "læs 283" })
+            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" });
+        await using var voice = await OfflineVoice.StartAsync(servers, model,
+            connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe til master?")); return Task.CompletedTask; });
+        await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og læs 283");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål. issue 283 spørger: Skal jeg pushe til master?");
+
+        Assert.Equal(2, model.Calls);
+        // The model's second round knew the first was said, and what was left to do
+        var told = Assert.Single(model.ToolResults);
+        Assert.Contains("The system has said this to the user itself already", told);
+        Assert.Contains("\"læs 283\"", told);
+    }
+
+    /// <summary>The model's own reply after a held part (an unknown project it explains) is said after the code's words.</summary>
+    [Fact]
+    public async Task A_second_ask_the_model_answers_itself_is_said_after_the_codes_words()
+    {
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "status 999" })
+            .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "999" })
+            .Respond("Ukendt: 999.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og status 999");
+        await voice.Events.SaidAsync("Intet venter. Ukendt: 999.");
+
+        Assert.Equal(3, model.Calls);
+    }
+
+    /// <summary>
+    /// #375 behind held words (#507): the model claims a send after a held part, and no answer went out. Its "Sendt"
+    /// no longer starts the reply, but it is still not said: the user hears that nothing was sent.
+    /// </summary>
+    [Fact]
+    public async Task A_send_claimed_after_a_held_part_with_none_sent_is_not_said()
+    {
+        var servers = new FakeServers();
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "svar 283 ja" })
+            .Respond("Sendt til 283.");
+        await using var voice = await OfflineVoice.StartAsync(servers, model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og svar 283 ja");
+        await voice.Events.SaidAsync("Intet venter. Intet sendt. Sig svaret igen.");
+
+        Assert.Empty(servers.Replies);
+        Assert.DoesNotContain(voice.Events.Responses, r => r.Contains("Sendt", StringComparison.Ordinal));
+    }
+
+    /// <summary>The model ends the turn on a protocol word alone after a held part: the code's words are said, not "Klar".</summary>
+    [Fact]
+    public async Task A_one_word_reply_after_a_held_part_adds_nothing()
+    {
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "og så?" })
+            .Respond("Klar.");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og så?");
+        await voice.Events.SaidAsync("Intet venter.");
+
+        Assert.Equal(2, model.Calls);
     }
 
     [Fact]
@@ -251,6 +330,62 @@ public sealed class SaidByCodeTests
         Assert.False(VoiceTools.SaidAsIs(new string('a', VoiceTools.SaidAsIsLength + 1)));
     }
 
+    /// <summary>#507: the issue's test. A Danish session where the user switches to English gets the code's words in English, and back.</summary>
+    [Fact]
+    public async Task The_codes_words_follow_the_user_switching_to_English_and_back()
+    {
+        var model = new ScriptedChatClient().CallTool(VoiceTools.WhatNeedsMe).CallTool(VoiceTools.WhatNeedsMe).CallTool(VoiceTools.WhatNeedsMe);
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("What needs me?");
+        await voice.Events.SaidAsync("Nothing needs you.");
+        // A final that tells no language keeps the one spoken last
+        voice.Transcriptions.SayAsRecognized("Status?");
+        await Eventually.UntilAsync(() => voice.Events.Responses.Count(r => r == "Nothing needs you.") == 2,
+            () => $"English again; it said: {string.Join(" | ", voice.Events.Responses)}");
+        voice.Transcriptions.SayAsRecognized("Hvad venter?");
+        await voice.Events.SaidAsync("Intet venter.");
+    }
+
+    [Theory]
+    [InlineData("Hvad venter?", 2)]
+    [InlineData("Læs 283", 1)]
+    [InlineData("Svar at den skal merge the branch", 2)]
+    [InlineData("What needs me?", -3)]
+    [InlineData("Read the reply of issue 283", -4)]
+    [InlineData("Status 283", 0)]
+    [InlineData("pull request", 0)]
+    public void The_language_of_a_final_is_told_by_its_small_words(string final, int lean) =>
+        Assert.Equal(lean, SpokenLanguage.Lean(final));
+
+    /// <summary>
+    /// A few English words in a Danish session may be Danish misheard ("Nej, som overseer" as "Now as overseer", #449):
+    /// only a sentence of English switches, and one Danish word switches back.
+    /// </summary>
+    [Fact]
+    public void A_few_english_words_switch_nothing_and_a_danish_word_switches_back()
+    {
+        var phrases = new VoicePhrases(new SessionLanguages("da-DK"));
+        phrases.Heard("Now as overseer.");
+        phrases.Heard("No");
+        Assert.True(phrases.Danish);
+        phrases.Heard("What needs me?");
+        Assert.False(phrases.Danish);
+        phrases.Heard("Status 283");
+        Assert.False(phrases.Danish);
+        phrases.Heard("Mere");
+        Assert.True(phrases.Danish);
+
+        var english = new VoicePhrases(new SessionLanguages("en-US"));
+        english.Heard("Hvad venter?");
+        Assert.True(english.Danish == false);
+        english.Heard("Hvad venter der nu?");
+        Assert.True(english.Danish);
+        english.Heard("More");
+        Assert.False(english.Danish);
+    }
+
     [Fact]
     public void The_lists_are_worded_in_the_sessions_language()
     {
@@ -259,7 +394,7 @@ public sealed class SaidByCodeTests
         Assert.Equal("Nothing needs you.", english.Waiting([]));
         Assert.Equal("issue 283 has a question.", english.Waiting([(new SpokenName("issue 283"), item)]));
         Assert.Equal("No projects.", english.Projects([]));
-        Assert.Equal("1 project. Profile Mega, root GodMode: issue 283.", english.Projects([("Mega", "GodMode", ["issue 283"])]));
-        Assert.Equal("1 projekt. Profil Mega: issue 283.", Danish.Projects([("Mega", null, ["issue 283"])]));
+        Assert.Equal("1 project. Profile Mega, root GodMode: issue 283.", english.Projects([new("Mega", "GodMode", ["issue 283"])]));
+        Assert.Equal("1 projekt. Profil Mega: issue 283.", Danish.Projects([new("Mega", null, ["issue 283"])]));
     }
 }

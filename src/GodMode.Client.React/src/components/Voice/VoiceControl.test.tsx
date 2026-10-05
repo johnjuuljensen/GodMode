@@ -236,7 +236,7 @@ it('sends a key the user typed, never shows one, and says only whether each is s
   await click([...container().querySelectorAll('button')].find(b => b.textContent === 'Save')!);
 
   expect(bridge.request).toHaveBeenCalledWith('voice.settings.set',
-    { VoiceId: 'v1', Language: 'da-DK+en', EchoCancellation: false, Earcons: true, ElevenLabsKey: 'sk_eleven' });
+    { VoiceId: 'v1', Language: 'da-DK+en', EchoCancellation: false, Earcons: true, StaleHours: 24, ElevenLabsKey: 'sk_eleven' });
   expect(elevenLabs.value).toBe('');
   expect(elevenLabs.placeholder).toMatch(/^Set/);
 });
@@ -276,7 +276,7 @@ it('offers Default and each device, keeps a chosen one that is not connected, an
   await click([...container().querySelectorAll('button')].find(b => b.textContent === 'Save')!);
 
   expect(bridge.request).toHaveBeenCalledWith('voice.settings.set', {
-    VoiceId: 'v1', Language: 'da-DK+en', EchoCancellation: false, Earcons: true, Microphone: headset, Speaker: { Id: '', Name: '' },
+    VoiceId: 'v1', Language: 'da-DK+en', EchoCancellation: false, Earcons: true, StaleHours: 24, Microphone: headset, Speaker: { Id: '', Name: '' },
   });
   expect(picker('Microphone').value).toBe(headset.Id);
   expect(picker('Speaker').value).toBe('');
@@ -320,6 +320,23 @@ it('turns the sounds off', async () => {
 
   expect(bridge.request).toHaveBeenCalledWith('voice.settings.set', expect.objectContaining({ Earcons: false }));
   expect(sounds.querySelector('.settings-toggle')!.classList.contains('off')).toBe(true);
+});
+
+it('saves how long voice keeps a quiet session in its lists', async () => {
+  const settings = {
+    Language: 'da-DK+en', VoiceId: 'v1', EchoCancellation: false, Earcons: true, StaleHours: 24,
+    ElevenLabsKeySet: true, AnthropicKeySet: true,
+  };
+  answer({ 'voice.settings.get': settings, 'voice.settings.set': { ...settings, StaleHours: 48 } });
+  view = await render(<VoiceSettings />);
+  const stale = container().querySelector<HTMLInputElement>('#voice-stale-hours')!;
+  expect(stale.value).toBe('24');
+
+  await typeInto(stale, '48');
+  await click([...container().querySelectorAll('button')].find(b => b.textContent === 'Save')!);
+
+  expect(bridge.request).toHaveBeenCalledWith('voice.settings.set', expect.objectContaining({ StaleHours: 48 }));
+  expect(stale.value).toBe('48');
 });
 
 it('offers no devices where voice picks its own route', async () => {

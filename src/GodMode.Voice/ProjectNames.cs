@@ -27,11 +27,15 @@ public sealed record SpokenName(string Label, string? Root = null, string? Profi
 /// </summary>
 public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, VoiceConversation conversation)
 {
-    /// <summary>A profile and root, and their projects, the one changed last first.</summary>
-    public sealed record Group(string Profile, string? Root, IReadOnlyList<ServerProject> Projects)
+    /// <summary>
+    /// A profile and root on one server, and their projects, the one changed last first. <paramref name="Server"/> is the
+    /// server's name when another server has a profile and root said as these are (#507), which it tells them apart by;
+    /// null otherwise.
+    /// </summary>
+    public sealed record Group(string Profile, string? Root, IReadOnlyList<ServerProject> Projects, string? Server = null)
     {
-        /// <summary>"Profile Mega, root GodMode".</summary>
-        public string Heading => $"Profile {Profile}, root {Root ?? "none"}";
+        /// <summary>"Profile Mega, root GodMode", and ", server work-pc" when it needs it.</summary>
+        public string Heading => $"Profile {Profile}, root {Root ?? "none"}{(Server is { } server ? $", server {server}" : "")}";
     }
 
     /// <summary>
@@ -81,21 +85,31 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
     private static string? TopicOf(ServerProject project, string label) => ProjectTopics.Of(project.Project.Name, project.Project.Kind, label);
 
     /// <summary>
-    /// Every project, grouped by profile, then root: the profiles in their names' order, the roots in each too, and the
-    /// projects in each the one changed last first. A list that names several profiles leaves none the last spoken of;
+    /// Every project, grouped by profile, then root, on its server: the profiles in their names' order, the roots in each
+    /// too, and the projects in each the one changed last first. Two servers' groups said alike are told apart by their
+    /// servers' names (<see cref="Group.Server"/>, #507). A list that names several profiles leaves none the last spoken of;
     /// one of one profile leaves it, and the same of roots.
     /// </summary>
     public IReadOnlyList<Group> Groups()
     {
-        var groups = projects.Projects
-            .GroupBy(p => (Profile: ProfileOf(p.Project), Root: p.Project.RootName ?? ""), Comparer)
-            .OrderBy(g => g.Key.Profile, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Key.Root, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new Group(g.Key.Profile, projects.RootShown(g.First()), [.. g]))
+        var grouped = projects.Projects
+            .GroupBy(p => (p.ServerId, Profile: ProfileOf(p.Project), Root: p.Project.RootName ?? ""), OnServer)
+            .Select(g => new Group(g.Key.Profile, projects.RootShown(g.First()), [.. g], g.First().ServerName))
+            .ToList();
+        var groups = grouped
+            .Select(g => g with { Server = grouped.Where(o => Same(o.Profile, g.Profile) && Same(o.Root, g.Root))
+                .Select(o => o.Projects[0].ServerId).Distinct().Skip(1).Any() ? g.Server : null })
+            .OrderBy(g => g.Profile, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Root ?? "", StringComparer.OrdinalIgnoreCase)
+            .ThenBy(g => g.Projects[0].ServerName, StringComparer.OrdinalIgnoreCase)
             .ToList();
         conversation.LastProfile = groups.Select(g => g.Profile).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1 ? groups[0].Profile : null;
         conversation.LastRoot = groups is [var one] ? one.Root : null;
         return groups;
     }
+
+    private static readonly IEqualityComparer<(string ServerId, string Profile, string Root)> OnServer = EqualityComparer<(string, string, string)>.Create(
+        (a, b) => a.Item1 == b.Item1 && Same(a.Item2, b.Item2) && Same(a.Item3, b.Item3),
+        k => HashCode.Combine(k.Item1, k.Item2.ToUpperInvariant(), k.Item3.ToUpperInvariant()));
 
     private static readonly IEqualityComparer<(string Profile, string Root)> Comparer = EqualityComparer<(string, string)>.Create(
         (a, b) => Same(a.Item1, b.Item1) && Same(a.Item2, b.Item2),

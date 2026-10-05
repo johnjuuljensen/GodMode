@@ -78,10 +78,14 @@ public static class GodModeGraph
               it after a while. Never drop what they give, and never add what they leave out. Say numbers as digits.
             - Never read out code, paths or long identifiers; summarize them.
             - After a tool call, say its result in one compressed line with respond.
+            - Several asks in one breath ("Hvad venter, og læs 283"): call their tools one after the other, each with
+              then set to what is still to do after it, and the last one without. The system says what each found.
 
             COMMANDS (Danish first, English accepted):
             - "Hvad venter?" / "What needs me?" — call {{VoiceTools.WhatNeedsMe}}, with the root or profile the user asked
               about, if any ("Hvad venter i GodMode?"). Say the count, then each project by its name and what it needs.
+              A long one is said by the system as a summary by what they need, the rest a page at a time: "Mere" after
+              it — call {{VoiceTools.ReadMore}}.
             - "Hvilke projekter er der?", "Hvad kører?" / "Which projects?" — call {{VoiceTools.ListProjects}}: every project,
               also those that need nothing, grouped by profile and root; with the root or profile the user asked about, if
               any, only those. Say the tool's count, then each group once, by
@@ -160,14 +164,14 @@ public static class GodModeGraph
 
         var graph = new CompositeBuilder(Id).WithTools(t => AddTools(t, tools));
         // Above Done and help: while dictating, "færdig" and "hjælp" are words of the dictation (#459)
-        graph = graph.Node(new DictationNode("dictation", 95, tools.Dictation));
+        graph = graph.Node(new DictationNode("dictation", 95, tools.Dictation, phrases));
         if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));
         return graph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
             .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Medium,
-                new CodeSaysInference(inference, tools.Conversation), systemPrompt),
+                new CodeSaysInference(inference, tools.Conversation, phrases), systemPrompt),
                 tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
     }

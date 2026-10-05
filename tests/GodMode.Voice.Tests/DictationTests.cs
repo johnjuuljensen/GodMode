@@ -368,6 +368,28 @@ public sealed class DictationTests
     }
 
     /// <summary>
+    /// #507: a project that started working while the user dictated is checked again at the send: nothing is queued to
+    /// it, the dictation is kept and the user hears why, and once it waits again "diktat slut" sends it.
+    /// </summary>
+    [Fact]
+    public async Task A_send_to_a_project_that_started_working_is_held_and_kept()
+    {
+        var (servers, dictation, _) = await DictatingAsync();
+        var waiting = await servers.GetStatusAsync(P283, CancellationToken.None);
+        servers.SetStatus(ServerA, waiting with { State = ProjectState.Running });
+
+        Assert.Equal("Intet sendt. issue 283 er gået i gang og arbejder nu. Sig diktat slut igen, eller annullér diktat.",
+            await dictation.HearAsync("Diktat slut", CancellationToken.None));
+        Assert.True(dictation.Active);
+        Assert.Equal([First], dictation.Parts);
+        Assert.Empty(servers.Replies);
+
+        servers.SetStatus(ServerA, waiting);
+        Assert.StartsWith("Sender 1 sætning til issue 283", await dictation.HearAsync("Diktat slut", CancellationToken.None));
+        Assert.Equal(First, Assert.Single(servers.Replies).Text);
+    }
+
+    /// <summary>
     /// Announcements wait while dictating: one in a pause to think would break the user's train of thought. They are
     /// said once it is sent or dropped.
     /// </summary>

@@ -19,6 +19,9 @@ public sealed class SpokenNode(INode chat, VoiceConversation conversation, Voice
         var result = await chat.EvaluateAsync(context, ct);
         if (conversation.TakeSpoken() is not { Count: > 0 } spoken)
             return result;
+        // The code said them already, word for word, in its own words for the turn (#456), maybe after others (#507)
+        if (result?.ResponseText is { } reply && spoken.All(s => reply.Contains(s.Item.Spoken!, StringComparison.Ordinal)))
+            return result;
 
         var said = string.Join(" ", spoken.Select(s => phrases.Spoken(s.Name, s.Item)).OfType<string>().Select(GodModeAnnouncementFormatter.Sentence));
         if (said.Length == 0)

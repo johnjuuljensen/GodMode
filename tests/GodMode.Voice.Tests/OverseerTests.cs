@@ -84,7 +84,7 @@ public sealed class OverseerTests
 
         var result = fleet.Tools.ListProjectsText(workers: workers);
 
-        Assert.Equal("2 projekter. Profil Mega, root GodMode: issue 463, issue 462. issue 462, queue, har et spørgsmål.", fleet.Conversation.TakeSaid(result));
+        Assert.Equal("2 projekter. Profil Mega, root GodMode: issue 463 om filter, issue 462 om queue. issue 462, queue, har et spørgsmål.", fleet.Conversation.TakeSaid(result));
         Assert.StartsWith("The workers epic voice runs: ", result);
         Assert.Contains("- issue 462 (462-queue, issue): WaitingInput; needs the user: question: Skal køen tømmes ved genstart?", result);
         Assert.DoesNotContain("issue 500", result);
@@ -112,7 +112,7 @@ public sealed class OverseerTests
             fleet.Conversation.TakeSaid(await fleet.Tools.WhatNeedsMeAsync(CancellationToken.None, workers: VoiceTools.WorkersAll)));
         Assert.Equal("2 venter på dig: issue 462, queue, har et spørgsmål. issue 500, other, har et spørgsmål.",
             fleet.Conversation.TakeSaid(await fleet.Tools.WhatNeedsMeAsync(CancellationToken.None, since: VoiceTools.SinceAll)));
-        Assert.Equal("4 projekter. Profil Mega, root GodMode: issue 463, issue 462, issue 500, epic voice. issue 462, queue, har et spørgsmål.",
+        Assert.Equal("4 projekter. Profil Mega, root GodMode: issue 463 om filter, issue 462 om queue, issue 500 om other, epic voice. issue 462, queue, har et spørgsmål.",
             fleet.Conversation.TakeSaid(fleet.Tools.ListProjectsText(workers: VoiceTools.WorkersAll)));
     }
 
@@ -124,7 +124,7 @@ public sealed class OverseerTests
 
         var result = fleet.Tools.ListProjectsText();
 
-        Assert.Equal("2 projekter. Profil Mega, root GodMode: epic voice (2 workers, 1 venter på den), issue 500.", fleet.Conversation.TakeSaid(result));
+        Assert.Equal("2 projekter. Profil Mega, root GodMode: epic voice (2 workers, 1 venter på den), issue 500 om other.", fleet.Conversation.TakeSaid(result));
         Assert.Contains("- epic voice (voice-epics, epic): Idle; runs 2 workers, 1 of them waiting on it, which it handles", result);
         Assert.DoesNotContain("issue 46", result);
     }
@@ -138,7 +138,7 @@ public sealed class OverseerTests
 
         fleet.Servers.DeleteProject(ServerA, Overseer);
 
-        Assert.Equal("3 projekter. Profil Mega, root GodMode: issue 463, issue 462, issue 500.", fleet.Conversation.TakeSaid(fleet.Tools.ListProjectsText()));
+        Assert.Equal("3 projekter. Profil Mega, root GodMode: issue 463 om filter, issue 462 om queue, issue 500 om other.", fleet.Conversation.TakeSaid(fleet.Tools.ListProjectsText()));
         Assert.Equal("2 venter på dig: issue 462, queue, har et spørgsmål. issue 500, other, har et spørgsmål.",
             fleet.Conversation.TakeSaid(await fleet.Tools.WhatNeedsMeAsync(CancellationToken.None)));
         // Its question, held back while the overseer ran it, is announced now

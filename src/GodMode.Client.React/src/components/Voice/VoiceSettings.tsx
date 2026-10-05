@@ -52,6 +52,7 @@ export function VoiceSettings() {
   const [microphone, setMicrophone] = useState<AudioDevice>(DEFAULT);
   const [speaker, setSpeaker] = useState<AudioDevice>(DEFAULT);
   const [micSilence, setMicSilence] = useState('');
+  const [staleHours, setStaleHours] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
 
@@ -64,6 +65,7 @@ export function VoiceSettings() {
     setMicrophone(settings.Microphone ?? DEFAULT);
     setSpeaker(settings.Speaker ?? DEFAULT);
     setMicSilence(String(settings.MicSilenceSeconds));
+    setStaleHours(String(settings.StaleHours ?? 24));
   };
 
   // The devices as they are now: read again when a picker opens, so a headset turned on since shows
@@ -102,6 +104,7 @@ export function VoiceSettings() {
     Earcons: earcons,
     ...(devices?.Supported && { Microphone: microphone, Speaker: speaker }),
     ...(devices?.Supported && Number(micSilence) > 0 && { MicSilenceSeconds: Math.round(Number(micSilence)) }),
+    ...(Number(staleHours) > 0 && { StaleHours: Math.round(Number(staleHours)) }),
     ...(elevenLabsKey.trim() && { ElevenLabsKey: elevenLabsKey }),
     ...(anthropicKey.trim() && { AnthropicKey: anthropicKey }),
   };
@@ -148,6 +151,11 @@ export function VoiceSettings() {
           </div>
         </>
       )}
+      <div className="form-group">
+        <label htmlFor="voice-stale-hours">Leave out of lists after (hours without activity)</label>
+        <input id="voice-stale-hours" type="number" min={1} value={staleHours} onChange={e => setStaleHours(e.target.value)} />
+        <div className="form-description">Voice counts those sessions, and names them when you ask for all. One that needs you is always named.</div>
+      </div>
       <div className="settings-item">
         <div className="settings-item-info">
           <div className="settings-item-name">Echo cancellation</div>

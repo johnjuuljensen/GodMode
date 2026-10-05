@@ -5,16 +5,39 @@ using VoiceBot.Core.Resources;
 
 namespace GodMode.Voice;
 
-/// <summary>What the bot says itself, not through the model: announcements, the greeting and a create's answer. Danish, else English.</summary>
+/// <summary>
+/// What the bot says itself, not through the model: announcements, the greeting and a create's answer. In the session's
+/// language, Danish, else English, until the user switches to the other one (<see cref="Heard"/>, #507), as the model
+/// answers in theirs; then in theirs until they switch back.
+/// </summary>
 public sealed partial class VoicePhrases
 {
     /// <summary>How long a prompt the read-back says as it is; a longer one is said cut, after its first words.</summary>
     public const int PromptReadBack = 100;
 
-    private readonly bool _danish;
+    private readonly bool _primaryDanish;
+    private volatile bool _danish;
 
     public VoicePhrases(SessionLanguages languages) =>
-        _danish = languages.Primary.StartsWith("da", StringComparison.OrdinalIgnoreCase);
+        _danish = _primaryDanish = languages.Primary.StartsWith("da", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The user said <paramref name="text"/>, a final: the code's words are in its language from now on, when it tells one
+    /// (<see cref="SpokenLanguage"/>): the other language's by a sentence of it (<see cref="SpokenLanguage.SwitchAway"/>),
+    /// since a few words heard in it may be the session's misheard, and the session's own back by a word.
+    /// </summary>
+    public void Heard(string text)
+    {
+        var lean = SpokenLanguage.Lean(text);
+        var towardsPrimary = _primaryDanish ? lean : -lean;
+        if (towardsPrimary > 0)
+            _danish = _primaryDanish;
+        else if (towardsPrimary <= -SpokenLanguage.SwitchAway)
+            _danish = !_primaryDanish;
+    }
+
+    /// <summary>Whether the code speaks Danish now.</summary>
+    public bool Danish => _danish;
 
     /// <summary>
     /// What the session says as it starts listening: "Klar.", and, when there are servers and none answered in time,
@@ -38,6 +61,16 @@ public sealed partial class VoicePhrases
     public string Named(SpokenName name) =>
         name.Label + (name.Topic is { } topic ? $", {topic}" : "") + (name.Root is { } root ? _danish ? $" i {root}" : $" in {root}" : "")
         + (name.Profile is { } profile ? _danish ? $", profil {profile}" : $", profile {profile}" : "");
+
+    /// <summary>
+    /// A project as a list names it (#507): its label, then its topic after "om" / "about", so that a list's commas part
+    /// its projects, not a project from its topic, then its root and profile as <see cref="Named"/> says them: "issue 376
+    /// om mic-timeout i GodMode".
+    /// </summary>
+    public string Listed(SpokenName name) =>
+        Named(name with { Topic = null }) is var named && name.Topic is { } topic
+            ? named.Insert(name.Label.Length, _danish ? $" om {topic}" : $" about {topic}")
+            : Named(name);
 
     /// <summary>The project named as a sentence's subject: <see cref="Named"/>, with a comma after a topic or profile, before the verb.</summary>
     private string Subject(SpokenName name) => Named(name) + (name.Topic is null && name.Profile is null ? "" : ",");
@@ -131,6 +164,55 @@ public sealed partial class VoicePhrases
         };
 
     /// <summary>
+    /// A long what-needs-me (#507), summarised as a long list is (<see cref="ListSummary"/>): the count, then what they need,
+    /// most urgent first, by name while they fit in a page, else counted; then the overseers' lines, those waiting from
+    /// before a window left out (<see cref="WaitingFromBefore"/>), and "Mere?" when more follows. "8 venter på dig: issue
+    /// 1 og issue 2 skal have tilladelse, 6 har et spørgsmål. Mere?"
+    /// </summary>
+    public string WaitingSummary(int count, IReadOnlyList<(WaitingKind Kind, int Count, IReadOnlyList<SpokenName> Named)> kinds,
+        IReadOnlyList<(SpokenName Name, int Workers, int Waiting)> overseers, int fromBefore, bool more) =>
+        $"{Several(count)} {string.Join(", ", kinds.Select(k => k.Named.Count > 0
+            ? $"{And([.. k.Named.Select(Listed)])} {Needs(k.Kind, k.Named.Count)}"
+            : $"{k.Count} {Needs(k.Kind, k.Count)}"))}."
+        + string.Concat(overseers.Select(o => Then(GodModeAnnouncementFormatter.Sentence(Workers(o.Name, o.Workers, o.Waiting)))))
+        + Then(WaitingFromBefore(fromBefore, saidAny: true))
+        + (more ? $" {More}" : "");
+
+    /// <summary>A page of a long what-needs-me (#507): each project as its announcement says it, "Mere?" when more follows.</summary>
+    public string WaitingPage(IReadOnlyList<(SpokenName Name, AttentionItem Item)> page, bool more) =>
+        string.Join(" ", page.Select(i => GodModeAnnouncementFormatter.Sentence(Announce(i.Name, i.Item)))) + (more ? $" {More}" : "");
+
+    /// <summary>What <paramref name="count"/> projects of the kind need, after their names or count: "har et spørgsmål", "need permission".</summary>
+    private string Needs(WaitingKind kind, int count) => (kind, _danish, count == 1) switch
+    {
+        (WaitingKind.Permission, true, _) => "skal have tilladelse",
+        (WaitingKind.Question, true, _) => "har et spørgsmål",
+        (WaitingKind.Blocked, true, _) => "er blokeret",
+        (WaitingKind.Escalation, true, _) => "har brug for din beslutning",
+        (WaitingKind.Error, true, _) => "fejlede",
+        (WaitingKind.Review, true, _) => "har fået ændringsønsker",
+        (WaitingKind.Done, true, true) => "er færdig",
+        (WaitingKind.Done, true, false) => "er færdige",
+        (WaitingKind.Idle, true, _) => "er idle",
+        (WaitingKind.Permission, false, true) => "needs permission",
+        (WaitingKind.Permission, false, false) => "need permission",
+        (WaitingKind.Question, false, true) => "has a question",
+        (WaitingKind.Question, false, false) => "have a question",
+        (WaitingKind.Blocked, false, true) => "is blocked",
+        (WaitingKind.Blocked, false, false) => "are blocked",
+        (WaitingKind.Escalation, false, true) => "needs your decision",
+        (WaitingKind.Escalation, false, false) => "need your decision",
+        (WaitingKind.Error, false, _) => "failed",
+        (WaitingKind.Review, false, true) => "has changes requested",
+        (WaitingKind.Review, false, false) => "have changes requested",
+        (WaitingKind.Done, false, true) => "is done",
+        (WaitingKind.Done, false, false) => "are done",
+        (WaitingKind.Idle, false, true) => "is idle",
+        (WaitingKind.Idle, false, false) => "are idle",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
+
+    /// <summary>
     /// An overseer's line for the workers it runs (#469), which voice leaves out: "voice-epics: 6 workers, 2 venter på den" /
     /// "voice-epics: 6 workers, 2 waiting on it". <paramref name="waiting"/> are those that need someone, which the overseer handles.
     /// </summary>
@@ -154,13 +236,13 @@ public sealed partial class VoicePhrases
     /// What the listed projects need, each as its announcement says it (<see cref="Announce"/>), said after the groups:
     /// a list of an overseer's workers (#469) says their questions, which no announcement said.
     /// </param>
-    public string Projects(IReadOnlyList<(string Profile, string? Root, IReadOnlyList<string> Labels)> groups, LeftOut? left = null,
+    public string Projects(IReadOnlyList<ListedGroup> groups, LeftOut? left = null,
         IReadOnlyList<(SpokenName Name, AttentionItem Item)>? needs = null)
     {
         var count = groups.Sum(g => g.Labels.Count);
         return count == 0
             ? left is { Count: > 0 } ? NothingNew(left) : _danish ? "Ingen projekter." : "No projects."
-            : $"{Total(count)} {string.Join(" ", groups.Select(g => GroupLine(g.Profile, g.Root, g.Labels)))}"
+            : $"{Total(count)} {string.Join(" ", groups.Select(g => GroupLine(g.Profile, g.Root, g.Server, g.Labels)))}"
                 + string.Concat((needs ?? []).Select(n => Then(GodModeAnnouncementFormatter.Sentence(Announce(n.Name, n.Item)))))
                 + Then(left is null ? "" : LeftOut(left));
     }
@@ -170,10 +252,13 @@ public sealed partial class VoicePhrases
 
     /// <summary>
     /// What a list left out (#468), as its last sentence: "Og 9 gamle." for stale ones, "Og 2 uden nyt." for those with
-    /// nothing new in the window the user asked for. Empty when it left none out.
+    /// nothing new in the window the user asked for, and how many of those need the user from before (#507), as what
+    /// needs me says "fra før": "Og 2 uden nyt. 1 af dem venter på dig." Empty when it left none out.
     /// </summary>
     public string LeftOut(LeftOut left) => (left.Count, left.Asked, _danish) switch
     {
+        (> 0, true, true) when left.Waiting > 0 => $"Og {left.Count} uden nyt. {WaitingOfThem(left.Waiting, left.Count)}",
+        (> 0, true, false) when left.Waiting > 0 => $"And {left.Count} with nothing new. {WaitingOfThem(left.Waiting, left.Count)}",
         (0, _, _) => "",
         (1, false, true) => "Og 1 gammel.",
         (var n, false, true) => $"Og {n} gamle.",
@@ -185,16 +270,30 @@ public sealed partial class VoicePhrases
 
     /// <summary>
     /// A list that left out every project it had (#468): "Intet nyt. 9 gamle." for stale ones, "Intet nyt." when the user
-    /// asked for a window nothing happened in.
+    /// asked for a window nothing happened in, with those that need the user from before (#507): "Intet nyt. 1 venter
+    /// på dig fra før."
     /// </summary>
     public string NothingNew(LeftOut left) => (left.Count, left.Asked, _danish) switch
     {
+        (_, true, true) when left.Waiting > 0 => $"Intet nyt. {left.Waiting} venter på dig fra før.",
+        (_, true, false) when left.Waiting == 1 => "Nothing new. 1 needs you from before.",
+        (_, true, false) when left.Waiting > 0 => $"Nothing new. {left.Waiting} need you from before.",
         (_, true, true) => "Intet nyt.",
         (_, true, false) => "Nothing new.",
         (1, false, true) => "Intet nyt. 1 gammel.",
         (var n, false, true) => $"Intet nyt. {n} gamle.",
         (1, false, false) => "Nothing new. 1 old one.",
         (var n, false, false) => $"Nothing new. {n} old ones.",
+    };
+
+    /// <summary>"1 af dem venter på dig." / "1 of them needs you.", of <paramref name="of"/> left out; "Den venter på dig." for the only one.</summary>
+    private string WaitingOfThem(int waiting, int of) => (waiting, of, _danish) switch
+    {
+        (1, 1, true) => "Den venter på dig.",
+        (1, 1, false) => "It needs you.",
+        (var n, _, true) => $"{n} af dem venter på dig.",
+        (1, _, false) => "1 of them needs you.",
+        (var n, _, false) => $"{n} of them need you.",
     };
 
     /// <summary>
@@ -220,24 +319,28 @@ public sealed partial class VoicePhrases
         (_, false) => $"{count} projects.",
     };
 
-    /// <summary>A group of a list, by its profile and root: "Profil Mega, root GodMode: issue 376, issue 382.".</summary>
-    private string GroupLine(string profile, string? root, IEnumerable<string> labels) =>
-        $"{(_danish ? "Profil" : "Profile")} {profile}{(root is { } r ? $", root {r}" : "")}: {string.Join(", ", labels)}.";
+    /// <summary>
+    /// A group of a list, by its profile and root, and its server when another server's is said alike (#507): "Profil
+    /// Mega, root GodMode: issue 376, issue 382.", "Profil Mega, root GodMode, server work-pc: issue 1.".
+    /// </summary>
+    private string GroupLine(string profile, string? root, string? server, IEnumerable<string> labels) =>
+        $"{(_danish ? "Profil" : "Profile")} {profile}{(root is { } r ? $", root {r}" : "")}{(server is { } s ? $", server {s}" : "")}: {string.Join(", ", labels)}.";
 
     /// <summary>The question that ends a part when more follows, which "mere" answers.</summary>
     public string More => _danish ? "Mere?" : "More?";
 
     /// <summary>
     /// A long project list, summarised by state (#457, <see cref="ProjectListing"/>): the count, then each state, its
-    /// projects by name when it names them, else their count, "the rest" for the one state counted after all named. "16
-    /// projekter. branch master er idle, resten er stoppet. Mere?"
+    /// projects by name when it names them, else their count, "the rest" for the one state counted after all named, when
+    /// it is said last (#507): before a state named after it, "resten" would not be the rest. "16 projekter. branch
+    /// master er idle, resten er stoppet. Mere?"
     /// </summary>
     public string ListSummary(int count, IReadOnlyList<(ListedState State, int Count, IReadOnlyList<SpokenName> Named)> states, bool more, LeftOut? left = null)
     {
         var counted = states.Select((s, i) => (s, i)).Where(x => x.s.Named.Count == 0).ToList();
-        var rest = counted is [var only] && only.i > 0 && states.Take(only.i).All(s => s.Named.Count > 0) ? only.s.State : (ListedState?)null;
+        var rest = counted is [var only] && only.i > 0 && only.i == states.Count - 1 ? only.s.State : (ListedState?)null;
         var parts = states.Select(s =>
-            s.Named.Count > 0 ? $"{And([.. s.Named.Select(Named)])} {Doing(s.State, s.Named.Count)}"
+            s.Named.Count > 0 ? $"{And([.. s.Named.Select(Listed)])} {Doing(s.State, s.Named.Count)}"
             : s.State == rest ? $"{(_danish ? "resten" : "the rest")} {Doing(s.State, 2)}"
             : $"{s.Count} {Doing(s.State, s.Count)}");
         return $"{Total(count)} {string.Join(", ", parts)}.{Then(left is null ? "" : LeftOut(left))}{(more ? $" {More}" : "")}";
@@ -254,11 +357,11 @@ public sealed partial class VoicePhrases
         for (var i = 0; i < page.Count;)
         {
             var first = page[i];
-            var group = page.Skip(i).TakeWhile(p => p.State == first.State && p.Profile == first.Profile && p.Root == first.Root).ToList();
+            var group = page.Skip(i).TakeWhile(p => p.State == first.State && p.Profile == first.Profile && p.Root == first.Root && p.Server == first.Server).ToList();
             if (first.State != state)
                 sentences.Add($"{Heading(first.State)}.");
             state = first.State;
-            sentences.Add(GroupLine(first.Profile, first.Root, group.Select(p => p.Label)));
+            sentences.Add(GroupLine(first.Profile, first.Root, first.Server, group.Select(p => p.Label)));
             i += group.Count;
         }
         return string.Join(" ", sentences) + (more ? $" {More}" : "");
@@ -400,6 +503,10 @@ public sealed partial class VoicePhrases
     /// <summary>A dictation to a project that works now: none is started, as nothing waits on the user's words.</summary>
     public string DictationRunning(SpokenName name) =>
         _danish ? $"{Subject(name)} arbejder. Diktér, når den venter på dig." : $"{Subject(name)} is working. Dictate when it waits for you.";
+
+    /// <summary>A dictation sent to a project that started working while it was taken (#507): it is kept, for when it waits again.</summary>
+    public string DictationBusy(SpokenName name) =>
+        _danish ? $"{Subject(name)} er gået i gang og arbejder nu." : $"{Subject(name)} has started working.";
 
     /// <summary>A dictation to a project that waits on a permission, answered on screen only.</summary>
     public string DictationPermission(SpokenName name, string? summary) => (summary, _danish) switch
