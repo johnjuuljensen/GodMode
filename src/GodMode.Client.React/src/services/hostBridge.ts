@@ -119,6 +119,8 @@ export interface VoiceSettingsView {
   Speaker?: AudioDevice | null;
   /** How many seconds of silence while voice listens close the mic. */
   MicSilenceSeconds: number;
+  /** Voice's short sounds: the tone as what you said is taken, and the earcons before announcements. */
+  Earcons: boolean;
   ElevenLabsKeySet: boolean;
   AnthropicKeySet: boolean;
 }
@@ -134,6 +136,7 @@ export interface VoiceSettingsUpdate {
   Microphone?: AudioDevice;
   Speaker?: AudioDevice;
   MicSilenceSeconds?: number;
+  Earcons?: boolean;
   ElevenLabsKey?: string;
   AnthropicKey?: string;
 }
