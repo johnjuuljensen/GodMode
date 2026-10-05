@@ -1,4 +1,6 @@
 using GodMode.Shared.Models;
+using Microsoft.Extensions.AI;
+using VoiceBot.Core.AI;
 using VoiceBot.Core.Pipeline;
 using VoiceBot.Core.Resources;
 using VoiceBot.Testing;
@@ -28,10 +30,11 @@ public sealed class HeardToneTests
 
     /// <summary>A session that has greeted, and whose greeting has played out.</summary>
     private static async Task<(OfflineVoice Voice, RecordingAudioSink Speaker)> GreetedAsync(ScriptedChatClient model,
-        VoiceSettings? settings = null, FakeServers? servers = null, TimeSpan? speech = null)
+        VoiceSettings? settings = null, FakeServers? servers = null, TimeSpan? speech = null, IInferenceProvider? inference = null)
     {
         var speaker = new RecordingAudioSink();
-        var voice = await OfflineVoice.StartAsync(servers ?? new FakeServers(), model, settings: settings, speaker: speaker, speech: speech);
+        var voice = await OfflineVoice.StartAsync(servers ?? new FakeServers(), model, settings: settings, speaker: speaker, speech: speech,
+            inference: inference);
         await voice.Events.SaidAsync("Klar.");
         await Eventually.UntilAsync(() => speaker.Calls.Any(c => c.Kind == SinkCallKind.Audio), () => "the greeting's audio");
         await Task.Delay(speech is null ? PlayedOut : TimeSpan.Zero);
@@ -51,15 +54,24 @@ public sealed class HeardToneTests
         Assert.DoesNotContain(Enum.GetValues<Earcon>(), e => Earcons.Pcm(e, format).Length == tone.Length);
     }
 
-    /// <summary>The issue's first test: the tone, then the answer's speech.</summary>
+    /// <summary>
+    /// The issue's first test: the tone, then the answer's speech. The tone is on the sink while the model is still
+    /// working out the answer, before anything of it is synthesized: it says the turn is taken, not that the answer starts.
+    /// </summary>
     [Fact]
     public async Task A_final_the_graph_takes_gets_the_tone_on_the_sink_before_any_speech()
     {
-        var (voice, speaker) = await GreetedAsync(new ScriptedChatClient().Respond("Intet venter på dig."));
+        var thinking = new TaskCompletionSource();
+        var model = new ScriptedChatClient().Respond("Intet venter på dig.");
+        var (voice, speaker) = await GreetedAsync(model, inference: new HeldModel(model, thinking.Task));
         await using var _ = voice;
         var greeting = speaker.Calls.Count;
+        var synthesized = voice.Synthesizer.Texts.Count;
 
         voice.Transcriptions.SayAsRecognized("Hvad venter på mig?");
+        await Eventually.UntilAsync(() => Tones(speaker) == 1, () => $"the tone while the model thinks; the speaker had: {Described(speaker)}");
+        Assert.Equal(synthesized, voice.Synthesizer.Texts.Count);
+        thinking.SetResult();
         await voice.Events.SaidAsync("Intet venter på dig.");
         await Eventually.UntilAsync(() => speaker.Calls.Skip(greeting).Count(c => c.Kind == SinkCallKind.Audio) >= 2, () => Described(speaker));
 
@@ -84,6 +96,8 @@ public sealed class HeardToneTests
         await voice.Events.SaidAsync(Said);
         await Task.Delay(PlayedOut);
         voice.Transcriptions.AddFinal(Said);
+        // Apart, so a tone for the echo could not keep the next final's from playing
+        await Task.Delay(PlayedOut);
         voice.Transcriptions.SayAsRecognized("Hvad med resten?");
         await voice.Events.SaidAsync("Godt.");
 
@@ -103,7 +117,9 @@ public sealed class HeardToneTests
         await Task.Delay(PlayedOut);
         // The same final again, no partial between: delivered twice. Then a ghost word
         voice.Transcriptions.AddFinal("Hvad venter på mig?");
+        await Task.Delay(PlayedOut);
         voice.Transcriptions.AddFinal(noise);
+        await Task.Delay(PlayedOut);
         voice.Transcriptions.SayAsRecognized("Og nu?");
         await voice.Events.SaidAsync("Godt.");
 
@@ -218,6 +234,28 @@ public sealed class HeardToneTests
         await Task.WhenAll(tone, speech);
 
         Assert.Equal([Earcons.Heard(speaker.Format).Length, 100], speaker.Sent);
+    }
+
+    /// <summary>The scripted model, answering once <paramref name="held"/> completes.</summary>
+    private sealed class HeldModel(ScriptedChatClient model, Task held) : IInferenceProvider
+    {
+        public IChatClient GetClient(InferenceTier tier) => new Held(model, held);
+
+        public async Task<ChatResponse> CompleteAsync(InferenceTier tier, IList<ChatMessage> messages, ChatOptions? options = null, CancellationToken ct = default)
+        {
+            await held.WaitAsync(ct);
+            return await model.GetResponseAsync(messages, options, ct);
+        }
+
+        private sealed class Held(IChatClient inner, Task held) : DelegatingChatClient(inner)
+        {
+            public override async Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
+                CancellationToken cancellationToken = default)
+            {
+                await held.WaitAsync(cancellationToken);
+                return await base.GetResponseAsync(messages, options, cancellationToken);
+            }
+        }
     }
 
     /// <summary>A speaker whose sends complete when the test says.</summary>
