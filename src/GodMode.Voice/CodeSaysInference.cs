@@ -14,7 +14,9 @@ namespace GodMode.Voice;
 /// venter, og læs 283"), does not end the turn: the code's words are held, the model is called for the rest, and the
 /// reply it ends on, its own or the code's, is said after them.
 /// </summary>
-public sealed class CodeSaysInference(IInferenceProvider model, VoiceConversation conversation) : IInferenceProvider
+/// The model's own words after held ones are checked for a claimed send as <see cref="SentNode"/> checks a reply (#375):
+/// behind the code's words its "Sendt" no longer starts the reply, where SentNode looks for it.
+public sealed class CodeSaysInference(IInferenceProvider model, VoiceConversation conversation, VoicePhrases? phrases = null) : IInferenceProvider
 {
     /// <summary>The code's words for the calls before this one in the turn, said before its reply; null when none waits.</summary>
     private string? _held;
@@ -58,6 +60,9 @@ public sealed class CodeSaysInference(IInferenceProvider model, VoiceConversatio
             return response;
         Volatile.Write(ref _held, null);
         var added = call is { Name: "respond" } && call.Arguments?.TryGetValue("response_text", out var text) == true ? text?.ToString() : null;
+        // A send claimed with none sent is not said (#375); one that went out is SentNode's to say, in place of the reply
+        if (added is not null && SentNode.ClaimsSend(added) && !conversation.AnySent && !conversation.ReadOutSoFar.Any(r => SentNode.Repeats(added, r)))
+            added = (phrases ?? new VoicePhrases(VoiceSettings.Default.Languages)).NothingSent;
         return Respond(Joined(held, Acknowledgement(added) ? null : added), call is { Name: "respond" } ? call.Arguments : null);
     }
 

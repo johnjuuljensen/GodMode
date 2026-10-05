@@ -193,6 +193,9 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     /// </summary>
     public IReadOnlyList<SpokenName> TakeSent() => [.. Interlocked.Exchange(ref _sent, new())];
 
+    /// <summary>Whether an answer was sent since the last take, which is left for <see cref="TakeSent"/>.</summary>
+    public bool AnySent => !Volatile.Read(ref _sent).IsEmpty;
+
     private ConcurrentQueue<(SpokenName Name, AttentionItem Item)> _spoken = new();
 
     /// <summary>
@@ -214,6 +217,9 @@ public sealed class VoiceConversation(TimeProvider? time = null)
 
     /// <summary>The texts read out since the last take, and none from now on: as <see cref="TakeSent"/>.</summary>
     public IReadOnlyList<string> TakeReadOut() => [.. Interlocked.Exchange(ref _read, new())];
+
+    /// <summary>The texts read out since the last take, left for <see cref="TakeReadOut"/>.</summary>
+    public IReadOnlyList<string> ReadOutSoFar => [.. Volatile.Read(ref _read)];
 
     private SaidByCode? _said;
 

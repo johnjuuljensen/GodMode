@@ -79,6 +79,27 @@ public sealed class SaidByCodeTests
         Assert.Equal(3, model.Calls);
     }
 
+    /// <summary>
+    /// #375 behind held words (#507): the model claims a send after a held part, and no answer went out. Its "Sendt"
+    /// no longer starts the reply, but it is still not said: the user hears that nothing was sent.
+    /// </summary>
+    [Fact]
+    public async Task A_send_claimed_after_a_held_part_with_none_sent_is_not_said()
+    {
+        var servers = new FakeServers();
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "svar 283 ja" })
+            .Respond("Sendt til 283.");
+        await using var voice = await OfflineVoice.StartAsync(servers, model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og svar 283 ja");
+        await voice.Events.SaidAsync("Intet venter. Intet sendt. Sig svaret igen.");
+
+        Assert.Empty(servers.Replies);
+        Assert.DoesNotContain(voice.Events.Responses, r => r.Contains("Sendt", StringComparison.Ordinal));
+    }
+
     /// <summary>The model ends the turn on a protocol word alone after a held part: the code's words are said, not "Klar".</summary>
     [Fact]
     public async Task A_one_word_reply_after_a_held_part_adds_nothing()

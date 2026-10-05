@@ -171,7 +171,7 @@ public static class GodModeGraph
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
             .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Medium,
-                new CodeSaysInference(inference, tools.Conversation), systemPrompt),
+                new CodeSaysInference(inference, tools.Conversation, phrases), systemPrompt),
                 tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
     }
