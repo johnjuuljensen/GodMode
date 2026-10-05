@@ -219,7 +219,11 @@ public sealed class VoiceSession : IAsyncDisposable
             projects.Changed += voice.RefreshKeyterms;
             voice.RefreshKeyterms();
             // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement
-            var announcements = new HeldAnnouncements(session.Announcements, tools.Creates);
+            // and while a dictation is taken (#459): one in a pause to think would break it
+            var announcements = new HeldAnnouncements(session.Announcements, tools.Creates, tools.Dictation);
+            // A dictation the mic closed on, with no "send", is dropped: nothing is sent (#459)
+            if (setup.Mic is { } dictationMic)
+                dictationMic.Changed += micState => { if (micState == VoiceMicState.Closed) tools.Dictation.Abandon(); };
             // Worded again as it is said, anchored by what was said before it (#455): this text is the log's, and the fallback's
             board.Attach((item, handle) => announcements.Write(board.AnnouncementOf(item,
                 phrases.Announce(tools.Names.Full(item.Project) ?? new SpokenName(handle), item.Item))));

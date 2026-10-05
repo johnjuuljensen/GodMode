@@ -67,6 +67,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <summary>The creates voice reads back, and makes on the user's yes.</summary>
     public SessionCreates Creates { get; } = new(servers, handles, time);
 
+    /// <summary>The dictation being taken, sent word for word on the user's "send" (#459, <see cref="DictationNode"/>).</summary>
+    public Dictation Dictation => field ??= new(servers, handles, Names, conversation, _phrases, _time);
+
     /// <summary>How many projects a reference to none lists, as the options the model offers.</summary>
     private const int OptionsListed = 8;
 
