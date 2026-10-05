@@ -160,15 +160,17 @@ public sealed class HeardToneTests
         await Task.Delay(PlayedOut);
 
         voice.Transcriptions.SayAsRecognized("Diktér til 283.");
-        await voice.Events.SaidAsync("Diktat til issue 283. Sig send, eller annullér.");
+        await voice.Events.SaidAsync("Diktat til issue 283. Sig diktat slut, eller annullér diktat.");
         await Task.Delay(PlayedOut);
         voice.Transcriptions.SayAsRecognized("Brug den eksisterende migration.");
         voice.Transcriptions.SayAsRecognized("Og skriv en note.");
-        await Eventually.UntilAsync(() => voice.Events.Transcripts.Count == 3, () => "the parts");
+        // A bare "send" is a part (#520): no tone
+        voice.Transcriptions.SayAsRecognized("Send.");
+        await Eventually.UntilAsync(() => voice.Events.Transcripts.Count == 4, () => "the parts");
         await Task.Delay(PlayedOut);
         Assert.True(Tones(speaker) == 1, Described(speaker));
 
-        voice.Transcriptions.SayAsRecognized("Send.");
+        voice.Transcriptions.SayAsRecognized("Diktat slut.");
         await Eventually.UntilAsync(() => servers.Replies.Count == 1, () => "the dictation sent");
 
         Assert.Equal(2, Tones(speaker));

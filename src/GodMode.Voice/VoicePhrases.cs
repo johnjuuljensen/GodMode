@@ -366,7 +366,7 @@ public sealed partial class VoicePhrases
 
     /// <summary>A dictation started (#459): the project it goes to, and how it ends.</summary>
     public string DictationStarted(SpokenName name) =>
-        _danish ? $"Diktat til {Named(name)}. Sig send, eller annullér." : $"Dictating to {Named(name)}. Say send, or cancel.";
+        _danish ? $"Diktat til {Named(name)}. Sig diktat slut, eller annullér diktat." : $"Dictating to {Named(name)}. Say end dictation, or cancel dictation.";
 
     /// <summary>
     /// A dictation sent (#459), read back: its length in sentences, and its first words, as it starts going out:
@@ -376,7 +376,7 @@ public sealed partial class VoicePhrases
         ? $"Sender {sentences} {(sentences == 1 ? "sætning" : "sætninger")} til {Named(name)}, der starter: {GodModeAnnouncementFormatter.Sentence(start)}"
         : $"Sending {sentences} {(sentences == 1 ? "sentence" : "sentences")} to {Named(name)}, starting: {GodModeAnnouncementFormatter.Sentence(start)}";
 
-    /// <summary>A dictation dropped by the user ("annullér", "stop"): nothing went out.</summary>
+    /// <summary>A dictation dropped by the user ("annullér diktat"): nothing went out.</summary>
     public string DictationCancelled(SpokenName name) =>
         _danish ? $"Annulleret. Intet sendt til {Named(name)}." : $"Cancelled. Nothing sent to {Named(name)}.";
 
@@ -384,13 +384,13 @@ public sealed partial class VoicePhrases
     public string DictationDropped(SpokenName name) =>
         _danish ? $"Diktatet til {Named(name)} er droppet. Intet sendt." : $"The dictation to {Named(name)} was dropped. Nothing sent.";
 
-    /// <summary>"Send" with nothing dictated: the dictation goes on.</summary>
+    /// <summary>"Diktat slut" with nothing dictated: the dictation goes on.</summary>
     public string DictationEmpty(SpokenName? name) => (name, _danish) switch
     {
         (null, true) => "Intet at sende.",
         (null, false) => "Nothing to send.",
-        ({ } n, true) => $"Intet dikteret til {Named(n)} endnu. Diktér, eller annullér.",
-        ({ } n, false) => $"Nothing dictated to {Named(n)} yet. Dictate, or cancel.",
+        ({ } n, true) => $"Intet dikteret til {Named(n)} endnu. Diktér, eller annullér diktat.",
+        ({ } n, false) => $"Nothing dictated to {Named(n)} yet. Dictate, or cancel dictation.",
     };
 
     /// <summary>A dictation to a project no handle names: none is started.</summary>
@@ -416,13 +416,13 @@ public sealed partial class VoicePhrases
 
     /// <summary>A dictation that cannot go now, and is kept: why, and how to go on.</summary>
     public string DictationHeld(SpokenName name, string why) =>
-        _danish ? $"Intet sendt. {why} Sig send igen, eller annullér." : $"Nothing sent. {why} Say send again, or cancel.";
+        _danish ? $"Intet sendt. {why} Sig diktat slut igen, eller annullér diktat." : $"Nothing sent. {why} Say end dictation again, or cancel dictation.";
 
     /// <summary>The project's server did not answer: a dictation <paramref name="started"/> is kept, and none is started otherwise.</summary>
     public string DictationNotReached(SpokenName name, bool started) => (started, _danish) switch
     {
-        (true, true) => $"Intet sendt. {Subject(name)} svarer ikke. Sig send igen, eller annullér.",
-        (true, false) => $"Nothing sent. {Subject(name)} does not answer. Say send again, or cancel.",
+        (true, true) => $"Intet sendt. {Subject(name)} svarer ikke. Sig diktat slut igen, eller annullér diktat.",
+        (true, false) => $"Nothing sent. {Subject(name)} does not answer. Say end dictation again, or cancel dictation.",
         (false, true) => $"{Subject(name)} svarer ikke. Intet diktat.",
         (false, false) => $"{Subject(name)} does not answer. No dictation.",
     };

@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+using System.Text;
 using System.Text.RegularExpressions;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
@@ -8,9 +10,11 @@ namespace GodMode.Voice;
 /// <summary>
 /// Dictation (#459): "Diktér til 283" / "Dictate to 283", then the user speaks freely, across pauses, and what they said
 /// is sent word for word, as recognized, never by the model. Each final the transcriber commits after a pause is a part;
-/// the parts are collected until a terminator: "send" sends them (<see cref="Send"/>), "annullér" or "stop" drops them
-/// (<see cref="Cancel"/>). A terminator counts only as a sentence on its own: a final that is the terminator alone, or
-/// whose last sentence is ("… Det var det. Send."); never inside a sentence ("… og send den til Peter"). Before it is
+/// the parts are collected until a terminator, an explicit phrase (<see cref="Phrases"/>): "diktat slut" sends them
+/// (<see cref="Send"/>), "annullér diktat" drops them (<see cref="Cancel"/>). A bare "send", "stop" or "annullér" is
+/// dictated like any other word (#520): "send" is too likely to be part of the text, and a "stop" that dropped it lost
+/// the user's words. A terminator counts only as a sentence on its own: a final that is the phrase alone, or whose last
+/// sentence is ("… Det var det. Diktat slut."); never inside a sentence ("… og skriv diktat slut i filen"). Before it is
 /// sent the read-back says how long it is and how it starts, naming the project (<see cref="VoicePhrases.DictationSending"/>).
 /// It goes to the session as an answer by voice (<see cref="IGodModeServers.ReplyAsync"/>, ReplyByVoice), marked as
 /// transcribed speech (#460). A project that runs, or waits on a permission, or failed to create, is refused up front.
@@ -22,18 +26,22 @@ namespace GodMode.Voice;
 public sealed partial class Dictation(IGodModeServers servers, ProjectHandles handles, ProjectNames names, VoiceConversation conversation,
     VoicePhrases phrases, TimeProvider? time = null)
 {
-    /// <summary>What ends a dictation and sends it, as a sentence on its own.</summary>
-    public static readonly IReadOnlyList<string> SendWords = ["send", "send det", "send den", "send det nu", "send it", "send now"];
-
-    /// <summary>What ends a dictation and drops it, as a sentence on its own. "Stop" drops it too: the safe reading, nothing sent.</summary>
-    public static readonly IReadOnlyList<string> CancelWords =
-        ["annullér", "annuller", "annullér det", "annuller det", "afbryd", "stop", "cancel", "cancel it"];
+    /// <summary>
+    /// What ends a dictation, as a sentence on its own, and how: the one list of them (#520), and speech recognition's
+    /// keyterms (<see cref="GodModeGraph.CommandWords"/>). Two words each, unusual enough never to be dictated.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Phrase, Terminator Ends)> Phrases =
+    [
+        ("diktat slut", Terminator.Send), ("send diktat", Terminator.Send),
+        ("end dictation", Terminator.Send), ("dictation end", Terminator.Send), ("send dictation", Terminator.Send),
+        ("annullér diktat", Terminator.Cancel), ("slet diktat", Terminator.Cancel),
+        ("cancel dictation", Terminator.Cancel),
+    ];
 
     /// <summary>How many of the dictation's first words the read-back says.</summary>
     public const int WordsReadBack = 8;
 
-    private static readonly IReadOnlyList<string[]> SendTokens = [.. SendWords.Select(CommandResolver.Tokenize)];
-    private static readonly IReadOnlyList<string[]> CancelTokens = [.. CancelWords.Select(CommandResolver.Tokenize)];
+    private static readonly FrozenDictionary<string, Terminator> PhraseKeys = Phrases.ToFrozenDictionary(p => Key(p.Phrase), p => p.Ends);
 
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly Lock _lock = new();
@@ -89,18 +97,34 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
 
     /// <summary>
     /// The terminator a final ends with, as a sentence on its own, and the words said before it in that final; no
-    /// terminator, and all its words, when it has none.
+    /// terminator, and all its words, when it has none. The phrase is matched as the transcriber may render it: in any
+    /// case, punctuated anyhow ("Diktat slut…", "Diktat, slut!"), with or without its accent ("annuller diktat"), a "c"
+    /// for a "k" ("dictat slut"), its words run together ("diktatslut") or split by a full stop ("Diktat. Slut."). It
+    /// is matched strictly as a sentence: the whole of the final's last one (or last two, split so), never part of one.
     /// </summary>
     public static (Terminator? Terminator, string Before) Ends(string text)
     {
         var sentences = Sentences(text);
         if (sentences.Count == 0)
             return (null, "");
-        var last = CommandResolver.Tokenize(sentences[^1]);
-        Terminator? terminator = SendTokens.Any(t => last.AsSpan().SequenceEqual(t)) ? Terminator.Send
-            : CancelTokens.Any(t => last.AsSpan().SequenceEqual(t)) ? Terminator.Cancel
-            : null;
-        return terminator is null ? (null, text.Trim()) : (terminator, string.Join(" ", sentences.Take(sentences.Count - 1)));
+        for (var count = 1; count <= Math.Min(2, sentences.Count); count++)
+        {
+            if (PhraseKeys.TryGetValue(Key(string.Concat(sentences.TakeLast(count))), out var terminator))
+                return (terminator, string.Join(" ", sentences.SkipLast(count)));
+        }
+        return (null, text.Trim());
+    }
+
+    /// <summary>A phrase as it is matched: its letters and digits alone, in lower case, unaccented, a "c" read as a "k".</summary>
+    private static string Key(string text)
+    {
+        var key = new StringBuilder(text.Length);
+        foreach (var c in text.ToLowerInvariant().Normalize(NormalizationForm.FormD))
+        {
+            if (char.IsLetterOrDigit(c))
+                key.Append(c == 'c' ? 'k' : c);
+        }
+        return key.ToString();
     }
 
     /// <summary>The text's sentences, as the transcriber punctuated it.</summary>
