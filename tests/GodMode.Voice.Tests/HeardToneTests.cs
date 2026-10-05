@@ -23,7 +23,9 @@ public sealed class HeardToneTests
 
     private static int ToneBytes(RecordingAudioSink speaker) => Earcons.Heard(speaker.Format).Length;
 
-    private static int Tones(RecordingAudioSink speaker) => speaker.Calls.Count(c => c.Kind == SinkCallKind.Audio && c.AudioBytes == ToneBytes(speaker));
+    /// <summary>The tones on the speaker, after its first <paramref name="from"/> calls.</summary>
+    private static int Tones(RecordingAudioSink speaker, int from = 0) =>
+        speaker.Calls.Skip(from).Count(c => c.Kind == SinkCallKind.Audio && c.AudioBytes == ToneBytes(speaker));
 
     private static string Described(RecordingAudioSink speaker) =>
         string.Join(", ", speaker.Calls.Select(c => c.Kind == SinkCallKind.Audio ? c.AudioBytes == ToneBytes(speaker) ? "tone" : $"audio {c.AudioBytes}" : c.Kind.ToString()));
@@ -69,7 +71,7 @@ public sealed class HeardToneTests
         var synthesized = voice.Synthesizer.Texts.Count;
 
         voice.Transcriptions.SayAsRecognized("Hvad venter på mig?");
-        await Eventually.UntilAsync(() => Tones(speaker) == 1, () => $"the tone while the model thinks; the speaker had: {Described(speaker)}");
+        await Eventually.UntilAsync(() => Tones(speaker, greeting) == 1, () => $"the tone while the model thinks; the speaker had: {Described(speaker)}");
         Assert.Equal(synthesized, voice.Synthesizer.Texts.Count);
         thinking.SetResult();
         await voice.Events.SaidAsync("Intet venter på dig.");
