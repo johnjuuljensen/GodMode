@@ -46,6 +46,21 @@ public sealed class VoiceSettingsTests : IDisposable
         Assert.Equal(VoiceSettings.DefaultStaleHours, (await _store.UpdateAsync(new VoiceSettingsUpdate(StaleHours: 0))).StaleHours);
     }
 
+    /// <summary>The earcons and the "heard you" tone (#458) are on, in a file saved before the setting too, until turned off.</summary>
+    [Fact]
+    public async Task The_earcons_are_on_unless_turned_off()
+    {
+        Assert.True((await _store.GetViewAsync()).Earcons);
+        Directory.CreateDirectory(_dir);
+        await File.WriteAllTextAsync(Path.Combine(_dir, VoiceSettingsStore.FileName), """{ "Language": "en" }""");
+        Assert.True((await _store.LoadAsync()).Earcons);
+
+        Assert.False((await _store.UpdateAsync(new VoiceSettingsUpdate(Earcons: false))).Earcons);
+        Assert.False((await new VoiceSettingsStore(_dir, _secrets).LoadAsync()).Earcons);
+        Assert.False((await _store.UpdateAsync(new VoiceSettingsUpdate(StaleHours: 6))).Earcons);
+        Assert.True((await _store.UpdateAsync(new VoiceSettingsUpdate(Earcons: true))).Earcons);
+    }
+
     /// <summary>A file saved when voice kept its own models (#475) loads as it is, and its next save drops them.</summary>
     [Fact]
     public async Task A_file_with_the_old_models_loads_and_its_next_save_drops_them()
