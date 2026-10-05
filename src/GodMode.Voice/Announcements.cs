@@ -350,20 +350,24 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
 /// The session's announcements, held while a create or a question waits on the user (<see cref="SessionCreates.Waiting"/>,
 /// #473): an announcement between a read-back and its yes would take the yes's place. They are said in order once
 /// nothing waits (the user answered, or the wait expired). A read-back to be said again (<see cref="SessionCreates.Repeat"/>)
-/// is never held: it is what was waited on.
+/// is never held: it is what was waited on. While a dictation is taken (<see cref="Dictation.Active"/>, #459) they wait
+/// too: one in a pause to think would break the user's train of thought, and change what is talked about.
 /// </summary>
 public sealed class HeldAnnouncements
 {
     private readonly ChannelWriter<Announcement> _session;
     private readonly SessionCreates _creates;
+    private readonly Dictation? _dictation;
     private readonly Lock _lock = new();
     private readonly List<Announcement> _held = [];
 
-    public HeldAnnouncements(ChannelWriter<Announcement> session, SessionCreates creates)
+    public HeldAnnouncements(ChannelWriter<Announcement> session, SessionCreates creates, Dictation? dictation = null)
     {
         _session = session;
         _creates = creates;
+        _dictation = dictation;
         creates.Released += Release;
+        if (dictation is not null) dictation.Released += Release;
         creates.Repeat += readBack => session.TryWrite(new Announcement(readBack));
     }
 
@@ -381,7 +385,7 @@ public sealed class HeldAnnouncements
     {
         lock (_lock)
         {
-            if (_held.Count > 0 || _creates.Waiting)
+            if (_held.Count > 0 || Waiting)
             {
                 _held.Add(announcement);
                 return;
@@ -390,12 +394,15 @@ public sealed class HeldAnnouncements
         _session.TryWrite(announcement);
     }
 
+    /// <summary>Whether something waits on the user's words: a create or its question, or a dictation.</summary>
+    private bool Waiting => _creates.Waiting || _dictation?.Active == true;
+
     private void Release()
     {
         List<Announcement> held;
         lock (_lock)
         {
-            if (_creates.Waiting) return;
+            if (Waiting) return;
             held = [.. _held];
             _held.Clear();
         }

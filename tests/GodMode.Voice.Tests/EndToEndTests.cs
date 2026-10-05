@@ -22,7 +22,7 @@ public sealed class EndToEndTests
     private const string Answer = "Den skal bruge den eksisterende migration.";
 
     /// <summary>A turn that ends on a question in plain text, then waits for the answer and takes another turn.</summary>
-    private static FakeScript Asking(string question) =>
+    internal static FakeScript Asking(string question) =>
         new FakeScript().EmitInit().AwaitStdin().EmitAssistant(question).Sleep(50).EmitResult(question)
             .AwaitStdin().EmitAssistant("Okay.").Sleep(50).EmitResult("Okay.");
 
@@ -201,7 +201,7 @@ public sealed class EndToEndTests
         Assert.EndsWith($"Idle. Last reply: {Last}", Assert.Single(model.ToolResults));
     }
 
-    private static async Task<ProjectStatus> CreateAsync(HubConnection hub, string name) =>
+    internal static async Task<ProjectStatus> CreateAsync(HubConnection hub, string name) =>
         (await hub.InvokeAsync<CreateProjectResult>(nameof(IProjectHub.CreateProject), TestServer.Profile, TestServer.Root, null,
             new Dictionary<string, JsonElement>
             {
@@ -209,11 +209,11 @@ public sealed class EndToEndTests
                 ["prompt"] = JsonSerializer.SerializeToElement("Ship the issue"),
             })).Project!;
 
-    private static Task WaitForAttentionAsync(HubConnection hub, string projectId) =>
+    internal static Task WaitForAttentionAsync(HubConnection hub, string projectId) =>
         Eventually.UntilAsync(
             () => hub.InvokeAsync<AttentionItem[]>(nameof(IProjectHub.GetAttention)).Result.Any(i => i.ProjectId == projectId),
             () => $"{projectId} to need the user");
 
-    private static ProjectStatus Status(HubConnection hub, string projectId) =>
+    internal static ProjectStatus Status(HubConnection hub, string projectId) =>
         hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), projectId).Result;
 }

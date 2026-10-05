@@ -42,7 +42,7 @@ public static class GodModeGraph
     /// before the servers' names (<see cref="VoiceSession.Keyterms"/>).
     /// </summary>
     public static readonly IReadOnlyList<string> CommandWords =
-        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "færdig", "det var alt", "done", "that's all", "GodMode", "pull request", "review", "start issue", "opret",
+        ["hvad venter", "projekter", "status", "svar", "læs videre", "læst", "stille", "sig til igen", "hjælp", "færdig", "det var alt", "done", "that's all", "GodMode", "pull request", "review", "start issue", "opret", "diktér til", "send", "annullér",
          "log", "loggen", "session", "sessionen", "branch", "worktree", "commit", "push", "merge", "issue"];
 
     /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
@@ -110,6 +110,9 @@ public static class GodModeGraph
             - "Mere?", "Hvorfor?", "Hvad er det?" / "More?", "Why?", "What is it?" about the line just said, naming no
               project — call {{VoiceTools.ReadMore}}: it expands that line a step (an announcement into the project's status,
               a status into its last reply, a reply or list into its next part). Never ask which project then.
+            - "Diktér til [handle]" / "Dictate to [handle]" is taken by the system itself, word for word, until the user
+              says "send" or "annullér": you never see it. A "diktér" that names no project: ask which, as a closed
+              question, and tell the user to say "Diktér til" and the project.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}, and only then: on the user's own "læst" or "seen".
               Never mark a project seen as part of reading it, its status or its reply, or when the user asks if that was all.
             - "Marker [handle] som vigtig / normal / stille" / "Mark [handle] as important / normal / quiet" — call
@@ -155,6 +158,8 @@ public static class GodModeGraph
             """;
 
         var graph = new CompositeBuilder(Id).WithTools(t => AddTools(t, tools));
+        // Above Done and help: while dictating, "færdig" and "hjælp" are words of the dictation (#459)
+        graph = graph.Node(new DictationNode("dictation", 95, tools.Dictation));
         if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));
         return graph
             .Node(new HelpNode("help", 80))
