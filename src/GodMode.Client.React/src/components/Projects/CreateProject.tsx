@@ -167,7 +167,8 @@ export function CreateProject({ context }: { context?: CreateContext }) {
     return groups;
   }, [roots]);
 
-  // The root of the profile picked: two profiles may each have a root of one name
+  // The root picked, in the profile picked: a server has one root per name across its profiles, and a
+  // root is still known by its profile and its name together, as a session's ID names it
   const selectedRoot = roots.find(r => r.Name === selectedRootName && sameProfile(profileOf(r), selectedProfileName));
   const actions = selectedRoot?.Actions ?? [];
   // Falls back to the root's first action; kept as picked while the root is unavailable
