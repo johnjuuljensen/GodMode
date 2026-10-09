@@ -165,6 +165,17 @@ internal sealed class ServerProcess : IDisposable
         }
     }
 
+    /// <summary>
+    /// Kills the server alone (SIGKILL on Linux, TerminateProcess on Windows), as a crash does: no shutdown
+    /// runs, and what it started is left to whatever outlives it.
+    /// </summary>
+    public void Crash()
+    {
+        if (_process.HasExited) return;
+        _process.Kill();
+        _process.WaitForExit(10_000);
+    }
+
     /// <summary>Kills the server with its children, as a crash would. A second call does nothing.</summary>
     public void Dispose()
     {
