@@ -80,7 +80,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>How often an open pull request is checked, and how long its root's status script may take.</summary>
     public const string PullRequestPollSetting = "PullRequestPollSeconds";
     public const string StatusScriptTimeoutSetting = "StatusScriptTimeoutSeconds";
-    private readonly TimeSpan _statusScriptTimeout;
+    /// <summary>Read at each run, as the list script's is: a test shortens it for the one run whose timeout it checks.</summary>
+    private TimeSpan StatusScriptTimeout => TimeSpan.FromSeconds(_configuration.GetValue(StatusScriptTimeoutSetting, 30.0));
     private readonly PullRequestPoller _pullRequests;
 
     /// <inheritdoc />
@@ -228,7 +229,6 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         _server = server;
         _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         _sessionStartTimeout = TimeSpan.FromSeconds(configuration.GetValue(SessionStartTimeoutSetting, 60.0));
-        _statusScriptTimeout = TimeSpan.FromSeconds(configuration.GetValue(StatusScriptTimeoutSetting, 30.0));
         _exitBeforeShutdownWindow = TimeSpan.FromSeconds(configuration.GetValue(ExitBeforeShutdownWindowSetting, 5.0));
         _pullRequests = new PullRequestPoller(CheckPullRequestAsync,
             TimeSpan.FromSeconds(configuration.GetValue(PullRequestPollSetting, 600.0)), logger);
@@ -1610,6 +1610,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (project.Status.RootName == null || profileName == null) return unchanged;
 
         string? script = null;
+        var limit = StatusScriptTimeout;
         PullRequestStatus? reported;
         try
         {
@@ -1623,7 +1624,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             var env = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
                 profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-            timeout.CancelAfter(_statusScriptTimeout);
+            timeout.CancelAfter(limit);
             var output = await _scriptRunner.RunForOutputAsync(script, rootPath, project.ProjectPath, env, PullRequestScript.MaxOutputChars, timeout.Token);
             reported = PullRequestScript.Parse(output, DateTime.UtcNow);
         }
@@ -1634,7 +1635,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         catch (Exception ex)
         {
             _logger.LogWarning("Project {ProjectId}: status script {Script} failed, so its pull request is left as it was: {Reason}",
-                projectId, script, ex is OperationCanceledException ? $"it took longer than {_statusScriptTimeout.TotalSeconds}s" : ex.Message);
+                projectId, script, ex is OperationCanceledException ? $"it took longer than {limit.TotalSeconds}s" : ex.Message);
             return unchanged;
         }
 

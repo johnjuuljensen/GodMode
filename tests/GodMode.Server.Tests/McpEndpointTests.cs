@@ -223,7 +223,7 @@ public class McpEndpointTests
             try
             {
                 run.Server = ServerProcess.Start(run._workDir, run.BaseUrl, environment: environment);
-                run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TimeSpan.FromSeconds(10) };
+                run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TestTimeouts.Request };
                 await run.Server.WaitForHealthyAsync(run.Http);
                 run.Client = new ServerHubClient(run.BaseUrl);
                 await run.Client.StartAsync();

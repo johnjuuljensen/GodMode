@@ -35,8 +35,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public const string RootName = "lifecycle";
     public const string ProfileName = "lifecycle";
 
-    /// <summary>Long enough for a slow CI box; each wait returns as soon as its condition holds.</summary>
-    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);
+    /// <summary>Long enough for a full parallel run on a busy machine; each wait returns as soon as its condition holds.</summary>
+    public static readonly TimeSpan DefaultTimeout = TestTimeouts.Wait;
 
     private const string RecordFileName = $"fake-claude-{FakeClaudeEnvironment.SessionPlaceholder}.jsonl";
 
@@ -110,6 +110,9 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         {
             [ScanSetting] = RootsDir,
             [ClaudeProcessManager.ExecutableSetting] = FakeClaudePath,
+            // Ceilings, not the subject: a test of a script's timeout sets its own
+            [ProjectManager.ListScriptTimeoutSetting] = Seconds(TestTimeouts.Script),
+            [ProjectManager.StatusScriptTimeoutSetting] = Seconds(TestTimeouts.Script),
         };
         foreach (var (variable, value) in profileEnvironment ?? new Dictionary<string, string>())
             configuration[$"{RootSources.ProfilesSection}:{ProfileName}:Environment:{variable}"] = value;
@@ -147,6 +150,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     /// <summary>Reads the configuration's sources again, as a reload of the instance's config file does.</summary>
     public void ReloadConfiguration() => ((IConfigurationRoot)_configuration).Reload();
+
+    /// <summary>Changes one setting in place, for the server's next read of it (a setting it reads each time).</summary>
+    public void Configure(string key, TimeSpan seconds) => _configuration[key] = Seconds(seconds);
+
+    private static string Seconds(TimeSpan time) => time.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>Replaces the script that the next launch plays. Running fakes keep the one they loaded.</summary>
     public void UseScript(FakeScript script) => script.Save(ScriptPath);

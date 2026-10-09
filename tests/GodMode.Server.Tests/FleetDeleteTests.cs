@@ -72,18 +72,20 @@ public class FleetDeleteTests
         public static async Task<Fleet> StartAsync()
         {
             // An open pull request is checked again every second
-            var run = await FleetRun.StartAsync(Waiting(), $$"""{ "{{ProjectManager.PullRequestPollSetting}}": 1 }""");
-            File.WriteAllText(Path.Combine(run.RootPath, ".godmode-root", "delete.ps1"), DeleteScript);
-            File.WriteAllText(Path.Combine(run.RootPath, ".godmode-root", "status.ps1"), StatusScript);
-            run.WriteActionScript(WorkAction, Turns(), Scripts);
-            run.WriteActionScript(BusyAction, Waiting(), Scripts);
-            run.WriteActionScript(AskingAction, new FakeScript().EmitInit().AwaitStdin().AskPermission("Bash", new { command = "ls" }).AwaitStdin(), Scripts);
-            var question = new { questions = new[] { new { question = "Which branch?", header = "Branch", options = new[] { new { label = "main", description = "the default" } }, multiSelect = false } } };
-            run.WriteActionScript(QuestioningAction, new FakeScript().EmitInit().AwaitStdin().AskPermission("AskUserQuestion", question, "toolu_ask").AwaitStdin(), Scripts);
-            var (overseerId, overseer) = await OverseerAsync(run, "overseer");
-            var fleet = new Fleet { Run = run, OverseerId = overseerId, Overseer = overseer };
-            run.Client.Hub.On<string>(nameof(IProjectHubClient.ProjectDeleted), fleet.Deleted.Enqueue);
-            return fleet;
+            return await (await FleetRun.StartAsync(Waiting(), $$"""{ "{{ProjectManager.PullRequestPollSetting}}": 1 }""")).SetUpAsync(async run =>
+            {
+                File.WriteAllText(Path.Combine(run.RootPath, ".godmode-root", "delete.ps1"), DeleteScript);
+                File.WriteAllText(Path.Combine(run.RootPath, ".godmode-root", "status.ps1"), StatusScript);
+                run.WriteActionScript(WorkAction, Turns(), Scripts);
+                run.WriteActionScript(BusyAction, Waiting(), Scripts);
+                run.WriteActionScript(AskingAction, new FakeScript().EmitInit().AwaitStdin().AskPermission("Bash", new { command = "ls" }).AwaitStdin(), Scripts);
+                var question = new { questions = new[] { new { question = "Which branch?", header = "Branch", options = new[] { new { label = "main", description = "the default" } }, multiSelect = false } } };
+                run.WriteActionScript(QuestioningAction, new FakeScript().EmitInit().AwaitStdin().AskPermission("AskUserQuestion", question, "toolu_ask").AwaitStdin(), Scripts);
+                var (overseerId, overseer) = await OverseerAsync(run, "overseer");
+                var fleet = new Fleet { Run = run, OverseerId = overseerId, Overseer = overseer };
+                run.Client.Hub.On<string>(nameof(IProjectHubClient.ProjectDeleted), fleet.Deleted.Enqueue);
+                return fleet;
+            });
         }
 
         /// <summary>An overseer action's session, created in the app, with its fleet client.</summary>

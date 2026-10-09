@@ -21,11 +21,13 @@ internal sealed class ServerHubClient(string baseUrl, string apiKey = ServerProc
             foreach (var converter in JsonDefaults.Options.Converters)
                 options.PayloadSerializerOptions.Converters.Add(converter);
         })
+        .WithServerTimeout(TestTimeouts.Request)
         .Build();
 
     public async Task StartAsync()
     {
         Hub.On<string, ProjectStatus>(nameof(IProjectHubClient.StatusChanged), (_, status) => _pushes.Enqueue(status));
+        Hub.HandshakeTimeout = TestTimeouts.Request;
         await Hub.StartAsync();
     }
 

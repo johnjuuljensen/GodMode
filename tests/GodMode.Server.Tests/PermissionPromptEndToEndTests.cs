@@ -60,7 +60,7 @@ public class PermissionPromptEndToEndTests
         var baseUrl = $"http://127.0.0.1:{port}";
         var server = ServerProcess.Start(workDir, baseUrl,
             environment: new Dictionary<string, string> { ["Claude__Executable"] = LifecycleHarness.FakeClaudePath });
-        using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(10) };
+        using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TestTimeouts.Request };
         try
         {
             await server.WaitForHealthyAsync(http);

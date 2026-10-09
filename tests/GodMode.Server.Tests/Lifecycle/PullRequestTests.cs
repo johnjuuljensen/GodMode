@@ -27,14 +27,13 @@ public class PullRequestTests
 
     /// <param name="pollSeconds">How often an open pull request is checked.</param>
     /// <param name="statusScript">Whether the root names the status script in its config.</param>
-    private static LifecycleHarness Harness(double pollSeconds = 1, bool statusScript = true, double timeoutSeconds = 30)
+    private static LifecycleHarness Harness(double pollSeconds = 1, bool statusScript = true)
     {
         var harness = new LifecycleHarness(Finishing(),
             rootConfig: statusScript ? new Dictionary<string, object> { ["status"] = "scripts/status" } : null,
             settings: new Dictionary<string, string?>
             {
                 [ProjectManager.PullRequestPollSetting] = pollSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                [ProjectManager.StatusScriptTimeoutSetting] = timeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
         // There with or without the config naming it: a root that does not name it does not run it
         UseStatusScript(harness, StatusScript);
@@ -159,7 +158,7 @@ public class PullRequestTests
     [Fact]
     public async Task Failures_AreLogged_AndLeaveThePullRequestAsItWas()
     {
-        await using var harness = Harness(timeoutSeconds: 3);
+        await using var harness = Harness();
         Report(harness, "open", "changes_requested");
         var created = await harness.CreateProjectAsync();
         var known = await WaitForPullRequestAsync(harness, created.Id, PullRequestState.Open, PullRequestReview.ChangesRequested);
@@ -172,12 +171,15 @@ public class PullRequestTests
         await WaitForWarningAsync(harness, "gh: could not reach github.com");
         Assert.Equal(known, (await harness.Projects.GetStatusAsync(created.Id)).PullRequest);
 
+        // The timeout is short for the slow script alone: a fast one may take seconds to start on a loaded machine
         UseStatusScript(harness, "Start-Sleep -Seconds 60; '{}'");
+        harness.Configure(ProjectManager.StatusScriptTimeoutSetting, TimeSpan.FromSeconds(3));
         await WaitForWarningAsync(harness, "it took longer than 3s");
         Assert.Equal(known, (await harness.Projects.GetStatusAsync(created.Id)).PullRequest);
         Assert.Equal(AttentionKind.Review, Assert.Single(harness.Projects.GetAttention()).Kind);
 
         UseStatusScript(harness, StatusScript);
+        harness.Configure(ProjectManager.StatusScriptTimeoutSetting, TestTimeouts.Script);
         Report(harness, "open", "approved");
         await WaitForPullRequestAsync(harness, created.Id, PullRequestState.Open, PullRequestReview.Approved);
     }
