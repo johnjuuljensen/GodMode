@@ -103,7 +103,7 @@ Live root updates start once the startup's recovery has run: from then on every 
 - **A root's `profileName` edited, or its explicit entry renamed**: its sessions' IDs (`{profile}/{root}/{id}`) name the profile and the root, so each session takes the ID the root has now, as a restart would give it. One without a claude does so at once: its old ID is pushed as `ProjectDeleted`, its new one as `ProjectCreated`, and its `status.json` is rewritten, and so are its children's, to name its new ID ([A session's parent](#a-sessions-parent)). One whose claude runs keeps its ID, which its MCP config carries, until claude exits, then does the same.
 - **Two reads in a row** must agree before a session leaves or changes its ID: a `config.json` saved half-written reads as the default config, in the `Default` profile, and a folder can blink.
 - **A busy session waits for a later read.** A read lets a session go under its lock, which a delete, stop or launch of it holds: it waits 2 seconds at most, then leaves it for the next read, so a delete script that runs long holds up no read of the roots.
-- **A delete script gets its session's profile environment** even once the root has left that profile (moved to another, or removed) while claude ran: from the snapshot while the profile has roots, else from the config's `Profiles:<name>:Environment`.
+- **A session gets its own profile's environment** in its launch, its status script and its delete script, even once the root has left that profile (moved to another, or removed) while claude ran, until a read of the roots gives it its new ID: from the snapshot while the profile has roots, else from the config's `Profiles:<name>:Environment`. A profile taken out of the config as well has none to give.
 
 ### Executables
 
