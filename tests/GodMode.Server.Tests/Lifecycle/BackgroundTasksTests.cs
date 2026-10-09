@@ -115,12 +115,16 @@ public class BackgroundTasksTests
         var created = await harness.CreateProjectAsync();
         await BothListedAsync(harness, created.Id);
 
+        var before = harness.Hub.StatusPushes(created.Id).Count;
         await harness.Projects.SendInputAsync(created.Id, "/clear");
-        await LifecycleHarness.WaitUntilAsync(
-            async () => harness.ReadOutputFile(created.Id).Contains("\"num_turns\":0")
-                && (await harness.Projects.GetStatusAsync(created.Id)).State == ProjectState.Idle,
-            null, () => $"the clear did not end.\n{harness.Describe(created.Id)}");
 
+        // The new conversation's init makes the session Running, and the clear's silent result Idle again: read from the
+        // statuses pushed, not output.jsonl, which the reset starts over
+        var started = await harness.WaitForStatusPushAsync(created.Id, s => s.State == ProjectState.Running, skip: before);
+        var cleared = await harness.WaitForStatusPushAsync(created.Id, s => s is { LastResult: null, State: ProjectState.Idle },
+            skip: harness.Hub.StatusPushes(created.Id).ToList().IndexOf(started) + 1);
+        Assert.Equal(Both, started.BackgroundTasks);
+        Assert.Equal(Both, cleared.BackgroundTasks);
         Assert.Equal(Both, (await harness.Projects.GetStatusAsync(created.Id)).BackgroundTasks);
     }
 
