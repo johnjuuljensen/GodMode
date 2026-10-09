@@ -315,8 +315,11 @@ internal abstract class SessionProcessTree : IDisposable
             LiveLaunches[_launch] = 0;
             try
             {
+                // Whole or not at all: a reap that read half of it would take it for no record, and delete it
                 Directory.CreateDirectory(Path.GetDirectoryName(recordPath)!);
-                File.WriteAllText(recordPath, JsonSerializer.Serialize(new GroupRecord(_group, _launch)));
+                var writing = recordPath + ".tmp";
+                File.WriteAllText(writing, JsonSerializer.Serialize(new GroupRecord(_group, _launch)));
+                File.Move(writing, recordPath, overwrite: true);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
