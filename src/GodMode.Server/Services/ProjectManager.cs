@@ -1635,8 +1635,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             if (config.ResolveAction(project.ActionName) is not { Status: { } status } action) return unchanged;
             script = status;
 
-            snap.Profiles.TryGetValue(profileName, out var profileCfg);
-            var env = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+            var env = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), ProfileEnvironment(snap, profileName),
                 profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
             timeout.CancelAfter(_statusScriptTimeout);
@@ -1938,9 +1937,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     }
 
     /// <summary>
-    /// A profile's environment, for the scripts of a session under it: the snapshot's, else the
-    /// configuration's. A session whose root has left the profile (moved to another, or removed) while
-    /// its claude ran is still that profile's, and the snapshot lists only profiles with roots.
+    /// A profile's environment, for a session under it: its launch, its status script and its delete
+    /// script. The snapshot's, else the configuration's: a session whose root has left the profile (moved
+    /// to another, or removed) while its claude ran is still that profile's until a read of the roots gives
+    /// it its new ID, and the snapshot lists only profiles with roots.
     /// </summary>
     private Dictionary<string, string>? ProfileEnvironment(ProfileSnapshot snap, string profileName) =>
         snap.Profiles.TryGetValue(profileName, out var profile) ? profile.Environment
@@ -3132,7 +3132,6 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // Recovery reads the action name from settings too; a project created before it was saved has none
         project.ActionName ??= settings.ActionName;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
-        snap.Profiles.TryGetValue(profileName ?? "", out var profile);
 
         var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(project, profileName);
         var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
@@ -3147,7 +3146,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             action = action with { ClaudeArgs = unnamed };
         }
         var (env, args) = BuildClaudeConfig(project.ProjectPath, mcpConfigPath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project), fleetTools),
-            project.Status.Model ?? action.Model, LaunchEffort(project, action), profile?.Environment, profileName, stripEnvVarProfile);
+            project.Status.Model ?? action.Model, LaunchEffort(project, action), ProfileEnvironment(snap, profileName ?? ""), profileName, stripEnvVarProfile);
         env ??= new Dictionary<string, string>();
         var address = AddressOf(project);
         env[SessionAddress.Variable] = address;
