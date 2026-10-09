@@ -28,7 +28,8 @@ namespace GodMode.Server.Services;
 /// Each session's <c>Address</c> is its name in Claude Code's own channel (<see cref="SessionAddress"/>), which a session
 /// in the same <c>CLAUDE_CONFIG_DIR</c> reaches with <c>SendMessage</c>. Each does what its hub method does, through the
 /// same <see cref="IProjectManager"/> call, so a session it starts is in the app's list like any other.
-/// None answers a permission prompt or a question, deletes, forgets, adopts or writes config: those are the user's.
+/// <see cref="DeleteSessionAsync"/> deletes a session the caller is done with, its own descendants alone (issue #428).
+/// None answers a permission prompt or a question, deletes any other session, forgets, adopts or writes config: those are the user's.
 /// Each returns JSON text, as the hub's models serialize, unindented (<see cref="JsonDefaults.Compact"/>); a refusal is the tool's error, saying why.
 /// </summary>
 [McpServerToolType]
@@ -58,8 +59,12 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         IReadOnlyList<BackgroundTask>? BackgroundTasks);
 
     /// <summary>What <see cref="StartSessionAsync"/> made: the session, or, for an action that starts none, its script's message.</summary>
+    /// <param name="Note">For a calling session whose new session is top level: <see cref="StartedTopLevel"/>; null otherwise.</param>
     public sealed record Started(string? Id = null, string? Name = null, ProjectState? State = null, string? Kind = null,
-        string? ParentId = null, string? Model = null, string? Effort = null, string? Message = null, string? Address = null);
+        string? ParentId = null, string? Model = null, string? Effort = null, string? Message = null, string? Address = null, string? Note = null);
+
+    /// <summary>What <see cref="Started.Note"/> says of a session a calling session started top level.</summary>
+    public const string StartedTopLevel = "Started top level: this session is not its parent.";
 
     /// <summary>A session's state after <see cref="SendAsync"/>, <see cref="StopAsync"/> or <see cref="ResumeAsync"/>.</summary>
     /// <param name="Held">For <see cref="SendAsync"/>: why the message is held, not delivered yet; null when it was.</param>
@@ -102,7 +107,9 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     [McpServerTool(Name = "start_session")]
     [Description("Starts a session as the app's create does: the root's action with its inputs (list_roots gives its schema). " +
         "model and effort override the action's. With parent (a session ID) the new session is that one's child. Without it, a session " +
-        "calling this is the new one's parent, unless top_level is true; any other caller's is top level. A session's child is in its " +
+        "calling this is the new one's parent, unless top_level is true; any other caller's is top level. A session whose action says " +
+        "\"fleetChildren\": \"topLevel\" (a chat) starts every session top level, whatever top_level says, and may not name a parent; " +
+        "the result's Note then says \"" + StartedTopLevel + "\" A session's child is in its " +
         "parent's root, unless a Fleet:Links entry in the server's config links the parent's root to the new one's. fleet_tools gives the new session " +
         "these tools too, where its action's config allows a grant (\"fleetTools\": \"grantable\"). " +
         "Returns the new session (with its Address for SendMessage), or, for an action that starts no session, its script's message. Its permission prompts go to the user.")]
@@ -128,6 +135,10 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         // The caller, when it is a session: it has the fleet's tools (the endpoint let it in), so it may grant them,
         // in its own profile
         var caller = CallerOf(context);
+        // A session whose action's sessions start top-level ones (a chat) is no parent, as its root's config says now
+        var topLevelOnly = caller != null && await Refusing(() => Task.FromResult(projects.FleetChildrenOf(caller))) == FleetChildren.TopLevel;
+        if (topLevelOnly && !string.IsNullOrWhiteSpace(parent))
+            throw new McpException("This session's action says \"fleetChildren\": \"topLevel\": the sessions it starts are top level, so it names no parent.");
         var scope = await ScopeOfAsync(context);
         var target = new RootRef(profile, root);
         if (scope is { } own && !InScope(scope, profile, root))
@@ -135,7 +146,7 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         // A session this caller does not see is no parent it can name, as one this server does not have is not
         if (scope != null && !string.IsNullOrWhiteSpace(parent) && await StatusOrNullAsync(parent) is { } named && !InScope(scope, named.ProfileName, named.RootName))
             throw new McpException($"The parent session '{parent}' is not one this server has.");
-        var parentId = !string.IsNullOrWhiteSpace(parent) ? parent : top_level ? null : caller;
+        var parentId = !string.IsNullOrWhiteSpace(parent) ? parent : top_level || topLevelOnly ? null : caller;
         // A session's child is in its parent's root, or one a link lets the parent oversee
         if (scope != null && parentId != null)
         {
@@ -156,7 +167,7 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         // As the hub's CreateProject: the app lists it
         await hub.Clients.All.ProjectCreated(status);
         return Json(new Started(status.Id, status.Name, status.State, status.Kind, status.ParentId, status.Model, status.Effort,
-            Address: SessionAddress.OfId(status.Id)));
+            Address: SessionAddress.OfId(status.Id), Note: caller != null && status.ParentId == null ? StartedTopLevel : null));
     }
 
     [McpServerTool(Name = "send")]
@@ -211,6 +222,25 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         logger.LogInformation("Fleet resuming {ProjectId}", session);
         await Refusing(() => projects.ResumeProjectAsync(session));
         return await StateAsync(session);
+    }
+
+    [McpServerTool(Name = "delete_session", Destructive = true)]
+    [Description("Deletes a session you are done with, as the app's delete does: the root's delete script runs (it removes the " +
+        "worktree, and refuses work not committed or pushed, with its error given back here), then its folder goes, or, in a " +
+        "shared folder, only its state, into the trash. Only your own children and theirs, by the parent the server recorded " +
+        "when they were started; never yourself. Refused while it is running or waits on a permission prompt or a question, " +
+        "while it has children of its own (delete those first), and while its pull request is draft or open: merged, closed " +
+        "or none. Only a session can delete. Returns Trashed, whether its state went to the trash rather than its folder.")]
+    public async Task<string> DeleteSessionAsync(RequestContext<CallToolRequestParams> context, [Description("The session's ID")] string session)
+    {
+        if (CallerOf(context) is not { } caller)
+            throw new McpException("Only a GodMode session can delete, and only the sessions it started: the user deletes in the app.");
+        await SeenAsync(context, session);
+        logger.LogInformation("Fleet ({Caller}) deleting {ProjectId}", caller, session);
+        var result = await Refusing(() => projects.DeleteChildAsync(caller, session));
+        // As the hub's DeleteProject: the app drops it
+        await hub.Clients.All.ProjectDeleted(session);
+        return Json(result);
     }
 
     [McpServerTool(Name = "escalate")]

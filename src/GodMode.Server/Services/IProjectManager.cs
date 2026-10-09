@@ -134,6 +134,14 @@ public interface IProjectManager
     Task<DeleteProjectResult> DeleteProjectAsync(string projectId, bool force = false);
 
     /// <summary>
+    /// The fleet's <c>delete_session</c>: <see cref="DeleteProjectAsync"/>, never forced, of one of the caller's descendants by
+    /// the server's record of each parent, and only one that is done. Refused, saying why, for the caller itself, a
+    /// session that is not its descendant, one that works or waits on the user, one with children of its own, and one
+    /// whose pull request is still open; and, as the user's delete is, when the root's delete script fails.
+    /// </summary>
+    Task<DeleteProjectResult> DeleteChildAsync(string callerId, string projectId);
+
+    /// <summary>
     /// Brings a trashed session back under the same ID, Stopped, and pushes it as ProjectCreated: see
     /// <see cref="GodMode.Shared.Hubs.IProjectHub.RestoreProject"/> for when it refuses.
     /// </summary>
@@ -190,6 +198,12 @@ public interface IProjectManager
     /// never grant them. The fleet's endpoint asks on every call made with a project token.
     /// </summary>
     bool HasFleetTools(string projectId);
+
+    /// <summary>
+    /// Who is the parent of the sessions the project starts with the fleet's <c>start_session</c>: its action as it was
+    /// started, in the root's config read now, says <c>"fleetChildren"</c> (issue #431). <c>start_session</c> asks on every call.
+    /// </summary>
+    FleetChildren FleetChildrenOf(string projectId);
 
     /// <summary>
     /// The MCP permission_prompt tool: waits until the user answers, and returns what claude gets.

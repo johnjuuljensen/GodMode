@@ -35,7 +35,7 @@ internal sealed class FleetRun : IAsyncDisposable
     /// <summary>The <see cref="SiblingRoot"/>'s title (#434): what the app shows for it, its name still its key.</summary>
     public const string SiblingTitle = "Sibling work";
 
-    public static readonly string[] FleetToolNames = ["escalate", "list_roots", "list_sessions", "read", "resume", "send", "start_session", "stop"];
+    public static readonly string[] FleetToolNames = ["delete_session", "escalate", "list_roots", "list_sessions", "read", "resume", "send", "start_session", "stop"];
 
     private string _workDir = "";
 
