@@ -84,24 +84,31 @@ public sealed class RootSourcesTests : IDisposable
         Assert.Contains(LifecycleHarness.RootName, names);
     }
 
+    /// <summary>
+    /// An explicit root's profile is its entry's <c>Profile</c>, else its config.json's <c>profileName</c>, else
+    /// <c>Default</c> (#344): the host's config, which holds the profiles' secrets, picks whose a root gets.
+    /// </summary>
     [Fact]
-    public async Task ExplicitRoot_OutsideEveryScanFolder_TakesItsProfileFromItsConfig_ElseFromTheEntry_ElseDefault()
+    public async Task ExplicitRoot_OutsideEveryScanFolder_TakesItsProfileFromTheEntry_ElseFromItsConfig_ElseDefault()
     {
         WriteRoot(Elsewhere("anywhere", "own"), profile: "from-config");
         WriteRoot(Elsewhere("anywhere", "entry"));
+        WriteRoot(Elsewhere("anywhere", "config-only"), profile: "from-config");
         WriteRoot(Elsewhere("anywhere", "bare"));
         await using var harness = new LifecycleHarness(Waiting(), settings: new Dictionary<string, string?>
         {
-            // The root's own config.json wins over the entry
+            // The entry wins over the root's own config.json
             ["Roots:Explicit:own:Path"] = Elsewhere("anywhere", "own"),
             ["Roots:Explicit:own:Profile"] = "from-entry",
             ["Roots:Explicit:solo:Path"] = Elsewhere("anywhere", "entry"),
             ["Roots:Explicit:solo:Profile"] = "from-entry",
+            ["Roots:Explicit:configured:Path"] = Elsewhere("anywhere", "config-only"),
             ["Roots:Explicit:bare:Path"] = Elsewhere("anywhere", "bare"),
         });
 
-        Assert.Equal("from-config", (await SingleRootAsync(harness, "own")).ProfileName);
+        Assert.Equal("from-entry", (await SingleRootAsync(harness, "own")).ProfileName);
         Assert.Equal("from-entry", (await SingleRootAsync(harness, "solo")).ProfileName);
+        Assert.Equal("from-config", (await SingleRootAsync(harness, "configured")).ProfileName);
         Assert.Equal("Default", (await SingleRootAsync(harness, "bare")).ProfileName);
         Assert.Contains(await harness.Projects.ListProjectRootsAsync(), root => root.Name == LifecycleHarness.RootName);
     }
@@ -260,7 +267,10 @@ public sealed class RootSourcesTests : IDisposable
         Assert.False(launch.Environment.ContainsKey("FROM_OTHER"));
     }
 
-    /// <summary><c>.profiles/</c> is gone: neither its description nor its environment is read, and it is no root.</summary>
+    /// <summary>
+    /// <c>.profiles/</c> is gone: neither its description nor its environment is read, and it is no root. One
+    /// left in a scan folder is warned about, once, since it may still hold the secrets it once gave (#344).
+    /// </summary>
     [Fact]
     public async Task DotProfilesFolder_IsNotRead()
     {
@@ -277,6 +287,8 @@ public sealed class RootSourcesTests : IDisposable
         Assert.NotEqual("from .profiles", Assert.Single(profiles, profile => profile.Name == LifecycleHarness.ProfileName).Description);
         Assert.False(launch.Environment.ContainsKey("FROM_DOT_PROFILES"));
         Assert.DoesNotContain(await harness.Projects.ListProjectRootsAsync(), root => root.Name == ".profiles");
+        var leftover = Assert.Single(harness.Warnings, line => line.Contains(Path.Combine(harness.RootsDir, ".profiles")));
+        Assert.Contains("is not read", leftover);
     }
 
     /// <summary>The settings that once named roots are not read, and each is named at startup with what takes its place.</summary>
