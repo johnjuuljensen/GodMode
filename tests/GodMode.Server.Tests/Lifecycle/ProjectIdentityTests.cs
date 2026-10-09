@@ -376,7 +376,8 @@ public class ProjectIdentityTests
 
     /// <summary>
     /// Scripts get the project's folder name as <c>GODMODE_PROJECT_FOLDER</c>. <c>GODMODE_PROJECT_ID</c>
-    /// is gone: the project's ID is <c>{profile}/{root}/{folder}</c>, which no script is given.
+    /// is gone: the project's ID is <c>{profile}/{root}/{id}</c>, its session's id and not its folder's
+    /// name, which no script is given as one (a script has the id alone, <c>GODMODE_SESSION_ID</c>).
     /// </summary>
     [Fact]
     public async Task Scripts_GetTheFolderName_AsGodModeProjectFolder()

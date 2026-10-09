@@ -110,6 +110,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         {
             [ScanSetting] = RootsDir,
             [ClaudeProcessManager.ExecutableSetting] = FakeClaudePath,
+            // The data directory, and so the fallback root a server with no roots has and holds, is the harness's own
+            [ApiKeyFile.PathSetting] = Path.Combine(_workDir, "data", ApiKeyFile.FileName),
         };
         foreach (var (variable, value) in profileEnvironment ?? new Dictionary<string, string>())
             configuration[$"{RootSources.ProfilesSection}:{ProfileName}:Environment:{variable}"] = value;
