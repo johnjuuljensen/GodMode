@@ -31,10 +31,9 @@ public sealed class CreateTests
             """))
         .AddRoot(ServerA, "provisioning", "Private", Action("new-root", session: false), Action("promote", session: false));
 
-    /// <summary>The model settles "start issue 283 in GodMode", and replies with a word the read-back replaces.</summary>
+    /// <summary>The model settles "start issue 283 in GodMode": the code reads it back, with no model round after the call (#526).</summary>
     private static ScriptedChatClient StartIssue283(ScriptedChatClient? model = null) => (model ?? new ScriptedChatClient())
-        .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "GodMode", [VoiceTools.IssueParameter] = "283" })
-        .Respond("Oprettet.");
+        .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "GodMode", [VoiceTools.IssueParameter] = "283" });
 
     private static async Task<OfflineVoice> ReadBack283Async(FakeServers servers, ScriptedChatClient model)
     {
@@ -52,7 +51,7 @@ public sealed class CreateTests
         var model = StartIssue283();
         await using var voice = await ReadBack283Async(servers, model);
         Assert.StartsWith("Settled: create issue 283 (its title is not known here: read back the number) in GodMode (profile Godmode), action issue.",
-            Assert.Single(model.ToolResults));
+            Assert.Single(voice.ToolResults));
         // The model's own words are never said: the read-back is said in their place
         Assert.DoesNotContain("Oprettet.", voice.Events.Responses);
         Assert.Empty(servers.Creates);
@@ -64,8 +63,8 @@ public sealed class CreateTests
         var (root, action, inputs) = Assert.Single(servers.Creates);
         Assert.Equal(("GodMode", "Godmode", "issue"), (root.Root.Name, root.Profile, action));
         Assert.Equal(new Dictionary<string, string> { ["issueNumber"] = "283" }, inputs);
-        // The yes is not the model's: it was called for the ask only
-        Assert.Equal(2, model.Calls);
+        // The yes is not the model's: it was called for the ask only, and the code read it back with no second round (#526)
+        Assert.Equal(1, model.Calls);
         Assert.Equal(new ProjectRef(ServerA, "Godmode/GodMode/260930-issue-issue_283-0001"), voice.Session.Handles.Resolve("283"));
     }
 
@@ -86,7 +85,7 @@ public sealed class CreateTests
         await voice.Events.SaidAsync("Annulleret. Intet oprettet.");
 
         Assert.Empty(servers.Creates);
-        Assert.Equal(2, model.Calls);
+        Assert.Equal(1, model.Calls);
     }
 
     /// <summary>
@@ -98,8 +97,7 @@ public sealed class CreateTests
     {
         var servers = Servers();
         var model = StartIssue283()
-            .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "kappe", [VoiceTools.IssueParameter] = "283" })
-            .Respond("Ok.");
+            .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "kappe", [VoiceTools.IssueParameter] = "283" });
         await using var voice = await ReadBack283Async(servers, model);
 
         voice.Transcriptions.AddPartial("Ja");
@@ -130,8 +128,8 @@ public sealed class CreateTests
             [VoiceTools.PromptParameter] = "Triage the issues.",
         };
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.StartSession, Ask("chat")).Respond("Ok.")
-            .CallTool(VoiceTools.StartSession, Ask("overseer")).Respond("Ok.");
+            .CallTool(VoiceTools.StartSession, Ask("chat"))
+            .CallTool(VoiceTools.StartSession, Ask("overseer"));
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
 
@@ -143,7 +141,7 @@ public sealed class CreateTests
         Assert.DoesNotContain("Annulleret. Intet oprettet.", voice.Events.Responses);
         Assert.Empty(servers.Creates);
         // The model heard the user's words with the create they answer
-        var heard = model.Requests.ElementAt(2)[^1].Text;
+        var heard = model.Requests.ElementAt(1)[^1].Text;
         Assert.Contains(correction, heard);
         Assert.Contains("answer the read-back", heard);
         Assert.Contains("the prompt 'Triage the issues.' in GodMode (profile Godmode), action chat", heard);
@@ -331,7 +329,7 @@ public sealed class CreateTests
         servers.CreateGate = create.Task;
         var model = StartIssue283(new ScriptedChatClient()
                 .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "101" }))
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Slet dem." }).Respond("Sendt til 101.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Slet dem." });
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("Kappe/kappe/260930-issue-101-c3", "101-cleanup", "Slet kolonnerne?")); return Task.CompletedTask; });
         await voice.Events.SaidAsync("issue 101, cleanup, har et spørgsmål.");
@@ -381,15 +379,14 @@ public sealed class CreateTests
                 [VoiceTools.ActionParameter] = "chat",
                 [VoiceTools.NameParameter] = "backup job",
                 [VoiceTools.PromptParameter] = "Find ud af hvorfor backup-jobbet fejler.",
-            })
-            .Respond("Ok.");
+            });
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Start en chat i assistenten om hvorfor backup-jobbet fejler");
         await voice.Events.SaidAsync("Skal jeg oprette backup job i Assistant, profil Outbound, som chat, med beskrivelsen \"Find ud af hvorfor backup-jobbet fejler\"?");
         Assert.Contains("create a session named 'backup job', the prompt 'Find ud af hvorfor backup-jobbet fejler.' in Assistant (profile Outbound), action chat",
-            Assert.Single(model.ToolResults));
+            Assert.Single(voice.ToolResults));
 
         voice.Transcriptions.SayAsRecognized("Ja tak");
         await voice.Events.SaidAsync("backup er oprettet.");
@@ -519,8 +516,7 @@ public sealed class CreateTests
         var servers = Servers();
         servers.CreateError = "Issue #999 was not found";
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "GodMode", [VoiceTools.IssueParameter] = "999" })
-            .Respond("Ok.");
+            .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "GodMode", [VoiceTools.IssueParameter] = "999" });
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
 
@@ -540,8 +536,7 @@ public sealed class CreateTests
         var servers = Servers();
         servers.CreateError = @"Script '.godmode-root\chat/create' exited with code 1: fatal: not a git repository: ../../../.bare/worktrees/chat/modules/external/VoiceBot";
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "Assistant", [VoiceTools.NameParameter] = "backup job" })
-            .Respond("Ok.");
+            .CallTool(VoiceTools.StartSession, new() { [VoiceTools.RootParameter] = "Assistant", [VoiceTools.NameParameter] = "backup job" });
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
 

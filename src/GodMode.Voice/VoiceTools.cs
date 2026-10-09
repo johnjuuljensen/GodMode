@@ -893,7 +893,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         await servers.ReplyAsync(target, answer.Trim(), ct);
         conversation.Current = target;
         conversation.Sent(name);
-        return $"Sent to {name}: \"{answer.Trim()}\". It continues. The system says it was sent itself.";
+        // The code says it was sent (SentNode): the model's round after it would only say so again (#526)
+        return SaysItself($"Sent to {name}: \"{answer.Trim()}\". It continues. The system says it was sent itself.", _phrases.Sent([name]));
     }
 
     public async Task<string> MarkSeenAsync(string? reference, CancellationToken ct)
@@ -930,9 +931,15 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <summary>What the conversation is about from now on, from a tool that read it out.</summary>
     private void Talked(ProjectRef? project) => conversation.Current = project;
 
-    /// <summary>What to read back for a create, or ask, or why there is none (<see cref="SessionCreates.Propose"/>).</summary>
-    public async Task<string> StartSessionAsync(CreateAsk ask, CancellationToken ct) =>
-        await Creates.ProposeAsync(await servers.ListRootsAsync(ct), ask, ct);
+    /// <summary>
+    /// What to read back for a create, or ask, or why there is none (<see cref="SessionCreates.ProposeAsync"/>). A create
+    /// settled on is read back by the code (<see cref="ReadBackNode"/>): the model's round after it is not run (#526).
+    /// </summary>
+    public async Task<string> StartSessionAsync(CreateAsk ask, CancellationToken ct)
+    {
+        var result = await Creates.ProposeAsync(await servers.ListRootsAsync(ct), ask, ct);
+        return Creates.Proposed is { } request ? SaysItself(result, _phrases.ReadBack(request)) : result;
+    }
 
     /// <summary>
     /// The project named, or the one the conversation is about when none is named, while it is still there. Every

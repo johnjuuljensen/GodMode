@@ -39,7 +39,7 @@ public sealed class EndToEndTests
 
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.WhatNeedsMe)
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "283", [VoiceTools.TextParameter] = Answer }).Respond("Sendt til 283.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "283", [VoiceTools.TextParameter] = Answer });
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
         await voice.Events.SaidAsync("issue 101, drop columns, har et spørgsmål.");
@@ -59,8 +59,8 @@ public sealed class EndToEndTests
 
         voice.Transcriptions.SayAsRecognized("Svar 283 at den skal bruge den eksisterende migration");
         await voice.Events.SaidAsync("Sendt til issue 283, add migration.");
-        // Each utterance once: the answer's tool round and its respond, no more
-        Assert.Equal(3, model.Calls);
+        // Each utterance once: the answer's tool round, and no respond round, which the code's "Sendt" replaces (#526)
+        Assert.Equal(2, model.Calls);
 
         // It reached FakeClaude's stdin through ReplyByVoice, marked as transcribed speech (#460), and the session carried on
         await Eventually.UntilAsync(() => server.StdinOf(asking.Id).Count == 2, () => $"the answer on stdin: {string.Join(" | ", server.StdinOf(asking.Id))}\n{server.Output}");
@@ -102,7 +102,7 @@ public sealed class EndToEndTests
 
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ListProjects)
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = TestServer.Root, [VoiceTools.TextParameter] = Answer }).Respond("Sendt til testing.")
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = TestServer.Root, [VoiceTools.TextParameter] = Answer })
             .CallTool(VoiceTools.ListProjects);
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
@@ -143,15 +143,14 @@ public sealed class EndToEndTests
                 [VoiceTools.RootParameter] = TestServer.Root,
                 [VoiceTools.NameParameter] = "backup job",
                 [VoiceTools.PromptParameter] = "Find ud af hvorfor backup-jobbet fejler.",
-            })
-            .Respond("Ok.");
+            });
         await using var servers = new HubServers(server.ServerDirectory(), NullLoggerFactory.Instance);
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: ct => servers.ConnectAsync(TimeSpan.FromSeconds(20), ct));
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Start en chat i voice om hvorfor backup-jobbet fejler");
         await voice.Events.SaidAsync($"Skal jeg oprette backup job i {TestServer.Root}, profil {TestServer.Profile}, som Create, med beskrivelsen \"Find ud af hvorfor backup-jobbet fejler\"?");
-        Assert.Contains($"in {TestServer.Root} (profile {TestServer.Profile}), action Create", Assert.Single(model.ToolResults));
+        Assert.Contains($"in {TestServer.Root} (profile {TestServer.Profile}), action Create", Assert.Single(voice.ToolResults));
 
         voice.Transcriptions.SayAsRecognized("Ja");
         // With the question the session asks at once, when both come before a pause

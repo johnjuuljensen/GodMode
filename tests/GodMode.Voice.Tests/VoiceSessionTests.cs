@@ -66,8 +66,7 @@ public sealed class VoiceSessionTests
         var servers = new FakeServers();
         var time = new ManualTime();
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Brug den eksisterende migration." })
-            .Respond("Sendt til 283.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Brug den eksisterende migration." });
         await using var voice = await OfflineVoice.StartAsync(servers, model, time: time,
             connect: _ => { servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Slet kolonnerne?", minutesAgo: 30)); return Task.CompletedTask; });
         await voice.Events.SaidAsync("issue 101, cleanup, har et spørgsmål.");
@@ -91,8 +90,7 @@ public sealed class VoiceSessionTests
     {
         var servers = new FakeServers();
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "hundrede og et", [VoiceTools.TextParameter] = "Ja, slet dem." })
-            .Respond("Sendt til 101.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "hundrede og et", [VoiceTools.TextParameter] = "Ja, slet dem." });
         await using var voice = await OfflineVoice.StartAsync(servers, model, connect: _ =>
         {
             servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Slet kolonnerne?", minutesAgo: 30), Question("p/r/283", "283-voice", "Migration?"));
@@ -116,8 +114,7 @@ public sealed class VoiceSessionTests
         var servers = new FakeServers();
         servers.AddProject(ServerA, "p/r/28-x", "28-x");
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "28", [VoiceTools.TextParameter] = "Kør testene." })
-            .Respond("Sendt til 28.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "28", [VoiceTools.TextParameter] = "Kør testene." });
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerB, Question("p/r/283", "283-voice", "Migration?")); return Task.CompletedTask; });
         await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
@@ -206,8 +203,8 @@ public sealed class VoiceSessionTests
     {
         var servers = new FakeServers();
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." }).Respond("Sendt til 101.")
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja.", [VoiceTools.ProjectParameter] = "283" }).Respond("Sendt til 283.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." })
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja.", [VoiceTools.ProjectParameter] = "283" });
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/101", "101-cleanup", "Skal jeg slette kolonnerne?", minutesAgo: 30)); return Task.CompletedTask; });
         await voice.Events.SaidAsync("issue 101, cleanup, har et spørgsmål.");
@@ -220,7 +217,7 @@ public sealed class VoiceSessionTests
         await voice.Events.SaidAsync("Sendt til issue 283.");
 
         Assert.Equal([new ProjectRef(ServerA, "p/r/101"), new ProjectRef(ServerB, "p/r/283")], servers.Replies.Select(r => r.Project));
-        Assert.Equal(4, model.Calls);
+        Assert.Equal(2, model.Calls);
     }
 
     /// <summary>"ja" and "nej" are answers: no noise filter may drop them before they reach the model.</summary>

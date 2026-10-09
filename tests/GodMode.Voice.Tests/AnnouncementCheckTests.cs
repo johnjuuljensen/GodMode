@@ -83,7 +83,8 @@ public sealed class AnnouncementCheckTests
             Of(board, new(ServerA, "p/r/4"), "4 skal have tilladelse"),
         ], Danish);
 
-        Assert.Equal("5 venter på dig: 3 har et spørgsmål. 4 skal have tilladelse. 2 fejlede. 1 er færdig. en er oprettet.", said);
+        // A create's outcome first: a session is said to be made before what it asks (#526)
+        Assert.Equal("5 venter på dig: en er oprettet. 3 har et spørgsmål. 4 skal have tilladelse. 2 fejlede. 1 er færdig.", said);
     }
 
     [Fact]

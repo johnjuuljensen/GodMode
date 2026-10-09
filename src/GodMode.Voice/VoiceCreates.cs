@@ -227,6 +227,15 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
     /// <summary>The chat's evaluation is done: whatever it settled, what no longer waits is released.</summary>
     public void Settled() => Notify();
 
+    /// <summary>The create settled on in this evaluation, left for <see cref="TakeProposed"/>; null when none is.</summary>
+    public CreateRequest? Proposed
+    {
+        get
+        {
+            lock (_lock) return _proposed;
+        }
+    }
+
     /// <summary>The create settled on in this evaluation, for its read-back to be said (<see cref="ReadBackNode"/>).</summary>
     public CreateRequest? TakeProposed()
     {
@@ -362,9 +371,11 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
                 draftRoot = heldRoot;
                 var heldAction = heldRoot.Root.Actions!.FirstOrDefault(a => a.Session && a.Name == draft.Action.Name);
                 var otherAction = action is not null && heldAction is not null && !Names(heldRoot, heldAction, action);
-                if (otherAction && !SaysAction(heard, heldRoot, action!))
+                if (otherAction && !SaysAction(heard, heldRoot, action!, issue))
                 {
-                    kept.Add($"the action stays {heldAction!.Name}: the user did not ask for '{action}'");
+                    kept.Add(IssueWordAlone(heard, heldRoot, action!)
+                        ? $"the action stays {heldAction!.Name}: an issue word with no issue number says what the session is about, not that it starts an issue"
+                        : $"the action stays {heldAction!.Name}: the user did not ask for '{action}'");
                     otherAction = false;
                 }
                 if (!otherAction && heldAction is not null)
@@ -416,8 +427,7 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
         if (fitting.Count == 0)
             return issue is null
                 // One root and action: the number asked for is asked for it, and kept for the next call
-                ? ($"{keptNote}Every action there needs an issue ({Options(candidates, severalServers)}): ask the user for its number, then call " +
-                    $"{StartSession} again with it. Nothing was created.", null,
+                ? ($"{keptNote}{NeedsIssue(candidates, matched, draft, severalServers)} Nothing was created.", null,
                     candidates is [var only] ? new CreateDraft(only.Root, only.Action, issue, name, prompt, Now) : null)
                 : ($"{keptNote}No action there takes the issue '{issue}' ({Options(candidates, severalServers)}). Nothing was created.", null, null);
         // Of those, the ones voice can fill; those it cannot only when there is nothing else
@@ -472,6 +482,29 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
 
     private const string StartSession = VoiceTools.StartSession;
 
+    /// <summary>
+    /// What to tell the model when each action asked for needs an issue and none was given (#526): which actions need one,
+    /// that the user gave no number, the action the draft had, which they may have meant (an issue word says what a
+    /// session is about as well), and the actions in those roots that need none.
+    /// </summary>
+    private static string NeedsIssue(IReadOnlyList<(ServerRoot Root, CreateActionInfo Action, Form Form)> candidates, IReadOnlyList<ServerRoot> roots,
+        CreateDraft? draft, bool severalServers)
+    {
+        var needs = candidates is [var only]
+            ? $"Action {only.Action.Name} in {Name(only.Root, severalServers)} needs an issue number, and the user gave none."
+            : $"Each of these needs an issue number, and the user gave none: {Options(candidates, severalServers)}.";
+        var held = draft is not null && !candidates.Any(c => c.Action.Name == draft.Action.Name && Same(c.Root, draft.Root))
+            ? $" The draft had action {draft.Action.Name}: the user may mean it, with the issue word saying what the session is about; " +
+                $"then call {StartSession} again with action {draft.Action.Name}."
+            : "";
+        var none = roots.Select(r => (Root: r, Actions: r.Root.Actions!.Where(a => a.Session && Form.Of(a).Fits(null)).Select(a => a.Name).ToList()))
+            .Where(r => r.Actions.Count > 0)
+            .Select(r => $"{Name(r.Root, severalServers)}: {string.Join(", ", r.Actions)}")
+            .ToList();
+        var others = none.Count == 0 ? "" : $" Actions there that need no issue: {string.Join("; ", none)}.";
+        return $"{needs}{held}{others} Otherwise ask the user for the issue's number, then call {StartSession} again with it.";
+    }
+
     /// <summary>The issue's labels, from its root's issueInfo script; null when it has none, or it could not say.</summary>
     private async Task<IReadOnlyList<string>?> LabelledAsync(ServerRoot root, string issue, CancellationToken ct)
     {
@@ -496,15 +529,27 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
 
     /// <summary>
     /// Whether the user's words name the action <paramref name="spoken"/> stands for in <paramref name="root"/>: one of
-    /// its words ("Nej, som overseer"), or, for an issue word, an issue word ("start it as an issue").
+    /// its words besides an issue word ("Nej, som overseer"), or, for one that takes an issue, an issue word with the
+    /// issue's number (<paramref name="issue"/>, "start it as issue 471"). An issue word with no number says what a
+    /// session is about ("a chat about a new issue"), and never changes the action a draft holds (#526).
     /// </summary>
-    private static bool SaysAction(string? heard, ServerRoot root, string spoken)
+    private static bool SaysAction(string? heard, ServerRoot root, string spoken, string? issue)
     {
         if (heard is null) return false;
         var meant = Best(root.Root.Actions!.Where(a => a.Session), a => [a.Name], spoken);
-        return Says(heard, meant.Select(a => a.Name))
-            || IssueWords.Contains(spoken) && Words(heard).Any(IssueWords.Contains);
+        var takesIssue = TakesIssue(root, spoken);
+        var plain = takesIssue ? string.Join(' ', Words(heard).Where(w => !IssueWords.Contains(w))) : heard;
+        return Says(plain, meant.Select(a => a.Name))
+            || takesIssue && Words(heard).Any(IssueWords.Contains) && issue is not null && Form.IsIssue(issue) && SaysIssue(heard, issue);
     }
+
+    /// <summary>Whether <paramref name="spoken"/> is an issue word, or the name of an action of <paramref name="root"/> that takes an issue.</summary>
+    private static bool TakesIssue(ServerRoot root, string spoken) =>
+        IssueWords.Contains(spoken) || Best(root.Root.Actions!.Where(a => a.Session), a => [a.Name], spoken).Any(a => Form.Of(a).HasIssue);
+
+    /// <summary>Whether the user's words name the issue action <paramref name="spoken"/> only by an issue word, with no number (<see cref="SaysAction"/>).</summary>
+    private static bool IssueWordAlone(string? heard, ServerRoot root, string spoken) =>
+        heard is not null && TakesIssue(root, spoken) && Words(heard).Any(IssueWords.Contains);
 
     /// <summary>Whether a word of <paramref name="heard"/>, or two said together ("god mode"), is one of <paramref name="names"/> or a word of one.</summary>
     private static bool Says(string? heard, IEnumerable<string> names)
@@ -770,6 +815,9 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
                 parts.Add("no prompt (it starts idle, waiting for the first message)");
             return parts.Count == 0 ? "a session" : string.Join(", ", parts);
         }
+
+        /// <summary>Whether <paramref name="issue"/> is an issue's number or key, as a field takes one.</summary>
+        public static bool IsIssue(string issue) => Value(Role.IssueNumber, issue) is not null || Value(Role.IssueKey, issue) is not null;
 
         /// <summary>An issue as its field takes it: a number's digits, a key's "BD-123", else as said.</summary>
         public static string Normal(string issue) => Value(Role.IssueNumber, issue) ?? Value(Role.IssueKey, issue) ?? issue.Trim();

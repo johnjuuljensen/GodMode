@@ -243,8 +243,23 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     public string? TakeSaid(string result) => TakeSaidByCode(result)?.Said;
 
     /// <summary>As <see cref="TakeSaid"/>, with what the user asked for after it (<see cref="Then"/>).</summary>
-    public SaidByCode? TakeSaidByCode(string result) =>
-        Volatile.Read(ref _said) is { } said && said.Result == result && Interlocked.CompareExchange(ref _said, null, said) == said ? said : null;
+    public SaidByCode? TakeSaidByCode(string result)
+    {
+        if (Volatile.Read(ref _said) is not { } said || said.Result != result || Interlocked.CompareExchange(ref _said, null, said) != said)
+            return null;
+        _saidResults.Enqueue(result);
+        while (_saidResults.Count > KeptResults) _saidResults.TryDequeue(out _);
+        return said;
+    }
+
+    private const int KeptResults = 20;
+    private readonly ConcurrentQueue<string> _saidResults = new();
+
+    /// <summary>
+    /// The latest tool results the code said itself (<see cref="TakeSaidByCode"/>), which no model was given, oldest
+    /// first: what the tests read as a result the model would have been given.
+    /// </summary>
+    internal IReadOnlyList<string> SaidResults => [.. _saidResults];
 }
 
 /// <summary>
@@ -305,7 +320,7 @@ public sealed record ListReading(IReadOnlyList<(string Result, string Said)> Pag
 /// An announcement of no project (a create's outcome) leaves the conversation as it is, said alone.
 /// Each is checked again here, when it is about to be said, not only when it was queued (#462): an item that no longer
 /// needs the user (<see cref="AttentionBoard.Waits"/>) is dropped, and leaves the conversation as it is. Those still
-/// waiting are said most urgent first: an important project's (#438), then by what they need
+/// waiting are said after any of no project (a create's outcome, #526), most urgent first: an important project's (#438), then by what they need
 /// (<see cref="Urgency"/>), else in the order they came. What is being said already is never cut off for them: only
 /// what waits for the pause is ordered. An item's announcement is worded here too, with <paramref name="names"/>, as it is
 /// said (#455): how much of its project it names depends on what was said just before it
@@ -320,7 +335,9 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
     {
         var waiting = announcements.Select(a => (Announcement: a, Item: ItemOf(a)))
             .Where(a => board?.Waits(a.Announcement) != false)
-            .OrderByDescending(a => a.Item?.Item.Alert == AttentionAlert.Interrupt)
+            // A create's outcome first: a session is said to be made before what it asks (#526)
+            .OrderBy(a => a.Announcement.Source is not null)
+            .ThenByDescending(a => a.Item?.Item.Alert == AttentionAlert.Interrupt)
             .ThenBy(a => Urgency(a.Item?.Item.Kind))
             .ToList();
         string[] texts = [.. waiting.Select(a => Sentence(TextOf(a.Announcement))).Where(t => t.Length > 0)];
@@ -349,7 +366,7 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
     /// <summary>
     /// How soon an item of <paramref name="kind"/> is said among others, lowest first (#462): a permission, a question
     /// or an escalation holds its session until the user answers, an error stopped it, a review and a result wait. An
-    /// announcement of no item (a create's outcome) comes last.
+    /// announcement of no project (a create's outcome) comes before them all, whatever this says (<see cref="Format"/>).
     /// </summary>
     internal static int Urgency(AttentionKind? kind) => kind switch
     {

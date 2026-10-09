@@ -39,16 +39,16 @@ public sealed class DraftTests
         var servers = Servers();
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.StartSession, Ask(root: "GodMode", action: "epic")).Respond("Hvilket nummer?")
-            .CallTool(VoiceTools.StartSession, Ask(action: "issue", issue: "470")).Respond("Ok.");
+            .CallTool(VoiceTools.StartSession, Ask(action: "issue", issue: "470"));
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Start et GodMode epic");
         await voice.Events.SaidAsync("Hvilket nummer?");
-        Assert.Contains("ask the user for its number", model.ToolResults[0]);
+        Assert.Contains("Action epic in GodMode (profile Godmode) needs an issue number, and the user gave none.", voice.ToolResults[0]);
         voice.Transcriptions.SayAsRecognized("Fire, syv, nul.");
         await voice.Events.SaidAsync("Skal jeg oprette issue 470 i GodMode, profil Godmode, som epic?");
-        Assert.Contains("the action stays epic: the user did not ask for 'issue'", model.ToolResults[1]);
+        Assert.Contains("the action stays epic: the user did not ask for 'issue'", voice.ToolResults[1]);
 
         voice.Transcriptions.SayAsRecognized("Ja");
         await voice.Events.SaidAsync("Opretter.");
@@ -192,13 +192,13 @@ public sealed class DraftTests
         var servers = Servers();
         servers.IssueLabels["471"] = ["epic"];
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.StartSession, Ask(root: "GodMode", action: "issue", issue: "471")).Respond("Ok.");
+            .CallTool(VoiceTools.StartSession, Ask(root: "GodMode", action: "issue", issue: "471"));
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Start GodMode epic 471");
         await voice.Events.SaidAsync("Issue 471 er mærket epic. Skal jeg oprette issue 471 i GodMode, profil Godmode, som epic?");
-        Assert.Contains("Issue 471 is labelled epic, so it is started as epic, not issue", Assert.Single(model.ToolResults));
+        Assert.Contains("Issue 471 is labelled epic, so it is started as epic, not issue", Assert.Single(voice.ToolResults));
         Assert.DoesNotContain(voice.Events.Responses, r => r.Contains("som issue?"));
 
         voice.Transcriptions.SayAsRecognized("Ja");
@@ -245,7 +245,7 @@ public sealed class DraftTests
         Assert.Contains("(the roots have issue, epic, overseer, chat)", system);
         Assert.Contains("Only the actions that start no session (new-root, promote) are not started by voice yet.", system);
         Assert.DoesNotContain("(new\n", system);
-        Assert.Single(model.ToolResults);
+        Assert.Single(voice.ToolResults);
     }
 
     private static VoiceTools Tools(FakeServers servers, TimeProvider? time = null)

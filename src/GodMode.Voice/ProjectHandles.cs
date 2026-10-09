@@ -47,6 +47,9 @@ public sealed partial class ProjectHandles
         public bool InRoot(string? reference) => Same(Root, reference ?? "") || Same(RootTitle, reference ?? "");
 
         public string Label => ProjectHandles.Label(Handle, Name, Kind);
+
+        /// <summary>Its label with its spoken topic (<see cref="ProjectTopics"/>), as a name in a tool's result has them: "issue 376, mic-timeout".</summary>
+        public string Topical => ProjectTopics.Of(Name, Kind, Label) is { } topic ? $"{Label}, {topic}" : Label;
     }
 
     /// <summary>Every handle given so far, in the order they were given.</summary>
@@ -157,7 +160,8 @@ public sealed partial class ProjectHandles
     /// treogfirs"), a word of a project's name that only one project has, the root or kind of only one project
     /// ("Assistant", "chat"), or, with <paramref name="fuzzy"/>, a handle or such a root misheard slightly
     /// ("Assistent"). It may be said as it is spoken (#450): its label ("issue 283", "branch master"), with the root or
-    /// profile that tells it from another ("branch master i GodMode, profil Mega"). A number is never matched fuzzily:
+    /// profile that tells it from another ("branch master i GodMode, profil Mega"), and with its topic, as a tool's result
+    /// names it ("issue 283, mic-timeout in GodMode, profile Mega", #526). A number is never matched fuzzily:
     /// "28" is not "283". Null when it names none, or more than one.
     /// </summary>
     public ProjectRef? Resolve(string spoken, bool fuzzy = true)
@@ -178,6 +182,10 @@ public sealed partial class ProjectHandles
             var labelled = _byProject.Where(p => Same(p.Value.Label, reference)).Select(p => p.Key).ToList();
             if (labelled.Count > 0)
                 return labelled is [var single] ? single : null;
+            // Its label and topic, as a tool's result names it ("issue 283, mic-timeout", #526)
+            var topical = _byProject.Where(p => Same(Joined(p.Value.Topical), Joined(reference))).Select(p => p.Key).ToList();
+            if (topical.Count > 0)
+                return topical is [var alone] ? alone : null;
             if (Qualified(reference) is { } qualified)
                 return qualified is [var one] ? one : null;
             // A numbered handle said with its number in words ("chat to") is that handle; one no project has, or of a
@@ -219,7 +227,7 @@ public sealed partial class ProjectHandles
     /// <summary>
     /// The projects a reference names with a root or profile said in it ("master i GodMode, profil Mega", "Mega
     /// GodMode branch master"): those in every root or profile it says, whose handle, label, either without its number,
-    /// or a word of whose name is the rest. A place said after "profil"/"profile" is a profile only: a profile and a
+    /// label and topic, or a word of whose name is the rest. A place said after "profil"/"profile" is a profile only: a profile and a
     /// root may have one name ("GodMode, profil Godmode"). Null when it says no root or profile, or nothing besides them.
     /// </summary>
     private List<ProjectRef>? Qualified(string reference)
@@ -244,7 +252,7 @@ public sealed partial class ProjectHandles
             rest = Regex.Replace(rest, pattern, " ", Options);
         }
         if (said.Count == 0) return null;
-        rest = string.Join(' ', Words(rest).Where(w => !Connectives.Contains(w)));
+        rest = Joined(rest);
         if (rest.Length == 0) return null;
 
         var number = DanishNumbers.Parse(rest)?.ToString();
@@ -252,9 +260,12 @@ public sealed partial class ProjectHandles
             .Where(p => said.All(place => place(p.Value)))
             .Where(p => Same(p.Value.Handle, rest) || Same(p.Value.Label, rest) || Same(StemOf(p.Value.Handle), rest)
                 || (!p.Value.Handle.All(char.IsAsciiDigit) && Same(StemOf(p.Value.Label), rest)) || (number is not null && Same(p.Value.Handle, number))
-                || Words(p.Value.Name).Any(w => Same(w, rest)))
+                || Words(p.Value.Name).Any(w => Same(w, rest)) || Same(Joined(p.Value.Topical), rest))
             .Select(p => p.Key)];
     }
+
+    /// <summary>The words of <paramref name="text"/>, but <see cref="Connectives"/>, joined by spaces: as a reference is compared.</summary>
+    private static string Joined(string text) => string.Join(' ', Words(text).Where(w => !Connectives.Contains(w)));
 
     /// <summary>The words said between a root or profile and a project's name: "i GodMode, profil Mega".</summary>
     private static readonly HashSet<string> Connectives = new(StringComparer.OrdinalIgnoreCase)
@@ -346,7 +357,8 @@ public sealed partial class ProjectHandles
         return Lead().Replace(text, "").Trim();
     }
 
-    [GeneratedRegex(@"(?<!\d)\d{1,6}(?!\d)")]
+    /// <summary>A number of up to six digits, not part of a dotted version ("Haiku 5.5", "v1.2.3", #526): that is no issue's.</summary>
+    [GeneratedRegex(@"(?<!\d|\d\.)\d{1,6}(?!\d|\.\d)")]
     private static partial Regex IssueNumber();
 
     [GeneratedRegex(@"^issue\s+(.+)$", RegexOptions.IgnoreCase)]
