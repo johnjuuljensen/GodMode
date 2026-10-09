@@ -16,17 +16,14 @@ public static class ApiKeyFile
 {
     public const string PathSetting = "Authentication:ApiKeyFile";
     public const string FileName = "api-key";
-    public const string DirectoryName = "GodMode.Server";
 
     /// <summary>
-    /// The user's local application data: <c>%LOCALAPPDATA%\GodMode.Server\api-key</c> on Windows,
-    /// <c>$XDG_DATA_HOME/GodMode.Server/api-key</c> (by default <c>~/.local/share</c>) on Linux. Null
-    /// when the OS names none (no home directory).
+    /// In the default data directory (<see cref="ServerDataDirectory.Default"/>): <c>%LOCALAPPDATA%\GodMode.Server\api-key</c>
+    /// on Windows, <c>$XDG_DATA_HOME/GodMode.Server/api-key</c> (by default <c>~/.local/share</c>) on Linux.
+    /// Null when the OS names none (no home directory).
     /// </summary>
     public static string? DefaultPath() =>
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify) is { Length: > 0 } dir
-            ? Path.Combine(dir, DirectoryName, FileName)
-            : null;
+        ServerDataDirectory.Default() is { } dir ? Path.Combine(dir, FileName) : null;
 
     /// <summary>The key file's full path: <c>Authentication:ApiKeyFile</c>, else <see cref="DefaultPath"/>, and under no scan folder or explicit root.</summary>
     public static string PathFrom(IConfiguration config)

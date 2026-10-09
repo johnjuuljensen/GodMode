@@ -76,12 +76,13 @@ ENV Claude__Executable=/usr/bin/claude
 
 # The server stays root's, read-only to godmode: a session could otherwise rewrite them.
 # godmode owns only what the server writes: the roots (appsettings' scan folder Roots:Scan:default, /app/roots, where
-# a volume goes), the default root's projects when no root is configured, /data, and its home.
+# a volume goes), /data, and its home, which holds the server's data directory (its key file, and the default
+# root, projects, when no root is configured).
 WORKDIR /app
 COPY --from=dotnet-build /app/publish .
 
-RUN mkdir -p /app/roots /app/projects /data && \
-    chown godmode:godmode /app/roots /app/projects /data
+RUN mkdir -p /app/roots /data && \
+    chown godmode:godmode /app/roots /data
 
 EXPOSE 31337
 

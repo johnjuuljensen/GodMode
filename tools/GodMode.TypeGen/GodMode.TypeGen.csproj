@@ -16,4 +16,9 @@
     <ProjectReference Include="..\..\src\GodMode.Shared\GodMode.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Its tests write fixture contracts of their own -->
+    <InternalsVisibleTo Include="GodMode.TypeGen.Tests" />
+  </ItemGroup>
+
 </Project>
