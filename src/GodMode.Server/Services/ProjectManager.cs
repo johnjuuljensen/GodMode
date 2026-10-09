@@ -2079,8 +2079,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             interruptedAs = status.StateAtShutdown;
             claimed = project.Process.BeginLaunching();
             if (!claimed) return status;
-            // A launch settles what a shutdown left: the project is not resumed again on the next start
-            return status with { State = resumedAs, LastError = null, StateAtShutdown = null, UpdatedAt = DateTime.UtcNow };
+            // A launch settles what a shutdown left: the project is not resumed again on the next start,
+            // and has no background tasks of an earlier process yet (issue #432)
+            return status with { State = resumedAs, LastError = null, StateAtShutdown = null, BackgroundTasks = null, UpdatedAt = DateTime.UtcNow };
         });
     }
 
@@ -2612,7 +2613,12 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             // What the app is told of the session's settings is settings.json's, not status.json's
             // A session in the root itself shares it, whatever its settings say: its delete never takes the root
             var sharedFolder = !settingsRead || settings.SharedFolder || IsTheRoot(rootPath, projectPath);
-            var fromSettings = status with { ActionName = settings.ActionName, SharedFolder = sharedFolder, Adopted = settings.Adopted, Importance = settings.Importance };
+            // No claude runs for it yet, so no background task of one does (issue #432)
+            var fromSettings = status with
+            {
+                ActionName = settings.ActionName, SharedFolder = sharedFolder, Adopted = settings.Adopted, Importance = settings.Importance,
+                BackgroundTasks = null,
+            };
             var correctedStatus = stateChanged
                 ? fromSettings with { Id = id, Kind = kind, State = ProjectState.Stopped, UpdatedAt = DateTime.UtcNow, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset }
                 : fromSettings with { Id = id, Kind = kind, RootName = rootName, ProfileName = profileName, OutputOffset = outputOffset };
@@ -2637,8 +2643,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                 return null;
             }
 
-            // Only save if state or ID changed
-            if (stateChanged || idChanged)
+            // Only save if state, ID or background tasks changed
+            if (stateChanged || idChanged || status.BackgroundTasks != null)
             {
                 await _statusUpdater.SaveStatusAsync(project);
             }

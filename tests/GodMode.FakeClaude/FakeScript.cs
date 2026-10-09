@@ -211,6 +211,33 @@ public sealed class FakeScript
         }));
 
     /// <summary>
+    /// <c>system/background_tasks_changed</c>: the whole list of what claude runs in the background, each task as
+    /// <c>(task_id, task_type, description)</c>; none when the last has ended.
+    /// </summary>
+    public FakeScript EmitBackgroundTasks(params (string Id, string Type, string Description)[] tasks) =>
+        Emit(Json(new
+        {
+            type = "system",
+            subtype = "background_tasks_changed",
+            tasks = tasks.Select(t => new { task_id = t.Id, task_type = t.Type, description = t.Description }),
+            session_id = SessionIdPlaceholder,
+        }));
+
+    /// <summary><c>system/task_progress</c>: a subagent's or workflow's task is at <paramref name="step"/>.</summary>
+    public FakeScript EmitTaskProgress(string taskId, string step) =>
+        Emit(Json(new
+        {
+            type = "system",
+            subtype = "task_progress",
+            task_id = taskId,
+            tool_use_id = "toolu_task",
+            description = step,
+            last_tool_name = "Bash",
+            usage = new { total_tokens = 100, tool_uses = 1, duration_ms = 1000 },
+            session_id = SessionIdPlaceholder,
+        }));
+
+    /// <summary>
     /// One whole turn: wait for the prompt, answer with <paramref name="answer"/>, end the turn. The
     /// result follows after a short pause, so the turn does not race the server's per-line handlers;
     /// a test about that race emits the two lines back to back itself.

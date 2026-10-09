@@ -153,6 +153,8 @@ public sealed class ProjectLifecycle
         await InOrderAsync(project, () => SetStatusAsync(project, status => WithoutPending(status) with
         {
             State = ProjectState.Stopped,
+            // claude's background tasks ended with it, and it said nothing of their end (issue #432)
+            BackgroundTasks = null,
             StateAtShutdown = shutdown == null ? null : status.StateAtShutdown,
             // What the user was asked, whatever claude did with the deny before it stopped
             CurrentQuestion = shutdown is { Question: { } question } && status.StateAtShutdown == ProjectState.WaitingInput
@@ -620,6 +622,9 @@ public sealed class ProjectLifecycle
                 await SetStatusAsync(project, status => WithoutPending(status) with
                 {
                     State = finished ? ProjectState.Stopped : ProjectState.Error,
+                    // claude waits for its background tasks before it exits on its own, and lists none then; killed, it lists
+                    // nothing more, and they went with it (issue #432)
+                    BackgroundTasks = null,
                     CurrentQuestion = shuttingDown ? status.CurrentQuestion : null,
                     LastError = finished ? null : exit.Stderr ?? $"claude exited with code {exit.ExitCode}",
                     UpdatedAt = DateTime.UtcNow
