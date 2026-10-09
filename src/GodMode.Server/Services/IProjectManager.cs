@@ -200,6 +200,12 @@ public interface IProjectManager
     bool HasFleetTools(string projectId);
 
     /// <summary>
+    /// Who is the parent of the sessions the project starts with the fleet's <c>start_session</c>: its action as it was
+    /// started, in the root's config read now, says <c>"fleetChildren"</c> (issue #431). <c>start_session</c> asks on every call.
+    /// </summary>
+    FleetChildren FleetChildrenOf(string projectId);
+
+    /// <summary>
     /// The MCP permission_prompt tool: waits until the user answers, and returns what claude gets.
     /// Canceled by <paramref name="aborted"/> when claude cancels the call or its connection drops.
     /// </summary>

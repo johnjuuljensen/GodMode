@@ -51,6 +51,10 @@ namespace GodMode.Shared.Models;
 /// Whether the action's sessions get the fleet's tools (<c>fleetTools</c>): every one, one a granted session
 /// grants them to as it starts it, or none (<see cref="FleetToolsGrant"/>).
 /// </param>
+/// <param name="FleetChildren">
+/// Who is the parent of the sessions the action's sessions start with the fleet's <c>start_session</c>
+/// (<c>fleetChildren</c>, issue #431): the caller, or none, top level (<see cref="Enums.FleetChildren"/>).
+/// </param>
 /// <param name="QuietTurns">
 /// Whether the action's sessions end their turns quietly (<c>"quietTurns": true</c>, issue #401): an overseer is woken by
 /// its workers' messages, the server's notices and its own background tasks, and those turns' ends raise no
@@ -85,6 +89,7 @@ public record CreateAction(
     bool Adopt = false,
     string? Effort = null,
     FleetToolsGrant FleetTools = FleetToolsGrant.None,
+    FleetChildren FleetChildren = FleetChildren.Own,
     bool QuietTurns = false,
     Importance Importance = Importance.Normal
 )

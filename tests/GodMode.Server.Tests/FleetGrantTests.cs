@@ -92,6 +92,54 @@ public class FleetGrantTests
         Assert.Equal(overseerId, Assert.Single(summaries, s => s.Id == IdOf(child)).ParentId);
     }
 
+    private static string? NoteOf(JsonElement started) => started.TryGetProperty("Note", out var note) ? note.GetString() : null;
+
+    /// <summary>
+    /// A session of an action that says <c>"fleetChildren": "topLevel"</c> (a chat, issue #431) starts every session top level,
+    /// whatever <c>top_level</c> says, is refused an explicit <c>parent</c>, and is told so. The root's config is read at each
+    /// call: set back to <c>"own"</c>, its next start is its child again.
+    /// </summary>
+    [Fact]
+    public async Task ASessionOfAnActionWhoseChildrenAreTopLevel_StartsThemTopLevel_RefusesAParent_AsItsConfigSaysAtEachCall()
+    {
+        await using var run = await FleetRun.StartAsync(Waiting());
+        var (overseerId, fleetEntry) = await OverseerAsync(run, "chat");
+        await using var fleet = await ConnectAsync(fleetEntry);
+        // Its own child, before the setting: no note
+        var child = await run.StartSessionAsync(fleet, "worker", WorkAction);
+        Assert.Equal(overseerId, ParentOf(child));
+        Assert.Null(NoteOf(child));
+
+        run.WriteActionConfig(OverseerAction, """{ "fleetTools": true, "fleetChildren": "topLevel" }""");
+        var started = await run.StartSessionAsync(fleet, "epic", WorkAction);
+        Assert.Null(ParentOf(started));
+        Assert.Equal(FleetTools.StartedTopLevel, NoteOf(started));
+        Assert.Null(ParentOf(await run.StartSessionAsync(fleet, "epic2", WorkAction, new() { ["top_level"] = false })));
+        Assert.Null((await run.Client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), IdOf(started))).ParentId);
+
+        // An explicit parent is refused, and nothing is started
+        var before = (await run.Client.Hub.InvokeAsync<ProjectSummary[]>(nameof(IProjectHub.ListProjects))).Length;
+        Assert.Contains("fleetChildren", await run.RefusedAsync(fleet, "start_session",
+            StartArguments("adopted", WorkAction, new() { ["parent"] = IdOf(child) })));
+        Assert.Equal(before, (await run.Client.Hub.InvokeAsync<ProjectSummary[]>(nameof(IProjectHub.ListProjects))).Length);
+
+        run.WriteActionConfig(OverseerAction, """{ "fleetTools": true, "fleetChildren": "own" }""");
+        Assert.Equal(overseerId, ParentOf(await run.StartSessionAsync(fleet, "worker2", WorkAction)));
+    }
+
+    /// <summary>A session's top-level start says so in its result, and the server's credential's, which has no session to be a parent, does not.</summary>
+    [Fact]
+    public async Task ATopLevelStart_ByASession_SaysItIsNotItsParent()
+    {
+        await using var run = await FleetRun.StartAsync(Waiting());
+        var (_, fleetEntry) = await OverseerAsync(run);
+        await using var fleet = await ConnectAsync(fleetEntry);
+        await using var user = await run.ConnectFleetAsync();
+
+        Assert.Equal(FleetTools.StartedTopLevel, NoteOf(await run.StartSessionAsync(fleet, "peer", WorkAction, new() { ["top_level"] = true })));
+        Assert.Null(NoteOf(await run.StartSessionAsync(user, "mine", WorkAction)));
+    }
+
     [Fact]
     public async Task AGrantedSession_GrantsAChildOfAGrantableAction_WhichOverseesItsOwn_AndNoChildOfAnActionThatAllowsNoGrant()
     {
