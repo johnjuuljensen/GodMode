@@ -22,9 +22,11 @@ public class LaunchActionRecordTests
 
     private static FakeScript Working() => new FakeScript().EmitInit().AwaitStdin().EmitAssistant("Working on it").AwaitStdin();
 
-    private static LifecycleHarness Harness(Dictionary<string, object>? rootConfig = null)
+    private static readonly Dictionary<string, object> Shared = new() { ["sharedFolder"] = true };
+
+    private static LifecycleHarness Harness(Dictionary<string, object>? rootConfig = null, Dictionary<string, string?>? settings = null)
     {
-        var harness = new LifecycleHarness(Working(), rootConfig: rootConfig);
+        var harness = new LifecycleHarness(Working(), rootConfig: rootConfig, settings: settings);
         WriteAction(harness, Work, "{}");
         WriteAction(harness, Secret, $$"""{ "environment": { "{{Token}}": "the-secret" }, "permissionMode": "acceptEdits", "model": "secret-model" }""");
         WriteAction(harness, Overseer, """{ "fleetTools": true }""");
@@ -104,6 +106,20 @@ public class LaunchActionRecordTests
         AssertLaunchedAsWork(await ResumeAsync(harness, worker, 1));
     }
 
+    [Fact]
+    public async Task AnAdoptedSessionThatRenamesItsAction_LaunchesAfterARestart_AsTheActionItWasAdoptedWith()
+    {
+        await using var harness = Harness();
+        Directory.CreateDirectory(Path.Combine(harness.RootPath, "existing"));
+        await harness.Projects.RecoverProjectsAsync();
+        var adopted = (await harness.Projects.AdoptFolderAsync(LifecycleHarness.ProfileName, LifecycleHarness.RootName, "existing", Work, null)).Id;
+
+        RenameAction(harness.StatePath(adopted), Secret);
+        await harness.RestartAsync();
+
+        AssertLaunchedAsWork(await ResumeAsync(harness, adopted, 0));
+    }
+
     /// <summary>A session made before records were kept launches as its settings.json says, as it always has.</summary>
     [Fact]
     public async Task ASessionWithoutARecord_LaunchesAsItsSettingsSay()
@@ -157,7 +173,7 @@ public class LaunchActionRecordTests
     [Fact]
     public async Task ASharedSessionsDelete_ThatRenamedItsAction_IsRestoredAsItsOwnAction()
     {
-        await using var harness = Harness(new Dictionary<string, object> { ["sharedFolder"] = true });
+        await using var harness = Harness(Shared);
         var worker = await CreateAsync(harness, Work, "worker");
 
         RenameAction(harness.StatePath(worker), Secret);
@@ -191,5 +207,23 @@ public class LaunchActionRecordTests
 
         Assert.False(File.Exists(FleetGrantFile.PathFor(harness.RootPath, SessionIdOf(worker))));
         Assert.False(File.Exists(FleetGrantFile.SetAsidePathFor(harness.RootPath, SessionIdOf(worker))));
+    }
+
+    [Fact]
+    public async Task ThePurge_DeletesTheRecordSetAside()
+    {
+        await using var harness = Harness(Shared, new Dictionary<string, string?>
+        {
+            [ProjectManager.RootsPollSetting] = "0",
+            [ProjectManager.TrashRetentionSetting] = "0.5",
+            [ProjectManager.TrashPurgeSetting] = "0.2",
+        });
+        await harness.Projects.RecoverProjectsAsync();
+        var worker = await CreateAsync(harness, Work, "worker");
+        await harness.Projects.DeleteProjectAsync(worker);
+        var setAside = FleetGrantFile.SetAsidePathFor(harness.RootPath, SessionIdOf(worker));
+        Assert.True(File.Exists(setAside), "a shared session's delete did not set its record aside");
+
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(!File.Exists(setAside)), null, () => "the purge left the record set aside");
     }
 }
