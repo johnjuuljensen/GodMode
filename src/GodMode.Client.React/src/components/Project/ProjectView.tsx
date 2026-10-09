@@ -12,7 +12,8 @@ import { deleteSession } from '../../deleteSession';
 import { useClickToCompose } from './clickToCompose';
 import './ProjectView.css';
 import { ImportancePicker } from '../Importance/Importance';
-import { BackgroundBadge, backgroundTitle, inBackground } from '../BackgroundTasks/BackgroundTasks';
+import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
+import { backgroundTitle, inBackground } from '../BackgroundTasks/backgroundState';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
 

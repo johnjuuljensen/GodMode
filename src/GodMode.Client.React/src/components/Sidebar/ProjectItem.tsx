@@ -5,7 +5,8 @@ import { KindLabel } from '../KindLabel/KindLabel';
 import { deleteSession } from '../../deleteSession';
 import { ImportanceMark } from '../Importance/Importance';
 import { IMPORTANCE_LABELS, IMPORTANCE_ORDER } from '../Importance/importanceTiers';
-import { BackgroundBadge, backgroundName, inBackground } from '../BackgroundTasks/BackgroundTasks';
+import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
+import { backgroundName, inBackground } from '../BackgroundTasks/backgroundState';
 import type { ProjectState } from '../../signalr/types';
 
 interface Props {
