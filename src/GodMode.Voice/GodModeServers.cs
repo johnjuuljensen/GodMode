@@ -78,6 +78,15 @@ public interface IGodModeServers
     /// <summary><see cref="IProjectHub.SetImportance"/>: how much the project may interrupt the user.</summary>
     Task SetImportanceAsync(ProjectRef project, Importance importance, CancellationToken ct);
 
+    /// <summary>
+    /// <see cref="IProjectHub.DeleteProject"/> as the app's delete calls it (#532): never forced, so the root's delete
+    /// script may refuse, which fails it, saying why.
+    /// </summary>
+    Task<DeleteProjectResult> DeleteAsync(ProjectRef project, CancellationToken ct);
+
+    /// <summary><see cref="IProjectHub.ForgetProject"/>: the session out of GodMode, its folder kept, no delete script run.</summary>
+    Task<DeleteProjectResult> ForgetAsync(ProjectRef project, CancellationToken ct);
+
     /// <summary>What claude said in the project's last <paramref name="turns"/> turns, oldest first (<see cref="IProjectHub.GetLastReplies"/>).</summary>
     Task<IReadOnlyList<AssistantReply>> GetLastRepliesAsync(ProjectRef project, int turns, CancellationToken ct);
 
@@ -195,6 +204,12 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
     public Task SetImportanceAsync(ProjectRef project, Importance importance, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.SetImportance), project.ProjectId, importance, ct);
+
+    public Task<DeleteProjectResult> DeleteAsync(ProjectRef project, CancellationToken ct) =>
+        Hub(project).InvokeAsync<DeleteProjectResult>(nameof(IProjectHub.DeleteProject), project.ProjectId, false, ct);
+
+    public Task<DeleteProjectResult> ForgetAsync(ProjectRef project, CancellationToken ct) =>
+        Hub(project).InvokeAsync<DeleteProjectResult>(nameof(IProjectHub.ForgetProject), project.ProjectId, ct);
 
     public async Task<IReadOnlyList<AssistantReply>> GetLastRepliesAsync(ProjectRef project, int turns, CancellationToken ct) =>
         await Hub(project).InvokeAsync<AssistantReply[]>(nameof(IProjectHub.GetLastReplies), project.ProjectId, turns, ct);

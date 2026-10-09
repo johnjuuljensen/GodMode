@@ -251,6 +251,9 @@ public sealed class DictationTests
     [InlineData("Ja, øh, end dictation.", Dictation.Terminator.Send, "")]
     [InlineData("ja øh, diktat slut", Dictation.Terminator.Send, "")]
     [InlineData("Okay. Diktat slut.", Dictation.Terminator.Send, "Okay.")]
+    [InlineData("And dictation.", Dictation.Terminator.Send, "")]
+    [InlineData("Brug migrationen. And dictation.", Dictation.Terminator.Send, "Brug migrationen.")]
+    [InlineData("En diktat.", Dictation.Terminator.Send, "")]
     [InlineData("Det var det. Øh. Diktat slut.", Dictation.Terminator.Send, "Det var det.")]
     [InlineData("Skal vi pushe? Ja. Diktat slut.", Dictation.Terminator.Send, "Skal vi pushe? Ja.")]
     [InlineData("Det var det. Uhm, cancel dictation.", Dictation.Terminator.Cancel, "Det var det.")]
@@ -280,6 +283,8 @@ public sealed class DictationTests
     [InlineData("Diktat.")]
     [InlineData("Ja, og skriv diktat slut i filen.")]
     [InlineData("Øh, men stop dictation først.")]
+    [InlineData("Skriv en diktat.")]
+    [InlineData("And dictation is next.")]
     public void Other_words_are_dictated(string final) => Assert.Equal(((Dictation.Terminator?)null, final), Dictation.Ends(final));
 
     /// <summary>The phrases are keyterms, so speech recognition hears them, and each fits in one.</summary>

@@ -190,6 +190,25 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         return Task.CompletedTask;
     }
 
+    /// <summary>Each delete, in order: the project, and whether it was only forgotten (#532).</summary>
+    public ConcurrentQueue<(ProjectRef Project, bool Forgot)> Deletes { get; } = new();
+
+    /// <summary>The delete script's refusal, as the server's error for a delete comes back; none when unset.</summary>
+    public string? DeleteError { get; set; }
+
+    public Task<DeleteProjectResult> DeleteAsync(ProjectRef project, CancellationToken ct) => Delete(project, forgot: false);
+
+    public Task<DeleteProjectResult> ForgetAsync(ProjectRef project, CancellationToken ct) => Delete(project, forgot: true);
+
+    private Task<DeleteProjectResult> Delete(ProjectRef project, bool forgot)
+    {
+        Deletes.Enqueue((project, forgot));
+        if (DeleteError is { } error && !forgot)
+            return Task.FromException<DeleteProjectResult>(new InvalidOperationException(error));
+        DeleteProject(project.ServerId, project.ProjectId);
+        return Task.FromResult(new DeleteProjectResult(forgot));
+    }
+
     private readonly ConcurrentDictionary<ProjectRef, AssistantReply[]> _replies = new();
 
     /// <summary>The project's turns, oldest first, as its <c>output.jsonl</c> has them on the server.</summary>
@@ -270,7 +289,7 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
 
     private static ProjectSummary Summary(ProjectStatus s) =>
         new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission, Kind: s.Kind,
-            LastResultAt: s.LastResultAt, LastOutputAt: s.LastOutputAt);
+            LastResultAt: s.LastResultAt, LastOutputAt: s.LastOutputAt, PullRequest: s.PullRequest, Adopted: s.Adopted);
 
     private static ProjectStatus Status(AttentionItem item) =>
         new(item.ProjectId, item.ProjectName,
