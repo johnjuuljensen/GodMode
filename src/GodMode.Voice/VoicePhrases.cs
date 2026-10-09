@@ -80,15 +80,18 @@ public sealed partial class VoicePhrases
     /// asked, or, when the session gave its own spoken reply, that reply word for word (<see cref="Spoken"/>). A finished
     /// turn is done only when the session said so, and idle otherwise (issue #467).
     /// </summary>
-    /// <param name="choices">Whether a question's options are said after it (#529, <see cref="Choices(AttentionItem)"/>): when it is said alone.</param>
-    public string Announce(SpokenName name, AttentionItem item, bool choices = true) =>
-        Spoken(name, item, choices) ?? (choices && Choices(item) is { Length: > 0 } listed
-            // Its options make sense only with the question: said as it is when it can be
+    public string Announce(SpokenName name, AttentionItem item) =>
+        Spoken(name, item) ?? (Choices(item) is { Length: > 0 } listed
+            // Its options (#529) make sense only with the question: said as it is when it can be
             ? With(QuestionChoices.Single(item.Question)!.Question.Trim() is var question && VoiceTools.SaidAsIs(question)
-                ? Reads(name, item, question) : AnnounceOnly(name, item), listed)
-            : AnnounceOnly(name, item));
+                ? Reads(name, item, question) : Short(name, item), listed)
+            : Short(name, item));
 
-    private string AnnounceOnly(SpokenName name, AttentionItem item) => (Subject(name), item.Kind, _danish) switch
+    /// <summary>
+    /// One project that needs the user, in one short line, by its name and what it needs, never its own words: "issue 283
+    /// er færdig", "issue 86 har et spørgsmål". A list of several says each so (#532), and the user asks about one for the rest.
+    /// </summary>
+    public string Short(SpokenName name, AttentionItem item) => (Subject(name), item.Kind, _danish) switch
     {
         (var who, AttentionKind.Question, true) when item.Outcome == TurnOutcome.Blocked => $"{who} er blokeret",
         (var who, AttentionKind.Question, false) when item.Outcome == TurnOutcome.Blocked => $"{who} is blocked",
@@ -116,8 +119,8 @@ public sealed partial class VoicePhrases
     /// Null when the session gave none.
     /// </summary>
     /// <param name="choices">Whether a question's options are said after it (#529, <see cref="Choices(AttentionItem)"/>).</param>
-    public string? Spoken(SpokenName name, AttentionItem item, bool choices = true) =>
-        item.Spoken is { Length: > 0 } spoken ? With(Reads(name, item, spoken), choices ? Choices(item) : "") : null;
+    public string? Spoken(SpokenName name, AttentionItem item) =>
+        item.Spoken is { Length: > 0 } spoken ? With(Reads(name, item, spoken), Choices(item)) : null;
 
     /// <summary>The line, then <paramref name="choices"/> as a sentence of their own (<see cref="Choices(AttentionItem)"/>), when there are any.</summary>
     public static string With(string line, string choices) =>
@@ -182,12 +185,13 @@ public sealed partial class VoicePhrases
         _danish ? $"Sidste resultat fra {Named(name)}: {result}" : $"Last result from {Named(name)}: {result}";
 
     /// <summary>
-    /// What needs the user, as <see cref="VoiceTools.WhatNeedsMe"/> found it, in the code's words (#456): each project as
-    /// its announcement says it (<see cref="Announce"/>), several after their count, "Intet venter." for none.
+    /// What needs the user, as <see cref="VoiceTools.WhatNeedsMe"/> found it, in the code's words (#456): one project as
+    /// its announcement says it (<see cref="Announce"/>), its own spoken reply too; several after their count, each in one
+    /// short line (<see cref="Short"/>, #532), since a list of whole replies fills the narrow channel; "Intet venter." for none.
     /// </summary>
     /// <param name="overseers">The overseers whose workers need someone (#469), each said by its line (<see cref="Workers"/>) after the items.</param>
     public string Waiting(IReadOnlyList<(SpokenName Name, AttentionItem Item)> items, IReadOnlyList<(SpokenName Name, int Workers, int Waiting)>? overseers = null) =>
-        items.Select(i => GodModeAnnouncementFormatter.Sentence(Announce(i.Name, i.Item, choices: items.Count == 1)))
+        items.Select(i => GodModeAnnouncementFormatter.Sentence(items.Count == 1 ? Announce(i.Name, i.Item) : Short(i.Name, i.Item)))
             .Concat((overseers ?? []).Select(o => GodModeAnnouncementFormatter.Sentence(Workers(o.Name, o.Workers, o.Waiting)))).ToList() switch
         {
             [] => _danish ? "Intet venter." : "Nothing needs you.",
@@ -210,9 +214,26 @@ public sealed partial class VoicePhrases
         + Then(WaitingFromBefore(fromBefore, saidAny: true))
         + (more ? $" {More}" : "");
 
-    /// <summary>A page of a long what-needs-me (#507): each project as its announcement says it, "Mere?" when more follows.</summary>
+    /// <summary>
+    /// What <see cref="VoiceTools.MarkAllSeen"/> did (#532): how many it marked seen, then what is left, each in one short
+    /// line (<see cref="Short"/>): "Ryddet 2. Tilbage: issue 86 har et spørgsmål."
+    /// </summary>
+    public string Cleared(int cleared, IReadOnlyList<(SpokenName Name, AttentionItem Item)> left)
+    {
+        var done = (cleared, _danish) switch
+        {
+            (0, true) => "Intet at rydde.",
+            (0, false) => "Nothing to clear.",
+            (var n, true) => $"Ryddet {n}.",
+            (var n, false) => $"Cleared {n}.",
+        };
+        return left.Count == 0 ? done
+            : $"{done} {(_danish ? "Tilbage" : "Left")}: {string.Join(" ", left.Select(l => GodModeAnnouncementFormatter.Sentence(Short(l.Name, l.Item))))}";
+    }
+
+    /// <summary>A page of a long what-needs-me (#507): each project in one short line (<see cref="Short"/>, #532), "Mere?" when more follows.</summary>
     public string WaitingPage(IReadOnlyList<(SpokenName Name, AttentionItem Item)> page, bool more) =>
-        string.Join(" ", page.Select(i => GodModeAnnouncementFormatter.Sentence(Announce(i.Name, i.Item, choices: false)))) + (more ? $" {More}" : "");
+        string.Join(" ", page.Select(i => GodModeAnnouncementFormatter.Sentence(Short(i.Name, i.Item)))) + (more ? $" {More}" : "");
 
     /// <summary>What <paramref name="count"/> projects of the kind need, after their names or count: "har et spørgsmål", "need permission".</summary>
     private string Needs(WaitingKind kind, int count) => (kind, _danish, count == 1) switch
@@ -584,6 +605,62 @@ public sealed partial class VoicePhrases
     /// <summary>The model claimed a send, and none went out this turn (<see cref="SentNode"/>).</summary>
     public string NothingSent => _danish ? "Intet sendt. Sig svaret igen." : "Nothing was sent. Say the answer again.";
 
+    /// <summary>
+    /// A delete read back (#532), as the question its yes answers: what is deleted, said once with its root and profile
+    /// when they share them, else each with its own, after what the user should know before the yes: that one runs, has
+    /// an open pull request, or is only forgotten, its folder kept. "issue 526 kører. Skal jeg slette issue 525 og issue
+    /// 526 i GodMode, profil Godmode?"
+    /// </summary>
+    public string DeleteReadBack(DeleteRequest request)
+    {
+        var targets = request.Targets;
+        // The topic helps tell one apart; of several, it only makes the question long
+        var names = targets is [var one] ? [one.Name] : targets.Select(t => t.Name with { Topic = null }).ToList();
+        var what = names.Select(n => (n.Root, n.Profile)).Distinct().Count() == 1
+            ? Named(names[0] with { Label = And([.. names.Select(n => n.Label)]) })
+            : And([.. names.Select(Named)]);
+        var notes = targets.Select(t => DeleteNote(new SpokenName(t.Name.Label), t)).OfType<string>().Select(GodModeAnnouncementFormatter.Sentence);
+        return string.Join(" ", notes.Append(_danish ? $"Skal jeg slette {what}?" : $"Shall I delete {what}?"));
+    }
+
+    /// <summary>What a delete read-back says of one session before its question: running, an open pull request, only forgotten; null for none.</summary>
+    private string? DeleteNote(SpokenName name, DeleteTarget target)
+    {
+        List<string> said = [];
+        if (target.Running) said.Add(_danish ? "kører" : "is running");
+        if (target.OpenPullRequest is { } pr) said.Add(_danish ? $"har en åben pull request, nummer {pr}" : $"has an open pull request, number {pr}");
+        if (target.Forget) said.Add(_danish ? "glemmes kun, og dens mappe bliver" : "is only forgotten, and its folder stays");
+        return said.Count == 0 ? null : $"{Named(name)} {And(said)}";
+    }
+
+    /// <summary>The user said yes to a delete read back: it runs, and <see cref="Deleted"/> says when it is done.</summary>
+    public string Deleting => _danish ? "Sletter." : "Deleting.";
+
+    /// <summary>The user said anything but yes to a delete read back.</summary>
+    public string DeleteCancelled => _danish ? "Annulleret. Intet slettet." : "Cancelled. Nothing deleted.";
+
+    /// <summary>A yes after the delete read-back it would have answered was dropped.</summary>
+    public string NothingToDelete => _danish ? "Der venter ingen sletning. Sig slet igen." : "Nothing waits to be deleted. Say delete again.";
+
+    /// <summary>
+    /// A confirmed delete done (#532): those deleted, those forgotten, and each that failed, with why, short as a create's
+    /// failure (<see cref="Why"/>). "issue 525 og issue 526 er slettet."
+    /// </summary>
+    public string Deleted(IReadOnlyList<DeleteOutcome> outcomes)
+    {
+        List<string> said = [];
+        var deleted = outcomes.Where(o => o.Error is null && !o.Target.Forget).Select(o => o.Target.Name.Label).ToList();
+        var forgotten = outcomes.Where(o => o.Error is null && o.Target.Forget).Select(o => o.Target.Name.Label).ToList();
+        if (deleted.Count > 0) said.Add(_danish ? $"{And(deleted)} er slettet" : $"{And(deleted)} {(deleted.Count == 1 ? "is" : "are")} deleted");
+        if (forgotten.Count > 0) said.Add(_danish ? $"{And(forgotten)} er glemt, mappen er der stadig" : $"{And(forgotten)} {(forgotten.Count == 1 ? "is" : "are")} forgotten, the folder kept");
+        foreach (var failed in outcomes.Where(o => o.Error is not null))
+        {
+            var lead = _danish ? $"{failed.Target.Name.Label} blev ikke slettet" : $"{failed.Target.Name.Label} was not deleted";
+            said.Add(Why(lead, failed.Error!));
+        }
+        return string.Join(" ", said.Select(GodModeAnnouncementFormatter.Sentence));
+    }
+
     /// <summary>A yes after the read-back it would have answered was dropped (it timed out, or the bot said something else).</summary>
     public string NothingToConfirm => _danish ? "Der venter ingen oprettelse. Sig start igen." : "Nothing waits to be created. Say start again.";
 
@@ -615,7 +692,15 @@ public sealed partial class VoicePhrases
     {
         var what = request.Issue is { } issue ? $"issue {issue}" : _danish ? request.Action.Name : $"the {request.Action.Name}";
         var where = $"{request.Root.Profile} / {request.Root.Shown}{(request.SeveralServers ? $"{(_danish ? " på" : " on")} {request.Root.ServerName}" : "")}";
-        var lead = _danish ? $"Kunne ikke oprette {what} i {where}" : $"Could not create {what} in {where}";
+        return Why(_danish ? $"Kunne ikke oprette {what} i {where}" : $"Could not create {what} in {where}", error);
+    }
+
+    /// <summary>
+    /// What failed (<paramref name="lead"/>), and why, in a few words: a short error as it is, a script's failure as that
+    /// script failing, and anything longer not at all: the log has it, and the app shows it whole.
+    /// </summary>
+    private string Why(string lead, string error)
+    {
         error = error.Trim();
         if (ScriptFailure().Match(error) is { Success: true } script)
         {

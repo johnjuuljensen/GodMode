@@ -208,7 +208,7 @@ public sealed class VoiceSession : IAsyncDisposable
                     ? TranscriptionInput.FromAudio(listening.Listening(audio.Source))
                     : setup.Transcription,
                 speaker,
-                new EventSink(setup.Events, state, tools.Creates, conversation, setup.Mic, setup.Media, sounds, tools.Dictation))
+                new EventSink(setup.Events, state, tools.Creates, tools.Deletes, conversation, setup.Mic, setup.Media, sounds, tools.Dictation))
             {
                 AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board, tools.Names,
                     sounds is null ? null : sounds.Cue), logger),
@@ -226,7 +226,7 @@ public sealed class VoiceSession : IAsyncDisposable
             voice.RefreshKeyterms();
             // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement
             // and while a dictation is taken (#459): one in a pause to think would break it
-            var announcements = new HeldAnnouncements(session.Announcements, tools.Creates, tools.Dictation, setup.Time);
+            var announcements = new HeldAnnouncements(session.Announcements, tools.Creates, tools.Dictation, tools.Deletes, setup.Time);
             // A dictation the mic closed on, with no "diktat slut", is dropped: nothing is sent (#459)
             if (setup.Mic is { } dictationMic)
                 dictationMic.Changed += micState => { if (micState == VoiceMicState.Closed) tools.Dictation.Abandon(); };
@@ -234,6 +234,7 @@ public sealed class VoiceSession : IAsyncDisposable
             board.Attach((item, handle) => announcements.Write(board.AnnouncementOf(item,
                 phrases.Announce(tools.Names.Full(item.Project) ?? new SpokenName(handle), item.Item))));
             tools.Creates.Attach(outcome => announcements.Write(new Announcement(phrases.Created(outcome))));
+            tools.Deletes.Attach(outcomes => announcements.Write(new Announcement(phrases.Deleted(outcomes))));
             // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
             if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));
             state.Release();
@@ -342,7 +343,7 @@ public sealed class VoiceSession : IAsyncDisposable
     }
 
     /// <summary>The session's events, to the host and the state.</summary>
-    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates, VoiceConversation conversation,
+    private sealed class EventSink(IVoiceEvents events, VoiceStateTracker state, SessionCreates creates, SessionDeletes deletes, VoiceConversation conversation,
         VoiceMic? mic, MediaPause? media, CueingSink? sounds, Dictation dictation)
         : ISessionEventSink
     {
@@ -362,6 +363,7 @@ public sealed class VoiceSession : IAsyncDisposable
         {
             // Called as the speech starts: a create's read-back arms it, anything else drops the one that waits
             creates.Spoken(response);
+            deletes.Spoken(response);
             events.Response(response);
             return Task.CompletedTask;
         }

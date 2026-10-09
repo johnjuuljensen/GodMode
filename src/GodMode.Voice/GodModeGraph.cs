@@ -85,7 +85,8 @@ public static class GodModeGraph
 
             COMMANDS (Danish first, English accepted):
             - "Hvad venter?" / "What needs me?" — call {{VoiceTools.WhatNeedsMe}}, with the root or profile the user asked
-              about, if any ("Hvad venter i GodMode?"). Say the count, then each project by its name and what it needs.
+              about, if any ("Hvad venter i GodMode?"). The system says it itself: several in one short line each, by name
+              and what it needs; a project's own words only when the user asks about it ({{VoiceTools.ProjectStatus}}).
               A long one is said by the system as a summary by what they need, the rest a page at a time: "Mere" after
               it — call {{VoiceTools.ReadMore}}.
             - "Hvilke projekter er der?", "Hvad kører?" / "Which projects?" — call {{VoiceTools.ListProjects}}: every project,
@@ -133,6 +134,14 @@ public static class GodModeGraph
               the end phrase was heard as part of the dictation, and why), and never call {{VoiceTools.Answer}} with it.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}, and only then: on the user's own "læst" or "seen".
               Never mark a project seen as part of reading it, its status or its reply, or when the user asks if that was all.
+            - "Ryd notifikationerne", "Marker alle som læst" / "Clear the notifications", "Mark all seen" — call
+              {{VoiceTools.MarkAllSeen}}, once: it marks all that only tell something (done, idle, failed, blocked) and
+              leaves those that wait on an answer. The system says what it cleared and what is left: respond with one
+              word. Never mark them one at a time, nor ask about each.
+            - "Slet [handle]", "Slet issue 525 og 526" / "Delete [handle]" — call {{VoiceTools.DeleteSession}} with each
+              session the user named, separated by ";". "issue 525" there is the session voice calls so, never an issue on
+              GitHub. The system reads back what goes itself, in place of your reply: respond with one word. Only the
+              user's yes to that read-back deletes, and that is not yours to answer: never say it was deleted.
             - "Marker [handle] som vigtig / normal / stille" / "Mark [handle] as important / normal / quiet" — call
               {{VoiceTools.SetImportance}} with important, normal or quiet. Only with "marker"/"mark": a bare "stille" is
               mute_announcements.
@@ -150,6 +159,12 @@ public static class GodModeGraph
               only when the user's own words do: never switch to another action in its place, nor use the kind as a name.
               An answer to a read-back with a change in it ("Nej, som overseer", "Ja, men i kappe") comes to you with the
               create it answers: call {{VoiceTools.StartSession}} again with the change and everything else as before.
+
+            SIDE TALK: the mic hears the room, and the bot's own voice. When nothing waits on the user (no question of
+            yours, no read-back) and an utterance names no project and no command (a bare number, "350."; words in
+            another register, said to someone else, "Øh, ja, nej, vi har hende", "nu tror jeg robotten har snakket til
+            den"), it is not for you: call waiting_for_further_input and say nothing. Never ask what it meant. A remark
+            about voice itself, said to you (above), is answered.
 
             EARLIER READINGS: the user's message may list earlier readings, the transcriber's drafts before it settled on
             the text. They are mostly a word or two, a sentence still growing, or the same words in the other language, and
@@ -182,12 +197,13 @@ public static class GodModeGraph
         return graph
             .Node(new HelpNode("help", 80))
             .Node(new HesitationNode("hesitation", 75))
+            .Node(new ConfirmDeleteNode("confirm-delete", 71, tools.Deletes, phrases))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
             // On the Light tier, Haiku 5.5, for speed (#525): Sonnet (#379) was for Haiku 4.5's mistakes
             .Child(new ReadBackNode(new SentNode(new SpokenNode(new HeldWordsNode(new ChatNode("control", 50, InferenceTier.Light,
                 new CodeSaysInference(inference, tools.Conversation, phrases), systemPrompt), tools.Conversation),
-                tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, phrases))
+                tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, tools.Deletes, phrases))
             .Build();
     }
 }

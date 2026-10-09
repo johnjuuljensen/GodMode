@@ -439,9 +439,10 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
 /// #473): an announcement between a read-back and its yes would take the yes's place. They are said in order once
 /// nothing waits (the user answered, or the wait expired). A read-back to be said again (<see cref="SessionCreates.Repeat"/>)
 /// is never held: it is what was waited on. While a dictation is taken (<see cref="Dictation.Active"/>, #459) they wait
-/// too: one in a pause to think would break the user's train of thought, and change what is talked about. And for
-/// <see cref="AfterDictation"/> after it ends (#529): one said right after the read-back of what was sent leaves the user
-/// unsure whether the dictation ended.
+/// too: one in a pause to think would break the user's train of thought, and change what is talked about. So, too,
+/// while a delete waits on its yes (<see cref="SessionDeletes.Waiting"/>, #532). And for <see cref="AfterDictation"/>
+/// after a dictation ends (#529): one said right after the read-back of what was sent leaves the user unsure whether
+/// the dictation ended.
 /// </summary>
 public sealed class HeldAnnouncements
 {
@@ -451,14 +452,18 @@ public sealed class HeldAnnouncements
     private readonly ChannelWriter<Announcement> _session;
     private readonly SessionCreates _creates;
     private readonly Dictation? _dictation;
+    private readonly SessionDeletes? _deletes;
     private readonly TimeProvider _time;
     private readonly Lock _lock = new();
     private readonly List<Announcement> _held = [];
     private DateTimeOffset _dictationEnded = DateTimeOffset.MinValue;
     private ITimer? _afterDictation;
 
-    public HeldAnnouncements(ChannelWriter<Announcement> session, SessionCreates creates, Dictation? dictation = null, TimeProvider? time = null)
+    public HeldAnnouncements(ChannelWriter<Announcement> session, SessionCreates creates, Dictation? dictation = null, SessionDeletes? deletes = null,
+        TimeProvider? time = null)
     {
+        _deletes = deletes;
+        if (deletes is not null) deletes.Released += Release;
         _session = session;
         _creates = creates;
         _dictation = dictation;
@@ -491,8 +496,8 @@ public sealed class HeldAnnouncements
         _session.TryWrite(announcement);
     }
 
-    /// <summary>Whether something waits on the user's words: a create or its question, or a dictation, or one just ended.</summary>
-    private bool Waiting => _creates.Waiting || _dictation?.Active == true || _time.GetUtcNow() - _dictationEnded < AfterDictation;
+    /// <summary>Whether something waits on the user's words: a create or its question, a delete, or a dictation, or one just ended.</summary>
+    private bool Waiting => _creates.Waiting || _deletes?.Waiting == true || _dictation?.Active == true || _time.GetUtcNow() - _dictationEnded < AfterDictation;
 
     /// <summary>A dictation ended: what was held is said once <see cref="AfterDictation"/> has passed.</summary>
     private void DictationEnded()

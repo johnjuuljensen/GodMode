@@ -33,6 +33,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string MarkSeen = "mark_seen";
     public const string SetImportance = "set_importance";
     public const string StartSession = "start_session";
+    public const string MarkAllSeen = "mark_all_seen";
+    public const string DeleteSession = "delete_session";
 
     public const string ProjectParameter = "project";
     public const string TextParameter = "text";
@@ -47,6 +49,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string WorkersParameter = "workers";
     public const string ThenParameter = "then";
     public const string OptionParameter = "option";
+    public const string ProjectsParameter = "projects";
 
     /// <summary>The <see cref="WorkersParameter"/> that takes in every overseer's workers (#469).</summary>
     public const string WorkersAll = "all";
@@ -68,6 +71,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     /// <summary>The creates voice reads back, and makes on the user's yes.</summary>
     public SessionCreates Creates { get; } = new(servers, handles, time);
+
+    /// <summary>The deletes voice reads back, and makes on the user's yes (#532).</summary>
+    public SessionDeletes Deletes { get; } = new(servers, time);
 
     /// <summary>The dictation being taken, sent word for word on the user's "send" (#459, <see cref="DictationNode"/>).</summary>
     public Dictation Dictation => field ??= new(servers, handles, Names, conversation, _phrases, _time);
@@ -165,9 +171,16 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         .Add(MarkSeen,
             "Mark what a project needs as seen (its finished result, an error, or a question it asked in plain text), so it no " +
             "longer needs the user; a seen question still waits for its answer. A pending choice or permission is only cleared by " +
-            "an answer. Call only when the user says so themselves (\"læst\", \"seen\"): never as part of reading a project, its status or its reply, nor when they ask whether that was all.",
+            "an answer. Call only when the user says so themselves (\"læst\", \"seen\"): never as part of reading a project, its status or its reply, nor when they ask whether that was all. " +
+            $"For all of them at once, call {MarkAllSeen}.",
             [ProjectReference],
             (_, args, ct) => MarkSeenAsync(Argument(args, ProjectParameter), ct))
+        .Add(MarkAllSeen,
+            "Mark everything that only tells the user something as seen, in one call: finished, idle, failed and blocked " +
+            "projects, and changes requested. What waits on an answer (a question, a permission request, a decision) is left, " +
+            "and said. Call when the user clears them all (\"ryd notifikationerne\", \"marker alle som læst\", \"clear all\").",
+            [InRoot],
+            (_, args, ct) => MarkAllSeenAsync(Argument(args, RootParameter), ct))
         .Add(SetImportance,
             "Set how much a project may interrupt the user: \"important\" (a sound, and said first), \"normal\", or \"quiet\" " +
             "(its results and errors stay in the inbox; its questions still reach the user). Call only when the user asks " +
@@ -186,7 +199,16 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 new ToolParameter(PromptParameter, "What the session should do, in the user's words, or empty when they said nothing more.", Required: false),
             ],
             (_, args, ct) => StartSessionAsync(new CreateAsk(Argument(args, RootParameter), Argument(args, ActionParameter),
-                Argument(args, IssueParameter), Argument(args, NameParameter), Argument(args, PromptParameter)), ct));
+                Argument(args, IssueParameter), Argument(args, NameParameter), Argument(args, PromptParameter)), ct))
+        .Add(DeleteSession,
+            "Prepare deleting sessions (projects) from GodMode, as the app's delete does: the root's delete script runs, and " +
+            "the session's working folder goes; one adopted from a folder is only forgotten, its folder kept. \"Slet issue " +
+            "525\" names the session voice calls \"issue 525\", never an issue on GitHub. It deletes nothing: the system reads " +
+            "back what goes. Only the user's own yes to that read-back deletes; never say it was deleted.",
+            [new ToolParameter(ProjectsParameter,
+                "The sessions as the user named them, each as a project is named to the other tools, separated by \";\" " +
+                "(\"Slet issue 525 og 526\": \"issue 525; issue 526\"). Empty for the project talked about.", Required: false)],
+            (_, args, ct) => DeleteSessionAsync(Argument(args, ProjectsParameter), ct));
 
     /// <param name="root">Only the items of the projects in this root or profile (<see cref="In"/>); all when empty.</param>
     /// <param name="since">
@@ -246,8 +268,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         }
 
         var text = new StringBuilder(items.Count > 0 ? $"{items.Count} need the user:\n" : "Nothing needs the user directly:\n");
+        // Several are said a short line each (#532): their own words are read when the user asks about one
         foreach (var (item, name) in named)
-            text.AppendLine($"- {name}: {Describe(item.Item)}{InItsWords(item.Item)}");
+            text.AppendLine($"- {name}: {(named.Count == 1 ? $"{Describe(item.Item)}{InItsWords(item.Item)}" : Kind(item.Item))}");
         foreach (var overseer in overseers)
             text.AppendLine($"- {overseer.Name}: runs {OverseerLine(overseer.Workers, overseer.Waiting)}");
         if (overseers.Count > 0)
@@ -278,6 +301,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 text.AppendLine($"The {rest.Count} it did not name are read {ProjectListing.Page} at a time: when the user says \"mere\", call {ReadMore}.");
             return SaysItself(ReadOut(text.ToString().TrimEnd()), summary);
         }
+        if (named.Count > 1)
+            text.AppendLine($"The system said one short line for each. When the user asks about one, call {ProjectStatus} for it.");
         var waiting = _phrases.Waiting([.. named.Select(n => (n.Name, n.Item.Item))], lines);
         return SaysItself(ReadOut(text.ToString().TrimEnd()),
             left.Count > 0 ? $"{waiting} {_phrases.WaitingFromBefore(left.Count, saidAny: true)}" : waiting);
@@ -286,7 +311,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <summary>A page of a long what-needs-me (#507), as the tool's text tells the model what the system said of it.</summary>
     private static string WaitingPageResult(IReadOnlyList<(ServerAttentionItem Item, SpokenName Name)> page, int index, int pages, int left) =>
         $"What needs the user not named in its summary ({left}), part {index + 1} of {pages}, said by the system itself: " +
-        string.Join("; ", page.Select(n => $"{n.Name}: {Describe(n.Item.Item)}")) +
+        string.Join("; ", page.Select(n => $"{n.Name}: {Kind(n.Item.Item)}")) +
         (index + 1 < pages ? $". More follows: {ReadMore} reads it." : ". That was the end of it.");
 
     /// <param name="root">Only the projects in this root or profile (<see cref="In"/>); all when empty.</param>
@@ -936,6 +961,42 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         return $"{Names.Of(target)?.ToString() ?? target.ProjectId} is marked seen.";
     }
 
+    /// <summary>
+    /// Whether an item only tells the user something (#532), which <see cref="MarkAllSeenAsync"/> marks seen: a finished
+    /// or idle turn, a failure, a blocked turn, changes requested. A question, a permission request or a decision waits
+    /// on the user's answer.
+    /// </summary>
+    internal static bool OnlyTells(AttentionItem item) => item.Kind switch
+    {
+        AttentionKind.Finished or AttentionKind.Error or AttentionKind.Review => true,
+        AttentionKind.Question => item.Outcome == TurnOutcome.Blocked,
+        _ => false,
+    };
+
+    /// <summary>
+    /// Marks every item that only tells the user something seen (<see cref="OnlyTells"/>), of the projects
+    /// <see cref="WhatNeedsMe"/> names (no overseer's worker), in <paramref name="root"/> when it names one, and says how
+    /// many, and what is left, each in one short line (#532).
+    /// </summary>
+    public async Task<string> MarkAllSeenAsync(string? root, CancellationToken ct)
+    {
+        var all = (await servers.GetAttentionAsync(ct)).Where(i => handles.Of(i.Project) is not null && !projects.Holds(i)).ToList();
+        if (!string.IsNullOrWhiteSpace(root))
+        {
+            if (!projects.Projects.Any(p => In(p, root)))
+                return NoSuchRoot(root);
+            all = [.. all.Where(i => projects.Find(i.Project) is { } p && In(p, root))];
+        }
+        var cleared = all.Where(i => OnlyTells(i.Item)).ToList();
+        await Task.WhenAll(cleared.Select(i => servers.MarkSeenAsync(i.Project, ct)));
+        var left = all.Where(i => !OnlyTells(i.Item)).Select(i => (Project: i.Project, Name: Names.Of(i.Project)!, i.Item)).ToList();
+        conversation.Reading = null;
+        Talked(left is [var only] ? only.Project : null);
+        var text = $"{cleared.Count} marked seen{(cleared.Count > 0 ? $": {string.Join("; ", cleared.Select(i => $"{Names.Full(i.Project)}: {Kind(i.Item)}"))}" : "")}." +
+            (left.Count > 0 ? $" Left, waiting on the user's answer: {string.Join("; ", left.Select(l => $"{l.Name}: {Kind(l.Item)}"))}." : " Nothing is left.");
+        return SaysItself(text, _phrases.Cleared(cleared.Count, [.. left.Select(l => (l.Name, l.Item))]));
+    }
+
     public async Task<string> SetImportanceAsync(string? reference, string? importance, CancellationToken ct)
     {
         if (ParseImportance(importance) is not { } tier)
@@ -968,6 +1029,36 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     {
         var result = await Creates.ProposeAsync(await servers.ListRootsAsync(ct), ask, ct);
         return Creates.Proposed is { } request ? SaysItself(result, _phrases.ReadBack(request)) : result;
+    }
+
+    /// <summary>
+    /// The sessions to delete (#532), read back by the code (<see cref="ReadBackNode"/>, <see cref="VoicePhrases.DeleteReadBack"/>):
+    /// each named, or the one talked about, with whether it runs, has an open pull request, or is only forgotten. One the
+    /// handles do not name proposes nothing, and says which there are.
+    /// </summary>
+    public async Task<string> DeleteSessionAsync(string? references, CancellationToken ct)
+    {
+        string[] said = string.IsNullOrWhiteSpace(references) ? [""] : [.. references.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+        List<ProjectRef> found = [];
+        foreach (var reference in said)
+        {
+            if (Target(reference) is not { } target || handles.LabelOf(target) is null)
+                return $"Nothing will be deleted. {await UnknownAsync(reference, ct)}";
+            if (!found.Contains(target)) found.Add(target);
+        }
+        List<DeleteTarget> targets = [];
+        foreach (var target in found)
+        {
+            var status = await servers.GetStatusAsync(target, ct);
+            targets.Add(new DeleteTarget(target, Names.Full(target)!, status.State == ProjectState.Running,
+                status.PullRequest is { IsOpen: true } pr ? pr.Number : null, status.Adopted));
+        }
+        if (targets is [var one]) Talked(one.Project);
+        var request = new DeleteRequest(targets);
+        Deletes.Propose(request);
+        var readBack = _phrases.DeleteReadBack(request);
+        return SaysItself($"The system reads back \"{readBack}\" itself, in place of your reply. Nothing is deleted until the " +
+            "user says yes to it, which is not yours to answer: never say it was deleted.", readBack);
     }
 
     /// <summary>
@@ -1012,28 +1103,26 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     private static string Details(string name, string? kind) =>
         string.Join(", ", new[] { name, kind }.Where(s => !string.IsNullOrWhiteSpace(s)).Distinct(StringComparer.OrdinalIgnoreCase));
 
+    /// <summary>What the item needs, with none of its text: what a list of several says of it (#532).</summary>
+    private static string Kind(AttentionItem item, string? text = null) => item.Kind switch
+    {
+        AttentionKind.Question when item.Outcome == TurnOutcome.Blocked => "blocked",
+        AttentionKind.Question => "question",
+        AttentionKind.Permission => $"permission request ({item.Permission?.Summary ?? text ?? item.Text}); answered on screen only",
+        AttentionKind.Error => "failed",
+        AttentionKind.Escalation => "needs the user's decision",
+        AttentionKind.Review => "changes requested on its pull request",
+        AttentionKind.Finished when item.Outcome == TurnOutcome.Done => "finished",
+        AttentionKind.Finished => "idle (it did not say it is done)",
+    };
+
     /// <summary>
     /// The item as a line says it, with <paramref name="text"/> for its text: the item's own (cut) one when null. A
     /// question's options follow it (#529), those of <paramref name="pending"/>, else the item's.
     /// </summary>
-    private static string Describe(AttentionItem item, string? text = null, PendingQuestion? pending = null)
-    {
-        var said = text ?? item.Text;
-        if (item.Kind == AttentionKind.Question)
-            said += QuestionChoices.Described(pending ?? item.Question);
-        return item.Kind switch
-        {
-            AttentionKind.Question when item.Outcome == TurnOutcome.Blocked => $"blocked: {said}",
-            AttentionKind.Question => $"question: {said}",
-            AttentionKind.Permission => $"permission request ({item.Permission?.Summary ?? said}); answered on screen only",
-            AttentionKind.Error => $"failed: {said}",
-            AttentionKind.Escalation => $"needs the user's decision: {said}",
-            AttentionKind.Review => $"changes requested on its pull request: {said}",
-            // Done only when the session said so; with no outcome it is idle, which says nothing of the work (issue #467)
-            AttentionKind.Finished when item.Outcome == TurnOutcome.Done => $"finished: {said}",
-            AttentionKind.Finished => $"idle (it did not say it is done): {said}",
-        };
-    }
+    private static string Describe(AttentionItem item, string? text = null, PendingQuestion? pending = null) =>
+        item.Kind == AttentionKind.Permission ? Kind(item, text)
+            : $"{Kind(item)}: {text ?? item.Text}{(item.Kind == AttentionKind.Question ? QuestionChoices.Described(pending ?? item.Question) : "")}";
 
     private static string? Argument(IDictionary<string, object?> args, string name) =>
         args.TryGetValue(name, out var value) ? value?.ToString() : null;

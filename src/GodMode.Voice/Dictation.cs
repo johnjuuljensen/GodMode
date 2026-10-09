@@ -31,13 +31,15 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
     /// <summary>
     /// What ends a dictation, as a sentence on its own, and how: the one list of them (#520), and speech recognition's
     /// keyterms (<see cref="GodModeGraph.CommandWords"/>). Two words each, unusual enough never to be dictated; with the
-    /// ways the user was heard to say them (#530: "dictate end", "stop dictation", "diktér slut").
+    /// ways the user was heard to say them (#530: "dictate end", "stop dictation", "diktér slut"), and the ways the
+    /// transcriber misheard them (#532: "end dictation" as "And dictation.", "diktat slut" as "En diktat.").
     /// </summary>
     public static readonly IReadOnlyList<(string Phrase, Terminator Ends)> Phrases =
     [
         ("diktat slut", Terminator.Send), ("diktér slut", Terminator.Send), ("send diktat", Terminator.Send),
         ("end dictation", Terminator.Send), ("dictation end", Terminator.Send), ("dictate end", Terminator.Send),
         ("send dictation", Terminator.Send), ("stop dictation", Terminator.Send),
+        ("and dictation", Terminator.Send), ("en diktat", Terminator.Send),
         ("annullér diktat", Terminator.Cancel), ("slet diktat", Terminator.Cancel),
         ("cancel dictation", Terminator.Cancel),
     ];

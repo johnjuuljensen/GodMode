@@ -56,7 +56,7 @@ public sealed class QuestionOptionsTests
         Assert.Equal($"findings spørger: {Asked} Valg: Yes, file them; Not now; eller Only the first", Danish.Announce(name, Item()));
         Assert.Equal($"findings asks: {Asked} Options: Yes, file them; Not now; or Only the first", English.Announce(name, Item()));
         // In a list of several, the options are left to the status
-        Assert.Equal("findings har et spørgsmål", Danish.Announce(name, Item(), choices: false));
+        Assert.Equal("findings har et spørgsmål", Danish.Short(name, Item()));
     }
 
     [Fact]
