@@ -32,8 +32,20 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     public ProjectRef? Current
     {
         get => Volatile.Read(ref _topic).Project;
-        set => Volatile.Write(ref _topic, new Topic(value, null));
+        set
+        {
+            Volatile.Write(ref _topic, new Topic(value, null));
+            if (value is not null) Volatile.Write(ref _lastTalked, value);
+        }
     }
+
+    private ProjectRef? _lastTalked;
+
+    /// <summary>
+    /// The project the user last talked about (#529): the last one a tool read, answered or named, whatever was announced
+    /// or listed since. What a request that names none is offered first, when nothing is current.
+    /// </summary>
+    public ProjectRef? LastTalked => Volatile.Read(ref _lastTalked);
 
     /// <summary>
     /// An announcement of <paramref name="project"/> alone (null for several) is being said: it is what the
@@ -252,6 +264,29 @@ public sealed class VoiceConversation(TimeProvider? time = null)
         return said;
     }
 
+    /// <summary>How long what the chat waited past is held for the next final (<see cref="HeldWordsNode"/>, #529): a pause to think, not a new subject.</summary>
+    public static readonly TimeSpan HeldFor = TimeSpan.FromSeconds(30);
+
+    private (string Text, DateTimeOffset At)? _held;
+    private readonly Lock _heldLock = new();
+
+    /// <summary>The chat waited past <paramref name="text"/>, a final that begins what the user is saying (#529): the next one goes on from it.</summary>
+    public void Hold(string text)
+    {
+        lock (_heldLock) _held = (text, _time.GetUtcNow());
+    }
+
+    /// <summary>What the chat waited past, held less than <see cref="HeldFor"/> ago, and nothing from now on; null when none.</summary>
+    public string? TakeHeld()
+    {
+        lock (_heldLock)
+        {
+            var held = _held;
+            _held = null;
+            return held is { } h && _time.GetUtcNow() - h.At < HeldFor ? h.Text : null;
+        }
+    }
+
     private const int KeptResults = 20;
     private readonly ConcurrentQueue<string> _saidResults = new();
 
@@ -404,23 +439,32 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
 /// #473): an announcement between a read-back and its yes would take the yes's place. They are said in order once
 /// nothing waits (the user answered, or the wait expired). A read-back to be said again (<see cref="SessionCreates.Repeat"/>)
 /// is never held: it is what was waited on. While a dictation is taken (<see cref="Dictation.Active"/>, #459) they wait
-/// too: one in a pause to think would break the user's train of thought, and change what is talked about.
+/// too: one in a pause to think would break the user's train of thought, and change what is talked about. And for
+/// <see cref="AfterDictation"/> after it ends (#529): one said right after the read-back of what was sent leaves the user
+/// unsure whether the dictation ended.
 /// </summary>
 public sealed class HeldAnnouncements
 {
+    /// <summary>How long announcements are still held after a dictation ends (#529): its read-back is said first, and heard as the last word.</summary>
+    public static readonly TimeSpan AfterDictation = TimeSpan.FromSeconds(5);
+
     private readonly ChannelWriter<Announcement> _session;
     private readonly SessionCreates _creates;
     private readonly Dictation? _dictation;
+    private readonly TimeProvider _time;
     private readonly Lock _lock = new();
     private readonly List<Announcement> _held = [];
+    private DateTimeOffset _dictationEnded = DateTimeOffset.MinValue;
+    private ITimer? _afterDictation;
 
-    public HeldAnnouncements(ChannelWriter<Announcement> session, SessionCreates creates, Dictation? dictation = null)
+    public HeldAnnouncements(ChannelWriter<Announcement> session, SessionCreates creates, Dictation? dictation = null, TimeProvider? time = null)
     {
         _session = session;
         _creates = creates;
         _dictation = dictation;
+        _time = time ?? TimeProvider.System;
         creates.Released += Release;
-        if (dictation is not null) dictation.Released += Release;
+        if (dictation is not null) dictation.Released += DictationEnded;
         creates.Repeat += readBack => session.TryWrite(new Announcement(readBack));
     }
 
@@ -447,8 +491,19 @@ public sealed class HeldAnnouncements
         _session.TryWrite(announcement);
     }
 
-    /// <summary>Whether something waits on the user's words: a create or its question, or a dictation.</summary>
-    private bool Waiting => _creates.Waiting || _dictation?.Active == true;
+    /// <summary>Whether something waits on the user's words: a create or its question, or a dictation, or one just ended.</summary>
+    private bool Waiting => _creates.Waiting || _dictation?.Active == true || _time.GetUtcNow() - _dictationEnded < AfterDictation;
+
+    /// <summary>A dictation ended: what was held is said once <see cref="AfterDictation"/> has passed.</summary>
+    private void DictationEnded()
+    {
+        lock (_lock)
+        {
+            _dictationEnded = _time.GetUtcNow();
+            _afterDictation?.Dispose();
+            _afterDictation = _time.CreateTimer(_ => Release(), null, AfterDictation, Timeout.InfiniteTimeSpan);
+        }
+    }
 
     private void Release()
     {

@@ -160,6 +160,15 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         return Task.CompletedTask;
     }
 
+    /// <summary>Each pending question answered with its options (#529), in order.</summary>
+    public ConcurrentQueue<(ProjectRef Project, string RequestId, IReadOnlyDictionary<string, string> Answers)> Answers { get; } = new();
+
+    public Task AnswerQuestionAsync(ProjectRef project, string requestId, IReadOnlyDictionary<string, string> answers, CancellationToken ct)
+    {
+        Answers.Enqueue((project, requestId, answers));
+        return Task.CompletedTask;
+    }
+
     /// <summary>Each project asked for its recap (#513), in order.</summary>
     public ConcurrentQueue<ProjectRef> RecapAsks { get; } = new();
 
@@ -283,5 +292,5 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
             item.Since, item.Since, item.Kind == AttentionKind.Question ? item.Text : null,
             new ProjectMetrics(0, 0, 0, TimeSpan.Zero, 0), null, null, 0, RootName: item.Root, ProfileName: item.Profile,
             LastError: item.Kind == AttentionKind.Error ? item.Text : null,
-            PendingPermission: item.Permission, CreateFailed: item.CreateFailed);
+            PendingPermission: item.Permission, PendingQuestion: item.Question, CreateFailed: item.CreateFailed);
 }

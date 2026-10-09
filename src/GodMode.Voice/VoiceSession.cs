@@ -226,7 +226,7 @@ public sealed class VoiceSession : IAsyncDisposable
             voice.RefreshKeyterms();
             // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement
             // and while a dictation is taken (#459): one in a pause to think would break it
-            var announcements = new HeldAnnouncements(session.Announcements, tools.Creates, tools.Dictation);
+            var announcements = new HeldAnnouncements(session.Announcements, tools.Creates, tools.Dictation, setup.Time);
             // A dictation the mic closed on, with no "diktat slut", is dropped: nothing is sent (#459)
             if (setup.Mic is { } dictationMic)
                 dictationMic.Changed += micState => { if (micState == VoiceMicState.Closed) tools.Dictation.Abandon(); };

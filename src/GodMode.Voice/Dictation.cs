@@ -8,7 +8,7 @@ using VoiceBot.Core.Commands;
 namespace GodMode.Voice;
 
 /// <summary>
-/// Dictation (#459): "Diktér til 283" / "Dictate to 283", then the user speaks freely, across pauses, and what they said
+/// Dictation (#459): "Diktér til 283" / "Dictate to 283" ("Diktér 283", #529), then the user speaks freely, across pauses, and what they said
 /// is sent word for word, as recognized, never by the model. Each final the transcriber commits after a pause is a part;
 /// the parts are collected until a terminator, an explicit phrase (<see cref="Phrases"/>): "diktat slut" sends them
 /// (<see cref="Send"/>), "annullér diktat" drops them (<see cref="Cancel"/>). A bare "send", "stop" or "annullér" is
@@ -112,11 +112,14 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
     /// <summary>
     /// Whether <paramref name="text"/> starts a dictation ("Diktér til 283", "Dictate to branch master i GodMode, profil
     /// Mega"): the project said up to the first sentence's end, and what follows it in the same final, its first part. A
-    /// project is taken as far as it names one ("Diktér til 283, brug migrationen": 283, then "brug migrationen"). Null
-    /// when it is no start: the words are the chat's.
+    /// project is taken as far as it names one ("Diktér til 283, brug migrationen": 283, then "brug migrationen").
+    /// <c>Addressed</c> is whether it was said with "til"/"to": one without ("Diktér FE86", #529) starts a dictation only
+    /// when its words name a project. Null when it is no start: the words are the chat's.
     /// </summary>
-    public static (string Reference, string After)? Starts(string text) =>
-        Start().Match(text) is { Success: true } match ? (match.Groups["reference"].Value.Trim(), match.Groups["rest"].Value.Trim()) : null;
+    public static (string Reference, string After, bool Addressed)? Starts(string text) =>
+        Start().Match(text) is { Success: true } match
+            ? (match.Groups["reference"].Value.Trim(), match.Groups["rest"].Value.Trim(), match.Groups["to"].Success)
+            : null;
 
     /// <summary>
     /// The terminator a final ends with, as a sentence on its own, and the words said before it in that final; no
@@ -171,10 +174,11 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
     /// </summary>
     public async Task<string?> StartAsync(string text, CancellationToken ct)
     {
-        if (Starts(text) is not var (said, rest))
+        if (Starts(text) is not var (said, rest, addressed))
             return null;
         if (Resolve(said, rest) is not var (target, more))
-            return phrases.DictationUnknown(said);
+            // "Diktér" and words that name no project are the chat's: they may be no start at all
+            return addressed ? phrases.DictationUnknown(said) : null;
 
         conversation.Current = target;
         var name = Named(target);
@@ -205,7 +209,9 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
     /// </summary>
     public async Task<string?> HearAsync(string text, CancellationToken ct)
     {
-        if (Starts(text) is not var (said, rest))
+        // A start without "til" that names no project, or is a terminator ("Dictate end", #530), is dictated as said
+        if (Starts(text) is not var (said, rest, addressed)
+            || (!addressed && (Ends(text).Terminator is not null || Resolve(said, rest) is null)))
             return await HearPartAsync(text, ct);
         ProjectRef target;
         lock (_lock)
@@ -358,7 +364,7 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
 
     private DateTimeOffset Now => _time.GetUtcNow();
 
-    [GeneratedRegex(@"^\s*(?:dikt[eé]r|dikterer|diktere|dictate)\s+(?:til|to)\s+(?<reference>[^.!?…]+?)\s*(?:[.!?…]+\s*(?<rest>.*?))?\s*$",
+    [GeneratedRegex(@"^\s*(?:dikt[eé]r|dikterer|diktere|dictate)\s+(?:(?<to>til|to)\s+)?(?<reference>[^.!?…]+?)\s*(?:[.!?…]+\s*(?<rest>.*?))?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline)]
     private static partial Regex Start();
 

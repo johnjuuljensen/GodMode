@@ -17,7 +17,8 @@ namespace GodMode.Voice;
 /// said word for word by the code, not retold by the model (<see cref="SpokenNode"/>, #384). A tool result the code can
 /// say itself (what needs me, the projects, a short question or result) is said so, with no second model call to retell
 /// it (<see cref="CodeSaysInference"/>, #456), as is a sent answer and a create read back (#526). A final that is only a
-/// hesitation ("Øh, det…") is waited past, with no model call (<see cref="HesitationNode"/>).
+/// hesitation ("Øh, det…") is waited past, with no model call (<see cref="HesitationNode"/>), and one the model waits past
+/// is joined to the next (<see cref="HeldWordsNode"/>, #529).
 /// </summary>
 public static class GodModeGraph
 {
@@ -97,6 +98,9 @@ public static class GodModeGraph
             - A project the user names by its root or kind ("Assistant", "chat") is named so to the tools; if the tool
               says it is unknown, give the names it lists as options. One the user names with its root or profile
               ("master i Mega") is named so to the tools, all of it.
+            - A request that names no project ("Behandl resten af loggen") is about the project the conversation was last
+              about: leave project empty, and the tools take it. If you must ask which, offer that one first, before the
+              ones waiting, as the tool says.
             - "Status [handle]", "Læs [handle]", "Hvad spørger [handle] om?" — call {{VoiceTools.ProjectStatus}}; read the
               question or result itself, shortened if long.
             - A SPOKEN REPLY is a project's own words for the user to hear, which the session wrote itself. When a tool
@@ -108,6 +112,9 @@ public static class GodModeGraph
               eksisterende migration."). Without a handle, leave project empty: it goes to the project last announced
               or talked about. If the tool says no project is being talked about, ask which, as a closed question.
               When it sent the answer, the system says so itself, in place of your reply: respond with one word.
+              A question with options: the tools give them numbered. "Hvad er valgene?" / "What are the options?" — call
+              {{VoiceTools.ProjectStatus}}. An answer that picks one ("den anden", "svar ja, opret dem") — call
+              {{VoiceTools.Answer}} with the option set to its number or label.
             - "Læs hele [handle]s svar", "Læs det sidste svar", "Hvad svarede [handle]?" / "Read its reply" — call
               {{VoiceTools.ReadReply}}: it reads what the project said last, also when it is idle or seen and needs nothing
               ({{VoiceTools.ProjectStatus}} does not have it then). Say the reply itself, after a lead-in that names the
@@ -116,9 +123,9 @@ public static class GodModeGraph
             - "Mere?", "Hvorfor?", "Hvad er det?" / "More?", "Why?", "What is it?" about the line just said, naming no
               project — call {{VoiceTools.ReadMore}}: it expands that line a step (an announcement into the project's status,
               a status into its last reply, a reply or list into its next part). Never ask which project then.
-            - "Diktér til [handle]" / "Dictate to [handle]" is taken by the system itself, word for word, until the user
+            - "Diktér til [handle]" / "Dictate to [handle]", or without "til"/"to", is taken by the system itself, word for word, until the user
               says "diktat slut" or "annullér diktat" / "end dictation" or "cancel dictation": you never see it. A "diktér" that names no project: ask which, as a closed
-              question, and tell the user to say "Diktér til" and the project. The end phrase counts only as a sentence
+              question, and tell the user to say "Diktér" and the project. The end phrase counts only as a sentence
               of its own (a "ja" or "øh" before it is fine); said inside a sentence it is dictated, and the read-back says
               how many sentences went out.
             - A remark about voice itself ("det gik dårligt", "jeg kunne ikke stoppe diktatet", "du hørte forkert") names
@@ -178,8 +185,8 @@ public static class GodModeGraph
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
             // On the Light tier, Haiku 5.5, for speed (#525): Sonnet (#379) was for Haiku 4.5's mistakes
-            .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Light,
-                new CodeSaysInference(inference, tools.Conversation, phrases), systemPrompt),
+            .Child(new ReadBackNode(new SentNode(new SpokenNode(new HeldWordsNode(new ChatNode("control", 50, InferenceTier.Light,
+                new CodeSaysInference(inference, tools.Conversation, phrases), systemPrompt), tools.Conversation),
                 tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
     }

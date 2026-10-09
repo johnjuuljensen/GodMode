@@ -114,12 +114,13 @@ public sealed class ProjectNamesTests
             (master, "master", "voicebot", "branch", "Private"));
         var names = voice.Tools.Names;
 
-        // New: all of its anchor (#455), its topic too; then the same project again: its label alone
-        Assert.Equal("issue 376, voice names i GodMode, profil Godmode", Danish.Named(names.Of(issue)!));
+        // New: all of its anchor (#455), its topic too, its root and profile of one name said once (#529); then the same
+        // project again: its label alone
+        Assert.Equal("issue 376, voice names i GodMode", Danish.Named(names.Of(issue)!));
         Assert.Equal("issue 376", Danish.Named(names.Of(issue)!));
         Assert.Equal("branch master i voicebot, profil Private", Danish.Named(names.Of(master)!));
         // Back to it after another: its topic, and the root and profile it changed back to
-        Assert.Equal("issue 376, voice names in GodMode, profile Godmode", English.Named(names.Of(issue)!));
+        Assert.Equal("issue 376, voice names in GodMode", English.Named(names.Of(issue)!));
 
         // Said as it is named, it is found
         Assert.Equal(issue, voice.Handles.Resolve("issue 376"));
@@ -149,4 +150,27 @@ public sealed class ProjectNamesTests
     [InlineData("vonage", "vonage", null, "vonage")]
     public void A_label_says_what_the_handle_is(string handle, string name, string? kind, string label) =>
         Assert.Equal(label, ProjectHandles.Label(handle, name, kind));
+
+    /// <summary>A root and profile of one name are said once (#529: "in GodMode, profile Godmode" on every announcement).</summary>
+    [Fact]
+    public void A_root_with_its_profiles_name_is_said_once()
+    {
+        var overseer = new ProjectRef(Server, "Godmode/GodMode/260930-overseer-voice-epics-x1");
+        var other = new ProjectRef(Server, "Mega/Mega-Assistant/260930-chat-general-y2");
+        var voice = Start(
+            (overseer, "voice-epics", "GodMode", "overseer", "Godmode"),
+            (other, "general", "Mega-Assistant", "chat", "Mega"));
+
+        Assert.Equal("overseer voice, voice epics in GodMode", English.Named(voice.Tools.Names.Full(overseer)!));
+        Assert.Equal("chat general in Mega-Assistant, profile Mega", English.Named(voice.Tools.Names.Full(other)!));
+    }
+
+    /// <summary>Two profiles with a root of that name: the profile is said, which tells them apart.</summary>
+    [Fact]
+    public void A_root_two_profiles_have_still_says_its_profile()
+    {
+        var voice = TwoMasters();
+
+        Assert.Equal("branch master in GodMode, profile Godmode", English.Named(voice.Tools.Names.Full(GodmodeMaster)!));
+    }
 }

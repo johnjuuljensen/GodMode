@@ -303,11 +303,13 @@ public sealed class DictationTests
     }
 
     [Theory]
-    [InlineData("Diktér til 283", "283", "")]
-    [InlineData("Dikter til issue 283.", "issue 283", "")]
-    [InlineData("Dictate to branch master. Use the migration.", "branch master", "Use the migration.")]
-    public void A_start_names_the_project_and_what_follows(string final, string reference, string after) =>
-        Assert.Equal((reference, after), Dictation.Starts(final));
+    [InlineData("Diktér til 283", "283", "", true)]
+    [InlineData("Dikter til issue 283.", "issue 283", "", true)]
+    [InlineData("Dictate to branch master. Use the migration.", "branch master", "Use the migration.", true)]
+    [InlineData("Dictate FE86.", "FE86", "", false)]
+    [InlineData("Diktér 283. Brug migrationen.", "283", "Brug migrationen.", false)]
+    public void A_start_names_the_project_and_what_follows(string final, string reference, string after, bool addressed) =>
+        Assert.Equal((reference, after, addressed), Dictation.Starts(final));
 
     [Theory]
     [InlineData("Brug den eksisterende migration, ikke en ny. Og så videre.", "Brug den eksisterende migration, ikke en ny …")]
@@ -449,19 +451,23 @@ public sealed class DictationTests
 
     /// <summary>
     /// Announcements wait while dictating: one in a pause to think would break the user's train of thought. They are
-    /// said once it is sent or dropped.
+    /// said a moment after it is sent or dropped (#529), so its read-back is heard as the last word of it.
     /// </summary>
     [Fact]
     public async Task Announcements_wait_while_dictating()
     {
-        var (_, dictation, _) = await DictatingAsync();
+        var (_, dictation, time) = await DictatingAsync();
         var channel = Channel.CreateUnbounded<Announcement>();
-        var announcements = new HeldAnnouncements(channel.Writer, new SessionCreates(new FakeServers(), new ProjectHandles()), dictation);
+        var announcements = new HeldAnnouncements(channel.Writer, new SessionCreates(new FakeServers(), new ProjectHandles()), dictation, time);
 
         announcements.Write(new Announcement("issue 101 har et spørgsmål"));
         Assert.False(channel.Reader.TryRead(out _));
 
         await dictation.HearAsync("Diktat slut", CancellationToken.None);
+        announcements.Write(new Announcement("issue 102 er færdig"));
+        time.Advance(HeldAnnouncements.AfterDictation - TimeSpan.FromSeconds(1));
+        Assert.False(channel.Reader.TryRead(out _));
+        time.Advance(TimeSpan.FromSeconds(1));
 
         Assert.True(channel.Reader.TryRead(out var said));
         Assert.Equal("issue 101 har et spørgsmål", said.Text);
@@ -496,5 +502,35 @@ public sealed class DictationTests
         await Eventually.UntilAsync(() => server.StdinOf(asking.Id).Count == 2, () => $"the dictation on stdin: {string.Join(" | ", server.StdinOf(asking.Id))}\n{server.Output}");
         Assert.Contains(JsonSerializer.Serialize(SpokenInput.Mark(dictated)), server.StdinOf(asking.Id)[1]);
         Assert.Equal(0, model.Calls);
+    }
+
+    /// <summary>"Dictate FE86." (#529) starts a dictation: "to" is not needed when the words name a project.</summary>
+    [Fact]
+    public async Task A_dictation_starts_without_til_when_it_names_a_project()
+    {
+        var model = new ScriptedChatClient();
+        var (servers, voice) = await AskedAsync(model);
+        await using var _ = voice;
+
+        Say(voice, "Diktér 283.");
+        await voice.Events.SaidAsync(Started);
+        Say(voice, First);
+        Say(voice, "Diktat slut.");
+        await SaidStartingAsync(voice, "Sender 1 sætning til issue 283");
+
+        Assert.Equal((P283, First), Assert.Single(servers.Replies));
+        Assert.Equal(0, model.Calls);
+    }
+
+    /// <summary>"Diktér" with words that name no project is the chat's, and dictated words starting so are dictated.</summary>
+    [Fact]
+    public async Task Dikter_without_til_and_no_project_is_no_start()
+    {
+        var (_, dictation, _) = await DictatingAsync();
+        Assert.Null(await new Dictation(new FakeServers(), new ProjectHandles(), null!, new VoiceConversation(), new VoicePhrases(Danish))
+            .StartAsync("Diktér en besked om backup.", CancellationToken.None));
+
+        Assert.Null(await dictation.HearAsync("Dictate end of the sentence here.", CancellationToken.None));
+        Assert.Contains("Dictate end of the sentence here.", dictation.Parts);
     }
 }
