@@ -3371,7 +3371,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (RecordOf(project) is not { } grant) return false;
         try
         {
-            return _rootConfigReader.ReadConfigStrict(project.RootPath).ResolveAction(grant.Action)?.FleetTools switch
+            return RecordedActionOf(project, grant)?.FleetTools switch
             {
                 FleetToolsGrant.Granted => true,
                 FleetToolsGrant.Grantable => grant.Granted,
@@ -3384,6 +3384,30 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             return false;
         }
     }
+
+    /// <summary>
+    /// Who is the parent of the sessions the project starts with the fleet's <c>start_session</c>: its action as it
+    /// was started (its <see cref="FleetGrantFile"/> record, never its own files), in the root's config read now, says
+    /// <c>"fleetChildren"</c> (issue #431). A session without a record is <see cref="FleetChildren.Own"/>, as it has no
+    /// fleet tools to start one with; a config that cannot be read now is refused, so no start guesses at it.
+    /// </summary>
+    public FleetChildren FleetChildrenOf(string projectId)
+    {
+        if (!_projects.TryGetValue(projectId, out var project)) throw new KeyNotFoundException($"Project {projectId} not found");
+        if (RecordOf(project) is not { } grant) return FleetChildren.Own;
+        try
+        {
+            return RecordedActionOf(project, grant)?.FleetChildren ?? FleetChildren.Own;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"The root config of {projectId} could not be read: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>The action the session's record names, in the root's config read now (strictly: a config error throws); null when it has no such action now.</summary>
+    private CreateAction? RecordedActionOf(ProjectInfo project, FleetGrantFile.Grant grant) =>
+        _rootConfigReader.ReadConfigStrict(project.RootPath).ResolveAction(grant.Action);
 
     /// <summary>
     /// Builds the full environment variables dictionary for scripts.

@@ -252,6 +252,7 @@ public class RootConfigReader : IRootConfigReader
         Transient = overlay.Transient ?? baseConfig.Transient,
         Adopt = overlay.Adopt ?? baseConfig.Adopt,
         FleetTools = overlay.FleetTools ?? baseConfig.FleetTools,
+        FleetChildren = overlay.FleetChildren ?? baseConfig.FleetChildren,
         QuietTurns = overlay.QuietTurns ?? baseConfig.QuietTurns,
         Importance = overlay.Importance ?? baseConfig.Importance
     };
@@ -308,6 +309,7 @@ public class RootConfigReader : IRootConfigReader
             Adopt: raw.Adopt ?? false,
             Effort: raw.Effort,
             FleetTools: ParseFleetTools(name, raw.FleetTools),
+            FleetChildren: ParseFleetChildren(name, raw.FleetChildren),
             QuietTurns: raw.QuietTurns ?? false,
             Importance: ParseImportance(name, raw.Importance)
         );
@@ -324,6 +326,18 @@ public class RootConfigReader : IRootConfigReader
         { ValueKind: JsonValueKind.String } grantable when grantable.GetString() == "grantable" => FleetToolsGrant.Grantable,
         { } other => throw new InvalidDataException(
             $"Action '{name}' has \"fleetTools\": {other.GetRawText()}, which is none of true, \"grantable\" and false."),
+    };
+
+    /// <summary>
+    /// The action's <c>fleetChildren</c>: <c>"own"</c>, <c>"topLevel"</c> or none, which is <see cref="FleetChildren.Own"/>.
+    /// Anything else is a config error (<see cref="InvalidDataException"/>), never taken for either.
+    /// </summary>
+    private static FleetChildren ParseFleetChildren(string name, string? value) => value switch
+    {
+        null or "own" => FleetChildren.Own,
+        "topLevel" => FleetChildren.TopLevel,
+        _ => throw new InvalidDataException(
+            $"Action '{name}' has \"fleetChildren\": \"{value}\", which is none of \"own\" and \"topLevel\"."),
     };
 
     /// <summary>
@@ -448,6 +462,8 @@ public class RootConfigReader : IRootConfigReader
         public bool? Adopt { get; init; }
         /// <summary>true, "grantable" or false: <see cref="ParseFleetTools"/>.</summary>
         public JsonElement? FleetTools { get; init; }
+        /// <summary>"own" or "topLevel": <see cref="ParseFleetChildren"/>.</summary>
+        public string? FleetChildren { get; init; }
         public bool? QuietTurns { get; init; }
         /// <summary>"quiet", "normal" or "important": <see cref="ParseImportance"/>.</summary>
         public string? Importance { get; init; }
