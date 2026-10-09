@@ -154,8 +154,20 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
             ? Task.FromResult(status)
             : Task.FromException<ProjectStatus>(new KeyNotFoundException(project.ProjectId));
 
+    /// <summary>
+    /// A permission prompt that arrives as a reply is on its way, after voice read the status (#289): the reply finds it
+    /// pending, and is refused as the server refuses a spoken reply then; none when null.
+    /// </summary>
+    public PendingPermission? PermissionBeforeReply { get; set; }
+
     public Task ReplyAsync(ProjectRef project, string text, CancellationToken ct)
     {
+        if (PermissionBeforeReply is { } permission && _statuses.TryGetValue(project, out var status))
+        {
+            _statuses[project] = status with { State = ProjectState.WaitingPermission, PendingPermission = permission };
+            return Task.FromException(new Microsoft.AspNetCore.SignalR.HubException(
+                $"Project {project.ProjectId} is waiting on the user's answer to its permission prompt, which is answered on screen: nothing was sent."));
+        }
         Replies.Enqueue((project, text));
         return Task.CompletedTask;
     }

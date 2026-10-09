@@ -77,7 +77,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - **GodMode.Server** — ASP.NET SignalR server that spawns/manages Claude Code processes; serves the hub and its MCP endpoint, and no page
 - **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation. An npm project with a NoTargets `GodMode.Client.React.csproj` in the slnx, which runs TypeGen and `npm run build`; GodMode.Maui references it
 - **GodMode.ClientBase** — Shared .NET client abstractions (host providers, server registry, token protection)
-- **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React; on Windows it also runs the voice session (`Voice/VoiceHost.cs`, `voice.*` bridge messages)
+- **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React; on Windows and Android it also runs the voice session (`Voice/VoiceHost.cs`, `voice.*` bridge messages)
 - **GodMode.Voice** — voice over GodMode on VoiceBot (the `external/VoiceBot` submodule): a Danish-first voice graph whose tools use the hub as it is (what needs me, a project's status, answer it, mark it seen), announcements of new attention items, spoken project handles, the voice settings (keys in `ISecretStore`)
 - **GodMode.ProjectFiles** — File system utilities for project folders (status.json, JSONL streams)
 - **SignalR.Proxy** — SignalR WebSocket relay used by MAUI for multi-server connectivity
@@ -92,7 +92,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - `IProjectHub` (Shared) — Client→Server methods
 - `IProjectHubClient` (Shared) — Server→Client callbacks (including `CreationProgress`)
 - `ProjectHub` (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
-- `HubConnectionFactory` (ClientBase) — .NET clients get a raw `HubConnection` and use `TypedSignalR.Client`'s `CreateHubProxy<IProjectHub>()` for typed calls
+- `HubConnections.Build` (ClientBase) — .NET clients get a raw `HubConnection` and use `TypedSignalR.Client`'s `CreateHubProxy<IProjectHub>()` for typed calls
 - `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of `GodMode.Client.React.csproj` (GodMode.Maui's reference, or the solution) (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
 
 **Config-Driven Project Roots (Multi-File)**
@@ -129,9 +129,10 @@ cd src/GodMode.Client.React && npm test && npm run lint
 **Authentication** (`src/GodMode.Server/Auth/`, details in the server README)
 - Every request needs a credential, loopback included. One mode per run: codespace (`CODESPACES=true`: a GitHub token of `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`) or API key
 - The key is `Authentication:ApiKey`, else one the server generates on its first start into an owner-only key file in its own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key`, `~/.local/share/GodMode.Server/api-key`; never under a scan folder or explicit root), prints once, and reuses on every start
+- The credential goes in the `Authorization` header, on the hub's WebSocket upgrade too: no endpoint reads one from the query string (the app's .NET SignalR clients send the header)
 - Any request with an `Origin` gets 403, whatever it names (the server's own bindings included; no setting allows one): no browser is a client. A request with no `Origin` (the MAUI relay, the attention service, a session's claude) needs its credential alone
 - Only `/health` is anonymous. `/`, with the key, answers `{"service":"GodMode.Server",…}`; nothing serves a page
-- Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them; a credential they need goes in the root's `environment`, or its profile's
+- Claude processes and root scripts start from an environment allowlist (`ChildEnvironment`), not the server's environment, so the key never reaches them, nor does a `${VAR}` in config naming it (`Authentication__*`, also under `ASPNETCORE_`/`DOTNET_`); a credential they need goes in the root's `environment`, or its profile's
 
 ### Project Folder Structure
 ```

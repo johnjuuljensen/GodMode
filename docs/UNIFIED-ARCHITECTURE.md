@@ -21,12 +21,21 @@ GodMode.slnx
 │   ├── GodMode.Server/            # ASP.NET SignalR server, spawns Claude processes, serves the hub and the MCP endpoint (no page)
 │   ├── GodMode.Client.React/      # React SPA (Vite + Zustand + SignalR), an npm project; its NoTargets csproj builds it
 │   ├── GodMode.ProjectFiles/      # File system utilities for project folders
-│   ├── GodMode.ClientBase/        # Shared .NET client abstractions (host providers, registry)
-│   ├── GodMode.Maui/              # MAUI app (Android, iOS, macOS, Windows) — hosts React
+│   ├── GodMode.ClientBase/        # Shared .NET client abstractions (host providers, registry, hub connections)
+│   ├── GodMode.Voice/             # Voice over GodMode on VoiceBot: the graph, its tools, announcements, settings
+│   ├── GodMode.Maui/              # MAUI app (Android, iOS, macOS, Windows) — hosts React; runs voice on Windows and Android
 │   └── SignalR.Proxy/             # SignalR WebSocket relay for MAUI
+├── external/
+│   └── VoiceBot/                  # Git submodule (private johnjuuljensen/VoiceBot): the voice pipeline and its providers
+├── tools/
+│   └── GodMode.TypeGen/           # Build-time generator of the React client's hub types
 └── tests/
-    └── GodMode.Server.Tests/      # xUnit tests for GodMode.Server
+    ├── GodMode.Server.Tests/      # xUnit tests for GodMode.Server, against GodMode.FakeClaude
+    ├── GodMode.Relay.Tests/       # xUnit tests for the relay, the server registry and ClientBase
+    └── GodMode.Voice.Tests/       # xUnit tests for GodMode.Voice: text in place of speech, a scripted model
 ```
+
+The solution build needs the submodule: `git submodule update --init --recursive` once in a new checkout. `GodMode.Voice`, its tests and `GodMode.Maui` reference VoiceBot's projects by path; `GodMode.Server`, the Docker image and the codespace need none of it. Nothing is committed inside the submodule: what VoiceBot lacks is a johnjuuljensen/VoiceBot issue, and upgrading it is a commit here that moves the pin.
 
 ### Project Dependency Graph
 
@@ -39,9 +48,11 @@ GodMode.Server  ← GodMode.Server.Tests
 
 GodMode.Shared    SignalR.Proxy  (WebSocket relay, LocalServer)
     ↑                 ↑
-GodMode.ClientBase  ← (host providers, server registry, URL selection)  ← GodMode.Relay.Tests
+GodMode.ClientBase  ← (host providers, server registry, URL selection, ServerConnections)  ← GodMode.Relay.Tests
     ↑
-GodMode.Maui
+GodMode.Voice  ← (VoiceBot.Core, .AI, .Providers.ElevenLabs, .Providers.Anthropic)  ← GodMode.Voice.Tests (+ GodMode.Server)
+    ↑
+GodMode.Maui  ← (VoiceBot.Providers.Windows, .Providers.Android)
 ```
 
 `GodMode.Client.React/GodMode.Client.React.csproj`, a NoTargets project in the slnx, generates the hub types and runs `npm run build`, first running `npm ci` when `node_modules` is missing or older than `package-lock.json`. The MAUI app references it and packages `dist/` as its `wwwroot`. The server does not reference it: building or running the server builds no React and needs no npm.
@@ -105,7 +116,7 @@ When building UI features:
 
 **Build integration**: The MAUI csproj references `GodMode.Client.React.csproj`, which runs `npm run build`, and adds the React `dist/` as `MauiAsset` items under `wwwroot/`. HybridWebView serves these embedded files.
 
-**Host bridge**: React talks to the shell over HybridWebView's raw-message channel (`services/hostBridge.ts` ↔ `Bridge/HostBridge.cs` + `Bridge/ShellBridge.cs`), a typed request/response API. `relay.info` returns the relay's base URL and a per-launch secret; `servers.list`, `servers.add`, `servers.remove`, `servers.start` and `servers.stop` manage servers; the `servers.changed` event says the list or a server's state changed. No bridge message carries a server's access token back to React.
+**Host bridge**: React talks to the shell over HybridWebView's raw-message channel (`services/hostBridge.ts` ↔ `Bridge/HostBridge.cs` + `Bridge/ShellBridge.cs`), a typed request/response API. `relay.info` returns the relay's base URL and a per-launch secret; `servers.list`, `servers.add`, `servers.remove`, `servers.start` and `servers.stop` manage servers; the `servers.changed` event says the list or a server's state changed. Voice, on Windows and Android, is the shell's too (`Voice/VoiceHost.cs`): `voice.state`, `voice.start`, `voice.stop`, `voice.mic.open`, `voice.mic.close`, `voice.settings.get`, `voice.settings.set` and `voice.devices` are requests, and `voice.transcript`, `voice.response`, `voice.error`, `voice.recovered` and `voice.stateChanged` events. No bridge message carries a server's access token, nor a voice key, back to React.
 
 **The relay** (`LocalServer`) serves only the WebSocket relay, and only to a request with the WebView's `Origin` (`https://0.0.0.1`, or `app://0.0.0.1` on Apple platforms; else 403) and the per-launch secret as the `access_token` query parameter (else 401). It forwards to registered servers by server ID and adds that server's key itself. SignalR frames pass through untouched, so the hub contract needs no relay changes.
 
@@ -122,12 +133,14 @@ The MAUI project (`GodMode.Maui/`) contains:
 - `MauiProgram.cs` — DI registration (using `ServiceCollectionExtensions.cs` from GodMode.ClientBase), starts the relay
 - `MauiSecretStore.cs` — `ISecretStore` over MAUI `SecureStorage`
 - `Bridge/` — `HostBridge` (the message channel), `ShellBridge` (the shell API), `ShellMessages.cs` (its types)
-- `Platforms/` — Platform-specific entry points (minimal). Android disables backup and device transfer.
+- `Voice/` — `VoiceHost`, the app's one voice session (it belongs to the app, not the page), over `GodMode.Voice`, and `VoiceAudio`, the platform's microphone and speaker
+- `Platforms/` — Platform-specific entry points. Android disables backup and device transfer, and has voice's audio (`AndroidVoiceAudio`: audio focus, the communication route) and its microphone foreground service (`VoiceService`).
 
 **Key services in GodMode.ClientBase/**:
 - `IServerRegistryService` — server registrations in `~/.godmode/servers.json` (each with a GUID ID and an ordered URL list); tokens in `ISecretStore`, never in the file
 - `IServerDirectory` — builds an `IServerProvider` per registration (local servers, GitHub Codespaces), lists servers and resolves one to a relay target
 - `ServerUrlSelector` — picks a server's URL: the first, in order, that answers `/health` within 1.5 s. Checked on every relay connection; a network change drops the relays so they reconnect and check again
+- `ServerConnections` — the app's own hub connections, straight to each server the directory lists (not through the relay), kept up and made again as servers come and go: the attention watcher's, and voice's (`HubServers` in GodMode.Voice). `HubConnections.Build` makes each one
 
 **SignalR.Proxy/** handles the WebSocket relay:
 - `LocalServer` — the loopback listener with the Origin and secret checks (tested in `tests/GodMode.Relay.Tests`)
@@ -160,19 +173,18 @@ All real-time communication uses strongly-typed SignalR on one hub, `/hubs/proje
 - **`IProjectHub`** (Shared) — Client→Server methods
 - **`IProjectHubClient`** (Shared) — Server→Client callbacks
 - **`ProjectHub`** (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
-- **`HubConnectionFactory`** (ClientBase) — .NET client side: `IServerProvider.ConnectAsync` returns a raw `HubConnection`, and consumers call `CreateHubProxy<IProjectHub>()` (`TypedSignalR.Client`) for typed calls
+- **`HubConnections.Build`** (ClientBase) — .NET client side: a raw `HubConnection` to a server's hub with its key and the server's payload conventions, and consumers call `CreateHubProxy<IProjectHub>()` (`TypedSignalR.Client`) for typed calls
 - **`signalr/generated/hub-types.ts`** (React) — both interfaces and their models in TypeScript, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of the client (committed; not edited by hand). `signalr/hub.ts` wires the calls on them
 
 The hub is the session loop plus reading profiles and roots:
 
-| `IProjectHub` (23 methods) | |
+| `IProjectHub` (26 methods) | |
 |---|---|
 | Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `RestoreProject`, `ForgetProject` |
 | Prompts | `RespondToPermission`, `GetPermissionDetail`, `AnswerQuestion` |
-| Attention | `GetAttention`, `MarkSeen`, `ReplyAndResume`, `GetLastReplies` |
-| Roots | `ListProjectRoots`, `ListUnmanaged`, `AdoptFolder` |
+| Attention | `GetAttention`, `MarkSeen`, `SetImportance`, `ReplyAndResume`, `ReplyByVoice`, `AskForRecap`, `GetLastReplies` |
+| Roots | `ListProjectRoots`, `ListUnmanaged`, `AdoptFolder`, `DescribeIssue` |
 | Profiles | `ListProfiles` |
-| Utility | `CheckCommand` |
 
 | `IProjectHubClient` (9 callbacks) |
 |---|
@@ -282,7 +294,7 @@ A session is a folder in `.godmode/sessions/` of a working folder directly insid
 Every request needs a credential, whatever the server is bound to, loopback included. The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
 
 1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`, which its sessions are given.
-2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade). The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under a scan folder or an explicit root.
+2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>`, on the hub's WebSocket upgrade too (the .NET SignalR client sends it there); no endpoint reads a key from the query string. The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under a scan folder or an explicit root.
 
 **No browser** (`Auth/OriginPolicy.cs`). A request with an `Origin`, as a browser sends on every WebSocket upgrade and any request but a same-origin GET, is refused with 403 before authentication, whatever origin it names: the server's own bindings included, in Development and in a codespace too, and no setting allows one. A request with no `Origin` (the MAUI relay, the attention service, a session's claude on `/mcp`) needs its credential alone.
 

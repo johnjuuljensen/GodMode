@@ -1328,9 +1328,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>
     /// <see cref="SendInputAsync(string, string)"/>; without <paramref name="answersPending"/>, a pending permission
     /// prompt or question refuses the input (<see cref="InvalidOperationException"/>) and is left as it is. One that
-    /// comes after the check gets no answer from it: the input then waits in claude's stdin as a message.
+    /// comes after the check gets no answer from it: the input then waits in claude's stdin as a message. With
+    /// <paramref name="spoken"/>, a pending permission prompt refuses it so, and a question is answered.
     /// </summary>
-    private async Task SendInputAsync(string projectId, string input, bool answersPending)
+    private async Task SendInputAsync(string projectId, string input, bool answersPending, bool spoken = false)
     {
         if (!_projects.TryGetValue(projectId, out var project))
         {
@@ -1338,6 +1339,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         }
         RefuseFailedCreate(project);
         if (!answersPending) RefuseWhilePending(project);
+        if (spoken) RefusePermissionPending(project);
 
         // claude is blocked on a permission prompt and reads no input until it is answered: a reply
         // in the chat answers it. A single question takes it as its answer; anything else is a deny
@@ -1362,6 +1364,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             throw new KeyNotFoundException($"Project {projectId} not found");
         RefuseFailedCreate(project);
         if (!answersPending) RefuseWhilePending(project);
+        if (spoken) RefusePermissionPending(project);
         SlashCommands.Check(text, project.Status);
         if (spoken) text = SpokenInput.Mark(text);
         // The user's reply answers what is pending; the fleet's send, which does not, starts no turn of the user's
@@ -1369,7 +1372,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // One reply at a time decides whether to resume: two would launch two processes. The wait
         // for the session to start comes after the lock, so a stop is not held behind it
-        var reply = await WithTrackedLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false, answersPending));
+        var reply = await WithTrackedLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false, answersPending, spoken));
         if (reply.SessionStart is { } sessionStart) await sessionStart;
     }
 
@@ -1402,14 +1405,15 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <see cref="ProjectStatus.StateAtShutdown"/>; not delivered when it did neither. A resume carries the messages
     /// held for the session after <paramref name="text"/>, or alone when <paramref name="text"/> is null.
     /// </summary>
-    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string? text, bool onlyIfInterrupted, bool answersPending = true)
+    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string? text, bool onlyIfInterrupted, bool answersPending = true,
+        bool spoken = false)
     {
         var projectId = project.Status.Id;
         await _lifecycle.SettleAsync(project);
         if (_lifecycle.IsRunning(project))
         {
             if (onlyIfInterrupted || text == null) return new(false);
-            await SendInputAsync(projectId, text, answersPending);
+            await SendInputAsync(projectId, text, answersPending, spoken);
             return new(true);
         }
 
@@ -1507,6 +1511,18 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     }
 
     /// <summary>Refuses, changing nothing, while the project's claude waits on a permission prompt or a question: those are the user's to answer.</summary>
+    /// <summary>
+    /// A permission prompt is answered on screen, never by voice (#289): a spoken reply that finds one first, which came
+    /// after voice looked, is refused rather than deny it with the spoken words. A question is the spoken reply's to answer.
+    /// </summary>
+    private static void RefusePermissionPending(ProjectInfo project)
+    {
+        if (project.Process.OldestPending is { Question: null })
+            throw new InvalidOperationException(
+                $"Project {project.Status.Id} is waiting on the user's answer to its permission prompt, which is answered on screen: " +
+                "nothing was sent.");
+    }
+
     private static void RefuseWhilePending(ProjectInfo project)
     {
         if (project.Process.OldestPending is { } pending)

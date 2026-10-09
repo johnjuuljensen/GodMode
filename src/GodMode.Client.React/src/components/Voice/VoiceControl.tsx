@@ -82,9 +82,10 @@ export function VoicePanel({ status, compact = false }: { status: VoiceStatus; c
   useEffect(() => {
     if (dismissed !== null && error !== dismissed) setDismissed(null);
   }, [error, dismissed]);
+  // A failed start is also kept in the status, for a page loaded later: one dismiss takes both
   const dismiss = () => {
-    if (startError) setStartError(null);
-    else setDismissed(error);
+    setStartError(null);
+    setDismissed(status.Error ? describeVoiceError(status.Error) : error);
   };
   const showsTranscript = on && !compact;
   const lines = status.Lines.slice(-8);

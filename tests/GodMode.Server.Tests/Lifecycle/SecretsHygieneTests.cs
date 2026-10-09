@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GodMode.FakeClaude;
 using GodMode.Server.Services;
 
@@ -32,6 +33,40 @@ public class SecretsHygieneTests
         // The project token is only in the MCP config file
         var token = GodModeMcpEntry.Of(launch).Token;
         Assert.DoesNotContain(launch.Environment.Values, value => value.Contains(token));
+    }
+
+    /// <summary>
+    /// A root's <c>environment</c> cannot name the server's own key with <c>${VAR}</c> (#279): the entry
+    /// is there, empty. Any other variable of the server's still resolves,
+    /// which is how godmode-dev passes the codespace's <c>GITHUB_TOKEN</c>.
+    /// </summary>
+    [Fact]
+    public async Task ARootsEnvironment_CannotExpandTheServersKey_ButStillExpandsOtherVariables()
+    {
+        using var canaries = new ServerCanaries();
+        var githubToken = "ghp-canary-" + Guid.NewGuid().ToString("N");
+        var previousToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+        Environment.SetEnvironmentVariable("GITHUB_TOKEN", githubToken);
+        try
+        {
+            await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+            var configPath = Path.Combine(harness.RootPath, ".godmode-root", "config.json");
+            var config = JsonNode.Parse(File.ReadAllText(configPath))!;
+            config["environment"]!["LEAK"] = "${Authentication__ApiKey}";
+            config["environment"]!["GITHUB_TOKEN"] = "${GITHUB_TOKEN}";
+            File.WriteAllText(configPath, config.ToJsonString());
+
+            var created = await harness.CreateProjectAsync();
+            var launch = await harness.WaitForStdinAsync(created.Id);
+
+            canaries.AssertAbsent(launch.Environment);
+            Assert.Equal("", launch.Environment["LEAK"]);
+            Assert.Equal(githubToken, launch.Environment["GITHUB_TOKEN"]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GITHUB_TOKEN", previousToken);
+        }
     }
 
     /// <summary>

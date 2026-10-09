@@ -108,10 +108,28 @@ public class AuthTests
         await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
         origin = WithPort(origin, run);
 
-        using var socket = new ClientWebSocket();
+        using var socket = HubSocket(ApiKey);
         socket.Options.SetRequestHeader("Origin", origin);
-        var ex = await Assert.ThrowsAsync<WebSocketException>(() => socket.ConnectAsync(HubSocketUrl(run, ApiKey), CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<WebSocketException>(() => socket.ConnectAsync(HubSocketUrl(run), CancellationToken.None));
         Assert.Contains("403", ex.Message);
+    }
+
+    /// <summary>
+    /// An <c>Origin</c> the client libraries would not send as such, written on the wire: empty, twice, in lower
+    /// or upper case. Each is refused, on an anonymous endpoint and on the hub with the key.
+    /// </summary>
+    [Theory]
+    [InlineData("Origin: ")]
+    [InlineData("Origin: https://0.0.0.1\r\nOrigin: https://evil.example")]
+    [InlineData("origin: https://evil.example")]
+    [InlineData("ORIGIN: null")]
+    public async Task AnOriginHeader_EmptyRepeatedOrInAnyCase_Is403(string originLines)
+    {
+        await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
+
+        Assert.Equal(200, await RawStatusAsync(run, "GET /health", headerLines: null));
+        Assert.Equal(403, await RawStatusAsync(run, "GET /health", originLines));
+        Assert.Equal(403, await RawStatusAsync(run, $"POST {HubPath}/negotiate?negotiateVersion=1", $"Authorization: Bearer {ApiKey}\r\n{originLines}"));
     }
 
     public static TheoryData<string> Origins =>
@@ -156,12 +174,12 @@ public class AuthTests
 
         await AssertKeyRequiredAsync(run, ApiKey);
 
-        using var socket = new ClientWebSocket();
-        await socket.ConnectAsync(HubSocketUrl(run, ApiKey), CancellationToken.None);
+        using var socket = HubSocket(ApiKey);
+        await socket.ConnectAsync(HubSocketUrl(run), CancellationToken.None);
         Assert.Equal(WebSocketState.Open, socket.State);
 
-        using var keyless = new ClientWebSocket();
-        var ex = await Assert.ThrowsAsync<WebSocketException>(() => keyless.ConnectAsync(HubSocketUrl(run, token: null), CancellationToken.None));
+        using var keyless = HubSocket(token: null);
+        var ex = await Assert.ThrowsAsync<WebSocketException>(() => keyless.ConnectAsync(HubSocketUrl(run), CancellationToken.None));
         Assert.Contains("401", ex.Message);
 
         // As the relay connects: a hub method answers
@@ -197,16 +215,29 @@ public class AuthTests
         Assert.Equal(JsonValueKind.Array, profiles.ValueKind);
     }
 
+    /// <summary>
+    /// A key in the URL opens nothing, the hub included: <c>?access_token=</c> was for browsers, which cannot set
+    /// headers on a WebSocket upgrade and are no clients. The .NET SignalR client, as the app's relay and attention
+    /// service connect, sends the key in the <c>Authorization</c> header, on the upgrade too.
+    /// </summary>
     [Fact]
-    public async Task QueryToken_IsOnlyAcceptedByTheHub_AndNeverLogged()
+    public async Task QueryToken_IsRefusedEverywhere_TheHubIncluded_AndNeverLogged()
     {
         await using var run = await StartHealthyAsync("127.0.0.1", ApiKey);
+        var query = $"access_token={Uri.EscapeDataString(ApiKey)}";
 
-        // Outside the hub, a key in the URL is refused.
-        using var status = await run.Http.GetAsync($"/?access_token={ApiKey}");
+        using var status = await run.Http.GetAsync($"/?{query}");
         Assert.Equal(HttpStatusCode.Unauthorized, status.StatusCode);
+        using var negotiate = await run.Http.PostAsync($"{HubPath}/negotiate?negotiateVersion=1&{query}", content: null);
+        Assert.Equal(HttpStatusCode.Unauthorized, negotiate.StatusCode);
+        using (var socket = HubSocket(token: null))
+        {
+            var ex = await Assert.ThrowsAsync<WebSocketException>(() =>
+                socket.ConnectAsync(new Uri($"{HubSocketUrl(run)}?{query}"), CancellationToken.None));
+            Assert.Contains("401", ex.Message);
+        }
 
-        // The hub's WebSocket upgrade carries it in the query string, all a browser can do, and works.
+        // The relay's connection: WebSockets alone, no negotiate, the key from AccessTokenProvider
         await using (var hub = new HubConnectionBuilder()
             .WithUrl($"{run.BaseUrl}{HubPath}", options =>
             {
@@ -368,9 +399,34 @@ public class AuthTests
         Assert.Equal(HttpStatusCode.OK, right.StatusCode);
     }
 
-    /// <summary>The hub's WebSocket URL, with the key as a browser sends it (it cannot set headers on an upgrade).</summary>
-    private static Uri HubSocketUrl(Run run, string? token) =>
-        new($"{run.BaseUrl.Replace("http", "ws")}{HubPath}{(token == null ? "" : $"?access_token={Uri.EscapeDataString(token)}")}");
+    /// <summary>The hub's WebSocket URL.</summary>
+    private static Uri HubSocketUrl(Run run) => new($"{run.BaseUrl.Replace("http", "ws")}{HubPath}");
+
+    /// <summary>A WebSocket for the hub's upgrade, presenting <paramref name="token"/> in the Authorization header.</summary>
+    private static ClientWebSocket HubSocket(string? token)
+    {
+        var socket = new ClientWebSocket();
+        if (token != null) socket.Options.SetRequestHeader("Authorization", $"Bearer {token}");
+        return socket;
+    }
+
+    /// <summary>
+    /// The status code of <paramref name="requestLine"/> (<c>METHOD path</c>) sent as written, with
+    /// <paramref name="headerLines"/> (CRLF-separated) as they are: no client library normalizes them.
+    /// </summary>
+    private static async Task<int> RawStatusAsync(Run run, string requestLine, string? headerLines)
+    {
+        var uri = new Uri(run.BaseUrl);
+        using var tcp = new System.Net.Sockets.TcpClient();
+        await tcp.ConnectAsync(uri.Host, uri.Port);
+        var stream = tcp.GetStream();
+        var request = $"{requestLine} HTTP/1.1\r\nHost: {uri.Authority}\r\nContent-Length: 0\r\nConnection: close\r\n"
+            + (headerLines == null ? "" : headerLines + "\r\n") + "\r\n";
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
+        using var reader = new StreamReader(stream, Encoding.ASCII);
+        var statusLine = await reader.ReadLineAsync() ?? "";
+        return int.Parse(statusLine.Split(' ')[1]);
+    }
 
     /// <summary><c>{port}</c> is the server's.</summary>
     private static string WithPort(string origin, Run run) => origin.Replace("{port}", $"{new Uri(run.BaseUrl).Port}");
