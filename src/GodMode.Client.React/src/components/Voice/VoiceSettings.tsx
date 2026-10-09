@@ -1,12 +1,25 @@
 import { useEffect, useState } from 'react';
 import {
   getVoiceDevices, getVoiceSettings, setVoiceSettings,
-  type AudioDevice, type VoiceDeviceList, type VoiceSettingsUpdate, type VoiceSettingsView,
+  type AudioDevice, type VoiceDeviceList, type VoiceSettingsUpdate, type VoiceSettingsView, type VoiceTierModels,
 } from '../../services/voice';
 import { Toggle } from '../settings-shared';
 import '../settings-common.css';
 
 const DEFAULT: AudioDevice = { Id: '', Name: '' };
+
+/** Voice's tiers, as Settings names them. */
+const TIERS = [
+  { tier: 'Light', label: 'Light model' },
+  { tier: 'Medium', label: 'Medium model (the conversation)' },
+  { tier: 'Heavy', label: 'Heavy model' },
+] as const;
+
+type Tier = typeof TIERS[number]['tier'];
+type TierModels = Record<Tier, string>;
+
+const tierModels = (models?: VoiceTierModels | null): TierModels =>
+  ({ Light: models?.Light ?? '', Medium: models?.Medium ?? '', Heavy: models?.Heavy ?? '' });
 
 /**
  * Default (named after the device it is now), each device there is, and a chosen one that is not there now: voice
@@ -53,6 +66,7 @@ export function VoiceSettings() {
   const [speaker, setSpeaker] = useState<AudioDevice>(DEFAULT);
   const [micSilence, setMicSilence] = useState('');
   const [staleHours, setStaleHours] = useState('');
+  const [models, setModels] = useState<TierModels>(tierModels());
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
 
@@ -66,6 +80,7 @@ export function VoiceSettings() {
     setSpeaker(settings.Speaker ?? DEFAULT);
     setMicSilence(String(settings.MicSilenceSeconds));
     setStaleHours(String(settings.StaleHours ?? 24));
+    setModels(tierModels(settings.TierModels));
   };
 
   // The devices as they are now: read again when a picker opens, so a headset turned on since shows
@@ -105,6 +120,7 @@ export function VoiceSettings() {
     ...(devices?.Supported && { Microphone: microphone, Speaker: speaker }),
     ...(devices?.Supported && Number(micSilence) > 0 && { MicSilenceSeconds: Math.round(Number(micSilence)) }),
     ...(Number(staleHours) > 0 && { StaleHours: Math.round(Number(staleHours)) }),
+    TierModels: models,
     ...(elevenLabsKey.trim() && { ElevenLabsKey: elevenLabsKey }),
     ...(anthropicKey.trim() && { AnthropicKey: anthropicKey }),
   };
@@ -156,6 +172,19 @@ export function VoiceSettings() {
         <input id="voice-stale-hours" type="number" min={1} value={staleHours} onChange={e => setStaleHours(e.target.value)} />
         <div className="form-description">Voice counts those sessions, and names them when you ask for all. One that needs you is always named.</div>
       </div>
+      {TIERS.map(({ tier, label }) => {
+        const byDefault = view.DefaultTierModels?.[tier];
+        const set = view.TierModels?.[tier];
+        return (
+          <div className="form-group" key={tier}>
+            <label htmlFor={`voice-model-${tier}`}>{label}</label>
+            <input id={`voice-model-${tier}`} type="text" value={models[tier]} placeholder={byDefault ? `Default (${byDefault})` : 'Default'}
+              onChange={e => setModels({ ...models, [tier]: e.target.value })} autoComplete="off" spellCheck={false} />
+            {set && <div className="form-description">In place of the default, {byDefault ?? "VoiceBot's"}. Empty it to follow the default.</div>}
+          </div>
+        );
+      })}
+      <div className="form-description">Empty follows VoiceBot's default, and moves with it. A model typed here stays until you empty it.</div>
       <div className="settings-item">
         <div className="settings-item-info">
           <div className="settings-item-name">Echo cancellation</div>

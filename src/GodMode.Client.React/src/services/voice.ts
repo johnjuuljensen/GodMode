@@ -10,7 +10,7 @@ import type {
 } from './hostBridge';
 
 export type {
-  AudioDevice, VoiceDeviceList, VoiceError, VoiceLine, VoiceSettingsUpdate, VoiceSettingsView, VoiceStatus,
+  AudioDevice, VoiceDeviceList, VoiceError, VoiceLine, VoiceSettingsUpdate, VoiceSettingsView, VoiceStatus, VoiceTierModels,
 } from './hostBridge';
 
 export const getVoiceStatus = (): Promise<VoiceStatus> => bridge.request('voice.state');

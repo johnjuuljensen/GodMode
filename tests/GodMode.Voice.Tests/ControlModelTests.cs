@@ -3,8 +3,9 @@ using VoiceBot.Core.AI;
 namespace GodMode.Voice.Tests;
 
 /// <summary>
-/// The model the control node talks to (#379): Sonnet, not Haiku, which got commands and facts wrong. Under the
-/// default settings, through the tier map the cloud providers give VoiceBot's router.
+/// The model the control node talks to (#379): Sonnet, not Haiku 4.5, which got commands and facts wrong. Under the
+/// default settings, through the tier map the cloud providers give VoiceBot's router. Settings → Voice can set the
+/// Medium tier to another model (#525), to try one; the default stays VoiceBot's Medium.
 /// </summary>
 public sealed class ControlModelTests
 {

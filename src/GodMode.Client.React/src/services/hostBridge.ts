@@ -109,6 +109,13 @@ export interface VoiceDeviceList {
   DefaultSpeakerId?: string | null;
 }
 
+/** A model per voice tier; an absent one has none. */
+export interface VoiceTierModels {
+  Light?: string | null;
+  Medium?: string | null;
+  Heavy?: string | null;
+}
+
 /** The voice settings, and whether each key is set. The shell never sends a key back. */
 export interface VoiceSettingsView {
   Language: string;
@@ -123,6 +130,10 @@ export interface VoiceSettingsView {
   Earcons: boolean;
   /** How many hours without activity leave a session out of voice's lists, unless asked for all. */
   StaleHours: number;
+  /** The model the user set for a tier, in place of VoiceBot's default; absent for a tier that has none. */
+  TierModels?: VoiceTierModels | null;
+  /** VoiceBot's default model of each tier, which a tier without one of its own runs on. */
+  DefaultTierModels?: VoiceTierModels | null;
   ElevenLabsKeySet: boolean;
   AnthropicKeySet: boolean;
 }
@@ -140,6 +151,8 @@ export interface VoiceSettingsUpdate {
   MicSilenceSeconds?: number;
   Earcons?: boolean;
   StaleHours?: number;
+  /** All three tiers: one that is empty takes VoiceBot's default. */
+  TierModels?: VoiceTierModels;
   ElevenLabsKey?: string;
   AnthropicKey?: string;
 }

@@ -236,7 +236,10 @@ it('sends a key the user typed, never shows one, and says only whether each is s
   await click([...container().querySelectorAll('button')].find(b => b.textContent === 'Save')!);
 
   expect(bridge.request).toHaveBeenCalledWith('voice.settings.set',
-    { VoiceId: 'v1', Language: 'da-DK+en', EchoCancellation: false, Earcons: true, StaleHours: 24, ElevenLabsKey: 'sk_eleven' });
+    {
+      VoiceId: 'v1', Language: 'da-DK+en', EchoCancellation: false, Earcons: true, StaleHours: 24,
+      TierModels: { Light: '', Medium: '', Heavy: '' }, ElevenLabsKey: 'sk_eleven',
+    });
   expect(elevenLabs.value).toBe('');
   expect(elevenLabs.placeholder).toMatch(/^Set/);
 });
@@ -277,6 +280,7 @@ it('offers Default and each device, keeps a chosen one that is not connected, an
 
   expect(bridge.request).toHaveBeenCalledWith('voice.settings.set', {
     VoiceId: 'v1', Language: 'da-DK+en', EchoCancellation: false, Earcons: true, StaleHours: 24, Microphone: headset, Speaker: { Id: '', Name: '' },
+    TierModels: { Light: '', Medium: '', Heavy: '' },
   });
   expect(picker('Microphone').value).toBe(headset.Id);
   expect(picker('Speaker').value).toBe('');
@@ -337,6 +341,28 @@ it('saves how long voice keeps a quiet session in its lists', async () => {
 
   expect(bridge.request).toHaveBeenCalledWith('voice.settings.set', expect.objectContaining({ StaleHours: 48 }));
   expect(stale.value).toBe('48');
+});
+
+it("sets a tier's model in place of VoiceBot's default, and shows the default beside it", async () => {
+  const settings = {
+    Language: 'da-DK+en', VoiceId: 'v1', EchoCancellation: false, Earcons: true, StaleHours: 24,
+    DefaultTierModels: { Light: 'claude-haiku-5-5', Medium: 'claude-sonnet-5-5', Heavy: 'claude-opus-5-5' },
+    ElevenLabsKeySet: true, AnthropicKeySet: true,
+  };
+  answer({ 'voice.settings.get': settings, 'voice.settings.set': { ...settings, TierModels: { Medium: 'claude-haiku-5-5' } } });
+  view = await render(<VoiceSettings />);
+  const medium = container().querySelector<HTMLInputElement>('#voice-model-Medium')!;
+  expect(medium.value).toBe('');
+  expect(medium.placeholder).toBe('Default (claude-sonnet-5-5)');
+  expect(container().textContent).not.toContain('In place of the default');
+
+  await typeInto(medium, 'claude-haiku-5-5');
+  await click([...container().querySelectorAll('button')].find(b => b.textContent === 'Save')!);
+
+  expect(bridge.request).toHaveBeenCalledWith('voice.settings.set',
+    expect.objectContaining({ TierModels: { Light: '', Medium: 'claude-haiku-5-5', Heavy: '' } }));
+  expect(medium.value).toBe('claude-haiku-5-5');
+  expect(container().textContent).toContain('In place of the default, claude-sonnet-5-5.');
 });
 
 it('offers no devices where voice picks its own route', async () => {

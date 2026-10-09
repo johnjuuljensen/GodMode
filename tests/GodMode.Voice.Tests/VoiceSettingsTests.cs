@@ -2,6 +2,8 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using GodMode.ClientBase.Services;
 using GodMode.Shared;
+using VoiceBot.AI;
+using VoiceBot.Core.AI;
 
 namespace GodMode.Voice.Tests;
 
@@ -75,6 +77,62 @@ public sealed class VoiceSettingsTests : IDisposable
         await _store.UpdateAsync(new VoiceSettingsUpdate(VoiceId: "voice-2"));
         Assert.DoesNotContain("Models", await File.ReadAllTextAsync(file));
     }
+
+    /// <summary>
+    /// A file's old Models (before #475) still has no effect (#525): it is not the tier models, so every tier is
+    /// VoiceBot's default.
+    /// </summary>
+    [Fact]
+    public async Task A_file_with_the_old_models_leaves_every_tier_at_VoiceBots_default()
+    {
+        Directory.CreateDirectory(_dir);
+        await File.WriteAllTextAsync(Path.Combine(_dir, VoiceSettingsStore.FileName),
+            """{ "Models": { "Light": "l", "Medium": "claude-sonnet-5", "Heavy": "h" } }""");
+
+        var settings = await _store.LoadAsync();
+
+        Assert.Null(settings.TierModels);
+        Assert.Equal(DefaultTierMap(), CloudVoiceProviders.TierMap(settings.TierModels));
+    }
+
+    /// <summary>A tier left empty is VoiceBot's default; one set is the model set, shown beside the default (#525).</summary>
+    [Fact]
+    public async Task An_unset_tier_is_VoiceBots_default_and_a_set_one_is_the_override()
+    {
+        var view = await _store.UpdateAsync(new VoiceSettingsUpdate(TierModels: new VoiceTierModels(Medium: " claude-haiku-5-5 ", Heavy: "  ")));
+        var settings = await new VoiceSettingsStore(_dir, _secrets).LoadAsync();
+        var tierMap = CloudVoiceProviders.TierMap(settings.TierModels);
+
+        Assert.Equal(new VoiceTierModels(Medium: "claude-haiku-5-5"), view.TierModels);
+        Assert.Equal(VoiceTierModels.Defaults, view.DefaultTierModels);
+        Assert.Equal("claude-haiku-5-5", tierMap[InferenceTier.Medium].Model);
+        Assert.Equal(TierMapConfiguration.DefaultModels[InferenceTier.Light], tierMap[InferenceTier.Light].Model);
+        Assert.Equal(TierMapConfiguration.DefaultModels[InferenceTier.Heavy], tierMap[InferenceTier.Heavy].Model);
+        Assert.All(tierMap.Values, t => Assert.Equal(TierMapConfiguration.DefaultProvider, t.Provider));
+    }
+
+    /// <summary>Only the tiers that are set are saved, so a default VoiceBot moves is followed; emptied again, none is.</summary>
+    [Fact]
+    public async Task Only_the_tiers_that_are_set_are_saved()
+    {
+        var file = Path.Combine(_dir, VoiceSettingsStore.FileName);
+
+        await _store.UpdateAsync(new VoiceSettingsUpdate(TierModels: new VoiceTierModels(Medium: "claude-haiku-5-5")));
+        var saved = await File.ReadAllTextAsync(file);
+        Assert.Contains("\"TierModels\"", saved);
+        Assert.Contains("\"Medium\": \"claude-haiku-5-5\"", saved);
+        Assert.DoesNotContain("Light", saved);
+        Assert.DoesNotContain("Heavy", saved);
+        Assert.Equal(new VoiceTierModels(Medium: "claude-haiku-5-5"), (await _store.UpdateAsync(new VoiceSettingsUpdate(StaleHours: 6))).TierModels);
+
+        var emptied = await _store.UpdateAsync(new VoiceSettingsUpdate(TierModels: new VoiceTierModels(Medium: "")));
+        Assert.Null(emptied.TierModels);
+        Assert.DoesNotContain("TierModels", await File.ReadAllTextAsync(file));
+        Assert.Equal(DefaultTierMap(), CloudVoiceProviders.TierMap((await _store.LoadAsync()).TierModels));
+    }
+
+    private static Dictionary<InferenceTier, TierConfig> DefaultTierMap() =>
+        TierMapConfiguration.DefaultModels.ToDictionary(d => d.Key, d => new TierConfig(TierMapConfiguration.DefaultProvider, d.Value));
 
     /// <summary>What voice.settings.get returns, as the page gets it: whether each key is set, never the key.</summary>
     [Fact]

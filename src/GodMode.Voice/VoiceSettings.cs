@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using GodMode.ClientBase.Services;
 using GodMode.Shared;
+using VoiceBot.AI;
+using VoiceBot.Core.AI;
 using VoiceBot.Core.Resources;
 
 namespace GodMode.Voice;
@@ -10,8 +12,8 @@ namespace GodMode.Voice;
 /// <summary>
 /// The voice settings that are not secret, kept in <c>voice.json</c> beside the app's other files
 /// (<see cref="GodMode.ClientBase.GodModePaths.AppDataDirectory"/>). The keys are in <see cref="ISecretStore"/>. The
-/// models are VoiceBot's (<see cref="CloudVoiceProviders.TierMap"/>): a file's old <c>Models</c> is ignored, and dropped
-/// at its next save.
+/// models are VoiceBot's but for a tier the user set (<see cref="TierModels"/>, <see cref="CloudVoiceProviders.TierMap"/>):
+/// a file's old <c>Models</c> (before #475) is ignored, and dropped at its next save.
 /// </summary>
 public sealed record VoiceSettings
 {
@@ -63,6 +65,12 @@ public sealed record VoiceSettings
     /// </summary>
     public int StaleHours { get; init; } = DefaultStaleHours;
 
+    /// <summary>
+    /// The model the user set for a tier, in place of VoiceBot's (#525); null when none is. Saved as only the tiers that
+    /// are set, so a tier left empty follows VoiceBot's default when a VoiceBot pin moves it.
+    /// </summary>
+    public VoiceTierModels? TierModels { get; init; }
+
     /// <summary><see cref="StaleHours"/> as a span.</summary>
     [JsonIgnore]
     public TimeSpan StaleAfter => TimeSpan.FromHours(StaleHours);
@@ -90,6 +98,24 @@ public sealed record VoiceSettings
     }
 }
 
+/// <summary>A model per tier: null for a tier that has none.</summary>
+public sealed record VoiceTierModels(string? Light = null, string? Medium = null, string? Heavy = null)
+{
+    /// <summary>VoiceBot's default model of each tier (<see cref="TierMapConfiguration.DefaultModels"/>).</summary>
+    public static VoiceTierModels Defaults { get; } = new(
+        TierMapConfiguration.DefaultModels[InferenceTier.Light],
+        TierMapConfiguration.DefaultModels[InferenceTier.Medium],
+        TierMapConfiguration.DefaultModels[InferenceTier.Heavy]);
+
+    public string? this[InferenceTier tier] => tier switch
+    {
+        InferenceTier.Light => Light,
+        InferenceTier.Medium => Medium,
+        InferenceTier.Heavy => Heavy,
+        _ => null,
+    };
+}
+
 /// <summary>The API keys voice needs, as read from <see cref="ISecretStore"/>.</summary>
 public sealed record VoiceKeys(string? ElevenLabs, string? Anthropic);
 
@@ -104,11 +130,14 @@ public sealed record VoiceSettingsView(
     bool ElevenLabsKeySet,
     bool AnthropicKeySet,
     int StaleHours = VoiceSettings.DefaultStaleHours,
-    bool Earcons = true);
+    bool Earcons = true,
+    VoiceTierModels? TierModels = null,
+    VoiceTierModels? DefaultTierModels = null);
 
 /// <summary>
 /// What <c>voice.settings.set</c> changes: a null field is left as it is. A key that is blank removes the key, and a
-/// device whose id is blank chooses Default.
+/// device whose id is blank chooses Default. <see cref="TierModels"/> is all three tiers: a tier that is null or blank
+/// takes VoiceBot's default.
 /// </summary>
 public sealed record VoiceSettingsUpdate(
     string? Language = null,
@@ -120,7 +149,8 @@ public sealed record VoiceSettingsUpdate(
     string? AnthropicKey = null,
     int? MicSilenceSeconds = null,
     int? StaleHours = null,
-    bool? Earcons = null);
+    bool? Earcons = null,
+    VoiceTierModels? TierModels = null);
 
 /// <summary>Reads and writes the voice settings: <c>voice.json</c> in a directory, the keys in secure storage.</summary>
 public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
@@ -166,7 +196,9 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
             ElevenLabsKeySet: !string.IsNullOrEmpty(keys.ElevenLabs),
             AnthropicKeySet: !string.IsNullOrEmpty(keys.Anthropic),
             StaleHours: settings.StaleHours,
-            Earcons: settings.Earcons);
+            Earcons: settings.Earcons,
+            TierModels: settings.TierModels,
+            DefaultTierModels: VoiceTierModels.Defaults);
     }
 
     /// <summary>Applies <paramref name="update"/> and returns what is set now.</summary>
@@ -190,6 +222,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
                 MicSilenceSeconds = update.MicSilenceSeconds ?? current.MicSilenceSeconds,
                 StaleHours = update.StaleHours ?? current.StaleHours,
                 Earcons = update.Earcons ?? current.Earcons,
+                TierModels = update.TierModels ?? current.TierModels,
             });
             if (next != current)
             {
@@ -209,7 +242,7 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
 
     /// <summary>
     /// Blank fields (a hand-edited file, an empty text box) take their defaults; a device with a blank id is Default; a
-    /// silence timeout of no seconds is the default, and one over an hour is an hour.
+    /// silence timeout of no seconds is the default, and one over an hour is an hour; a blank tier model is none.
     /// </summary>
     private static VoiceSettings Normalized(VoiceSettings settings) => settings with
     {
@@ -219,7 +252,17 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
         Speaker = Device(settings.Speaker),
         MicSilenceSeconds = settings.MicSilenceSeconds > 0 ? Math.Min(settings.MicSilenceSeconds, MaxMicSilenceSeconds) : VoiceMicOptions.DefaultSilenceSeconds,
         StaleHours = settings.StaleHours > 0 ? Math.Min(settings.StaleHours, MaxStaleHours) : VoiceSettings.DefaultStaleHours,
+        TierModels = TierModels(settings.TierModels),
     };
+
+    private static VoiceTierModels? TierModels(VoiceTierModels? models) =>
+        new VoiceTierModels(OrNull(models?.Light), OrNull(models?.Medium), OrNull(models?.Heavy)) switch
+        {
+            { Light: null, Medium: null, Heavy: null } => null,
+            var set => set,
+        };
+
+    private static string? OrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static AudioDevice? Device(AudioDevice? device) =>
         string.IsNullOrWhiteSpace(device?.Id) ? null : new AudioDevice(device.Id.Trim(), Or(device.Name, device.Id));
