@@ -681,11 +681,16 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
         }
         catch (Exception ex)
         {
-            var message = Regex.Replace(ex.Message, @"^An unexpected error occurred invoking '\w+' on the server\.\s*(HubException:\s*)?", "");
             // Whole: what is said of it is short (VoicePhrases.Created), and the server's log has it all
-            return new CreateOutcome(request, null, null, message.Trim());
+            return new CreateOutcome(request, null, null, ServerError(ex));
         }
     }
+
+    /// <summary>A hub call's failure as the server gave it, without SignalR's lead-in.</summary>
+    internal static string ServerError(Exception ex) => HubError().Replace(ex.Message, "").Trim();
+
+    [GeneratedRegex(@"^An unexpected error occurred invoking '\w+' on the server\.\s*(HubException:\s*)?")]
+    private static partial Regex HubError();
 
     private static string Names(IEnumerable<ServerRoot> roots, bool severalServers) =>
         string.Join(", ", roots.Select(r => Name(r, severalServers)));

@@ -56,6 +56,9 @@ public sealed class ConfirmCreateNode(string id, int priority, SessionCreates cr
         return YesTokens.Any(y => Enumerable.Range(0, Math.Max(0, tokens.Length - y.Length + 1)).Any(i => tokens.AsSpan(i, y.Length).SequenceEqual(y)));
     }
 
+    /// <summary>Whether <paramref name="said"/>, as a whole, is a clear yes.</summary>
+    internal static bool IsYes(string said) => IsYes(CommandResolver.Tokenize(said));
+
     private static bool IsYes(string[] tokens) => YesTokens.Any(y => tokens.AsSpan().SequenceEqual(y));
 
     /// <summary>

@@ -88,9 +88,12 @@ public sealed class SpokenReplyTests
         Assert.DoesNotContain("spoken", result, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Of several, the list gives the spoken reply word for word for the model to say, and the model says the list.</summary>
+    /// <summary>
+    /// Of several, the list says each in one short line, its spoken reply left for when the user asks about it (#532): a
+    /// list of whole replies fills the narrow channel.
+    /// </summary>
     [Fact]
-    public async Task Of_several_projects_the_list_gives_each_spoken_reply_as_it_is()
+    public async Task Of_several_projects_the_list_says_each_in_one_short_line()
     {
         var servers = new FakeServers();
         var handles = new ProjectHandles();
@@ -103,9 +106,12 @@ public sealed class SpokenReplyTests
 
         var result = await tools.WhatNeedsMeAsync(CancellationToken.None);
 
-        Assert.Contains($"- issue 283, voice: finished: {Written} In its own spoken words: \"{Spoken}\"", result);
-        Assert.Contains("- issue 101: question: Hvilken titel?", result);
+        Assert.Contains("- issue 283, voice: finished", result);
+        Assert.Contains("- issue 101: question", result);
+        Assert.DoesNotContain(Spoken, result);
+        Assert.DoesNotContain("Hvilken titel?", result);
         Assert.Empty(conversation.TakeSpoken());
+        Assert.DoesNotContain(Spoken, conversation.TakeSaid(result));
     }
 
     [Fact]

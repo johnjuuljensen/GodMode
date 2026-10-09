@@ -65,7 +65,9 @@ public sealed class OutcomeTests
 
         var said = await tools.WhatNeedsMeAsync(CancellationToken.None);
 
-        Assert.Contains("finished: Merged.", said);
-        Assert.Contains("idle (it did not say it is done): Waiting on CI.", said);
+        // Several are a short line each (#532): what each needs, none of its text
+        Assert.Contains("done one: finished", said);
+        Assert.Contains("idle one: idle (it did not say it is done)", said);
+        Assert.DoesNotContain("Merged.", said);
     }
 }

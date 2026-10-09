@@ -404,18 +404,22 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
 /// #473): an announcement between a read-back and its yes would take the yes's place. They are said in order once
 /// nothing waits (the user answered, or the wait expired). A read-back to be said again (<see cref="SessionCreates.Repeat"/>)
 /// is never held: it is what was waited on. While a dictation is taken (<see cref="Dictation.Active"/>, #459) they wait
-/// too: one in a pause to think would break the user's train of thought, and change what is talked about.
+/// too: one in a pause to think would break the user's train of thought, and change what is talked about. So, too,
+/// while a delete waits on its yes (<see cref="SessionDeletes.Waiting"/>, #532).
 /// </summary>
 public sealed class HeldAnnouncements
 {
     private readonly ChannelWriter<Announcement> _session;
     private readonly SessionCreates _creates;
     private readonly Dictation? _dictation;
+    private readonly SessionDeletes? _deletes;
     private readonly Lock _lock = new();
     private readonly List<Announcement> _held = [];
 
-    public HeldAnnouncements(ChannelWriter<Announcement> session, SessionCreates creates, Dictation? dictation = null)
+    public HeldAnnouncements(ChannelWriter<Announcement> session, SessionCreates creates, Dictation? dictation = null, SessionDeletes? deletes = null)
     {
+        _deletes = deletes;
+        if (deletes is not null) deletes.Released += Release;
         _session = session;
         _creates = creates;
         _dictation = dictation;
@@ -447,8 +451,8 @@ public sealed class HeldAnnouncements
         _session.TryWrite(announcement);
     }
 
-    /// <summary>Whether something waits on the user's words: a create or its question, or a dictation.</summary>
-    private bool Waiting => _creates.Waiting || _dictation?.Active == true;
+    /// <summary>Whether something waits on the user's words: a create or its question, a delete, or a dictation.</summary>
+    private bool Waiting => _creates.Waiting || _deletes?.Waiting == true || _dictation?.Active == true;
 
     private void Release()
     {
