@@ -145,4 +145,35 @@ public class RootConfigPermissionsTests
         var lenient = Read(strict: false, ("config.json", "{}"), ("config.overseer.json", $$"""{ "fleetTools": {{value}} }"""), ("config.issue.json", "{}"));
         Assert.Equal(["issue"], lenient.GetEffectiveActions().Select(a => a.Name));
     }
+
+    // ── fleetChildren ──
+
+    /// <summary>"own" or "topLevel", merged as any scalar: an overlay replaces the base. Own unless a root says so (issue #431).</summary>
+    [Fact]
+    public void FleetChildren_IsOwnUnlessSet_AndAnOverlayReplacesTheBase()
+    {
+        var config = Read(
+            ("config.json", """{ "fleetChildren": "topLevel" }"""),
+            ("config.chat.json", "{}"),
+            ("config.overseer.json", """{ "fleetChildren": "own" }"""));
+
+        Assert.Equal(FleetChildren.TopLevel, config.ResolveAction("chat")!.FleetChildren);
+        Assert.Equal(FleetChildren.Own, config.ResolveAction("overseer")!.FleetChildren);
+        Assert.Equal(FleetChildren.Own, Read(("config.json", "{}")).ResolveAction(null)!.FleetChildren);
+    }
+
+    /// <summary>Anything else is an error, never taken for either; read leniently, its action is left out.</summary>
+    [Theory]
+    [InlineData("\"toplevel\"")]
+    [InlineData("\"parent\"")]
+    [InlineData("\"\"")]
+    [InlineData("true")]
+    public void FleetChildren_OfAnyOtherValue_IsAnError(string value)
+    {
+        var error = Assert.ThrowsAny<Exception>(() => Read(("config.json", "{}"), ("config.chat.json", $$"""{ "fleetChildren": {{value}} }""")));
+        Assert.Contains("fleetChildren", error.Message);
+
+        var lenient = Read(strict: false, ("config.json", "{}"), ("config.chat.json", $$"""{ "fleetChildren": {{value}} }"""), ("config.issue.json", "{}"));
+        Assert.Equal(["issue"], lenient.GetEffectiveActions().Select(a => a.Name));
+    }
 }

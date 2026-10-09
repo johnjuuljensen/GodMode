@@ -104,6 +104,13 @@ namespace GodMode.Shared.Models;
 /// Kept in memory as each line comes, as <paramref name="OutputOffset"/> is: status.json carries it when something else
 /// changes, at the latest as the turn ends. Null until the session has written a line since it was recorded.
 /// </param>
+/// <param name="BackgroundTasks">
+/// What the session's claude runs in the background (issue #432): its subagents, shells, monitors and workflows that run
+/// on while its turn has ended, as claude's last <c>system/background_tasks_changed</c> listed them, each with its last
+/// step. Null when there are none. Cleared when claude exits or is stopped, which ends them, and when a server start finds
+/// the session with no process; not by a <c>/clear</c>, which they outlive. The app shows an idle session with them as
+/// working in the background.
+/// </param>
 public record ProjectStatus(
     string Id,
     string Name,
@@ -144,7 +151,8 @@ public record ProjectStatus(
     string? Recap = null,
     DateTime? RecapAt = null,
     TurnOutcome? Outcome = null,
-    DateTime? LastOutputAt = null
+    DateTime? LastOutputAt = null,
+    IReadOnlyList<BackgroundTask>? BackgroundTasks = null
 )
 {
     /// <summary>

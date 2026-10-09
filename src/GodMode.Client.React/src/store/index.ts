@@ -52,7 +52,7 @@ function summaryOf(status: ProjectStatus): ProjectSummary {
     PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
     PullRequest: status.PullRequest, Kind: status.Kind,
     ActionName: status.ActionName, SharedFolder: status.SharedFolder, Adopted: status.Adopted,
-    ParentId: status.ParentId, Importance: status.Importance,
+    ParentId: status.ParentId, Importance: status.Importance, BackgroundTasks: status.BackgroundTasks,
   };
 }
 
@@ -856,7 +856,7 @@ export const useAppStore = create<AppState>((set, get) => {
                       ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
                       PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
                       PullRequest: status.PullRequest, ParentId: status.ParentId, SlashCommands: status.SlashCommands,
-                      Importance: status.Importance,
+                      Importance: status.Importance, BackgroundTasks: status.BackgroundTasks,
                     }
                   : p) }
               : c

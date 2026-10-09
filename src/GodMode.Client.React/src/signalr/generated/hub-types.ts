@@ -259,6 +259,28 @@ export interface AttentionItem {
 }
 
 /**
+ * A task the session's claude runs in the background (issue #432): a subagent, a shell or a monitor, or a
+ * workflow, which runs on while the session is idle between turns. As claude's last
+ * `system/background_tasks_changed` listed it.
+ */
+export interface BackgroundTask {
+  /** claude's `task_id`. */
+  Id: string;
+  /**
+   * claude's `task_type`: `local_agent` (a subagent), `local_bash` (a shell or a monitor), `local_workflow`,
+   * or another claude adds.
+   */
+  Type: string;
+  /** What the task does, as claude describes it. */
+  Description: string;
+  /**
+   * What the task is doing now: the `description` of its last `system/task_progress` (a subagent's or a
+   * workflow's). Null until it reports one.
+   */
+  Step?: string | null;
+}
+
+/**
  * Client-facing information about a create action within a project root. No server paths or scripts exposed —
  * only name, description, and input schema.
  */
@@ -622,6 +644,14 @@ export interface ProjectStatus {
    * changes, at the latest as the turn ends. Null until the session has written a line since it was recorded.
    */
   LastOutputAt?: string | null;
+  /**
+   * What the session's claude runs in the background (issue #432): its subagents, shells, monitors and
+   * workflows that run on while its turn has ended, as claude's last `system/background_tasks_changed` listed
+   * them, each with its last step. Null when there are none. Cleared when claude exits or is stopped, which
+   * ends them, and when a server start finds the session with no process; not by a `/clear`, which they
+   * outlive. The app shows an idle session with them as working in the background.
+   */
+  BackgroundTasks?: BackgroundTask[] | null;
 }
 
 /** Summary information about a project. */
@@ -681,6 +711,10 @@ export interface ProjectSummary {
   LastResultAt?: string | null;
   /** When its main conversation last wrote a line, as in ProjectStatus.LastOutputAt (issue #468). */
   LastOutputAt?: string | null;
+  /**
+   * What it runs in the background, or null for nothing, as in ProjectStatus.BackgroundTasks (issue #432).
+   */
+  BackgroundTasks?: BackgroundTask[] | null;
 }
 
 /**

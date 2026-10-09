@@ -100,7 +100,8 @@ picture yourself. Anything you were told is a hint to check, not a finding.
 2. **Branches to issues to pull requests.** The issue number is in the branch name; confirm against
    `gh pr list --state all --json number,headRefName,baseRefName,isDraft,state`.
 3. **Finished or live.** A session whose pull request has merged is finished, not adoptable — stop
-   tracking it, but leave its worktree alone. A non-draft pull request means its worker believes
+   tracking it. One you started is yours to delete once you have reviewed it
+   ([Deleting finished workers](#deleting-finished-workers)); any other, leave alone. A non-draft pull request means its worker believes
    it is done. An **issue** can be finished with no session at all: search `--state all` for a merged
    pull request naming it, and read what actually landed before dispatching a worker to build it
    again. An issue stays open through carelessness as often as through unfinished work.
@@ -268,8 +269,9 @@ tidiness rule:
 - The branch left behind still has a pull request, reviews and possibly a fault to come back to. The
   session that wrote it is where that context lives.
 
-A finished session is a record, not a resource. Stop tracking it and leave it alone. With the
-tools that means: never `stop` it, never `send` it the next issue. Deleting it is the user's.
+A finished session is not a resource. Stop tracking it: with the tools that means never `stop` it,
+never `send` it the next issue. Once its pull request is merged or closed and you are done
+reviewing it, delete it ([Deleting finished workers](#deleting-finished-workers)).
 
 Write a brief per worker from `brief-worker.md`. **Do not pass a model** — workers and overseers
 alike run on the configured default model. Effort you may set, when the issue calls for it.
@@ -390,7 +392,8 @@ Adopt it in this order:
    session nothing. `git -C <worktree> rev-parse --abbrev-ref HEAD` maps a session name to its
    branch when the name is truncated.
 2. **Decide whether it is alive work.** A session whose pull request already merged is finished, not
-   adoptable — stop tracking it and leave it where it is.
+   adoptable — stop tracking it and leave it where it is. You did not start it, so it is not yours to
+   delete, and `delete_session` refuses it.
 3. **Message it once** (`send`, or `SendMessage` for a tab) with what a brief would have carried:
    load the `fleet-worker` skill, its base branch, the projects and paths it owns, and your address
    (inside GodMode, your `Address` from `list_sessions`; a session that did not start under you
@@ -530,7 +533,8 @@ failing on the same finding after the second pass is the two rounds this skill e
 it to the human, say what is unresolved, next lane.
 
 **Merging is yours when it is trivially simple** — the review approves, the body's gate is green, and
-nothing about the diff makes you want a second opinion. Merge it into your epic branch and move on.
+nothing about the diff makes you want a second opinion. Merge it into your epic branch, delete its
+worker ([Deleting finished workers](#deleting-finished-workers)), and move on.
 
 **When it is not trivially simple, you still do not stop and you still do not ask.** Assign the pull
 request to the human and add them as reviewer, comment why you did not merge it, and go to the next
@@ -619,7 +623,22 @@ against `gh pr list --state merged --base <epic branch>` — because a sub-issue
 wrote the body does not add itself to it. Then read the sub-issue states back once the merge
 lands: closure is the one part of the protocol nothing else verifies.
 
-**Leave the worktrees.** Merged is not spent: a branch whose work has landed is exactly where anyone
-looks when a fault turns up in that part, and the session that wrote it is the cheapest place to
-continue from. Reclaiming them is the user's housekeeping on their own schedule — do not do it, and
-do not offer it as cleanup. Disk is not your constraint and you have no reason to measure it.
+### Deleting finished workers
+
+With the tools, you clean up as you go: every session you start is in the user's list, and in what
+voice reads out, until it is deleted. A worker is done when its pull request is merged (into your
+epic branch, or into `master`) or closed, and you have finished reviewing it. Then
+`delete_session(<its ID>)`. It is the app's delete: the root's delete script runs and removes the
+worktree, and the session leaves the list. The branch and its pull request stay on GitHub, which is
+where anyone looks when a fault turns up later.
+
+- **Your own alone.** Your children, and theirs. Not yourself (the user deletes you), not a session
+  you adopted, not the user's, not a sibling overseer's: the tool refuses those.
+- **Only what is done.** It is refused while the worker runs or waits on the user, while its pull
+  request is draft or open, and while it has children of its own: delete those first. A worker that
+  never made a pull request (a failed start) may go.
+- **Never forced.** Work not committed or pushed fails the delete script, the error comes back to you,
+  and the session stays. Tell the worker, or the user; never clean the worktree yourself to get past
+  it.
+- **Without the tools** (ac-gwt tabs) there is nothing to delete with: leave the worktrees to the user.
+- **Your own scratch worktrees** (a trial merge's) you remove when you are done with them, as before.

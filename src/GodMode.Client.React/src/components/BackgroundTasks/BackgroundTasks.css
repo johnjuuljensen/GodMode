@@ -1,0 +1,32 @@
+/* A session's background tasks (#432): their count, beside a ring that turns where a theme loops */
+.background-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  line-height: 1.4;
+  padding: 0 5px;
+  border-radius: var(--radius-sm);
+  border: var(--border-width) var(--border-style) var(--glass-border-strong);
+  color: var(--state-running);
+  background: var(--glass);
+  font-family: var(--font-display);
+  font-size-adjust: var(--font-display-adjust);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.background-badge-spinner {
+  box-sizing: border-box;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-round);
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  animation: background-badge-turn 1.2s linear var(--loop-iterations);
+}
+
+@keyframes background-badge-turn {
+  to { transform: rotate(360deg); }
+}
