@@ -446,8 +446,8 @@ to `master` and publishes an image. So `gh pr checks` reports nothing, and the g
 runs in its own worktree as part of writing the code:
 
 ```powershell
-cd src/GodMode.Client.React; npm ci; cd ../..   # the server build runs `npm run build` but never installs
-dotnet build GodMode.slnx                         # also builds the React client into the server's wwwroot
+cd src/GodMode.Client.React; npm ci; cd ../..   # the app's client build installs only when node_modules is missing or stale
+dotnet build GodMode.slnx                         # also builds the React client, for the app (the server serves no page)
 dotnet test GodMode.slnx --no-build
 cd src/GodMode.Client.React; npm run lint; npm test
 ```

@@ -34,25 +34,45 @@ public static class DanishNumbers
         }
         if (tokens.Count == 0) return null;
 
+        // Said digit by digit ("to otte tre"), as an issue number often is: its digits, not their sum
+        if (tokens.Count > 1 && tokens.All(t => Words.TryGetValue(t, out var value) && value < 10))
+            return int.TryParse(string.Concat(tokens.Select(t => Words[t])), out var said) ? said : null;
+
         int total = 0, current = 0;
+        // What has been said below a hundred since the last hundred or thousand: a unit may be followed by a ten only
+        // ("tre og firs"), and anything else by nothing ("tyve tredive" is no number)
+        var tail = Tail.None;
         foreach (var token in tokens)
         {
             switch (token)
             {
                 case Hundred:
                     current = (current == 0 ? 1 : current) * 100;
+                    tail = Tail.None;
                     break;
                 case Thousand:
                     total += (current == 0 ? 1 : current) * 1000;
                     current = 0;
+                    tail = Tail.None;
                     break;
                 default:
-                    current += Words[token];
+                    var value = Words[token];
+                    tail = (tail, value) switch
+                    {
+                        (Tail.None, > 0 and < 10) => Tail.Unit,
+                        (Tail.None, _) => Tail.Closed,
+                        (Tail.Unit, >= 20 and < 100) when value % 10 == 0 => Tail.Closed,
+                        _ => Tail.Invalid,
+                    };
+                    if (tail == Tail.Invalid) return null;
+                    current += value;
                     break;
             }
         }
         return total + current;
     }
+
+    private enum Tail { None, Unit, Closed, Invalid }
 
     /// <summary>
     /// A word as number words ("tohundredeogtreogfirs" → to, hundrede, tre, firs): "og" joins them and is dropped.

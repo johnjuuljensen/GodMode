@@ -115,7 +115,7 @@ internal sealed class RecordingEvents : IVoiceEvents
 /// <summary>A running voice session over offline services, fed text, and the setup it was started with.</summary>
 internal sealed class OfflineVoice : IAsyncDisposable
 {
-    private readonly string _logDirectory = Path.Combine(Path.GetTempPath(), $"godmode-voice-{Guid.NewGuid():N}");
+    private string _logDirectory = Path.Combine(Path.GetTempPath(), $"godmode-voice-{Guid.NewGuid():N}");
 
     public ListTranscriptionSource Transcriptions { get; } = new();
     public FixedPcmSynthesizer Synthesizer { get; }
@@ -141,10 +141,11 @@ internal sealed class OfflineVoice : IAsyncDisposable
         Func<CancellationToken, Task>? connect = null, VoiceSettings? settings = null, ILoggerFactory? loggerFactory = null,
         TimeSpan? speech = null, IAudioSource? microphone = null, IInferenceProvider? inference = null,
         VoiceMic? mic = null, MediaPause? media = null, IAudioSink? speaker = null, ScriptedSpeechEngine? engine = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null, string? logDirectory = null)
     {
         // How long anything the bot says plays: short, unless a test watches it speak
         var voice = new OfflineVoice(model, inference ?? model, speech ?? TimeSpan.FromMilliseconds(50), engine);
+        if (logDirectory is not null) voice._logDirectory = logDirectory;
         voice.Session = await VoiceSession.StartAsync(new VoiceSessionSetup
         {
             Settings = settings ?? VoiceSettings.Default,

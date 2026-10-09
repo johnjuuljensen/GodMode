@@ -24,7 +24,7 @@ try
     text = TypeScriptWriter.Write(
         hub: typeof(IProjectHub),
         clientHub: typeof(IProjectHubClient),
-        // Not the hub's: the server list (/servers), and the server to add (services/hostApi.ts addServer)
+        // Not the hub's: the server list (the shell's servers.list), and the server to add (services/hostApi.ts addServer)
         extraTypes: [typeof(ServerInfo), typeof(AddServerRequest)]);
 }
 catch (NotSupportedException ex)

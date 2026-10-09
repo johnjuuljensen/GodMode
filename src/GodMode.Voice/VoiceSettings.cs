@@ -1,8 +1,10 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GodMode.ClientBase.Services;
 using GodMode.Shared;
+using Microsoft.Extensions.Logging;
 using VoiceBot.Core.Resources;
 
 namespace GodMode.Voice;
@@ -90,8 +92,15 @@ public sealed record VoiceSettings
     }
 }
 
-/// <summary>The API keys voice needs, as read from <see cref="ISecretStore"/>.</summary>
-public sealed record VoiceKeys(string? ElevenLabs, string? Anthropic);
+/// <summary>The API keys voice needs, as read from <see cref="ISecretStore"/>. Printed, it says only whether each is set.</summary>
+public sealed record VoiceKeys(string? ElevenLabs, string? Anthropic)
+{
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"ElevenLabs = {VoiceSettingsStore.Shown(ElevenLabs)}, Anthropic = {VoiceSettingsStore.Shown(Anthropic)}");
+        return true;
+    }
+}
 
 /// <summary>What <c>voice.settings.get</c> shows: the settings, and whether each key is set. Never a key itself.</summary>
 public sealed record VoiceSettingsView(
@@ -108,7 +117,7 @@ public sealed record VoiceSettingsView(
 
 /// <summary>
 /// What <c>voice.settings.set</c> changes: a null field is left as it is. A key that is blank removes the key, and a
-/// device whose id is blank chooses Default.
+/// device whose id is blank chooses Default. Printed, it says only whether each key is set.
 /// </summary>
 public sealed record VoiceSettingsUpdate(
     string? Language = null,
@@ -120,10 +129,19 @@ public sealed record VoiceSettingsUpdate(
     string? AnthropicKey = null,
     int? MicSilenceSeconds = null,
     int? StaleHours = null,
-    bool? Earcons = null);
+    bool? Earcons = null)
+{
+    private bool PrintMembers(StringBuilder builder)
+    {
+        builder.Append($"Language = {Language}, VoiceId = {VoiceId}, EchoCancellation = {EchoCancellation}, Microphone = {Microphone}, ")
+            .Append($"Speaker = {Speaker}, ElevenLabsKey = {VoiceSettingsStore.Shown(ElevenLabsKey)}, AnthropicKey = {VoiceSettingsStore.Shown(AnthropicKey)}, ")
+            .Append($"MicSilenceSeconds = {MicSilenceSeconds}, StaleHours = {StaleHours}, Earcons = {Earcons}");
+        return true;
+    }
+}
 
 /// <summary>Reads and writes the voice settings: <c>voice.json</c> in a directory, the keys in secure storage.</summary>
-public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
+public sealed class VoiceSettingsStore(string directory, ISecretStore secrets, ILogger? logger = null)
 {
     public const string ElevenLabsKeyName = "voice.elevenlabs-api-key";
     public const string AnthropicKeyName = "voice.anthropic-api-key";
@@ -153,7 +171,10 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
         }
     }
 
-    /// <summary>The keys. One that secure storage cannot read (the store was reset, say) is the same as none.</summary>
+    /// <summary>
+    /// The keys. One that secure storage cannot read is the same as none, this time: it is logged and left where it is,
+    /// as a server's token is, so a passing failure costs no key. A store that was reset holds none to read anyway.
+    /// </summary>
     public async Task<VoiceKeys> LoadKeysAsync() =>
         new(await ReadKeyAsync(ElevenLabsKeyName), await ReadKeyAsync(AnthropicKeyName));
 
@@ -232,12 +253,15 @@ public sealed class VoiceSettingsStore(string directory, ISecretStore secrets)
         {
             return await secrets.GetAsync(name) is { Length: > 0 } key ? key : null;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            secrets.Remove(name);
+            logger?.LogWarning(ex, "Secure storage could not read {Key}; voice goes without it this time", name);
             return null;
         }
     }
+
+    /// <summary>How a key is printed: whether it is set, never the key.</summary>
+    internal static string Shown(string? key) => string.IsNullOrEmpty(key) ? "not set" : "set";
 
     private async Task WriteKeyAsync(string name, string? value)
     {

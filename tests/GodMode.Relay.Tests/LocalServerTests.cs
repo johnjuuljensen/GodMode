@@ -174,6 +174,8 @@ public sealed class LocalServerTests : IAsyncLifetime
         Assert.All(_alpha.HubRequests, r =>
         {
             Assert.Equal("Bearer key-a", r.Authorization);
+            // The server reads its key from the header alone, the WebSocket upgrade's included
+            Assert.DoesNotContain("access_token", r.Query);
             Assert.DoesNotContain(Uri.EscapeDataString(_relay.Secret), r.Query);
         });
     }

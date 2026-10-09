@@ -20,8 +20,26 @@ public sealed class HandleTests
     [InlineData("et tusind og fem", 1005)]
     [InlineData("to tusind tre hundrede og halvtreds", 2350)]
     [InlineData("Halvfems.", 90)]
+    [InlineData("tre og firs", 83)]
     public void Danish_numbers_are_read(string spoken, int expected) =>
         Assert.Equal(expected, DanishNumbers.Parse(spoken));
+
+    /// <summary>A number said digit by digit, as an issue number often is, is its digits, not their sum.</summary>
+    [Theory]
+    [InlineData("to otte tre", 283)]
+    [InlineData("fire nul fem", 405)]
+    [InlineData("en to", 12)]
+    public void Digits_said_one_by_one_are_read_as_digits(string spoken, int expected) =>
+        Assert.Equal(expected, DanishNumbers.Parse(spoken));
+
+    /// <summary>Number words no Danish number is said as: two tens, a ten before a unit, a unit after a teen.</summary>
+    [Theory]
+    [InlineData("tyve tredive")]
+    [InlineData("tyve fem")]
+    [InlineData("tretten fem")]
+    [InlineData("hundrede to tre")]
+    public void Number_words_that_make_no_number_are_none(string spoken) =>
+        Assert.Null(DanishNumbers.Parse(spoken));
 
     [Theory]
     [InlineData("vonage")]
