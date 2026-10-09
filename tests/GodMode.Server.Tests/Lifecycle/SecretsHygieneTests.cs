@@ -67,7 +67,8 @@ public class SecretsHygieneTests
 
         canaries.AssertAbsent(environment);
         // What it needs to run, and what the server gives every script
-        Assert.Contains("PATH", environment.Keys);
+        // By the dictionary's own comparer: Windows spells it as the test host's parent did, PATH or Path
+        Assert.True(environment.ContainsKey("PATH"), $"no PATH in: {string.Join(", ", environment.Keys)}");
         Assert.Equal(harness.RootPath, environment["GODMODE_ROOT_PATH"]);
         // The root's configured environment
         Assert.Contains(FakeClaudeEnvironment.Script, environment.Keys);
