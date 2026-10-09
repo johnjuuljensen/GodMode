@@ -1,4 +1,4 @@
-/* The voice button and transcript: in the sidebar's foot, above Settings, never over the content (#433; Windows app only).
+/* The voice button and transcript: in the sidebar's foot, above Settings, never over the content (#433; the Windows and Android apps).
    The transcript is a strip in the foot's flow, so opening it shortens the list beside it and covers nothing */
 .voice-control {
   display: flex;

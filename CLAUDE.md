@@ -77,7 +77,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - **GodMode.Server** — ASP.NET SignalR server that spawns/manages Claude Code processes; serves the hub and its MCP endpoint, and no page
 - **GodMode.Client.React** — React SPA (Vite + Zustand + SignalR) — the single UI implementation. An npm project with a NoTargets `GodMode.Client.React.csproj` in the slnx, which runs TypeGen and `npm run build`; GodMode.Maui references it
 - **GodMode.ClientBase** — Shared .NET client abstractions (host providers, server registry, token protection)
-- **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React; on Windows it also runs the voice session (`Voice/VoiceHost.cs`, `voice.*` bridge messages)
+- **GodMode.Maui** — MAUI app (Android, iOS, macOS, Windows) — thin WebView host for React; on Windows and Android it also runs the voice session (`Voice/VoiceHost.cs`, `voice.*` bridge messages)
 - **GodMode.Voice** — voice over GodMode on VoiceBot (the `external/VoiceBot` submodule): a Danish-first voice graph whose tools use the hub as it is (what needs me, a project's status, answer it, mark it seen), announcements of new attention items, spoken project handles, the voice settings (keys in `ISecretStore`)
 - **GodMode.ProjectFiles** — File system utilities for project folders (status.json, JSONL streams)
 - **SignalR.Proxy** — SignalR WebSocket relay used by MAUI for multi-server connectivity
@@ -92,7 +92,7 @@ cd src/GodMode.Client.React && npm test && npm run lint
 - `IProjectHub` (Shared) — Client→Server methods
 - `IProjectHubClient` (Shared) — Server→Client callbacks (including `CreationProgress`)
 - `ProjectHub` (Server) — Implements `Hub<IProjectHubClient>, IProjectHub`
-- `HubConnectionFactory` (ClientBase) — .NET clients get a raw `HubConnection` and use `TypedSignalR.Client`'s `CreateHubProxy<IProjectHub>()` for typed calls
+- `HubConnections.Build` (ClientBase) — .NET clients get a raw `HubConnection` and use `TypedSignalR.Client`'s `CreateHubProxy<IProjectHub>()` for typed calls
 - `signalr/generated/hub-types.ts` (React) — both interfaces and their models, generated from GodMode.Shared by `tools/GodMode.TypeGen` on every build of `GodMode.Client.React.csproj` (GodMode.Maui's reference, or the solution) (committed; do not edit). `signalr/types.ts` re-exports it; `signalr/hub.ts` wires the calls
 
 **Config-Driven Project Roots (Multi-File)**
