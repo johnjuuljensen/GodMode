@@ -240,6 +240,11 @@ public class EnvironmentExpanderTests
     [InlineData("AUTHENTICATION__APIKEY")]
     [InlineData("authentication__apikeyfile")]
     [InlineData("Authentication:ApiKey")]
+    // The host's prefixed forms, which WebApplication.CreateBuilder reads into Authentication:ApiKey
+    [InlineData("ASPNETCORE_Authentication__ApiKey")]
+    [InlineData("DOTNET_Authentication__ApiKey")]
+    [InlineData("aspnetcore_authentication__apikeyfile")]
+    [InlineData("DOTNET_Authentication:ApiKey")]
     public void IsServerSecret_TheAuthenticationSection_InAnyFormAndCase(string name) =>
         Assert.True(EnvironmentExpander.IsServerSecret(name));
 
@@ -248,6 +253,8 @@ public class EnvironmentExpanderTests
     [InlineData("ANTHROPIC_API_KEY")]
     [InlineData("AuthenticationKey")]
     [InlineData("MY_Authentication__ApiKey")]
+    [InlineData("ASPNETCORE_ENVIRONMENT")]
+    [InlineData("DOTNET_AuthenticationKey")]
     public void IsServerSecret_NotOtherVariables(string name) =>
         Assert.False(EnvironmentExpander.IsServerSecret(name));
 
@@ -316,6 +323,46 @@ public class EnvironmentExpanderTests
         {
             Environment.SetEnvironmentVariable(secret, null);
             Environment.SetEnvironmentVariable(plain, null);
+        }
+    }
+
+    /// <summary>
+    /// The key under the host's prefixes, <c>ASPNETCORE_</c> and <c>DOTNET_</c>, is the key too: the server reads
+    /// either into <c>Authentication:ApiKey</c>, so a <c>${VAR}</c> naming one expands empty, set or not.
+    /// </summary>
+    [Theory]
+    [InlineData("ASPNETCORE_")]
+    [InlineData("DOTNET_")]
+    public void ExpandVariables_TheKeyUnderAHostPrefix_ExpandsEmpty(string hostPrefix)
+    {
+        var secret = hostPrefix + "Authentication__Canary" + Guid.NewGuid().ToString("N")[..8];
+        Environment.SetEnvironmentVariable(secret, "the-key");
+        try
+        {
+            var result = EnvironmentExpander.ExpandVariables(new Dictionary<string, string> { ["LEAK"] = $"${{{secret}}}" });
+
+            Assert.NotNull(result);
+            Assert.Equal("", result["LEAK"]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(secret, null);
+        }
+    }
+
+    [Fact]
+    public void GetPrefixStrippedVars_LeavesOutTheKeyUnderAHostPrefix()
+    {
+        // A profile named "Aspnetcore" strips ASPNETCORE_, which would hand its sessions Authentication__*
+        var secret = "ASPNETCORE_Authentication__Canary" + Guid.NewGuid().ToString("N")[..8];
+        Environment.SetEnvironmentVariable(secret, "the-key");
+        try
+        {
+            Assert.DoesNotContain("the-key", EnvironmentExpander.GetPrefixStrippedVars("Aspnetcore")?.Values ?? Enumerable.Empty<string>());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(secret, null);
         }
     }
 }

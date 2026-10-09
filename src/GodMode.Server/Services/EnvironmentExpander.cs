@@ -22,6 +22,12 @@ public static partial class EnvironmentExpander
     /// </summary>
     private static readonly string[] ServerSecretPrefixes = ["Authentication__", "Authentication:"];
 
+    /// <summary>
+    /// The host's environment prefixes: <c>WebApplication.CreateBuilder</c> reads <c>ASPNETCORE_Authentication__ApiKey</c>
+    /// and <c>DOTNET_Authentication__ApiKey</c> into <c>Authentication:ApiKey</c> too, so under either the key is still the key.
+    /// </summary>
+    private static readonly string[] HostPrefixes = ["ASPNETCORE_", "DOTNET_"];
+
     /// <summary>The names already logged as refused: each is logged once per server process.</summary>
     private static readonly ConcurrentDictionary<string, byte> LoggedRefusals = new(StringComparer.OrdinalIgnoreCase);
 
@@ -29,8 +35,13 @@ public static partial class EnvironmentExpander
     public static ILogger Logger { get; set; } = NullLogger.Instance;
 
     /// <summary>Whether <paramref name="name"/> is one of the server's own secrets, which no config may pass to a child.</summary>
-    public static bool IsServerSecret(string name) =>
-        ServerSecretPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    public static bool IsServerSecret(string name)
+    {
+        var unprefixed = HostPrefixes.FirstOrDefault(host => name.StartsWith(host, StringComparison.OrdinalIgnoreCase)) is { } hostPrefix
+            ? name[hostPrefix.Length..]
+            : name;
+        return ServerSecretPrefixes.Any(prefix => unprefixed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// Expands ${VAR} references in environment dictionary values.

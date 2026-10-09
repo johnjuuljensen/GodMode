@@ -74,7 +74,7 @@
 	</ItemGroup>
 
 	<!-- The React client: GodMode.Client.React.csproj builds it into dist/, once per build for every target
-	     framework here and GodMode.Server alike -->
+	     framework here (only the app uses it: the server serves no page) -->
 	<ItemGroup>
 		<ProjectReference Include="..\GodMode.Client.React\GodMode.Client.React.csproj"
 		                  ReferenceOutputAssembly="false" Private="false" />

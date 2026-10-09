@@ -13,7 +13,7 @@ using Microsoft.Extensions.Options;
 namespace GodMode.Server.Auth;
 
 /// <summary>
-/// Authenticates users of the server (React client, MAUI relay) according to the startup <see cref="AuthMode"/>.
+/// Authenticates users of the server (the app's relay and attention service) according to the startup <see cref="AuthMode"/>.
 /// Every mode needs a credential: there is no keyless access, from loopback or anywhere else.
 /// </summary>
 public class GodModeAuthenticationHandler : AuthenticationHandler<AuthenticationSchemeOptions>
@@ -43,12 +43,10 @@ public class GodModeAuthenticationHandler : AuthenticationHandler<Authentication
         if (Request.Headers.ContainsKey(ProjectTokenAuthenticationHandler.ProjectIdHeader))
             return AuthenticateResult.NoResult();
 
-        // Authorization header; for the hub only, also the query string, because browsers cannot set
-        // headers on a WebSocket upgrade. Nowhere else: a key in a URL ends up in logs and history.
-        var queryToken = Request.Path.StartsWithSegments(GodModeAuthExtensions.HubPath)
-            ? Request.Query["access_token"].FirstOrDefault()
-            : null;
-        if ((BearerToken.FromHeader(Request) ?? queryToken) is not { Length: > 0 } token)
+        // The Authorization header alone, the hub's WebSocket upgrade included: the app's .NET SignalR client
+        // sends it there, and only a browser, which is no client, needs ?access_token=. A key in a URL ends up
+        // in logs and history.
+        if (BearerToken.FromHeader(Request) is not { Length: > 0 } token)
             return AuthenticateResult.NoResult();
 
         return _settings.Mode switch
@@ -209,7 +207,7 @@ public static class GodModeAuthExtensions
 
     /// <summary>
     /// Registers user and project authentication, and makes authentication the default:
-    /// every endpoint requires an authenticated user unless it explicitly opts out (only /health and the SPA do).
+    /// every endpoint requires an authenticated user unless it explicitly opts out (only /health does).
     /// </summary>
     public static IServiceCollection AddGodModeAuth(this IServiceCollection services, AuthSettings settings)
     {

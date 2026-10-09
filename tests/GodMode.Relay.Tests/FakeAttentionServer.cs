@@ -24,8 +24,11 @@ internal sealed class FakeAttentionServer : IAsyncDisposable
 
     public string Url { get; }
 
-    /// <summary>The access_token each hub request presented.</summary>
+    /// <summary>The bearer token each hub request presented in its Authorization header.</summary>
     public ConcurrentQueue<string?> Tokens { get; } = new();
+
+    /// <summary>The query string of each hub request: the server reads no key from one.</summary>
+    public ConcurrentQueue<string> Queries { get; } = new();
 
     public int Connections => _state.Connections;
 
@@ -57,8 +60,10 @@ internal sealed class FakeAttentionServer : IAsyncDisposable
         app.Use(async (ctx, next) =>
         {
             if (ctx.Request.Path.StartsWithSegments("/hubs/projects"))
-                self!.Tokens.Enqueue(ctx.Request.Query["access_token"].FirstOrDefault()
-                    ?? ctx.Request.Headers.Authorization.FirstOrDefault()?.Replace("Bearer ", ""));
+            {
+                self!.Tokens.Enqueue(ctx.Request.Headers.Authorization.FirstOrDefault()?.Replace("Bearer ", ""));
+                self.Queries.Enqueue(ctx.Request.QueryString.Value ?? "");
+            }
             await next();
         });
         app.MapGet("/health", () => Results.Ok());
