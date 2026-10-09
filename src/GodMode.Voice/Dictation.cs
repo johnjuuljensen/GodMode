@@ -17,9 +17,9 @@ namespace GodMode.Voice;
 /// sentence is ("… Det var det. Diktat slut."); never inside a sentence ("… og skriv diktat slut i filen"). Before it is
 /// sent the read-back says how long it is and how it starts, naming the project (<see cref="VoicePhrases.DictationSending"/>).
 /// It goes to the session as an answer by voice (<see cref="IGodModeServers.ReplyAsync"/>, ReplyByVoice), marked as
-/// transcribed speech (#460). A project that runs, or waits on a permission, or failed to create, is refused up front;
-/// one that has started to since is checked again at the send, and the dictation is kept, said why, rather than queued
-/// to a turn it never waited for, or lost (#507).
+/// transcribed speech (#460). A project that runs takes it as any reply, on its stdin, into the turn it is in (#530), and
+/// the read-back says it works. A project that waits on a permission, or failed to create, is refused up front; one that
+/// has come to since is checked again at the send, and the dictation is kept, said why, rather than lost (#507).
 /// While dictating, announcements wait (<see cref="Active"/>, <see cref="HeldAnnouncements"/>): an announcement in a
 /// pause to think would interrupt the user's train of thought, and change what is talked about. A dictation abandoned
 /// with no terminator (the mic closed, voice stopped, or nothing heard for <see cref="IdleWindow"/>) is dropped, and
@@ -30,15 +30,36 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
 {
     /// <summary>
     /// What ends a dictation, as a sentence on its own, and how: the one list of them (#520), and speech recognition's
-    /// keyterms (<see cref="GodModeGraph.CommandWords"/>). Two words each, unusual enough never to be dictated.
+    /// keyterms (<see cref="GodModeGraph.CommandWords"/>). Two words each, unusual enough never to be dictated; with the
+    /// ways the user was heard to say them (#530: "dictate end", "stop dictation", "diktér slut").
     /// </summary>
     public static readonly IReadOnlyList<(string Phrase, Terminator Ends)> Phrases =
     [
-        ("diktat slut", Terminator.Send), ("send diktat", Terminator.Send),
-        ("end dictation", Terminator.Send), ("dictation end", Terminator.Send), ("send dictation", Terminator.Send),
+        ("diktat slut", Terminator.Send), ("diktér slut", Terminator.Send), ("send diktat", Terminator.Send),
+        ("end dictation", Terminator.Send), ("dictation end", Terminator.Send), ("dictate end", Terminator.Send),
+        ("send dictation", Terminator.Send), ("stop dictation", Terminator.Send),
         ("annullér diktat", Terminator.Cancel), ("slet diktat", Terminator.Cancel),
         ("cancel dictation", Terminator.Cancel),
     ];
+
+    /// <summary>
+    /// Words said in front of a terminator, in its sentence, that leave it a terminator (#530: "Ja, øh, end dictation"):
+    /// a hesitation, a yes, an okay. They are dropped with it.
+    /// </summary>
+    private static readonly FrozenSet<string> Fillers = new[]
+    {
+        "øh", "øhm", "øhh", "eh", "ehm", "uh", "uhm", "um", "umm", "hm", "hmm", "mm", "er", "erm",
+        "ja", "jo", "jah", "nå", "okay", "ok", "yes", "yeah",
+    }.Select(Key).ToFrozenSet();
+
+    /// <summary>
+    /// The hesitations alone (#530): a sentence of nothing but these right before a terminator ("Øh. Diktat slut.") is
+    /// dropped with it. A "ja" said as a sentence of its own may be meant, and is kept.
+    /// </summary>
+    private static readonly FrozenSet<string> Hesitations = new[]
+    {
+        "øh", "øhm", "øhh", "eh", "ehm", "uh", "uhm", "um", "umm", "hm", "hmm", "mm", "erm",
+    }.Select(Key).ToFrozenSet();
 
     /// <summary>How many of the dictation's first words the read-back says.</summary>
     public const int WordsReadBack = 8;
@@ -102,7 +123,9 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
     /// terminator, and all its words, when it has none. The phrase is matched as the transcriber may render it: in any
     /// case, punctuated anyhow ("Diktat slut…", "Diktat, slut!"), with or without its accent ("annuller diktat"), a "c"
     /// for a "k" ("dictat slut"), its words run together ("diktatslut") or split by a full stop ("Diktat. Slut."). It
-    /// is matched strictly as a sentence: the whole of the final's last one (or last two, split so), never part of one.
+    /// is matched strictly as a sentence: the whole of the final's last one (or last two, split so), never part of one,
+    /// but for <see cref="Fillers"/> in front of it ("Ja, øh, diktat slut", #530). Hesitations said as sentences of their
+    /// own right before it ("Øh. Diktat slut.") go with it.
     /// </summary>
     public static (Terminator? Terminator, string Before) Ends(string text)
     {
@@ -111,11 +134,20 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
             return (null, "");
         for (var count = 1; count <= Math.Min(2, sentences.Count); count++)
         {
-            if (PhraseKeys.TryGetValue(Key(string.Concat(sentences.TakeLast(count))), out var terminator))
-                return (terminator, string.Join(" ", sentences.SkipLast(count)));
+            var words = Words(string.Join(" ", sentences.TakeLast(count))).SkipWhile(Fillers.Contains);
+            if (!PhraseKeys.TryGetValue(string.Concat(words), out var terminator))
+                continue;
+            var before = sentences.SkipLast(count).ToList();
+            while (before.Count > 0 && Words(before[^1]).All(Hesitations.Contains))
+                before.RemoveAt(before.Count - 1);
+            return (terminator, string.Join(" ", before));
         }
         return (null, text.Trim());
     }
+
+    /// <summary>The text's words, each as a phrase is matched (<see cref="Key"/>); none for a word of punctuation alone.</summary>
+    private static IEnumerable<string> Words(string text) =>
+        text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Select(Key).Where(w => w.Length > 0);
 
     /// <summary>A phrase as it is matched: its letters and digits alone, in lower case, unaccented, a "c" read as a "k".</summary>
     private static string Key(string text)
@@ -154,7 +186,6 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
             { CreateFailed: true } => phrases.DictationCreateFailed(name),
             { PendingPermission: { } permission } => phrases.DictationPermission(name, permission.Summary),
             { State: ProjectState.WaitingPermission } => phrases.DictationPermission(name, null),
-            { State: ProjectState.Running } => phrases.DictationRunning(name),
             _ => null,
         };
         if (refused is not null)
@@ -168,9 +199,30 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
 
     /// <summary>
     /// The user said <paramref name="text"/>, a final, while a dictation is taken: a part, said nothing to (null), or a
-    /// terminator, and what to say of it.
+    /// terminator, and what to say of it. A start ("Diktér til 283") is never a part (#530): to the project dictated to,
+    /// the dictation goes on, with the words after it; to another, or one no handle names, nothing of it is taken, and
+    /// the user hears how to end this one first.
     /// </summary>
     public async Task<string?> HearAsync(string text, CancellationToken ct)
+    {
+        if (Starts(text) is not var (said, rest))
+            return await HearPartAsync(text, ct);
+        ProjectRef target;
+        lock (_lock)
+        {
+            if (_taking is not { } taking)
+                return null;
+            _taking = taking with { LastHeard = Now };
+            target = taking.Target;
+        }
+        var name = Named(target);
+        if (Resolve(said, rest) is not var (other, more) || other != target)
+            return phrases.DictationElsewhere(name);
+        return more.Length > 0 && await HearPartAsync(more, ct) is { } after ? after : phrases.DictationGoesOn(name);
+    }
+
+    /// <summary>A final that is no start, while a dictation is taken: a part, or a terminator and what to say of it.</summary>
+    private async Task<string?> HearPartAsync(string text, CancellationToken ct)
     {
         var (terminator, before) = Ends(text);
         ProjectRef target;
@@ -224,6 +276,7 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
         if (text.Length == 0)
             return phrases.DictationEmpty(name);
 
+        bool running;
         try
         {
             var status = await servers.GetStatusAsync(target, ct);
@@ -233,8 +286,7 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
                 return phrases.DictationHeld(name, phrases.DictationCreateFailed(name));
             if (status.State == ProjectState.WaitingPermission)
                 return phrases.DictationHeld(name, phrases.DictationPermission(name, null));
-            if (status.State == ProjectState.Running)
-                return phrases.DictationHeld(name, phrases.DictationBusy(name));
+            running = status.State == ProjectState.Running;
             await servers.ReplyAsync(target, text, ct);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
@@ -244,7 +296,8 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
 
         End();
         conversation.Current = target;
-        return phrases.DictationSending(name, Sentences(text).Count, Opening(text));
+        var sentences = Sentences(text);
+        return phrases.DictationSending(name, sentences.Count, Opening(text), running, sentences.LastOrDefault(LooksLikeCommand));
     }
 
     /// <summary>
@@ -260,6 +313,13 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
         var start = string.Join(" ", words.Take(count)).TrimEnd('.', ',', ';', ':', '!', '?', '…', ' ');
         return count < words.Length ? $"{start} …" : start;
     }
+
+    /// <summary>
+    /// A dictated sentence that looks meant to end the dictation, not to be part of it (#530): a few words, one of them
+    /// about dictating ("Dictate end.", "Stop dictating."). The read-back names it.
+    /// </summary>
+    public static bool LooksLikeCommand(string sentence) =>
+        Words(sentence).ToList() is { Count: > 0 and <= 4 } words && words.Any(w => w.StartsWith("dikt", StringComparison.Ordinal));
 
     private string Cancel(ProjectRef target)
     {

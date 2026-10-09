@@ -163,8 +163,12 @@ public sealed class DictationTests
         Assert.Equal((P283, "Brug den eksisterende migration. Det var det."), Assert.Single(servers.Replies));
     }
 
+    /// <summary>
+    /// #530: a project that is working takes a dictation as any reply, into the turn it is in; the read-back says it
+    /// works, so the user knows it answers no question.
+    /// </summary>
     [Fact]
-    public async Task A_project_that_is_working_is_refused_up_front()
+    public async Task A_dictation_to_a_project_that_is_working_is_sent()
     {
         var servers = new FakeServers();
         var model = new ScriptedChatClient().Respond("Klar.");
@@ -173,13 +177,14 @@ public sealed class DictationTests
         await voice.Events.SaidAsync("Klar.");
 
         Say(voice, "Diktér til 283");
-        await SaidStartingAsync(voice, "issue 283");
-        Assert.EndsWith("arbejder. Diktér, når den venter på dig.", voice.Events.Responses.Last());
+        await voice.Events.SaidAsync("Diktat til issue 283, voice. Sig diktat slut, eller annullér diktat.");
+        Say(voice, First);
+        Say(voice, "Diktat slut.");
+        await voice.Events.SaidAsync("Sender 1 sætning til issue 283, der starter: Brug den eksisterende migration, ikke en ny. Den arbejder, og tager det med undervejs.");
 
-        // Nothing is dictated: "send" is the chat's
-        Say(voice, "Send");
-        await Eventually.UntilAsync(() => model.Calls == 1, () => "the chat to hear it");
-        Assert.Empty(servers.Replies);
+        Assert.Equal((P283, First), Assert.Single(servers.Replies));
+        // The model never heard a word of it
+        Assert.Equal(0, model.Calls);
     }
 
     [Fact]
@@ -238,6 +243,17 @@ public sealed class DictationTests
     [InlineData("Slet diktat.", Dictation.Terminator.Cancel, "")]
     [InlineData("Cancel dictation.", Dictation.Terminator.Cancel, "")]
     [InlineData("Det var forkert. Annullér diktat.", Dictation.Terminator.Cancel, "Det var forkert.")]
+    // #530: as the user was heard to say it, and with a filler in front of it
+    [InlineData("Dictate end.", Dictation.Terminator.Send, "")]
+    [InlineData("Stop dictation.", Dictation.Terminator.Send, "")]
+    [InlineData("Diktér slut.", Dictation.Terminator.Send, "")]
+    [InlineData("Dikter slut", Dictation.Terminator.Send, "")]
+    [InlineData("Ja, øh, end dictation.", Dictation.Terminator.Send, "")]
+    [InlineData("ja øh, diktat slut", Dictation.Terminator.Send, "")]
+    [InlineData("Okay. Diktat slut.", Dictation.Terminator.Send, "Okay.")]
+    [InlineData("Det var det. Øh. Diktat slut.", Dictation.Terminator.Send, "Det var det.")]
+    [InlineData("Skal vi pushe? Ja. Diktat slut.", Dictation.Terminator.Send, "Skal vi pushe? Ja.")]
+    [InlineData("Det var det. Uhm, cancel dictation.", Dictation.Terminator.Cancel, "Det var det.")]
     public void A_phrase_as_a_sentence_on_its_own_ends_it(string final, Dictation.Terminator terminator, string before) =>
         Assert.Equal((terminator, before), Dictation.Ends(final));
 
@@ -262,6 +278,8 @@ public sealed class DictationTests
     [InlineData("Det var et diktat. Slut.")]
     [InlineData("Slut.")]
     [InlineData("Diktat.")]
+    [InlineData("Ja, og skriv diktat slut i filen.")]
+    [InlineData("Øh, men stop dictation først.")]
     public void Other_words_are_dictated(string final) => Assert.Equal(((Dictation.Terminator?)null, final), Dictation.Ends(final));
 
     /// <summary>The phrases are keyterms, so speech recognition hears them, and each fits in one.</summary>
@@ -367,27 +385,67 @@ public sealed class DictationTests
         Assert.Empty(servers.Replies);
     }
 
-    /// <summary>
-    /// #507: a project that started working while the user dictated is checked again at the send: nothing is queued to
-    /// it, the dictation is kept and the user hears why, and once it waits again "diktat slut" sends it.
-    /// </summary>
+    /// <summary>#530: a project that started working while the user dictated is sent the dictation all the same.</summary>
     [Fact]
-    public async Task A_send_to_a_project_that_started_working_is_held_and_kept()
+    public async Task A_send_to_a_project_that_started_working_is_sent()
     {
         var (servers, dictation, _) = await DictatingAsync();
         var waiting = await servers.GetStatusAsync(P283, CancellationToken.None);
         servers.SetStatus(ServerA, waiting with { State = ProjectState.Running });
 
-        Assert.Equal("Intet sendt. issue 283 er gået i gang og arbejder nu. Sig diktat slut igen, eller annullér diktat.",
-            await dictation.HearAsync("Diktat slut", CancellationToken.None));
+        Assert.EndsWith("Den arbejder, og tager det med undervejs.", await dictation.HearAsync("Diktat slut", CancellationToken.None));
+        Assert.False(dictation.Active);
+        Assert.Equal((P283, First), Assert.Single(servers.Replies));
+    }
+
+    /// <summary>#530: "Diktér til" the same project, said while dictating, is no part: the dictation goes on, with what follows it.</summary>
+    [Fact]
+    public async Task Dictate_to_the_same_project_while_dictating_goes_on()
+    {
+        var (servers, dictation, _) = await DictatingAsync();
+
+        Assert.Equal("Diktatet til issue 283 fortsætter.", await dictation.HearAsync("Diktér til 283.", CancellationToken.None));
+        Assert.Equal([First], dictation.Parts);
+        Assert.Equal("Diktatet til issue 283 fortsætter.", await dictation.HearAsync("Dictate to 283. Og kør testene.", CancellationToken.None));
+        Assert.StartsWith("Sender 2 sætninger til issue 283", await dictation.HearAsync("Diktat slut.", CancellationToken.None));
+
+        Assert.Equal($"{First} Og kør testene.", Assert.Single(servers.Replies).Text);
+    }
+
+    /// <summary>#530: "Diktér til" another project, or one no handle names, while dictating, is taken as nothing, and the dictation is kept.</summary>
+    [Theory]
+    [InlineData("Diktér til 101. Brug den nye.")]
+    [InlineData("Dictate to GodMode Chat General.")]
+    public async Task Dictate_to_another_project_while_dictating_adds_nothing(string final)
+    {
+        var (servers, dictation, _) = await DictatingAsync();
+        servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?"), Question("p/r/101", "101-docs", "Hvilken?"));
+
+        Assert.Equal("Du dikterer stadig til issue 283, intet tilføjet. Sig diktat slut eller annullér diktat først.",
+            await dictation.HearAsync(final, CancellationToken.None));
         Assert.True(dictation.Active);
         Assert.Equal([First], dictation.Parts);
         Assert.Empty(servers.Replies);
-
-        servers.SetStatus(ServerA, waiting);
-        Assert.StartsWith("Sender 1 sætning til issue 283", await dictation.HearAsync("Diktat slut", CancellationToken.None));
-        Assert.Equal(First, Assert.Single(servers.Replies).Text);
     }
+
+    /// <summary>#530: a dictated sentence that sounds like an end phrase is named in the read-back.</summary>
+    [Fact]
+    public async Task A_part_that_sounds_like_a_command_is_named_in_the_read_back()
+    {
+        var (servers, dictation, _) = await DictatingAsync();
+        Assert.Null(await dictation.HearAsync("Dictation ended.", CancellationToken.None));
+
+        Assert.EndsWith("En sætning lyder som en kommando: Dictation ended.", await dictation.HearAsync("Diktat slut", CancellationToken.None));
+        Assert.Equal($"{First} Dictation ended.", Assert.Single(servers.Replies).Text);
+    }
+
+    [Theory]
+    [InlineData("Dictate end.", true)]
+    [InlineData("Stop dictating.", true)]
+    [InlineData("Diktat færdig nu.", true)]
+    [InlineData("Brug den eksisterende migration.", false)]
+    [InlineData("Diktat-funktionen skal kunne afsluttes med et ja foran slutordene.", false)]
+    public void Looks_like_a_command(string sentence, bool command) => Assert.Equal(command, Dictation.LooksLikeCommand(sentence));
 
     /// <summary>
     /// Announcements wait while dictating: one in a pause to think would break the user's train of thought. They are

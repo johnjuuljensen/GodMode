@@ -473,11 +473,34 @@ public sealed partial class VoicePhrases
 
     /// <summary>
     /// A dictation sent (#459), read back: its length in sentences, and its first words, as it starts going out:
-    /// "Sender 4 sætninger til issue 283, der starter: Brug den eksisterende migration …".
+    /// "Sender 4 sætninger til issue 283, der starter: Brug den eksisterende migration …". To a project that is
+    /// <paramref name="running"/> (#530), it says so, as it answers no question: the turn takes it in as it goes. A
+    /// dictated sentence that sounds like a <paramref name="command"/> (<see cref="Dictation.LooksLikeCommand"/>) is named.
     /// </summary>
-    public string DictationSending(SpokenName name, int sentences, string start) => _danish
-        ? $"Sender {sentences} {(sentences == 1 ? "sætning" : "sætninger")} til {Named(name)}, der starter: {GodModeAnnouncementFormatter.Sentence(start)}"
-        : $"Sending {sentences} {(sentences == 1 ? "sentence" : "sentences")} to {Named(name)}, starting: {GodModeAnnouncementFormatter.Sentence(start)}";
+    public string DictationSending(SpokenName name, int sentences, string start, bool running, string? command)
+    {
+        List<string> said =
+        [
+            _danish
+                ? $"Sender {sentences} {(sentences == 1 ? "sætning" : "sætninger")} til {Named(name)}, der starter: {GodModeAnnouncementFormatter.Sentence(start)}"
+                : $"Sending {sentences} {(sentences == 1 ? "sentence" : "sentences")} to {Named(name)}, starting: {GodModeAnnouncementFormatter.Sentence(start)}",
+        ];
+        if (command is not null)
+            said.Add(_danish ? $"En sætning lyder som en kommando: {GodModeAnnouncementFormatter.Sentence(command)}"
+                : $"One sentence sounds like a command: {GodModeAnnouncementFormatter.Sentence(command)}");
+        if (running)
+            said.Add(_danish ? "Den arbejder, og tager det med undervejs." : "It is working, and takes it in as it goes.");
+        return string.Join(" ", said);
+    }
+
+    /// <summary>"Diktér til" the project dictated to, said while dictating (#530): the dictation goes on.</summary>
+    public string DictationGoesOn(SpokenName name) =>
+        _danish ? $"Diktatet til {Named(name)} fortsætter." : $"Still dictating to {Named(name)}.";
+
+    /// <summary>"Diktér til" another project, said while dictating (#530): nothing of it is taken, and this one ends first.</summary>
+    public string DictationElsewhere(SpokenName name) => _danish
+        ? $"Du dikterer stadig til {Named(name)}, intet tilføjet. Sig diktat slut eller annullér diktat først."
+        : $"Still dictating to {Named(name)}, nothing added. Say end dictation or cancel dictation first.";
 
     /// <summary>A dictation dropped by the user ("annullér diktat"): nothing went out.</summary>
     public string DictationCancelled(SpokenName name) =>
@@ -499,14 +522,6 @@ public sealed partial class VoicePhrases
     /// <summary>A dictation to a project no handle names: none is started.</summary>
     public string DictationUnknown(string said) =>
         _danish ? $"Ukendt projekt: {said}. Intet diktat." : $"Unknown project: {said}. No dictation.";
-
-    /// <summary>A dictation to a project that works now: none is started, as nothing waits on the user's words.</summary>
-    public string DictationRunning(SpokenName name) =>
-        _danish ? $"{Subject(name)} arbejder. Diktér, når den venter på dig." : $"{Subject(name)} is working. Dictate when it waits for you.";
-
-    /// <summary>A dictation sent to a project that started working while it was taken (#507): it is kept, for when it waits again.</summary>
-    public string DictationBusy(SpokenName name) =>
-        _danish ? $"{Subject(name)} er gået i gang og arbejder nu." : $"{Subject(name)} has started working.";
 
     /// <summary>A dictation to a project that waits on a permission, answered on screen only.</summary>
     public string DictationPermission(SpokenName name, string? summary) => (summary, _danish) switch
