@@ -771,6 +771,17 @@ The server's shutdown stops every session at once, within its 15-second bound: t
 
 A stop denies the permission prompts claude waits on before it interrupts it: killing claude would drop their calls, and the cleanup of a dropped call would show the project `Running` again, its question gone.
 
+#### A server that dies without stopping its sessions
+
+A crash, or a SIGKILL, runs no stop. On Windows nothing is left: the Job Object closes with the server, and kills the session's tree with it. On Linux the session's process group outlives the server, so the next server ends it before it can run a second claude on the same session (issue #280):
+
+- **The group is recorded while claude runs**, in the root: `{root}/logs/{id}.process-group.json`, `{"Group": <pgid>, "Launch": "<mark>"}`. The mark is random per launch and is in claude's environment as `GODMODE_LAUNCH`, so every process it starts carries it too. The record goes when the session's exit has been handled, whatever ended it.
+- **A server reaps a root's records before it recovers the root's sessions**, at its start and for a root it takes over later: a record that is not one of its own launches is an orphan's. It takes the group whole, and any process elsewhere that carries the mark (one that left the group, as a detached spawn does): SIGTERM, 3 seconds, then SIGKILL to what is left. The record goes, and the log says what was ended.
+- **Only what carries the mark is taken.** A group id is a pid, and the kernel can give it to another group once the session's has gone: a group none of whose processes carries the recorded mark (read from `/proc/{pid}/environ`, so only the server's user's processes count) is left alone. So is a group the server itself is in (a server started from the orphaned session).
+- **A session is recovered after the reap**: `Stopped`, or resumed when a shutdown that the crash cut short had marked it. Either way its old claude is gone by then, so a resume runs one.
+
+macOS has no `setsid`: claude stays in the server's process group, nothing is recorded, and a crash there leaves claude running.
+
 ### When Something Fails
 
 A project's state follows claude, whatever else fails:

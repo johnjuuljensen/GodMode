@@ -2507,6 +2507,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// </summary>
     private async Task<IReadOnlyList<ProjectInfo>> RecoverRootsAsync(ProfileSnapshot recoverSnap, IReadOnlyList<(string Profile, string Root, string Path)> roots)
     {
+        // What a server that died left running in them goes first, so no session is resumed beside its old claude (issue #280)
+        await SessionProcessTree.ReapOrphansAsync(roots.Select(root => root.Path).Distinct(PathComparer), _logger);
+
         // A session tracked already, under the ID it has, is left as it is: one whose claude runs on
         // after its root moved profile, say
         var tracked = new HashSet<string>(_projects.Values.Select(project => FullPath(project.StatePath)), PathComparer);
