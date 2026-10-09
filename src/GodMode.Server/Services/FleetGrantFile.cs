@@ -30,8 +30,14 @@ public static class FleetGrantFile
     /// </param>
     public sealed record Grant(string Action, bool Granted, string Folder, string? Parent = null);
 
+    /// <summary>The extension of a record set aside while its session is in the trash (<see cref="SetAside"/>).</summary>
+    public const string SetAsideExtension = ".fleet-trashed";
+
     public static string PathFor(string rootPath, string sessionId) =>
         Path.Combine(rootPath, ProjectFolder.ScriptLogsFolderName, sessionId + Extension);
+
+    public static string SetAsidePathFor(string rootPath, string sessionId) =>
+        Path.Combine(rootPath, ProjectFolder.ScriptLogsFolderName, sessionId + SetAsideExtension);
 
     /// <summary>Atomic, and replacing any record a session with the same id had before.</summary>
     public static void Write(string rootPath, string sessionId, Grant grant)
