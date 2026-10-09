@@ -170,7 +170,8 @@ public static class GodModeGraph
             .Node(new HelpNode("help", 80))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
-            .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Medium,
+            // On the Light tier, Haiku 5.5, for speed (#525): Sonnet (#379) was for Haiku 4.5's mistakes
+            .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Light,
                 new CodeSaysInference(inference, tools.Conversation, phrases), systemPrompt),
                 tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, phrases))
             .Build();
