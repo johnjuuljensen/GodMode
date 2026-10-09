@@ -242,7 +242,7 @@ When resolving an action, `config.json` (base) is merged with `config.{action}.j
 | `description` | Shown in the UI when selecting an action |
 | `profileName` | Profile the root belongs to (`config.json` only). Default: `Default` |
 | `title` | What the app and voice show for the root (`config.json` only); its name stays its key. Default: none, the name is shown |
-| `environment` | Env vars set for scripts and passed to Claude processes, on top of the few they inherit (see [Environment](#environment)). Values support `${VAR}` expansion from the server's environment |
+| `environment` | Env vars set for scripts and passed to Claude processes, on top of the few they inherit (see [Environment](#environment)). Values support `${VAR}` expansion from the server's environment, but for its own secrets (see [Environment](#environment)) |
 | `prepare` | Scripts run before project folder is created (working dir = root) |
 | `create` | Scripts run to create the project (working dir = project, or root if `scriptsCreateFolder`) |
 | `delete` | Scripts run when a project is deleted (working dir = root) |
@@ -677,6 +677,8 @@ Neither a Claude process nor a root script (`prepare`, `create`, `delete`, `stat
 
 A credential a script or a session needs that is not a file in the user's home goes in the root's `environment` (or the profile's, `Profiles:<name>:Environment`), and then reaches both: `GH_TOKEN` or `GITHUB_TOKEN` for `gh` and its git credential helper, `SSH_AUTH_SOCK` for an SSH agent, `GIT_SSH_COMMAND`, a desktop keyring's `DBUS_SESSION_BUS_ADDRESS`. `godmode-dev` passes the codespace's token this way, `"environment": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }`; on a machine where `gh` is logged in with its own stored credentials (`gh auth login`, the Windows credential manager), the entry expands to nothing and is dropped, and `gh` reads its login from the home directory.
 
+`${VAR}` reads the server's environment, with one exception: the server's own secrets, the names under `Authentication` (`Authentication__ApiKey`, `Authentication__ApiKeyFile`, and the `Authentication:` forms, in any case). A reference to one expands to an empty string, set or not, and the server logs a warning, once per name per run, naming the entry and the secret. So `"environment": { "X": "${Authentication__ApiKey}" }` gives sessions an empty `X`, not the key. The same goes for a profile's prefix-stripped variables (`stripEnvVarProfile`). Everything else, `${GITHUB_TOKEN}` included, still resolves. A key a session should have goes in the environment as a value of its own.
+
 ### Pull Request Status
 
 A root's `status` script tells the server what became of a project's work, without the server knowing the VCS. It runs in the project folder, with the environment above, and prints one JSON object:
@@ -943,9 +945,6 @@ Roots and profiles:
 - `Task<ProjectRootInfo[]> ListProjectRoots()` — Get roots with their actions and input schemas, and each root's `Title` when it has one
 - `Task<IssueInfo?> DescribeIssue(profileName, projectRootName, issue)` — The issue's `Title` and `Labels` from the root's `issueInfo` script, run now; null when the root has none; fails, saying why, as [Issue Info](#issue-info) says
 - `Task<ProfileInfo[]> ListProfiles()` — Get profiles (read-only: no hub method writes a profile or a root)
-
-Utility:
-- `Task<string?> CheckCommand(command)` — Resolve a command on the server's `PATH`
 
 ### Server → Client Events
 

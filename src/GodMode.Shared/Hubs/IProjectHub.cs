@@ -221,12 +221,4 @@ public interface IProjectHub
     /// <see cref="IProjectHubClient.ProjectDeleted"/>.
     /// </summary>
     Task<DeleteProjectResult> ForgetProject(string projectId);
-
-    // ── Utility ──
-
-    /// <summary>
-    /// Checks whether a CLI command is available on the server (in PATH).
-    /// Returns the resolved path if found, null if not.
-    /// </summary>
-    Task<string?> CheckCommand(string command);
 }

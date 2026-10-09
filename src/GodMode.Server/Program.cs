@@ -94,6 +94,7 @@ builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 builder.Services.AddGodModeMcp();
 
 var app = builder.Build();
+EnvironmentExpander.Logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(EnvironmentExpander));
 
 // Configure the HTTP request pipeline. The server serves no page and no browser is its client: a request
 // with an Origin is refused first, before authentication

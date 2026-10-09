@@ -368,10 +368,4 @@ export class GodModeHub {
   async forgetProject(projectId: string): Promise<DeleteProjectResult> {
     return await this.invoke('ForgetProject', projectId);
   }
-
-  // ── Utility ──
-
-  async checkCommand(command: string): Promise<string | null> {
-    return await this.invoke('CheckCommand', command);
-  }
 }
