@@ -389,8 +389,9 @@ internal abstract class SessionProcessTree : IDisposable
     /// the claudes a server that died without stopping them (a crash, a SIGKILL) left running, with every
     /// process they started. Each recorded group (<see cref="RecordPathFor"/>) that is not a launch of this
     /// process is taken whole, with any process that carries its launch's mark but left it (a session of its
-    /// own), and only when one of them carries the mark: a group id is a pid, so the kernel can give it to
-    /// another group once the session's is gone, and that group is left alone. SIGTERM, then
+    /// own), but only when a process in the group carries the mark: a group id is a pid, so the kernel can give
+    /// it to another group once the session's is gone, and that group is left alone, only the marked processes
+    /// elsewhere ended. A root whose records cannot be listed is skipped, logged, and the others are not. SIGTERM, then
     /// <see cref="OrphanGracePeriod"/>, then SIGKILL to what is left. Each record goes once it is dealt with.
     /// Linux only: Windows needs none (the Job Object dies with the server), and macOS has no group to record.
     /// </summary>
@@ -398,9 +399,7 @@ internal abstract class SessionProcessTree : IDisposable
     {
         if (!OperatingSystem.IsLinux()) return;
         var records = rootPaths
-            .Select(root => Path.Combine(root, GodMode.ProjectFiles.ProjectFolder.ScriptLogsFolderName))
-            .Where(Directory.Exists)
-            .SelectMany(logs => Directory.EnumerateFiles(logs, "*" + RecordSuffix))
+            .SelectMany(root => RecordsIn(root, logger))
             .Select(path => (Path: path, Record: ReadRecord(path)))
             .Where(found => found.Record is not { } record || !LiveLaunches.ContainsKey(record.Launch))
             .ToList();
@@ -417,41 +416,76 @@ internal abstract class SessionProcessTree : IDisposable
         }));
     }
 
+    /// <summary>The records in the root at <paramref name="rootPath"/>; none, logged, when its logs cannot be listed, so the other roots are still reaped and recovered.</summary>
+    private static string[] RecordsIn(string rootPath, ILogger logger)
+    {
+        var logs = Path.Combine(rootPath, GodMode.ProjectFiles.ProjectFolder.ScriptLogsFolderName);
+        try
+        {
+            return Directory.Exists(logs) ? Directory.GetFiles(logs, "*" + RecordSuffix) : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Could not list the process group records in {Path}: what a server that died left running there is not reaped", logs);
+            return [];
+        }
+    }
+
     private static async Task ReapAsync(string path, GroupRecord record, ILogger logger, TimeSpan grace)
     {
         var session = Path.GetFileName(path)[..^RecordSuffix.Length];
-        var members = Members(record);
-        if (members.Count == 0) return;
-        if (!members.Any(member => member.Marked))
+        var targets = Targets(record);
+        if (targets.Members.Count == 0)
         {
-            logger.LogInformation("Process group {Group} of session {Session} is another's now (none of its processes carries the session's launch): left alone",
-                record.Group, session);
+            logger.LogInformation("Nothing of session {Session} is left running (group {Group}): none of the processes there carries its launch",
+                session, record.Group);
             return;
         }
         // A server started from the orphaned session (a restart it ran) is one of them: it never ends itself
-        if (members.Any(member => member.Pid == Environment.ProcessId))
+        if (targets.Members.Any(member => member.Pid == Environment.ProcessId))
         {
             logger.LogWarning("Session {Session} still has processes a server that died left running ({Pids}, group {Group}), and this server is one of them: left alone",
-                session, string.Join(", ", members.Select(member => member.Pid)), record.Group);
+                session, Pids(targets), record.Group);
             return;
         }
 
-        logger.LogWarning("Session {Session} still has processes a server that died left running: {Pids} (group {Group}); ending them before it is recovered",
-            session, string.Join(", ", members.Select(member => member.Pid)), record.Group);
-        Signal(-record.Group, SigTerm);
-        foreach (var member in members.Where(member => member.Group != record.Group)) Signal(member.Pid, SigTerm);
+        logger.LogWarning("Session {Session} still has processes a server that died left running: {Pids} ({Group}); ending them before it is recovered",
+            session, Pids(targets), targets.WholeGroup ? $"group {record.Group}" : $"group {record.Group} is another's now, so only these");
+        SignalTargets(record, targets, SigTerm);
 
         var deadline = DateTime.UtcNow + grace;
-        while (DateTime.UtcNow < deadline && Members(record).Count > 0) await Task.Delay(100);
-        if (Members(record) is { Count: > 0 } left)
+        while (DateTime.UtcNow < deadline && Targets(record).Members.Count > 0) await Task.Delay(100);
+        if (Targets(record) is { Members.Count: > 0 } left)
         {
             logger.LogWarning("Session {Session}: {Pids} did not end within {Grace}s of SIGTERM; killing them",
-                session, string.Join(", ", left.Select(member => member.Pid)), grace.TotalSeconds);
-            Signal(-record.Group, SigKill);
-            foreach (var member in left.Where(member => member.Group != record.Group)) Signal(member.Pid, SigKill);
+                session, Pids(left), grace.TotalSeconds);
+            SignalTargets(record, left, SigKill);
         }
         else logger.LogInformation("Session {Session}: its orphaned processes ended on SIGTERM", session);
     }
+
+    /// <summary>
+    /// What a reap of <paramref name="record"/> ends: the whole group, with the marked processes that left it,
+    /// when a process in the group carries the launch's mark; otherwise the group is another's (its id reused)
+    /// and only the marked processes elsewhere are the session's. Decided afresh at each signal.
+    /// </summary>
+    private sealed record ReapTargets(IReadOnlyList<Member> Members, bool WholeGroup);
+
+    private static ReapTargets Targets(GroupRecord record)
+    {
+        var members = Members(record);
+        var wholeGroup = members.Any(member => member.Group == record.Group && member.Marked);
+        return new ReapTargets(wholeGroup ? members : [.. members.Where(member => member.Marked)], wholeGroup);
+    }
+
+    private static void SignalTargets(GroupRecord record, ReapTargets targets, int signal)
+    {
+        if (targets.WholeGroup) Signal(-record.Group, signal);
+        foreach (var member in targets.Members.Where(member => !targets.WholeGroup || member.Group != record.Group))
+            Signal(member.Pid, signal);
+    }
+
+    private static string Pids(ReapTargets targets) => string.Join(", ", targets.Members.Select(member => member.Pid));
 
     private sealed record Member(int Pid, int Group, bool Marked);
 

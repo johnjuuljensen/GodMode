@@ -69,6 +69,35 @@ public class ProcessGroupReapTests
         }
     }
 
+    /// <summary>
+    /// A recorded group none of whose own processes carries the launch is another's, even while a process that
+    /// left it (a detached spawn of the session's) still carries it: the group is left alone, and only the
+    /// marked process is ended.
+    /// </summary>
+    [Fact]
+    public async Task Reap_OfAReusedGroup_EndsOnlyTheMarkedProcessOutsideIt()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var root = NewRoot();
+        using var other = await StartOwnGroupAsync("sleep", ["600"], launch: "someone-else", members: 1);
+        using var detached = await StartOwnGroupAsync("sleep", ["600"], launch: "abc", members: 1);
+        var recordPath = WriteRecord(root, "s1", other.Id, "abc");
+        try
+        {
+            await SessionProcessTree.ReapOrphansAsync([root], NullLogger.Instance, TimeSpan.FromSeconds(1));
+
+            Assert.True(detached.WaitForExit(5_000), $"the marked process (pid {detached.Id}) outside the recorded group outlived the reap");
+            Assert.False(other.HasExited, $"the reap killed group {other.Id}, which no process of the session is in");
+            Assert.False(File.Exists(recordPath));
+        }
+        finally
+        {
+            KillGroupQuietly(other.Id);
+            KillGroupQuietly(detached.Id);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     /// <summary>A session this process runs is no orphan: its record stays, and so does its claude.</summary>
     [Fact]
     public async Task Reap_LeavesALaunchOfThisProcess()
