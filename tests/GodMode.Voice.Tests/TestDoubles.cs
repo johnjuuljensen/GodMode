@@ -130,6 +130,15 @@ internal sealed class OfflineVoice : IAsyncDisposable
     /// </summary>
     public IReadOnlyList<string> ToolResults => [.. Model.ToolResults, .. Session.Conversation.SaidResults];
 
+    /// <summary>
+    /// Until the session listens, and has reported it: a line is in <see cref="RecordingEvents.Responses"/> once it is
+    /// said, while it may still be spoken, and what is heard while it is spoken is not taken; the session's own state
+    /// changes before it reports the change (#371).
+    /// </summary>
+    public Task ListeningAsync() => Eventually.UntilAsync(
+        () => Session.State == VoiceState.Listening && Events.States.LastOrDefault() == VoiceState.Listening,
+        () => $"the session to listen; it is {Session.State}, after {string.Join(", ", Events.States)}");
+
     private OfflineVoice(ScriptedChatClient model, IInferenceProvider inference, TimeSpan speech, ScriptedSpeechEngine? engine)
     {
         Synthesizer = new FixedPcmSynthesizer(speech);
