@@ -4,7 +4,7 @@ namespace GodMode.Voice;
 
 /// <summary>
 /// The chat node, which keeps what it waited past (#529): a final the model took for the start of what the user is
-/// saying (<c>waiting_for_further_input</c>, a pause the transcriber committed on mid-sentence) is joined to the next
+/// saying (its answer's <c>wait</c>, a pause the transcriber committed on mid-sentence) is joined to the next
 /// final it is given, so the whole of it is acted on, and sent, not its last part alone. ChatNode answers nothing for
 /// a final it waits past, and gives null; what it held is dropped after <see cref="VoiceConversation.HeldFor"/>.
 /// </summary>
