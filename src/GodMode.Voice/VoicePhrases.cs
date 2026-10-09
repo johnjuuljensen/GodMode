@@ -80,7 +80,12 @@ public sealed partial class VoicePhrases
     /// asked, or, when the session gave its own spoken reply, that reply word for word (<see cref="Spoken"/>). A finished
     /// turn is done only when the session said so, and idle otherwise (issue #467).
     /// </summary>
-    public string Announce(SpokenName name, AttentionItem item) => Spoken(name, item) ?? Short(name, item);
+    public string Announce(SpokenName name, AttentionItem item) =>
+        Spoken(name, item) ?? (Choices(item) is { Length: > 0 } listed
+            // Its options (#529) make sense only with the question: said as it is when it can be
+            ? With(QuestionChoices.Single(item.Question)!.Question.Trim() is var question && VoiceTools.SaidAsIs(question)
+                ? Reads(name, item, question) : Short(name, item), listed)
+            : Short(name, item));
 
     /// <summary>
     /// One project that needs the user, in one short line, by its name and what it needs, never its own words: "issue 283
@@ -113,7 +118,31 @@ public sealed partial class VoicePhrases
     /// not the bot, so it never starts the line, where a "Sendt" in it would be the bot's own word (<see cref="SentNode"/>).
     /// Null when the session gave none.
     /// </summary>
-    public string? Spoken(SpokenName name, AttentionItem item) => item.Spoken is { Length: > 0 } spoken ? Reads(name, item, spoken) : null;
+    /// <param name="choices">Whether a question's options are said after it (#529, <see cref="Choices(AttentionItem)"/>).</param>
+    public string? Spoken(SpokenName name, AttentionItem item) =>
+        item.Spoken is { Length: > 0 } spoken ? With(Reads(name, item, spoken), Choices(item)) : null;
+
+    /// <summary>The line, then <paramref name="choices"/> as a sentence of their own (<see cref="Choices(AttentionItem)"/>), when there are any.</summary>
+    public static string With(string line, string choices) =>
+        choices.Length == 0 ? line : $"{GodModeAnnouncementFormatter.Sentence(line)} {choices}";
+
+    /// <summary>
+    /// A pending question's options (#529), their labels alone, said after the question: "Valg: Ja, opret dem; Ikke nu;
+    /// eller Senere" / "Options: …; or …". Said for an AskUserQuestion of one question; nothing for any other item, or one of
+    /// several questions, which the screen answers.
+    /// </summary>
+    public string Choices(AttentionItem item) => Choices(item.Kind == AttentionKind.Question ? item.Question : null);
+
+    /// <inheritdoc cref="Choices(AttentionItem)"/>
+    public string Choices(PendingQuestion? pending)
+    {
+        if (QuestionChoices.Single(pending) is not { } question)
+            return "";
+        var labels = question.Options.Select(o => o.Label.Trim().TrimEnd('.')).ToList();
+        var or = _danish ? "eller" : "or";
+        var listed = labels is [var one] ? one : $"{string.Join("; ", labels.Take(labels.Count - 1))}; {or} {labels[^1]}";
+        return _danish ? $"Valg: {listed}" : $"Options: {listed}";
+    }
 
     /// <summary>
     /// A project's own words read out, after a lead-in that names it and what it needs: "issue 283 spørger: …" for a

@@ -70,6 +70,12 @@ public interface IGodModeServers
     /// <summary><see cref="IProjectHub.ReplyByVoice"/>: the answer reaches the session marked as transcribed speech.</summary>
     Task ReplyAsync(ProjectRef project, string text, CancellationToken ct);
 
+    /// <summary>
+    /// <see cref="IProjectHub.AnswerQuestion"/>: the project's pending AskUserQuestion answered with the options the user
+    /// picked (#529), each question's text to its label, as the inbox answers it.
+    /// </summary>
+    Task AnswerQuestionAsync(ProjectRef project, string requestId, IReadOnlyDictionary<string, string> answers, CancellationToken ct);
+
     /// <summary><see cref="IProjectHub.AskForRecap"/>: sends <c>/recap</c> to a project with no recap, once (#513).</summary>
     Task<RecapAsk> AskForRecapAsync(ProjectRef project, CancellationToken ct);
 
@@ -195,6 +201,9 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
     public Task ReplyAsync(ProjectRef project, string text, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.ReplyByVoice), project.ProjectId, text, ct);
+
+    public Task AnswerQuestionAsync(ProjectRef project, string requestId, IReadOnlyDictionary<string, string> answers, CancellationToken ct) =>
+        Hub(project).InvokeAsync(nameof(IProjectHub.AnswerQuestion), project.ProjectId, requestId, new Dictionary<string, string>(answers), ct);
 
     public Task<RecapAsk> AskForRecapAsync(ProjectRef project, CancellationToken ct) =>
         Hub(project).InvokeAsync<RecapAsk>(nameof(IProjectHub.AskForRecap), project.ProjectId, ct);

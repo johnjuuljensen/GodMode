@@ -62,7 +62,7 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
         };
         conversation.LastProfile = profile;
         conversation.LastRoot = root;
-        return new SpokenName(label, saysRoot ? root : null, saysProfile ? profile : null,
+        return new SpokenName(label, saysRoot ? root : null, saysProfile && !OneName(all, saysRoot, profile, root) ? profile : null,
             anchor == Anchor.Bare ? null : TopicOf(found, label));
     }
 
@@ -77,9 +77,17 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
         if (projects.Find(project) is not { } found)
             return new SpokenName(label);
         var all = projects.Projects;
-        return new SpokenName(label, SeveralRoots(all) ? projects.RootShown(found) : null, SeveralProfiles(all) ? ProfileOf(found.Project) : null,
+        var (root, profile, saysRoot) = (projects.RootShown(found), ProfileOf(found.Project), SeveralRoots(all));
+        return new SpokenName(label, saysRoot ? root : null, SeveralProfiles(all) && !OneName(all, saysRoot, profile, root) ? profile : null,
             TopicOf(found, label));
     }
+
+    /// <summary>
+    /// Whether a root said is the profile's name too (#529: "i GodMode, profil Godmode"), and no other profile has a root
+    /// shown so: the root said names both, once.
+    /// </summary>
+    private bool OneName(IReadOnlyList<ServerProject> all, bool saysRoot, string profile, string? root) =>
+        saysRoot && Same(root, profile) && !SameRootElsewhere(all, profile, root);
 
     /// <summary>The project's spoken topic (<see cref="ProjectTopics"/>); null when its name gives none.</summary>
     private static string? TopicOf(ServerProject project, string label) => ProjectTopics.Of(project.Project.Name, project.Project.Kind, label);

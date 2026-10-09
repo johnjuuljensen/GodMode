@@ -113,7 +113,8 @@ public sealed class DeleteTests
 
         var result = await tools.DeleteSessionAsync("issue 525; issue 12", default);
 
-        Assert.Equal("Skal jeg slette issue 525 i GodMode, profil Godmode og issue 12 i api, profil Mega?", conversation.TakeSaid(result));
+        // A root with its profile's name is said once (#529)
+        Assert.Equal("Skal jeg slette issue 525 i GodMode og issue 12 i api, profil Mega?", conversation.TakeSaid(result));
     }
 
     [Fact]

@@ -194,6 +194,13 @@ public sealed partial class ProjectHandles
                 return _byHandle.GetValueOrDefault(numbered);
             if (Retired(reference))
                 return null;
+            // A handle said with its punctuation or spaces otherwise ("FE86", "FE 86" for "fe-86", #529)
+            if (!reference.All(c => char.IsAsciiDigit(c) || c == ' ') && _byHandle.Where(h => Same(Squashed(h.Key), Squashed(reference))).ToList() is [var squashed])
+                return squashed.Value;
+            // Its kind and a word of its name, as a label of it is guessed ("chat FE86" for "issue 86", #529)
+            var kindAndWord = _byProject.Where(p => KindAndWord(p.Value, reference)).Select(p => p.Key).ToList();
+            if (kindAndWord.Count > 0)
+                return kindAndWord is [var guessed] ? guessed : null;
 
             var words = Words(reference).ToList();
             var named = _byProject
@@ -260,9 +267,25 @@ public sealed partial class ProjectHandles
             .Where(p => said.All(place => place(p.Value)))
             .Where(p => Same(p.Value.Handle, rest) || Same(p.Value.Label, rest) || Same(StemOf(p.Value.Handle), rest)
                 || (!p.Value.Handle.All(char.IsAsciiDigit) && Same(StemOf(p.Value.Label), rest)) || (number is not null && Same(p.Value.Handle, number))
-                || Words(p.Value.Name).Any(w => Same(w, rest)) || Same(Joined(p.Value.Topical), rest))
+                || Words(p.Value.Name).Any(w => Same(w, rest)) || Same(Joined(p.Value.Topical), rest) || KindAndWord(p.Value, rest))
             .Select(p => p.Key)];
     }
+
+    /// <summary>
+    /// Whether the reference is the project's kind and then a word of its name, or its name or handle run together
+    /// ("chat FE86", "chat fe 86" of the chat FE-86, #529): as the model names a project by what it is and what it is about.
+    /// </summary>
+    private static bool KindAndWord(Entry entry, string reference)
+    {
+        if (entry.Kind is null || Words(entry.Kind).FirstOrDefault(w => !w.All(char.IsDigit)) is not { } kind
+            || Words(reference).Where(w => !Connectives.Contains(w)).ToList() is not [var first, _, ..] words || !Same(first, kind))
+            return false;
+        var rest = string.Concat(words.Skip(1));
+        return Words(entry.Name).Any(w => Same(w, rest)) || Same(Squashed(entry.Name), rest) || Same(Squashed(entry.Handle), rest);
+    }
+
+    /// <summary>The text's letters and digits alone: "fe86" of "FE-86".</summary>
+    private static string Squashed(string text) => string.Concat(text.Where(char.IsLetterOrDigit));
 
     /// <summary>The words of <paramref name="text"/>, but <see cref="Connectives"/>, joined by spaces: as a reference is compared.</summary>
     private static string Joined(string text) => string.Join(' ', Words(text).Where(w => !Connectives.Contains(w)));
@@ -329,6 +352,8 @@ public sealed partial class ProjectHandles
     {
         if (IssueNumber().Match(name) is { Success: true } number)
             yield return number.Value;
+        if (Key().Match(name) is { Success: true, Length: <= MaxLength } key)
+            yield return key.Value.ToLowerInvariant();
         foreach (var word in Words(name).Where(w => w.Length >= 3 && !Undistinctive.Contains(w) && !w.All(char.IsDigit) && !Same(kind, w)))
             yield return Shortened(word, MaxLength);
         if (kind is not null && Words(kind).FirstOrDefault(w => !w.All(char.IsDigit)) is { } kindWord)
@@ -357,9 +382,16 @@ public sealed partial class ProjectHandles
         return Lead().Replace(text, "").Trim();
     }
 
-    /// <summary>A number of up to six digits, not part of a dotted version ("Haiku 5.5", "v1.2.3", #526): that is no issue's.</summary>
-    [GeneratedRegex(@"(?<!\d|\d\.)\d{1,6}(?!\d|\.\d)")]
+    /// <summary>
+    /// A number of up to six digits standing alone: not part of a dotted version ("Haiku 5.5", "v1.2.3", #526), nor of a
+    /// word or a key ("FE86", "FE-86", #529). Those are no issue's.
+    /// </summary>
+    [GeneratedRegex(@"(?<![\p{L}\d]|\d\.|[A-Z][A-Z0-9]*-)\d{1,6}(?![\p{L}\d]|\.\d)")]
     private static partial Regex IssueNumber();
+
+    /// <summary>A key of another tracker, as Jira's ("FE-86", "BD-123"): the handle of a project named by one (#529).</summary>
+    [GeneratedRegex(@"(?<![\p{L}\p{N}])[A-Z][A-Z0-9]+-\d{1,6}(?![\p{L}\p{N}])")]
+    private static partial Regex Key();
 
     [GeneratedRegex(@"^issue\s+(.+)$", RegexOptions.IgnoreCase)]
     private static partial Regex IssueLead();

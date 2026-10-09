@@ -48,6 +48,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string SinceParameter = "since";
     public const string WorkersParameter = "workers";
     public const string ThenParameter = "then";
+    public const string OptionParameter = "option";
     public const string ProjectsParameter = "projects";
 
     /// <summary>The <see cref="WorkersParameter"/> that takes in every overseer's workers (#469).</summary>
@@ -161,9 +162,12 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             (_, args, ct) => AndThen(args, ReadMoreAsync(ct)))
         .Add(Answer,
             "Send the user's answer to a project: it reaches the Claude session as the user's reply, and the session " +
-            "continues. Give the answer as the instruction the user meant, in their words.",
-            [new ToolParameter(TextParameter, "The answer to send, e.g. \"Brug den eksisterende migration.\""), ProjectReference],
-            (_, args, ct) => AnswerAsync(Argument(args, ProjectParameter), Argument(args, TextParameter), ct))
+            "continues. Give the answer as the instruction the user meant, in their words. To a question with options, an " +
+            $"answer that picks one gives it as {OptionParameter} too, and the option is sent as the screen sends it.",
+            [new ToolParameter(TextParameter, "The answer to send, e.g. \"Brug den eksisterende migration.\""), ProjectReference,
+                new ToolParameter(OptionParameter, "The option the user picked of the project's question, by its label or number as " +
+                    "the tool gave them (\"2\", \"Not now\"), several with commas where several may be picked. Empty when they picked none.", Required: false)],
+            (_, args, ct) => AnswerAsync(Argument(args, ProjectParameter), Argument(args, TextParameter), ct, Argument(args, OptionParameter)))
         .Add(MarkSeen,
             "Mark what a project needs as seen (its finished result, an error, or a question it asked in plain text), so it no " +
             "longer needs the user; a seen question still waits for its answer. A pending choice or permission is only cleared by " +
@@ -585,7 +589,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         text.Append(Standing(standing));
         if (item is not null)
         {
-            text.Append($" Needs the user: {Describe(item, full)}");
+            text.Append($" Needs the user: {Describe(item, full, status.PendingQuestion)}");
             if (item.Spoken is { Length: > 0 })
                 text.Append(' ').Append(SpokenBySystem(name, item));
         }
@@ -686,7 +690,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             null when status.CurrentQuestion is { Length: > 0 } => null,
             null => "",
             { Spoken.Length: > 0 } => _phrases.Spoken(again, item),
-            { Kind: AttentionKind.Question or AttentionKind.Finished } when SaidAsIs(full) => _phrases.Reads(again, item, full!.Trim()),
+            { Kind: AttentionKind.Question } when SaidAsIs(full) =>
+                VoicePhrases.With(_phrases.Reads(again, item, full!.Trim()), _phrases.Choices(status.PendingQuestion ?? item.Question)),
+            { Kind: AttentionKind.Finished } when SaidAsIs(full) => _phrases.Reads(again, item, full!.Trim()),
             _ => null,
         };
         return stands is null || needs is null ? null
@@ -885,8 +891,16 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         return window.LastIndexOfAny([' ', '\n', '\t']) is var space and > 0 ? space : Whole(text, ReplyPartLength);
     }
 
-    public async Task<string> AnswerAsync(string? reference, string? answer, CancellationToken ct)
+    /// <param name="option">
+    /// The option the user picked of the project's question (#529, <see cref="QuestionChoices.Pick"/>): the question is
+    /// answered with it, as the inbox answers it. An answer that is an option's label or number picks it too; any other
+    /// goes as the user's words.
+    /// </param>
+    public async Task<string> AnswerAsync(string? reference, string? answer, CancellationToken ct, string? option = null)
     {
+        option = string.IsNullOrWhiteSpace(option) ? null : option.Trim();
+        if (string.IsNullOrWhiteSpace(answer))
+            answer = option;
         if (string.IsNullOrWhiteSpace(answer))
             return "No answer given: ask the user what to answer.";
         if (Target(reference) is not { } target || handles.LabelOf(target) is null)
@@ -915,11 +929,26 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 "not by voice. Nothing was sent: tell the user to answer it on screen.";
         }
 
-        await servers.ReplyAsync(target, answer.Trim(), ct);
+        var sent = answer.Trim();
+        var question = QuestionChoices.Single(status.PendingQuestion);
+        var picked = question is null ? null : QuestionChoices.Pick(question, option ?? sent);
+        if (question is not null && picked is null && option is not null)
+        {
+            conversation.Current = target;
+            return $"'{option}' is none of {name}'s options ({string.Join("; ", question.Options.Select((o, i) => $"{i + 1}. \"{o.Label}\""))}). " +
+                $"Nothing was sent: ask the user which, or call {Answer} with their words as text alone.";
+        }
+        if (question is not null && picked is not null)
+        {
+            sent = QuestionChoices.Joined(picked);
+            await servers.AnswerQuestionAsync(target, status.PendingQuestion!.RequestId, new Dictionary<string, string> { [question.Question] = sent }, ct);
+        }
+        else
+            await servers.ReplyAsync(target, sent, ct);
         conversation.Current = target;
         conversation.Sent(name);
         // The code says it was sent (SentNode): the model's round after it would only say so again (#526)
-        return SaysItself($"Sent to {name}: \"{answer.Trim()}\". It continues. The system says it was sent itself.", _phrases.Sent([name]));
+        return SaysItself($"Sent to {name}: \"{sent}\". It continues. The system says it was sent itself.", _phrases.Sent([name]));
     }
 
     public async Task<string> MarkSeenAsync(string? reference, CancellationToken ct)
@@ -1050,8 +1079,11 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             : $" Projects: {string.Join("; ", all.Take(OptionsListed).Select(Line))}{(all.Count > OptionsListed ? $"; {all.Count - OptionsListed} more" : "")}.";
         // A label several projects have ("branch master" in two profiles) names none of them: say which there are
         var several = string.IsNullOrWhiteSpace(reference) ? [] : handles.Labelled(reference);
+        // The one the user talked about last comes first (#529): whatever was announced since, it is what they mean most often
+        var last = conversation.LastTalked is { } talked && Names.Full(talked) is { } lastName
+            ? $" The user last talked about {lastName}: offer it first." : "";
         return string.IsNullOrWhiteSpace(reference)
-            ? $"No project is being talked about: ask the user which one.{which}{options}"
+            ? $"No project is being talked about: ask the user which one.{last}{which}{options}"
             : several.Count > 1
                 ? $"'{reference}' names {several.Count} projects: {string.Join("; ", several.Select(Names.Full).OfType<SpokenName>())}. " +
                     "Nothing was done: ask which, as a closed question naming each by its root and profile."
@@ -1084,9 +1116,13 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         AttentionKind.Finished => "idle (it did not say it is done)",
     };
 
-    /// <summary>The item as a line says it, with <paramref name="text"/> for its text: the item's own (cut) one when null.</summary>
-    private static string Describe(AttentionItem item, string? text = null) =>
-        item.Kind == AttentionKind.Permission ? Kind(item, text) : $"{Kind(item)}: {text ?? item.Text}";
+    /// <summary>
+    /// The item as a line says it, with <paramref name="text"/> for its text: the item's own (cut) one when null. A
+    /// question's options follow it (#529), those of <paramref name="pending"/>, else the item's.
+    /// </summary>
+    private static string Describe(AttentionItem item, string? text = null, PendingQuestion? pending = null) =>
+        item.Kind == AttentionKind.Permission ? Kind(item, text)
+            : $"{Kind(item)}: {text ?? item.Text}{(item.Kind == AttentionKind.Question ? QuestionChoices.Described(pending ?? item.Question) : "")}";
 
     private static string? Argument(IDictionary<string, object?> args, string name) =>
         args.TryGetValue(name, out var value) ? value?.ToString() : null;

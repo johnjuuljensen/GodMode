@@ -190,4 +190,47 @@ public sealed class HandleTests
         Assert.DoesNotContain(keyterms, t => t.StartsWith("a-root-name", StringComparison.Ordinal));
         Assert.Equal(keyterms.Count, keyterms.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
+
+    /// <summary>A Jira key is no issue number (#529): "FE86" got the handle 86, said "issue 86".</summary>
+    [Theory]
+    [InlineData("FE86", "fe86", "chat fe86")]
+    [InlineData("FE-86", "fe-86", "chat fe-86")]
+    [InlineData("BD-123 backup job", "bd-123", "chat bd-123")]
+    [InlineData("feature/283-voice-on-windows", "283", "issue 283")]
+    [InlineData("issue_283", "283", "issue 283")]
+    public void A_number_is_an_issue_only_when_it_stands_alone(string name, string handle, string label)
+    {
+        var handles = new ProjectHandles();
+        var project = new ProjectRef("a", "Mega/Mega-Assistant/1");
+
+        Assert.Equal(handle, handles.For(project, name, "Mega-Assistant", "chat", "Mega"));
+        Assert.Equal(label, handles.LabelOf(project));
+    }
+
+    /// <summary>The model's label for a session (#529): its kind and a word of its name, with its root and profile.</summary>
+    [Theory]
+    [InlineData("chat FE86 in Mega-Assistant, profile Mega")]
+    [InlineData("chat FE86")]
+    [InlineData("chat fe 86")]
+    [InlineData("FE86")]
+    [InlineData("FE 86")]
+    public void A_session_is_found_by_its_kind_and_a_word_of_its_name(string spoken)
+    {
+        var handles = new ProjectHandles();
+        var fe86 = new ProjectRef("a", "Mega/Mega-Assistant/1");
+        handles.For(fe86, "FE-86", "Mega-Assistant", "chat", "Mega");
+        handles.For(new ProjectRef("a", "Mega/Mega-Assistant/2"), "general", "Mega-Assistant", "chat", "Mega");
+
+        Assert.Equal(fe86, handles.Resolve(spoken));
+    }
+
+    [Fact]
+    public void A_kind_and_a_word_two_projects_share_names_neither()
+    {
+        var handles = new ProjectHandles();
+        handles.For(new ProjectRef("a", "Mega/Assistant/1"), "nightly backup", "Assistant", "chat", "Mega");
+        handles.For(new ProjectRef("a", "Mega/Assistant/2"), "weekly backup", "Assistant", "chat", "Mega");
+
+        Assert.Null(handles.Resolve("chat backup"));
+    }
 }
