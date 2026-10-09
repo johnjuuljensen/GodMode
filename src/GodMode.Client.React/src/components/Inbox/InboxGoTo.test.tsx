@@ -79,7 +79,7 @@ const everyKind: AttentionItem[] = [
   item('p-failed', 'Error', { CreateFailed: true }),
   item('p-escalation', 'Escalation', { PullRequestUrl: 'https://example.test/issues/1' }),
   item('p-review', 'Review', { PullRequestUrl: 'https://example.test/pr/1' }),
-  item('p-finished', 'Finished', { PullRequestUrl: 'https://example.test/pr/2' }),
+  item('p-finished', 'Finished', { PullRequestUrl: 'https://github.com/o/r/pull/533' }),
 ];
 
 const initialState = useAppStore.getState();
@@ -115,14 +115,16 @@ beforeEach(() => {
 afterEach(() => view.unmount());
 
 describe('Go to', () => {
-  it('is on every kind, beside Open PR and Mark seen', async () => {
+  it('is on every kind, beside View PR and Mark seen', async () => {
     await start(everyKind);
     for (const { ProjectId } of everyKind) {
       const actions = itemEl(ProjectId)!.querySelector('.inbox-item-actions');
       expect(actions && buttonIn(actions as HTMLElement, 'Go to'), ProjectId).toBeTruthy();
     }
     const finished = itemEl('p-finished')!.querySelector<HTMLElement>('.inbox-item-actions')!;
-    expect([...finished.querySelectorAll('a, button')].map(e => e.textContent)).toEqual(['Go to', 'Open PR', 'Mark seen']);
+    expect([...finished.querySelectorAll('a, button')].map(e => e.textContent)).toEqual(['Go to', 'View PR #533', 'Mark seen']);
+    const review = itemEl('p-review')!.querySelector<HTMLElement>('.inbox-item-actions')!;
+    expect([...review.querySelectorAll('a')].map(e => e.textContent)).toEqual(['View PR']);
   });
 
   it("selects the item's project, and the list layout shows it beside the inbox", async () => {
