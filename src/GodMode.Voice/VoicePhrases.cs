@@ -473,11 +473,18 @@ public sealed partial class VoicePhrases
 
     /// <summary>
     /// A dictation sent (#459), read back: its length in sentences, and its first words, as it starts going out:
-    /// "Sender 4 sætninger til issue 283, der starter: Brug den eksisterende migration …".
+    /// "Sender 4 sætninger til issue 283, der starter: Brug den eksisterende migration …". To a project that is
+    /// <paramref name="running"/> (#530), it says so, as it answers no question: the turn takes it in as it goes.
     /// </summary>
-    public string DictationSending(SpokenName name, int sentences, string start) => _danish
-        ? $"Sender {sentences} {(sentences == 1 ? "sætning" : "sætninger")} til {Named(name)}, der starter: {GodModeAnnouncementFormatter.Sentence(start)}"
-        : $"Sending {sentences} {(sentences == 1 ? "sentence" : "sentences")} to {Named(name)}, starting: {GodModeAnnouncementFormatter.Sentence(start)}";
+    public string DictationSending(SpokenName name, int sentences, string start, bool running)
+    {
+        var sending = _danish
+            ? $"Sender {sentences} {(sentences == 1 ? "sætning" : "sætninger")} til {Named(name)}, der starter: {GodModeAnnouncementFormatter.Sentence(start)}"
+            : $"Sending {sentences} {(sentences == 1 ? "sentence" : "sentences")} to {Named(name)}, starting: {GodModeAnnouncementFormatter.Sentence(start)}";
+        return !running ? sending
+            : _danish ? $"{sending} Den arbejder, og tager det med undervejs."
+            : $"{sending} It is working, and takes it in as it goes.";
+    }
 
     /// <summary>A dictation dropped by the user ("annullér diktat"): nothing went out.</summary>
     public string DictationCancelled(SpokenName name) =>
@@ -499,14 +506,6 @@ public sealed partial class VoicePhrases
     /// <summary>A dictation to a project no handle names: none is started.</summary>
     public string DictationUnknown(string said) =>
         _danish ? $"Ukendt projekt: {said}. Intet diktat." : $"Unknown project: {said}. No dictation.";
-
-    /// <summary>A dictation to a project that works now: none is started, as nothing waits on the user's words.</summary>
-    public string DictationRunning(SpokenName name) =>
-        _danish ? $"{Subject(name)} arbejder. Diktér, når den venter på dig." : $"{Subject(name)} is working. Dictate when it waits for you.";
-
-    /// <summary>A dictation sent to a project that started working while it was taken (#507): it is kept, for when it waits again.</summary>
-    public string DictationBusy(SpokenName name) =>
-        _danish ? $"{Subject(name)} er gået i gang og arbejder nu." : $"{Subject(name)} has started working.";
 
     /// <summary>A dictation to a project that waits on a permission, answered on screen only.</summary>
     public string DictationPermission(SpokenName name, string? summary) => (summary, _danish) switch

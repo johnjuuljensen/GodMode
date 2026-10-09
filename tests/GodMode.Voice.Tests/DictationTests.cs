@@ -163,8 +163,12 @@ public sealed class DictationTests
         Assert.Equal((P283, "Brug den eksisterende migration. Det var det."), Assert.Single(servers.Replies));
     }
 
+    /// <summary>
+    /// #530: a project that is working takes a dictation as any reply, into the turn it is in; the read-back says it
+    /// works, so the user knows it answers no question.
+    /// </summary>
     [Fact]
-    public async Task A_project_that_is_working_is_refused_up_front()
+    public async Task A_dictation_to_a_project_that_is_working_is_sent()
     {
         var servers = new FakeServers();
         var model = new ScriptedChatClient().Respond("Klar.");
@@ -173,13 +177,14 @@ public sealed class DictationTests
         await voice.Events.SaidAsync("Klar.");
 
         Say(voice, "Diktér til 283");
-        await SaidStartingAsync(voice, "issue 283");
-        Assert.EndsWith("arbejder. Diktér, når den venter på dig.", voice.Events.Responses.Last());
+        await voice.Events.SaidAsync("Diktat til issue 283, voice. Sig diktat slut, eller annullér diktat.");
+        Say(voice, First);
+        Say(voice, "Diktat slut.");
+        await voice.Events.SaidAsync("Sender 1 sætning til issue 283, der starter: Brug den eksisterende migration, ikke en ny. Den arbejder, og tager det med undervejs.");
 
-        // Nothing is dictated: "send" is the chat's
-        Say(voice, "Send");
-        await Eventually.UntilAsync(() => model.Calls == 1, () => "the chat to hear it");
-        Assert.Empty(servers.Replies);
+        Assert.Equal((P283, First), Assert.Single(servers.Replies));
+        // The model never heard a word of it
+        Assert.Equal(0, model.Calls);
     }
 
     [Fact]
@@ -367,26 +372,17 @@ public sealed class DictationTests
         Assert.Empty(servers.Replies);
     }
 
-    /// <summary>
-    /// #507: a project that started working while the user dictated is checked again at the send: nothing is queued to
-    /// it, the dictation is kept and the user hears why, and once it waits again "diktat slut" sends it.
-    /// </summary>
+    /// <summary>#530: a project that started working while the user dictated is sent the dictation all the same.</summary>
     [Fact]
-    public async Task A_send_to_a_project_that_started_working_is_held_and_kept()
+    public async Task A_send_to_a_project_that_started_working_is_sent()
     {
         var (servers, dictation, _) = await DictatingAsync();
         var waiting = await servers.GetStatusAsync(P283, CancellationToken.None);
         servers.SetStatus(ServerA, waiting with { State = ProjectState.Running });
 
-        Assert.Equal("Intet sendt. issue 283 er gået i gang og arbejder nu. Sig diktat slut igen, eller annullér diktat.",
-            await dictation.HearAsync("Diktat slut", CancellationToken.None));
-        Assert.True(dictation.Active);
-        Assert.Equal([First], dictation.Parts);
-        Assert.Empty(servers.Replies);
-
-        servers.SetStatus(ServerA, waiting);
-        Assert.StartsWith("Sender 1 sætning til issue 283", await dictation.HearAsync("Diktat slut", CancellationToken.None));
-        Assert.Equal(First, Assert.Single(servers.Replies).Text);
+        Assert.EndsWith("Den arbejder, og tager det med undervejs.", await dictation.HearAsync("Diktat slut", CancellationToken.None));
+        Assert.False(dictation.Active);
+        Assert.Equal((P283, First), Assert.Single(servers.Replies));
     }
 
     /// <summary>

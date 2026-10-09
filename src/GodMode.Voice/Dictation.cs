@@ -17,9 +17,9 @@ namespace GodMode.Voice;
 /// sentence is ("… Det var det. Diktat slut."); never inside a sentence ("… og skriv diktat slut i filen"). Before it is
 /// sent the read-back says how long it is and how it starts, naming the project (<see cref="VoicePhrases.DictationSending"/>).
 /// It goes to the session as an answer by voice (<see cref="IGodModeServers.ReplyAsync"/>, ReplyByVoice), marked as
-/// transcribed speech (#460). A project that runs, or waits on a permission, or failed to create, is refused up front;
-/// one that has started to since is checked again at the send, and the dictation is kept, said why, rather than queued
-/// to a turn it never waited for, or lost (#507).
+/// transcribed speech (#460). A project that runs takes it as any reply, on its stdin, into the turn it is in (#530), and
+/// the read-back says it works. A project that waits on a permission, or failed to create, is refused up front; one that
+/// has come to since is checked again at the send, and the dictation is kept, said why, rather than lost (#507).
 /// While dictating, announcements wait (<see cref="Active"/>, <see cref="HeldAnnouncements"/>): an announcement in a
 /// pause to think would interrupt the user's train of thought, and change what is talked about. A dictation abandoned
 /// with no terminator (the mic closed, voice stopped, or nothing heard for <see cref="IdleWindow"/>) is dropped, and
@@ -154,7 +154,6 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
             { CreateFailed: true } => phrases.DictationCreateFailed(name),
             { PendingPermission: { } permission } => phrases.DictationPermission(name, permission.Summary),
             { State: ProjectState.WaitingPermission } => phrases.DictationPermission(name, null),
-            { State: ProjectState.Running } => phrases.DictationRunning(name),
             _ => null,
         };
         if (refused is not null)
@@ -224,6 +223,7 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
         if (text.Length == 0)
             return phrases.DictationEmpty(name);
 
+        bool running;
         try
         {
             var status = await servers.GetStatusAsync(target, ct);
@@ -233,8 +233,7 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
                 return phrases.DictationHeld(name, phrases.DictationCreateFailed(name));
             if (status.State == ProjectState.WaitingPermission)
                 return phrases.DictationHeld(name, phrases.DictationPermission(name, null));
-            if (status.State == ProjectState.Running)
-                return phrases.DictationHeld(name, phrases.DictationBusy(name));
+            running = status.State == ProjectState.Running;
             await servers.ReplyAsync(target, text, ct);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
@@ -244,7 +243,7 @@ public sealed partial class Dictation(IGodModeServers servers, ProjectHandles ha
 
         End();
         conversation.Current = target;
-        return phrases.DictationSending(name, Sentences(text).Count, Opening(text));
+        return phrases.DictationSending(name, Sentences(text).Count, Opening(text), running);
     }
 
     /// <summary>
