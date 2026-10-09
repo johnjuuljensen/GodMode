@@ -219,7 +219,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
       <div className="inbox-item-actions">
         <button className="btn btn-secondary" onClick={open} title="Open the project">Go to</button>
         {canMarkSeen && item.PullRequestUrl && (
-          <a className="btn btn-secondary" href={item.PullRequestUrl} target="_blank" rel="noreferrer">Open PR</a>
+          <a className="btn btn-secondary" href={item.PullRequestUrl} target="_blank" rel="noreferrer">{pullRequestLabel(item.PullRequestUrl)}</a>
         )}
         {canMarkSeen && (
           <button className="btn btn-secondary" onClick={() => run(() => markSeen(serverId, projectId))} disabled={busy}>
@@ -239,6 +239,12 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
 }
 
 /** How long since `since`: "<1m", "5m", "3h", "2d". */
+/** The link to the project's pull request, which is there already: "View PR #533", never "Open PR", read as creating one (#535). */
+function pullRequestLabel(url: string): string {
+  const number = /\/pull\/(\d+)/.exec(url)?.[1];
+  return number ? `View PR #${number}` : 'View PR';
+}
+
 function waitingFor(since: string, now: number): string {
   const min = Math.floor((now - new Date(since).getTime()) / 60000);
   if (min < 1) return '<1m';
