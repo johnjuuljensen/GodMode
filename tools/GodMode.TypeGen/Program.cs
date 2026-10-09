@@ -22,7 +22,8 @@ string text;
 try
 {
     text = TypeScriptWriter.Write(
-        hubs: [typeof(IProjectHub), typeof(IProjectHubClient)],
+        hub: typeof(IProjectHub),
+        clientHub: typeof(IProjectHubClient),
         // Not the hub's: the server list (/servers), and the server to add (services/hostApi.ts addServer)
         extraTypes: [typeof(ServerInfo), typeof(AddServerRequest)]);
 }
@@ -43,15 +44,29 @@ File.WriteAllText(outputPath, text, new UTF8Encoding(encoderShouldEmitUTF8Identi
 Console.WriteLine($"GodMode.TypeGen: wrote {outputPath}");
 return 0;
 
-static class TypeScriptWriter
+/// <summary>
+/// The TypeScript of a hub contract: its hubs, and every type of the contract's assembly (the hub's) they
+/// reach. A type of that assembly is named; any other needs a mapping here, or the write fails.
+/// </summary>
+sealed class TypeScriptWriter
 {
-    private static readonly NullabilityInfoContext Nullability = new();
+    private readonly NullabilityInfoContext _nullability = new();
+    private readonly Assembly _contract;
 
-    public static string Write(IReadOnlyList<Type> hubs, IReadOnlyList<Type> extraTypes)
+    private TypeScriptWriter(Assembly contract) => _contract = contract;
+
+    /// <summary>
+    /// <paramref name="hub"/> (client to server: each method returns a promise), <paramref name="clientHub"/>
+    /// (server to client: each returns nothing), and the models of both and of <paramref name="extraTypes"/>.
+    /// Throws <see cref="NotSupportedException"/> for what has no TypeScript mapping.
+    /// </summary>
+    public static string Write(Type hub, Type clientHub, IReadOnlyList<Type> extraTypes) =>
+        new TypeScriptWriter(hub.Assembly).WriteContract([hub, clientHub], clientHub, extraTypes);
+
+    private string WriteContract(IReadOnlyList<Type> hubs, Type clientHub, IReadOnlyList<Type> extraTypes)
     {
-        var assembly = hubs[0].Assembly;
-        var docs = XmlDocs.Load(assembly);
-        var types = CollectTypes(hubs, extraTypes, assembly);
+        var docs = XmlDocs.Load(_contract);
+        var types = CollectTypes(hubs, extraTypes);
 
         // A TypeScript type is named by the C# type's name alone, so a nested type, or one in another
         // namespace, could share it; two interfaces of one name would merge into one without a word
@@ -78,13 +93,13 @@ static class TypeScriptWriter
             WriteModel(sb, type, docs);
 
         foreach (var hub in hubs)
-            WriteHub(sb, hub, docs, isClient: hub == typeof(IProjectHubClient));
+            WriteHub(sb, hub, docs, isClient: hub == clientHub);
 
         return sb.ToString().ReplaceLineEndings("\n");
     }
 
-    /// <summary>Every type of <paramref name="assembly"/> the hubs and extra types reach through members.</summary>
-    private static IReadOnlySet<Type> CollectTypes(IReadOnlyList<Type> hubs, IReadOnlyList<Type> extraTypes, Assembly assembly)
+    /// <summary>Every type of the contract's assembly the hubs and extra types reach through members.</summary>
+    private IReadOnlySet<Type> CollectTypes(IReadOnlyList<Type> hubs, IReadOnlyList<Type> extraTypes)
     {
         var found = new HashSet<Type>();
         var pending = new Stack<Type>(extraTypes.Concat(hubs.SelectMany(HubMethods).SelectMany(m =>
@@ -94,7 +109,7 @@ static class TypeScriptWriter
         {
             if (type.HasElementType) { pending.Push(type.GetElementType()!); continue; }
             if (type.IsGenericType) { foreach (var arg in type.GetGenericArguments()) pending.Push(arg); continue; }
-            if (type.Assembly != assembly || !found.Add(type) || type.IsEnum) continue;
+            if (type.Assembly != _contract || !found.Add(type) || type.IsEnum) continue;
             foreach (var member in SerializedMembers(type))
                 pending.Push(MemberNullability(member).Type);
         }
@@ -124,10 +139,10 @@ static class TypeScriptWriter
     }
 
     /// <summary>A serialized member's type, and whether it may be null.</summary>
-    private static NullabilityInfo MemberNullability(MemberInfo member) => member switch
+    private NullabilityInfo MemberNullability(MemberInfo member) => member switch
     {
-        PropertyInfo p => Nullability.Create(p),
-        FieldInfo f => Nullability.Create(f),
+        PropertyInfo p => _nullability.Create(p),
+        FieldInfo f => _nullability.Create(f),
         _ => throw new NotSupportedException($"{member} is neither a property nor a field."),
     };
 
@@ -170,7 +185,7 @@ static class TypeScriptWriter
         sb.Append(";\n");
     }
 
-    private static void WriteModel(StringBuilder sb, Type type, XmlDocs docs)
+    private void WriteModel(StringBuilder sb, Type type, XmlDocs docs)
     {
         sb.Append('\n');
         WriteDoc(sb, docs.Summary($"T:{DocName(type)}"), "");
@@ -190,7 +205,7 @@ static class TypeScriptWriter
         sb.Append("}\n");
     }
 
-    private static void WriteHub(StringBuilder sb, Type hub, XmlDocs docs, bool isClient)
+    private void WriteHub(StringBuilder sb, Type hub, XmlDocs docs, bool isClient)
     {
         sb.Append('\n');
         WriteDoc(sb, docs.Summary($"T:{hub.FullName}"), "");
@@ -203,7 +218,7 @@ static class TypeScriptWriter
 
             var parameters = method.GetParameters().Select(p =>
             {
-                var (tsType, nullable) = Map(Nullability.Create(p));
+                var (tsType, nullable) = Map(_nullability.Create(p));
                 return $"{p.Name}{(p.HasDefaultValue ? "?" : "")}: {(nullable ? Nullable(tsType) : tsType)}";
             });
             var returns = isClient ? "void" : ReturnType(method);
@@ -213,16 +228,16 @@ static class TypeScriptWriter
         sb.Append("}\n");
     }
 
-    private static string ReturnType(MethodInfo method)
+    private string ReturnType(MethodInfo method)
     {
-        var info = Nullability.Create(method.ReturnParameter);
+        var info = _nullability.Create(method.ReturnParameter);
         if (!info.Type.IsGenericType) return "Promise<void>";
         var (tsType, nullable) = Map(info.GenericTypeArguments[0]);
         return $"Promise<{(nullable ? Nullable(tsType) : tsType)}>";
     }
 
     /// <summary>The TypeScript type of a member, and whether it may be null.</summary>
-    private static (string Type, bool Nullable) Map(NullabilityInfo info)
+    private (string Type, bool Nullable) Map(NullabilityInfo info)
     {
         var underlying = System.Nullable.GetUnderlyingType(info.Type);
         var nullable = underlying is not null || info.ReadState == NullabilityState.Nullable;
@@ -248,7 +263,7 @@ static class TypeScriptWriter
         return (Scalar(type), nullable);
     }
 
-    private static string Scalar(Type type) => type switch
+    private string Scalar(Type type) => type switch
     {
         _ when type == typeof(string) || type == typeof(Guid) => "string",
         // ISO 8601 text; a TimeSpan is "hh:mm:ss"
@@ -259,7 +274,7 @@ static class TypeScriptWriter
             || type == typeof(decimal) => "number",
         // Arbitrary JSON, passed through as the client sent or claude wrote it
         _ when type == typeof(JsonElement) || type == typeof(object) => "unknown",
-        _ when type.Assembly == typeof(IProjectHub).Assembly => type.Name,
+        _ when type.Assembly == _contract => type.Name,
         _ => throw new NotSupportedException($"No TypeScript mapping for {type}."),
     };
 

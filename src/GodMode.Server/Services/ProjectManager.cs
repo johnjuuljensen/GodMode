@@ -346,12 +346,12 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // One server per root: before the default, so a server all of whose roots are held elsewhere has what a server with no roots has
         HoldRoots(merged);
 
-        // If still empty after discovery, create a default
+        // If still empty after discovery, create a default: in the server's data directory, not wherever it was started
         if (merged.Count == 0)
         {
             merged["Default"] = new ProfileConfig
             {
-                Roots = new Dictionary<string, string> { ["default"] = "projects" }
+                Roots = new Dictionary<string, string> { ["default"] = ServerDataDirectory.FallbackRoot(_configuration) }
             };
         }
 

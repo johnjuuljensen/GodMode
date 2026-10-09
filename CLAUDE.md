@@ -43,7 +43,8 @@ The solution build needs the VoiceBot submodule (`external/VoiceBot`, VoiceBot's
 dotnet build src/GodMode.Server/GodMode.Server.csproj
 
 # Run server (http://127.0.0.1:31337; with no Authentication:ApiKey it generates a key on its first start and prints it).
-# With no config file it is a dev server: appsettings only, an empty `roots` folder under the working directory
+# With no config file it is a dev server: appsettings only, an empty `roots` folder under the working directory,
+# and with no root found, the fallback root `projects` in the server's data directory (beside its key file), wherever it was started
 dotnet run --project src/GodMode.Server/GodMode.Server.csproj
 
 # Run the server you use on its own config file (Instance, Roots, Profiles, ...): --config <path> or GODMODE_CONFIG
