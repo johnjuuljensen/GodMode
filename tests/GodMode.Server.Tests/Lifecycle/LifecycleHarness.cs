@@ -330,13 +330,22 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public ProjectInfo Tracked(string projectId) =>
         ((ProjectManager)Projects).Tracked(projectId) ?? throw new InvalidOperationException($"project {projectId} is not tracked");
 
-    /// <summary>Polls the in-memory status until it reaches <paramref name="state"/>.</summary>
+    /// <summary>
+    /// Polls the in-memory status until it reaches <paramref name="state"/>, then waits out the change
+    /// that set it. The server changes a status in steps and saves it under the project's state lock,
+    /// and the status is read without it: a poll can see the state before the rest of its change (a
+    /// result sets Idle, then withdraws a pending prompt), and status.json before its save (#371).
+    /// Returns the status as that change left it, or the one polled if the state has moved on since.
+    /// </summary>
     public async Task<ProjectStatus> WaitForStateAsync(string projectId, ProjectState state, TimeSpan? timeout = null)
     {
         ProjectStatus status = await Projects.GetStatusAsync(projectId);
         await WaitUntilAsync(async () => (status = await Projects.GetStatusAsync(projectId)).State == state, timeout,
             () => $"project {projectId} did not reach {state}; it is {status.State}.\n{Describe(projectId)}");
-        return status;
+        if (((ProjectManager)Projects).Tracked(projectId)?.Process.StateLock is not { } stateLock) return status;
+        Assert.True(await stateLock.WaitAsync(timeout ?? DefaultTimeout), $"project {projectId} reached {state}, and its state lock was not freed.\n{Describe(projectId)}");
+        try { return await Projects.GetStatusAsync(projectId) is { } settled && settled.State == state ? settled : status; }
+        finally { stateLock.Release(); }
     }
 
     /// <summary>

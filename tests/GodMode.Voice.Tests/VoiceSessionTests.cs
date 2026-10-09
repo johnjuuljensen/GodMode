@@ -257,7 +257,9 @@ public sealed class VoiceSessionTests
         }
         Assert.Equal(VoiceState.Off, voice.Events.States.Last());
 
-        static Task ListeningAsync(OfflineVoice voice) => Eventually.UntilAsync(() => voice.Session.State == VoiceState.Listening,
+        // On the states reported, which the test counts: the session's own state changes before it reports the change (#371)
+        static Task ListeningAsync(OfflineVoice voice) => Eventually.UntilAsync(
+            () => voice.Session.State == VoiceState.Listening && voice.Events.States.LastOrDefault() == VoiceState.Listening,
             () => $"the session to listen; it is {voice.Session.State}, after {string.Join(", ", voice.Events.States)}");
     }
 
