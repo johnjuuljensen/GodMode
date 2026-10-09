@@ -960,11 +960,6 @@ export interface IProjectHub {
    * was, until the trash is purged. Pushed as IProjectHubClient.ProjectDeleted.
    */
   ForgetProject(projectId: string): Promise<DeleteProjectResult>;
-  /**
-   * Checks whether a CLI command is available on the server (in PATH). Returns the resolved path if found,
-   * null if not.
-   */
-  CheckCommand(command: string): Promise<string | null>;
 }
 
 /**

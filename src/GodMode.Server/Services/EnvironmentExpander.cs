@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GodMode.Server.Services;
 
@@ -7,15 +10,36 @@ namespace GodMode.Server.Services;
 /// Supports two modes:
 /// 1. Explicit ${VAR} expansion — resolves references from process env, skips entries with missing vars.
 /// 2. Profile prefix stripping — scans process env for PROFILE_PREFIX_* vars and strips the prefix.
+/// Neither reads the server's own secrets (<see cref="IsServerSecret"/>): the child environment is an
+/// allowlist (<see cref="ChildEnvironment"/>), and config must not be a way around it.
 /// </summary>
 public static partial class EnvironmentExpander
 {
     /// <summary>
+    /// The configuration section of the server's own secrets: its API key (<c>Authentication:ApiKey</c>)
+    /// and where it keeps it, in the forms an environment variable names them (<c>Authentication__ApiKey</c>,
+    /// <c>Authentication:ApiKey</c>), matched case-insensitively.
+    /// </summary>
+    private static readonly string[] ServerSecretPrefixes = ["Authentication__", "Authentication:"];
+
+    /// <summary>The names already logged as refused: each is logged once per server process.</summary>
+    private static readonly ConcurrentDictionary<string, byte> LoggedRefusals = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Where a refusal is logged. The server sets it at its start.</summary>
+    public static ILogger Logger { get; set; } = NullLogger.Instance;
+
+    /// <summary>Whether <paramref name="name"/> is one of the server's own secrets, which no config may pass to a child.</summary>
+    public static bool IsServerSecret(string name) =>
+        ServerSecretPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
     /// Expands ${VAR} references in environment dictionary values.
     /// If a referenced variable does not exist in the process environment, the entire entry is removed
     /// (letting the ambient process env flow through naturally).
+    /// A reference to one of the server's own secrets (<see cref="IsServerSecret"/>) expands to an empty
+    /// string, whether it is set or not, and is logged once (<paramref name="logger"/>, else <see cref="Logger"/>).
     /// </summary>
-    public static Dictionary<string, string>? ExpandVariables(Dictionary<string, string>? env)
+    public static Dictionary<string, string>? ExpandVariables(Dictionary<string, string>? env, ILogger? logger = null)
     {
         if (env is not { Count: > 0 }) return env;
 
@@ -36,6 +60,12 @@ public static partial class EnvironmentExpander
             var expanded = VarRefPattern().Replace(value, match =>
             {
                 var varName = match.Groups[1].Value;
+                if (IsServerSecret(varName))
+                {
+                    LogRefusalOnce(varName, key, logger);
+                    return "";
+                }
+
                 var envValue = Environment.GetEnvironmentVariable(varName);
                 if (envValue != null) return envValue;
 
@@ -100,6 +130,13 @@ public static partial class EnvironmentExpander
             if (stripped.Equals("STRIP_ENV_VAR_PROFILE", StringComparison.OrdinalIgnoreCase))
                 continue;
 
+            // Nor one of the server's own secrets, under a profile that happens to share its prefix
+            if (IsServerSecret(envKey))
+            {
+                LogRefusalOnce(envKey, stripped, logger: null);
+                continue;
+            }
+
             result ??= new Dictionary<string, string>();
             result[stripped] = envValue;
         }
@@ -126,6 +163,14 @@ public static partial class EnvironmentExpander
         if (sb.Length == 0) return "";
         sb.Append('_');
         return sb.ToString();
+    }
+
+    private static void LogRefusalOnce(string secretName, string entry, ILogger? logger)
+    {
+        if (LoggedRefusals.TryAdd(secretName, 0))
+            (logger ?? Logger).LogWarning(
+                "Config environment entry {Entry} refers to the server's own secret {Secret}, which no session or script gets: it is left empty. Name the value in the root's or profile's environment itself",
+                entry, secretName);
     }
 
     [GeneratedRegex(@"\$\{(\w+)\}")]
