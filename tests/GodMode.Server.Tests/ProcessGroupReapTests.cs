@@ -23,7 +23,7 @@ public class ProcessGroupReapTests
         if (!OperatingSystem.IsLinux()) return;
         var root = NewRoot();
         // A shell that ignores SIGTERM, and a sleep it starts, which inherits that
-        using var group = StartOwnGroup("sh", ["-c", "trap '' TERM; sleep 600 & wait"], launch: "abc");
+        using var group = await StartOwnGroupAsync("sh", ["-c", "trap '' TERM; sleep 600 & wait"], launch: "abc", members: 2);
         var recordPath = WriteRecord(root, "s1", group.Id, "abc");
         try
         {
@@ -53,7 +53,7 @@ public class ProcessGroupReapTests
     {
         if (!OperatingSystem.IsLinux()) return;
         var root = NewRoot();
-        using var other = StartOwnGroup("sleep", ["600"], launch: "someone-else");
+        using var other = await StartOwnGroupAsync("sleep", ["600"], launch: "someone-else", members: 1);
         var recordPath = WriteRecord(root, "s1", other.Id, "abc");
         try
         {
@@ -116,12 +116,23 @@ public class ProcessGroupReapTests
         return path;
     }
 
-    /// <summary>A program in a session and process group of its own (setsid, in place: its pid is the group's), carrying <paramref name="launch"/>.</summary>
-    private static Process StartOwnGroup(string program, IReadOnlyList<string> args, string launch)
+    /// <summary>
+    /// A program in a session and process group of its own (setsid, in place: its pid is the group's), carrying
+    /// <paramref name="launch"/>, once its group has <paramref name="members"/> processes: setsid makes the group
+    /// after the start returns, and a shell sets its trap and starts its child after that.
+    /// </summary>
+    private static async Task<Process> StartOwnGroupAsync(string program, IReadOnlyList<string> args, string launch, int members)
     {
         var start = new ProcessStartInfo("setsid", [program, .. args]) { UseShellExecute = false };
         start.Environment[SessionProcessTree.LaunchVariable] = launch;
-        return Process.Start(start)!;
+        var process = Process.Start(start)!;
+        if (!await LifecycleHarness.WaitForAsync(() => Task.FromResult(GroupMembers(process.Id).Length == members), TimeSpan.FromSeconds(10)))
+        {
+            KillGroupQuietly(process.Id);
+            process.Kill();
+            Assert.Fail($"group {process.Id} has {GroupMembers(process.Id).Length} processes, not {members}");
+        }
+        return process;
     }
 
     /// <summary>The live, non-zombie processes in group <paramref name="group"/>.</summary>
