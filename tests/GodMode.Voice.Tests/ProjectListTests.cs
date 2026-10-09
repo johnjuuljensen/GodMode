@@ -21,8 +21,7 @@ public sealed class ProjectListTests
         var servers = new FakeServers(ServerA);
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ListProjects)
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "Assistent", [VoiceTools.TextParameter] = "Skift til outbound profil." })
-            .Respond("Sendt til testing.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "Assistent", [VoiceTools.TextParameter] = "Skift til outbound profil." });
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
 

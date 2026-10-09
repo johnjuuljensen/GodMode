@@ -61,13 +61,12 @@ public sealed class SentTests
         Assert.DoesNotContain("Sendt.", voice.Events.Responses);
     }
 
-    /// <summary>An answer that went out is said in the code's words, whatever the model replied.</summary>
+    /// <summary>An answer that went out is said in the code's words, with no model round after the call (#526).</summary>
     [Fact]
     public async Task An_answer_sent_is_said_sent_to_its_project()
     {
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Push." })
-            .Respond("Sendt.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Push." });
         var (servers, voice) = await AskedAsync(model);
         await using var _ = voice;
 
@@ -75,7 +74,7 @@ public sealed class SentTests
         await voice.Events.SaidAsync("Sendt til issue 283.");
 
         Assert.Equal((P283, "Push."), Assert.Single(servers.Replies));
-        Assert.DoesNotContain("Sendt.", voice.Events.Responses);
+        Assert.Equal(1, model.Calls);
     }
 
     /// <summary>A send in an earlier turn is no send in this one.</summary>
@@ -84,7 +83,6 @@ public sealed class SentTests
     {
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Push." })
-            .Respond("Sendt.")
             .Respond("Sendt.");
         var (servers, voice) = await AskedAsync(model);
         await using var _ = voice;

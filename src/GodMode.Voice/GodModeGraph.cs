@@ -16,7 +16,8 @@ namespace GodMode.Voice;
 /// phrase alone closes it (<see cref="DoneNode"/>), above help. A session's own spoken reply that a tool read out is
 /// said word for word by the code, not retold by the model (<see cref="SpokenNode"/>, #384). A tool result the code can
 /// say itself (what needs me, the projects, a short question or result) is said so, with no second model call to retell
-/// it (<see cref="CodeSaysInference"/>, #456).
+/// it (<see cref="CodeSaysInference"/>, #456), as is a sent answer and a create read back (#526). A final that is only a
+/// hesitation ("Øh, det…") is waited past, with no model call (<see cref="HesitationNode"/>).
 /// </summary>
 public static class GodModeGraph
 {
@@ -168,6 +169,7 @@ public static class GodModeGraph
         if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));
         return graph
             .Node(new HelpNode("help", 80))
+            .Node(new HesitationNode("hesitation", 75))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
             .Child(new ReadBackNode(new SentNode(new SpokenNode(new ChatNode("control", 50, InferenceTier.Medium,

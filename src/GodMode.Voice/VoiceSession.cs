@@ -134,6 +134,9 @@ public sealed class VoiceSession : IAsyncDisposable
 
     public ProjectHandles Handles { get; }
 
+    /// <summary>What the conversation is about, and what the code said itself (<see cref="VoiceConversation.SaidResults"/>).</summary>
+    internal VoiceConversation Conversation { get; private init; } = null!;
+
     /// <summary>
     /// The terms speech recognition is biased towards now (<see cref="Keyterms"/>); empty when the session's speech
     /// engine takes none.
@@ -218,7 +221,7 @@ public sealed class VoiceSession : IAsyncDisposable
 
             // The session's own terms (its scope's), renewed as projects come and go (VoiceBot#51)
             var voice = new VoiceSession(services, scope, session, state, board, projects, handles,
-                scope.ServiceProvider.GetService<ElevenLabsSttKeyterms>(), logger);
+                scope.ServiceProvider.GetService<ElevenLabsSttKeyterms>(), logger) { Conversation = conversation };
             projects.Changed += voice.RefreshKeyterms;
             voice.RefreshKeyterms();
             // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement

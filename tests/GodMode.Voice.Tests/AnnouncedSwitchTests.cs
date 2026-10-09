@@ -161,7 +161,7 @@ public sealed class AnnouncedSwitchTests
             // Both said by the code: the model is not called after them (#456)
             .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "283" })
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja." })
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja.", [VoiceTools.ProjectParameter] = "283" }).Respond("Sendt til issue 283.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Ja.", [VoiceTools.ProjectParameter] = "283" });
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerB, Question("p/r/283", "283-voice", "Skal jeg bruge den eksisterende migration?", minutesAgo: 30)); return Task.CompletedTask; });
         await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");

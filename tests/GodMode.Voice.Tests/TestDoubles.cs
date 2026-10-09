@@ -124,6 +124,12 @@ internal sealed class OfflineVoice : IAsyncDisposable
     public OfflineProviders Providers { get; }
     public VoiceSession Session { get; private set; } = null!;
 
+    /// <summary>
+    /// Every tool result the model was given, then those the code said itself, which it was not (#456, #526): an answer
+    /// sent, a create read back.
+    /// </summary>
+    public IReadOnlyList<string> ToolResults => [.. Model.ToolResults, .. Session.Conversation.SaidResults];
+
     private OfflineVoice(ScriptedChatClient model, IInferenceProvider inference, TimeSpan speech, ScriptedSpeechEngine? engine)
     {
         Synthesizer = new FixedPcmSynthesizer(speech);

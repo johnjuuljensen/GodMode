@@ -52,8 +52,7 @@ public sealed class EarlierReadingsTests
     public async Task An_answer_heard_with_ordinary_earlier_readings_is_sent(string final, string[] readings, string answer)
     {
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = answer })
-            .Respond("Sendt.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = answer });
         var (servers, voice) = await AskedAsync(model);
         await using var _ = voice;
 
@@ -61,7 +60,7 @@ public sealed class EarlierReadingsTests
         await voice.Events.SaidAsync("Sendt til issue 283.");
 
         Assert.Contains(model.UserTexts, t => t.Contains(final) && t.Contains("Earlier readings") && readings.All(t.Contains));
-        Assert.StartsWith("Sent to issue 283", Assert.Single(model.ToolResults));
+        Assert.StartsWith("Sent to issue 283", Assert.Single(voice.ToolResults));
         Assert.Equal((P283, answer), Assert.Single(servers.Replies));
     }
 
@@ -104,8 +103,7 @@ public sealed class EarlierReadingsTests
         var model = new ScriptedChatClient()
             .CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "101" })
             .Respond("101 er idle.")
-            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Push." })
-            .Respond("Sendt.");
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Push." });
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?")); return Task.CompletedTask; });
         await voice.Events.SaidAsync("issue 283, voice, har et spørgsmål.");
