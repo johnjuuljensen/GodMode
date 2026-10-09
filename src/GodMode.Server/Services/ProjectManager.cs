@@ -21,8 +21,9 @@ namespace GodMode.Server.Services;
 /// </summary>
 public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 {
-    /// <summary>How long server shutdown waits for the projects' processes to be stopped and marked Stopped.</summary>
-    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
+    /// <summary>How long server shutdown waits for the projects' processes to be stopped and marked Stopped (a test gives a loaded machine more).</summary>
+    public const string ShutdownTimeoutSetting = "ShutdownTimeoutSeconds";
+    private TimeSpan ShutdownTimeout => TimeSpan.FromSeconds(_configuration.GetValue(ShutdownTimeoutSetting, 15.0));
 
     /// <summary>What a shutdown keeps of <see cref="ShutdownTimeout"/> for killing what its grace period did not stop.</summary>
     private static readonly TimeSpan ShutdownKillMargin = TimeSpan.FromSeconds(3);

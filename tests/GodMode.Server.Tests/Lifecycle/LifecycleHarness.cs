@@ -113,6 +113,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             // Ceilings, not the subject: a test of a script's timeout sets its own
             [ProjectManager.ListScriptTimeoutSetting] = Seconds(TestTimeouts.Script),
             [ProjectManager.StatusScriptTimeoutSetting] = Seconds(TestTimeouts.Script),
+            // Caps a shutdown's grace period, which a test that waits on claude's answer to the interrupt raises
+            [ProjectManager.ShutdownTimeoutSetting] = Seconds(TestTimeouts.Script),
         };
         foreach (var (variable, value) in profileEnvironment ?? new Dictionary<string, string>())
             configuration[$"{RootSources.ProfilesSection}:{ProfileName}:Environment:{variable}"] = value;

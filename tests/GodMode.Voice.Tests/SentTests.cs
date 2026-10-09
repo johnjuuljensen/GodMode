@@ -52,6 +52,8 @@ public sealed class SentTests
         await using var voice = await OfflineVoice.StartAsync(servers, model,
             connect: _ => { servers.Set(ServerA, Permission("p/r/283", "283-voice", "git push")); return Task.CompletedTask; });
         await voice.Events.SaidAsync("Klar.");
+        // Spoken once the announcement is: an answer heard while it is said can be lost to it on a loaded machine (#371)
+        await voice.Events.SaidAsync("issue 283, voice, skal have tilladelse: git push. Svar på skærmen.");
 
         voice.Transcriptions.SayAsRecognized("Svar 283 ja");
         await voice.Events.SaidAsync(NothingSent);
