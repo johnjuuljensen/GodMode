@@ -641,6 +641,12 @@
   background: var(--state-error);
 }
 
+/* Idle, at work in the background (#432): the running colour, pulsing, without the running LED's glow */
+.project-state-dot.Background {
+  background: var(--state-running);
+  animation: state-dot-pulse 2s ease-in-out var(--loop-iterations);
+}
+
 /* Stopped is a ring: no process behind it */
 .project-state-dot.Stopped {
   background: transparent;

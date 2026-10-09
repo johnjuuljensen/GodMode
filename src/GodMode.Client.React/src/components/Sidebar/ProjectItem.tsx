@@ -5,6 +5,7 @@ import { KindLabel } from '../KindLabel/KindLabel';
 import { deleteSession } from '../../deleteSession';
 import { ImportanceMark } from '../Importance/Importance';
 import { IMPORTANCE_LABELS, IMPORTANCE_ORDER } from '../Importance/importanceTiers';
+import { BackgroundBadge, backgroundName, inBackground } from '../BackgroundTasks/BackgroundTasks';
 import type { ProjectState } from '../../signalr/types';
 
 interface Props {
@@ -43,8 +44,10 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
   const isMobile = useAppStore(s => s.isMobile);
   const isWaiting = waitsOnUser(project);
   const state: ProjectState = isWaiting ? 'WaitingInput' : project.State;
+  // Idle, with claude still at work in the background (#432): its dot says so, not Idle
+  const background = inBackground(project);
   // A state this client does not know yet is named as the server names it
-  const stateName = stateNames[state] ?? String(state);
+  const stateName = background ? backgroundName(project.BackgroundTasks!.length) : stateNames[state] ?? String(state);
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -134,12 +137,13 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
       >
-        <span className={`project-state-dot ${state}`} role="img" aria-label={stateName} title={stateName} />
+        <span className={`project-state-dot ${background ? 'Background' : state}`} role="img" aria-label={stateName} title={stateName} />
         <div className="project-info">
           <div className="project-name-row">
             <div className="project-name" title={project.Name}>{project.Name}</div>
             <ImportanceMark importance={project.Importance} />
             <KindLabel kind={project.Kind} />
+            <BackgroundBadge tasks={project.BackgroundTasks} />
             {ownRoot && <span className="project-own-root" title={`In ${ownRoot}`}>{ownRoot}</span>}
           </div>
           <div className="project-meta">

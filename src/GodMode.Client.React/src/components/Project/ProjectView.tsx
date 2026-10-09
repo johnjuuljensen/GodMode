@@ -12,6 +12,7 @@ import { deleteSession } from '../../deleteSession';
 import { useClickToCompose } from './clickToCompose';
 import './ProjectView.css';
 import { ImportancePicker } from '../Importance/Importance';
+import { BackgroundBadge, backgroundTitle, inBackground } from '../BackgroundTasks/BackgroundTasks';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
 
@@ -87,8 +88,10 @@ export function ProjectView({ serverId, projectId }: Props) {
   // Created with no prompt (#352): Idle with its output loaded and empty, claude has had no turn and
   // waits for the first message. Resume has nothing to do
   const awaitsFirstMessage = !notFound && state === 'Idle' && phase === 'ready' && outputMessages.length === 0;
-  const canResume = !notFound && (state === 'Stopped' || state === 'Idle' && !awaitsFirstMessage);
-  const canStop = !notFound && (state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission');
+  // Idle, with claude still at work in the background (#432): shown as working, and its stop ends that work
+  const background = !notFound && !!project && inBackground(project);
+  const canResume = !notFound && !background && (state === 'Stopped' || state === 'Idle' && !awaitsFirstMessage);
+  const canStop = !notFound && (background || state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission');
 
   // What claude is blocked on: a tool call to allow or deny, or AskUserQuestion's questions, asked one at a time
   const pendingPermission = project?.PendingPermission ?? null;
@@ -178,6 +181,8 @@ export function ProjectView({ serverId, projectId }: Props) {
       <div className="project-header">
         <div className="project-header-info">
           <span className="project-header-name">{projectName}</span>
+          {/* Background work while a turn runs or waits on the user; idle, the status button says it */}
+          {!background && <BackgroundBadge tasks={project?.BackgroundTasks} />}
           {(project?.ProfileName || project?.RootName) && (
             <span className="project-header-root" title={project?.RootName ?? undefined}>
               {project?.ProfileName && project.ProfileName !== 'Default' ? project.ProfileName : ''}
@@ -196,13 +201,16 @@ export function ProjectView({ serverId, projectId }: Props) {
             {simpleView ? 'Simple' : 'Full'}
           </button>
           <button
-            className={`project-status-btn ${state}`}
+            className={`project-status-btn ${background ? 'Running Background' : state}`}
             onClick={canStop ? handleStop : canResume ? handleResume : undefined}
             disabled={!canStop && !canResume}
-            title={canStop ? 'Click to stop' : canResume ? 'Click to resume' : state}
+            title={background ? `${backgroundTitle(project.BackgroundTasks!)}
+Click to stop` : canStop ? 'Click to stop' : canResume ? 'Click to resume' : state}
           >
             <span className="project-status-dot" />
-            <span className="project-status-label">{notFound ? 'Not found' : state}</span>
+            <span className="project-status-label">
+              {notFound ? 'Not found' : background ? `Background · ${project.BackgroundTasks!.length}` : state}
+            </span>
             {canStop && <span className="project-status-action">Stop</span>}
             {canResume && <span className="project-status-action">Resume</span>}
           </button>
