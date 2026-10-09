@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using VoiceBot.Core.AI;
+using VoiceBot.Core.Graph.Nodes;
 
 namespace GodMode.Voice;
 
@@ -48,22 +50,24 @@ public sealed class CodeSaysInference(IInferenceProvider model, VoiceConversatio
     }
 
     /// <summary>
-    /// The model's response, with the code's words held for the turn, if any, said before its <c>respond</c>: or alone,
-    /// when it ends the turn any other way (no call, or waiting), so they are never lost. A tool call goes on as it is.
+    /// The model's response, with the code's words held for the turn, if any, said before its answer's reply: or alone,
+    /// when it ends the turn any other way (no answer, or waiting), so they are never lost. A tool call goes on as it is.
     /// </summary>
     private ChatResponse HeldBefore(ChatResponse response)
     {
         if (Volatile.Read(ref _held) is not { } held)
             return response;
-        var call = response.Messages.SelectMany(m => m.Contents).OfType<FunctionCallContent>().FirstOrDefault();
-        if (call is not (null or { Name: "respond" or "waiting_for_further_input" or "already_responded" }))
+        if (response.Messages.SelectMany(m => m.Contents).OfType<FunctionCallContent>().Any())
             return response;
         Volatile.Write(ref _held, null);
-        var added = call is { Name: "respond" } && call.Arguments?.TryGetValue("response_text", out var text) == true ? text?.ToString() : null;
+        // ChatNode takes any answer but a wait or a skip for a reply
+        var answer = StructuredAnswer.Read(response) is { } read && read.GetString("action") is not (ChatNode.Wait or ChatNode.AlreadyResponded)
+            ? read : (JsonElement?)null;
+        var added = answer?.GetString("response_text");
         // A send claimed with none sent is not said (#375); one that went out is SentNode's to say, in place of the reply
         if (added is not null && SentNode.ClaimsSend(added) && !conversation.AnySent && !conversation.ReadOutSoFar.Any(r => SentNode.Repeats(added, r)))
             added = (phrases ?? new VoicePhrases(VoiceSettings.Default.Languages)).NothingSent;
-        return Respond(Joined(held, Acknowledgement(added) ? null : added), call is { Name: "respond" } ? call.Arguments : null);
+        return Respond(Joined(held, Acknowledgement(added) ? null : added), answer);
     }
 
     /// <summary>A reply that adds nothing to what the code said: empty, or a protocol word alone ("Klar.", "Ready").</summary>
@@ -75,7 +79,12 @@ public sealed class CodeSaysInference(IInferenceProvider model, VoiceConversatio
     private static string Joined(string? before, string? after) =>
         string.Join(" ", new[] { before, after }.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!.Trim()));
 
-    private static ChatResponse Respond(string text, IDictionary<string, object?>? arguments = null) =>
-        new(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent($"said-by-code-{Guid.NewGuid():N}", "respond",
-            new Dictionary<string, object?>(arguments ?? new Dictionary<string, object?>()) { ["response_text"] = text })]));
+    /// <summary>ChatNode's answer (<see cref="StructuredAnswer"/>) replying <paramref name="text"/>, with the model's other fields (heard_as, exit_name) kept.</summary>
+    private static ChatResponse Respond(string text, JsonElement? answer = null)
+    {
+        var fields = answer?.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value) ?? [];
+        fields["action"] = ChatNode.Respond;
+        fields["response_text"] = text;
+        return new(new ChatMessage(ChatRole.Assistant, JsonSerializer.Serialize(fields)));
+    }
 }

@@ -16,7 +16,7 @@ public sealed class HeldWordsTests
     public async Task A_final_the_model_waited_past_goes_on_into_the_next()
     {
         var model = new ScriptedChatClient()
-            .CallTool("waiting_for_further_input", new() { ["reason"] = "mid-sentence" })
+            .Answer(new() { ["action"] = "wait", ["response_text"] = "", ["note"] = "mid-sentence" })
             .Respond("Okay.");
         await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
         await voice.Events.SaidAsync("Klar.");

@@ -163,7 +163,7 @@ public static class GodModeGraph
             SIDE TALK: the mic hears the room, and the bot's own voice. When nothing waits on the user (no question of
             yours, no read-back) and an utterance names no project and no command (a bare number, "350."; words in
             another register, said to someone else, "Øh, ja, nej, vi har hende", "nu tror jeg robotten har snakket til
-            den"), it is not for you: call waiting_for_further_input and say nothing. Never ask what it meant. A remark
+            den"), it is not for you: answer with the action "wait" and say nothing. Never ask what it meant. A remark
             about voice itself, said to you (above), is answered.
 
             EARLIER READINGS: the user's message may list earlier readings, the transcriber's drafts before it settled on
