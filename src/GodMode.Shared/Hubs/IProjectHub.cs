@@ -122,6 +122,8 @@ public interface IProjectHub
     /// <see cref="ReplyAndResume"/> with an answer spoken and transcribed (issue #460): the server sends it to claude
     /// marked so, on a line of its own before it, so the session reads it knowing words may be misheard. A command
     /// (<c>/clear</c>) goes as it is, as a marked one would be text. A typed reply is <see cref="ReplyAndResume"/>, unmarked.
+    /// It answers a pending question as <see cref="ReplyAndResume"/> does, but never a permission prompt, which is answered
+    /// on screen (issue #289): with one pending it fails, saying so, sends nothing, and the prompt waits.
     /// </summary>
     Task ReplyByVoice(string projectId, string text);
 

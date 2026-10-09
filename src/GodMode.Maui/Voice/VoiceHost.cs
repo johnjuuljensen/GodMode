@@ -39,7 +39,7 @@ public sealed class VoiceHost : IVoiceEvents
         _directory = directory;
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<VoiceHost>();
-        Settings = new VoiceSettingsStore(GodModePaths.AppDataDirectory, secrets);
+        Settings = new VoiceSettingsStore(GodModePaths.AppDataDirectory, secrets, loggerFactory.CreateLogger<VoiceSettingsStore>());
     }
 
     public VoiceSettingsStore Settings { get; }
@@ -87,16 +87,16 @@ public sealed class VoiceHost : IVoiceEvents
         {
             if (_running is not null) return Status;
 
-            var settings = await Settings.LoadAsync();
-            var providers = new CloudVoiceProviders(await Settings.LoadKeysAsync());
-            if (providers.MissingKeys.Count > 0)
-                throw new InvalidOperationException($"Set the {string.Join(" and ", providers.MissingKeys)} key in the voice settings");
-
             lock (_lock)
             {
                 _lines.Clear();
                 _error = null;
             }
+            var settings = await Settings.LoadAsync();
+            var providers = new CloudVoiceProviders(await Settings.LoadKeysAsync());
+            if (providers.MissingKeys.Count > 0)
+                throw StartFailed(new InvalidOperationException($"Set the {string.Join(" and ", providers.MissingKeys)} key in the voice settings"));
+
             StateChanged(VoiceState.Starting);
 
             IVoiceAudio? audio = null;
@@ -150,7 +150,7 @@ public sealed class VoiceHost : IVoiceEvents
                     mic is null ? "always open" : $"on demand, closing after {settings.MicSilenceSeconds} s of silence");
                 return Status;
             }
-            catch
+            catch (Exception ex)
             {
                 buttons?.Dispose();
                 mic?.Dispose();
@@ -158,7 +158,7 @@ public sealed class VoiceHost : IVoiceEvents
                 audio?.Dispose();
                 media?.Dispose();
                 if (servers is not null) await servers.DisposeAsync();
-                StateChanged(VoiceState.Off);
+                StartFailed(ex);
                 throw;
             }
         }
@@ -166,6 +166,18 @@ public sealed class VoiceHost : IVoiceEvents
         {
             _switching.Release();
         }
+    }
+
+    /// <summary>
+    /// A start that failed is Off, with its reason kept in <see cref="Status"/> as a stop's is (<see cref="StopForAsync"/>):
+    /// a page loaded after it still shows why. The next start clears it.
+    /// </summary>
+    private Exception StartFailed(Exception ex)
+    {
+        _logger.LogWarning("Voice did not start: {Why}", ex.Message);
+        Error(SessionService.Session, SessionErrorKind.ServiceError, ex.Message);
+        StateChanged(VoiceState.Off);
+        return ex;
     }
 
     public async Task<VoiceStatus> StopAsync()
@@ -230,13 +242,34 @@ public sealed class VoiceHost : IVoiceEvents
     }
 
     /// <summary>The server list changed: connect to new servers and let go of removed ones.</summary>
-    public void ServersChanged()
+    public void ServersChanged() => _ = RefreshServersAsync();
+
+    /// <summary>
+    /// Between a start and a stop, never across one: a refresh that overlapped a stop would open connections on the
+    /// stopped session's servers, which nothing would close.
+    /// </summary>
+    private async Task RefreshServersAsync()
     {
-        if (_running is { } running)
-            _ = running.Servers.RefreshAsync();
+        await _switching.WaitAsync();
+        try
+        {
+            if (_running is { } running)
+                await running.Servers.RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Voice: the servers could not be refreshed");
+        }
+        finally
+        {
+            _switching.Release();
+        }
     }
 
-    /// <summary>The network changed: make each connection again.</summary>
+    /// <summary>
+    /// The network changed: make each connection again. Outside <see cref="_switching"/>, as it opens none: it drops
+    /// those there are, and a stopped session's servers have none left to drop.
+    /// </summary>
     public void NetworkChanged() => _running?.Servers.Reconnect();
 
     /// <summary>The platform took the audio (a phone call, on Android): stop, and leave the reason on show.</summary>

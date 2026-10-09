@@ -63,7 +63,10 @@ public sealed record VoiceSessionSetup
     public required IVoiceEvents Events { get; init; }
     public required ILoggerFactory LoggerFactory { get; init; }
 
-    /// <summary>Where the session writes its log (<see cref="SessionOptions.LogDirectory"/>).</summary>
+    /// <summary>
+    /// Where the session writes its log (<see cref="SessionOptions.LogDirectory"/>): whole conversations, in plain text.
+    /// A start deletes those older than <see cref="VoiceSession.LogsKeptFor"/>.
+    /// </summary>
     public required string LogDirectory { get; init; }
 
     /// <summary>The conversation's clock: when an announcement's window ends (<see cref="VoiceConversation.AnnouncedSwitchWindow"/>). The system's when null.</summary>
@@ -95,6 +98,9 @@ public sealed class VoiceSession : IAsyncDisposable
     /// <summary>What is never noise: the answers and the greetings.</summary>
     public static readonly IReadOnlySet<string> SaidOnPurpose =
         new HashSet<string>(AnswerWords.Concat(Greetings), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How long a session's log is kept: a week, as the app's own logs are.</summary>
+    public static readonly TimeSpan LogsKeptFor = TimeSpan.FromDays(7);
 
     private readonly CancellationTokenSource _stop = new();
     private readonly ServiceProvider _services;
@@ -154,6 +160,7 @@ public sealed class VoiceSession : IAsyncDisposable
     public static async Task<VoiceSession> StartAsync(VoiceSessionSetup setup, CancellationToken ct)
     {
         var logger = setup.LoggerFactory.CreateLogger<VoiceSession>();
+        DeleteOldLogs(setup.LogDirectory, logger);
         var languages = setup.Settings.Languages;
         var phrases = new VoicePhrases(languages);
         var handles = new ProjectHandles();
@@ -315,9 +322,41 @@ public sealed class VoiceSession : IAsyncDisposable
             _logger.LogWarning(ex, "Voice session's teardown failed");
         }
         _state.Hold(VoiceState.Off);
-        await _scope.DisposeAsync();
-        await _services.DisposeAsync();
-        _stop.Dispose();
+        // The services and the token are let go of even if the scope's teardown throws, as it did (johnjuuljensen/VoiceBot#38)
+        try
+        {
+            await _scope.DisposeAsync();
+        }
+        finally
+        {
+            try
+            {
+                await _services.DisposeAsync();
+            }
+            finally
+            {
+                _stop.Dispose();
+            }
+        }
+    }
+
+    /// <summary>The session logs (VoiceBot's <c>*.log</c>) last written more than <see cref="LogsKeptFor"/> ago. Best effort.</summary>
+    private static void DeleteOldLogs(string directory, ILogger logger)
+    {
+        try
+        {
+            var cutoff = DateTime.UtcNow - LogsKeptFor;
+            foreach (var file in new DirectoryInfo(directory).EnumerateFiles("*.log"))
+            {
+                if (file.LastWriteTimeUtc < cutoff)
+                    file.Delete();
+            }
+        }
+        catch (DirectoryNotFoundException) { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Voice: the old session logs in {Directory} could not all be deleted", directory);
+        }
     }
 
     private async Task RunAsync(SessionLanguages languages)
