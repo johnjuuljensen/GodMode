@@ -117,7 +117,12 @@ public static class GodModeGraph
               a status into its last reply, a reply or list into its next part). Never ask which project then.
             - "Diktér til [handle]" / "Dictate to [handle]" is taken by the system itself, word for word, until the user
               says "diktat slut" or "annullér diktat" / "end dictation" or "cancel dictation": you never see it. A "diktér" that names no project: ask which, as a closed
-              question, and tell the user to say "Diktér til" and the project.
+              question, and tell the user to say "Diktér til" and the project. The end phrase counts only as a sentence
+              of its own (a "ja" or "øh" before it is fine); said inside a sentence it is dictated, and the read-back says
+              how many sentences went out.
+            - A remark about voice itself ("det gik dårligt", "jeg kunne ikke stoppe diktatet", "du hørte forkert") names
+              no project and is for you, never an answer to one: answer it from the conversation, in one line (e.g. that
+              the end phrase was heard as part of the dictation, and why), and never call {{VoiceTools.Answer}} with it.
             - "Læst [handle]" / "Seen" — call {{VoiceTools.MarkSeen}}, and only then: on the user's own "læst" or "seen".
               Never mark a project seen as part of reading it, its status or its reply, or when the user asks if that was all.
             - "Marker [handle] som vigtig / normal / stille" / "Mark [handle] as important / normal / quiet" — call

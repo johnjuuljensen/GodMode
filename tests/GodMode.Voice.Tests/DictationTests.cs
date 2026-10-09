@@ -243,6 +243,17 @@ public sealed class DictationTests
     [InlineData("Slet diktat.", Dictation.Terminator.Cancel, "")]
     [InlineData("Cancel dictation.", Dictation.Terminator.Cancel, "")]
     [InlineData("Det var forkert. Annullér diktat.", Dictation.Terminator.Cancel, "Det var forkert.")]
+    // #530: as the user was heard to say it, and with a filler in front of it
+    [InlineData("Dictate end.", Dictation.Terminator.Send, "")]
+    [InlineData("Stop dictation.", Dictation.Terminator.Send, "")]
+    [InlineData("Diktér slut.", Dictation.Terminator.Send, "")]
+    [InlineData("Dikter slut", Dictation.Terminator.Send, "")]
+    [InlineData("Ja, øh, end dictation.", Dictation.Terminator.Send, "")]
+    [InlineData("ja øh, diktat slut", Dictation.Terminator.Send, "")]
+    [InlineData("Okay. Diktat slut.", Dictation.Terminator.Send, "Okay.")]
+    [InlineData("Det var det. Øh. Diktat slut.", Dictation.Terminator.Send, "Det var det.")]
+    [InlineData("Skal vi pushe? Ja. Diktat slut.", Dictation.Terminator.Send, "Skal vi pushe? Ja.")]
+    [InlineData("Det var det. Uhm, cancel dictation.", Dictation.Terminator.Cancel, "Det var det.")]
     public void A_phrase_as_a_sentence_on_its_own_ends_it(string final, Dictation.Terminator terminator, string before) =>
         Assert.Equal((terminator, before), Dictation.Ends(final));
 
@@ -267,6 +278,8 @@ public sealed class DictationTests
     [InlineData("Det var et diktat. Slut.")]
     [InlineData("Slut.")]
     [InlineData("Diktat.")]
+    [InlineData("Ja, og skriv diktat slut i filen.")]
+    [InlineData("Øh, men stop dictation først.")]
     public void Other_words_are_dictated(string final) => Assert.Equal(((Dictation.Terminator?)null, final), Dictation.Ends(final));
 
     /// <summary>The phrases are keyterms, so speech recognition hears them, and each fits in one.</summary>
@@ -384,6 +397,55 @@ public sealed class DictationTests
         Assert.False(dictation.Active);
         Assert.Equal((P283, First), Assert.Single(servers.Replies));
     }
+
+    /// <summary>#530: "Diktér til" the same project, said while dictating, is no part: the dictation goes on, with what follows it.</summary>
+    [Fact]
+    public async Task Dictate_to_the_same_project_while_dictating_goes_on()
+    {
+        var (servers, dictation, _) = await DictatingAsync();
+
+        Assert.Equal("Diktatet til issue 283 fortsætter.", await dictation.HearAsync("Diktér til 283.", CancellationToken.None));
+        Assert.Equal([First], dictation.Parts);
+        Assert.Equal("Diktatet til issue 283 fortsætter.", await dictation.HearAsync("Dictate to 283. Og kør testene.", CancellationToken.None));
+        Assert.StartsWith("Sender 2 sætninger til issue 283", await dictation.HearAsync("Diktat slut.", CancellationToken.None));
+
+        Assert.Equal($"{First} Og kør testene.", Assert.Single(servers.Replies).Text);
+    }
+
+    /// <summary>#530: "Diktér til" another project, or one no handle names, while dictating, is taken as nothing, and the dictation is kept.</summary>
+    [Theory]
+    [InlineData("Diktér til 101. Brug den nye.")]
+    [InlineData("Dictate to GodMode Chat General.")]
+    public async Task Dictate_to_another_project_while_dictating_adds_nothing(string final)
+    {
+        var (servers, dictation, _) = await DictatingAsync();
+        servers.Set(ServerA, Question("p/r/283", "283-voice", "Skal jeg pushe?"), Question("p/r/101", "101-docs", "Hvilken?"));
+
+        Assert.Equal("Du dikterer stadig til issue 283, intet tilføjet. Sig diktat slut eller annullér diktat først.",
+            await dictation.HearAsync(final, CancellationToken.None));
+        Assert.True(dictation.Active);
+        Assert.Equal([First], dictation.Parts);
+        Assert.Empty(servers.Replies);
+    }
+
+    /// <summary>#530: a dictated sentence that sounds like an end phrase is named in the read-back.</summary>
+    [Fact]
+    public async Task A_part_that_sounds_like_a_command_is_named_in_the_read_back()
+    {
+        var (servers, dictation, _) = await DictatingAsync();
+        Assert.Null(await dictation.HearAsync("Dictation ended.", CancellationToken.None));
+
+        Assert.EndsWith("En sætning lyder som en kommando: Dictation ended.", await dictation.HearAsync("Diktat slut", CancellationToken.None));
+        Assert.Equal($"{First} Dictation ended.", Assert.Single(servers.Replies).Text);
+    }
+
+    [Theory]
+    [InlineData("Dictate end.", true)]
+    [InlineData("Stop dictating.", true)]
+    [InlineData("Diktat færdig nu.", true)]
+    [InlineData("Brug den eksisterende migration.", false)]
+    [InlineData("Diktat-funktionen skal kunne afsluttes med et ja foran slutordene.", false)]
+    public void Looks_like_a_command(string sentence, bool command) => Assert.Equal(command, Dictation.LooksLikeCommand(sentence));
 
     /// <summary>
     /// Announcements wait while dictating: one in a pause to think would break the user's train of thought. They are

@@ -474,17 +474,33 @@ public sealed partial class VoicePhrases
     /// <summary>
     /// A dictation sent (#459), read back: its length in sentences, and its first words, as it starts going out:
     /// "Sender 4 sætninger til issue 283, der starter: Brug den eksisterende migration …". To a project that is
-    /// <paramref name="running"/> (#530), it says so, as it answers no question: the turn takes it in as it goes.
+    /// <paramref name="running"/> (#530), it says so, as it answers no question: the turn takes it in as it goes. A
+    /// dictated sentence that sounds like a <paramref name="command"/> (<see cref="Dictation.LooksLikeCommand"/>) is named.
     /// </summary>
-    public string DictationSending(SpokenName name, int sentences, string start, bool running)
+    public string DictationSending(SpokenName name, int sentences, string start, bool running, string? command)
     {
-        var sending = _danish
-            ? $"Sender {sentences} {(sentences == 1 ? "sætning" : "sætninger")} til {Named(name)}, der starter: {GodModeAnnouncementFormatter.Sentence(start)}"
-            : $"Sending {sentences} {(sentences == 1 ? "sentence" : "sentences")} to {Named(name)}, starting: {GodModeAnnouncementFormatter.Sentence(start)}";
-        return !running ? sending
-            : _danish ? $"{sending} Den arbejder, og tager det med undervejs."
-            : $"{sending} It is working, and takes it in as it goes.";
+        List<string> said =
+        [
+            _danish
+                ? $"Sender {sentences} {(sentences == 1 ? "sætning" : "sætninger")} til {Named(name)}, der starter: {GodModeAnnouncementFormatter.Sentence(start)}"
+                : $"Sending {sentences} {(sentences == 1 ? "sentence" : "sentences")} to {Named(name)}, starting: {GodModeAnnouncementFormatter.Sentence(start)}",
+        ];
+        if (command is not null)
+            said.Add(_danish ? $"En sætning lyder som en kommando: {GodModeAnnouncementFormatter.Sentence(command)}"
+                : $"One sentence sounds like a command: {GodModeAnnouncementFormatter.Sentence(command)}");
+        if (running)
+            said.Add(_danish ? "Den arbejder, og tager det med undervejs." : "It is working, and takes it in as it goes.");
+        return string.Join(" ", said);
     }
+
+    /// <summary>"Diktér til" the project dictated to, said while dictating (#530): the dictation goes on.</summary>
+    public string DictationGoesOn(SpokenName name) =>
+        _danish ? $"Diktatet til {Named(name)} fortsætter." : $"Still dictating to {Named(name)}.";
+
+    /// <summary>"Diktér til" another project, said while dictating (#530): nothing of it is taken, and this one ends first.</summary>
+    public string DictationElsewhere(SpokenName name) => _danish
+        ? $"Du dikterer stadig til {Named(name)}, intet tilføjet. Sig diktat slut eller annullér diktat først."
+        : $"Still dictating to {Named(name)}, nothing added. Say end dictation or cancel dictation first.";
 
     /// <summary>A dictation dropped by the user ("annullér diktat"): nothing went out.</summary>
     public string DictationCancelled(SpokenName name) =>
