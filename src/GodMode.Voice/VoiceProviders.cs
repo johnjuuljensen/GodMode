@@ -41,15 +41,9 @@ public sealed class CloudVoiceProviders(VoiceKeys keys) : IVoiceProviders
     }
 
     public Task InitializeAsync(IServiceProvider services, VoiceSettings settings) =>
-        services.GetRequiredService<InferenceRouter>().InitializeAsync(TierMap(settings.TierModels));
+        services.GetRequiredService<InferenceRouter>().InitializeAsync(TierMap());
 
-    /// <summary>
-    /// The model behind each tier: the one the user set (<see cref="VoiceSettings.TierModels"/>, #525), else VoiceBot's,
-    /// so a VoiceBot pin that moves its models moves every tier the user left empty (#475). The same merge as VoiceBot's
-    /// <c>ReadTierMap</c> does from configuration.
-    /// </summary>
-    public static Dictionary<InferenceTier, TierConfig> TierMap(VoiceTierModels? overrides = null) =>
-        TierMapConfiguration.DefaultModels.ToDictionary(
-            d => d.Key,
-            d => new TierConfig(TierMapConfiguration.DefaultProvider, overrides?[d.Key] ?? d.Value));
+    /// <summary>The model behind each tier: VoiceBot's, so a VoiceBot pin that moves its models moves voice's (#475).</summary>
+    public static Dictionary<InferenceTier, TierConfig> TierMap() =>
+        TierMapConfiguration.DefaultModels.ToDictionary(d => d.Key, d => new TierConfig(TierMapConfiguration.DefaultProvider, d.Value));
 }
