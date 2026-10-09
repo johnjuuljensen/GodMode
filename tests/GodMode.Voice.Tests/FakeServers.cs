@@ -298,7 +298,8 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
 
     private static ProjectSummary Summary(ProjectStatus s) =>
         new(s.Id, s.Name, s.State, s.UpdatedAt, s.CurrentQuestion, s.RootName, s.ProfileName, s.PendingPermission, Kind: s.Kind,
-            LastResultAt: s.LastResultAt, LastOutputAt: s.LastOutputAt, PullRequest: s.PullRequest, Adopted: s.Adopted);
+            LastResultAt: s.LastResultAt, LastOutputAt: s.LastOutputAt, PullRequest: s.PullRequest, Adopted: s.Adopted,
+            BackgroundTasks: s.BackgroundTasks);
 
     private static ProjectStatus Status(AttentionItem item) =>
         new(item.ProjectId, item.ProjectName,

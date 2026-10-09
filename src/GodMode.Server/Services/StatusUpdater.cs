@@ -173,6 +173,26 @@ public class StatusUpdater : IStatusUpdater
                 status = WithTokenMetrics(status, outputEvent);
                 break;
 
+            // What claude runs in the background (issue #432): the whole list, each time it changes, between turns too, and
+            // an empty one when the last task has ended. Its steps are kept for the tasks it keeps
+            case OutputEventType.System when Subtype(outputEvent) == BackgroundTasksChangedSubtype:
+                if (BackgroundTasksOf(rawJson, status.BackgroundTasks) is { } tasks && !SameTasks(status.BackgroundTasks, tasks))
+                {
+                    status = status with { BackgroundTasks = tasks.Count == 0 ? null : tasks };
+                    stateChanged = true;
+                }
+                break;
+
+            // A background subagent's or workflow's step. A foreground one's, and a background task's own foreground
+            // shells', are of no task in the list
+            case OutputEventType.System when Subtype(outputEvent) == TaskProgressSubtype:
+                if (WithStep(status.BackgroundTasks, rawJson) is { } stepped)
+                {
+                    status = status with { BackgroundTasks = stepped };
+                    stateChanged = true;
+                }
+                break;
+
             case OutputEventType.System when IsSessionStart(outputEvent):
                 // The session claude keeps is the one it reports, which a resume must name
                 if (outputEvent.Metadata?.GetValueOrDefault(SessionIdKey) is string reported && !SessionIdFile.IsValid(reported))
@@ -382,6 +402,67 @@ public class StatusUpdater : IStatusUpdater
         while (at < text.Length && char.IsWhiteSpace(text[at])) at++;
         return at;
     }
+
+    /// <summary>The <c>system</c> subtype claude lists its background tasks with, whole, each time the list changes.</summary>
+    public const string BackgroundTasksChangedSubtype = "background_tasks_changed";
+
+    /// <summary>The <c>system</c> subtype a subagent's or workflow's task reports its current step with.</summary>
+    public const string TaskProgressSubtype = "task_progress";
+
+    /// <summary>
+    /// The tasks a <c>system/background_tasks_changed</c> lists, each with the step <paramref name="before"/> had for it;
+    /// empty when it lists none, null when the line cannot be read as one, which changes nothing.
+    /// </summary>
+    internal static IReadOnlyList<BackgroundTask>? BackgroundTasksOf(string rawJson, IReadOnlyList<BackgroundTask>? before)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            if (!doc.RootElement.TryGetProperty("tasks", out var tasks) || tasks.ValueKind != JsonValueKind.Array) return null;
+            return [.. tasks.EnumerateArray()
+                .Where(task => task.ValueKind == JsonValueKind.Object && StringOf(task, "task_id") is { Length: > 0 })
+                .Select(task =>
+                {
+                    var id = StringOf(task, "task_id")!;
+                    return new BackgroundTask(id, StringOf(task, "task_type") ?? "", StringOf(task, "description") ?? "",
+                        before?.FirstOrDefault(t => t.Id == id)?.Step);
+                })];
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="tasks"/> with the step a <c>system/task_progress</c> gives its task; null when it is of no task
+    /// in them, cannot be read, or gives the step the task has.
+    /// </summary>
+    internal static IReadOnlyList<BackgroundTask>? WithStep(IReadOnlyList<BackgroundTask>? tasks, string rawJson)
+    {
+        if (tasks is not { Count: > 0 }) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            if (StringOf(doc.RootElement, "task_id") is not { } id || StringOf(doc.RootElement, "description") is not { Length: > 0 } step)
+                return null;
+            return tasks.Any(t => t.Id == id && t.Step != step)
+                ? [.. tasks.Select(t => t.Id == id ? t with { Step = step } : t)]
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool SameTasks(IReadOnlyList<BackgroundTask>? before, IReadOnlyList<BackgroundTask> after) =>
+        before == null ? after.Count == 0 : before.SequenceEqual(after);
+
+    private static string? StringOf(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     /// <summary><c>system/init</c>: claude (re)started its session. It writes it once it has read its first input.</summary>
     public static bool IsSessionStart(OutputEvent outputEvent) =>

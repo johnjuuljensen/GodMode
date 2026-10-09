@@ -42,8 +42,9 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     /// <summary>One session in <see cref="ListSessionsAsync"/>.</summary>
     /// <param name="Needs">What it needs from the user, as its attention item says; null when nothing.</param>
     /// <param name="Address">Its name in Claude Code's own channel: <c>SendMessage</c>'s <c>to</c>, from a session in its config dir.</param>
+    /// <param name="BackgroundTasks">What its claude runs in the background, idle or not; null for nothing (issue #432).</param>
     public sealed record SessionEntry(string Id, string Name, string? Address, string? Profile, string? Root, string? Kind, string? Action,
-        ProjectState State, string? ParentId, AttentionKind? Needs, string? PullRequestUrl);
+        ProjectState State, string? ParentId, AttentionKind? Needs, string? PullRequestUrl, IReadOnlyList<BackgroundTask>? BackgroundTasks);
 
     /// <summary>What a session waits on, in full, in <see cref="ReadAsync"/>.</summary>
     /// <param name="Text">The whole of it: the permission's summary, the question, the error, or the last result.</param>
@@ -52,8 +53,10 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     public sealed record WaitingOn(AttentionKind Kind, string Text, string? Tool = null, string? Detail = null, PendingQuestion? Question = null);
 
     /// <summary>A session as <see cref="ReadAsync"/> gives it.</summary>
+    /// <param name="BackgroundTasks">What its claude runs in the background, each with its last step; null for nothing (issue #432).</param>
     public sealed record SessionRead(string Id, string Name, string? Address, ProjectState State, string? Kind, string? ParentId,
-        string? Model, string? Effort, WaitingOn? WaitingOn, string? PullRequestUrl, IReadOnlyList<AssistantReply> Replies);
+        string? Model, string? Effort, WaitingOn? WaitingOn, string? PullRequestUrl, IReadOnlyList<AssistantReply> Replies,
+        IReadOnlyList<BackgroundTask>? BackgroundTasks);
 
     /// <summary>What <see cref="StartSessionAsync"/> made: the session, or, for an action that starts none, its script's message.</summary>
     /// <param name="Note">For a calling session whose new session is top level: <see cref="StartedTopLevel"/>; null otherwise.</param>
@@ -70,7 +73,9 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
     [McpServerTool(Name = "list_sessions", ReadOnly = true)]
     [Description("Every GodMode session on this server: its ID, name, address (its name for SendMessage, from a session in its " +
         "config dir), profile, root, kind, action, state, parent, " +
-        "what it needs from the user (Permission, Question, Error, Escalation, Review, Finished; null for nothing) and its pull request.")]
+        "what it needs from the user (Permission, Question, Error, Escalation, Review, Finished; null for nothing), its pull request, " +
+        "and what it runs in the background (its subagents, shells, monitors and workflows; null for nothing): Idle with " +
+        "background tasks is still working.")]
     public async Task<string> ListSessionsAsync(RequestContext<CallToolRequestParams> context)
     {
         var scope = await ScopeOfAsync(context);
@@ -78,7 +83,7 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         var sessions = (await projects.ListProjectsAsync())
             .Where(s => InScope(scope, s.ProfileName, s.RootName))
             .Select(s => new SessionEntry(s.Id, s.Name, SessionAddress.OfId(s.Id), s.ProfileName, s.RootName, s.Kind, s.ActionName, s.State, s.ParentId,
-                needs.GetValueOrDefault(s.Id)?.Kind, s.PullRequest?.Url))
+                needs.GetValueOrDefault(s.Id)?.Kind, s.PullRequest?.Url, s.BackgroundTasks))
             .OrderBy(s => s.Id, StringComparer.Ordinal);
         return Json(sessions);
     }
@@ -184,7 +189,8 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
 
     [McpServerTool(Name = "read", ReadOnly = true)]
     [Description("Reads a session: its state, what it waits on in full (a permission prompt with what it would run, a question, " +
-        "an error, a pull request's review, or a finished turn's result), and its last replies, oldest first " +
+        "an error, a pull request's review, or a finished turn's result), what it runs in the background with each task's last " +
+        "step, and its last replies, oldest first " +
         "(turns, default 1, at most 20; the last may be unfinished while it works).")]
     public async Task<string> ReadAsync(
         RequestContext<CallToolRequestParams> context,
@@ -195,7 +201,7 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         var status = await SeenAsync(context, session);
         var replies = await Refusing(() => projects.LastRepliesAsync(session, turns));
         return Json(new SessionRead(status.Id, status.Name, SessionAddress.OfId(status.Id), status.State, status.Kind, status.ParentId, status.Model, status.Effort,
-            await WaitingOnAsync(status), status.PullRequest?.Url, replies));
+            await WaitingOnAsync(status), status.PullRequest?.Url, replies, status.BackgroundTasks));
     }
 
     [McpServerTool(Name = "stop")]

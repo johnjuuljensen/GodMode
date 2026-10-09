@@ -66,6 +66,30 @@ public sealed class ProjectStatusTests
         Assert.Equal($"issue 283, voice (283-voice): Idle. Needs the user: finished: {Long}", result);
     }
 
+    /// <summary>
+    /// An idle session with background tasks (#432) is working in the background: its status says so, with each task and its
+    /// step, and a list counts it as running.
+    /// </summary>
+    [Fact]
+    public async Task An_idle_session_with_background_tasks_is_working_in_the_background()
+    {
+        var servers = new FakeServers();
+        var handles = new ProjectHandles();
+        var projects = new ProjectBoard(servers, handles);
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, new VoiceConversation());
+        servers.SetStatus(ServerA, Status(ProjectState.Idle) with
+        {
+            BackgroundTasks = [new("a1", "local_agent", "Review the diff", "Running the tests"), new("b1", "local_bash", "Watch CI")],
+        });
+
+        var status = await tools.ProjectStatusAsync("283", CancellationToken.None);
+        var listed = tools.ListProjectsText();
+
+        Assert.StartsWith("issue 283, voice (283-voice): Idle, working in the background (2 tasks). " +
+            "In the background: Review the diff (Running the tests); Watch CI.", status);
+        Assert.Contains("Idle, working in the background (2 tasks)", listed);
+    }
+
     /// <summary>A result far past any reply read whole keeps its start and its end, where the question is, and says it was cut.</summary>
     [Fact]
     public async Task A_result_over_the_limit_keeps_its_start_and_end_and_says_it_was_cut()

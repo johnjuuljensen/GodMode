@@ -375,7 +375,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         {
             text.Append($"{group.Heading} ({Count(group.Projects.Count)}):\n");
             foreach (var project in group.Projects)
-                text.Append($"- {LabelOf(project)} ({Details(project.Project.Name, project.Project.Kind)}): {project.Project.State}{ListedLine(project, scope)}\n");
+                text.Append($"- {LabelOf(project)} ({Details(project.Project.Name, project.Project.Kind)}): {StateText(project.Project.State, project.Project.BackgroundTasks)}{ListedLine(project, scope)}\n");
         }
         if (left.Count > 0)
             text.Append(LeftOutText(left, ask)).Append(' ');
@@ -479,8 +479,17 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// <summary>When the project last did something (<see cref="ProjectListing.ActivityOf"/>).</summary>
     private static DateTime ActivityOf(ServerProject project, DateTime now) => ProjectListing.ActivityOf(project.Project, now);
 
-    /// <summary>What the project is doing, as a list says it: it needs the user when it has an attention item.</summary>
-    private ListedState StateOf(ServerProject project) => ProjectListing.StateOf(project.Project.State, board.ItemOf(project.Ref) is not null);
+    /// <summary>
+    /// What the project is doing, as a list says it: it needs the user when it has an attention item, and runs when it is
+    /// idle with background tasks (#432).
+    /// </summary>
+    private ListedState StateOf(ServerProject project) =>
+        ProjectListing.StateOf(project.Project.State is ProjectState.Idle && project.Project.BackgroundTasks is { Count: > 0 } ? ProjectState.Running : project.Project.State,
+            board.ItemOf(project.Ref) is not null);
+
+    /// <summary>The state as a tool's text says it: "Idle, working in the background (2 tasks)" with background tasks (#432).</summary>
+    private static string StateText(ProjectState state, IReadOnlyList<BackgroundTask>? tasks) =>
+        tasks is { Count: > 0 } ? $"{state}, working in the background ({(tasks.Count == 1 ? "1 task" : $"{tasks.Count} tasks")})" : state.ToString();
 
     /// <summary>
     /// A list's window as the model gave it (<see cref="Since"/>): <see cref="ListWindow"/>, how the tool's text says it,
@@ -582,7 +591,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         Talked(target);
         // The last line is its status: "Mere?" expands it into its last reply (#455)
         conversation.Reading = new ProjectLine(target, Read: true);
-        var text = new StringBuilder($"{name} ({Details(status.Name, status.Kind)}): {status.State}.");
+        var text = new StringBuilder($"{name} ({Details(status.Name, status.Kind)}): {StateText(status.State, status.BackgroundTasks)}.");
+        if (status.BackgroundTasks is { Count: > 0 } tasks)
+            text.Append($" In the background: {string.Join("; ", tasks.Select(t => t.Step is { Length: > 0 } step ? $"{t.Description} ({step})" : t.Description))}.");
         var item = board.ItemOf(target)?.Item;
         var full = item is null ? null : InFull(item, status);
         var standing = StandingOf(status, item);
@@ -1096,7 +1107,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     private string Line(ServerProject project)
     {
         var p = project.Project;
-        return $"{Names.Full(project.Ref)?.ToString() ?? p.Name} ({Details(p.Name, p.Kind)}): {p.State}";
+        return $"{Names.Full(project.Ref)?.ToString() ?? p.Name} ({Details(p.Name, p.Kind)}): {StateText(p.State, p.BackgroundTasks)}";
     }
 
     /// <summary>The project's name and kind, those it has.</summary>
