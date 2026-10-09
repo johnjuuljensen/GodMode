@@ -134,6 +134,14 @@ public interface IProjectManager
     Task<DeleteProjectResult> DeleteProjectAsync(string projectId, bool force = false);
 
     /// <summary>
+    /// The fleet's <c>delete_session</c>: <see cref="DeleteProjectAsync"/>, never forced, of one of the caller's descendants by
+    /// the server's record of each parent, and only one that is done. Refused, saying why, for the caller itself, a
+    /// session that is not its descendant, one that works or waits on the user, one with children of its own, and one
+    /// whose pull request is still open; and, as the user's delete is, when the root's delete script fails.
+    /// </summary>
+    Task<DeleteProjectResult> DeleteChildAsync(string callerId, string projectId);
+
+    /// <summary>
     /// Brings a trashed session back under the same ID, Stopped, and pushes it as ProjectCreated: see
     /// <see cref="GodMode.Shared.Hubs.IProjectHub.RestoreProject"/> for when it refuses.
     /// </summary>

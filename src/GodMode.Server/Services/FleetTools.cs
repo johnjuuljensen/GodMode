@@ -28,7 +28,8 @@ namespace GodMode.Server.Services;
 /// Each session's <c>Address</c> is its name in Claude Code's own channel (<see cref="SessionAddress"/>), which a session
 /// in the same <c>CLAUDE_CONFIG_DIR</c> reaches with <c>SendMessage</c>. Each does what its hub method does, through the
 /// same <see cref="IProjectManager"/> call, so a session it starts is in the app's list like any other.
-/// None answers a permission prompt or a question, deletes, forgets, adopts or writes config: those are the user's.
+/// <see cref="DeleteSessionAsync"/> deletes a session the caller is done with, its own descendants alone (issue #428).
+/// None answers a permission prompt or a question, deletes any other session, forgets, adopts or writes config: those are the user's.
 /// Each returns JSON text, as the hub's models serialize, unindented (<see cref="JsonDefaults.Compact"/>); a refusal is the tool's error, saying why.
 /// </summary>
 [McpServerToolType]
@@ -205,6 +206,25 @@ public sealed class FleetTools(IProjectManager projects, IHubContext<ProjectHub,
         logger.LogInformation("Fleet resuming {ProjectId}", session);
         await Refusing(() => projects.ResumeProjectAsync(session));
         return await StateAsync(session);
+    }
+
+    [McpServerTool(Name = "delete_session", Destructive = true)]
+    [Description("Deletes a session you are done with, as the app's delete does: the root's delete script runs (it removes the " +
+        "worktree, and refuses work not committed or pushed, with its error given back here), then its folder goes, or, in a " +
+        "shared folder, only its state, into the trash. Only your own children and theirs, by the parent the server recorded " +
+        "when they were started; never yourself. Refused while it is running or waits on a permission prompt or a question, " +
+        "while it has children of its own (delete those first), and while its pull request is draft or open: merged, closed " +
+        "or none. Only a session can delete. Returns Trashed, whether its state went to the trash rather than its folder.")]
+    public async Task<string> DeleteSessionAsync(RequestContext<CallToolRequestParams> context, [Description("The session's ID")] string session)
+    {
+        if (CallerOf(context) is not { } caller)
+            throw new McpException("Only a GodMode session can delete, and only the sessions it started: the user deletes in the app.");
+        await SeenAsync(context, session);
+        logger.LogInformation("Fleet ({Caller}) deleting {ProjectId}", caller, session);
+        var result = await Refusing(() => projects.DeleteChildAsync(caller, session));
+        // As the hub's DeleteProject: the app drops it
+        await hub.Clients.All.ProjectDeleted(session);
+        return Json(result);
     }
 
     [McpServerTool(Name = "escalate")]
