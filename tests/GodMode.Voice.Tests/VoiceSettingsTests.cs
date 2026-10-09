@@ -160,6 +160,33 @@ public sealed class VoiceSettingsTests : IDisposable
         Assert.Equal(new VoiceKeys(null, null), await _store.LoadKeysAsync());
     }
 
+    /// <summary>A read that fails once (a passing keystore failure) leaves the keys where they are: the next read has them.</summary>
+    [Fact]
+    public async Task A_key_secure_storage_cannot_read_is_kept_for_the_next_read()
+    {
+        await _store.UpdateAsync(new VoiceSettingsUpdate(ElevenLabsKey: ElevenLabsKey, AnthropicKey: AnthropicKey));
+        _secrets.FailReads = true;
+        await _store.LoadKeysAsync();
+        _secrets.FailReads = false;
+
+        Assert.Equal(new VoiceKeys(ElevenLabsKey, AnthropicKey), await _store.LoadKeysAsync());
+    }
+
+    /// <summary>A log template or an assertion's message prints a record: never its keys, only whether each is set.</summary>
+    [Fact]
+    public void The_records_with_keys_print_whether_each_is_set_never_the_key()
+    {
+        var keys = new VoiceKeys(ElevenLabsKey, null).ToString();
+        var update = new VoiceSettingsUpdate(Language: "da-DK", ElevenLabsKey: ElevenLabsKey, AnthropicKey: AnthropicKey).ToString();
+
+        Assert.DoesNotContain(ElevenLabsKey, keys);
+        Assert.Equal("VoiceKeys { ElevenLabs = set, Anthropic = not set }", keys);
+        Assert.DoesNotContain(ElevenLabsKey, update);
+        Assert.DoesNotContain(AnthropicKey, update);
+        Assert.Contains("Language = da-DK", update);
+        Assert.Contains("ElevenLabsKey = set", update);
+    }
+
     private sealed class MemorySecrets : ISecretStore
     {
         private readonly ConcurrentDictionary<string, string> _values = new();
