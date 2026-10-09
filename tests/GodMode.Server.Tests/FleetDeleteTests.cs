@@ -26,7 +26,10 @@ public class FleetDeleteTests
     /// <summary>An action whose sessions ask a permission, which waits on the user.</summary>
     private const string AskingAction = "asking";
 
-    /// <summary>In a worker's folder, the delete script refuses, as a real one does for work not pushed.</summary>
+    /// <summary>An action whose sessions ask the user a question with AskUserQuestion.</summary>
+    private const string QuestioningAction = "questioning";
+
+    /// <summary>In a worker's folder, the delete script refuses, as a real one does for work not pushed, unless forced.</summary>
     private const string UnpushedMarker = "unpushed";
 
     /// <summary>In the root, what the status script prints for every session: its pull request.</summary>
@@ -37,7 +40,7 @@ public class FleetDeleteTests
 
     private const string DeleteScript = """
         $ErrorActionPreference = 'Stop'
-        if (Test-Path (Join-Path $env:GODMODE_PROJECT_PATH 'unpushed')) {
+        if ($env:GODMODE_FORCE -ne 'true' -and (Test-Path (Join-Path $env:GODMODE_PROJECT_PATH 'unpushed'))) {
             [Console]::Error.WriteLine("The worktree has work not pushed: $env:GODMODE_PROJECT_FOLDER stays")
             exit 1
         }
@@ -75,6 +78,8 @@ public class FleetDeleteTests
             run.WriteActionScript(WorkAction, Turns(), Scripts);
             run.WriteActionScript(BusyAction, Waiting(), Scripts);
             run.WriteActionScript(AskingAction, new FakeScript().EmitInit().AwaitStdin().AskPermission("Bash", new { command = "ls" }).AwaitStdin(), Scripts);
+            var question = new { questions = new[] { new { question = "Which branch?", header = "Branch", options = new[] { new { label = "main", description = "the default" } }, multiSelect = false } } };
+            run.WriteActionScript(QuestioningAction, new FakeScript().EmitInit().AwaitStdin().AskPermission("AskUserQuestion", question, "toolu_ask").AwaitStdin(), Scripts);
             var (overseerId, overseer) = await OverseerAsync(run, "overseer");
             var fleet = new Fleet { Run = run, OverseerId = overseerId, Overseer = overseer };
             run.Client.Hub.On<string>(nameof(IProjectHubClient.ProjectDeleted), fleet.Deleted.Enqueue);
@@ -194,9 +199,9 @@ public class FleetDeleteTests
         Assert.Contains(fleet.OverseerId, await fleet.IdsAsync());
     }
 
-    /// <summary>A child mid-turn, or waiting on the user's answer to a permission prompt, is not stopped by a delete: it is refused.</summary>
+    /// <summary>A child mid-turn, or waiting on the user's answer to a permission prompt or a question, is not stopped by a delete: it is refused.</summary>
     [Fact]
-    public async Task ARunningChild_AndOneWaitingOnAPermission_AreRefused_AndKeepTheirState()
+    public async Task ARunningChild_AndOneWaitingOnAPermissionOrAQuestion_AreRefused_AndKeepTheirState()
     {
         await using var fleet = await Fleet.StartAsync();
         var running = await fleet.StartAsync(fleet.Overseer, "running", BusyAction);
@@ -204,15 +209,20 @@ public class FleetDeleteTests
         var asking = await fleet.StartAsync(fleet.Overseer, "asking", AskingAction);
         await fleet.Run.Client.WaitForAsync(asking, s => s.State == ProjectState.WaitingPermission, fleet.Run.Server);
 
+        var questioning = await fleet.StartAsync(fleet.Overseer, "questioning", QuestioningAction);
+        await fleet.Run.Client.WaitForAsync(questioning, s => s.PendingQuestion != null, fleet.Run.Server);
+
         Assert.Contains("running", await fleet.RefusedAsync(running));
         Assert.Contains("permission", await fleet.RefusedAsync(asking));
+        Assert.Contains("question", await fleet.RefusedAsync(questioning));
 
         Assert.Equal(ProjectState.Running, (await fleet.Run.Client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), running)).State);
         Assert.Equal(ProjectState.WaitingPermission, (await fleet.Run.Client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), asking)).State);
+        Assert.NotNull((await fleet.Run.Client.Hub.InvokeAsync<ProjectStatus>(nameof(IProjectHub.GetStatus), questioning)).PendingQuestion);
         Assert.Empty(fleet.ScriptDeleted());
     }
 
-    /// <summary>Never forced: the root's delete script refuses work not pushed, its error is the caller's, and the session stays.</summary>
+    /// <summary>Never forced: the root's delete script refuses work not pushed (which it would let go if forced), its error is the caller's, and the session stays.</summary>
     [Fact]
     public async Task WhenTheDeleteScriptFails_ItsErrorIsTheCallers_AndTheChildStays()
     {

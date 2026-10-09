@@ -41,10 +41,11 @@ public partial class ProjectManager
     private string? WhyNotDone(ProjectInfo project)
     {
         var status = project.Status;
-        if (status is { PendingPermission: not null } or { State: ProjectState.WaitingPermission })
-            return "it waits on a permission prompt, which is the user's";
+        // An AskUserQuestion reaches the server as a permission prompt: the question first
         if (status is { PendingQuestion: not null } or { State: ProjectState.WaitingInput })
             return "it waits on a question to the user";
+        if (status is { PendingPermission: not null } or { State: ProjectState.WaitingPermission })
+            return "it waits on a permission prompt, which is the user's";
         if (status.State == ProjectState.Running)
             return "it is running; delete it once its turn has ended";
         var children = _projects.Values
