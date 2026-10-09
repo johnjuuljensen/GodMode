@@ -30,8 +30,8 @@ builder.Host.UseSerilog((context, configuration) =>
     configuration
         .ReadFrom.Configuration(context.Configuration)
         // Serilog ignores Logging:LogLevel. ASP.NET Core's Information events log full request
-        // URLs, which for the hub's WebSocket upgrade carry the key as ?access_token=, so they
-        // stay off after any configured levels.
+        // URLs, query strings included, and the server reads no key from one but a caller may still
+        // put it there, so they stay off after any configured levels.
         .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
         .WriteTo.Console()
         .WriteTo.File(

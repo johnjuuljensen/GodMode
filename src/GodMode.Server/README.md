@@ -122,7 +122,7 @@ Every endpoint and the SignalR hub require authentication, whatever the server i
 | Mode | When | Callers authenticate with |
 |---|---|---|
 | `codespace` | `CODESPACES=true` (set by GitHub Codespaces) | a GitHub token owned by `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`: its sessions are given that one, so the server refuses it. This mode wins whatever the binding and whether or not an API key is set. |
-| `apikey` | anywhere else | `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade) |
+| `apikey` | anywhere else | `Authorization: Bearer <key>`, on the hub's WebSocket upgrade too (the .NET SignalR client sends it there) |
 
 **The key** is `Authentication:ApiKey` when that is set. Otherwise the server generates a 256-bit key on its first start, prints it once to the console with how to use it, and keeps it in its key file, which it reads on every later start. A restart keeps the key.
 
@@ -138,6 +138,8 @@ Every endpoint and the SignalR hub require authentication, whatever the server i
 - **Read it again** with `cat ~/.local/share/GodMode.Server/api-key` (Windows: `type %LOCALAPPDATA%\GodMode.Server\api-key`). Write your own key into it, or delete it for a new one on the next start.
 - **A configured key always wins**, and the key file is then neither read nor written. So does a codespace, which uses no key.
 - **Docker:** a replaced container has a new home, so a new key. Run it with `-e Authentication__ApiKey=<key>`, or keep the key file on a named volume: `-v godmode-key:/home/godmode/.local/share/GodMode.Server`. The image creates that directory, owned by `godmode` with mode 0700, and a new named volume starts with its owner and mode. A bind mount (`-v /srv/godmode-key:…`) keeps the host directory's owner instead, which must be writable by the container's `godmode` user.
+
+**The header only.** No endpoint reads a credential from the query string, the hub included: `?access_token=` existed for browsers, which cannot set headers on a WebSocket upgrade and are no clients now, and a key in a URL ends up in logs and history.
 
 A key of your own can go in the instance's config file or `appsettings.json` (`"Authentication": { "ApiKey": "..." }`), in the `Authentication__ApiKey` environment variable, or on the command line as `--Authentication:ApiKey=<key>`. `openssl rand -hex 32` makes one.
 
@@ -677,7 +679,7 @@ Neither a Claude process nor a root script (`prepare`, `create`, `delete`, `stat
 
 A credential a script or a session needs that is not a file in the user's home goes in the root's `environment` (or the profile's, `Profiles:<name>:Environment`), and then reaches both: `GH_TOKEN` or `GITHUB_TOKEN` for `gh` and its git credential helper, `SSH_AUTH_SOCK` for an SSH agent, `GIT_SSH_COMMAND`, a desktop keyring's `DBUS_SESSION_BUS_ADDRESS`. `godmode-dev` passes the codespace's token this way, `"environment": { "GITHUB_TOKEN": "${GITHUB_TOKEN}" }`; on a machine where `gh` is logged in with its own stored credentials (`gh auth login`, the Windows credential manager), the entry expands to nothing and is dropped, and `gh` reads its login from the home directory.
 
-`${VAR}` reads the server's environment, with one exception: the server's own secrets, the names under `Authentication` (`Authentication__ApiKey`, `Authentication__ApiKeyFile`, and the `Authentication:` forms, in any case). A reference to one expands to an empty string, set or not, and the server logs a warning, once per name per run, naming the entry and the secret. So `"environment": { "X": "${Authentication__ApiKey}" }` gives sessions an empty `X`, not the key. The same goes for a profile's prefix-stripped variables (`stripEnvVarProfile`). Everything else, `${GITHUB_TOKEN}` included, still resolves. A key a session should have goes in the environment as a value of its own.
+`${VAR}` reads the server's environment, with one exception: the server's own secrets, the names under `Authentication` (`Authentication__ApiKey`, `Authentication__ApiKeyFile`, and the `Authentication:` forms, in any case, and each under the host's prefixes `ASPNETCORE_` and `DOTNET_`, which the server reads into the same settings). A reference to one expands to an empty string, set or not, and the server logs a warning, once per name per run, naming the entry and the secret. So `"environment": { "X": "${Authentication__ApiKey}" }` gives sessions an empty `X`, not the key. The same goes for a profile's prefix-stripped variables (`stripEnvVarProfile`). Everything else, `${GITHUB_TOKEN}` included, still resolves. A key a session should have goes in the environment as a value of its own.
 
 ### Pull Request Status
 

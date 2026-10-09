@@ -178,14 +178,13 @@ All real-time communication uses strongly-typed SignalR on one hub, `/hubs/proje
 
 The hub is the session loop plus reading profiles and roots:
 
-| `IProjectHub` (23 methods) | |
+| `IProjectHub` (26 methods) | |
 |---|---|
 | Projects | `ListProjects`, `GetStatus`, `CreateProject`, `SendInput`, `StopProject`, `ResumeProject`, `SubscribeProject`, `UnsubscribeProject`, `DeleteProject`, `RestoreProject`, `ForgetProject` |
 | Prompts | `RespondToPermission`, `GetPermissionDetail`, `AnswerQuestion` |
-| Attention | `GetAttention`, `MarkSeen`, `ReplyAndResume`, `GetLastReplies` |
-| Roots | `ListProjectRoots`, `ListUnmanaged`, `AdoptFolder` |
+| Attention | `GetAttention`, `MarkSeen`, `SetImportance`, `ReplyAndResume`, `ReplyByVoice`, `AskForRecap`, `GetLastReplies` |
+| Roots | `ListProjectRoots`, `ListUnmanaged`, `AdoptFolder`, `DescribeIssue` |
 | Profiles | `ListProfiles` |
-| Utility | `CheckCommand` |
 
 | `IProjectHubClient` (9 callbacks) |
 |---|
@@ -295,7 +294,7 @@ A session is a folder in `.godmode/sessions/` of a working folder directly insid
 Every request needs a credential, whatever the server is bound to, loopback included. The server picks exactly one mode at startup (`AuthModeSelector` in `Auth/AuthMode.cs`):
 
 1. **Codespace** — `CODESPACES=true`. Callers present a GitHub token owned by `GITHUB_USER`, other than the codespace's own `GITHUB_TOKEN`, which its sessions are given.
-2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>` (the SignalR client sends it as `access_token` on the WebSocket upgrade). The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under a scan folder or an explicit root.
+2. **API key** — anywhere else. Callers send `Authorization: Bearer <key>`, on the hub's WebSocket upgrade too (the .NET SignalR client sends it there); no endpoint reads a key from the query string. The key is `Authentication:ApiKey`, else the one in the server's key file (`Auth/ApiKeyFile.cs`): generated on the first start (256 bits), printed once, owner-only, and reused on every start. The file is in the server's own data directory (`%LOCALAPPDATA%\GodMode.Server\api-key` on Windows, `~/.local/share/GodMode.Server/api-key` on Linux and in the Docker image), or `Authentication:ApiKeyFile`, and never under a scan folder or an explicit root.
 
 **No browser** (`Auth/OriginPolicy.cs`). A request with an `Origin`, as a browser sends on every WebSocket upgrade and any request but a same-origin GET, is refused with 403 before authentication, whatever origin it names: the server's own bindings included, in Development and in a codespace too, and no setting allows one. A request with no `Origin` (the MAUI relay, the attention service, a session's claude on `/mcp`) needs its credential alone.
 
