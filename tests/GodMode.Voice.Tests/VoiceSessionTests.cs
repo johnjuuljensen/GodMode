@@ -11,6 +11,32 @@ public sealed class VoiceSessionTests
     private const string ServerA = "server-a";
     private const string ServerB = "server-b";
 
+    /// <summary>
+    /// The session logs hold whole conversations in plain text: a start deletes those older than a week, as the app's
+    /// own logs are, and leaves the rest and whatever else is in the folder.
+    /// </summary>
+    [Fact]
+    public async Task A_start_deletes_the_session_logs_older_than_a_week()
+    {
+        var logs = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"godmode-voice-{Guid.NewGuid():N}")).FullName;
+        string Log(string name, int daysOld)
+        {
+            var path = Path.Combine(logs, name);
+            File.WriteAllText(path, "user: hvad venter?");
+            File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddDays(-daysOld));
+            return path;
+        }
+        var old = Log("session-2026-09-01-120000-a.log", daysOld: 8);
+        var recent = Log("session-2026-10-03-120000-b.log", daysOld: 6);
+        var other = Log("notes.txt", daysOld: 30);
+
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), new ScriptedChatClient(), logDirectory: logs);
+
+        Assert.False(File.Exists(old));
+        Assert.True(File.Exists(recent));
+        Assert.True(File.Exists(other));
+    }
+
     [Fact]
     public async Task What_waits_at_the_start_is_announced_after_the_greeting_and_a_new_item_when_it_comes()
     {
@@ -246,19 +272,16 @@ public sealed class VoiceSessionTests
         await using (voice)
         {
             await voice.Events.SaidAsync("Klar.");
-            await ListeningAsync(voice);
+            await voice.ListeningAsync();
             var before = voice.Events.States.Count;
 
             voice.Transcriptions.AddFinal("Hvad venter på mig?");
             await voice.Events.SaidAsync("Intet venter.");
-            await ListeningAsync(voice);
+            await voice.ListeningAsync();
 
             Assert.Equal([VoiceState.Thinking, VoiceState.Speaking, VoiceState.Listening], voice.Events.States.Skip(before));
         }
         Assert.Equal(VoiceState.Off, voice.Events.States.Last());
-
-        static Task ListeningAsync(OfflineVoice voice) => Eventually.UntilAsync(() => voice.Session.State == VoiceState.Listening,
-            () => $"the session to listen; it is {voice.Session.State}, after {string.Join(", ", voice.Events.States)}");
     }
 
     /// <summary>

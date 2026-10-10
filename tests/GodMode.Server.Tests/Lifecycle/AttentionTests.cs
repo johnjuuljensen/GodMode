@@ -451,7 +451,9 @@ public class ReplyAndResumeTests
             harness.Projects.ReplyAndResumeAsync(stopped.Id, Reply).WaitAsync(LifecycleHarness.DefaultTimeout));
 
         Assert.Contains("did not start its session within 1 seconds", timedOut.Message);
-        Assert.True(Carries(Assert.Single(harness.Launches(stopped.Id)[1].Stdin), Reply));
+        // The timeout runs from the reply's write, not the fake's record of it, which a loaded machine can be seconds behind
+        var resumed = await harness.WaitForStdinAsync(stopped.Id, index: 1);
+        Assert.True(Carries(Assert.Single(resumed.Stdin), Reply));
     }
 
     /// <summary>

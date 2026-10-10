@@ -35,8 +35,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public const string RootName = "lifecycle";
     public const string ProfileName = "lifecycle";
 
-    /// <summary>Long enough for a slow CI box; each wait returns as soon as its condition holds.</summary>
-    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(15);
+    /// <summary>Long enough for a full parallel run on a busy machine; each wait returns as soon as its condition holds.</summary>
+    public static readonly TimeSpan DefaultTimeout = TestTimeouts.Wait;
 
     private const string RecordFileName = $"fake-claude-{FakeClaudeEnvironment.SessionPlaceholder}.jsonl";
 
@@ -110,6 +110,13 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         {
             [ScanSetting] = RootsDir,
             [ClaudeProcessManager.ExecutableSetting] = FakeClaudePath,
+            // Ceilings, not the subject: a test of a script's timeout sets its own
+            [ProjectManager.ListScriptTimeoutSetting] = Seconds(TestTimeouts.Script),
+            [ProjectManager.StatusScriptTimeoutSetting] = Seconds(TestTimeouts.Script),
+            // Caps a shutdown's grace period, which a test that waits on claude's answer to the interrupt raises
+            [ProjectManager.ShutdownTimeoutSetting] = Seconds(TestTimeouts.Script),
+            // The data directory, and so the fallback root a server with no roots has and holds, is the harness's own
+            [ApiKeyFile.PathSetting] = Path.Combine(_workDir, "data", ApiKeyFile.FileName),
         };
         foreach (var (variable, value) in profileEnvironment ?? new Dictionary<string, string>())
             configuration[$"{RootSources.ProfilesSection}:{ProfileName}:Environment:{variable}"] = value;
@@ -147,6 +154,11 @@ internal sealed class LifecycleHarness : IAsyncDisposable
 
     /// <summary>Reads the configuration's sources again, as a reload of the instance's config file does.</summary>
     public void ReloadConfiguration() => ((IConfigurationRoot)_configuration).Reload();
+
+    /// <summary>Changes one setting in place, for the server's next read of it (a setting it reads each time).</summary>
+    public void Configure(string key, TimeSpan seconds) => _configuration[key] = Seconds(seconds);
+
+    private static string Seconds(TimeSpan time) => time.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>Replaces the script that the next launch plays. Running fakes keep the one they loaded.</summary>
     public void UseScript(FakeScript script) => script.Save(ScriptPath);
@@ -322,13 +334,22 @@ internal sealed class LifecycleHarness : IAsyncDisposable
     public ProjectInfo Tracked(string projectId) =>
         ((ProjectManager)Projects).Tracked(projectId) ?? throw new InvalidOperationException($"project {projectId} is not tracked");
 
-    /// <summary>Polls the in-memory status until it reaches <paramref name="state"/>.</summary>
+    /// <summary>
+    /// Polls the in-memory status until it reaches <paramref name="state"/>, then waits out the change
+    /// that set it. The server changes a status in steps and saves it under the project's state lock,
+    /// and the status is read without it: a poll can see the state before the rest of its change (a
+    /// result sets Idle, then withdraws a pending prompt), and status.json before its save (#371).
+    /// Returns the status as that change left it, or the one polled if the state has moved on since.
+    /// </summary>
     public async Task<ProjectStatus> WaitForStateAsync(string projectId, ProjectState state, TimeSpan? timeout = null)
     {
         ProjectStatus status = await Projects.GetStatusAsync(projectId);
         await WaitUntilAsync(async () => (status = await Projects.GetStatusAsync(projectId)).State == state, timeout,
             () => $"project {projectId} did not reach {state}; it is {status.State}.\n{Describe(projectId)}");
-        return status;
+        if (((ProjectManager)Projects).Tracked(projectId)?.Process.StateLock is not { } stateLock) return status;
+        Assert.True(await stateLock.WaitAsync(timeout ?? DefaultTimeout), $"project {projectId} reached {state}, and its state lock was not freed.\n{Describe(projectId)}");
+        try { return await Projects.GetStatusAsync(projectId) is { } settled && settled.State == state ? settled : status; }
+        finally { stateLock.Release(); }
     }
 
     /// <summary>

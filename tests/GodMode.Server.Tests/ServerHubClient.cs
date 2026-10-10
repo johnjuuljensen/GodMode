@@ -21,12 +21,25 @@ internal sealed class ServerHubClient(string baseUrl, string apiKey = ServerProc
             foreach (var converter in JsonDefaults.Options.Converters)
                 options.PayloadSerializerOptions.Converters.Add(converter);
         })
+        .WithServerTimeout(TestTimeouts.Request)
         .Build();
 
     public async Task StartAsync()
     {
         Hub.On<string, ProjectStatus>(nameof(IProjectHubClient.StatusChanged), (_, status) => _pushes.Enqueue(status));
-        await Hub.StartAsync();
+        Hub.HandshakeTimeout = TestTimeouts.Request;
+        // A server only just started can take longer than its own 15 s to read the handshake on a loaded
+        // machine, and refuses it as canceled: the connection is not what the tests are about (#371)
+        var deadline = DateTime.UtcNow + TestTimeouts.Request;
+        while (true)
+        {
+            try
+            {
+                await Hub.StartAsync();
+                return;
+            }
+            catch (Microsoft.AspNetCore.SignalR.HubException ex) when (ex.Message.EndsWith("Handshake was canceled.", StringComparison.Ordinal) && DateTime.UtcNow < deadline) { }
+        }
     }
 
     /// <summary>The first status pushed for the project, or read with GetStatus, that satisfies <paramref name="condition"/>.</summary>

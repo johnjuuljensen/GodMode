@@ -31,6 +31,7 @@
     <Project Path="tests/GodMode.HeadsetSpike.Tests/GodMode.HeadsetSpike.Tests.csproj" />
     <Project Path="tests/GodMode.Relay.Tests/GodMode.Relay.Tests.csproj" />
     <Project Path="tests/GodMode.Server.Tests/GodMode.Server.Tests.csproj" />
+    <Project Path="tests/GodMode.TypeGen.Tests/GodMode.TypeGen.Tests.csproj" />
     <Project Path="tests/GodMode.Voice.Tests/GodMode.Voice.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GodMode.FakeClaude;
 using GodMode.Server.Services;
 
@@ -35,6 +36,40 @@ public class SecretsHygieneTests
     }
 
     /// <summary>
+    /// A root's <c>environment</c> cannot name the server's own key with <c>${VAR}</c> (#279): the entry
+    /// is there, empty. Any other variable of the server's still resolves,
+    /// which is how godmode-dev passes the codespace's <c>GITHUB_TOKEN</c>.
+    /// </summary>
+    [Fact]
+    public async Task ARootsEnvironment_CannotExpandTheServersKey_ButStillExpandsOtherVariables()
+    {
+        using var canaries = new ServerCanaries();
+        var githubToken = "ghp-canary-" + Guid.NewGuid().ToString("N");
+        var previousToken = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+        Environment.SetEnvironmentVariable("GITHUB_TOKEN", githubToken);
+        try
+        {
+            await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+            var configPath = Path.Combine(harness.RootPath, ".godmode-root", "config.json");
+            var config = JsonNode.Parse(File.ReadAllText(configPath))!;
+            config["environment"]!["LEAK"] = "${Authentication__ApiKey}";
+            config["environment"]!["GITHUB_TOKEN"] = "${GITHUB_TOKEN}";
+            File.WriteAllText(configPath, config.ToJsonString());
+
+            var created = await harness.CreateProjectAsync();
+            var launch = await harness.WaitForStdinAsync(created.Id);
+
+            canaries.AssertAbsent(launch.Environment);
+            Assert.Equal("", launch.Environment["LEAK"]);
+            Assert.Equal(githubToken, launch.Environment["GITHUB_TOKEN"]);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GITHUB_TOKEN", previousToken);
+        }
+    }
+
+    /// <summary>
     /// A root's scripts run with the essentials and their config, as claude does: the status script
     /// at the turn's end, in a folder the session controls, and the prepare script before the project
     /// exists. Each writes the environment it got.
@@ -67,7 +102,8 @@ public class SecretsHygieneTests
 
         canaries.AssertAbsent(environment);
         // What it needs to run, and what the server gives every script
-        Assert.Contains("PATH", environment.Keys);
+        // By the dictionary's own comparer: Windows spells it as the test host's parent did, PATH or Path
+        Assert.True(environment.ContainsKey("PATH"), $"no PATH in: {string.Join(", ", environment.Keys)}");
         Assert.Equal(harness.RootPath, environment["GODMODE_ROOT_PATH"]);
         // The root's configured environment
         Assert.Contains(FakeClaudeEnvironment.Script, environment.Keys);

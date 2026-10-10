@@ -885,7 +885,9 @@ export interface IProjectHub {
    * IProjectHub.ReplyAndResume with an answer spoken and transcribed (issue #460): the server sends it to
    * claude marked so, on a line of its own before it, so the session reads it knowing words may be misheard.
    * A command (`/clear`) goes as it is, as a marked one would be text. A typed reply is
-   * IProjectHub.ReplyAndResume, unmarked.
+   * IProjectHub.ReplyAndResume, unmarked. It answers a pending question as IProjectHub.ReplyAndResume does,
+   * but never a permission prompt, which is answered on screen (issue #289): with one pending it fails,
+   * saying so, sends nothing, and the prompt waits.
    */
   ReplyByVoice(projectId: string, text: string): Promise<void>;
   /**
@@ -958,11 +960,6 @@ export interface IProjectHub {
    * was, until the trash is purged. Pushed as IProjectHubClient.ProjectDeleted.
    */
   ForgetProject(projectId: string): Promise<DeleteProjectResult>;
-  /**
-   * Checks whether a CLI command is available on the server (in PATH). Returns the resolved path if found,
-   * null if not.
-   */
-  CheckCommand(command: string): Promise<string | null>;
 }
 
 /**

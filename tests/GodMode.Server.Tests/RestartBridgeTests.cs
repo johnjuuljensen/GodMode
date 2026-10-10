@@ -51,7 +51,7 @@ public class RestartBridgeTests
             string projectId;
             {
                 var baseUrl = await first.WaitForListeningUrlAsync();
-                using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(10) };
+                using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TestTimeouts.Request };
                 await first.WaitForHealthyAsync(http);
                 await using var client = new ServerHubClient(baseUrl);
                 await client.StartAsync();
@@ -74,7 +74,7 @@ public class RestartBridgeTests
             second = ServerProcess.Start(workDir, portZero ? "http://127.0.0.1:0" : $"http://127.0.0.1:{ServerProcess.GetFreePort()}",
                 environment: fake);
             var restartedUrl = await second.WaitForListeningUrlAsync();
-            using var restartedHttp = new HttpClient { BaseAddress = new Uri(restartedUrl), Timeout = TimeSpan.FromSeconds(10) };
+            using var restartedHttp = new HttpClient { BaseAddress = new Uri(restartedUrl), Timeout = TestTimeouts.Request };
             await second.WaitForHealthyAsync(restartedHttp);
             await using var restarted = new ServerHubClient(restartedUrl);
             await restarted.StartAsync();
