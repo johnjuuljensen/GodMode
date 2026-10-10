@@ -2578,7 +2578,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (!await TryForgetAsync(project)) return false;
 
         _stateGone.Remove(id);
-        ForgetFleetGrant(project);
+        ForgetFleetGrant(project, setAside: false);
         _logger.LogInformation("Project {ProjectId} left the list: its folder {Folder} is gone", id, folder);
         return true;
     }
