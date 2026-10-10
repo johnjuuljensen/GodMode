@@ -31,7 +31,7 @@ public sealed class SwitchTests
     public async Task Switch_makes_it_the_project_talked_about_and_shows_it_in_the_app()
     {
         var servers = Servers();
-        var model = new ScriptedChatClient().CallTool(VoiceTools.SwitchProject, Project("issue 525"));
+        var model = new ScriptedChatClient().CallTool(VoiceTools.SwitchFocus, Project("issue 525"));
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
 
@@ -49,8 +49,8 @@ public sealed class SwitchTests
     {
         var servers = Servers();
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.SwitchProject, Project("issue 525"))
-            .CallTool(VoiceTools.SwitchProject, Project("issue 526"))
+            .CallTool(VoiceTools.SwitchFocus, Project("issue 525"))
+            .CallTool(VoiceTools.SwitchFocus, Project("issue 526"))
             .CallTool(VoiceTools.GoBack);
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
@@ -86,7 +86,7 @@ public sealed class SwitchTests
         var servers = Servers();
         servers.SetStatus(ServerA, await servers.GetStatusAsync(P526, default) with { Recap = "Venter på review." });
         var model = new ScriptedChatClient()
-            .CallTool(VoiceTools.SwitchProject, Project("issue 525"))
+            .CallTool(VoiceTools.SwitchFocus, Project("issue 525"))
             .CallTool(VoiceTools.PeekProject, Project("issue 526"))
             .CallTool(VoiceTools.Answer, new() { [VoiceTools.TextParameter] = "Kør videre." });
         await using var voice = await OfflineVoice.StartAsync(servers, model);

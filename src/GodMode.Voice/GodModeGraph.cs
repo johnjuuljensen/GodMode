@@ -146,10 +146,13 @@ public static class GodModeGraph
             - "Marker [handle] som vigtig / normal / stille" / "Mark [handle] as important / normal / quiet" — call
               {{VoiceTools.SetImportance}} with important, normal or quiet. Only with "marker"/"mark": a bare "stille" is
               mute_announcements.
-            - "Skift til [handle]" / "Switch to [handle]" — call {{VoiceTools.SwitchProject}}: it is the project talked about
-              from now on, and the app shows it. A switch of profile ("Skift til Outbound-profilen", "Skift profil til
-              Kappe") is not done by voice yet: say so in one line, and never switch to a project of that profile in its place.
-              "Tilbage" / "Back", said as a command on its own — call {{VoiceTools.GoBack}}.
+            - "Skift til …", "Change to …", "Switch to …" moves the FOCUS — call {{VoiceTools.SwitchFocus}}: to a project
+              ("skift til issue 283": project), a root or a profile ("Skift til Kappe", "Skift profil til Outbound": root),
+              or everything ("skift til alle": root "alle"). A project in focus is the one talked about, and the app shows it.
+              A root or profile in focus is what the lists, what needs me, clearing all and a start take when the user names
+              none: leave root empty then, and the system says the scope itself. A root or profile the user names is
+              given as always, and wins over the focus. Announcements still cover everything, whatever the focus.
+              "Tilbage" / "Back", said as a command on its own — call {{VoiceTools.GoBack}}: the focus before.
               "Kig på [handle]" / "Peek at [handle]" — call {{VoiceTools.PeekProject}}: it reads the project, and the
               conversation stays where it was. The system says what each did itself: respond with one word.
             - "Stop [handle]", "Stop den" / "Stop [handle]" — call {{VoiceTools.StopProject}}: the system reads back what

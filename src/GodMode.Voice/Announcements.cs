@@ -87,53 +87,88 @@ public sealed class VoiceConversation(TimeProvider? time = null)
 
     private sealed record Topic(ProjectRef? Project, AnnouncedSwitch? Switched);
 
-    /// <summary>How many projects switched away from "tilbage" can go back through (#287).</summary>
+    /// <summary>How many focuses switched away from "tilbage" can go back through (#287).</summary>
     private const int SwitchesKept = 16;
 
-    private readonly Lock _switchesLock = new();
-    // The projects switched away from, the last at the end
-    private readonly List<ProjectRef> _switchedFrom = [];
+    private readonly Lock _focusLock = new();
+    private VoiceFocus _focus = VoiceFocus.Everything;
+    // The focuses switched away from, the last at the end
+    private readonly List<VoiceFocus> _switchedFrom = [];
 
     /// <summary>The user switched to a project by voice (<see cref="SwitchTo"/>, <see cref="Back"/>): the app shows it.</summary>
     public event Action<ProjectRef>? Shown;
 
     /// <summary>
-    /// "Skift til" (#287): <paramref name="project"/> is what the conversation is about, and the app shows it. The one
-    /// it was about before is where "tilbage" goes (<see cref="Back"/>); a status read, an answer or an announcement
-    /// moves the conversation, but is no switch, and leaves none.
+    /// What the user switched to last (#287): a project, a root or a profile, or <see cref="VoiceFocus.Everything"/>. A
+    /// root's or profile's is the default of the commands that take one when the user names none; a project's is the
+    /// project talked about (<see cref="Current"/>) as the switch left it.
     /// </summary>
-    public void SwitchTo(ProjectRef project)
+    public VoiceFocus Focus
     {
-        if (Current is { } before && before != project)
-            lock (_switchesLock)
+        get { lock (_focusLock) return _focus; }
+    }
+
+    /// <summary>The root or profile in focus, the default scope of a command that names none; null for a project or everything.</summary>
+    public ScopeFocus? Scope => Focus as ScopeFocus;
+
+    /// <summary>
+    /// "Skift til" (#287): <paramref name="focus"/> is the focus from now on, and the one before it is where "tilbage"
+    /// goes (<see cref="Back"/>). A project's is the project talked about, and the app shows it; a status read, an answer
+    /// or an announcement moves the project talked about, but is no switch, and leaves none.
+    /// </summary>
+    public void SwitchTo(VoiceFocus focus)
+    {
+        lock (_focusLock)
+        {
+            if (_focus != focus)
             {
-                _switchedFrom.Add(before);
+                _switchedFrom.Add(_focus);
                 if (_switchedFrom.Count > SwitchesKept) _switchedFrom.RemoveAt(0);
             }
-        Current = project;
-        Shown?.Invoke(project);
+            _focus = focus;
+        }
+        Focused(focus);
     }
 
     /// <summary>
-    /// "Tilbage" (#287): the project switched away from last that is still there (<paramref name="there"/>) is what the
-    /// conversation is about again, and the app shows it; those gone since are passed over. Null when there is none.
+    /// "Tilbage" (#287): the focus switched away from last that is still there (<paramref name="there"/>) is the focus
+    /// again; those gone since are passed over. Null when there is none.
     /// </summary>
-    public ProjectRef? Back(Func<ProjectRef, bool> there)
+    public VoiceFocus? Back(Func<VoiceFocus, bool> there)
     {
-        ProjectRef? back = null;
-        lock (_switchesLock)
+        VoiceFocus? back = null;
+        lock (_focusLock)
         {
             while (back is null && _switchedFrom.Count > 0)
             {
                 var last = _switchedFrom[^1];
                 _switchedFrom.RemoveAt(_switchedFrom.Count - 1);
-                if (there(last) && last != Current) back = last;
+                if (there(last) && last != _focus) back = last;
             }
+            if (back is not null) _focus = back;
         }
-        if (back is null) return null;
-        Current = back;
-        Shown?.Invoke(back);
+        if (back is not null) Focused(back);
         return back;
+    }
+
+    /// <summary>A project in focus is the project talked about, and the app shows it.</summary>
+    private void Focused(VoiceFocus focus)
+    {
+        if (focus is not ProjectFocus { Project: var project }) return;
+        Current = project;
+        Shown?.Invoke(project);
+    }
+
+    /// <summary>
+    /// <paramref name="result"/>, which the code says itself (<see cref="SaysItself"/>), said as <paramref name="said"/>
+    /// rewords it, with <paramref name="reworded"/> as the tool's text from now on; unchanged when the code does not say
+    /// it, and the model does. <paramref name="reworded"/> either way.
+    /// </summary>
+    public string Reword(string result, Func<string, string> said, string reworded)
+    {
+        if (Volatile.Read(ref _said) is { } by && by.Result == result)
+            Interlocked.CompareExchange(ref _said, by with { Result = reworded, Said = said(by.Said) }, by);
+        return reworded;
     }
 
     private string? _lastProfile;
@@ -351,6 +386,27 @@ public sealed class VoiceConversation(TimeProvider? time = null)
 /// asked for after it in the same breath, if anything (<see cref="VoiceConversation.Then"/>, #507).
 /// </summary>
 public sealed record SaidByCode(string Result, string Said, string? Then = null);
+
+/// <summary>What "skift til" put the conversation on (#287): a project, a root or a profile, or everything.</summary>
+public abstract record VoiceFocus
+{
+    /// <summary>No focus: every profile and root.</summary>
+    public static readonly VoiceFocus Everything = new AllFocus();
+
+    private sealed record AllFocus : VoiceFocus;
+}
+
+/// <summary>A project in focus: the project talked about, shown in the app.</summary>
+public sealed record ProjectFocus(ProjectRef Project) : VoiceFocus;
+
+/// <summary>
+/// A root or profile in focus: <paramref name="Name"/> is what the lists and a start take it by (a profile's name, or a
+/// root's, as shown); <paramref name="Profile"/> is a root's profile, and null for a profile itself.
+/// </summary>
+public sealed record ScopeFocus(string Name, string? Profile) : VoiceFocus
+{
+    public bool IsProfile => Profile is null;
+}
 
 /// <summary>How much of a project's anchor a line gives (#455, <see cref="VoiceConversation.Mention"/>).</summary>
 public enum Anchor

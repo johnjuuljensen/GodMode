@@ -35,7 +35,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string StartSession = "start_session";
     public const string MarkAllSeen = "mark_all_seen";
     public const string DeleteSession = "delete_session";
-    public const string SwitchProject = "switch_project";
+    public const string SwitchFocus = "switch_focus";
     public const string GoBack = "go_back";
     public const string PeekProject = "peek_project";
     public const string StopProject = "stop_project";
@@ -93,7 +93,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
 
     private static readonly ToolParameter InRoot = new(RootParameter,
         "Only those of one root or profile, as the user named it (\"i GodMode\", \"i Mega\"), when they asked about one. " +
-        "Empty for all of them.", Required: false);
+        $"Empty for the root or profile in focus ({SwitchFocus}), which the system says, or all of them when none is.", Required: false);
 
     /// <summary>The window a list takes in (#468), as the model gives it from what the user said.</summary>
     private ToolParameter Since => new(SinceParameter,
@@ -135,14 +135,14 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             "finished results, one line per project, the most recent first, each named as it is said; an overseer's workers " +
             "on its own line, counted, unless the user asks for them. Call when the user asks what needs them, what is waiting, or for status overall.",
             [InRoot, Since, Workers, Then],
-            (_, args, ct) => AndThen(args, WhatNeedsMeAsync(ct, Argument(args, RootParameter), Argument(args, SinceParameter), Argument(args, WorkersParameter))))
+            (_, args, ct) => AndThen(args, InScopeAsync(Argument(args, RootParameter), root => WhatNeedsMeAsync(ct, root, Argument(args, SinceParameter), Argument(args, WorkersParameter)))))
         .Add(ListProjects,
             "List the projects on every server, whether they need the user or not, the most recent first, grouped by profile, " +
             "then root: each by the name it is said by, with its name, kind and state. Stale ones are left out and counted " +
             "unless the user asks for all; an overseer's workers are counted on its line, unless the user asks for them. Call " +
             "when the user asks which projects there are, what runs, what has happened, or about one they just started.",
             [InRoot, Since, Workers, Then],
-            (_, args, _) => AndThen(args, Task.FromResult(ListProjectsText(Argument(args, RootParameter), Argument(args, SinceParameter), Argument(args, WorkersParameter)))))
+            (_, args, _) => AndThen(args, InScopeAsync(Argument(args, RootParameter), root => Task.FromResult(ListProjectsText(root, Argument(args, SinceParameter), Argument(args, WorkersParameter))))))
         .Add(ProjectStatus,
             "Read one project's state and what it waits on (its question, result, error or permission request) in full: " +
             "a very long one has its middle cut, and says so. " +
@@ -185,7 +185,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             "projects, and changes requested. What waits on an answer (a question, a permission request, a decision) is left, " +
             "and said. Call when the user clears them all (\"ryd notifikationerne\", \"marker alle som læst\", \"clear all\").",
             [InRoot],
-            (_, args, ct) => MarkAllSeenAsync(Argument(args, RootParameter), ct))
+            (_, args, ct) => InScopeAsync(Argument(args, RootParameter), root => MarkAllSeenAsync(root, ct)))
         .Add(SetImportance,
             "Set how much a project may interrupt the user: \"important\" (a sound, and said first), \"normal\", or \"quiet\" " +
             "(its results and errors stay in the inbox; its questions still reach the user). Call only when the user asks " +
@@ -214,14 +214,19 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 "The sessions as the user named them, each as a project is named to the other tools, separated by \";\" " +
                 "(\"Slet issue 525 og 526\": \"issue 525; issue 526\"). Empty for the project talked about.", Required: false)],
             (_, args, ct) => DeleteSessionAsync(Argument(args, ProjectsParameter), ct))
-        .Add(SwitchProject,
-            "Switch to a project: it is the one talked about from now on, the app shows it, and what it is doing is said. " +
-            $"Call when the user says \"skift til [handle]\" / \"switch to [handle]\". {GoBack} goes back to the one before.",
-            [ProjectReference],
-            (_, args, ct) => SwitchAsync(Argument(args, ProjectParameter), ct))
+        .Add(SwitchFocus,
+            "Switch the focus to a project, a root or a profile, or to everything. A project is the one talked about from now " +
+            "on, the app shows it, and what it is doing is said. A root or profile is the default of what needs me, the lists, " +
+            "clearing all and starting a session, when the user names none: each says it so. Announcements still cover " +
+            "everything. Call when the user says \"skift til\", \"change to\" or \"switch to\" and a project, root or profile " +
+            $"(\"skift til issue 283\", \"skift til Kappe\", \"switch to profile Outbound\"), or \"skift til alle\" / \"switch to everything\". {GoBack} goes back to the focus before.",
+            [ProjectReference, new ToolParameter(RootParameter,
+                "The root or profile as the user named it (\"Kappe\", \"GodMode\"), or \"alle\" for everything, when they switch to " +
+                "one of those rather than a project. Empty for a project.", Required: false)],
+            (_, args, ct) => SwitchAsync(Argument(args, ProjectParameter), Argument(args, RootParameter), ct))
         .Add(GoBack,
-            $"Go back to the project talked about before the last switch ({SwitchProject}): it is the one talked about again, and " +
-            "the app shows it. Call when the user says \"tilbage\" / \"back\" alone, as a command.",
+            $"Go back to the focus before the last switch ({SwitchFocus}): a project is the one talked about again, and the app " +
+            "shows it; a root, a profile or everything is the focus again. Call when the user says \"tilbage\" / \"back\" alone, as a command.",
             [],
             (_, _, ct) => BackAsync(ct))
         .Add(PeekProject,
@@ -1124,6 +1129,9 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// </summary>
     public async Task<string> StartSessionAsync(CreateAsk ask, CancellationToken ct)
     {
+        // The root or profile in focus, when the user named none (#287): the read-back names it
+        if (string.IsNullOrWhiteSpace(ask.Root) && conversation.Scope is { } focus)
+            ask = ask with { Root = focus.Name };
         var result = await Creates.ProposeAsync(await servers.ListRootsAsync(ct), ask, ct);
         return Creates.Proposed is { } request ? SaysItself(result, _phrases.ReadBack(request)) : result;
     }
@@ -1162,22 +1170,101 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// "Skift til" (#287): the project is the one talked about (<see cref="VoiceConversation.SwitchTo"/>), the app shows
     /// it, and the code says what it is doing; "mere" reads its status. The one before is where <see cref="GoBack"/> goes.
     /// </summary>
-    public async Task<string> SwitchAsync(string? reference, CancellationToken ct)
+    /// <param name="root">
+    /// A root or profile, or everything (<see cref="EverythingWords"/>), the user switched to instead of a project: the
+    /// focus (<see cref="VoiceConversation.Focus"/>). A project reference that names no project but a root or profile is one too.
+    /// </param>
+    public async Task<string> SwitchAsync(string? reference, string? root, CancellationToken ct)
     {
-        if (Target(reference) is not { } target || handles.LabelOf(target) is null)
-            return await UnknownAsync(reference, ct);
-        var status = await servers.GetStatusAsync(target, ct);
-        conversation.SwitchTo(target);
-        return Switched(target, status, back: false);
+        if (!string.IsNullOrWhiteSpace(root))
+            return await ScopeNamedAsync(root, ct) is { } scope ? FocusedOn(scope, back: false) : NoSuchScope(root);
+        if (Target(reference) is { } target && handles.LabelOf(target) is not null)
+        {
+            var status = await servers.GetStatusAsync(target, ct);
+            conversation.SwitchTo(new ProjectFocus(target));
+            return Switched(target, status, back: false);
+        }
+        if (string.IsNullOrWhiteSpace(reference))
+            return "Nothing was switched: ask the user what to switch to, a project, a root or a profile, or everything.";
+        return await ScopeNamedAsync(reference, ct) is { } named ? FocusedOn(named, back: false) : await UnknownAsync(reference, ct);
     }
 
-    /// <summary>"Tilbage" (#287): the project switched away from last, still there, as <see cref="SwitchAsync"/> says it.</summary>
+    /// <summary>"Tilbage" (#287): the focus switched away from last, still there, as <see cref="SwitchAsync"/> says it.</summary>
     public async Task<string> BackAsync(CancellationToken ct)
     {
-        if (conversation.Back(p => handles.LabelOf(p) is not null) is not { } target)
-            return SaysItself($"Nothing to go back to: no project was switched away from by {SwitchProject}, or those were deleted. Nothing changed.",
-                _phrases.NothingToGoBackTo);
-        return Switched(target, await servers.GetStatusAsync(target, ct), back: true);
+        var back = conversation.Back(f => f is not ProjectFocus { Project: var p } || handles.LabelOf(p) is not null);
+        return back switch
+        {
+            null => SaysItself($"Nothing to go back to: there was no focus before this one ({SwitchFocus}), or it was deleted. Nothing changed.",
+                _phrases.NothingToGoBackTo),
+            ProjectFocus { Project: var target } => Switched(target, await servers.GetStatusAsync(target, ct), back: true),
+            _ => FocusedOn(back, back: true),
+        };
+    }
+
+    /// <summary>What a switch says to everything, or "alle": the focus is cleared.</summary>
+    public static readonly IReadOnlySet<string> EverythingWords = new HashSet<string>(
+        ["alle", "alt", "alle projekter", "alle profiler", "all", "everything", "all projects", "all profiles"], StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The words a root or profile is said with ("profil Kappe", "Kappe-profilen"), which name neither.</summary>
+    private static readonly string[] ScopeWords = ["profilen", "profil", "profile", "roden", "root"];
+
+    /// <summary>
+    /// The root or profile the user named, as a focus, or everything: a profile by its name before a root by its name or
+    /// title, on any server, with or without projects; null for neither.
+    /// </summary>
+    private async Task<VoiceFocus?> ScopeNamedAsync(string named, CancellationToken ct)
+    {
+        var said = named.Trim().TrimEnd('.', '!', '?');
+        if (EverythingWords.Contains(said))
+            return VoiceFocus.Everything;
+        var words = said.Replace('-', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(w => !ScopeWords.Contains(w, StringComparer.OrdinalIgnoreCase)).ToList();
+        var name = string.Join(" ", words);
+        if (name.Length == 0)
+            return null;
+        bool Is(string? n) => string.Equals(n, name, StringComparison.OrdinalIgnoreCase);
+        var roots = await servers.ListRootsAsync(ct);
+        var profile = roots.Select(r => r.Profile).Concat(projects.Projects.Select(p => p.Project.ProfileName ?? "Default")).FirstOrDefault(Is);
+        if (profile is not null)
+            return new ScopeFocus(profile, null);
+        if (roots.FirstOrDefault(r => Is(r.Root.Name) || Is(r.Shown)) is { } root)
+            return new ScopeFocus(root.Shown, root.Profile);
+        return projects.Projects.FirstOrDefault(p => Is(p.Project.RootName) || Is(projects.RootShown(p))) is { } project
+            ? new ScopeFocus(projects.RootShown(project) ?? project.Project.RootName!, project.Project.ProfileName ?? "Default")
+            : null;
+    }
+
+    /// <summary>The focus on a root, a profile or everything (<see cref="SwitchAsync"/>, <see cref="BackAsync"/>), said by the code.</summary>
+    private string FocusedOn(VoiceFocus focus, bool back)
+    {
+        if (!back) conversation.SwitchTo(focus);
+        var what = focus is ScopeFocus scope
+            ? $"The focus is {(scope.IsProfile ? $"profile {scope.Name}" : $"root {scope.Name}, profile {scope.Profile}")} now: {WhatNeedsMe}, " +
+              $"{ListProjects}, {MarkAllSeen} and {StartSession} take it when the user names no root or profile, and say so."
+            : "The focus is cleared: every root and profile is taken in.";
+        return SaysItself($"{what} Announcements still cover everything. The system said so itself.",
+            back ? _phrases.BackTo(focus) : _phrases.FocusedOn(focus));
+    }
+
+    /// <summary>A switch to a root or profile there is none of: for the model, with the groups there are.</summary>
+    private string NoSuchScope(string named) =>
+        $"No root or profile '{named}'. Nothing was switched. There are: {string.Join("; ", Names.Groups().Select(g => g.Heading))}. " +
+        "Ask which, or switch to a project.";
+
+    /// <summary>
+    /// The root or profile a scoped command takes in (#287): the one the user named, else the one in focus, which its
+    /// reply then says first (<see cref="VoicePhrases.InScope"/>), so a user with no screen knows why it says only those.
+    /// </summary>
+    private async Task<string> InScopeAsync(string? named, Func<string?, Task<string>> call)
+    {
+        if (!string.IsNullOrWhiteSpace(named) || conversation.Scope is not { } focus)
+            return await call(named);
+        var result = await call(focus.Name);
+        var lead = _phrases.InScope(focus);
+        return conversation.Reword(result, said => $"{lead} {said}",
+            $"{result}\nThe user named no root or profile: this is of the one in focus, {_phrases.Scope(focus)}. The reply says so " +
+            $"first (\"{lead}\"). \"Skift til alle\" clears the focus.");
     }
 
     /// <summary>A switch made (<see cref="SwitchAsync"/>, <see cref="BackAsync"/>): what the code says of it, and the tool's text.</summary>
