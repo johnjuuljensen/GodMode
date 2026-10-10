@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -13,7 +14,18 @@ internal sealed class ServerProcess : IDisposable
 {
     private readonly Process _process;
     private readonly StringBuilder _output = new();
-    private bool _disposed;
+    private int _disposed;
+
+    /// <summary>
+    /// Servers not yet disposed, killed when the test host exits: a test that fails before it disposes its
+    /// server would leave it running, with its claudes, through every later run's load and its locked binaries.
+    /// </summary>
+    private static readonly ConcurrentDictionary<ServerProcess, byte> Live = new();
+
+    static ServerProcess() => AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+    {
+        foreach (var server in Live.Keys) server.Dispose();
+    };
 
     public string WorkDir { get; }
     public string RootsDir { get; }
@@ -28,6 +40,7 @@ internal sealed class ServerProcess : IDisposable
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
+        Live[this] = 0;
     }
 
     public string Output { get { lock (_output) return _output.ToString(); } }
@@ -127,14 +140,14 @@ internal sealed class ServerProcess : IDisposable
                 .Select(line => line.IndexOf(marker, StringComparison.Ordinal) is var at and >= 0 ? line[(at + marker.Length)..].Trim() : null)
                 .FirstOrDefault(listening => listening != null);
             return Task.FromResult(url != null || HasExited);
-        }, TimeSpan.FromSeconds(60));
+        }, TestTimeouts.ServerStart);
         Assert.True(found && url != null, $"Server did not report where it listens.\n{Output}");
         return url!;
     }
 
     public async Task WaitForHealthyAsync(HttpClient http)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(60);
+        var deadline = DateTime.UtcNow + TestTimeouts.ServerStart;
         while (DateTime.UtcNow < deadline)
         {
             Assert.False(HasExited, $"Server exited during startup (code {(HasExited ? ExitCode : 0)}).\n{Output}");
@@ -147,7 +160,7 @@ internal sealed class ServerProcess : IDisposable
             catch (TaskCanceledException) { }
             await Task.Delay(250);
         }
-        Assert.Fail($"Server did not become healthy within 60s.\n{Output}");
+        Assert.Fail($"Server did not become healthy within {TestTimeouts.ServerStart.TotalSeconds}s.\n{Output}");
     }
 
     /// <summary>Waits for the process to exit on its own; returns false on timeout.</summary>
@@ -179,8 +192,8 @@ internal sealed class ServerProcess : IDisposable
     /// <summary>Kills the server with its children, as a crash would. A second call does nothing.</summary>
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+        Live.TryRemove(this, out _);
         if (!_process.HasExited)
         {
             _process.Kill(entireProcessTree: true);

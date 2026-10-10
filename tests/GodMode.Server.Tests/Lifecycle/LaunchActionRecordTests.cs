@@ -120,7 +120,7 @@ public class LaunchActionRecordTests
         // Adopted with no prompt, it may have had a launch that took no input: the one that takes the reply is its resume's
         await harness.Projects.ReplyAndResumeAsync(adopted, "Go on");
         await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.Launches(adopted).Any(launch => launch.Stdin.Count > 0)),
-            null, () => "no launch of the adopted session took the reply");
+            TestTimeouts.Wait, () => "no launch of the adopted session took the reply");
         AssertLaunchedAsWork(harness.Launches(adopted).First(launch => launch.Stdin.Count > 0));
     }
 
@@ -228,6 +228,6 @@ public class LaunchActionRecordTests
         var setAside = FleetGrantFile.SetAsidePathFor(harness.RootPath, SessionIdOf(worker));
         Assert.True(File.Exists(setAside), "a shared session's delete did not set its record aside");
 
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(!File.Exists(setAside)), null, () => "the purge left the record set aside");
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(!File.Exists(setAside)), TestTimeouts.Wait, () => "the purge left the record set aside");
     }
 }

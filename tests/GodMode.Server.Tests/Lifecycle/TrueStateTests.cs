@@ -73,7 +73,10 @@ public class TrueStateTests
     [Fact]
     public async Task InterruptAnsweredWithAnErrorResult_DuringTheShutdown_IsStillResumed()
     {
-        await using var harness = new LifecycleHarness(Working());
+        // A grace that claude's answer ends: on Windows the interrupt starts a helper process, which can
+        // take seconds of the default 10 on a loaded machine, and the kill leaves no error result (#371)
+        await using var harness = new LifecycleHarness(Working(),
+            settings: new Dictionary<string, string?> { [ClaudeProcessManager.StopGracePeriodSetting] = "60" });
         var created = await harness.CreateProjectAsync();
         await OutputContainsAsync(harness, created.Id, "Working on it");
 

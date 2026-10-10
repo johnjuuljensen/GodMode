@@ -369,7 +369,8 @@ public sealed class AdoptTests
     [InlineData("Start-Sleep -Seconds 20", "took longer")]
     public async Task AListScriptThatPrintsAnythingButTheList_FailsTheListing_SayingWhy(string script, string reason)
     {
-        await using var harness = ListingRoot(new Dictionary<string, string?> { [ProjectManager.ListScriptTimeoutSetting] = "3" });
+        // A short timeout for the slow script alone: pwsh can take seconds to start on a loaded machine
+        await using var harness = ListingRoot(reason == "took longer" ? new Dictionary<string, string?> { [ProjectManager.ListScriptTimeoutSetting] = "3" } : null);
         File.WriteAllText(Path.Combine(harness.RootPath, ".godmode-root", "list.ps1"), $"$ErrorActionPreference = 'Stop'\n{script}\n");
         await harness.Projects.RecoverProjectsAsync();
 

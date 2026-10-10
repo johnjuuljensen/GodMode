@@ -32,16 +32,18 @@ public class FleetScopeTests
 
         public static async Task<Scoped> StartAsync()
         {
-            var run = await FleetRun.StartAsync(Waiting());
-            var overseerId = await run.CreateOverHubAsync("overseer", OverseerAction);
-            var entry = GodModeMcpEntry.FleetOf(await run.WaitForLaunchAsync(overseerId, launch => launch.Stdin.Count > 0));
-            var foreignId = await run.CreateOverHubAsync("foreign", WorkAction, OtherProfile, OtherRoot);
-            await run.WaitForLaunchAsync(foreignId, launch => launch.Stdin.Count > 0, root: OtherRoot);
-            return new Scoped
+            return await (await FleetRun.StartAsync(Waiting())).SetUpAsync(async run =>
             {
-                Run = run, OverseerId = overseerId, Overseer = await ConnectAsync(entry), ForeignId = foreignId,
-                User = await run.ConnectFleetAsync(),
-            };
+                var overseerId = await run.CreateOverHubAsync("overseer", OverseerAction);
+                var entry = GodModeMcpEntry.FleetOf(await run.WaitForLaunchAsync(overseerId, launch => launch.Stdin.Count > 0));
+                var foreignId = await run.CreateOverHubAsync("foreign", WorkAction, OtherProfile, OtherRoot);
+                await run.WaitForLaunchAsync(foreignId, launch => launch.Stdin.Count > 0, root: OtherRoot);
+                return new Scoped
+                {
+                    Run = run, OverseerId = overseerId, Overseer = await ConnectAsync(entry), ForeignId = foreignId,
+                    User = await run.ConnectFleetAsync(),
+                };
+            });
         }
 
         /// <summary>Asserts the overseer's call on the foreign session is refused just as one on an unknown ID is.</summary>
