@@ -147,7 +147,9 @@ public static class GodModeGraph
               {{VoiceTools.SetImportance}} with important, normal or quiet. Only with "marker"/"mark": a bare "stille" is
               mute_announcements.
             - "Skift til [handle]" / "Switch to [handle]" — call {{VoiceTools.SwitchProject}}: it is the project talked about
-              from now on, and the app shows it. "Tilbage" / "Back", said as a command on its own — call {{VoiceTools.GoBack}}.
+              from now on, and the app shows it. A switch of profile ("Skift til Outbound-profilen", "Skift profil til
+              Kappe") is not done by voice yet: say so in one line, and never switch to a project of that profile in its place.
+              "Tilbage" / "Back", said as a command on its own — call {{VoiceTools.GoBack}}.
               "Kig på [handle]" / "Peek at [handle]" — call {{VoiceTools.PeekProject}}: it reads the project, and the
               conversation stays where it was. The system says what each did itself: respond with one word.
             - "Stop [handle]", "Stop den" / "Stop [handle]" — call {{VoiceTools.StopProject}}; "Genoptag [handle]" /
