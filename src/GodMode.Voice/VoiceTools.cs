@@ -35,7 +35,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string StartSession = "start_session";
     public const string MarkAllSeen = "mark_all_seen";
     public const string DeleteSession = "delete_session";
-    public const string SwitchProject = "switch_project";
+    public const string SwitchFocus = "switch_focus";
     public const string GoBack = "go_back";
     public const string PeekProject = "peek_project";
     public const string StopProject = "stop_project";
@@ -214,13 +214,13 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 "The sessions as the user named them, each as a project is named to the other tools, separated by \";\" " +
                 "(\"Slet issue 525 og 526\": \"issue 525; issue 526\"). Empty for the project talked about.", Required: false)],
             (_, args, ct) => DeleteSessionAsync(Argument(args, ProjectsParameter), ct))
-        .Add(SwitchProject,
+        .Add(SwitchFocus,
             "Switch to a project: it is the one talked about from now on, the app shows it, and what it is doing is said. " +
             $"Call when the user says \"skift til [handle]\" / \"switch to [handle]\". {GoBack} goes back to the one before.",
             [ProjectReference],
             (_, args, ct) => SwitchAsync(Argument(args, ProjectParameter), ct))
         .Add(GoBack,
-            $"Go back to the project talked about before the last switch ({SwitchProject}): it is the one talked about again, and " +
+            $"Go back to the project talked about before the last switch ({SwitchFocus}): it is the one talked about again, and " +
             "the app shows it. Call when the user says \"tilbage\" / \"back\" alone, as a command.",
             [],
             (_, _, ct) => BackAsync(ct))
@@ -1175,7 +1175,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public async Task<string> BackAsync(CancellationToken ct)
     {
         if (conversation.Back(p => handles.LabelOf(p) is not null) is not { } target)
-            return SaysItself($"Nothing to go back to: no project was switched away from by {SwitchProject}, or those were deleted. Nothing changed.",
+            return SaysItself($"Nothing to go back to: no project was switched away from by {SwitchFocus}, or those were deleted. Nothing changed.",
                 _phrases.NothingToGoBackTo);
         return Switched(target, await servers.GetStatusAsync(target, ct), back: true);
     }
