@@ -283,9 +283,11 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
                 _toSay = null;
                 _dropped = false;
             }
-            // The read-back said again, or its end from where it was cut ("gentag", #547): it still waits on its yes
-            else if (_armed is { } again && SaidAgain(again.ReadBack, text))
-                _armed = again with { At = Now };
+            // The read-back said again, or its end from where it was cut ("gentag", #547): it still waits on its yes, armed
+            // as it was, so an answer begun since it was first said answers it
+            else if (_armed is { ReadBack: var readBack } && SaidAgain(readBack, text))
+            {
+            }
             else if (_armed is { } armed && _repeats < MaxRepeats)
             {
                 _repeats++;

@@ -134,4 +134,54 @@ public sealed class ReadingControlTests
         Assert.True(SpeedOf(voice, Fifth) < SpeedOf(voice, First));
         Assert.Equal(1, model.Calls);
     }
+
+    /// <summary>
+    /// "Vent" while a reading plays pauses it, with no barge-in and no model call, and "fortsæt" goes on with it to its
+    /// end (VoiceBot's playback commands, with GodMode's "vent").
+    /// </summary>
+    [Fact]
+    public async Task Wait_pauses_a_reading_and_continue_goes_on_with_it()
+    {
+        var model = new ScriptedChatClient().Respond($"{First} {Second} {Third}");
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model, speech: TimeSpan.FromMilliseconds(1500));
+        await voice.Events.SaidAsync("Klar.");
+        await voice.ListeningAsync();
+
+        voice.Transcriptions.SayAsRecognized("Hvad skete der i nat?");
+        await RequestedAsync(voice, Second);
+        voice.Transcriptions.SayAsRecognized("Vent.");
+        await voice.ListeningAsync();
+        voice.Transcriptions.SayAsRecognized("Fortsæt.");
+        await RequestedAsync(voice, Third);
+
+        Assert.Equal(1, model.Calls);
+        Assert.Equal(2, voice.Events.Responses.Count);
+    }
+
+    /// <summary>
+    /// "Gentag" while a delete's read-back waits on its yes says the read-back again, and the yes still deletes: the
+    /// read-back said again is no other line, which would drop it (#532).
+    /// </summary>
+    [Fact]
+    public async Task Repeat_of_a_delete_read_back_keeps_it_waiting_on_its_yes()
+    {
+        const string id = "Godmode/GodMode/261009-issue-525-voice-k7q2";
+        const string readBack = "Skal jeg slette issue 525, voice?";
+        var servers = new FakeServers(ServerA);
+        servers.AddProject(ServerA, id, "525-voice", root: "GodMode", kind: "issue", profile: "Godmode");
+        var model = new ScriptedChatClient().CallTool(VoiceTools.DeleteSession, new() { [VoiceTools.ProjectsParameter] = "issue 525" });
+        await using var voice = await OfflineVoice.StartAsync(servers, model);
+        await voice.Events.SaidAsync("Klar.");
+        voice.Transcriptions.SayAsRecognized("Slet issue 525.");
+        await voice.Events.SaidAsync(readBack);
+
+        voice.Transcriptions.SayAsRecognized("Gentag.");
+        await Eventually.UntilAsync(() => voice.Events.Responses.Count(r => r == readBack) == 2,
+            () => $"the read-back said again; the bot said: {string.Join(" | ", voice.Events.Responses)}");
+        voice.Transcriptions.SayAsRecognized("Ja.");
+        await voice.Events.SaidAsync("Sletter.");
+
+        Assert.Equal([(new ProjectRef(ServerA, id), false)], servers.Deletes);
+        Assert.Equal(1, model.Calls);
+    }
 }

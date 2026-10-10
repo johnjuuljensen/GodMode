@@ -172,9 +172,10 @@ public static class GodModeGraph
               {{VoiceTools.ResumeProject}}; the system says what it did itself: respond with one word. A bare "stop", "stop
               stop" or "stop, vent" names no project: it is the user cutting you off, never a stop. Answer it with the
               action "wait".
-            - "Gentag", "Spol tilbage", "Fra starten", "Gentag afsnittet", "Pause", "Fortsæt", "Langsommere", "Hurtigere" /
-              "Repeat that", "Back up", "From the start", "Slower", "Faster", said alone, are taken by the system itself: you
-              never get them alone. A bare "tilbage" / "back" is {{VoiceTools.GoBack}}, as above.
+            - "Gentag", "Spol tilbage", "Fra starten", "Gentag afsnittet", "Langsommere", "Hurtigere" / "Repeat that", "Back
+              up", "From the start", "Slower", "Faster", said alone, are taken by the system itself: you never get them alone.
+              So are "Pause", "Vent" and "Fortsæt" while it speaks: one that reaches you came when nothing was said. A bare
+              "tilbage" / "back" is {{VoiceTools.GoBack}}, as above.
             - "Stille" / "Quiet" — call mute_announcements; "Du må godt sige til igen" — call unmute_announcements.
             - "Start issue 283 [i GodMode]", "Start en chat i Assistant om …", "Start et eksperiment om …" / "Start issue …",
               "Start a chat in … about …" — call {{VoiceTools.StartSession}} with the root, kind, issue, name and prompt as

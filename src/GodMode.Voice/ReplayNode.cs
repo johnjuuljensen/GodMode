@@ -33,10 +33,10 @@ public enum Replay
 /// "tilbage" alone.
 /// </para>
 /// <para>
-/// It also takes VoiceBot's playback words (<paramref name="playback"/>) when nothing is being said, so they never reach
-/// the model: "langsommere" / "hurtigere" change the speed of what is said from then on, "fortsæt" goes on with a line
-/// that was cut, from its cut sentence (with nothing cut it is the model's), and "pause" with nothing to pause is let
-/// be. While the bot speaks, VoiceBot takes them itself, without a barge-in.
+/// It also takes VoiceBot's playback words (<paramref name="playback"/>) when nothing is being said: "langsommere" /
+/// "hurtigere" change the speed of what is said from then on, and "fortsæt" goes on with a line that was cut, from its
+/// cut sentence. With nothing cut, "fortsæt" is the model's, and so is "pause" or "vent" with nothing to pause: a bare
+/// "vent" answers a read-back as before. While the bot speaks, VoiceBot takes them itself, without a barge-in.
 /// </para>
 /// </summary>
 public sealed class ReplayNode(string id, int priority, VoiceConversation conversation, VoicePhrases phrases, PlaybackCommands playback) : INode
@@ -96,8 +96,6 @@ public sealed class ReplayNode(string id, int priority, VoiceConversation conver
 
         context.Log?.Log("REPLAY", $"'{text}' → \"{said}\"");
         context.AddUserMessage(text);
-        if (said.Length == 0)
-            return Task.FromResult<NodeResult?>(new NodeResult());
         context.AddAssistantMessage(said);
         return Task.FromResult<NodeResult?>(new NodeResult { ResponseText = said });
     }
@@ -139,9 +137,6 @@ public sealed class ReplayNode(string id, int priority, VoiceConversation conver
                 return phrases.SpeedChanged(control == PlaybackControl.Slower, context.Speech.Speed != before);
             case PlaybackControl.Resume when context.LastSpeech is { } last && Cut(last) && last.From(last.FirstUnheardSentence) is { Length: > 0 } rest:
                 return rest;
-            case PlaybackControl.Pause:
-                // Nothing to pause: the user stopped the bot, which is quiet
-                return "";
             default:
                 return null;
         }
