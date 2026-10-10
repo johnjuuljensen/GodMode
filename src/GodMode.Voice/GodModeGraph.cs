@@ -18,7 +18,8 @@ namespace GodMode.Voice;
 /// say itself (what needs me, the projects, a short question or result) is said so, with no second model call to retell
 /// it (<see cref="CodeSaysInference"/>, #456), as is a sent answer and a create read back (#526). A final that is only a
 /// hesitation ("Øh, det…") is waited past, with no model call (<see cref="HesitationNode"/>), and one the model waits past
-/// is joined to the next (<see cref="HeldWordsNode"/>, #529).
+/// is joined to the next (<see cref="HeldWordsNode"/>, #529). The code's words held for a turn the model never ended are
+/// said all the same (<see cref="UnsaidNode"/>, #523).
 /// </summary>
 public static class GodModeGraph
 {
@@ -191,6 +192,7 @@ public static class GodModeGraph
             """;
 
         var graph = new CompositeBuilder(Id).WithTools(t => AddTools(t, tools));
+        var codeSays = new CodeSaysInference(inference, tools.Conversation, phrases);
         // Above Done and help: while dictating, "færdig" and "hjælp" are words of the dictation (#459)
         graph = graph.Node(new DictationNode("dictation", 95, tools.Dictation, phrases));
         if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));
@@ -201,9 +203,9 @@ public static class GodModeGraph
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
             // On the Light tier, Haiku 5.5, for speed (#525): Sonnet (#379) was for Haiku 4.5's mistakes
-            .Child(new ReadBackNode(new SentNode(new SpokenNode(new HeldWordsNode(new ChatNode("control", 50, InferenceTier.Light,
-                new CodeSaysInference(inference, tools.Conversation, phrases), systemPrompt), tools.Conversation),
-                tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, tools.Deletes, phrases))
+            .Child(new ReadBackNode(new SentNode(new SpokenNode(new HeldWordsNode(new UnsaidNode(new ChatNode("control", 50, InferenceTier.Light,
+                codeSays, systemPrompt), codeSays), tools.Conversation), tools.Conversation, phrases), tools.Conversation, phrases),
+                tools.Creates, tools.Deletes, phrases))
             .Build();
     }
 }
