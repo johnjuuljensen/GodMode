@@ -446,6 +446,27 @@ public sealed partial class VoicePhrases
     public string WentBack(SpokenName name, ListedState state) =>
         $"{(_danish ? "Tilbage til" : "Back to")} {Named(name)}. {It(state)}";
 
+    /// <summary>A root or profile as a focus names it (#287): "profil Kappe", "api, profil Kappe", "alle projekter".</summary>
+    public string Scope(VoiceFocus focus) => focus switch
+    {
+        ScopeFocus { IsProfile: true } profile => _danish ? $"profil {profile.Name}" : $"profile {profile.Name}",
+        ScopeFocus root => Named(new SpokenName(root.Name,
+            Profile: string.Equals(root.Name, root.Profile, StringComparison.OrdinalIgnoreCase) ? null : root.Profile)),
+        _ => _danish ? "alle projekter" : "everything",
+    };
+
+    /// <summary>"Skift til" a root or profile, or everything (#287): "Fokus på profil Kappe." / "Focus on profile Kappe."</summary>
+    public string FocusedOn(VoiceFocus focus) => $"{(_danish ? "Fokus på" : "Focus on")} {Scope(focus)}.";
+
+    /// <summary>"Tilbage" to a root or profile, or everything (#287): "Tilbage til profil Kappe."</summary>
+    public string BackTo(VoiceFocus focus) => $"{(_danish ? "Tilbage til" : "Back to")} {Scope(focus)}.";
+
+    /// <summary>
+    /// What leads a reply whose root or profile the focus gave, the user naming none (#287), so a user with no screen
+    /// knows why it says only those: "I profil Kappe:" / "In profile Kappe:".
+    /// </summary>
+    public string InScope(ScopeFocus focus) => $"{(_danish ? "I" : "In")} {Scope(focus)}:";
+
     /// <summary>"Tilbage" with no switch before it to go back from (#287).</summary>
     public string NothingToGoBackTo => _danish ? "Intet at gå tilbage til." : "Nothing to go back to.";
 
