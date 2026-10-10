@@ -655,6 +655,25 @@ public sealed partial class VoicePhrases
     /// <summary>The model claimed a send, and none went out this turn (<see cref="SentNode"/>).</summary>
     public string NothingSent => _danish ? "Intet sendt. Sig svaret igen." : "Nothing was sent. Say the answer again.";
 
+    /// <summary>"Gentag" before anything was said (#547).</summary>
+    public string NothingToRepeat => _danish ? "Jeg har ikke sagt noget endnu." : "I haven't said anything yet.";
+
+    /// <summary>
+    /// "Langsommere" / "hurtigere" said while nothing is read (#547): the speed changed for what is said from now on, or
+    /// was at its bound already.
+    /// </summary>
+    public string SpeedChanged(bool slower, bool changed) => (slower, changed, _danish) switch
+    {
+        (true, true, true) => "Langsommere.",
+        (true, true, false) => "Slower.",
+        (false, true, true) => "Hurtigere.",
+        (false, true, false) => "Faster.",
+        (true, false, true) => "Langsommere går det ikke.",
+        (true, false, false) => "That's as slow as it goes.",
+        (false, false, true) => "Hurtigere går det ikke.",
+        (false, false, false) => "That's as fast as it goes.",
+    };
+
     /// <summary>
     /// A delete read back (#532), as the question its yes answers: what is deleted, said once with its root and profile
     /// when they share them, else each with its own, after what the user should know before the yes: that one runs, has

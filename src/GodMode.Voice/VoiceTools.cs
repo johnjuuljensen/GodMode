@@ -858,7 +858,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             ? $"Last reply{Flags(one)}: {one.Text.Trim()}"
             : $"Last {replies.Count} replies, oldest first:\n" + string.Join("\n", replies.Select((r, i) => $"Reply {i + 1}{Flags(r)}: {r.Text.Trim()}"));
         var parts = Parts(Capped(said));
-        conversation.Reading = new ReplyReading(target, parts, 1, count, replies);
+        conversation.PartRead(new ReplyReading(target, parts, 1, count, replies));
         return ReadOut(parts.Count == 1
             ? $"{header} {parts[0]}"
             : $"{header} {parts[0]} [Part 1 of {parts.Count}: more follows; {ReadMore} reads it.]");
@@ -915,7 +915,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     /// </summary>
     private string ReadPart(ReplyReading reading, int index, SpokenName name)
     {
-        conversation.Reading = reading with { Next = index + 1 };
+        conversation.PartRead(reading with { Next = index + 1 });
         var last = index + 1 == reading.Parts.Count;
         return ReadOut($"{name}'s reply, part {index + 1} of {reading.Parts.Count}: {reading.Parts[index]}" +
             (last ? " [That was the end of it.]" : $" [More follows: {ReadMore} reads it.]"));

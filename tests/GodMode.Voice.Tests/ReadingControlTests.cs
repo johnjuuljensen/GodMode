@@ -1,10 +1,11 @@
 using GodMode.Shared.Models;
+using Microsoft.Extensions.AI;
 
 namespace GodMode.Voice.Tests;
 
 /// <summary>
-/// Issue #547: a long reading is said slower than an ack (<c>SpeechPace</c>); "gentag", "spol tilbage", "fra
-/// starten" and "gentag afsnittet" say it again by code (<c>ReplayNode</c>); and "pause", "fortsæt",
+/// Issue #547: a long reading is said slower than an ack (<see cref="SpeechPace"/>); "gentag", "spol tilbage", "fra
+/// starten" and "gentag afsnittet" say it again by code (<see cref="ReplayNode"/>); and "pause", "fortsæt",
 /// "langsommere" and "hurtigere" steer a reading while it plays (VoiceBot's playback commands, johnjuuljensen/VoiceBot#96).
 /// </summary>
 public sealed class ReadingControlTests
@@ -92,7 +93,9 @@ public sealed class ReadingControlTests
 
         voice.Transcriptions.SayAsRecognized("Læs videre.");
         await voice.Events.SaidAsync("Master, del 2 igen.");
-        Assert.StartsWith("master's reply, part 2 of 3", model.ToolResults[^1]);
+        // The last tool result the model was given is part 2, read a second time
+        var last = model.Requests.Last().SelectMany(m => m.Contents).OfType<FunctionResultContent>().Last();
+        Assert.StartsWith("master's reply, part 2 of 3", last.Result?.ToString());
     }
 
     /// <summary>The issue's test: "gentag" after a cut says it again from the sentence that was cut, by code.</summary>
