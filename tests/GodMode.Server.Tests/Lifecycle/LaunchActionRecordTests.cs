@@ -117,7 +117,11 @@ public class LaunchActionRecordTests
         RenameAction(harness.StatePath(adopted), Secret);
         await harness.RestartAsync();
 
-        AssertLaunchedAsWork(await ResumeAsync(harness, adopted, 0));
+        // Adopted with no prompt, it may have had a launch that took no input: the one that takes the reply is its resume's
+        await harness.Projects.ReplyAndResumeAsync(adopted, "Go on");
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.Launches(adopted).Any(launch => launch.Stdin.Count > 0)),
+            null, () => "no launch of the adopted session took the reply");
+        AssertLaunchedAsWork(harness.Launches(adopted).First(launch => launch.Stdin.Count > 0));
     }
 
     /// <summary>A session made before records were kept launches as its settings.json says, as it always has.</summary>
