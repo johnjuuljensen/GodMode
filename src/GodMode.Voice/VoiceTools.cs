@@ -852,7 +852,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             ? $"Last reply{Flags(one)}: {one.Text.Trim()}"
             : $"Last {replies.Count} replies, oldest first:\n" + string.Join("\n", replies.Select((r, i) => $"Reply {i + 1}{Flags(r)}: {r.Text.Trim()}"));
         var parts = Parts(Capped(said));
-        conversation.Reading = new ReplyReading(target, name.ToString(), parts, 1, count, replies);
+        conversation.Reading = new ReplyReading(target, parts, 1, count, replies);
         return ReadOut(parts.Count == 1
             ? $"{header} {parts[0]}"
             : $"{header} {parts[0]} [Part 1 of {parts.Count}: more follows; {ReadMore} reads it.]");
@@ -886,17 +886,32 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         if (conversation.Reading is not ReplyReading reading || reading.Next >= reading.Parts.Count)
             return $"Nothing more to read: the last reply read was read to its end. {ReadReply} reads a project's reply.";
 
+        // Named as this line names it (#523): its label alone right after a part of it, more after a line about another
+        if (Names.Of(reading.Project) is not { } name)
+        {
+            conversation.Reading = null;
+            return "Nothing more to read: the project the reply was of is gone. Say so.";
+        }
         Talked(reading.Project);
         if (!(await servers.GetLastRepliesAsync(reading.Project, reading.Turns, ct)).SequenceEqual(reading.Replies))
         {
             conversation.Reading = null;
-            return $"{reading.Handle} has written a new reply since the one being read, so the rest of that one is not read: " +
+            return $"{name} has written a new reply since the one being read, so the rest of that one is not read: " +
                 $"say so, and offer to read the new one with {ReadReply}.";
         }
 
-        conversation.Reading = reading with { Next = reading.Next + 1 };
-        var last = reading.Next + 1 == reading.Parts.Count;
-        return ReadOut($"{reading.Handle}'s reply, part {reading.Next + 1} of {reading.Parts.Count}: {reading.Parts[reading.Next]}" +
+        return ReadPart(reading, reading.Next, name);
+    }
+
+    /// <summary>
+    /// Part <paramref name="index"/> of the reply being read, with the project named <paramref name="name"/>; the reading
+    /// goes on after it.
+    /// </summary>
+    private string ReadPart(ReplyReading reading, int index, SpokenName name)
+    {
+        conversation.Reading = reading with { Next = index + 1 };
+        var last = index + 1 == reading.Parts.Count;
+        return ReadOut($"{name}'s reply, part {index + 1} of {reading.Parts.Count}: {reading.Parts[index]}" +
             (last ? " [That was the end of it.]" : $" [More follows: {ReadMore} reads it.]"));
     }
 

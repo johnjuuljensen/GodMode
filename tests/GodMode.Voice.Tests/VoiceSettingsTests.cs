@@ -28,7 +28,7 @@ public sealed class VoiceSettingsTests : IDisposable
         var view = await _store.GetViewAsync();
 
         Assert.Equal("da-DK+en", view.Language);
-        Assert.Equal("OyYu1oFho6PvCH2wRY3S", view.VoiceId);
+        Assert.Equal("aDMeK4SvMKPrfK2biNvZ", view.VoiceId);
         Assert.False(view.EchoCancellation);
         Assert.False(view.ElevenLabsKeySet);
         Assert.False(view.AnthropicKeySet);
