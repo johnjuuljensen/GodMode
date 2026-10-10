@@ -186,6 +186,11 @@ public sealed class SessionDeletes(IGodModeServers servers, TimeProvider? time =
                 _toSay = null;
                 _dropped = null;
             }
+            // The read-back said again, or its end from where it was cut ("gentag", #547): it still waits on its yes, armed
+            // as it was, so an answer begun since it was first said answers it
+            else if (_armed is { ReadBack: var readBack } && SessionCreates.SaidAgain(readBack, text))
+            {
+            }
             else if (_toSay is not null || _armed is not null)
                 Drop();
         }

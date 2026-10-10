@@ -215,9 +215,10 @@ public sealed class VoiceSession : IAsyncDisposable
 
             var inference = scope.ServiceProvider.GetRequiredService<IInferenceProvider>();
             var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation, phrases: phrases, staleAfter: setup.Settings.StaleAfter);
+            var playback = GodModeGraph.Playback(languages);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
-                GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null, roots),
+                GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null, roots, playback),
                 setup.Mic is { } listening && setup.Transcription is TranscriptionInput.Audio audio
                     ? TranscriptionInput.FromAudio(listening.Listening(audio.Source))
                     : setup.Transcription,
@@ -230,6 +231,8 @@ public sealed class VoiceSession : IAsyncDisposable
                 {
                     LogDirectory = setup.LogDirectory,
                     NoiseWords = NoiseWords(languages),
+                    // "pause", "fortsæt", "langsommere", "hurtigere" steer a reading while it plays, without cutting it (#547)
+                    PlaybackCommands = playback,
                 },
             });
 

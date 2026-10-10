@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using GodMode.Shared.Enums;
@@ -278,6 +279,30 @@ public sealed class VoiceConversation(TimeProvider? time = null)
         set => Volatile.Write(ref _reading, value);
     }
 
+    private ReplyReading? _partRead;
+
+    /// <summary>
+    /// A tool read <paramref name="reading"/>'s part <see cref="ReplyReading.Next"/> − 1 for the model to say (#547): what
+    /// the evaluation then says is kept as that part's words (<see cref="PartSaid"/>).
+    /// </summary>
+    public void PartRead(ReplyReading reading)
+    {
+        Volatile.Write(ref _partRead, reading);
+        Reading = reading;
+    }
+
+    /// <summary>
+    /// The evaluation is done, and said <paramref name="said"/> (null for nothing): the part a tool read in it, if any, was
+    /// said so, kept on the reading for "fra starten" and "gentag afsnittet" (<see cref="ReplyReading.Said"/>), while it
+    /// is still the reading.
+    /// </summary>
+    public void PartSaid(string? said)
+    {
+        if (Interlocked.Exchange(ref _partRead, null) is not { } read || said is null) return;
+        if (Reading is ReplyReading reading && reading.Project == read.Project && ReferenceEquals(reading.Parts, read.Parts))
+            Reading = reading with { Said = reading.Said.SetItem(read.Next - 1, said) };
+    }
+
     private ConcurrentQueue<SpokenName> _sent = new();
 
     /// <summary>An answer reached the project named so: <see cref="VoiceTools.AnswerAsync"/>, once the server took it.</summary>
@@ -434,7 +459,14 @@ public sealed record AnnouncedSwitch(ProjectRef From, ProjectRef To, DateTimeOff
 /// (<see cref="ProjectNames.Of"/>, #523), not as the first part did.
 /// </summary>
 public sealed record ReplyReading(ProjectRef Project, IReadOnlyList<string> Parts, int Next, int Turns, IReadOnlyList<AssistantReply> Replies)
-    : PagedReading;
+    : PagedReading
+{
+    /// <summary>
+    /// What was said for each part read, by its index (#547): the model's words for it, which "fra starten" and "gentag
+    /// afsnittet" say again (<see cref="ReplayNode"/>).
+    /// </summary>
+    public ImmutableDictionary<int, string> Said { get; init; } = ImmutableDictionary<int, string>.Empty;
+}
 
 /// <summary>
 /// What "mere" reads on in (<see cref="VoiceConversation.Reading"/>): a reply, a long project list, or the last line said

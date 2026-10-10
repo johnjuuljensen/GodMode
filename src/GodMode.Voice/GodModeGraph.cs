@@ -1,6 +1,7 @@
 using VoiceBot.Core.AI;
 using VoiceBot.Core.Graph;
 using VoiceBot.Core.Graph.Nodes;
+using VoiceBot.Core.Pipeline;
 using VoiceBot.Core.Resources;
 using VoiceBot.Core.Tools;
 
@@ -19,7 +20,8 @@ namespace GodMode.Voice;
 /// it (<see cref="CodeSaysInference"/>, #456), as is a sent answer and a create read back (#526). A final that is only a
 /// hesitation ("Øh, det…") is waited past, with no model call (<see cref="HesitationNode"/>), and one the model waits past
 /// is joined to the next (<see cref="HeldWordsNode"/>, #529). The code's words held for a turn the model never ended are
-/// said all the same (<see cref="UnsaidNode"/>, #523).
+/// said all the same (<see cref="UnsaidNode"/>, #523). "Gentag", "spol tilbage", "fra starten" and the playback words said
+/// between readings are the code's (<see cref="ReplayNode"/>, #547), and every reply is said at its pace (<see cref="PacedNode"/>).
 /// </summary>
 public static class GodModeGraph
 {
@@ -49,6 +51,15 @@ public static class GodModeGraph
          .. Dictation.Phrases.Select(p => p.Phrase),
          "log", "loggen", "session", "sessionen", "branch", "worktree", "commit", "push", "merge", "issue"];
 
+    /// <summary>
+    /// What steers a reading while it plays (#547), which VoiceBot acts on itself, without a barge-in or the graph
+    /// (johnjuuljensen/VoiceBot#96): its own words ("pause", "fortsæt", "videre", "langsommere", "hurtigere", and English),
+    /// and "vent" for a pause. A bare "stop" stays a barge-in, and "stop den" a stop of a project (#287): neither is one of
+    /// these. Said when nothing is read, they are <see cref="ReplayNode"/>'s.
+    /// </summary>
+    public static PlaybackCommands Playback(SessionLanguages languages) =>
+        PlaybackCommands.FromResources(languages).Add(PlaybackControl.Pause, "vent", "vent lige", "hold on");
+
     /// <summary>The graph's tools: the hub's, and muting announcements.</summary>
     public static ToolSet AddTools(ToolSet set, VoiceTools tools) =>
         tools.AddTo(set).AddAnnouncementTools();
@@ -56,8 +67,8 @@ public static class GodModeGraph
     /// <summary>The graph, greeting the user as <paramref name="heard"/> allows (<see cref="VoicePhrases.Greeting"/>).</summary>
     /// <param name="done">Closes the mic, on a Done phrase; null where the mic is always open (Android), and there is no Done.</param>
     /// <param name="roots">The servers' roots when the session started: the prompt names their session kinds, and the actions voice does not start.</param>
-    public static CompositeNode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases,
-        ServersHeard heard, Action? done = null, IReadOnlyList<ServerRoot>? roots = null)
+    public static INode Build(IInferenceProvider inference, SessionLanguages languages, VoiceTools tools, VoicePhrases phrases,
+        ServersHeard heard, Action? done = null, IReadOnlyList<ServerRoot>? roots = null, PlaybackCommands? playback = null)
     {
         var (kinds, sessionless) = Actions(roots ?? []);
         // The words the model uses itself are the session's language's: never Danish in an English session (#449)
@@ -161,6 +172,10 @@ public static class GodModeGraph
               {{VoiceTools.ResumeProject}}; the system says what it did itself: respond with one word. A bare "stop", "stop
               stop" or "stop, vent" names no project: it is the user cutting you off, never a stop. Answer it with the
               action "wait".
+            - "Gentag", "Spol tilbage", "Fra starten", "Gentag afsnittet", "Langsommere", "Hurtigere" / "Repeat that", "Back
+              up", "From the start", "Slower", "Faster", said alone, are taken by the system itself: you never get them alone.
+              So are "Pause", "Vent" and "Fortsæt" while it speaks: one that reaches you came when nothing was said. A bare
+              "tilbage" / "back" is {{VoiceTools.GoBack}}, as above.
             - "Stille" / "Quiet" — call mute_announcements; "Du må godt sige til igen" — call unmute_announcements.
             - "Start issue 283 [i GodMode]", "Start en chat i Assistant om …", "Start et eksperiment om …" / "Start issue …",
               "Start a chat in … about …" — call {{VoiceTools.StartSession}} with the root, kind, issue, name and prompt as
@@ -211,8 +226,9 @@ public static class GodModeGraph
         // Above Done and help: while dictating, "færdig" and "hjælp" are words of the dictation (#459)
         graph = graph.Node(new DictationNode("dictation", 95, tools.Dictation, phrases));
         if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));
-        return graph
-            .Node(new HelpNode("help", 80))
+        return new PacedNode(graph
+            .Node(new HelpNode("help", 80, ReplayNode.Commands))
+            .Node(new ReplayNode("replay", 78, tools.Conversation, phrases, playback ?? Playback(languages)))
             .Node(new HesitationNode("hesitation", 75))
             .Node(new ConfirmDeleteNode("confirm-delete", 71, tools.Deletes, phrases))
             .Node(new ConfirmCreateNode("confirm-create", 70, tools.Creates, phrases))
@@ -221,6 +237,6 @@ public static class GodModeGraph
             .Child(new ReadBackNode(new SentNode(new SpokenNode(new HeldWordsNode(new UnsaidNode(new ChatNode("control", 50, InferenceTier.Light,
                 codeSays, systemPrompt), codeSays), tools.Conversation), tools.Conversation, phrases), tools.Conversation, phrases),
                 tools.Creates, tools.Deletes, phrases))
-            .Build();
+            .Build(), tools.Conversation);
     }
 }
