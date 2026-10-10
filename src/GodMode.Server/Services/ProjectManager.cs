@@ -1721,7 +1721,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             var snap = _snapshot;
             var rootPath = project.RootPath;
             var config = _rootConfigReader.ReadConfig(rootPath);
-            if (config.ResolveAction(project.ActionName) is not { Status: { } status } action) return unchanged;
+            if (config.ResolveAction(ActionNameOf(project)) is not { Status: { } status } action) return unchanged;
             script = status;
 
             var env = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), ProfileEnvironment(snap, profileName),
@@ -1966,7 +1966,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
                     _logger.LogWarning("Project {ProjectId}: its root config cannot be read ({Reason}); its delete keeps the folder, so it goes on without the delete script", projectId, ex.Message);
                     config = new RootConfig();
                 }
-                var action = config.ResolveAction(project.ActionName);
+                var action = config.ResolveAction(ActionNameOf(project));
                 // An action that shares folders now shares this one too, whatever the session was created as
                 sharedFolder |= action?.SharedFolder == true;
 
@@ -2001,7 +2001,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // Remove from tracking, and finish its output and any check a push started since
         _projects.TryRemove(projectId, out _);
-        ForgetFleetGrant(project);
+        ForgetFleetGrant(project, setAside: true);
         await project.Process.CloseAsync();
         await _pullRequests.ForgetAsync(projectId);
 
@@ -2018,6 +2018,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             await DeleteDirectoryRobustAsync(project.ProjectPath, WhyNotAProjectFolderOf(project.RootPath, project.ProjectPath));
         else
             trashed = await TrashSessionStateAsync(project);
+        // Its record is kept only for a restore of its state from the trash
+        if (!trashed) ForgetFleetGrant(project, setAside: false);
 
         _logger.LogInformation("Project {ProjectId} deleted successfully{Kept}", projectId,
             folderGoes ? "" : $"; its working folder {project.ProjectPath} is shared, and stays{(trashed ? ", with its state in the trash" : "")}");
@@ -2371,6 +2373,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         {
             claims.Claim(projectId, folder);
             var statePath = ProjectFiles.SessionState.Restore(folder, sessionId);
+            RestoreFleetGrant(projectId, rootPath, sessionId);
             // It was deleted as a session that shares its folder, and stays one: a later delete leaves the folder
             if (!forgotten && ProjectFiles.ProjectSettings.TryLoad(statePath, out var settings) && !settings.SharedFolder)
                 (settings with { SharedFolder = true }).Save(statePath);
@@ -2382,6 +2385,26 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         await ReparentAsync(rekeyed, [project]);
         _logger.LogInformation("Project {ProjectId} was restored from the trash of {Folder}", projectId, folder);
         return project;
+    }
+
+    /// <summary>
+    /// Brings back the record set aside for a restored session (<see cref="FleetGrantFile.Restore"/>): it runs as the
+    /// action it was created with, and has no grant. One with none set aside (trashed before records were set aside)
+    /// runs as its settings.json names (<see cref="ActionNameOf"/>).
+    /// </summary>
+    private void RestoreFleetGrant(string projectId, string rootPath, string sessionId)
+    {
+        try
+        {
+            if (FleetGrantFile.Restore(rootPath, sessionId) is { } record)
+                _logger.LogInformation("Project {ProjectId} is restored as its recorded action '{Action}', with no fleet grant", projectId, record.Action);
+            else
+                _logger.LogWarning("Project {ProjectId} has no record of its action set aside: restored, it runs as its settings.json names", projectId);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("Project {ProjectId}: its record set aside could not be restored ({Reason}): it runs as its settings.json names", projectId, ex.Message);
+        }
     }
 
     /// <summary>
@@ -2901,7 +2924,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (project.Status.RootName == null || profileName == null) return new CreateAction("Create");
         try
         {
-            return _rootConfigReader.ReadConfig(project.RootPath).ResolveAction(project.ActionName) ?? new CreateAction("Create");
+            return _rootConfigReader.ReadConfig(project.RootPath).ResolveAction(ActionNameOf(project)) ?? new CreateAction("Create");
         }
         catch (Exception ex)
         {
@@ -3376,7 +3399,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         _launchWarnings.TryAdd($"{FullPath(project.StatePath)}\n{about}", 0);
 
     /// <summary>
-    /// The project's action in its root's config (the default action for a project with no root), and
+    /// The project's action (<see cref="ActionNameOf"/>) in its root's config (the default action for a project with no root), and
     /// whether every action of the root allows skip-permissions. The root is the project's by its
     /// folder (<see cref="ProjectInfo.RootPath"/>), not by the name it has now.
     /// Throws <see cref="LaunchConfigException"/> when the config cannot be read or lacks the action.
@@ -3394,9 +3417,32 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         {
             throw new LaunchConfigException($"root config unreadable: {ex.Message}", ex);
         }
-        return config.ResolveAction(project.ActionName) is { } action
+        var actionName = ActionNameOf(project);
+        return config.ResolveAction(actionName) is { } action
             ? (action, config.StripEnvVarProfile, config.GetEffectiveActions().All(a => a.AllowSkipPermissions))
-            : throw new LaunchConfigException($"root config has no action '{project.ActionName}'");
+            : throw new LaunchConfigException($"root config has no action '{actionName}'");
+    }
+
+    /// <summary>
+    /// The action the session runs as, for its launch and its scripts: the one the server recorded at its create or
+    /// adopt (<see cref="FleetGrantFile"/>), never its settings.json's, which is in its working folder and so the
+    /// session's to write: another action's environment, permission mode, claudeArgs and model are not its to take
+    /// (issue #399). A session with no record of its own (made before records were kept, or restored when none was set
+    /// aside) runs as its settings.json names, else as the root's default action; which is logged once.
+    /// </summary>
+    private string? ActionNameOf(ProjectInfo project)
+    {
+        if (RecordOf(project) is { } record) return record.Action;
+        if (FirstLaunchWarning(project, "no-record"))
+        {
+            if (project.ActionName is { } named)
+                _logger.LogWarning("Project {ProjectId} has no record of its action (made before records were kept): it runs as its settings.json names, '{Action}'",
+                    project.Status.Id, named);
+            else
+                _logger.LogWarning("Project {ProjectId} has no record of its action, and its settings.json names none: it runs as its root's default action",
+                    project.Status.Id);
+        }
+        return project.ActionName;
     }
 
     /// <summary>
@@ -3490,14 +3536,17 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     public bool HasFleetTools(string projectId) => _projects.TryGetValue(projectId, out var project) && HasFleetTools(project);
 
     /// <summary>
-    /// Deletes the fleet grant record of a session that leaves GodMode (a delete or a forget): one restored from the
-    /// trash has no grant, and a state folder planted under its id, in its own folder or another, finds none.
+    /// Takes away the fleet grant record of a session that leaves GodMode (a delete or a forget), so a state folder
+    /// planted under its id, in its own folder or another, finds none. With <paramref name="setAside"/>, for a session
+    /// whose state goes to the trash, it is set aside in the root's logs (<see cref="FleetGrantFile.SetAside"/>) for a
+    /// restore, which takes back its action and no grant; otherwise it is deleted, and any set aside with it.
     /// </summary>
-    private void ForgetFleetGrant(ProjectInfo project)
+    private void ForgetFleetGrant(ProjectInfo project, bool setAside)
     {
         try
         {
-            FleetGrantFile.Delete(project.RootPath, project.SessionId);
+            if (setAside) FleetGrantFile.SetAside(project.RootPath, project.SessionId);
+            else FleetGrantFile.Delete(project.RootPath, project.SessionId);
             SessionInbox.Delete(project.RootPath, project.SessionId);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -3526,7 +3575,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
     private bool HasFleetTools(ProjectInfo project)
     {
-        if (RecordOf(project) is not { } grant) return false;
+        if (RecordOf(project) is not { Restored: false } grant) return false;
         try
         {
             return RecordedActionOf(project, grant)?.FleetTools switch
@@ -3552,7 +3601,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     public FleetChildren FleetChildrenOf(string projectId)
     {
         if (!_projects.TryGetValue(projectId, out var project)) throw new KeyNotFoundException($"Project {projectId} not found");
-        if (RecordOf(project) is not { } grant) return FleetChildren.Own;
+        if (RecordOf(project) is not { Restored: false } grant) return FleetChildren.Own;
         try
         {
             return RecordedActionOf(project, grant)?.FleetChildren ?? FleetChildren.Own;
