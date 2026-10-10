@@ -327,11 +327,13 @@ public partial class ProjectManager
         await _pullRequests.ForgetAsync(projectId);
 
         _projects.TryRemove(projectId, out _);
-        ForgetFleetGrant(project);
+        ForgetFleetGrant(project, setAside: true);
         await project.Process.CloseAsync();
         await _pullRequests.ForgetAsync(projectId);
 
         var trashed = await TrashSessionStateAsync(project, forgotten: true);
+        // Its record is kept only for a restore of its state from the trash
+        if (!trashed) ForgetFleetGrant(project, setAside: false);
         _logger.LogInformation("Project {ProjectId} forgotten{Trashed}", projectId, trashed ? ", with its state in the trash" : "; it had no state");
         await PushAttentionIfChangedAsync();
         return new DeleteProjectResult(trashed);
