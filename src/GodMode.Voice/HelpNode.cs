@@ -45,6 +45,11 @@ public sealed class HelpNode(string id, int priority) : INode
         (VoiceTools.SetImportance, "marker som vigtig", "mark as important"),
         (VoiceTools.StartSession, "start issue og et nummer", "start issue and a number"),
         (VoiceTools.DeleteSession, "slet og et projekt", "delete and a project"),
+        (VoiceTools.SwitchProject, "skift til et projekt", "switch to a project"),
+        (VoiceTools.GoBack, "tilbage", "back"),
+        (VoiceTools.PeekProject, "kig på et projekt", "peek at a project"),
+        (VoiceTools.StopProject, "stop et projekt", "stop a project"),
+        (VoiceTools.ResumeProject, "genoptag et projekt", "resume a project"),
         (AnnouncementTools.Mute.Name, "stille", "quiet"),
         (AnnouncementTools.Unmute.Name, "sig til igen", "you can talk again"),
     ];

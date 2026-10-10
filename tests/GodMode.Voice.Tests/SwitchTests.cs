@@ -36,7 +36,7 @@ public sealed class SwitchTests
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Skift til issue 525.");
-        await voice.Events.SaidAsync("Skiftet til issue 525. Den er idle.");
+        await voice.Events.SaidAsync("Skiftet til issue 525, voice. Den er idle.");
 
         Assert.Equal([(P525, "Godmode")], voice.Events.Shown);
         Assert.Equal(P525, voice.Session.Conversation.Current);
@@ -55,12 +55,12 @@ public sealed class SwitchTests
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
         voice.Transcriptions.SayAsRecognized("Skift til issue 525.");
-        await voice.Events.SaidAsync("Skiftet til issue 525. Den er idle.");
+        await voice.Events.SaidAsync("Skiftet til issue 525, voice. Den er idle.");
         voice.Transcriptions.SayAsRecognized("Skift til issue 526.");
-        await voice.Events.SaidAsync("Skiftet til issue 526. Den er idle.");
+        await voice.Events.SaidAsync("Skiftet til issue 526, voice. Den er idle.");
 
         voice.Transcriptions.SayAsRecognized("Tilbage.");
-        await voice.Events.SaidAsync("Tilbage til issue 525. Den er idle.");
+        await voice.Events.SaidAsync("Tilbage til issue 525, voice. Den er idle.");
 
         Assert.Equal([(P525, "Godmode"), (P526, "Godmode"), (P525, "Godmode")], voice.Events.Shown);
         Assert.Equal(P525, voice.Session.Conversation.Current);
@@ -92,14 +92,14 @@ public sealed class SwitchTests
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
         voice.Transcriptions.SayAsRecognized("Skift til issue 525.");
-        await voice.Events.SaidAsync("Skiftet til issue 525. Den er idle.");
+        await voice.Events.SaidAsync("Skiftet til issue 525, voice. Den er idle.");
 
         voice.Transcriptions.SayAsRecognized("Kig på issue 526.");
-        await voice.Events.SaidAsync("issue 526: Venter på review.");
+        await voice.Events.SaidAsync("issue 526, voice: Venter på review.");
         Assert.Equal(P525, voice.Session.Conversation.Current);
 
         voice.Transcriptions.SayAsRecognized("Svar at den skal køre videre.");
-        await voice.Events.SaidAsync("Sendt.");
+        await voice.Events.SaidAsync("Sendt til issue 525, voice.");
 
         Assert.Equal([(P525, "Kør videre.")], servers.Replies);
         // A peek moves nothing on screen
@@ -115,7 +115,7 @@ public sealed class SwitchTests
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Stop issue 525.");
-        await voice.Events.SaidAsync("issue 525 er stoppet. Sig genoptag, så fortsætter den.");
+        await voice.Events.SaidAsync("issue 525, voice, er stoppet. Sig genoptag, så fortsætter den.");
 
         Assert.Equal([P525], servers.Stops);
         Assert.Equal(1, model.Calls);
@@ -131,7 +131,7 @@ public sealed class SwitchTests
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Stop issue 525.");
-        await voice.Events.SaidAsync("issue 525 kører ikke. Den er idle.");
+        await voice.Events.SaidAsync("issue 525, voice, kører ikke. Den er idle.");
 
         Assert.Empty(servers.Stops);
     }
@@ -145,7 +145,7 @@ public sealed class SwitchTests
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Genoptag issue 525.");
-        await voice.Events.SaidAsync("issue 525 er genoptaget.");
+        await voice.Events.SaidAsync("issue 525, voice, er genoptaget.");
 
         Assert.Equal([P525], servers.Resumes);
     }
@@ -160,7 +160,7 @@ public sealed class SwitchTests
         await voice.Events.SaidAsync("Klar.");
 
         voice.Transcriptions.SayAsRecognized("Genoptag issue 525.");
-        await voice.Events.SaidAsync("issue 525 er ikke stoppet. Den er idle.");
+        await voice.Events.SaidAsync("issue 525, voice, er ikke stoppet. Den er idle.");
 
         Assert.Empty(servers.Resumes);
     }

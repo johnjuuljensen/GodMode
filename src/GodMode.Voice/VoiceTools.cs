@@ -213,7 +213,36 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             [new ToolParameter(ProjectsParameter,
                 "The sessions as the user named them, each as a project is named to the other tools, separated by \";\" " +
                 "(\"Slet issue 525 og 526\": \"issue 525; issue 526\"). Empty for the project talked about.", Required: false)],
-            (_, args, ct) => DeleteSessionAsync(Argument(args, ProjectsParameter), ct));
+            (_, args, ct) => DeleteSessionAsync(Argument(args, ProjectsParameter), ct))
+        .Add(SwitchProject,
+            "Switch to a project: it is the one talked about from now on, the app shows it, and what it is doing is said. " +
+            $"Call when the user says \"skift til [handle]\" / \"switch to [handle]\". {GoBack} goes back to the one before.",
+            [ProjectReference],
+            (_, args, ct) => SwitchAsync(Argument(args, ProjectParameter), ct))
+        .Add(GoBack,
+            $"Go back to the project talked about before the last switch ({SwitchProject}): it is the one talked about again, and " +
+            "the app shows it. Call when the user says \"tilbage\" / \"back\" alone, as a command.",
+            [],
+            (_, _, ct) => BackAsync(ct))
+        .Add(PeekProject,
+            $"Read a project's status as {ProjectStatus} does, without switching to it: the conversation stays on the project it " +
+            "was about, an answer that names none goes there, and the app shows what it showed. Call when the user says " +
+            "\"kig på [handle]\" / \"peek at [handle]\".",
+            [ProjectReference, Then],
+            (_, args, ct) => AndThen(args, PeekAsync(Argument(args, ProjectParameter), ct)))
+        .Add(StopProject,
+            "Stop a project's Claude session, as the app's Stop does: its turn is interrupted, its conversation kept, and " +
+            $"{ResumeProject} resumes it. Only a project that runs (or waits on the user, or works in the background) is " +
+            "stopped. Call when the user says \"stop [handle]\" or \"stop den\": never on a bare \"stop\", which is the " +
+            "user cutting you off.",
+            [ProjectReference],
+            (_, args, ct) => StopProjectAsync(Argument(args, ProjectParameter), ct))
+        .Add(ResumeProject,
+            "Resume a stopped project, as the app's Resume does: its Claude session starts again with its conversation, and " +
+            "waits for the user's input. Only a stopped project is resumed. Call when the user says \"genoptag [handle]\" / " +
+            "\"resume [handle]\".",
+            [ProjectReference],
+            (_, args, ct) => ResumeProjectAsync(Argument(args, ProjectParameter), ct));
 
     /// <param name="root">Only the items of the projects in this root or profile (<see cref="In"/>); all when empty.</param>
     /// <param name="since">
@@ -922,12 +951,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         if (Target(reference) is not { } target || handles.LabelOf(target) is null)
             return await UnknownAsync(reference, ct);
         // An announcement that just changed the project talked about never decides where an unnamed answer goes (#461)
-        if (string.IsNullOrWhiteSpace(reference) && conversation.TakeAnnouncedSwitch() is { } switched
-            && handles.LabelOf(switched.From) is not null && handles.LabelOf(switched.To) is not null
-            && Names.Of(switched.From) is { } before && Names.Of(switched.To) is { } announced)
-            return SaysItself($"Nothing was sent: {announced} was announced just before this answer, which names no project, " +
-                $"and the user was talking about {before} before it. The system asks which of the two it is for. When the user " +
-                $"says one, call {Answer} again with the same text and that project named.", _phrases.Which(before, announced));
+        if (AskWhichAfterAnnouncement(reference, "Nothing was sent", "answer", $"{Answer} again with the same text and that project named") is { } which)
+            return which;
 
         // Named once it is known what is said of it: the line names it (#455)
         var name = Names.Of(target)!;
@@ -962,6 +987,22 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         // The code says it was sent (SentNode): the model's round after it would only say so again (#526)
         return SaysItself($"Sent to {name}: \"{sent}\". It continues. The system says it was sent itself.", _phrases.Sent([name]));
     }
+
+    /// <summary>
+    /// A request that names no project, just after an announcement changed the project talked about (#461): it goes to
+    /// neither, and the system asks which of the two it is for. Null when it names one, or no announcement just did.
+    /// </summary>
+    /// <param name="nothing">What was not done: "Nothing was sent".</param>
+    /// <param name="request">The request, as the text names it: "answer".</param>
+    /// <param name="again">The call that makes it once the user says which: "answer_project again with the same text and that project named".</param>
+    private string? AskWhichAfterAnnouncement(string? reference, string nothing, string request, string again) =>
+        string.IsNullOrWhiteSpace(reference) && conversation.TakeAnnouncedSwitch() is { } switched
+        && handles.LabelOf(switched.From) is not null && handles.LabelOf(switched.To) is not null
+        && Names.Of(switched.From) is { } before && Names.Of(switched.To) is { } announced
+            ? SaysItself($"{nothing}: {announced} was announced just before this {request}, which names no project, " +
+                $"and the user was talking about {before} before it. The system asks which of the two it is for. When the user " +
+                $"says one, call {again}.", _phrases.Which(before, announced))
+            : null;
 
     private string WaitsOnPermission(ProjectRef target, SpokenName name, PendingPermission permission)
     {
@@ -1101,7 +1142,103 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             "user says yes to it, which is not yours to answer: never say it was deleted.", readBack);
     }
 
-    public Task<string> StopProjectAsync(string? reference, CancellationToken ct) => throw new NotImplementedException();
+    /// <summary>
+    /// "Skift til" (#287): the project is the one talked about (<see cref="VoiceConversation.SwitchTo"/>), the app shows
+    /// it, and the code says what it is doing; "mere" reads its status. The one before is where <see cref="GoBack"/> goes.
+    /// </summary>
+    public async Task<string> SwitchAsync(string? reference, CancellationToken ct)
+    {
+        if (Target(reference) is not { } target || handles.LabelOf(target) is null)
+            return await UnknownAsync(reference, ct);
+        var status = await servers.GetStatusAsync(target, ct);
+        conversation.SwitchTo(target);
+        return Switched(target, status, back: false);
+    }
+
+    /// <summary>"Tilbage" (#287): the project switched away from last, still there, as <see cref="SwitchAsync"/> says it.</summary>
+    public async Task<string> BackAsync(CancellationToken ct)
+    {
+        if (conversation.Back(p => handles.LabelOf(p) is not null) is not { } target)
+            return SaysItself($"Nothing to go back to: no project was switched away from by {SwitchProject}, or those were deleted. Nothing changed.",
+                _phrases.NothingToGoBackTo);
+        return Switched(target, await servers.GetStatusAsync(target, ct), back: true);
+    }
+
+    /// <summary>A switch made (<see cref="SwitchAsync"/>, <see cref="BackAsync"/>): what the code says of it, and the tool's text.</summary>
+    private string Switched(ProjectRef target, ProjectStatus status, bool back)
+    {
+        var name = Names.Of(target)!;
+        // As an announcement's line: "mere" expands it into its status (#455)
+        conversation.Reading = new ProjectLine(target, Read: false);
+        var state = ListedStateOf(target, status);
+        return SaysItself($"{(back ? "Back" : "Switched")} to {name} ({Details(status.Name, status.Kind)}): {StateText(status.State, status.BackgroundTasks)}. " +
+            $"The app shows it now, and the system said so itself. {ProjectStatus} or {ReadMore} reads more of it.",
+            back ? _phrases.WentBack(name, state) : _phrases.Switched(name, state));
+    }
+
+    /// <summary>
+    /// "Kig på" (#287): the project's status, read as <see cref="ProjectStatusAsync"/> reads it, and the conversation left on
+    /// the project it was about: an answer that names none goes there, and the app shows what it showed. "Mere" reads on
+    /// in the project peeked at, the line just said.
+    /// </summary>
+    public async Task<string> PeekAsync(string? reference, CancellationToken ct)
+    {
+        if (Target(reference) is not { } target || handles.LabelOf(target) is null)
+            return await UnknownAsync(reference, ct);
+        var before = conversation.Current;
+        try { return await StatusOfAsync(target, ct); }
+        finally { conversation.Current = before; }
+    }
+
+    /// <summary>
+    /// "Stop" (#287), as the app's Stop: only a project the screen would stop (it runs, waits on the user, or works in the
+    /// background) is stopped, with no read-back: its conversation is kept, and "genoptag" resumes it. An unnamed stop
+    /// just after an announcement changed the project talked about asks which, as an answer does (#461).
+    /// </summary>
+    public async Task<string> StopProjectAsync(string? reference, CancellationToken ct)
+    {
+        if (AskWhichAfterAnnouncement(reference, "Nothing was stopped", "stop", $"{StopProject} with that project named") is { } which)
+            return which;
+        if (Target(reference) is not { } target || handles.LabelOf(target) is null)
+            return await UnknownAsync(reference, ct);
+        var name = Names.Of(target)!;
+        var status = await servers.GetStatusAsync(target, ct);
+        Talked(target);
+        if (status.CreateFailed)
+            return $"{name} failed to create, so it has no session to stop. Nothing was stopped.";
+        var state = ListedStateOf(target, status);
+        if (!(status.BackgroundTasks is { Count: > 0 } || status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission))
+            return SaysItself($"{name} does not run ({StateText(status.State, status.BackgroundTasks)}): nothing was stopped. The system said so itself.",
+                _phrases.NotRunning(name, state));
+        await servers.StopAsync(target, ct);
+        return SaysItself($"{name} is stopped: its conversation is kept, and {ResumeProject} resumes it. The system said so itself.",
+            _phrases.StoppedNow(name));
+    }
+
+    /// <summary>
+    /// "Genoptag" (#287), as the app's Resume, of a stopped project only: one that is idle would be sent "Continue", a turn
+    /// the user never wrote.
+    /// </summary>
+    public async Task<string> ResumeProjectAsync(string? reference, CancellationToken ct)
+    {
+        if (Target(reference) is not { } target || handles.LabelOf(target) is null)
+            return await UnknownAsync(reference, ct);
+        var name = Names.Of(target)!;
+        var status = await servers.GetStatusAsync(target, ct);
+        Talked(target);
+        if (status.CreateFailed)
+            return $"{name} failed to create, so it has no session to resume. Nothing was resumed: tell the user to delete it, or create it again.";
+        if (status.State != ProjectState.Stopped || status.BackgroundTasks is { Count: > 0 })
+            return SaysItself($"{name} is not stopped ({StateText(status.State, status.BackgroundTasks)}): nothing was resumed. The system said so itself.",
+                _phrases.NotStopped(name, ListedStateOf(target, status)));
+        await servers.ResumeAsync(target, ct);
+        return SaysItself($"{name} is resumed, and waits for the user's input. The system said so itself.", _phrases.Resumed(name));
+    }
+
+    /// <summary>What the project is doing, as a list says it (<see cref="StateOf"/>), from its status as just read.</summary>
+    private ListedState ListedStateOf(ProjectRef project, ProjectStatus status) =>
+        ProjectListing.StateOf(status.State is ProjectState.Idle && status.BackgroundTasks is { Count: > 0 } ? ProjectState.Running : status.State,
+            board.ItemOf(project) is not null);
 
     /// <summary>
     /// The project named, or the one the conversation is about when none is named, while it is still there. Every

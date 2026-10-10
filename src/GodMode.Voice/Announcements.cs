@@ -87,6 +87,55 @@ public sealed class VoiceConversation(TimeProvider? time = null)
 
     private sealed record Topic(ProjectRef? Project, AnnouncedSwitch? Switched);
 
+    /// <summary>How many projects switched away from "tilbage" can go back through (#287).</summary>
+    private const int SwitchesKept = 16;
+
+    private readonly Lock _switchesLock = new();
+    // The projects switched away from, the last at the end
+    private readonly List<ProjectRef> _switchedFrom = [];
+
+    /// <summary>The user switched to a project by voice (<see cref="SwitchTo"/>, <see cref="Back"/>): the app shows it.</summary>
+    public event Action<ProjectRef>? Shown;
+
+    /// <summary>
+    /// "Skift til" (#287): <paramref name="project"/> is what the conversation is about, and the app shows it. The one
+    /// it was about before is where "tilbage" goes (<see cref="Back"/>); a status read, an answer or an announcement
+    /// moves the conversation, but is no switch, and leaves none.
+    /// </summary>
+    public void SwitchTo(ProjectRef project)
+    {
+        if (Current is { } before && before != project)
+            lock (_switchesLock)
+            {
+                _switchedFrom.Add(before);
+                if (_switchedFrom.Count > SwitchesKept) _switchedFrom.RemoveAt(0);
+            }
+        Current = project;
+        Shown?.Invoke(project);
+    }
+
+    /// <summary>
+    /// "Tilbage" (#287): the project switched away from last that is still there (<paramref name="there"/>) is what the
+    /// conversation is about again, and the app shows it; those gone since are passed over. Null when there is none.
+    /// </summary>
+    public ProjectRef? Back(Func<ProjectRef, bool> there)
+    {
+        ProjectRef? back = null;
+        lock (_switchesLock)
+        {
+            while (back is null && _switchedFrom.Count > 0)
+            {
+                var last = _switchedFrom[^1];
+                _switchedFrom.RemoveAt(_switchedFrom.Count - 1);
+                if (there(last) && last != Current) back = last;
+            }
+        }
+        if (back is null) return null;
+        Current = back;
+        Shown?.Invoke(back);
+        return back;
+    }
+
     private string? _lastProfile;
 
     /// <summary>

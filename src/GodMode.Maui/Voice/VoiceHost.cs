@@ -28,7 +28,7 @@ public sealed class VoiceHost : IVoiceEvents
     private readonly SemaphoreSlim _switching = new(1, 1);
     private readonly Lock _lock = new();
     private readonly List<VoiceLine> _lines = [];
-    private readonly ConcurrentDictionary<int, Action<string, object?>> _pages = new();
+    private readonly ConcurrentDictionary<int, Page> _pages = new();
     private int _attached;
     private Running? _running;
     private VoiceState _state = VoiceState.Off;
@@ -59,17 +59,23 @@ public sealed class VoiceHost : IVoiceEvents
         }
     }
 
-    /// <summary>Events go to this page too, from now on, until the result is disposed (its page is gone or replaced).</summary>
-    public IDisposable Attach(Action<string, object?> send)
+    /// <summary>
+    /// Events go to this page too, from now on, until the result is disposed (its page is gone or replaced). Its window's
+    /// <paramref name="profile"/> (null for the main window) is where a project of that profile is shown (<see cref="Show"/>).
+    /// </summary>
+    public IDisposable Attach(string? profile, Action<string, object?> send)
     {
         var page = Interlocked.Increment(ref _attached);
-        _pages[page] = send;
+        _pages[page] = new Page(profile, send);
         return new Detach(() => _pages.TryRemove(page, out _));
     }
 
+    /// <summary>A page attached: the profile its window is locked to (null for the main window), and how to send it an event.</summary>
+    private sealed record Page(string? Profile, Action<string, object?> Send);
+
     private void Send(string type, object? payload)
     {
-        foreach (var send in _pages.Values) send(type, payload);
+        foreach (var page in _pages.Values) page.Send(type, payload);
     }
 
     private sealed class Detach(Action detach) : IDisposable
@@ -347,6 +353,21 @@ public sealed class VoiceHost : IVoiceEvents
             if (_error?.Service == service) _error = null;
         }
         Send(ShellMessageTypes.VoiceRecovered, new VoiceServicePayload(service));
+    }
+
+    /// <summary>
+    /// The user switched to a project by voice (#287): the window of its profile shows it, or the main window when the
+    /// profile has none (Android's one window). The window is not brought forward: voice is hands-free, and the user may
+    /// be typing in another window, or another app.
+    /// </summary>
+    public void Show(ProjectRef project, string profile)
+    {
+        var pages = _pages.Values.ToList();
+        var page = pages.FirstOrDefault(p => string.Equals(p.Profile, profile, StringComparison.OrdinalIgnoreCase))
+            ?? pages.FirstOrDefault(p => p.Profile is null);
+        _logger.LogInformation("Voice shows {Project} ({Profile}) in {Window}", project.ProjectId, profile,
+            page is null ? "no window" : page.Profile ?? "the main window");
+        page?.Send(ShellMessageTypes.VoiceShow, new VoiceShowPayload(project.ServerId, project.ProjectId));
     }
 
     private void Keep(VoiceLine line)

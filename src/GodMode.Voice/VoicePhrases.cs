@@ -438,6 +438,35 @@ public sealed partial class VoicePhrases
         _ => throw new ArgumentOutOfRangeException(nameof(state)),
     };
 
+    /// <summary>"Skift til" (#287): "Skiftet til issue 283. Den kører." / "Switched to issue 283. It is running."</summary>
+    public string Switched(SpokenName name, ListedState state) =>
+        $"{(_danish ? "Skiftet til" : "Switched to")} {Named(name)}. {It(state)}";
+
+    /// <summary>"Tilbage" (#287): "Tilbage til issue 283. Den er idle." / "Back to issue 283. It is idle."</summary>
+    public string WentBack(SpokenName name, ListedState state) =>
+        $"{(_danish ? "Tilbage til" : "Back to")} {Named(name)}. {It(state)}";
+
+    /// <summary>"Tilbage" with no switch before it to go back from (#287).</summary>
+    public string NothingToGoBackTo => _danish ? "Intet at gå tilbage til." : "Nothing to go back to.";
+
+    /// <summary>A stop by voice (#287), with how to undo it: "issue 283 er stoppet. Sig genoptag, så fortsætter den."</summary>
+    public string StoppedNow(SpokenName name) =>
+        _danish ? $"{Subject(name)} er stoppet. Sig genoptag, så fortsætter den." : $"{Subject(name)} is stopped. Say resume to go on.";
+
+    /// <summary>A stop of a project that does not run (#287): nothing was stopped. "issue 283 kører ikke. Den er idle."</summary>
+    public string NotRunning(SpokenName name, ListedState state) =>
+        $"{Subject(name)} {(_danish ? "kører ikke" : "is not running")}. {It(state)}";
+
+    /// <summary>A resume by voice (#287): "issue 283 er genoptaget." / "issue 283 is resumed."</summary>
+    public string Resumed(SpokenName name) => _danish ? $"{Subject(name)} er genoptaget." : $"{Subject(name)} is resumed.";
+
+    /// <summary>A resume of a project that is not stopped (#287): nothing was resumed. "issue 283 er ikke stoppet. Den kører."</summary>
+    public string NotStopped(SpokenName name, ListedState state) =>
+        $"{Subject(name)} {(_danish ? "er ikke stoppet" : "is not stopped")}. {It(state)}";
+
+    /// <summary>What a project just named is doing, as a sentence: "Den kører." / "It is running."</summary>
+    private string It(ListedState state) => $"{(_danish ? "Den" : "It")} {Doing(state, 1)}.";
+
     /// <summary>A state as a page's heading: "Venter på dig", "Kører", "Idle", "Stoppet".</summary>
     private string Heading(ListedState state) => (state, _danish) switch
     {

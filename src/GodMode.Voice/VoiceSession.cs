@@ -26,6 +26,12 @@ public interface IVoiceEvents
 
     /// <summary>A service reported through <see cref="Error"/> works again.</summary>
     void Recovered(SessionService service);
+
+    /// <summary>
+    /// The user switched to <paramref name="project"/> by voice ("skift til", "tilbage", #287): the app shows it, in the
+    /// window of its <paramref name="profile"/> where it has one. A host with no screen ignores it.
+    /// </summary>
+    void Show(ProjectRef project, string profile) { }
 }
 
 /// <summary>Everything one voice session is made from.</summary>
@@ -231,6 +237,7 @@ public sealed class VoiceSession : IAsyncDisposable
                 scope.ServiceProvider.GetService<ElevenLabsSttKeyterms>(), logger) { Conversation = conversation };
             projects.Changed += voice.RefreshKeyterms;
             voice.RefreshKeyterms();
+            conversation.Shown += project => setup.Events.Show(project, projects.Find(project)?.Project.ProfileName ?? "Default");
             // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement
             // and while a dictation is taken (#459): one in a pause to think would break it
             var announcements = new HeldAnnouncements(session.Announcements, tools.Creates, tools.Dictation, tools.Deletes, setup.Time);

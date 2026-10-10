@@ -99,6 +99,12 @@ public static class ShellMessageTypes
 
     /// <summary>Event <see cref="VoiceStatus"/>: the state changed, or the mic opened or closed.</summary>
     public const string VoiceStateChanged = "voice.stateChanged";
+
+    /// <summary>
+    /// Event <see cref="VoiceShowPayload"/>, to the page of the project's profile window, else the main window's: the user
+    /// switched to the project by voice ("skift til", "tilbage", #287), and the page shows it.
+    /// </summary>
+    public const string VoiceShow = "voice.show";
 }
 
 public enum VoiceSpeaker { User, Bot }
@@ -118,6 +124,9 @@ public sealed record VoiceStatus(bool Available, VoiceState State, IReadOnlyList
 public sealed record VoiceErrorPayload(SessionService Service, SessionErrorKind Kind, string Message);
 
 public sealed record VoiceServicePayload(SessionService Service);
+
+/// <summary>A project voice switched to (<see cref="ShellMessageTypes.VoiceShow"/>), both IDs as the server gave them.</summary>
+public sealed record VoiceShowPayload(string ServerId, string ProjectId);
 
 /// <summary>The relay's base URL and the per-launch secret it requires (as the access_token query parameter).</summary>
 public sealed record RelayInfo(string BaseUrl, string Secret);

@@ -109,9 +109,9 @@ internal sealed class RecordingEvents : IVoiceEvents
     public void Recovered(SessionService service) { }
 
     /// <summary>Each project voice showed in the app (#287), with its profile, in order.</summary>
-    public ConcurrentQueue<(ProjectRef Project, string? Profile)> Shown { get; } = new();
+    public ConcurrentQueue<(ProjectRef Project, string Profile)> Shown { get; } = new();
 
-    public void Show(ProjectRef project, string? profile) => Shown.Enqueue((project, profile));
+    public void Show(ProjectRef project, string profile) => Shown.Enqueue((project, profile));
 
     public Task SaidAsync(string text) =>
         Eventually.UntilAsync(() => Responses.Contains(text), () => $"the bot to say \"{text}\"; it said: {string.Join(" | ", Responses)}");
