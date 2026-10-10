@@ -438,6 +438,56 @@ public sealed partial class VoicePhrases
         _ => throw new ArgumentOutOfRangeException(nameof(state)),
     };
 
+    /// <summary>"Skift til" (#287): "Skiftet til issue 283. Den kører." / "Switched to issue 283. It is running."</summary>
+    public string Switched(SpokenName name, ListedState state) =>
+        $"{(_danish ? "Skiftet til" : "Switched to")} {Named(name)}. {It(state)}";
+
+    /// <summary>"Tilbage" (#287): "Tilbage til issue 283. Den er idle." / "Back to issue 283. It is idle."</summary>
+    public string WentBack(SpokenName name, ListedState state) =>
+        $"{(_danish ? "Tilbage til" : "Back to")} {Named(name)}. {It(state)}";
+
+    /// <summary>A root or profile as a focus names it (#287): "profil Kappe", "api, profil Kappe", "alle projekter".</summary>
+    public string Scope(VoiceFocus focus) => focus switch
+    {
+        ScopeFocus { IsProfile: true } profile => _danish ? $"profil {profile.Name}" : $"profile {profile.Name}",
+        ScopeFocus root => Named(new SpokenName(root.Name,
+            Profile: string.Equals(root.Name, root.Profile, StringComparison.OrdinalIgnoreCase) ? null : root.Profile)),
+        _ => _danish ? "alle projekter" : "everything",
+    };
+
+    /// <summary>"Skift til" a root or profile, or everything (#287): "Fokus på profil Kappe." / "Focus on profile Kappe."</summary>
+    public string FocusedOn(VoiceFocus focus) => $"{(_danish ? "Fokus på" : "Focus on")} {Scope(focus)}.";
+
+    /// <summary>"Tilbage" to a root or profile, or everything (#287): "Tilbage til profil Kappe."</summary>
+    public string BackTo(VoiceFocus focus) => $"{(_danish ? "Tilbage til" : "Back to")} {Scope(focus)}.";
+
+    /// <summary>
+    /// What leads a reply whose root or profile the focus gave, the user naming none (#287), so a user with no screen
+    /// knows why it says only those: "I profil Kappe:" / "In profile Kappe:".
+    /// </summary>
+    public string InScope(ScopeFocus focus) => $"{(_danish ? "I" : "In")} {Scope(focus)}:";
+
+    /// <summary>"Tilbage" with no switch before it to go back from (#287).</summary>
+    public string NothingToGoBackTo => _danish ? "Intet at gå tilbage til." : "Nothing to go back to.";
+
+    /// <summary>A stop by voice (#287), with how to undo it: "issue 283 er stoppet. Sig genoptag, så fortsætter den."</summary>
+    public string StoppedNow(SpokenName name) =>
+        _danish ? $"{Subject(name)} er stoppet. Sig genoptag, så fortsætter den." : $"{Subject(name)} is stopped. Say resume to go on.";
+
+    /// <summary>A stop of a project that does not run (#287): nothing was stopped. "issue 283 kører ikke. Den er idle."</summary>
+    public string NotRunning(SpokenName name, ListedState state) =>
+        $"{Subject(name)} {(_danish ? "kører ikke" : "is not running")}. {It(state)}";
+
+    /// <summary>A resume by voice (#287): "issue 283 er genoptaget." / "issue 283 is resumed."</summary>
+    public string Resumed(SpokenName name) => _danish ? $"{Subject(name)} er genoptaget." : $"{Subject(name)} is resumed.";
+
+    /// <summary>A resume of a project that is not stopped (#287): nothing was resumed. "issue 283 er ikke stoppet. Den kører."</summary>
+    public string NotStopped(SpokenName name, ListedState state) =>
+        $"{Subject(name)} {(_danish ? "er ikke stoppet" : "is not stopped")}. {It(state)}";
+
+    /// <summary>What a project just named is doing, as a sentence: "Den kører." / "It is running."</summary>
+    private string It(ListedState state) => $"{(_danish ? "Den" : "It")} {Doing(state, 1)}.";
+
     /// <summary>A state as a page's heading: "Venter på dig", "Kører", "Idle", "Stoppet".</summary>
     private string Heading(ListedState state) => (state, _danish) switch
     {
@@ -605,6 +655,25 @@ public sealed partial class VoicePhrases
     /// <summary>The model claimed a send, and none went out this turn (<see cref="SentNode"/>).</summary>
     public string NothingSent => _danish ? "Intet sendt. Sig svaret igen." : "Nothing was sent. Say the answer again.";
 
+    /// <summary>"Gentag" before anything was said (#547).</summary>
+    public string NothingToRepeat => _danish ? "Jeg har ikke sagt noget endnu." : "I haven't said anything yet.";
+
+    /// <summary>
+    /// "Langsommere" / "hurtigere" said while nothing is read (#547): the speed changed for what is said from now on, or
+    /// was at its bound already.
+    /// </summary>
+    public string SpeedChanged(bool slower, bool changed) => (slower, changed, _danish) switch
+    {
+        (true, true, true) => "Langsommere.",
+        (true, true, false) => "Slower.",
+        (false, true, true) => "Hurtigere.",
+        (false, true, false) => "Faster.",
+        (true, false, true) => "Langsommere går det ikke.",
+        (true, false, false) => "That's as slow as it goes.",
+        (false, false, true) => "Hurtigere går det ikke.",
+        (false, false, false) => "That's as fast as it goes.",
+    };
+
     /// <summary>
     /// A delete read back (#532), as the question its yes answers: what is deleted, said once with its root and profile
     /// when they share them, else each with its own, after what the user should know before the yes: that one runs, has
@@ -613,6 +682,10 @@ public sealed partial class VoicePhrases
     /// </summary>
     public string DeleteReadBack(DeleteRequest request)
     {
+        // A stop (#287) asks as the app's Stop does, naming what stops
+        if (request.Action == SessionAction.Stop)
+            return _danish ? $"Skal jeg stoppe {And([.. request.Targets.Select(t => Named(t.Name))])}?"
+                : $"Shall I stop {And([.. request.Targets.Select(t => Named(t.Name))])}?";
         var targets = request.Targets;
         // The topic helps tell one apart; of several, it only makes the question long
         var names = targets is [var one] ? [one.Name] : targets.Select(t => t.Name with { Topic = null }).ToList();
@@ -642,12 +715,34 @@ public sealed partial class VoicePhrases
     /// <summary>A yes after the delete read-back it would have answered was dropped.</summary>
     public string NothingToDelete => _danish ? "Der venter ingen sletning. Sig slet igen." : "Nothing waits to be deleted. Say delete again.";
 
+    /// <summary>The user said yes to a stop read back (#287): it runs, and <see cref="Deleted"/> says when it is done.</summary>
+    public string Stopping => _danish ? "Stopper." : "Stopping.";
+
+    /// <summary>The user said anything but yes to a stop read back (#287).</summary>
+    public string StopCancelled => _danish ? "Annulleret. Intet stoppet." : "Cancelled. Nothing stopped.";
+
+    /// <summary>A yes after the stop read-back it would have answered was dropped (#287).</summary>
+    public string NothingToStop => _danish ? "Der venter intet stop. Sig stop og projektet igen." : "Nothing waits to be stopped. Say stop and the project again.";
+
+    /// <summary>The yes to a delete or stop read back, as <see cref="Deleting"/> or <see cref="Stopping"/>.</summary>
+    public string Confirmed(SessionAction action) => action == SessionAction.Stop ? Stopping : Deleting;
+
+    /// <summary>Anything but yes to a delete or stop read back, as <see cref="DeleteCancelled"/> or <see cref="StopCancelled"/>.</summary>
+    public string Cancelled(SessionAction action) => action == SessionAction.Stop ? StopCancelled : DeleteCancelled;
+
+    /// <summary>A yes after a dropped read-back, as <see cref="NothingToDelete"/> or <see cref="NothingToStop"/>.</summary>
+    public string NothingWaits(SessionAction action) => action == SessionAction.Stop ? NothingToStop : NothingToDelete;
+
     /// <summary>
     /// A confirmed delete done (#532): those deleted, those forgotten, and each that failed, with why, short as a create's
     /// failure (<see cref="Why"/>). "issue 525 og issue 526 er slettet."
     /// </summary>
-    public string Deleted(IReadOnlyList<DeleteOutcome> outcomes)
+    public string Deleted(IReadOnlyList<DeleteOutcome> outcomes, SessionAction action = SessionAction.Delete)
     {
+        if (action == SessionAction.Stop)
+            return string.Join(" ", outcomes.Select(o => GodModeAnnouncementFormatter.Sentence(o.Error is null
+                ? StoppedNow(new SpokenName(o.Target.Name.Label))
+                : Why(_danish ? $"{o.Target.Name.Label} blev ikke stoppet" : $"{o.Target.Name.Label} was not stopped", o.Error))));
         List<string> said = [];
         var deleted = outcomes.Where(o => o.Error is null && !o.Target.Forget).Select(o => o.Target.Name.Label).ToList();
         var forgotten = outcomes.Where(o => o.Error is null && o.Target.Forget).Select(o => o.Target.Name.Label).ToList();

@@ -259,9 +259,17 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
     }
 
     /// <summary>
+    /// Whether <paramref name="text"/> is <paramref name="readBack"/> said again by "gentag" (#547): all of it, or its end,
+    /// from the sentence it was cut in. Its question is at its end, so the yes still answers it.
+    /// </summary>
+    internal static bool SaidAgain(string readBack, string text) =>
+        text.Trim() is { Length: > 0 } said && readBack.EndsWith(said, StringComparison.Ordinal);
+
+    /// <summary>
     /// The bot started saying <paramref name="text"/> (<c>ISessionEventSink.OnResponseAsync</c>): the read-back arms its
-    /// create. Anything else, said while one waits, has the read-back said again after it (<see cref="Repeat"/>), once;
-    /// after that it drops the create, and a yes to it is told nothing waits.
+    /// create, and so does the read-back said again (<see cref="SaidAgain"/>). Anything else, said while one waits, has the
+    /// read-back said again after it (<see cref="Repeat"/>), once; after that it drops the create, and a yes to it is told
+    /// nothing waits.
     /// </summary>
     public void Spoken(string text)
     {
@@ -274,6 +282,11 @@ public sealed partial class SessionCreates(IGodModeServers servers, ProjectHandl
                 _armed = new ArmedCreate(toSay.Request, toSay.ReadBack, Now);
                 _toSay = null;
                 _dropped = false;
+            }
+            // The read-back said again, or its end from where it was cut ("gentag", #547): it still waits on its yes, armed
+            // as it was, so an answer begun since it was first said answers it
+            else if (_armed is { ReadBack: var readBack } && SaidAgain(readBack, text))
+            {
             }
             else if (_armed is { } armed && _repeats < MaxRepeats)
             {

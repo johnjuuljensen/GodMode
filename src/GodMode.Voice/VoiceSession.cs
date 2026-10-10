@@ -26,6 +26,12 @@ public interface IVoiceEvents
 
     /// <summary>A service reported through <see cref="Error"/> works again.</summary>
     void Recovered(SessionService service);
+
+    /// <summary>
+    /// The user switched to <paramref name="project"/> by voice ("skift til", "tilbage", #287): the app shows it, in the
+    /// window of its <paramref name="profile"/> where it has one. A host with no screen ignores it.
+    /// </summary>
+    void Show(ProjectRef project, string profile) { }
 }
 
 /// <summary>Everything one voice session is made from.</summary>
@@ -198,6 +204,7 @@ public sealed class VoiceSession : IAsyncDisposable
         // as a final is taken (#458); the setting turns both off
         var speaker = new CueingSink(setup.Media?.Holding(setup.AudioSink) ?? setup.AudioSink, logger);
         var sounds = setup.Settings.Earcons ? speaker : null;
+        var earcons = new AnnouncementEarcons();
         var state = new VoiceStateTracker();
         state.Changed += setup.Events.StateChanged;
         AsyncServiceScope scope = default;
@@ -208,9 +215,10 @@ public sealed class VoiceSession : IAsyncDisposable
 
             var inference = scope.ServiceProvider.GetRequiredService<IInferenceProvider>();
             var tools = new VoiceTools(setup.Servers, board, projects, handles, conversation, phrases: phrases, staleAfter: setup.Settings.StaleAfter);
+            var playback = GodModeGraph.Playback(languages);
             var session = scope.ServiceProvider.GetRequiredService<SessionFactory>().Build(new SessionInputs(
                 new SessionContext(languages),
-                GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null, roots),
+                GodModeGraph.Build(inference, languages, tools, phrases, heard, setup.Mic is { } mic ? mic.Done : null, roots, playback),
                 setup.Mic is { } listening && setup.Transcription is TranscriptionInput.Audio audio
                     ? TranscriptionInput.FromAudio(listening.Listening(audio.Source))
                     : setup.Transcription,
@@ -218,11 +226,13 @@ public sealed class VoiceSession : IAsyncDisposable
                 new EventSink(setup.Events, state, tools.Creates, tools.Deletes, conversation, setup.Mic, setup.Media, sounds, tools.Dictation))
             {
                 AnnouncementFormatter = new NeverThrowingFormatter(new GodModeAnnouncementFormatter(phrases, conversation, board, tools.Names,
-                    sounds is null ? null : sounds.Cue), logger),
+                    sounds is null ? null : sounds.Cue, earcons), logger),
                 Options = new SessionOptions
                 {
                     LogDirectory = setup.LogDirectory,
                     NoiseWords = NoiseWords(languages),
+                    // "pause", "fortsæt", "langsommere", "hurtigere" steer a reading while it plays, without cutting it (#547)
+                    PlaybackCommands = playback,
                 },
             });
 
@@ -231,6 +241,7 @@ public sealed class VoiceSession : IAsyncDisposable
                 scope.ServiceProvider.GetService<ElevenLabsSttKeyterms>(), logger) { Conversation = conversation };
             projects.Changed += voice.RefreshKeyterms;
             voice.RefreshKeyterms();
+            conversation.Shown += project => setup.Events.Show(project, projects.Find(project)?.Project.ProfileName ?? "Default");
             // Held while a create or its question waits on the user (#473): the yes answers the read-back, never an announcement
             // and while a dictation is taken (#459): one in a pause to think would break it
             var announcements = new HeldAnnouncements(session.Announcements, tools.Creates, tools.Dictation, tools.Deletes, setup.Time);
@@ -240,8 +251,8 @@ public sealed class VoiceSession : IAsyncDisposable
             // Worded again as it is said, anchored by what was said before it (#455): this text is the log's, and the fallback's
             board.Attach((item, handle) => announcements.Write(board.AnnouncementOf(item,
                 phrases.Announce(tools.Names.Full(item.Project) ?? new SpokenName(handle), item.Item))));
-            tools.Creates.Attach(outcome => announcements.Write(new Announcement(phrases.Created(outcome))));
-            tools.Deletes.Attach(outcomes => announcements.Write(new Announcement(phrases.Deleted(outcomes))));
+            tools.Creates.Attach(outcome => announcements.Write(earcons.Cued(new Announcement(phrases.Created(outcome)), Earcons.For(outcome))));
+            tools.Deletes.Attach((request, outcomes) => announcements.Write(new Announcement(phrases.Deleted(outcomes, request.Action))));
             // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
             if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));
             state.Release();
@@ -403,6 +414,8 @@ public sealed class VoiceSession : IAsyncDisposable
             // Called as the speech starts: a create's read-back arms it, anything else drops the one that waits
             creates.Spoken(response);
             deletes.Spoken(response);
+            // A cue the speech before this one did not play (it made no audio) is not this one's (#523)
+            sounds?.SpeechStarted();
             events.Response(response);
             return Task.CompletedTask;
         }

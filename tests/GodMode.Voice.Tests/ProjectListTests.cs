@@ -194,6 +194,28 @@ public sealed class ProjectListTests
         Assert.Contains("Profile Private, root voicebot (1 project):", result);
     }
 
+    /// <summary>
+    /// #523: two servers of one name, with a root of one profile and name, are told apart by a number after the name, in
+    /// the order of their ids; a third server of that name with no such root is said by its name alone.
+    /// </summary>
+    [Fact]
+    public void Same_named_groups_on_two_same_named_servers_are_told_apart_by_number()
+    {
+        var servers = new FakeServers().Named("s-1", "pc").Named("s-2", "pc");
+        var handles = new ProjectHandles();
+        var projects = new ProjectBoard(servers, handles);
+        var conversation = new VoiceConversation();
+        var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, conversation);
+        servers.AddProject("s-2", "Mega/GodMode/261004-issue-2-b", "2-x", root: "GodMode", kind: "issue", profile: "Mega", minutesAgo: 2);
+        servers.AddProject("s-1", "Mega/GodMode/261004-issue-1-a", "1-x", root: "GodMode", kind: "issue", profile: "Mega", minutesAgo: 1);
+
+        var result = tools.ListProjectsText();
+
+        Assert.Equal("2 projekter. Profil Mega, root GodMode, server pc 1: issue 1. Profil Mega, root GodMode, server pc 2: issue 2.",
+            conversation.TakeSaid(result));
+        Assert.Contains("Profile Mega, root GodMode, server pc 2 (1 project):", result);
+    }
+
     /// <summary>#507: a list says each project's topic, after "om", so its commas part the projects.</summary>
     [Fact]
     public void A_list_says_each_projects_topic()

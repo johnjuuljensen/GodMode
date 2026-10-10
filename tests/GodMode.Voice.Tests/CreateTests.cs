@@ -510,6 +510,29 @@ public sealed class CreateTests
         Assert.StartsWith("issue 41 (issue_41, issue): Idle.", await tools.ProjectStatusAsync("41", CancellationToken.None));
     }
 
+    /// <summary>#523: a create's outcome has its earcon, as an attention item's announcement has: done when it was made, failed when not.</summary>
+    [Theory]
+    [InlineData(null, Earcon.Done, "283 er oprettet.")]
+    [InlineData("Issue #283 was not found", Earcon.Failed, "Kunne ikke oprette issue 283 i Godmode / GodMode: Issue #283 was not found.")]
+    public async Task A_creates_outcome_is_cued_by_its_earcon(string? error, Earcon earcon, string announced)
+    {
+        var servers = Servers();
+        servers.CreateError = error;
+        var speaker = new VoiceBot.Testing.RecordingAudioSink();
+        await using var voice = await OfflineVoice.StartAsync(servers, StartIssue283(), speaker: speaker);
+        await voice.Events.SaidAsync("Klar.");
+        voice.Transcriptions.SayAsRecognized("Start issue 283 i GodMode");
+        await voice.Events.SaidAsync(ReadBack283);
+        var before = speaker.Calls.Count;
+
+        voice.Transcriptions.SayAsRecognized("Ja.");
+        await voice.Events.SaidAsync(announced);
+
+        var cue = Earcons.Pcm(earcon, speaker.Format).Length;
+        await Eventually.UntilAsync(() => speaker.Calls.Skip(before).Any(c => c.AudioBytes == cue),
+            () => $"the earcon before the outcome; the speaker had: {string.Join(", ", speaker.Calls.Skip(before).Select(c => c.AudioBytes))}");
+    }
+
     [Fact]
     public async Task A_failed_create_is_announced_with_its_reason()
     {

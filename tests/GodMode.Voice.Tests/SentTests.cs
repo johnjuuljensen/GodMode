@@ -81,6 +81,25 @@ public sealed class SentTests
         Assert.Equal(1, model.Calls);
     }
 
+    /// <summary>
+    /// #523: a compound ask with an answer in it ("hvad venter, og svar 283 ja"). The code's words for what waits are held,
+    /// then the answer's "Sendt til" is said after them: the send's own words do not replace the part before it.
+    /// </summary>
+    [Fact]
+    public async Task A_send_after_a_held_part_is_said_after_it_not_in_its_place()
+    {
+        var model = new ScriptedChatClient()
+            .CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "svar 283 ja" })
+            .CallTool(VoiceTools.Answer, new() { [VoiceTools.ProjectParameter] = "283", [VoiceTools.TextParameter] = "Ja." });
+        var (servers, voice) = await AskedAsync(model);
+        await using var _ = voice;
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og svar 283 ja");
+        await voice.Events.SaidAsync("issue 283 har et spørgsmål. Sendt til issue 283.");
+
+        Assert.Equal((P283, "Ja."), Assert.Single(servers.Replies));
+    }
+
     /// <summary>A send in an earlier turn is no send in this one.</summary>
     [Fact]
     public async Task Sendt_after_a_send_in_an_earlier_turn_is_not_said()

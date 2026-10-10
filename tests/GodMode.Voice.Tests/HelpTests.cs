@@ -9,14 +9,14 @@ public sealed class HelpTests
     private static readonly string Danish = HelpNode.Say(GraphTools(), danish: true);
     private static readonly string English = HelpNode.Say(GraphTools(), danish: false);
 
-    /// <summary>The names of the tools GodMode's graph has.</summary>
+    /// <summary>The names of the tools GodMode's graph has, and the commands it takes by code (#547).</summary>
     private static IReadOnlyCollection<string> GraphTools()
     {
         var servers = new FakeServers();
         var handles = new ProjectHandles();
         var projects = new ProjectBoard(servers, handles);
         var tools = new VoiceTools(servers, new AttentionBoard(servers, handles, projects), projects, handles, new VoiceConversation());
-        return [.. GodModeGraph.AddTools(new ToolSet(), tools).ResolveAll().Keys];
+        return [.. GodModeGraph.AddTools(new ToolSet(), tools).ResolveAll().Keys, .. ReplayNode.Commands];
     }
 
     /// <summary>
@@ -251,7 +251,7 @@ public sealed class HelpTests
         Assert.DoesNotContain(Danish, voice.Events.Responses);
     }
 
-    /// <summary>The list is what the graph can do: every tool it has has its hint, and help says each.</summary>
+    /// <summary>The list is what the graph can do: every tool it has, and every command it takes by code (#547), has its hint, and help says each.</summary>
     [Fact]
     public void The_list_names_every_tool_of_the_graph()
     {
@@ -260,7 +260,7 @@ public sealed class HelpTests
         Assert.Empty(tools.Except(HelpNode.Hints.Select(h => h.Tool)));
         Assert.All(HelpNode.Hints, h => Assert.Contains(h.Danish, Danish));
         Assert.All(HelpNode.Hints, h => Assert.Contains(h.English, English));
-        Assert.Equal("Du kan sige: hvad venter, hvilke projekter er der, status og et projekt, læs svaret og et projekt, læs videre, svar at og dit svar, læst, ryd alle, marker som vigtig, start issue og et nummer, slet og et projekt, stille eller sig til igen.", Danish);
+        Assert.Equal("Du kan sige: hvad venter, hvilke projekter er der, status og et projekt, læs svaret og et projekt, læs videre, svar at og dit svar, læst, ryd alle, marker som vigtig, start issue og et nummer, slet og et projekt, skift til et projekt eller en profil, tilbage, kig på et projekt, stop et projekt, genoptag et projekt, stille, sig til igen, gentag, spol tilbage, fra starten, pause eller langsommere.", Danish);
     }
 
     /// <summary>A tool the graph does not have is not offered.</summary>

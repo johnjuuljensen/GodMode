@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using GodMode.Shared.Enums;
@@ -86,6 +87,90 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     }
 
     private sealed record Topic(ProjectRef? Project, AnnouncedSwitch? Switched);
+
+    /// <summary>How many focuses switched away from "tilbage" can go back through (#287).</summary>
+    private const int SwitchesKept = 16;
+
+    private readonly Lock _focusLock = new();
+    private VoiceFocus _focus = VoiceFocus.Everything;
+    // The focuses switched away from, the last at the end
+    private readonly List<VoiceFocus> _switchedFrom = [];
+
+    /// <summary>The user switched to a project by voice (<see cref="SwitchTo"/>, <see cref="Back"/>): the app shows it.</summary>
+    public event Action<ProjectRef>? Shown;
+
+    /// <summary>
+    /// What the user switched to last (#287): a project, a root or a profile, or <see cref="VoiceFocus.Everything"/>. A
+    /// root's or profile's is the default of the commands that take one when the user names none; a project's is the
+    /// project talked about (<see cref="Current"/>) as the switch left it.
+    /// </summary>
+    public VoiceFocus Focus
+    {
+        get { lock (_focusLock) return _focus; }
+    }
+
+    /// <summary>The root or profile in focus, the default scope of a command that names none; null for a project or everything.</summary>
+    public ScopeFocus? Scope => Focus as ScopeFocus;
+
+    /// <summary>
+    /// "Skift til" (#287): <paramref name="focus"/> is the focus from now on, and the one before it is where "tilbage"
+    /// goes (<see cref="Back"/>). A project's is the project talked about, and the app shows it; a status read, an answer
+    /// or an announcement moves the project talked about, but is no switch, and leaves none.
+    /// </summary>
+    public void SwitchTo(VoiceFocus focus)
+    {
+        lock (_focusLock)
+        {
+            if (_focus != focus)
+            {
+                _switchedFrom.Add(_focus);
+                if (_switchedFrom.Count > SwitchesKept) _switchedFrom.RemoveAt(0);
+            }
+            _focus = focus;
+        }
+        Focused(focus);
+    }
+
+    /// <summary>
+    /// "Tilbage" (#287): the focus switched away from last that is still there (<paramref name="there"/>) is the focus
+    /// again; those gone since are passed over. Null when there is none.
+    /// </summary>
+    public VoiceFocus? Back(Func<VoiceFocus, bool> there)
+    {
+        VoiceFocus? back = null;
+        lock (_focusLock)
+        {
+            while (back is null && _switchedFrom.Count > 0)
+            {
+                var last = _switchedFrom[^1];
+                _switchedFrom.RemoveAt(_switchedFrom.Count - 1);
+                if (there(last) && last != _focus) back = last;
+            }
+            if (back is not null) _focus = back;
+        }
+        if (back is not null) Focused(back);
+        return back;
+    }
+
+    /// <summary>A project in focus is the project talked about, and the app shows it.</summary>
+    private void Focused(VoiceFocus focus)
+    {
+        if (focus is not ProjectFocus { Project: var project }) return;
+        Current = project;
+        Shown?.Invoke(project);
+    }
+
+    /// <summary>
+    /// <paramref name="result"/>, which the code says itself (<see cref="SaysItself"/>), said as <paramref name="said"/>
+    /// rewords it, with <paramref name="reworded"/> as the tool's text from now on; unchanged when the code does not say
+    /// it, and the model does. <paramref name="reworded"/> either way.
+    /// </summary>
+    public string Reword(string result, Func<string, string> said, string reworded)
+    {
+        if (Volatile.Read(ref _said) is { } by && by.Result == result)
+            Interlocked.CompareExchange(ref _said, by with { Result = reworded, Said = said(by.Said) }, by);
+        return reworded;
+    }
 
     private string? _lastProfile;
 
@@ -192,6 +277,30 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     {
         get => Volatile.Read(ref _reading);
         set => Volatile.Write(ref _reading, value);
+    }
+
+    private ReplyReading? _partRead;
+
+    /// <summary>
+    /// A tool read <paramref name="reading"/>'s part <see cref="ReplyReading.Next"/> − 1 for the model to say (#547): what
+    /// the evaluation then says is kept as that part's words (<see cref="PartSaid"/>).
+    /// </summary>
+    public void PartRead(ReplyReading reading)
+    {
+        Volatile.Write(ref _partRead, reading);
+        Reading = reading;
+    }
+
+    /// <summary>
+    /// The evaluation is done, and said <paramref name="said"/> (null for nothing): the part a tool read in it, if any, was
+    /// said so, kept on the reading for "fra starten" and "gentag afsnittet" (<see cref="ReplyReading.Said"/>), while it
+    /// is still the reading.
+    /// </summary>
+    public void PartSaid(string? said)
+    {
+        if (Interlocked.Exchange(ref _partRead, null) is not { } read || said is null) return;
+        if (Reading is ReplyReading reading && reading.Project == read.Project && ReferenceEquals(reading.Parts, read.Parts))
+            Reading = reading with { Said = reading.Said.SetItem(read.Next - 1, said) };
     }
 
     private ConcurrentQueue<SpokenName> _sent = new();
@@ -303,6 +412,27 @@ public sealed class VoiceConversation(TimeProvider? time = null)
 /// </summary>
 public sealed record SaidByCode(string Result, string Said, string? Then = null);
 
+/// <summary>What "skift til" put the conversation on (#287): a project, a root or a profile, or everything.</summary>
+public abstract record VoiceFocus
+{
+    /// <summary>No focus: every profile and root.</summary>
+    public static readonly VoiceFocus Everything = new AllFocus();
+
+    private sealed record AllFocus : VoiceFocus;
+}
+
+/// <summary>A project in focus: the project talked about, shown in the app.</summary>
+public sealed record ProjectFocus(ProjectRef Project) : VoiceFocus;
+
+/// <summary>
+/// A root or profile in focus: <paramref name="Name"/> is what the lists and a start take it by (a profile's name, or a
+/// root's, as shown); <paramref name="Profile"/> is a root's profile, and null for a profile itself.
+/// </summary>
+public sealed record ScopeFocus(string Name, string? Profile) : VoiceFocus
+{
+    public bool IsProfile => Profile is null;
+}
+
 /// <summary>How much of a project's anchor a line gives (#455, <see cref="VoiceConversation.Mention"/>).</summary>
 public enum Anchor
 {
@@ -325,10 +455,18 @@ public sealed record AnnouncedSwitch(ProjectRef From, ProjectRef To, DateTimeOff
 /// <summary>
 /// A project's reply in the parts voice reads it in, and the index of the part to read next (its count once all were
 /// read). <paramref name="Replies"/> are the replies it was read from, the last <paramref name="Turns"/>: while the
-/// project's are still these, the parts are what it said last.
+/// project's are still these, the parts are what it said last. Each part names the project as a line said then does
+/// (<see cref="ProjectNames.Of"/>, #523), not as the first part did.
 /// </summary>
-public sealed record ReplyReading(ProjectRef Project, string Handle, IReadOnlyList<string> Parts, int Next, int Turns, IReadOnlyList<AssistantReply> Replies)
-    : PagedReading;
+public sealed record ReplyReading(ProjectRef Project, IReadOnlyList<string> Parts, int Next, int Turns, IReadOnlyList<AssistantReply> Replies)
+    : PagedReading
+{
+    /// <summary>
+    /// What was said for each part read, by its index (#547): the model's words for it, which "fra starten" and "gentag
+    /// afsnittet" say again (<see cref="ReplayNode"/>).
+    /// </summary>
+    public ImmutableDictionary<int, string> Said { get; init; } = ImmutableDictionary<int, string>.Empty;
+}
 
 /// <summary>
 /// What "mere" reads on in (<see cref="VoiceConversation.Reading"/>): a reply, a long project list, or the last line said
@@ -360,10 +498,11 @@ public sealed record ListReading(IReadOnlyList<(string Result, string Said)> Pag
 /// what waits for the pause is ordered. An item's announcement is worded here too, with <paramref name="names"/>, as it is
 /// said (#455): how much of its project it names depends on what was said just before it
 /// (<see cref="VoiceConversation.Mention"/>), which is known only now. What is said is cued with <paramref name="cue"/>: the
-/// earcon of its first item (<see cref="Earcons.For"/>), played before its words (<see cref="CueingSink"/>).
+/// earcon of the first said that has one to say (<see cref="Earcons.For(AttentionItem)"/>), an item, or an announcement
+/// of none given one (<paramref name="earcons"/>: a create's outcome, #523), played before its words (<see cref="CueingSink"/>).
 /// </summary>
 public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConversation conversation, AttentionBoard? board = null,
-    ProjectNames? names = null, Action<Earcon>? cue = null)
+    ProjectNames? names = null, Action<Earcon>? cue = null, AnnouncementEarcons? earcons = null)
     : IAnnouncementFormatter
 {
     public string Format(IReadOnlyList<Announcement> announcements, SessionLanguages languages)
@@ -385,9 +524,10 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
             if (projects is [var one] && ProjectRef.FromKey(one) is { } announced)
                 conversation.Reading = new ProjectLine(announced, Read: false);
         }
-        // VoiceBot says it now: its earcon goes before it (#455), the first item's, which is the most urgent
-        if (texts.Length > 0 && waiting.Select(a => a.Item).OfType<ServerAttentionItem>().FirstOrDefault() is { } first
-            && Earcons.For(first.Item) is { } earcon)
+        // VoiceBot says it now: its earcon goes before it (#455), the first's that has one to say: a create's outcome
+        // (#523), else the first item, which is the most urgent
+        if (texts.Length > 0 && waiting.Select(a => a.Item is { } item ? (Says: true, Earcon: Earcons.For(item.Item)) : EarconOf(a.Announcement))
+                .FirstOrDefault(e => e.Says).Earcon is { } earcon)
             cue?.Invoke(earcon);
 
         return texts switch
@@ -424,6 +564,10 @@ public sealed class GodModeAnnouncementFormatter(VoicePhrases phrases, VoiceConv
             conversation.Mention(project);
         return announcement.Text;
     }
+
+    /// <summary>The earcon an announcement of no item was given (<see cref="AnnouncementEarcons"/>); one given none says nothing of it.</summary>
+    private (bool Says, Earcon? Earcon) EarconOf(Announcement announcement) =>
+        earcons?.Of(announcement) is { } earcon ? (true, earcon) : (false, null);
 
     /// <summary>The item the announcement is of, as the board has it now; null for one of no project.</summary>
     private ServerAttentionItem? ItemOf(Announcement announcement) =>
