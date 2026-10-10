@@ -179,6 +179,13 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// </summary>
     private readonly Dictionary<string, string> _unbound = new();
 
+    /// <summary>
+    /// The tracked sessions whose state folder (<see cref="ProjectInfo.StatePath"/>) the last refresh found
+    /// gone, by ID. As for <see cref="_unbound"/>, one refresh is not enough to act on: a folder moved for
+    /// a moment is back by the next.
+    /// </summary>
+    private readonly HashSet<string> _stateGone = new();
+
     /// <summary>The roots and profiles the last refresh made, and what they serialize to, which says whether they changed.</summary>
     private sealed record RootsView(ProjectRootInfo[] Roots, ProfileInfo[] Profiles, string Json);
     private RootsView? _rootsView;
@@ -2482,7 +2489,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// is no longer tracked, its files left as they are, and, when its folder is still a root, it is
     /// recovered again under the ID it has there: <c>{profile}/{root}/{id}</c> names both. One whose
     /// claude runs or launches carries on under its ID until claude exits, and its root's config and
-    /// scripts are read from its folder all along. Then every root whose sessions were not recovered
+    /// scripts are read from its folder all along. A session of a root still there whose state folder
+    /// is gone leaves alike (<see cref="TryLetGoOfGoneStateAsync"/>). Then every root whose sessions were not recovered
     /// under its profile and name (one that appeared) has them recovered, as at the start. Each session
     /// that goes is pushed as ProjectDeleted, and each that comes as ProjectCreated. Says whether any did.
     /// </summary>
@@ -2498,8 +2506,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             if (string.Equals(foundAs, trackedAs, StringComparison.OrdinalIgnoreCase))
             {
                 _unbound.Remove(id);
+                if (await TryLetGoOfGoneStateAsync(project)) gone.Add(id);
                 continue;
             }
+            _stateGone.Remove(id);
             if (!_unbound.TryGetValue(id, out var before) || !string.Equals(before, foundAs, StringComparison.OrdinalIgnoreCase))
             {
                 _unbound[id] = foundAs;
@@ -2520,6 +2530,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             }
         }
         foreach (var id in _unbound.Keys.Where(id => !_projects.ContainsKey(id)).ToArray()) _unbound.Remove(id);
+        _stateGone.RemoveWhere(id => !_projects.ContainsKey(id));
 
         var roots = RootsOf(snap);
         foreach (var path in _recoveredRoots.Keys.Where(path => !roots.Any(root => PathComparer.Equals(root.Path, path))).ToArray())
@@ -2537,6 +2548,39 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             await PushAsync(() => _hubContext.Clients.All.ProjectCreated(status), $"project {status.Id} joining the list");
         }
         return gone.Count > 0 || recovered.Count > 0;
+    }
+
+    /// <summary>
+    /// Lets go of a session of a root still there whose state folder (<see cref="ProjectInfo.StatePath"/>)
+    /// is gone, its working folder with it or not (a worktree removed outside GodMode): as a root that
+    /// is gone, once two refreshes in a row find it so, and only without a claude, running or
+    /// launching. One whose claude runs carries on, and leaves at the first read after claude exits.
+    /// A create in progress, and a create that failed (which may never have made its folder), are left
+    /// alone. What the server keeps for it goes too, as at a delete: its fleet record and inbox (its
+    /// attention item goes with it from the list). Its create log and result in <c>{root}/logs</c> stay,
+    /// as a delete's and a forget's do. Says whether it went.
+    /// </summary>
+    private async Task<bool> TryLetGoOfGoneStateAsync(ProjectInfo project)
+    {
+        var id = project.Status.Id;
+        if (Directory.Exists(project.StatePath) || project.Status.CreateFailed || IsClaimedByCreate(project.ProjectPath))
+        {
+            _stateGone.Remove(id);
+            return false;
+        }
+        var folder = Directory.Exists(project.ProjectPath) ? project.StatePath : project.ProjectPath;
+        if (_stateGone.Add(id))
+        {
+            _logger.LogInformation("Project {ProjectId}: its folder {Folder} is gone. Without a claude it leaves the list once the next read of the roots agrees; with one it carries on until claude exits",
+                id, folder);
+            return false;
+        }
+        if (!await TryForgetAsync(project)) return false;
+
+        _stateGone.Remove(id);
+        ForgetFleetGrant(project, setAside: false);
+        _logger.LogInformation("Project {ProjectId} left the list: its folder {Folder} is gone", id, folder);
+        return true;
     }
 
     /// <summary>
