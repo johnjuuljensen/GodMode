@@ -34,7 +34,7 @@ public sealed class GoneFolderTests
                 refused = ex;
                 return Task.FromResult(false);
             }
-        }, null, () => $"{path} could not be deleted: {refused?.Message}");
+        }, TestTimeouts.Wait, () => $"{path} could not be deleted: {refused?.Message}");
     }
 
     private static bool Deleted(LifecycleHarness harness, string projectId) =>
@@ -62,7 +62,7 @@ public sealed class GoneFolderTests
 
         await DeleteAsync(harness.ProjectPath(project.Id));
 
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Deleted(harness, project.Id)), null,
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Deleted(harness, project.Id)), TestTimeouts.Wait,
             () => $"no ProjectDeleted for {project.Id}; pushed: {string.Join(", ", harness.Hub.Pushes.Select(p => $"{p.Method} {p.ProjectId}"))}");
         Assert.False(await ListedAsync(harness, project.Id));
         Assert.DoesNotContain(harness.Projects.GetAllAttention(), item => item.ProjectId == project.Id);
@@ -100,7 +100,7 @@ public sealed class GoneFolderTests
 
         await harness.Projects.ListProjectRootsAsync();
         Assert.False(await ListedAsync(harness, project.Id), "the second read in a row lets it go");
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Deleted(harness, project.Id)), null, () => $"no ProjectDeleted for {project.Id}");
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Deleted(harness, project.Id)), TestTimeouts.Wait, () => $"no ProjectDeleted for {project.Id}");
         Assert.True(Directory.Exists(harness.ProjectPath(project.Id)), "its working folder, still there, is left as it is");
     }
 
@@ -133,6 +133,6 @@ public sealed class GoneFolderTests
         await harness.Projects.ListProjectRootsAsync();
         await harness.Projects.ListProjectRootsAsync();
         Assert.False(await ListedAsync(harness, project.Id), "once claude has exited, it leaves");
-        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Deleted(harness, project.Id)), null, () => $"no ProjectDeleted for {project.Id}");
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(Deleted(harness, project.Id)), TestTimeouts.Wait, () => $"no ProjectDeleted for {project.Id}");
     }
 }
