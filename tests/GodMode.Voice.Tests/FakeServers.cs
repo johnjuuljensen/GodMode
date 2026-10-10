@@ -211,6 +211,24 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         return Task.CompletedTask;
     }
 
+    /// <summary>Each project stopped (<c>StopProject</c>, #287), in order.</summary>
+    public ConcurrentQueue<ProjectRef> Stops { get; } = new();
+
+    /// <summary>Each project resumed (<c>ResumeProject</c>, #287), in order.</summary>
+    public ConcurrentQueue<ProjectRef> Resumes { get; } = new();
+
+    public Task StopAsync(ProjectRef project, CancellationToken ct)
+    {
+        Stops.Enqueue(project);
+        return Task.CompletedTask;
+    }
+
+    public Task ResumeAsync(ProjectRef project, CancellationToken ct)
+    {
+        Resumes.Enqueue(project);
+        return Task.CompletedTask;
+    }
+
     /// <summary>Each delete, in order: the project, and whether it was only forgotten (#532).</summary>
     public ConcurrentQueue<(ProjectRef Project, bool Forgot)> Deletes { get; } = new();
 

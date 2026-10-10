@@ -65,7 +65,7 @@ public sealed class ShellBridge : IDisposable
         Attached.AddOrUpdate(profile ?? "", shell, (_, attached) => { before = attached; return shell; });
         before?.Dispose();
         shell.Register();
-        shell._voicePage = shell._voice.Attach(shell._bridge.Send);
+        shell._voicePage = shell._voice.Attach(profile, shell._bridge.Send);
         if (shell.IsMain)
         {
             // On Windows, should taps come, one belongs in the window holding the item's profile (its bridge's

@@ -52,6 +52,13 @@ export function withLine(lines: VoiceLine[], line: VoiceLine): VoiceLine[] {
   return [...kept, line];
 }
 
+/**
+ * Calls `show` with each project the user switches to by voice ("skift til", "tilbage", #287), which the shell sends
+ * to the window that holds its profile.
+ */
+export const subscribeVoiceShow = (show: (serverId: string, projectId: string) => void): (() => void) =>
+  bridge.on('voice.show', ({ ServerId, ProjectId }) => show(ServerId, ProjectId));
+
 /** Voice as the shell reports it, kept current by its events. Null until the shell answers. */
 export function useVoice(): VoiceStatus | null {
   const [status, setStatus] = useState<VoiceStatus | null>(null);
