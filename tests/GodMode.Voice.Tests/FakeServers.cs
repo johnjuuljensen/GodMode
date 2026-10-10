@@ -301,10 +301,19 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     public static AttentionItem CreateFailed(string projectId, string name, string reason, int minutesAgo = 5) =>
         new(projectId, name, "Default", "root", AttentionKind.Error, DateTime.UtcNow.AddMinutes(-minutesAgo), reason, CreateFailed: true);
 
+    private readonly ConcurrentDictionary<string, string> _names = new();
+
+    /// <summary>The server's name, as the app shows it, for the projects pushed from now on: its id when unset.</summary>
+    public FakeServers Named(string serverId, string name)
+    {
+        _names[serverId] = name;
+        return this;
+    }
+
     private void PushProjects(string serverId)
     {
         _servers.TryAdd(serverId, 0);
-        ProjectsChanged?.Invoke(serverId, serverId, [.. _statuses.Where(s => s.Key.ServerId == serverId)
+        ProjectsChanged?.Invoke(serverId, _names.GetValueOrDefault(serverId, serverId), [.. _statuses.Where(s => s.Key.ServerId == serverId)
             .Select(s => Summary(s.Value) with { RecordedParentId = _parents.GetValueOrDefault(s.Key) })]);
     }
 
