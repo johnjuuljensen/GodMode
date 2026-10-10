@@ -35,6 +35,11 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     public const string StartSession = "start_session";
     public const string MarkAllSeen = "mark_all_seen";
     public const string DeleteSession = "delete_session";
+    public const string SwitchProject = "switch_project";
+    public const string GoBack = "go_back";
+    public const string PeekProject = "peek_project";
+    public const string StopProject = "stop_project";
+    public const string ResumeProject = "resume_project";
 
     public const string ProjectParameter = "project";
     public const string TextParameter = "text";
@@ -1095,6 +1100,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         return SaysItself($"The system reads back \"{readBack}\" itself, in place of your reply. Nothing is deleted until the " +
             "user says yes to it, which is not yours to answer: never say it was deleted.", readBack);
     }
+
+    public Task<string> StopProjectAsync(string? reference, CancellationToken ct) => throw new NotImplementedException();
 
     /// <summary>
     /// The project named, or the one the conversation is about when none is named, while it is still there. Every
