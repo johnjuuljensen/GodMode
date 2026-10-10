@@ -272,19 +272,16 @@ public sealed class VoiceSessionTests
         await using (voice)
         {
             await voice.Events.SaidAsync("Klar.");
-            await ListeningAsync(voice);
+            await voice.ListeningAsync();
             var before = voice.Events.States.Count;
 
             voice.Transcriptions.AddFinal("Hvad venter på mig?");
             await voice.Events.SaidAsync("Intet venter.");
-            await ListeningAsync(voice);
+            await voice.ListeningAsync();
 
             Assert.Equal([VoiceState.Thinking, VoiceState.Speaking, VoiceState.Listening], voice.Events.States.Skip(before));
         }
         Assert.Equal(VoiceState.Off, voice.Events.States.Last());
-
-        static Task ListeningAsync(OfflineVoice voice) => Eventually.UntilAsync(() => voice.Session.State == VoiceState.Listening,
-            () => $"the session to listen; it is {voice.Session.State}, after {string.Join(", ", voice.Events.States)}");
     }
 
     /// <summary>

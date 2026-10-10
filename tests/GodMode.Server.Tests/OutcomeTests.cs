@@ -25,10 +25,12 @@ public class OutcomeTests
         var script = new FakeScript().EmitInit()
             .AwaitStdin().EmitUser("Start", echo: true).Speak(Spoken, outcome: outcome).EmitAssistant(reply).EmitResult(reply)
             .AwaitStdin();
-        var run = await FleetRun.StartAsync(script);
-        var id = await run.CreateOverHubAsync("worker");
-        var ended = await run.Client.WaitForAsync(id, s => s is { LastResult: not null, State: not ProjectState.Running }, run.Server);
-        return (run, id, ended);
+        return await (await FleetRun.StartAsync(script)).SetUpAsync(async run =>
+        {
+            var id = await run.CreateOverHubAsync("worker");
+            var ended = await run.Client.WaitForAsync(id, s => s is { LastResult: not null, State: not ProjectState.Running }, run.Server);
+            return (run, id, ended);
+        });
     }
 
     private static async Task<AttentionItem?> ItemAsync(FleetRun run, string id) =>

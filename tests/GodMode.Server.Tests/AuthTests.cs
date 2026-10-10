@@ -493,7 +493,7 @@ public class AuthTests
         var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
         {
             BaseAddress = new Uri(baseUrl),
-            Timeout = TimeSpan.FromSeconds(10),
+            Timeout = TestTimeouts.Request,
         };
         var run = new Run(server, http, baseUrl, ownsWorkDir);
         try

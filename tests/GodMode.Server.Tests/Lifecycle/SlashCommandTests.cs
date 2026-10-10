@@ -125,6 +125,10 @@ public class SlashCommandTests
             async () => Output(harness, created.Id).Contains("\"num_turns\":0")
                 && (await harness.Projects.GetStatusAsync(created.Id)).State == ProjectState.Idle,
             null, () => $"the clear did not end.\n{harness.Describe(created.Id)}");
+        // A line is broadcast once its state is saved, after the state the wait saw (#371)
+        await LifecycleHarness.WaitUntilAsync(
+            () => Task.FromResult(live.Received.Any(p => p.ProjectId == created.Id && p.RawJson?.Contains("\"num_turns\":0") == true)),
+            null, () => $"the clear's result did not reach the connection.\n{harness.Describe(created.Id)}");
 
         // The new generation's file starts with the reset; the old one is kept beside it, whole
         var after = await OutputLog.GenerationAsync(statePath);

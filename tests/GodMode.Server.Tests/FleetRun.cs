@@ -87,7 +87,7 @@ internal sealed class FleetRun : IAsyncDisposable
         run.BaseUrl = $"http://127.0.0.1:{ServerProcess.GetFreePort()}";
         try
         {
-            run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TimeSpan.FromSeconds(10) };
+            run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TestTimeouts.Request };
             await run.StartServerAsync();
             return run;
         }
@@ -107,6 +107,20 @@ internal sealed class FleetRun : IAsyncDisposable
         await Server.WaitForHealthyAsync(Http);
         Client = new ServerHubClient(BaseUrl);
         await Client.StartAsync();
+    }
+
+    /// <summary>
+    /// The rest of a test's set-up on the run, which disposes it when the set-up fails: the test never
+    /// gets the run to dispose, as with <see cref="StartAsync(FakeScript, string)"/>'s own start.
+    /// </summary>
+    public async Task<T> SetUpAsync<T>(Func<FleetRun, Task<T>> setUp)
+    {
+        try { return await setUp(this); }
+        catch
+        {
+            await DisposeAsync();
+            throw;
+        }
     }
 
     /// <summary>Kills the server, as a crash would, and starts another over the same roots and port, which recovers their sessions.</summary>
@@ -149,7 +163,7 @@ internal sealed class FleetRun : IAsyncDisposable
             Endpoint = new Uri(entry.Url),
             TransportMode = HttpTransportMode.StreamableHttp,
             AdditionalHeaders = entry.Headers.ToDictionary(),
-        }));
+        }), TestTimeouts.McpClient());
 
     /// <summary>The status of an MCP <c>initialize</c> to <paramref name="path"/> with the credential, and the project named: whether the caller got in.</summary>
     public async Task<HttpStatusCode> InitializeAsync(string path, string? token, string? projectId = null)
@@ -183,7 +197,7 @@ internal sealed class FleetRun : IAsyncDisposable
             Endpoint = new Uri(BaseUrl + GodModeMcp.FleetPath),
             TransportMode = HttpTransportMode.StreamableHttp,
             AdditionalHeaders = new Dictionary<string, string> { ["Authorization"] = $"Bearer {ServerProcess.ApiKey}" },
-        }));
+        }), TestTimeouts.McpClient());
 
     /// <summary>The tool's JSON answer; fails the test when the tool refused.</summary>
     public async Task<JsonElement> CallAsync(McpClient fleet, string tool, Dictionary<string, object?>? arguments = null)
