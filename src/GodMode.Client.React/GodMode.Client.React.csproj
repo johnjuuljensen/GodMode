@@ -19,6 +19,8 @@
   <!-- Track React sources for incremental build -->
   <ItemGroup>
     <_ReactSource Include="src\**\*" />
+    <!-- Copied into dist/ as they are -->
+    <_ReactSource Include="public\**\*" />
     <_ReactSource Include="index.html" />
     <_ReactSource Include="package.json" />
     <_ReactSource Include="package-lock.json" />

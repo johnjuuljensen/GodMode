@@ -1,7 +1,9 @@
 // Deleting a session, from its row in the list or from its view (#325). DeleteProject as it is (the
 // root's delete script first, never forced unless the user chooses it after a refusal), and then:
 // - a session that shares its working folder loses only its state, into the folder's trash: it goes at
-//   once, and "Deleted · Undo" brings it back (RestoreProject), with no dialog;
+//   once, and "Deleted · Undo" brings it back (RestoreProject), with no dialog. A shared create that failed
+//   before its session had its state takes the folder it made too, also with no dialog: the server removes
+//   it only while it holds nothing but its .godmode, so nothing of the user's goes ("… and its folder");
 // - any other loses its working folder and every file in it, which nothing brings back: a dialog names
 //   the session and what goes, and asks first.
 // An adopted session (#370) was a folder before GodMode had it: its delete always asks, and offers

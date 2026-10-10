@@ -115,6 +115,8 @@ internal sealed class LifecycleHarness : IAsyncDisposable
             [ProjectManager.StatusScriptTimeoutSetting] = Seconds(TestTimeouts.Script),
             // Caps a shutdown's grace period, which a test that waits on claude's answer to the interrupt raises
             [ProjectManager.ShutdownTimeoutSetting] = Seconds(TestTimeouts.Script),
+            // The data directory, and so the fallback root a server with no roots has and holds, is the harness's own
+            [ApiKeyFile.PathSetting] = Path.Combine(_workDir, "data", ApiKeyFile.FileName),
         };
         foreach (var (variable, value) in profileEnvironment ?? new Dictionary<string, string>())
             configuration[$"{RootSources.ProfilesSection}:{ProfileName}:Environment:{variable}"] = value;

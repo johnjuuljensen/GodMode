@@ -221,7 +221,7 @@ public class ClaudeProcessManager : IClaudeProcessManager
         }
 
         // Its own tree, off the server's console: what a stop interrupts, then kills whole
-        var tree = SessionProcessTree.Create(_logger);
+        var tree = SessionProcessTree.Create(_logger, SessionProcessTree.RecordPathFor(project.RootPath, project.SessionId));
         try
         {
             tree.Prepare(startInfo);

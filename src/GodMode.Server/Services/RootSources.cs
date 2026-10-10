@@ -71,7 +71,9 @@ public sealed record ScanFolder(string Key, string Folder);
 
 /// <summary>
 /// A root named in config, anywhere on disk: <c>Roots:Explicit:&lt;Name&gt;</c>. <paramref name="Profile"/>
-/// is its profile, and <paramref name="Title"/> its title, when the root's own config.json names none.
+/// is its profile, over any <c>profileName</c> the root's own config.json names: the host's config, which
+/// holds the profiles' secrets, says whose a root gets. <paramref name="Title"/> is its title when the
+/// root's config.json names none.
 /// </summary>
 public sealed record ExplicitRoot(string Name, string Path, string? Profile, string? Title = null);
 

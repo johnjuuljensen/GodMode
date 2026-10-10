@@ -95,6 +95,9 @@ builder.Services.AddGodModeMcp();
 
 var app = builder.Build();
 EnvironmentExpander.Logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(EnvironmentExpander));
+// A save of the instance's file that does not parse keeps the config it had: said in the log
+InstanceConfig.ReportRefusedReloads(builder.Configuration, (path, error) =>
+    app.Logger.LogError(error, "The config file {ConfigFile} was not reloaded, and its last good config is kept: fix the file", path));
 
 // Configure the HTTP request pipeline. The server serves no page and no browser is its client: a request
 // with an Origin is refused first, before authentication
