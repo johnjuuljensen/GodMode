@@ -642,6 +642,10 @@ public sealed partial class VoicePhrases
     /// </summary>
     public string DeleteReadBack(DeleteRequest request)
     {
+        // A stop (#287) asks as the app's Stop does, naming what stops
+        if (request.Action == SessionAction.Stop)
+            return _danish ? $"Skal jeg stoppe {And([.. request.Targets.Select(t => Named(t.Name))])}?"
+                : $"Shall I stop {And([.. request.Targets.Select(t => Named(t.Name))])}?";
         var targets = request.Targets;
         // The topic helps tell one apart; of several, it only makes the question long
         var names = targets is [var one] ? [one.Name] : targets.Select(t => t.Name with { Topic = null }).ToList();
@@ -671,12 +675,34 @@ public sealed partial class VoicePhrases
     /// <summary>A yes after the delete read-back it would have answered was dropped.</summary>
     public string NothingToDelete => _danish ? "Der venter ingen sletning. Sig slet igen." : "Nothing waits to be deleted. Say delete again.";
 
+    /// <summary>The user said yes to a stop read back (#287): it runs, and <see cref="Deleted"/> says when it is done.</summary>
+    public string Stopping => _danish ? "Stopper." : "Stopping.";
+
+    /// <summary>The user said anything but yes to a stop read back (#287).</summary>
+    public string StopCancelled => _danish ? "Annulleret. Intet stoppet." : "Cancelled. Nothing stopped.";
+
+    /// <summary>A yes after the stop read-back it would have answered was dropped (#287).</summary>
+    public string NothingToStop => _danish ? "Der venter intet stop. Sig stop og projektet igen." : "Nothing waits to be stopped. Say stop and the project again.";
+
+    /// <summary>The yes to a delete or stop read back, as <see cref="Deleting"/> or <see cref="Stopping"/>.</summary>
+    public string Confirmed(SessionAction action) => action == SessionAction.Stop ? Stopping : Deleting;
+
+    /// <summary>Anything but yes to a delete or stop read back, as <see cref="DeleteCancelled"/> or <see cref="StopCancelled"/>.</summary>
+    public string Cancelled(SessionAction action) => action == SessionAction.Stop ? StopCancelled : DeleteCancelled;
+
+    /// <summary>A yes after a dropped read-back, as <see cref="NothingToDelete"/> or <see cref="NothingToStop"/>.</summary>
+    public string NothingWaits(SessionAction action) => action == SessionAction.Stop ? NothingToStop : NothingToDelete;
+
     /// <summary>
     /// A confirmed delete done (#532): those deleted, those forgotten, and each that failed, with why, short as a create's
     /// failure (<see cref="Why"/>). "issue 525 og issue 526 er slettet."
     /// </summary>
-    public string Deleted(IReadOnlyList<DeleteOutcome> outcomes)
+    public string Deleted(IReadOnlyList<DeleteOutcome> outcomes, SessionAction action = SessionAction.Delete)
     {
+        if (action == SessionAction.Stop)
+            return string.Join(" ", outcomes.Select(o => GodModeAnnouncementFormatter.Sentence(o.Error is null
+                ? StoppedNow(new SpokenName(o.Target.Name.Label))
+                : Why(_danish ? $"{o.Target.Name.Label} blev ikke stoppet" : $"{o.Target.Name.Label} was not stopped", o.Error))));
         List<string> said = [];
         var deleted = outcomes.Where(o => o.Error is null && !o.Target.Forget).Select(o => o.Target.Name.Label).ToList();
         var forgotten = outcomes.Where(o => o.Error is null && o.Target.Forget).Select(o => o.Target.Name.Label).ToList();

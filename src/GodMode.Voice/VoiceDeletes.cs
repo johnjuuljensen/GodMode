@@ -7,8 +7,14 @@ namespace GodMode.Voice;
 /// </summary>
 public sealed record DeleteTarget(ProjectRef Project, SpokenName Name, bool Running, int? OpenPullRequest, bool Forget);
 
-/// <summary>The sessions one read-back asks to delete, said together.</summary>
-public sealed record DeleteRequest(IReadOnlyList<DeleteTarget> Targets)
+/// <summary>What a read-back of <see cref="SessionDeletes"/> asks the yes for: a delete (#532), or a stop (#287).</summary>
+public enum SessionAction { Delete, Stop }
+
+/// <summary>
+/// The sessions one read-back asks to delete, said together, or, with <paramref name="Action"/> <see cref="SessionAction.Stop"/>,
+/// to stop: the app's Stop asks first too.
+/// </summary>
+public sealed record DeleteRequest(IReadOnlyList<DeleteTarget> Targets, SessionAction Action = SessionAction.Delete)
 {
     /// <summary>What is deleted, as the log says it.</summary>
     public string What => string.Join(", ", Targets.Select(t => t.Project.ProjectId));
@@ -17,7 +23,7 @@ public sealed record DeleteRequest(IReadOnlyList<DeleteTarget> Targets)
 /// <summary>A delete read-back playing, or played: the sessions it is for, its text, and when it started playing.</summary>
 public sealed record ArmedDelete(DeleteRequest Request, string ReadBack, DateTimeOffset At);
 
-/// <summary>What a delete did to one session: deleted (or forgotten), or why not.</summary>
+/// <summary>What a delete (or a stop) did to one session: deleted (or forgotten, or stopped), or why not.</summary>
 public sealed record DeleteOutcome(DeleteTarget Target, string? Error);
 
 /// <summary>
@@ -27,7 +33,8 @@ public sealed record DeleteOutcome(DeleteTarget Target, string? Error);
 /// yes is armed when the read-back starts playing (<see cref="Spoken"/>), and <see cref="ConfirmWindow"/> passing, or
 /// other speech of the bot's, drops it. Each session goes as on screen: <c>DeleteProject</c>, never forced, so the root's
 /// delete script may refuse; an adopted one is forgotten, its folder kept. While a delete waits on the user
-/// (<see cref="Waiting"/>), announcements are held (<see cref="HeldAnnouncements"/>).
+/// (<see cref="Waiting"/>), announcements are held (<see cref="HeldAnnouncements"/>). A stop by voice (#287) goes the same
+/// way, as the app's Stop asks first: read back, and <c>StopProject</c> only on the yes.
 /// </summary>
 public sealed class SessionDeletes(IGodModeServers servers, TimeProvider? time = null)
 {
@@ -36,10 +43,10 @@ public sealed class SessionDeletes(IGodModeServers servers, TimeProvider? time =
     private DeleteRequest? _proposed;
     private (DeleteRequest Request, string ReadBack, DateTimeOffset At)? _toSay;
     private ArmedDelete? _armed;
-    private bool _dropped;
+    private SessionAction? _dropped;
     private bool _wasWaiting;
     private ITimer? _timer;
-    private Action<IReadOnlyList<DeleteOutcome>>? _announce;
+    private Action<DeleteRequest, IReadOnlyList<DeleteOutcome>>? _announce;
     private Task _running = Task.CompletedTask;
 
     /// <summary>How long after its read-back started playing a delete waits on the yes.</summary>
@@ -53,8 +60,8 @@ public sealed class SessionDeletes(IGodModeServers servers, TimeProvider? time =
     /// <summary>The deletes confirmed, until each has finished and been announced.</summary>
     public Task Running => Volatile.Read(ref _running);
 
-    /// <summary>From now on, each confirmed delete's outcomes go to <paramref name="announce"/>.</summary>
-    public void Attach(Action<IReadOnlyList<DeleteOutcome>> announce) => _announce = announce;
+    /// <summary>From now on, each confirmed delete's (or stop's) outcomes go to <paramref name="announce"/>, with its request.</summary>
+    public void Attach(Action<DeleteRequest, IReadOnlyList<DeleteOutcome>> announce) => _announce = announce;
 
     /// <summary>The delete whose read-back is playing or played, waiting on the user's yes; null once dropped or expired.</summary>
     public ArmedDelete? Armed
@@ -96,9 +103,9 @@ public sealed class SessionDeletes(IGodModeServers servers, TimeProvider? time =
 
     private void Drop()
     {
+        _dropped = (_armed?.Request ?? _toSay?.Request)?.Action ?? _dropped;
         _toSay = null;
         _armed = null;
-        _dropped = true;
     }
 
     /// <summary>Says, once, that nothing waits any more (<see cref="Released"/>), and while something does, looks again when it would expire.</summary>
@@ -132,7 +139,7 @@ public sealed class SessionDeletes(IGodModeServers servers, TimeProvider? time =
             _proposed = request;
             _toSay = null;
             _armed = null;
-            _dropped = false;
+            _dropped = null;
         }
         Notify();
     }
@@ -177,7 +184,7 @@ public sealed class SessionDeletes(IGodModeServers servers, TimeProvider? time =
             {
                 _armed = new ArmedDelete(toSay.Request, toSay.ReadBack, Now);
                 _toSay = null;
-                _dropped = false;
+                _dropped = null;
             }
             else if (_toSay is not null || _armed is not null)
                 Drop();
@@ -185,13 +192,13 @@ public sealed class SessionDeletes(IGodModeServers servers, TimeProvider? time =
         Notify();
     }
 
-    /// <summary>Whether a delete was read back and dropped unanswered since; asking forgets it.</summary>
-    public bool TakeDropped()
+    /// <summary>What a read-back dropped unanswered since asked for (a delete or a stop); null for none. Asking forgets it.</summary>
+    public SessionAction? TakeDropped()
     {
         lock (_lock)
         {
             var dropped = _dropped;
-            _dropped = false;
+            _dropped = null;
             return dropped;
         }
     }
@@ -229,17 +236,19 @@ public sealed class SessionDeletes(IGodModeServers servers, TimeProvider? time =
             await previous;
             List<DeleteOutcome> outcomes = [];
             foreach (var target in armed.Request.Targets)
-                outcomes.Add(await DeleteAsync(target));
-            _announce?.Invoke(outcomes);
+                outcomes.Add(await DeleteAsync(target, armed.Request.Action));
+            _announce?.Invoke(armed.Request, outcomes);
         }));
         return armed.Request;
     }
 
-    private async Task<DeleteOutcome> DeleteAsync(DeleteTarget target)
+    private async Task<DeleteOutcome> DeleteAsync(DeleteTarget target, SessionAction action)
     {
         try
         {
-            if (target.Forget)
+            if (action == SessionAction.Stop)
+                await servers.StopAsync(target.Project, CancellationToken.None);
+            else if (target.Forget)
                 await servers.ForgetAsync(target.Project, CancellationToken.None);
             else
                 await servers.DeleteAsync(target.Project, CancellationToken.None);

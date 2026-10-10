@@ -231,10 +231,11 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             [ProjectReference, Then],
             (_, args, ct) => AndThen(args, PeekAsync(Argument(args, ProjectParameter), ct)))
         .Add(StopProject,
-            "Stop a project's Claude session, as the app's Stop does: its turn is interrupted, its conversation kept, and " +
-            $"{ResumeProject} resumes it. Only a project that runs (or waits on the user, or works in the background) is " +
-            "stopped. Call when the user says \"stop [handle]\" or \"stop den\": never on a bare \"stop\", which is the " +
-            "user cutting you off.",
+            "Prepare stopping a project's Claude session, as the app's Stop does: its turn is interrupted, its conversation " +
+            $"kept, and {ResumeProject} resumes it. Only a project that runs (or waits on the user, or works in the background) " +
+            "is stopped. It stops nothing: the system reads back what stops, and only the user's own yes to that read-back stops " +
+            "it; never say it was stopped. Call when the user says \"stop [handle]\" or \"stop den\": never on a bare " +
+            "\"stop\", which is the user cutting you off.",
             [ProjectReference],
             (_, args, ct) => StopProjectAsync(Argument(args, ProjectParameter), ct))
         .Add(ResumeProject,
@@ -1206,9 +1207,11 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     }
 
     /// <summary>
-    /// "Stop" (#287), as the app's Stop: only a project the screen would stop (it runs, waits on the user, or works in the
-    /// background) is stopped, with no read-back: its conversation is kept, and "genoptag" resumes it. An unnamed stop
-    /// just after an announcement changed the project talked about asks which, as an answer does (#461).
+    /// "Stop" (#287), as the app's Stop, which asks first: only a project the screen would stop (it runs, waits on the
+    /// user, or works in the background) is proposed, and read back by the code ("Skal jeg stoppe issue 283?",
+    /// <see cref="ReadBackNode"/>); only the user's yes stops it (<see cref="ConfirmDeleteNode"/>), its conversation kept,
+    /// and "genoptag" resumes it. An unnamed stop just after an announcement changed the project talked about asks which,
+    /// as an answer does (#461).
     /// </summary>
     public async Task<string> StopProjectAsync(string? reference, CancellationToken ct)
     {
@@ -1225,9 +1228,11 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
         if (!(status.BackgroundTasks is { Count: > 0 } || status.State is ProjectState.Running or ProjectState.WaitingInput or ProjectState.WaitingPermission))
             return SaysItself($"{name} does not run ({StateText(status.State, status.BackgroundTasks)}): nothing was stopped. The system said so itself.",
                 _phrases.NotRunning(name, state));
-        await servers.StopAsync(target, ct);
-        return SaysItself($"{name} is stopped: its conversation is kept, and {ResumeProject} resumes it. The system said so itself.",
-            _phrases.StoppedNow(name));
+        var request = new DeleteRequest([new DeleteTarget(target, Names.Full(target)!, Running: true, null, Forget: false)], SessionAction.Stop);
+        Deletes.Propose(request);
+        var readBack = _phrases.DeleteReadBack(request);
+        return SaysItself($"The system reads back \"{readBack}\" itself, in place of your reply. Nothing is stopped until the " +
+            "user says yes to it, which is not yours to answer: never say it was stopped.", readBack);
     }
 
     /// <summary>

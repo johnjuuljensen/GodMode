@@ -106,19 +106,49 @@ public sealed class SwitchTests
         Assert.Equal([(P525, "Godmode")], voice.Events.Shown);
     }
 
+    private const string StopReadBack = "Skal jeg stoppe issue 525, voice?";
+
+    /// <summary>As the app's Stop asks first: the code reads back what stops, and only the yes stops it.</summary>
     [Fact]
-    public async Task Stop_stops_a_running_project_and_says_how_to_resume_it()
+    public async Task Stop_is_read_back_and_stops_a_running_project_on_yes()
     {
         var servers = Servers(state525: ProjectState.Running);
         var model = new ScriptedChatClient().CallTool(VoiceTools.StopProject, Project("issue 525"));
         await using var voice = await OfflineVoice.StartAsync(servers, model);
         await voice.Events.SaidAsync("Klar.");
-
         voice.Transcriptions.SayAsRecognized("Stop issue 525.");
-        await voice.Events.SaidAsync("issue 525, voice, er stoppet. Sig genoptag, så fortsætter den.");
+        await voice.Events.SaidAsync(StopReadBack);
+        Assert.Empty(servers.Stops);
+
+        voice.Transcriptions.SayAsRecognized("Ja.");
+        await voice.Events.SaidAsync("Stopper.");
+        await voice.Events.SaidAsync("issue 525 er stoppet. Sig genoptag, så fortsætter den.");
 
         Assert.Equal([P525], servers.Stops);
+        // The yes is not the model's: it was called for the stop only, and the code read it back
         Assert.Equal(1, model.Calls);
+    }
+
+    /// <summary>
+    /// A stop the user does not confirm ("stop den" said to cut the bot off, then anything but yes) stops nothing: a no
+    /// cancels it, other words cancel it and go on to the chat.
+    /// </summary>
+    [Theory]
+    [InlineData("Nej.", "Annulleret. Intet stoppet.")]
+    [InlineData("Læs videre.", "Læser videre.")]
+    public async Task A_stop_not_confirmed_stops_nothing(string answer, string said)
+    {
+        var servers = Servers(state525: ProjectState.Running);
+        var model = new ScriptedChatClient().CallTool(VoiceTools.StopProject, Project("issue 525")).Respond("Læser videre.");
+        await using var voice = await OfflineVoice.StartAsync(servers, model);
+        await voice.Events.SaidAsync("Klar.");
+        voice.Transcriptions.SayAsRecognized("Stop den.");
+        await voice.Events.SaidAsync(StopReadBack);
+
+        voice.Transcriptions.SayAsRecognized(answer);
+        await voice.Events.SaidAsync(said);
+
+        Assert.Empty(servers.Stops);
     }
 
     /// <summary>As the screen's Stop: a project that does not run has nothing to stop, and is left as it is.</summary>

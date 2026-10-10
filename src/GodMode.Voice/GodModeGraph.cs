@@ -152,10 +152,12 @@ public static class GodModeGraph
               "Tilbage" / "Back", said as a command on its own — call {{VoiceTools.GoBack}}.
               "Kig på [handle]" / "Peek at [handle]" — call {{VoiceTools.PeekProject}}: it reads the project, and the
               conversation stays where it was. The system says what each did itself: respond with one word.
-            - "Stop [handle]", "Stop den" / "Stop [handle]" — call {{VoiceTools.StopProject}}; "Genoptag [handle]" /
-              "Resume [handle]" — call {{VoiceTools.ResumeProject}}. The system says what each did itself: respond with one
-              word. A bare "stop", "stop stop" or "stop, vent" names no project: it is the user cutting you off, never a
-              stop. Answer it with the action "wait".
+            - "Stop [handle]", "Stop den" / "Stop [handle]" — call {{VoiceTools.StopProject}}: the system reads back what
+              stops itself, in place of your reply: respond with one word. Only the user's yes to that read-back stops it,
+              and that is not yours to answer: never say it was stopped. "Genoptag [handle]" / "Resume [handle]" — call
+              {{VoiceTools.ResumeProject}}; the system says what it did itself: respond with one word. A bare "stop", "stop
+              stop" or "stop, vent" names no project: it is the user cutting you off, never a stop. Answer it with the
+              action "wait".
             - "Stille" / "Quiet" — call mute_announcements; "Du må godt sige til igen" — call unmute_announcements.
             - "Start issue 283 [i GodMode]", "Start en chat i Assistant om …", "Start et eksperiment om …" / "Start issue …",
               "Start a chat in … about …" — call {{VoiceTools.StartSession}} with the root, kind, issue, name and prompt as

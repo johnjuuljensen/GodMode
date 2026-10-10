@@ -249,7 +249,7 @@ public sealed class VoiceSession : IAsyncDisposable
             board.Attach((item, handle) => announcements.Write(board.AnnouncementOf(item,
                 phrases.Announce(tools.Names.Full(item.Project) ?? new SpokenName(handle), item.Item))));
             tools.Creates.Attach(outcome => announcements.Write(earcons.Cued(new Announcement(phrases.Created(outcome)), Earcons.For(outcome))));
-            tools.Deletes.Attach(outcomes => announcements.Write(new Announcement(phrases.Deleted(outcomes))));
+            tools.Deletes.Attach((request, outcomes) => announcements.Write(new Announcement(phrases.Deleted(outcomes, request.Action))));
             // Suspended from the start while the mic is closed: no connection to speech recognition until it opens (#424)
             if (setup.Mic is { } voiceMic) await voiceMic.AttachAsync(new SessionInput(session));
             state.Release();
