@@ -10,25 +10,27 @@ namespace GodMode.Server.Auth;
 /// The API key of a server with none configured: 256 random bits, generated on its first start into a
 /// file only the server's user can read, and read from there on every later start. The file lives in
 /// the server's own data directory (<see cref="DefaultPath"/>, or <c>Authentication:ApiKeyFile</c>),
-/// never under a root's folder (a scan folder or an explicit root, <see cref="RootSources"/>), where sessions work.
+/// never under a root's folder (a scan folder or an explicit root, <see cref="RootSources"/>, or the fallback
+/// root, <see cref="ServerDataDirectory.FallbackRoot"/>), where sessions work (<see cref="ServerFiles"/>).
 /// </summary>
 public static class ApiKeyFile
 {
     public const string PathSetting = "Authentication:ApiKeyFile";
     public const string FileName = "api-key";
-    public const string DirectoryName = "GodMode.Server";
 
     /// <summary>
-    /// The user's local application data: <c>%LOCALAPPDATA%\GodMode.Server\api-key</c> on Windows,
-    /// <c>$XDG_DATA_HOME/GodMode.Server/api-key</c> (by default <c>~/.local/share</c>) on Linux. Null
-    /// when the OS names none (no home directory).
+    /// In the default data directory (<see cref="ServerDataDirectory.Default"/>): <c>%LOCALAPPDATA%\GodMode.Server\api-key</c>
+    /// on Windows, <c>$XDG_DATA_HOME/GodMode.Server/api-key</c> (by default <c>~/.local/share</c>) on Linux.
+    /// Null when the OS names none (no home directory).
     /// </summary>
     public static string? DefaultPath() =>
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify) is { Length: > 0 } dir
-            ? Path.Combine(dir, DirectoryName, FileName)
-            : null;
+        ServerDataDirectory.Default() is { } dir ? Path.Combine(dir, FileName) : null;
 
-    /// <summary>The key file's full path: <c>Authentication:ApiKeyFile</c>, else <see cref="DefaultPath"/>, and under no scan folder or explicit root.</summary>
+    /// <summary>
+    /// The key file's full path: <c>Authentication:ApiKeyFile</c>, else <see cref="DefaultPath"/>, and under no scan
+    /// folder, explicit root or fallback root. The fallback root is <c>projects</c> beside the key file, so only a key
+    /// file named <c>projects</c> is in it; it is checked all the same, as the others are.
+    /// </summary>
     public static string PathFrom(IConfiguration config)
     {
         var path = (config[PathSetting] is { Length: > 0 } configured ? configured : DefaultPath())
@@ -37,23 +39,12 @@ public static class ApiKeyFile
                 $"directory to keep a generated one in. Set {AuthModeSelector.ApiKeySetting}, or {PathSetting} to a file this user can write.");
         path = Path.GetFullPath(path);
 
-        foreach (var (setting, folder) in RootSources.From(config).Folders)
-        {
-            if (IsUnder(folder, path))
-                throw new StartupConfigurationException(
-                    $"GodMode.Server will not start: its API key file, {path}, would be under {setting} ({folder}), " +
-                    $"where sessions work. Set {PathSetting} to a file outside every root, or set {AuthModeSelector.ApiKeySetting}.");
-        }
+        if (ServerFiles.FolderHolding(path, config) is { } holder)
+            throw new StartupConfigurationException(
+                $"GodMode.Server will not start: its API key file, {path}, would be under {holder.Setting} ({holder.Folder}), " +
+                $"where sessions work. Set {PathSetting} to a file outside every root, or set {AuthModeSelector.ApiKeySetting}.");
         return path;
     }
-
-    /// <summary>
-    /// Whether <paramref name="path"/> is <paramref name="folder"/> or in its tree: the start refuses a
-    /// key file there, and a rebuild leaves out a root source added later whose tree holds it.
-    /// </summary>
-    public static bool IsUnder(string folder, string path) =>
-        Path.GetRelativePath(folder, path) is var relative
-        && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar) && !Path.IsPathRooted(relative);
 
     /// <summary>The key in <paramref name="path"/>, or a new one written there (owner-only) when it has none.</summary>
     public static (string Key, bool Created) LoadOrCreate(string path)

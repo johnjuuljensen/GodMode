@@ -30,8 +30,8 @@ builder.Host.UseSerilog((context, configuration) =>
     configuration
         .ReadFrom.Configuration(context.Configuration)
         // Serilog ignores Logging:LogLevel. ASP.NET Core's Information events log full request
-        // URLs, which for the hub's WebSocket upgrade carry the key as ?access_token=, so they
-        // stay off after any configured levels.
+        // URLs, query strings included, and the server reads no key from one but a caller may still
+        // put it there, so they stay off after any configured levels.
         .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
         .WriteTo.Console()
         .WriteTo.File(
@@ -94,6 +94,10 @@ builder.Services.AddSingleton<IProjectManager, ProjectManager>();
 builder.Services.AddGodModeMcp();
 
 var app = builder.Build();
+EnvironmentExpander.Logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(EnvironmentExpander));
+// A save of the instance's file that does not parse keeps the config it had: said in the log
+InstanceConfig.ReportRefusedReloads(builder.Configuration, (path, error) =>
+    app.Logger.LogError(error, "The config file {ConfigFile} was not reloaded, and its last good config is kept: fix the file", path));
 
 // Configure the HTTP request pipeline. The server serves no page and no browser is its client: a request
 // with an Origin is refused first, before authentication

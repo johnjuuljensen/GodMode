@@ -48,6 +48,29 @@ public class McpEndpointTests
     }
 
     /// <summary>
+    /// The <c>Origin</c> policy sits ahead of every endpoint, <c>/mcp</c> included: a project's own token, which
+    /// opens it without one, is refused with 403 when the request carries an <c>Origin</c>, whatever it names.
+    /// </summary>
+    [Fact]
+    public async Task AProjectsOwnToken_WithAnOrigin_Is403()
+    {
+        await using var run = await Run.StartAsync(new FakeScript().EmitInit().AwaitStdin());
+        var id = await run.CreateAsync("p1");
+        var token = GodModeMcpEntry.Of(await run.WaitForLaunchAsync(id, launch => launch.Stdin.Count > 0)).Token;
+
+        using var without = await run.Http.SendAsync(Initialize(id, token));
+        Assert.Equal(HttpStatusCode.OK, without.StatusCode);
+
+        foreach (var origin in new[] { run.BaseUrl, "https://0.0.0.1", "null" })
+        {
+            using var request = Initialize(id, token);
+            request.Headers.Add("Origin", origin);
+            using var response = await run.Http.SendAsync(request);
+            Assert.True(response.StatusCode == HttpStatusCode.Forbidden, $"/mcp with Origin {origin} → {(int)response.StatusCode}, expected 403");
+        }
+    }
+
+    /// <summary>
     /// A project token is for its claude's permission prompt, and opens /mcp alone: not the hub, over
     /// HTTP or on the WebSocket upgrade, and not the API, with its project named or not.
     /// </summary>
@@ -77,7 +100,7 @@ public class McpEndpointTests
                 $"{method} {path}{(projectId != null ? " naming its project" : "")} with a project token → {(int)response.StatusCode}, expected 401");
         }
 
-        // The hub's WebSocket upgrade: the token as a browser sends it, and as claude sends it to /mcp
+        // The hub's WebSocket upgrade: the token in the query string, which no endpoint reads, and as claude sends it to /mcp
         var hubSocket = new Uri($"{run.BaseUrl.Replace("http", "ws")}/hubs/projects");
         using (var queryToken = new ClientWebSocket())
         {
@@ -223,7 +246,7 @@ public class McpEndpointTests
             try
             {
                 run.Server = ServerProcess.Start(run._workDir, run.BaseUrl, environment: environment);
-                run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TimeSpan.FromSeconds(10) };
+                run.Http = new HttpClient { BaseAddress = new Uri(run.BaseUrl), Timeout = TestTimeouts.Request };
                 await run.Server.WaitForHealthyAsync(run.Http);
                 run.Client = new ServerHubClient(run.BaseUrl);
                 await run.Client.StartAsync();

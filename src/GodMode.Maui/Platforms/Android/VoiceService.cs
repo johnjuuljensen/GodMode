@@ -78,9 +78,10 @@ public sealed class VoiceService : Service
         var logger = MauiProgram.LoggerFactory.CreateLogger<VoiceService>();
         if (intent?.Action == ActionStop)
         {
-            // The notification's Stop: voice stops as if the page asked, and that stops this service
+            // The notification's Stop: voice stops as if the page asked, and that stops this service. One that Android
+            // made again for the Stop, with no session to stop, would stay started with no notification: it stops itself
             logger.LogInformation("Voice stopped from its notification");
-            _ = MauiProgram.Services.GetRequiredService<VoiceHost>().StopAsync();
+            _ = StopVoiceAsync();
             return StartCommandResult.NotSticky;
         }
 
@@ -106,6 +107,18 @@ public sealed class VoiceService : Service
         }
         // After a kill the session is gone with the process, and a microphone service may not start from the background
         return StartCommandResult.NotSticky;
+    }
+
+    private async Task StopVoiceAsync()
+    {
+        try
+        {
+            await MauiProgram.Services.GetRequiredService<VoiceHost>().StopAsync();
+        }
+        finally
+        {
+            StopSelf();
+        }
     }
 
     public override void OnDestroy()

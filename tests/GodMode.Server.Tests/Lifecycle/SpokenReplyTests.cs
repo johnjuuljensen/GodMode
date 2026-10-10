@@ -2,6 +2,7 @@ using System.Text.Json;
 using GodMode.FakeClaude;
 using GodMode.ProjectFiles;
 using GodMode.Server.Services;
+using GodMode.Server.Models;
 using GodMode.Shared.Enums;
 
 namespace GodMode.Server.Tests.Lifecycle;
@@ -74,6 +75,31 @@ public class SpokenReplyTests
         var resumed = await harness.WaitForStdinAsync(id, index: 1);
         Assert.Equal(Marked, TextOf(resumed.Stdin[0]));
         Assert.Equal(Marked, LoggedInput(harness, id)[^1]);
+    }
+
+    /// <summary>
+    /// Issue #289: a permission prompt is answered on screen, never by voice. One that came after voice looked at the
+    /// session is not denied with the spoken words, as a typed reply denies it: the reply is refused, saying why, and
+    /// the prompt waits on.
+    /// </summary>
+    [Fact]
+    public async Task ASpokenReply_ToAPendingPermission_IsRefused_AndThePromptWaits()
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStdinAsync(created.Id);
+        await LifecycleHarness.WaitUntilAsync(async () => (await harness.Projects.GetStatusAsync(created.Id)).OutputOffset > 0, null,
+            () => harness.Describe(created.Id));
+        var asking = harness.Projects.RequestPermissionAsync(created.Id,
+            new PermissionPromptRequest("Bash", JsonSerializer.SerializeToElement(new { command = "rm -rf build" }), "toolu_1"), CancellationToken.None);
+        await harness.WaitForStatusPushAsync(created.Id, s => s.PendingPermission != null);
+
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => harness.Projects.ReplyAndResumeAsync(created.Id, Reply, spoken: true));
+
+        Assert.Contains("permission prompt", refused.Message);
+        Assert.False(asking.IsCompleted);
+        Assert.NotNull((await harness.Projects.GetStatusAsync(created.Id)).PendingPermission);
+        Assert.Single(harness.Projects.GetAttention(), item => item.Kind == AttentionKind.Permission);
     }
 
     [Theory]

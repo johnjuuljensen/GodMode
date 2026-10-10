@@ -23,8 +23,7 @@ public class SpeakTests
     /// <summary>A session in the work action, whose first launch plays <paramref name="script"/>.</summary>
     private static async Task<(FleetRun Run, string Id)> StartAsync(FakeScript script)
     {
-        var run = await FleetRun.StartAsync(script);
-        return (run, await run.CreateOverHubAsync("talker"));
+        return await (await FleetRun.StartAsync(script)).SetUpAsync(async run => (run, await run.CreateOverHubAsync("talker")));
     }
 
     private static async Task<ProjectStatus> StatusAsync(FleetRun run, string id) =>

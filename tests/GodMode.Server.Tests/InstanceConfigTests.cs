@@ -1,4 +1,5 @@
 using System.Text.Json;
+using GodMode.Server.Auth;
 using GodMode.Server.Tests.Lifecycle;
 using GodMode.Shared.Hubs;
 using GodMode.Shared.Models;
@@ -142,7 +143,40 @@ public class InstanceConfigTests
     }
 
     /// <summary>
-    /// Two server processes on the same roots: the second lists none of the first one's, and logs
+    /// A server with no roots has one, the <c>Default</c> profile's <c>default</c>, in its data directory
+    /// (the folder of its key file), not in the folder it was started in (#282).
+    /// </summary>
+    [Fact]
+    public async Task WithNoRoots_TheFallbackRootIsInTheDataDirectory_NotTheWorkingDirectory()
+    {
+        var workDir = ServerProcess.CreateWorkDir("fallback-root-cwd");
+        var dataDir = ServerProcess.CreateWorkDir("fallback-root-data");
+        try
+        {
+            var fallbackRoot = Path.Combine(dataDir, ServerDataDirectory.FallbackRootName);
+            Directory.CreateDirectory(Path.Combine(fallbackRoot, "existing"));
+
+            using var server = ServerProcess.Start(workDir, "http://127.0.0.1:0",
+                arguments: [$"--{ApiKeyFile.PathSetting}={Path.Combine(dataDir, ApiKeyFile.FileName)}"]);
+            var url = await StartAsync(server);
+
+            Assert.Contains(await ListRootsAsync(url), root => (root.ProfileName, root.Name) == ("Default", "default"));
+            await using var client = new ServerHubClient(url);
+            await client.StartAsync();
+            var unmanaged = await client.Hub.InvokeAsync<UnmanagedFolder[]>(nameof(IProjectHub.ListUnmanaged), "Default", "default");
+            Assert.Contains(unmanaged, folder => folder.Name == "existing");
+            Assert.Contains($"Default/default={fallbackRoot}", server.Output);
+            Assert.False(Directory.Exists(Path.Combine(workDir, ServerDataDirectory.FallbackRootName)));
+        }
+        finally
+        {
+            ServerProcess.DeleteWorkDir(workDir);
+            ServerProcess.DeleteWorkDir(dataDir);
+        }
+    }
+
+    /// <summary>
+    /// Two server processes on the same roots:the second lists none of the first one's, and logs
     /// them with its instance. Killed hard, the first one's lock goes with it, and the second one
     /// picks the roots up on its next rebuild.
     /// </summary>

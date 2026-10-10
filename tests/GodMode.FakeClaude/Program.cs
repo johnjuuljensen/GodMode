@@ -293,7 +293,13 @@ async Task<McpClient> ConnectAsync(string server)
             ? headers.EnumerateObject().ToDictionary(header => header.Name, header => header.Value.GetString() ?? "")
             : null,
     }, new HttpClient { Timeout = Timeout.InfiniteTimeSpan }, ownsHttpClient: true);
-    var client = await McpClient.CreateAsync(transport);
+    // The discover probe gets the whole connect: one cut off at its own 5 s falls back to an initialize that
+    // the SDK (2.2) sends with the probe's protocol-version header, which the server refuses (#371)
+    var client = await McpClient.CreateAsync(transport, new McpClientOptions
+    {
+        InitializationTimeout = TimeSpan.FromMinutes(2),
+        DiscoverProbeTimeout = Timeout.InfiniteTimeSpan,
+    });
     var tools = await client.ListToolsAsync();
     FakeRecording.Append(recordPath, new RecordLine(RecordLine.Tools, pid, Line: JsonSerializer.Serialize(tools.Select(t => t.ProtocolTool))));
     return client;

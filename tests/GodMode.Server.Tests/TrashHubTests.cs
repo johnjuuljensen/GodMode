@@ -43,7 +43,7 @@ public class TrashHubTests
         try
         {
             var baseUrl = await server.WaitForListeningUrlAsync();
-            using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(10) };
+            using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TestTimeouts.Request };
             await server.WaitForHealthyAsync(http);
             await using var client = new ServerHubClient(baseUrl);
             var pushes = new ConcurrentQueue<(string Method, string Id)>();

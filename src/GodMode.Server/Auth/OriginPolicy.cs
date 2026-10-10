@@ -23,7 +23,7 @@ public static class OriginPolicy
                 return;
             }
 
-            // The path alone: the hub's query string carries the key
+            // The path alone: a caller may have put a key in the query string, which no endpoint reads
             logger.LogWarning("Refused {Method} {Path} from origin {Origin}: no browser is a client of this server; use the GodMode app",
                 context.Request.Method, context.Request.Path, origin.ToString());
             context.Response.StatusCode = StatusCodes.Status403Forbidden;

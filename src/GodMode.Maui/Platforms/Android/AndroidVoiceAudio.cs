@@ -12,7 +12,7 @@ namespace GodMode.Maui;
 /// The phone's microphone and speaker for voice, through VoiceBot.Providers.Android (voice-communication capture and
 /// playback, so the platform's echo cancellation applies). Around them the app does what VoiceBot leaves to its host:
 /// the microphone foreground service (<see cref="VoiceService"/>), which keeps listening with the screen off; and audio
-/// focus, whose loss to a call stops voice. It also sets the audio mode and the communication device itself, in place of
+/// focus, whose loss (to a call, an alarm, an assistant, another app's audio) stops voice. It also sets the audio mode and the communication device itself, in place of
 /// the sink's own (johnjuuljensen/VoiceBot#31), which picks the route once: the app's prefers a headset, and picks
 /// again when one comes or goes.
 /// </summary>
@@ -64,10 +64,7 @@ public sealed class AndroidVoiceAudio : IVoiceAudio
         }
         catch
         {
-            source?.Dispose();
-            focus?.Release(manager);
-            route?.Restore();
-            VoiceService.Stop();
+            ReleaseAll(source, null, focus, manager, route);
             throw;
         }
     }
@@ -82,11 +79,29 @@ public sealed class AndroidVoiceAudio : IVoiceAudio
     {
         if (_disposed) return;
         _disposed = true;
-        _source.Dispose();
-        _sink.Dispose();
-        _focus.Release(_manager);
-        _route.Restore();
-        VoiceService.Stop();
+        ReleaseAll(_source, _sink, _focus, _manager, _route);
+    }
+
+    /// <summary>
+    /// Each step whatever the one before it threw, so a failing source leaves no focus, audio mode or microphone service
+    /// behind. The first failure is thrown once all are done.
+    /// </summary>
+    private static void ReleaseAll(AndroidAudioSource? source, AndroidAudioSink? sink, Focus? focus, AudioManager manager, AudioRoute? route)
+    {
+        try { source?.Dispose(); }
+        finally
+        {
+            try { sink?.Dispose(); }
+            finally
+            {
+                try { focus?.Release(manager); }
+                finally
+                {
+                    try { route?.Restore(); }
+                    finally { VoiceService.Stop(); }
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -125,27 +140,49 @@ public sealed class AndroidVoiceAudio : IVoiceAudio
 #pragma warning restore CA1422
         }
 
+        /// <summary>Sets the mode and the device; a failure puts back what it set before it is thrown.</summary>
         public static AudioRoute Take(AudioManager manager, ILogger logger)
         {
             var route = new AudioRoute(manager, logger);
             manager.Mode = Mode.InCommunication;
-            route.Pick();
-            manager.RegisterAudioDeviceCallback(route, null);
+            try
+            {
+                route.Pick();
+                manager.RegisterAudioDeviceCallback(route, null);
+            }
+            catch
+            {
+                route.Restore();
+                throw;
+            }
             logger.LogInformation("Audio mode {Mode} (was {Was})", manager.Mode, route._mode);
             return route;
         }
 
+        /// <summary>Each step whatever the one before it threw: the mode goes back last, and always.</summary>
         public void Restore()
         {
-            _manager.UnregisterAudioDeviceCallback(this);
-            if (OperatingSystem.IsAndroidVersionAtLeast(31))
-                _manager.ClearCommunicationDevice();
-            else
+            try
+            {
+                _manager.UnregisterAudioDeviceCallback(this);
+            }
+            finally
+            {
+                try
+                {
+                    if (OperatingSystem.IsAndroidVersionAtLeast(31))
+                        _manager.ClearCommunicationDevice();
+                    else
 #pragma warning disable CA1422
-                _manager.SpeakerphoneOn = _speakerphone;
+                        _manager.SpeakerphoneOn = _speakerphone;
 #pragma warning restore CA1422
-            _manager.Mode = _mode;
-            _logger.LogInformation("Audio mode restored to {Mode}", _manager.Mode);
+                }
+                finally
+                {
+                    _manager.Mode = _mode;
+                    _logger.LogInformation("Audio mode restored to {Mode}", _manager.Mode);
+                }
+            }
         }
 
         public override void OnAudioDevicesAdded(AudioDeviceInfo[]? addedDevices) => Pick();
@@ -175,25 +212,29 @@ public sealed class AndroidVoiceAudio : IVoiceAudio
     }
 
     /// <summary>
-    /// Audio focus for the whole conversation. A call (or anything else taking it for good or for a while) ends voice:
-    /// the microphone would hear the call, and the bot would talk over it. Ducking for a moment (a navigation prompt) does not.
+    /// Audio focus for the whole conversation. A call, or anything else taking it for good or for a while (an alarm, an
+    /// assistant, another app's audio), ends voice: the microphone would hear it, and the bot would talk over it. Ducking
+    /// for a moment (a navigation prompt) does not. Android does not say who took it: the reason given names a call only
+    /// when the phone is in one, or ringing.
     /// </summary>
     private sealed class Focus : Java.Lang.Object, AudioManager.IOnAudioFocusChangeListener
     {
+        private readonly AudioManager _manager;
         private readonly Action<string> _lost;
         private readonly ILogger _logger;
         private AudioFocusRequestClass? _request;
         private int _gone;
 
-        private Focus(Action<string> lost, ILogger logger)
+        private Focus(AudioManager manager, Action<string> lost, ILogger logger)
         {
+            _manager = manager;
             _lost = lost;
             _logger = logger;
         }
 
         public static Focus Take(AudioManager manager, Action<string> lost, ILogger logger)
         {
-            var focus = new Focus(lost, logger);
+            var focus = new Focus(manager, lost, logger);
             AudioFocusRequest result;
             if (OperatingSystem.IsAndroidVersionAtLeast(26))
             {
@@ -223,9 +264,11 @@ public sealed class AndroidVoiceAudio : IVoiceAudio
 
         public void OnAudioFocusChange(AudioFocus focusChange)
         {
-            _logger.LogInformation("Audio focus: {Change}", focusChange);
+            _logger.LogInformation("Audio focus: {Change} (audio mode {Mode})", focusChange, _manager.Mode);
             if (focusChange is AudioFocus.Loss or AudioFocus.LossTransient && Interlocked.Exchange(ref _gone, 1) == 0)
-                _lost("A call took the microphone and speaker, so voice stopped. Start it again after the call.");
+                _lost(_manager.Mode is Mode.InCall or Mode.Ringtone
+                    ? "A call took the microphone and speaker, so voice stopped. Start it again after the call."
+                    : "Another app took the microphone and speaker (an alarm, an assistant, its audio), so voice stopped. Start it again when it is done.");
         }
 
         public void Release(AudioManager manager)

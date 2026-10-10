@@ -171,7 +171,7 @@ public class GracefulStopTests
             ["Claude__Executable"] = LifecycleHarness.FakeClaudePath,
             [ClaudeProcessManager.StopGracePeriodSetting] = "5",
         });
-        using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(10) };
+        using var http = new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TestTimeouts.Request };
         try
         {
             await server.WaitForHealthyAsync(http);

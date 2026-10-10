@@ -365,34 +365,6 @@ public class ProjectHub : Hub<IProjectHubClient>, IProjectHub
         return result;
     }
 
-    public async Task<string?> CheckCommand(string command)
-    {
-        // Only allow checking simple command names (no paths, no args)
-        if (string.IsNullOrWhiteSpace(command) || command.Contains('/') || command.Contains('\\') || command.Contains(' '))
-            return null;
-
-        try
-        {
-            var which = OperatingSystem.IsWindows() ? "where" : "which";
-            var psi = new System.Diagnostics.ProcessStartInfo(which, command)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using var proc = System.Diagnostics.Process.Start(psi);
-            if (proc == null) return null;
-            var output = await proc.StandardOutput.ReadToEndAsync();
-            await proc.WaitForExitAsync();
-            return proc.ExitCode == 0 ? output.Trim().Split('\n')[0].Trim() : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         _logger.LogInformation("Client {ConnectionId} disconnected", Context.ConnectionId);

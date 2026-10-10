@@ -934,11 +934,7 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
                 "Nothing was sent: tell the user to delete it, or create it again.";
         }
         if (status.PendingPermission is { } permission)
-        {
-            conversation.Current = target;
-            return $"{name} is waiting on a permission request ({permission.Summary}), which is answered on screen, " +
-                "not by voice. Nothing was sent: tell the user to answer it on screen.";
-        }
+            return WaitsOnPermission(target, name, permission);
 
         var sent = answer.Trim();
         var question = QuestionChoices.Single(status.PendingQuestion);
@@ -954,12 +950,40 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             sent = QuestionChoices.Joined(picked);
             await servers.AnswerQuestionAsync(target, status.PendingQuestion!.RequestId, new Dictionary<string, string> { [question.Question] = sent }, ct);
         }
-        else
-            await servers.ReplyAsync(target, sent, ct);
+        else if (await ReplyUnlessPermissionAsync(target, sent, ct) is { } arrived)
+            return WaitsOnPermission(target, name, arrived);
         conversation.Current = target;
         conversation.Sent(name);
         // The code says it was sent (SentNode): the model's round after it would only say so again (#526)
         return SaysItself($"Sent to {name}: \"{sent}\". It continues. The system says it was sent itself.", _phrases.Sent([name]));
+    }
+
+    private string WaitsOnPermission(ProjectRef target, SpokenName name, PendingPermission permission)
+    {
+        conversation.Current = target;
+        return $"{name} is waiting on a permission request ({permission.Summary}), which is answered on screen, " +
+            "not by voice. Nothing was sent: tell the user to answer it on screen.";
+    }
+
+    /// <summary>
+    /// Sends the reply, or, when the server refused it for a permission request that arrived after the status was read
+    /// (#289), returns that request: the server never denies one with a spoken reply. Any other failure is thrown.
+    /// </summary>
+    private async Task<PendingPermission?> ReplyUnlessPermissionAsync(ProjectRef target, string text, CancellationToken ct)
+    {
+        try
+        {
+            await servers.ReplyAsync(target, text, ct);
+            return null;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            ProjectStatus? now = null;
+            try { now = await servers.GetStatusAsync(target, ct); }
+            catch (Exception) when (!ct.IsCancellationRequested) { }
+            if (now?.PendingPermission is { } arrived) return arrived;
+            throw;
+        }
     }
 
     public async Task<string> MarkSeenAsync(string? reference, CancellationToken ct)

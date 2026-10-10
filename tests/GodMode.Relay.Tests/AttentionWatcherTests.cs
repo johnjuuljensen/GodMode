@@ -53,6 +53,8 @@ public sealed class AttentionWatcherTests : IAsyncLifetime
         await UntilAsync(() => _notifier.Items.Count == 1, "the listed item");
         Assert.Equal([(alpha, "Default/root/a")], _notifier.Items);
         Assert.All(_alpha.Tokens, t => Assert.Equal("key-alpha", t));
+        // In the header, the WebSocket upgrade's too (this is the Android attention service's connection): never in the URL
+        Assert.All(_alpha.Queries, q => Assert.DoesNotContain("access_token", q));
     }
 
     [Fact]
@@ -65,7 +67,7 @@ public sealed class AttentionWatcherTests : IAsyncLifetime
         await _alpha.SetAsync(Item("Default/root/a"), Item("Default/root/b"));
         await UntilAsync(() => _notifier.Items.Count == 2, "both items");
 
-        // Answered in the browser: the server pushes the list without it
+        // Answered elsewhere (another app, voice): the server pushes the list without it
         await _alpha.SetAsync(Item("Default/root/b"));
         await UntilAsync(() => _notifier.Items.Count == 1, "the answered item to clear");
         Assert.Equal([(alpha, "Default/root/b")], _notifier.Items);

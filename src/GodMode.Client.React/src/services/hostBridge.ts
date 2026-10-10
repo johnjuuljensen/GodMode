@@ -53,7 +53,7 @@ export interface AttentionSound {
   Enabled: boolean;
 }
 
-// ── Voice (the Windows app only: voice.state says whether it is Available) ──
+// ── Voice (the Windows and Android apps: voice.state says whether it is Available) ──
 
 export type VoiceStateName = 'Off' | 'Starting' | 'Listening' | 'Thinking' | 'Speaking' | 'Error';
 

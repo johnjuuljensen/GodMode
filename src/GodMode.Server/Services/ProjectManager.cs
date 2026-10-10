@@ -21,8 +21,9 @@ namespace GodMode.Server.Services;
 /// </summary>
 public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDisposable
 {
-    /// <summary>How long server shutdown waits for the projects' processes to be stopped and marked Stopped.</summary>
-    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(15);
+    /// <summary>How long server shutdown waits for the projects' processes to be stopped and marked Stopped (a test gives a loaded machine more).</summary>
+    public const string ShutdownTimeoutSetting = "ShutdownTimeoutSeconds";
+    private TimeSpan ShutdownTimeout => TimeSpan.FromSeconds(_configuration.GetValue(ShutdownTimeoutSetting, 15.0));
 
     /// <summary>What a shutdown keeps of <see cref="ShutdownTimeout"/> for killing what its grace period did not stop.</summary>
     private static readonly TimeSpan ShutdownKillMargin = TimeSpan.FromSeconds(3);
@@ -80,7 +81,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>How often an open pull request is checked, and how long its root's status script may take.</summary>
     public const string PullRequestPollSetting = "PullRequestPollSeconds";
     public const string StatusScriptTimeoutSetting = "StatusScriptTimeoutSeconds";
-    private readonly TimeSpan _statusScriptTimeout;
+    /// <summary>Read at each run, as the list script's is: a test shortens it for the one run whose timeout it checks.</summary>
+    private TimeSpan StatusScriptTimeout => TimeSpan.FromSeconds(_configuration.GetValue(StatusScriptTimeoutSetting, 30.0));
     private readonly PullRequestPoller _pullRequests;
 
     /// <inheritdoc />
@@ -101,12 +103,20 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     private readonly HashSet<string> _loggedMissingRoots = new(PathComparer);
 
     /// <summary>
-    /// The generated API key's file, when the server has one (<see cref="AuthSettings.KeyFilePath"/>):
-    /// no root source whose tree holds it is used. The start refuses one; this keeps out one added by a
-    /// config reload later. Each left out is logged once, by folder, while it lasts.
+    /// The server's own files (<see cref="ServerFiles"/>): the generated API key's file, when the server has
+    /// one (<see cref="AuthSettings.KeyFilePath"/>), and the instance's config file, when it was started with
+    /// one (<see cref="InstanceConfig"/>), each with what it is and how to move it. No root source whose tree
+    /// holds one is used, nor the fallback root. The start refuses one; this keeps out one added by a config
+    /// reload later. Each left out is logged once, by folder, while it lasts.
     /// </summary>
-    private readonly string? _keyFilePath;
-    private readonly HashSet<string> _loggedKeyFileFolders = new(PathComparer);
+    private readonly (string What, string Path, string Move)[] _serverFiles;
+    private readonly HashSet<string> _loggedServerFileFolders = new(PathComparer);
+
+    /// <summary>The folders this rebuild left out for holding one of <see cref="_serverFiles"/> (under <see cref="_profileLock"/>).</summary>
+    private readonly HashSet<string> _serverFileFolders = new(PathComparer);
+
+    /// <summary>The leftover <c>.profiles/</c> folders found in scan folders, each logged once while it is there.</summary>
+    private readonly HashSet<string> _loggedLeftoverProfiles = new(PathComparer);
 
     /// <summary>Which server this is, in the roots it holds and in the logs: <c>Instance</c>, <c>default</c> unless configured.</summary>
     public const string InstanceSetting = "Instance";
@@ -129,9 +139,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>
     /// How often the roots are read again, so a root added, edited or removed on the host shows up
     /// without a reconnect, where a file watcher would miss it (a network drive). 0 turns the poll
-    /// off; a reload of the config, and every list of roots or profiles, still read them.
+    /// off; a reload of the config, and every list of roots or profiles, still read them. A poll more
+    /// often than <see cref="RootsPollFloor"/> is raised to it: every read reads each root's config.
     /// </summary>
     public const string RootsPollSetting = "RootsPollSeconds";
+    public static readonly TimeSpan RootsPollFloor = TimeSpan.FromSeconds(1);
     private readonly TimeSpan _rootsPoll;
 
     /// <summary>How long a refresh waits for a session's lock to let the session go (<see cref="TryForgetAsync"/>).</summary>
@@ -235,11 +247,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         _server = server;
         _configuredUrls = (configuration["Urls"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         _sessionStartTimeout = TimeSpan.FromSeconds(configuration.GetValue(SessionStartTimeoutSetting, 60.0));
-        _statusScriptTimeout = TimeSpan.FromSeconds(configuration.GetValue(StatusScriptTimeoutSetting, 30.0));
         _exitBeforeShutdownWindow = TimeSpan.FromSeconds(configuration.GetValue(ExitBeforeShutdownWindowSetting, 5.0));
         _pullRequests = new PullRequestPoller(CheckPullRequestAsync,
             TimeSpan.FromSeconds(configuration.GetValue(PullRequestPollSetting, 600.0)), logger);
-        _rootsPoll = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(RootsPollSetting, 5.0)));
+        _rootsPoll = RootsPollFrom(configuration, logger);
         _trashRetention = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(TrashRetentionSetting, TimeSpan.FromDays(1).TotalSeconds)));
         _trashPurge = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(TrashPurgeSetting, TimeSpan.FromHours(1).TotalSeconds)));
         _lifecycle.StatusNotified += OnStatusNotifiedAsync;
@@ -249,7 +260,15 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         _configuration = configuration;
         _links = links ?? new FleetLinks(configuration, logger);
-        _keyFilePath = authSettings?.KeyFilePath is { } keyFile ? Path.GetFullPath(keyFile) : null;
+        _serverFiles =
+        [
+            .. authSettings?.KeyFilePath is { } keyFile
+                ? [("API key file", Path.GetFullPath(keyFile), $"move the key file ({ApiKeyFile.PathSetting})")]
+                : Array.Empty<(string, string, string)>(),
+            .. InstanceConfig.PathFrom(configuration) is { } configFile
+                ? [("config file", configFile, $"move the config file (--{InstanceConfig.CommandLineSetting})")]
+                : Array.Empty<(string, string, string)>(),
+        ];
         foreach (var (setting, folder) in RootSources.From(configuration).Folders)
             _logger.LogInformation("Roots from {Setting}: {Folder}", setting, folder);
         foreach (var retired in RootSources.RetiredSettings(configuration))
@@ -264,6 +283,17 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         lifetime.ApplicationStopping.Register(ReleaseRoots);
         lifetime.ApplicationStopping.Register(StopProjectsOnShutdown);
         lifetime.ApplicationStopping.Register(StopWatchingRoots);
+    }
+
+    /// <summary><see cref="RootsPollSetting"/>, in seconds: 0 or less is off, and anything more often than <see cref="RootsPollFloor"/> is raised to it, said once.</summary>
+    private static TimeSpan RootsPollFrom(IConfiguration configuration, ILogger logger)
+    {
+        var seconds = configuration.GetValue(RootsPollSetting, 5.0);
+        if (seconds <= 0) return TimeSpan.Zero;
+        if (TimeSpan.FromSeconds(seconds) >= RootsPollFloor) return TimeSpan.FromSeconds(seconds);
+        logger.LogWarning("{Setting} ({Seconds}) is below its floor: the roots are read again every {Floor}s. 0 turns the poll off",
+            RootsPollSetting, seconds.ToString(System.Globalization.CultureInfo.InvariantCulture), RootsPollFloor.TotalSeconds);
+        return RootsPollFloor;
     }
 
     /// <summary>
@@ -351,16 +381,22 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         }
 
         // One server per root: before the default, so a server all of whose roots are held elsewhere has what a server with no roots has
-        HoldRoots(merged);
+        var found = new HashSet<string>(PathComparer);
+        HoldRoots(merged, found);
 
-        // If still empty after discovery, create a default
-        if (merged.Count == 0)
+        // If still empty after discovery, a default: in the server's data directory, not wherever it was started.
+        // It is a root as any other: made here, so it is held from the start, and left alone while another server holds it
+        if (merged.Count == 0 && FallbackRoot() is { } fallbackRoot)
         {
             merged["Default"] = new ProfileConfig
             {
-                Roots = new Dictionary<string, string> { ["default"] = "projects" }
+                Roots = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["default"] = fallbackRoot }
             };
+            HoldRoots(merged, found);
         }
+        LetGoOfRootsNotFound(found);
+        _loggedServerFileFolders.IntersectWith(_serverFileFolders);
+        _serverFileFolders.Clear();
 
         var (rootLookup, pathToProfileRoot) = BuildRootLookups(merged);
 
@@ -385,16 +421,49 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     }
 
     /// <summary>
-    /// One server per root: removes from <paramref name="profiles"/> every root another live server
-    /// holds, and takes the lock on each one that is free. A root held elsewhere is logged once, with
-    /// its holder where that can be read, and tried again on every rebuild; a root this server holds
-    /// stays held across rebuilds, and is let go once it is no longer found and no project of this
-    /// server's is in it (one being created included) until the server stops. A root whose folder does
-    /// not exist holds nothing yet, and is kept. A profile left with no root by this is not listed either.
+    /// The fallback root's full path, made if it is not there; null when one of the server's own files is in
+    /// its tree (a key file named <c>projects</c>, which the start refuses), logged once.
     /// </summary>
-    private void HoldRoots(Dictionary<string, ProfileConfig> profiles)
+    private string? FallbackRoot()
     {
-        var found = new HashSet<string>(PathComparer);
+        var path = ServerDataDirectory.FallbackRoot(_configuration);
+        if (HoldsAServerFile(path, ServerFiles.FallbackRootSetting)) return null;
+        try
+        {
+            Directory.CreateDirectory(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Could not make the fallback root {Path}", path);
+        }
+        return path;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="folder"/>, named by <paramref name="setting"/>, holds one of the server's own
+    /// files in its tree (<see cref="_serverFiles"/>), where sessions would work: it is left out then, logged
+    /// once while it lasts.
+    /// </summary>
+    private bool HoldsAServerFile(string folder, string setting)
+    {
+        if (_serverFiles.FirstOrDefault(file => ServerFiles.IsUnder(folder, file.Path)) is not { Path: not null } held) return false;
+        _serverFileFolders.Add(folder);
+        if (_loggedServerFileFolders.Add(folder))
+            _logger.LogWarning("{Setting} ({Folder}) is left out: the server's {What}, {File}, is in its tree, where sessions would work. " +
+                "Name a folder without it, or {Move}", setting, folder, held.What, held.Path, held.Move);
+        return true;
+    }
+
+    /// <summary>
+    /// One server per root: removes from <paramref name="profiles"/> every root another live server
+    /// holds, and takes the lock on each one that is free, adding each one that exists to <paramref name="found"/>.
+    /// A root held elsewhere is logged once, with its holder where that can be read, and tried again on
+    /// every rebuild; a root this server holds stays held across rebuilds (<see cref="LetGoOfRootsNotFound"/>).
+    /// A root whose folder does not exist holds nothing yet, and is kept. A profile left with no root by
+    /// this is not listed either.
+    /// </summary>
+    private void HoldRoots(Dictionary<string, ProfileConfig> profiles, HashSet<string> found)
+    {
         foreach (var (profileName, config) in profiles.ToArray())
         {
             var hadRoots = config.Roots.Count > 0;
@@ -423,7 +492,15 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             }
             if (hadRoots && config.Roots.Count == 0) profiles.Remove(profileName);
         }
+    }
 
+    /// <summary>
+    /// Lets go of each root this server holds that the rebuild did not find (<paramref name="found"/>) and no
+    /// project of this server's is in (one being created included), until the server stops; and forgets the
+    /// skipped roots it did not find.
+    /// </summary>
+    private void LetGoOfRootsNotFound(HashSet<string> found)
+    {
         // Not found by one rebuild is not gone: a config.json saved mid-edit, or a folder that blinks.
         // A root with a project of this server's in it stays held, so no other server takes its sessions
         foreach (var gone in _heldRoots.Keys.Where(path => !found.Contains(path) && !HasProjectIn(path)).ToArray())
@@ -483,9 +560,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// The roots <paramref name="sources"/> name: the explicit ones, then each scan folder's, in ordinal
     /// order of their keys. One name, one root per server, and one folder, one root: an explicit root
     /// wins a clash, and between scan folders the first key does. Each loser is logged once, with both
-    /// paths, while the clash lasts. A root's profile is its config.json's <c>profileName</c>, else its
-    /// explicit entry's <c>Profile</c>, else <c>Default</c>; its title, likewise, config.json's <c>title</c>,
-    /// else the entry's <c>Title</c>, else none (the name).
+    /// paths, while the clash lasts. A root's profile is its explicit entry's <c>Profile</c>, else its
+    /// config.json's <c>profileName</c>, else <c>Default</c>: the host's config, which holds the profiles'
+    /// secrets, picks whose a root gets, over what the root's folder says. Its title is config.json's
+    /// <c>title</c>, else the entry's <c>Title</c>, else none (the name).
     /// </summary>
     private List<FoundRoot> FindRoots(RootSources sources)
     {
@@ -493,18 +571,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         var byName = new Dictionary<string, FoundRoot>(StringComparer.OrdinalIgnoreCase);
         var byPath = new Dictionary<string, FoundRoot>(PathComparer);
         var clashes = new HashSet<string>(PathComparer);
-        var holdingTheKey = new HashSet<string>(PathComparer);
-
-        // Where sessions work, the key file never is: a source added since the start that holds it is left out
-        bool HoldsTheKeyFile(string folder, string setting)
-        {
-            if (_keyFilePath is null || !ApiKeyFile.IsUnder(folder, _keyFilePath)) return false;
-            holdingTheKey.Add(folder);
-            if (_loggedKeyFileFolders.Add(folder))
-                _logger.LogWarning("{Setting} ({Folder}) is left out: the server's API key file, {KeyFile}, is in its tree, where sessions would work. " +
-                    "Name a folder without it, or move the key file (Authentication:ApiKeyFile)", setting, folder, _keyFilePath);
-            return true;
-        }
+        var leftoverProfiles = new HashSet<string>(PathComparer);
 
         void Add(string name, string path, string? entryProfile, string? entryTitle, string source)
         {
@@ -524,7 +591,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             {
                 var read = _rootConfigReader.ReadConfig(path);
                 var config = read with { Title = read.Title ?? entryTitle };
-                var root = new FoundRoot(name, path, config.ProfileName ?? entryProfile ?? "Default", config, source);
+                var root = new FoundRoot(name, path, entryProfile ?? config.ProfileName ?? "Default", config, source);
                 roots.Add(root);
                 byName[name] = root;
                 byPath[path] = root;
@@ -539,7 +606,8 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         foreach (var root in sources.ExplicitRoots)
         {
             var setting = $"{RootSources.ExplicitSection}:{root.Name}";
-            if (HoldsTheKeyFile(root.Path, $"{setting}:Path")) continue;
+            // Where sessions work, the server's own files never are: a source added since the start that holds one is left out
+            if (HoldsAServerFile(root.Path, $"{setting}:Path")) continue;
             if (Directory.Exists(root.Path))
                 Add(root.Name, root.Path, root.Profile, root.Title, setting);
             else if (_loggedMissingRoots.Add(root.Path))
@@ -548,19 +616,26 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         foreach (var scan in sources.ScanFolders)
         {
             var setting = $"{RootSources.ScanSection}:{scan.Key}";
-            if (HoldsTheKeyFile(scan.Folder, setting)) continue;
+            if (HoldsAServerFile(scan.Folder, setting)) continue;
             if (!Directory.Exists(scan.Folder))
             {
                 _logger.LogDebug("Scan folder {Folder} ({Setting}) does not exist, skipping it", scan.Folder, setting);
                 continue;
             }
+            // .profiles/ gave a scan folder's profiles their description and environment, secrets included, until
+            // March 2026: one left is not read, and is said, once while it is there
+            var dotProfiles = Path.Combine(scan.Folder, ".profiles");
+            if (Directory.Exists(dotProfiles) && leftoverProfiles.Add(dotProfiles) && _loggedLeftoverProfiles.Add(dotProfiles))
+                _logger.LogWarning("{Folder} ({Setting}) is not read, and may still hold secrets it once gave its profiles: a profile's description " +
+                    "and environment are {Profiles}:<name>:Description and {Profiles}:<name>:Environment:<VAR>, secrets in environment variables. Delete the folder",
+                    dotProfiles, setting, RootSources.ProfilesSection, RootSources.ProfilesSection);
             foreach (var subDir in Directory.GetDirectories(scan.Folder).Order(StringComparer.Ordinal))
                 if (Directory.Exists(Path.Combine(subDir, ProjectFiles.ProjectFolder.RootConfigFolderName)))
                     Add(Path.GetFileName(subDir), FullPath(subDir), null, null, setting);
         }
 
         _loggedClashes.IntersectWith(clashes);
-        _loggedKeyFileFolders.IntersectWith(holdingTheKey);
+        _loggedLeftoverProfiles.IntersectWith(leftoverProfiles);
         _loggedMissingRoots.IntersectWith(sources.ExplicitRoots.Select(root => root.Path).Where(path => !Directory.Exists(path)));
         return roots;
     }
@@ -1286,8 +1361,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>
     /// Why a new session cannot have the working folder <paramref name="path"/> (a full path), or null
     /// when it can. A session that does not share its folder needs one no other session has, tracked
-    /// or only on disk in its <c>.godmode/sessions/</c>: its delete removes the folder. One that shares
-    /// it (<paramref name="shared"/>) may join sessions that share it too, and no other kind. Nor may
+    /// or only on disk in its <c>.godmode/sessions/</c>, nor one whose <c>.godmode/trash/</c> holds a
+    /// session that shared it: its delete removes the folder, the trash with it, and nothing could be
+    /// restored. One that shares it (<paramref name="shared"/>) may join sessions that share it too, and
+    /// no other kind. A session forgotten from a folder it owned is no session's, as for an adopt. Nor may
     /// one that does not share its folder have any folder in the root at <paramref name="rootPath"/>
     /// while the root is its own workspace (<see cref="WhyRootIsAWorkspace"/>): its folders are the
     /// repo's, and the session's delete would remove the one it has.
@@ -1305,8 +1382,12 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // A session's state left on disk and not tracked (not recovered) is the folder's too
         var untracked = ProjectFiles.SessionState.List(path).Where(id => !tracked.Any(p => p.SessionId == id));
-        return untracked.FirstOrDefault(id => !shared || !ProjectFiles.ProjectSettings.Load(ProjectFiles.SessionState.PathOf(path, id)).SharedFolder) is { } other
-            ? $"session {other} has its state in {path}"
+        if (untracked.FirstOrDefault(id => !shared || !ProjectFiles.ProjectSettings.Load(ProjectFiles.SessionState.PathOf(path, id)).SharedFolder) is { } other)
+            return $"session {other} has its state in {path}";
+
+        // A shared session's delete, kept for an undo, goes with the folder when a session that owns it is deleted
+        return !shared && ProjectFiles.SessionState.ListTrashed(path).FirstOrDefault(id => TrashedAsSharing(path, id)) is { } trashed
+            ? $"session {trashed} is in the trash of {path}, which its sessions shared, and this create's action does not share folders (sharedFolder): its delete would remove the trash with the folder"
             : null;
     }
 
@@ -1335,9 +1416,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <summary>
     /// <see cref="SendInputAsync(string, string)"/>; without <paramref name="answersPending"/>, a pending permission
     /// prompt or question refuses the input (<see cref="InvalidOperationException"/>) and is left as it is. One that
-    /// comes after the check gets no answer from it: the input then waits in claude's stdin as a message.
+    /// comes after the check gets no answer from it: the input then waits in claude's stdin as a message. With
+    /// <paramref name="spoken"/>, a pending permission prompt refuses it so, and a question is answered.
     /// </summary>
-    private async Task SendInputAsync(string projectId, string input, bool answersPending)
+    private async Task SendInputAsync(string projectId, string input, bool answersPending, bool spoken = false)
     {
         if (!_projects.TryGetValue(projectId, out var project))
         {
@@ -1345,6 +1427,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         }
         RefuseFailedCreate(project);
         if (!answersPending) RefuseWhilePending(project);
+        if (spoken) RefusePermissionPending(project);
 
         // claude is blocked on a permission prompt and reads no input until it is answered: a reply
         // in the chat answers it. A single question takes it as its answer; anything else is a deny
@@ -1369,6 +1452,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             throw new KeyNotFoundException($"Project {projectId} not found");
         RefuseFailedCreate(project);
         if (!answersPending) RefuseWhilePending(project);
+        if (spoken) RefusePermissionPending(project);
         SlashCommands.Check(text, project.Status);
         if (spoken) text = SpokenInput.Mark(text);
         // The user's reply answers what is pending; the fleet's send, which does not, starts no turn of the user's
@@ -1376,7 +1460,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         // One reply at a time decides whether to resume: two would launch two processes. The wait
         // for the session to start comes after the lock, so a stop is not held behind it
-        var reply = await WithTrackedLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false, answersPending));
+        var reply = await WithTrackedLockAsync(project, () => ReplyAndResumeLockedAsync(project, text, onlyIfInterrupted: false, answersPending, spoken));
         if (reply.SessionStart is { } sessionStart) await sessionStart;
     }
 
@@ -1409,14 +1493,15 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// <see cref="ProjectStatus.StateAtShutdown"/>; not delivered when it did neither. A resume carries the messages
     /// held for the session after <paramref name="text"/>, or alone when <paramref name="text"/> is null.
     /// </summary>
-    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string? text, bool onlyIfInterrupted, bool answersPending = true)
+    private async Task<ReplyOutcome> ReplyAndResumeLockedAsync(ProjectInfo project, string? text, bool onlyIfInterrupted, bool answersPending = true,
+        bool spoken = false)
     {
         var projectId = project.Status.Id;
         await _lifecycle.SettleAsync(project);
         if (_lifecycle.IsRunning(project))
         {
             if (onlyIfInterrupted || text == null) return new(false);
-            await SendInputAsync(projectId, text, answersPending);
+            await SendInputAsync(projectId, text, answersPending, spoken);
             return new(true);
         }
 
@@ -1514,6 +1599,18 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     }
 
     /// <summary>Refuses, changing nothing, while the project's claude waits on a permission prompt or a question: those are the user's to answer.</summary>
+    /// <summary>
+    /// A permission prompt is answered on screen, never by voice (#289): a spoken reply that finds one first, which came
+    /// after voice looked, is refused rather than deny it with the spoken words. A question is the spoken reply's to answer.
+    /// </summary>
+    private static void RefusePermissionPending(ProjectInfo project)
+    {
+        if (project.Process.OldestPending is { Question: null })
+            throw new InvalidOperationException(
+                $"Project {project.Status.Id} is waiting on the user's answer to its permission prompt, which is answered on screen: " +
+                "nothing was sent.");
+    }
+
     private static void RefuseWhilePending(ProjectInfo project)
     {
         if (project.Process.OldestPending is { } pending)
@@ -1617,6 +1714,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         if (project.Status.RootName == null || profileName == null) return unchanged;
 
         string? script = null;
+        var limit = StatusScriptTimeout;
         PullRequestStatus? reported;
         try
         {
@@ -1626,11 +1724,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             if (config.ResolveAction(project.ActionName) is not { Status: { } status } action) return unchanged;
             script = status;
 
-            snap.Profiles.TryGetValue(profileName, out var profileCfg);
-            var env = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), profileCfg?.Environment,
+            var env = BuildScriptEnvironment(rootPath, project, action, new Dictionary<string, JsonElement>(), ProfileEnvironment(snap, profileName),
                 profileName: profileName, stripEnvVarProfile: config.StripEnvVarProfile);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-            timeout.CancelAfter(_statusScriptTimeout);
+            timeout.CancelAfter(limit);
             var output = await _scriptRunner.RunForOutputAsync(script, rootPath, project.ProjectPath, env, PullRequestScript.MaxOutputChars, timeout.Token);
             reported = PullRequestScript.Parse(output, DateTime.UtcNow);
         }
@@ -1641,7 +1738,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         catch (Exception ex)
         {
             _logger.LogWarning("Project {ProjectId}: status script {Script} failed, so its pull request is left as it was: {Reason}",
-                projectId, script, ex is OperationCanceledException ? $"it took longer than {_statusScriptTimeout.TotalSeconds}s" : ex.Message);
+                projectId, script, ex is OperationCanceledException ? $"it took longer than {limit.TotalSeconds}s" : ex.Message);
             return unchanged;
         }
 
@@ -1929,9 +2026,10 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     }
 
     /// <summary>
-    /// A profile's environment, for the scripts of a session under it: the snapshot's, else the
-    /// configuration's. A session whose root has left the profile (moved to another, or removed) while
-    /// its claude ran is still that profile's, and the snapshot lists only profiles with roots.
+    /// A profile's environment, for a session under it: its launch, its status script and its delete
+    /// script. The snapshot's, else the configuration's: a session whose root has left the profile (moved
+    /// to another, or removed) while its claude ran is still that profile's until a read of the roots gives
+    /// it its new ID, and the snapshot lists only profiles with roots.
     /// </summary>
     private Dictionary<string, string>? ProfileEnvironment(ProfileSnapshot snap, string profileName) =>
         snap.Profiles.TryGetValue(profileName, out var profile) ? profile.Environment
@@ -2265,9 +2363,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // A forgotten session left its folder as it was, and comes back as it was: one that owns its
         // folder owns it again, so no other session may be in it now. Any other was deleted as sharing it
         var forgotten = ProjectFiles.SessionState.WasForgotten(folder, sessionId);
-        var shared = !forgotten
-            || !ProjectFiles.ProjectSettings.TryLoad(ProjectFiles.SessionState.TrashedPathOf(folder, sessionId), out var trashedSettings)
-            || trashedSettings.SharedFolder;
+        var shared = TrashedAsSharing(folder, sessionId);
 
         // As a create into the folder would claim it: no create in progress has the ID or owns the
         // folder, and no session that owns the folder is in it now
@@ -2287,6 +2383,16 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         _logger.LogInformation("Project {ProjectId} was restored from the trash of {Folder}", projectId, folder);
         return project;
     }
+
+    /// <summary>
+    /// Whether the session <paramref name="sessionId"/> in the trash of <paramref name="folder"/> shares the folder:
+    /// one deleted did (only a session that shares its folder is deleted into its trash), and one forgotten did
+    /// when its settings say so, or cannot be read.
+    /// </summary>
+    private static bool TrashedAsSharing(string folder, string sessionId) =>
+        !ProjectFiles.SessionState.WasForgotten(folder, sessionId)
+        || !ProjectFiles.ProjectSettings.TryLoad(ProjectFiles.SessionState.TrashedPathOf(folder, sessionId), out var settings)
+        || settings.SharedFolder;
 
     /// <summary>
     /// Deletes every trashed session older than <see cref="TrashRetentionSetting"/> in the working folders
@@ -2535,6 +2641,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     /// </summary>
     private async Task<IReadOnlyList<ProjectInfo>> RecoverRootsAsync(ProfileSnapshot recoverSnap, IReadOnlyList<(string Profile, string Root, string Path)> roots)
     {
+        // What a server that died left running in them goes first, so no session is resumed beside its old claude (issue #280)
+        await SessionProcessTree.ReapOrphansAsync(roots.Select(root => root.Path).Distinct(PathComparer), _logger);
+
         // A session tracked already, under the ID it has, is left as it is: one whose claude runs on
         // after its root moved profile, say
         var tracked = new HashSet<string>(_projects.Values.Select(project => FullPath(project.StatePath)), PathComparer);
@@ -3157,7 +3266,6 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         // Recovery reads the action name from settings too; a project created before it was saved has none
         project.ActionName ??= settings.ActionName;
         var profileName = project.ProfileName ?? project.Status.ProfileName;
-        snap.Profiles.TryGetValue(profileName ?? "", out var profile);
 
         var (action, stripEnvVarProfile, rootAllowsSkip) = ResolveLaunchAction(project, profileName);
         var (skipPermissions, permissionMode) = LaunchPermissions(project, settings, action, rootAllowsSkip);
@@ -3172,7 +3280,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             action = action with { ClaudeArgs = unnamed };
         }
         var (env, args) = BuildClaudeConfig(project.ProjectPath, mcpConfigPath, action, skipPermissions, permissionMode, McpConfigJson(project, IssueProjectToken(project), fleetTools),
-            project.Status.Model ?? action.Model, LaunchEffort(project, action), profile?.Environment, profileName, stripEnvVarProfile);
+            project.Status.Model ?? action.Model, LaunchEffort(project, action), ProfileEnvironment(snap, profileName ?? ""), profileName, stripEnvVarProfile);
         env ??= new Dictionary<string, string>();
         var address = AddressOf(project);
         env[SessionAddress.Variable] = address;

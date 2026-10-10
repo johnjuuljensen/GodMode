@@ -69,8 +69,8 @@ state lives; the user tracks by issue.
 4. Mark it ready for review only when the gate is green:
 
    ```powershell
-   cd src/GodMode.Client.React; npm ci; cd ../..   # the server build runs `npm run build` but never installs
-   dotnet build GodMode.slnx                         # also builds the React client into the server's wwwroot
+   cd src/GodMode.Client.React; npm ci; cd ../..   # the app's client build installs only when node_modules is missing or stale
+   dotnet build GodMode.slnx                         # also builds the React client, for the app (the server serves no page)
    dotnet test GodMode.slnx --no-build
    cd src/GodMode.Client.React; npm run lint; npm test
    ```
