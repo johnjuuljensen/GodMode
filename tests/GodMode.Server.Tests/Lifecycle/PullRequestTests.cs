@@ -171,9 +171,10 @@ public class PullRequestTests
         await WaitForWarningAsync(harness, "gh: could not reach github.com");
         Assert.Equal(known, (await harness.Projects.GetStatusAsync(created.Id)).PullRequest);
 
-        // The timeout is short for the slow script alone: a fast one may take seconds to start on a loaded machine
-        UseStatusScript(harness, "Start-Sleep -Seconds 60; '{}'");
+        // The timeout is short for the slow script alone, set before it is swapped in so no run of it has the ceiling:
+        // a fast one may take seconds to start on a loaded machine
         harness.Configure(ProjectManager.StatusScriptTimeoutSetting, TimeSpan.FromSeconds(3));
+        UseStatusScript(harness, "Start-Sleep -Seconds 60; '{}'");
         await WaitForWarningAsync(harness, "it took longer than 3s");
         Assert.Equal(known, (await harness.Projects.GetStatusAsync(created.Id)).PullRequest);
         Assert.Equal(AttentionKind.Review, Assert.Single(harness.Projects.GetAttention()).Kind);
