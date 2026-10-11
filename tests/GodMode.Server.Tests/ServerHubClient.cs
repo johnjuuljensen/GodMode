@@ -24,18 +24,26 @@ internal sealed class ServerHubClient(string baseUrl, string apiKey = ServerProc
         .WithServerTimeout(TestTimeouts.Request)
         .Build();
 
-    public async Task StartAsync()
+    public Task StartAsync()
     {
         Hub.On<string, ProjectStatus>(nameof(IProjectHubClient.StatusChanged), (_, status) => _pushes.Enqueue(status));
-        Hub.HandshakeTimeout = TestTimeouts.Request;
-        // A server only just started can take longer than its own 15 s to read the handshake on a loaded
-        // machine, and refuses it as canceled: the connection is not what the tests are about (#371)
+        return StartAsync(Hub);
+    }
+
+    /// <summary>
+    /// Starts a test's hub connection. A server only just started can take longer than its own 15 s to read the
+    /// handshake on a loaded machine, and refuses it as canceled: the connection is not what the tests are about
+    /// (#371), so a canceled handshake is tried again, for as long as a request may take.
+    /// </summary>
+    public static async Task StartAsync(HubConnection hub)
+    {
+        hub.HandshakeTimeout = TestTimeouts.Request;
         var deadline = DateTime.UtcNow + TestTimeouts.Request;
         while (true)
         {
             try
             {
-                await Hub.StartAsync();
+                await hub.StartAsync();
                 return;
             }
             catch (Microsoft.AspNetCore.SignalR.HubException ex) when (ex.Message.EndsWith("Handshake was canceled.", StringComparison.Ordinal) && DateTime.UtcNow < deadline) { }
