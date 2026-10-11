@@ -353,16 +353,19 @@
   margin-left: 0;
 }
 
-/* A parent's fold (#506): its row's first mark, before the state dot, in the column a header's chevron is in */
+/* A parent's fold (#506): it hangs left of its row, in the gutter (or the level's indent, over its guide line), out of
+   the row's flow, so a parent's state dot and name are in the same column as a row's with nothing under it */
 .project-children-toggle {
-  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--list-gutter));
+  width: calc(var(--list-gutter) + var(--row-pad-x) - 1px);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  align-self: stretch;
-  /* The row's height, its chevron where the row's first mark starts, two pixels from the state dot */
-  margin: calc(-1 * var(--row-pad-y)) -4px calc(-1 * var(--row-pad-y)) -4px;
-  padding: 0 4px;
+  margin: 0;
+  padding: 0;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -423,12 +426,13 @@
     min-height: 44px;
   }
 
-  /* A finger's height, the row's, and out to the row's left edge: 44px wide would push a parent's name past its
-     children's, and the nesting would read backwards (#506) */
+  /* The row's height, and wider than its gutter: over the state dot too, its chevron still in the gutter */
   .project-children-toggle {
-    min-width: 28px;
     min-height: 44px;
-    margin-left: calc(-1 * var(--row-pad-x));
+    width: calc(var(--list-gutter) + var(--row-pad-x) + var(--state-dot-size) + 6px);
+    justify-content: flex-start;
+    padding-left: 1px;
+    background: none;
     font-size: 11px;
   }
 

@@ -138,7 +138,7 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
       >
-        {/* The fold is the row's first mark, as a profile's or a root's is on its header (#506) */}
+        {/* The fold, left of the row as a profile's or a root's is on its header (#506): hung in the gutter by Sidebar.css, out of the row's flow */}
         {nested && (
           <button
             className={`project-children-toggle ${nested.collapsed ? 'collapsed' : ''}`}

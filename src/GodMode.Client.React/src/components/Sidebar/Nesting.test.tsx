@@ -103,7 +103,7 @@ describe.each([false, true])('on a phone: %s', isPhone => {
     expect(rowOf('overseer').querySelector('.project-children-count')).toBeNull();
   });
 
-  it("puts a parent's chevron first on its row, as a header's is, and its count at the row's end (#506)", async () => {
+  it("puts a parent's chevron before its state dot, as a header's is before its name, and its count at the row's end (#506)", async () => {
     await showFleet();
     await click(toggleOf('overseer')!);
     const marks = [...rowOf('overseer').children].map(el => el.className.split(' ')[0]);
