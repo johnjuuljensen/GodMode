@@ -37,3 +37,10 @@
   border-radius: inherit;
   background: var(--accent);
 }
+
+/* A phone's header has no room left for it beside the name (the row a tap back shows it) */
+@media (max-width: 768px) {
+  .progress-mark.with-bar {
+    display: none;
+  }
+}
