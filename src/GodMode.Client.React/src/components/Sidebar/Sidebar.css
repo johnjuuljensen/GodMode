@@ -353,19 +353,23 @@
   margin-left: 0;
 }
 
+/* A parent's fold (#506): its row's first mark, before the state dot, in the column a header's chevron is in */
 .project-children-toggle {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  align-self: stretch;
+  /* The row's height, its chevron where the row's first mark starts, two pixels from the state dot */
+  margin: calc(-1 * var(--row-pad-y)) -4px calc(-1 * var(--row-pad-y)) -4px;
+  padding: 0 4px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-tertiary);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1;
-  padding: 2px 4px;
   cursor: pointer;
   transition: background var(--duration-fast), color var(--duration-fast);
 }
@@ -373,6 +377,16 @@
 .project-children-toggle:hover {
   background: var(--glass-hover);
   color: var(--text-primary);
+}
+
+/* Folded, the row's end says how many are under it, and shows a dot when any of them needs the user, as a header's does */
+.project-children-summary {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .project-children-count {
@@ -409,10 +423,12 @@
     min-height: 44px;
   }
 
+  /* A finger's size, out to the row's left edge so it takes less from the name */
   .project-children-toggle {
     min-width: 44px;
     min-height: 44px;
-    justify-content: center;
+    margin-left: calc(-1 * var(--row-pad-x));
+    font-size: 11px;
   }
 
   .group-fold-toggle {
