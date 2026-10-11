@@ -87,6 +87,13 @@ export const attentionSound = async (): Promise<boolean> => (await bridge.reques
 export const setAttentionSound = async (enabled: boolean): Promise<boolean> =>
   (await bridge.request('attention.sound.set', { Enabled: enabled })).Enabled;
 
+/** Whether this device toasts what notifies (#491), as the app keeps it; null where it has no toasts (Android). */
+export const attentionToasts = async (): Promise<boolean | null> => (await bridge.request('attention.toasts.get')).Notify;
+
+/** Turns this device's toasts for what notifies on or off; resolves to what the app keeps now. */
+export const setAttentionToasts = async (notify: boolean): Promise<boolean | null> =>
+  (await bridge.request('attention.toasts.set', { Notify: notify })).Notify;
+
 export async function openProfileWindow(profile: string): Promise<void> {
   await bridge.request('window.openProfile', { Profile: profile });
 }

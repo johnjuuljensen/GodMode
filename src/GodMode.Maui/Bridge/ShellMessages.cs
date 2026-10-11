@@ -58,6 +58,12 @@ public static class ShellMessageTypes
     /// <summary>Request <see cref="AttentionSoundPayload"/> → <see cref="AttentionSoundPayload"/>: sets it, for this device.</summary>
     public const string AttentionSoundSet = "attention.sound.set";
 
+    /// <summary>Request → <see cref="AttentionToastsPayload"/>: whether this device toasts what notifies (Windows, #491).</summary>
+    public const string AttentionToastsGet = "attention.toasts.get";
+
+    /// <summary>Request <see cref="AttentionToastsPayload"/> → <see cref="AttentionToastsPayload"/>: sets it, for this device.</summary>
+    public const string AttentionToastsSet = "attention.toasts.set";
+
     /// <summary>Request → <see cref="VoiceStatus"/>: whether voice is available here, its state, and the conversation so far.</summary>
     public const string VoiceState = "voice.state";
 
@@ -148,6 +154,12 @@ public sealed record ProfilePayload(string Profile);
 
 /// <summary>Whether this device makes a sound for what interrupts (<see cref="AttentionSound"/>).</summary>
 public sealed record AttentionSoundPayload(bool Enabled);
+
+/// <summary>
+/// Whether this device toasts what notifies, silently into the notification centre (Windows, #491); null on a device
+/// without toasts, which keeps what notifies its own way (Android's notify channel).
+/// </summary>
+public sealed record AttentionToastsPayload(bool? Notify);
 
 /// <summary>An attention item to open in the inbox: a project on a server, both IDs as the server gave them.</summary>
 public sealed record AttentionLinkPayload(string ServerId, string ProjectId);

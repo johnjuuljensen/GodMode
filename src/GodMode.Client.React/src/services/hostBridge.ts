@@ -58,6 +58,14 @@ export interface AttentionSound {
   Enabled: boolean;
 }
 
+/**
+ * Whether this device toasts what notifies, silently into the notification centre (#491, Windows); null on a device
+ * without toasts (Android keeps those on its own notify channel). What interrupts is always toasted.
+ */
+export interface AttentionToasts {
+  Notify: boolean | null;
+}
+
 // ── Voice (the Windows and Android apps: voice.state says whether it is Available) ──
 
 export type VoiceStateName = 'Off' | 'Starting' | 'Listening' | 'Thinking' | 'Speaking' | 'Error';
@@ -170,6 +178,8 @@ export interface BridgeRequests {
   'session.open': [OpenSessionPayload, boolean];
   'attention.sound.get': [void, AttentionSound];
   'attention.sound.set': [AttentionSound, AttentionSound];
+  'attention.toasts.get': [void, AttentionToasts];
+  'attention.toasts.set': [AttentionToasts, AttentionToasts];
   'voice.state': [void, VoiceStatus];
   /** Fails saying why: a missing key, no microphone, voice not available here. */
   'voice.start': [void, VoiceStatus];

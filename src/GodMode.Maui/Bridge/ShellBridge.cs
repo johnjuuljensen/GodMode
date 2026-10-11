@@ -125,6 +125,18 @@ public sealed class ShellBridge : IDisposable
             _logger.LogInformation("Sound for what interrupts is {State} on this device", p.Enabled ? "on" : "off");
             return Task.FromResult(new AttentionSoundPayload(AttentionSound.Enabled));
         });
+        _bridge.Handle(ShellMessageTypes.AttentionToastsGet, () => Task.FromResult(ToastsPayload()));
+        _bridge.Handle<AttentionToastsPayload, AttentionToastsPayload>(ShellMessageTypes.AttentionToastsSet, p =>
+        {
+#if WINDOWS
+            if (p.Notify is { } notify)
+            {
+                WindowsAttention.ToastNotify = notify;
+                _logger.LogInformation("Toasts for what notifies are {State} on this device", notify ? "on" : "off");
+            }
+#endif
+            return Task.FromResult(ToastsPayload());
+        });
         _bridge.Handle(ShellMessageTypes.OpenDevTools, () =>
         {
             MainPage.OpenDevTools(_webView);
@@ -165,6 +177,13 @@ public sealed class ShellBridge : IDisposable
         _logger.LogInformation("Registered {Type} server {Id} ({Name})", added.Type, added.Id, added.DisplayName);
         return Changed(new AddServerResult(added.Id));
     }
+
+    private static AttentionToastsPayload ToastsPayload() =>
+#if WINDOWS
+        new(WindowsAttention.ToastNotify);
+#else
+        new(null);
+#endif
 
     private static KeyNotFoundException NotFound(ServerIdPayload p) => new($"Server not found: {p.ServerId}");
 
