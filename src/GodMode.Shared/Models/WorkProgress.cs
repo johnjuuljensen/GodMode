@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace GodMode.Shared.Models;
 
 /// <summary>
@@ -10,5 +12,6 @@ namespace GodMode.Shared.Models;
 public record WorkProgress(int Resolved, int Total)
 {
     /// <summary>Whether the numbers are ones the server keeps: whole, not negative, and no more resolved than there are.</summary>
+    [JsonIgnore]
     public bool IsValid => Resolved >= 0 && Total >= 0 && Resolved <= Total;
 }

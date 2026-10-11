@@ -13,6 +13,7 @@ import { useClickToCompose } from './clickToCompose';
 import './ProjectView.css';
 import { ImportancePicker } from '../Importance/Importance';
 import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
+import { ProgressMark } from '../Progress/Progress';
 import { backgroundTitle, inBackground } from '../BackgroundTasks/backgroundState';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
@@ -184,6 +185,7 @@ export function ProjectView({ serverId, projectId }: Props) {
           <span className="project-header-name">{projectName}</span>
           {/* Background work while a turn runs or waits on the user; idle, the status button says it */}
           {!background && <BackgroundBadge tasks={project?.BackgroundTasks} />}
+          <ProgressMark progress={project?.Progress} bar />
           {(project?.ProfileName || project?.RootName) && (
             <span className="project-header-root" title={project?.RootName ?? undefined}>
               {project?.ProfileName && project.ProfileName !== 'Default' ? project.ProfileName : ''}
