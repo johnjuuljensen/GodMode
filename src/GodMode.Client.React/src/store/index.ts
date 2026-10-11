@@ -928,7 +928,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     try {
       const hubUrl = api.getHubUrl(serverId);
-      const hubOptions = api.getHubOptions(serverId);
+      const hubOptions = api.getHubOptions();
       console.info(`[store] connectServer: hub.connect(${hubUrl})...`);
       await conn.hub.connect(hubUrl, hubOptions);
       console.info(`[store] connectServer: connected, catching up...`);
