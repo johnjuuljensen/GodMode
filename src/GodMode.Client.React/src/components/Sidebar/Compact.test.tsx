@@ -79,8 +79,9 @@ describe('on a phone', () => {
     expect(onPhone(selector)).toContain('min-height: 44px');
   });
 
-  it("a parent's toggle is 44px wide too", () => {
-    expect(onPhone('.project-children-toggle')).toContain('min-width: 44px');
+  // On the left of its row (#506), a 44px-wide toggle would push a parent's name past its children's
+  it("a parent's toggle is 28px wide, out to the row's left edge", () => {
+    expect(onPhone('.project-children-toggle')).toEqual(expect.arrayContaining(['min-width: 28px', 'margin-left: calc(-1 * var(--row-pad-x))']));
   });
 
   it("the swipe still opens a full Delete", () => {
