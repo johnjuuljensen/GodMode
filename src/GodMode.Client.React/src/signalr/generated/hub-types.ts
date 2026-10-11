@@ -256,6 +256,11 @@ export interface AttentionItem {
    * TurnOutcome.Blocked when the session said so. Null otherwise.
    */
   Outcome?: TurnOutcome | null;
+  /**
+   * Whether Text was cut (it ends in "…"): the app shows such an item as a short card, read and answered in
+   * its session (issue #548). Left out of the JSON when false.
+   */
+  Truncated?: boolean;
 }
 
 /**

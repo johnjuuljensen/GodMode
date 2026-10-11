@@ -6,6 +6,7 @@ import { ReplyInput } from '../Project/ReplyInput';
 import { hubErrorMessage } from '../../signalr/hubError';
 import { deleteSession } from '../../deleteSession';
 import { ImportanceMark } from '../Importance/Importance';
+import { GoToIcon, SeenIcon } from './icons';
 
 const KIND_LABELS: Record<AttentionKind, string> = {
   Permission: 'Permission',
@@ -25,6 +26,17 @@ const kindLabel = ({ Kind: kind, Outcome: outcome }: ServerAttentionItem): strin
     : kind === 'Question' && outcome === 'blocked' ? 'Blocked'
     : kind === 'Question' && outcome === 'needs-you' ? 'Needs you'
     : KIND_LABELS[kind];
+
+/** About three lines of a card in the left pane: a longer text is not read on the card. */
+const LONG_TEXT = 200;
+
+/**
+ * A finished turn whose reply is too long to read on its card (#548): its server cut it, or it is longer than a few
+ * lines. Its card is short, a clamped preview with no reply box: the session is where it is read and answered. A short
+ * reply, an error, an escalation, a question and a permission keep their card.
+ */
+const isShortCard =(item: Pick<ServerAttentionItem, 'Kind' | 'Text' | 'Truncated'>): boolean =>
+  item.Kind === 'Finished' && (item.Truncated === true || item.Text.length > LONG_TEXT);
 
 /** Kinds answered with a typed reply (ReplyAndResume). */
 const REPLY_KINDS: ReadonlySet<AttentionKind> = new Set(['Question', 'Error', 'Escalation', 'Finished']);
@@ -82,7 +94,8 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
   const answersAtOnce = pending !== null && (pending.Questions.length > 1 || pending.Questions.some(q => q.MultiSelect));
   // A create that failed before its launch has no session to reply to: its delete is all that is left (#448)
   const createFailed = kind === 'Error' && item.CreateFailed === true;
-  const canReply = !createFailed && (REPLY_KINDS.has(kind) || (kind === 'Permission' && !permission));
+  const short = isShortCard(item);
+  const canReply = !createFailed && !short && (REPLY_KINDS.has(kind) || (kind === 'Permission' && !permission));
   const canMarkSeen = SEEN_KINDS.has(kind) && !(kind === 'Question' && item.Question);
 
   /** Runs a hub call; the item leaves the inbox by AttentionChanged when it worked. */
@@ -152,13 +165,34 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
     .filter(Boolean).join(' · ');
 
   return (
-    <article className={`inbox-item inbox-kind-${kind}${focused ? ' inbox-item-focused' : ''}${offline ? ' inbox-item-offline' : ''}`}>
-      <button className="inbox-item-header" onClick={open} title="Open the project">
-        <span className="inbox-item-kind">{kindLabel(item)}</span>
-        <span className="inbox-item-name">{item.ProjectName}</span>
-        {item.Importance === 'Important' && <ImportanceMark importance="Important" />}
-        <span className="inbox-item-meta">{meta}</span>
-      </button>
+    <article className={`inbox-item inbox-kind-${kind}${short ? ' inbox-item-short' : ''}${focused ? ' inbox-item-focused' : ''}${offline ? ' inbox-item-offline' : ''}`}
+      data-project={projectKey(serverId, projectId)}>
+      <div className="inbox-item-top">
+        <button className="inbox-item-header" onClick={open} title="Open the project">
+          <span className="inbox-item-kind">{kindLabel(item)}</span>
+          <span className="inbox-item-name">{item.ProjectName}</span>
+          {item.Importance === 'Important' && <ImportanceMark importance="Important" />}
+          <span className="inbox-item-meta">{meta}</span>
+        </button>
+        {/* Every kind can be gone to: the header opens it too, but does not look like a button (#440) */}
+        <div className="inbox-item-icons">
+          {canMarkSeen && item.PullRequestUrl && (
+            <a className="inbox-item-chip" href={item.PullRequestUrl} target="_blank" rel="noreferrer"
+              title={pullRequestLabel(item.PullRequestUrl)} aria-label={pullRequestLabel(item.PullRequestUrl)}>
+              {pullRequestChip(item.PullRequestUrl)}
+            </a>
+          )}
+          {canMarkSeen && (
+            <button className="inbox-icon-btn" onClick={() => run(() => markSeen(serverId, projectId))} disabled={busy}
+              title="Mark seen" aria-label="Mark seen">
+              <SeenIcon />
+            </button>
+          )}
+          <button className="inbox-icon-btn" onClick={open} title="Go to the session" aria-label="Go to">
+            <GoToIcon />
+          </button>
+        </div>
+      </div>
 
       {permission ? (
         // One card per request: the next one does not start out sending, as the last one was (#218)
@@ -198,7 +232,7 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
           )}
         </div>
       ) : (
-        <div className="inbox-item-text">{item.Text}</div>
+        <div className={`inbox-item-text${short ? ' inbox-item-preview' : ''}`}>{item.Text}</div>
       )}
 
       {canReply && (
@@ -215,36 +249,34 @@ export function InboxItem({ item, serverName, now, focused = false }: Props) {
         </div>
       )}
 
-      {/* Every kind can be gone to: the header opens it too, but does not look like a button (#440) */}
-      <div className="inbox-item-actions">
-        <button className="btn btn-secondary" onClick={open} title="Open the project">Go to</button>
-        {canMarkSeen && item.PullRequestUrl && (
-          <a className="btn btn-secondary" href={item.PullRequestUrl} target="_blank" rel="noreferrer">{pullRequestLabel(item.PullRequestUrl)}</a>
-        )}
-        {canMarkSeen && (
-          <button className="btn btn-secondary" onClick={() => run(() => markSeen(serverId, projectId))} disabled={busy}>
-            Mark seen
-          </button>
-        )}
-        {createFailed && (
+      {createFailed && (
+        <div className="inbox-item-actions">
           <button className="btn btn-danger" onClick={remove} disabled={busy} title="Its create failed: delete it, or create it again">
             Delete
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {error && <div className="inbox-item-error">{error}</div>}
     </article>
   );
 }
 
-/** How long since `since`: "<1m", "5m", "3h", "2d". */
+const pullRequestNumber = (url: string) => /\/pull\/(\d+)/.exec(url)?.[1];
+
 /** The link to the project's pull request, which is there already: "View PR #533", never "Open PR", read as creating one (#535). */
 function pullRequestLabel(url: string): string {
-  const number = /\/pull\/(\d+)/.exec(url)?.[1];
+  const number = pullRequestNumber(url);
   return number ? `View PR #${number}` : 'View PR';
 }
 
+/** The link's chip on the card (#548): "PR #533", named in full by its label. */
+function pullRequestChip(url: string): string {
+  const number = pullRequestNumber(url);
+  return number ? `PR #${number}` : 'PR';
+}
+
+/** How long since `since`: "<1m", "5m", "3h", "2d". */
 function waitingFor(since: string, now: number): string {
   const min = Math.floor((now - new Date(since).getTime()) / 60000);
   if (min < 1) return '<1m';
