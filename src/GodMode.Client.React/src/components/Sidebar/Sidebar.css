@@ -353,19 +353,26 @@
   margin-left: 0;
 }
 
+/* A parent's fold (#506): it hangs left of its row, in the gutter (or the level's indent, over its guide line), out of
+   the row's flow, so a parent's state dot and name are in the same column as a row's with nothing under it */
 .project-children-toggle {
-  flex-shrink: 0;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(-1 * var(--list-gutter));
+  width: calc(var(--list-gutter) + var(--row-pad-x) - 1px);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-tertiary);
   font-family: var(--font-body);
-  font-size: 11px;
+  font-size: 9px;
   line-height: 1;
-  padding: 2px 4px;
   cursor: pointer;
   transition: background var(--duration-fast), color var(--duration-fast);
 }
@@ -373,6 +380,16 @@
 .project-children-toggle:hover {
   background: var(--glass-hover);
   color: var(--text-primary);
+}
+
+/* Folded, the row's end says how many are under it, and shows a dot when any of them needs the user, as a header's does */
+.project-children-summary {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .project-children-count {
@@ -409,10 +426,14 @@
     min-height: 44px;
   }
 
+  /* The row's height, and wider than its gutter: over the state dot too, its chevron still in the gutter */
   .project-children-toggle {
-    min-width: 44px;
     min-height: 44px;
-    justify-content: center;
+    width: calc(var(--list-gutter) + var(--row-pad-x) + var(--state-dot-size) + 6px);
+    justify-content: flex-start;
+    padding-left: 1px;
+    background: none;
+    font-size: 11px;
   }
 
   .group-fold-toggle {

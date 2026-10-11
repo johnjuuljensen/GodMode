@@ -53,8 +53,8 @@ function outline(): string[] {
   return q('.project-list').flatMap(l => rows(l, 0));
 }
 
-const toggleOf = (name: string) => q('.project-item').find(r => r.querySelector('.project-name')?.textContent === name)!
-  .querySelector<HTMLButtonElement>('.project-children-toggle');
+const rowOf = (name: string) => q('.project-item').find(r => r.querySelector('.project-name')?.textContent === name)!;
+const toggleOf = (name: string) => rowOf(name).querySelector<HTMLButtonElement>('.project-children-toggle');
 
 const needs = (projectId: string): AttentionItem =>
   ({ ProjectId: projectId, ProjectName: projectId, Profile: 'Default', Root: 'fleet', Kind: 'Question', Since: now, Text: 'Go on?' }) as unknown as AttentionItem;
@@ -95,18 +95,41 @@ describe.each([false, true])('on a phone: %s', isPhone => {
     await showFleet();
     await click(toggleOf('overseer')!);
     expect(outline()).toEqual(['overseer']);
-    expect(toggleOf('overseer')!.querySelector('.project-children-count')?.textContent).toBe('3');
+    expect(rowOf('overseer').querySelector('.project-children-count')?.textContent).toBe('3');
     expect(toggleOf('overseer')!.getAttribute('aria-expanded')).toBe('false');
 
     await click(toggleOf('overseer')!);
     expect(outline()).toEqual(['overseer', '  epic', '    worker-1', '    worker-2 [work]']);
+    expect(rowOf('overseer').querySelector('.project-children-count')).toBeNull();
+  });
+
+  it("puts a parent's chevron before its state dot, as a header's is before its name, and its count at the row's end (#506)", async () => {
+    await showFleet();
+    await click(toggleOf('overseer')!);
+    const marks = [...rowOf('overseer').children].map(el => el.className.split(' ')[0]);
+    expect(marks.slice(0, 3)).toEqual(['project-children-toggle', 'project-state-dot', 'project-info']);
+    expect(marks.indexOf('project-children-summary')).toBeGreaterThan(marks.indexOf('project-info'));
+    expect(toggleOf('overseer')!.textContent).toBe('▸');
+    await click(toggleOf('overseer')!);
+    expect(toggleOf('overseer')!.textContent).toBe('▾');
+    // A session with nothing under it has no chevron, nor a gutter for one: its state dot is its first mark
+    expect(rowOf('worker-1').firstElementChild!.className).toContain('project-state-dot');
+  });
+
+  it('folds on a tap on the chevron without opening the session, which a tap on the rest of the row does', async () => {
+    await showFleet();
+    await click(toggleOf('epic')!);
+    expect(useAppStore.getState().selectedProject).toBeNull();
+    await click(rowOf('epic').querySelector<HTMLElement>('.project-children-count')!);
+    expect(useAppStore.getState().selectedProject?.projectId).toBe('Default/fleet/epic');
+    expect(useAppStore.getState().collapsedSessions).toEqual({ 'A:Default/fleet/epic': true });
   });
 
   it('rolls a grandchild that needs the user up to its collapsed grandparent', async () => {
     await showFleet();
     hub.callbacks.onAttentionChanged?.([needs('Default/work/worker-2')]);
     await click(toggleOf('overseer')!);
-    expect(toggleOf('overseer')!.querySelector('.project-children-attention')).not.toBeNull();
+    expect(rowOf('overseer').querySelector('.project-children-attention')).not.toBeNull();
   });
 });
 
@@ -114,11 +137,11 @@ it('shows no dot on a collapsed parent when nothing under it needs the user, nor
   await showFleet();
   hub.callbacks.onAttentionChanged?.([needs('Default/fleet/worker-1')]);
   await vi.waitFor(() => expect(useAppStore.getState().attention).toHaveLength(1));
-  expect(toggleOf('overseer')!.querySelector('.project-children-attention')).toBeNull();
+  expect(rowOf('overseer').querySelector('.project-children-attention')).toBeNull();
 
   hub.callbacks.onAttentionChanged?.([]);
   await click(toggleOf('overseer')!);
-  expect(toggleOf('overseer')!.querySelector('.project-children-attention')).toBeNull();
+  expect(rowOf('overseer').querySelector('.project-children-attention')).toBeNull();
 });
 
 it('keeps a collapse on this device', async () => {
