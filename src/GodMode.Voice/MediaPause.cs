@@ -196,7 +196,7 @@ public sealed class MediaPause : IDisposable
             var call = _playback.PausePlayingAsync(PauseWait, CancellationToken.None);
             try
             {
-                Remember(await call.WaitAsync(PauseWait).ConfigureAwait(false));
+                Remember(await call.WaitAsync(PauseWait, _time).ConfigureAwait(false));
             }
             catch (TimeoutException)
             {
@@ -338,7 +338,7 @@ public sealed class MediaPause : IDisposable
             {
                 try
                 {
-                    await pausing.WaitAsync(PauseWait, ct).ConfigureAwait(false);
+                    await pausing.WaitAsync(PauseWait, media._time, ct).ConfigureAwait(false);
                 }
                 catch (TimeoutException)
                 {

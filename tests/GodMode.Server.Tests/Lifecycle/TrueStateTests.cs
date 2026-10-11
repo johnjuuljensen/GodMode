@@ -102,7 +102,8 @@ public class TrueStateTests
     {
         await using var harness = new LifecycleHarness(
             new FakeScript().EmitInit().AwaitStdin().IgnoreInterrupt().EmitAssistant("Working on it").Sleep(60_000),
-            settings: new Dictionary<string, string?> { [ClaudeProcessManager.StopGracePeriodSetting] = "3" });
+            // Long enough for a loaded machine's fake to record the interrupt before the grace runs out and kills it (#568)
+            settings: new Dictionary<string, string?> { [ClaudeProcessManager.StopGracePeriodSetting] = "15" });
         var created = await harness.CreateProjectAsync();
         await OutputContainsAsync(harness, created.Id, "Working on it");
 

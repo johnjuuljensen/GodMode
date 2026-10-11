@@ -243,13 +243,11 @@ public partial class ProjectManager
         };
 
     /// <summary>
-    /// After every status push: the session's parent hears of a change it should (<see cref="NoticeParent"/>), and
-    /// what is held for the session is delivered if it can take it now. Neither is waited for: a delivery waits for
-    /// the receiver's resume lock, which whoever pushed this may hold.
+    /// After every status push: what is held for the session is delivered if it can take it now. Not waited for: a
+    /// delivery waits for the receiver's resume lock, which whoever pushed this may hold.
     /// </summary>
     private void DeliverOnStatusChange(ProjectInfo project)
     {
-        NoticeParent(project);
         if (!_lifecycle.IsRunning(project)) project.Process.HeldNotices.Clear();
         if (_lifecycle.CanTakeInput(project) && (!project.Process.HeldNotices.IsEmpty || SessionInbox.Any(project.RootPath, project.SessionId)))
             DeliverInBackground(project);
@@ -267,7 +265,9 @@ public partial class ProjectManager
     /// the session's root or one a link lets it oversee. A parent in the session's <c>CLAUDE_CONFIG_DIR</c> hears of the
     /// turn's end through <c>notify_when_idle</c>, so it gets no notice of Idle, and gets the rest. Two sessions are in
     /// the same dir when their last launches on this server were, or when neither has launched since the server started.
-    /// A notice held for the parent about this session is replaced by the newer one.
+    /// A notice held for the parent about this session is replaced by the newer one. Decided before clients have the
+    /// status (<see cref="ProjectLifecycle.StatusNotifying"/>): a parent stopped when its child's state changed gets no
+    /// notice of it, even when it is resumed by a client that saw the change before the notice was decided.
     /// </summary>
     private void NoticeParent(ProjectInfo child)
     {

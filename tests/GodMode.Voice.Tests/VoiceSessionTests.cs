@@ -272,6 +272,8 @@ public sealed class VoiceSessionTests
         await using (voice)
         {
             await voice.Events.SaidAsync("Klar.");
+            // The greeting spoken, not only said: it starts Listening, and its own Speaking, Listening may come after "Klar." (#568)
+            await Eventually.UntilAsync(() => voice.Events.States.Contains(VoiceState.Speaking), () => $"the greeting to be spoken; states: {string.Join(", ", voice.Events.States)}");
             await voice.ListeningAsync();
             var before = voice.Events.States.Count;
 

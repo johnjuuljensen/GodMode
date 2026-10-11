@@ -253,6 +253,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         _rootsPoll = RootsPollFrom(configuration, logger);
         _trashRetention = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(TrashRetentionSetting, TimeSpan.FromDays(1).TotalSeconds)));
         _trashPurge = TimeSpan.FromSeconds(Math.Max(0, configuration.GetValue(TrashPurgeSetting, TimeSpan.FromHours(1).TotalSeconds)));
+        _lifecycle.StatusNotifying += NoticeParent;
         _lifecycle.StatusNotified += OnStatusNotifiedAsync;
 
         _instance = configuration[InstanceSetting] is { Length: > 0 } instance ? instance : DefaultInstance;
@@ -1690,8 +1691,9 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     }
 
     /// <summary>
-    /// After every status push: the pull request check a transition to Idle or Stopped makes, the parent's notice and
-    /// the delivery of what is held (<see cref="DeliverOnStatusChange"/>), then the attention list.
+    /// After every status push: the pull request check a transition to Idle or Stopped makes, the delivery of what is
+    /// held (<see cref="DeliverOnStatusChange"/>), then the attention list. The parent's notice came before the push
+    /// (<see cref="NoticeParent"/>).
     /// </summary>
     private Task OnStatusNotifiedAsync(ProjectInfo project)
     {

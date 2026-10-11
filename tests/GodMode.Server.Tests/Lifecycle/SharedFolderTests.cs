@@ -311,7 +311,7 @@ public class SharedFolderTests
             // Told the id the action made, whose date and suffix the final one keeps
             // and only its own script wrote to it
             Assert.Single(log.Split('\n'), line => line.Contains("creating "));
-            Assert.Matches($"creating {DateTime.Now:yyMMdd}-create-chat-{id[^4..]} shared=true", log);
+            Assert.Matches($"creating {LifecycleHarness.DatePattern}-create-chat-{id[^4..]} shared=true", log);
             Assert.Contains("project_path=", File.ReadAllText(Path.Combine(logs, $"{id}.result")));
         }
         // Nothing is left under the ids the creates began with

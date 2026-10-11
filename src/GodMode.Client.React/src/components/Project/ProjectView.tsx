@@ -59,9 +59,8 @@ export function ProjectView({ serverId, projectId }: Props) {
     };
   }, [hub, serverId, projectId, subscribeOutput, unsubscribeOutput]);
 
-  useEffect(() => {
-    if (project) setProjectName(project.Name);
-  }, [project]);
+  // Set while rendering, not in an effect: the name shown stays the last one known once the project is gone
+  if (project && project.Name !== projectName) setProjectName(project.Name);
 
   const toggleSimpleView = useCallback(() => {
     setSimpleView(v => {
