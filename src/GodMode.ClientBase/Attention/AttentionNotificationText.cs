@@ -45,13 +45,24 @@ public static class AttentionNotificationText
             if (heading.Length > 0) text.Append(heading).Append('\n');
             text.Append(q.Question);
             foreach (var option in q.Options)
-            {
-                text.Append("\n• ").Append(option.Label);
-                if (!string.IsNullOrWhiteSpace(option.Description)) text.Append(" — ").Append(option.Description);
-            }
+                text.Append('\n').Append(Option(option));
         }
         return text.Append("\n\nTap to answer.").ToString();
     }
+
+    /// <summary>
+    /// What a notice that shows its one line and then more (a Windows toast, #491) shows after the line: a single
+    /// question's options with their descriptions; several questions, the whole text. Null when the line says it all.
+    /// </summary>
+    public static string? Details(AttentionItem item) => item switch
+    {
+        { Kind: AttentionKind.Question, Question.Questions: [var only] } => string.Join('\n', only.Options.Select(Option)),
+        { Kind: AttentionKind.Question, Question.Questions.Count: > 1 } => Body(item),
+        _ => null,
+    };
+
+    private static string Option(QuestionOption option) =>
+        string.IsNullOrWhiteSpace(option.Description) ? $"• {option.Label}" : $"• {option.Label} — {option.Description}";
 
     public static string KindLabel(AttentionKind kind) => kind switch
     {

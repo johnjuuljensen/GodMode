@@ -173,12 +173,13 @@ public static class WindowsAttention
                 return;
             }
 
+            // A question says it is one, then what it asks and its options (#454); what does not fit, a click opens
             var builder = new AppNotificationBuilder()
                 .AddArgument(LinkArgument, key)
-                // A question says it is one, with every question and its options (#454); what does not fit, a click opens
                 .AddText(AttentionNotificationText.Title(item))
-                .AddText(AttentionNotificationText.Body(item))
-                .SetAttributionText(notice.ServerName)
+                .AddText(AttentionNotificationText.Line(item));
+            if (AttentionNotificationText.Details(item) is { } details) builder.AddText(details);
+            builder.SetAttributionText(notice.ServerName)
                 .SetTimeStamp(new DateTimeOffset(DateTime.SpecifyKind(item.Since, DateTimeKind.Utc)));
             if (!toast.Sound) builder.MuteAudio();
             var notification = builder.BuildNotification();
