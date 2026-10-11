@@ -3,6 +3,7 @@ using Android.App;
 using Android.Content;
 using AndroidX.Core.App;
 using GodMode.ClientBase.Attention;
+using GodMode.Maui.Bridge;
 using GodMode.Shared.Enums;
 using Microsoft.Extensions.Logging;
 
@@ -13,7 +14,7 @@ namespace GodMode.Maui;
 /// and project), grouped under one summary. A tap opens <c>godmode://attention/{key}</c> in <see cref="MainActivity"/>.
 /// The item's alert (issue #438) picks the channel: one that interrupts goes on <see cref="InterruptChannel"/> (heads-up,
 /// sound), unless this device's sound is off (<see cref="AttentionSound"/>); one that notifies on <see cref="Channel"/>,
-/// silent; one for the inbox alone is not posted.
+/// silent; one for the inbox alone is not posted, nor one for the session open on screen while the app is in front (#549).
 /// </summary>
 public sealed class AttentionNotifier(Context context, ILogger logger) : IAttentionNotifier
 {
@@ -57,6 +58,14 @@ public sealed class AttentionNotifier(Context context, ILogger logger) : IAttent
             if (_shown.ContainsKey(notice.Link.Key) || Showing().Any(link => link.Key == notice.Link.Key)) Cancel(notice.Link);
             return;
         }
+        // The session open on screen, with the app in front (#549): the user is looking at it, so it is not posted, and
+        // what showed for it goes. It is not posted when they leave it either; the inbox has it again then
+        if (OpenSessions.IsOpen(notice.Link) && InForeground())
+        {
+            logger.LogDebug("Notification {Key}: {Kind} is for the session open on screen", notice.Link.Key, item.Kind);
+            if (_shown.ContainsKey(notice.Link.Key) || Showing().Any(link => link.Key == notice.Link.Key)) Cancel(notice.Link);
+            return;
+        }
         var interrupts = item.Alert == AttentionAlert.Interrupt && AttentionSound.Enabled;
         var builder = new NotificationCompat.Builder(context, interrupts ? InterruptChannel : Channel);
         builder.SetSmallIcon(Resource.Drawable.ic_attention);
@@ -96,6 +105,14 @@ public sealed class AttentionNotifier(Context context, ILogger logger) : IAttent
             .Where(n => n.Id == ItemId)
             .Select(n => AttentionLink.FromKey(n.Tag))
             .OfType<AttentionLink>()];
+
+    /// <summary>Whether an activity of the app is visible: the user has it in front, not only its foreground service.</summary>
+    private static bool InForeground()
+    {
+        var state = new ActivityManager.RunningAppProcessInfo();
+        ActivityManager.GetMyMemoryState(state);
+        return state.Importance <= Importance.Foreground;
+    }
 
     /// <summary>Removes everything this notifier showed (the service is stopping and can no longer keep it right).</summary>
     public void CancelAll()

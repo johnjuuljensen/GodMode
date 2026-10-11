@@ -49,6 +49,9 @@ public static class ShellMessageTypes
     /// <summary>Event from the shell: a notification was tapped; attention.take has its item.</summary>
     public const string AttentionOpen = "attention.open";
 
+    /// <summary>Request <see cref="OpenSessionPayload"/> → bool: the session the window's main view shows now, or none (#549).</summary>
+    public const string SessionOpen = "session.open";
+
     /// <summary>Request → <see cref="AttentionSoundPayload"/>: whether this device makes a sound for what interrupts.</summary>
     public const string AttentionSoundGet = "attention.sound.get";
 
@@ -148,3 +151,6 @@ public sealed record AttentionSoundPayload(bool Enabled);
 
 /// <summary>An attention item to open in the inbox: a project on a server, both IDs as the server gave them.</summary>
 public sealed record AttentionLinkPayload(string ServerId, string ProjectId);
+
+/// <summary>The session a window's main view shows (<see cref="OpenSessions"/>), or none.</summary>
+public sealed record OpenSessionPayload(AttentionLinkPayload? Session);

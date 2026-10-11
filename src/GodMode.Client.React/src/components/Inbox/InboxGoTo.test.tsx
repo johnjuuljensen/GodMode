@@ -129,12 +129,13 @@ describe('Go to', () => {
     expect([...review.querySelectorAll('a')].map(e => e.getAttribute('aria-label'))).toEqual(['View PR']);
   });
 
-  it("selects the item's project, and the list layout shows it beside the inbox", async () => {
+  it("selects the item's project, and the list layout shows it beside the inbox, which leaves its item out (#549)", async () => {
     await start(everyKind);
     await goTo('p-review');
     expect(useAppStore.getState().selectedProject).toEqual({ serverId: 'A', projectId: 'p-review' });
     expect(shownProject()).toBe('p-review');
-    expect(itemEl('p-review')).not.toBeNull();
+    expect(itemEl('p-review')).toBeNull();
+    expect(inbox()).toBe(everyKind.length - 1);
   });
 
   it('shows the project in place of the tiles, in tile mode', async () => {
@@ -158,10 +159,14 @@ describe('Go to', () => {
     expect(view.container.querySelector('.page-back-bar')).not.toBeNull();
   });
 
-  it('marks nothing seen: opening a project and reading it leaves its item (#440)', async () => {
+  it('marks nothing seen: opening a project and reading it leaves its item, hidden only while it is open (#440, #549)', async () => {
     await start(everyKind);
     await goTo('p-finished');
     expect(hub.seen).toEqual([]);
+    expect(useAppStore.getState().attention).toHaveLength(everyKind.length);
+    expect(itemEl('p-finished')).toBeNull();
+
+    await act(async () => useAppStore.getState().clearSelection());
     expect(itemEl('p-finished')).not.toBeNull();
     expect(inbox()).toBe(everyKind.length);
   });

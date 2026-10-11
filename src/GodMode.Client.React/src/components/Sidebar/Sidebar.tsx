@@ -8,6 +8,7 @@ import { projectKey } from '../../store/projectKey';
 import { ProjectItem } from './ProjectItem';
 import { UnmanagedGroup } from './UnmanagedGroup';
 import { Inbox } from '../Inbox/Inbox';
+import { useInboxAttention } from '../Inbox/useInboxAttention';
 import { VoiceControl } from '../Voice/VoiceControl';
 import './Sidebar.css';
 
@@ -237,9 +238,9 @@ function FoldToggle({ folded, onToggle, what, children }: {
   );
 }
 
-/** Whether a session needs the user: an item in the inbox for it, as its server says (#441). */
+/** Whether a session needs the user: an item in the inbox for it, as its server says (#441), the open session's left out (#549). */
 function useNeedsYou(): (item: SidebarItem) => boolean {
-  const attention = useAppStore(s => s.attention);
+  const attention = useInboxAttention();
   const attentionKeys = new Set(attention.map(a => projectKey(a.serverId, a.ProjectId)));
   return item => attentionKeys.has(item.key);
 }

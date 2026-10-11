@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using GodMode.ClientBase.Attention;
 using GodMode.ClientBase.Services;
 using GodMode.ClientBase.Services.Models;
 using GodMode.Maui.Voice;
@@ -85,6 +86,8 @@ public sealed class ShellBridge : IDisposable
     public void Dispose()
     {
         Attached.TryRemove(new KeyValuePair<string, ShellBridge>(Profile ?? "", this));
+        // A page that replaced this one says what it shows itself
+        if (!Attached.ContainsKey(Profile ?? "")) OpenSessions.Set(Profile ?? "", null);
         _voicePage?.Dispose();
         PendingAttentionLink.Arrived -= OnAttentionArrived;
         Connectivity.Current.ConnectivityChanged -= OnNetworkChanged;
@@ -110,6 +113,11 @@ public sealed class ShellBridge : IDisposable
             await _directory.StopServerAsync(p.ServerId) ? Polling(p.ServerId) : throw NotFound(p));
         _bridge.Handle(ShellMessageTypes.AttentionTake, () => Task.FromResult(
             PendingAttentionLink.Take() is { } link ? new AttentionLinkPayload(link.ServerId, link.ProjectId) : null));
+        _bridge.Handle<OpenSessionPayload, bool>(ShellMessageTypes.SessionOpen, p =>
+        {
+            OpenSessions.Set(Profile ?? "", p.Session is { } open ? new AttentionLink(open.ServerId, open.ProjectId) : null);
+            return Task.FromResult(true);
+        });
         _bridge.Handle(ShellMessageTypes.AttentionSoundGet, () => Task.FromResult(new AttentionSoundPayload(AttentionSound.Enabled)));
         _bridge.Handle<AttentionSoundPayload, AttentionSoundPayload>(ShellMessageTypes.AttentionSoundSet, p =>
         {
