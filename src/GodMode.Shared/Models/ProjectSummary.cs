@@ -31,6 +31,7 @@ namespace GodMode.Shared.Models;
 /// <param name="LastResultAt">When the session's last turn ended, as in <see cref="ProjectStatus.LastResultAt"/>.</param>
 /// <param name="LastOutputAt">When its main conversation last wrote a line, as in <see cref="ProjectStatus.LastOutputAt"/> (issue #468).</param>
 /// <param name="BackgroundTasks">What it runs in the background, or null for nothing, as in <see cref="ProjectStatus.BackgroundTasks"/> (issue #432).</param>
+/// <param name="Progress">How far its work has got, as in <see cref="ProjectStatus.Progress"/> (issue #545).</param>
 public record ProjectSummary(
     string Id,
     string Name,
@@ -55,7 +56,8 @@ public record ProjectSummary(
     TurnOutcome? Outcome = null,
     DateTime? LastResultAt = null,
     DateTime? LastOutputAt = null,
-    IReadOnlyList<BackgroundTask>? BackgroundTasks = null
+    IReadOnlyList<BackgroundTask>? BackgroundTasks = null,
+    WorkProgress? Progress = null
 )
 {
     /// <summary>
@@ -85,5 +87,6 @@ public record ProjectSummary(
         Outcome: status.EffectiveOutcome,
         LastResultAt: status.LastResultAt,
         LastOutputAt: status.LastOutputAt,
-        BackgroundTasks: status.BackgroundTasks);
+        BackgroundTasks: status.BackgroundTasks,
+        Progress: status.Progress);
 }

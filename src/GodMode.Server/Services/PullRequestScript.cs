@@ -8,9 +8,11 @@ namespace GodMode.Server.Services;
 /// What a root's <c>status</c> script prints, read strictly: the output is untrusted, so anything
 /// but the documented object is refused rather than guessed at.
 /// <code>
-/// {"pullRequest": {"url": "https://…", "number": 12, "state": "draft|open|merged|closed", "review": "none|changes_requested|approved"}}
+/// {"pullRequest": {"url": "https://…", "number": 12, "state": "draft|open|merged|closed", "review": "none|changes_requested|approved"},
+///  "progress": {"resolved": 4, "total": 12}}
 /// </code>
-/// or <c>{}</c> (or <c>{"pullRequest": null}</c>) when there is no pull request.
+/// each optional: <c>{}</c> (or <c>{"pullRequest": null}</c>) when there is no pull request, and no
+/// <c>progress</c> (or <c>null</c>) when the script reports none (issue #545).
 /// </summary>
 public static class PullRequestScript
 {
@@ -44,11 +46,19 @@ public static class PullRequestScript
 
     private static readonly string[] Fields = ["url", "number", "state", "review"];
 
+    private static readonly string[] ProgressFields = ["resolved", "total"];
+
+    /// <summary>What one run of a status script reported.</summary>
+    /// <param name="PullRequest">The project's pull request, or null for none.</param>
+    /// <param name="Progress">How far its work has got, or null for none reported.</param>
+    public record Report(PullRequestStatus? PullRequest, WorkProgress? Progress);
+
     /// <summary>
-    /// The pull request the output reports, seen at <paramref name="now"/>, or null for none.
-    /// Throws <see cref="FormatException"/> saying what is wrong with anything else.
+    /// The pull request the output reports, seen at <paramref name="now"/>, and the progress, each null for none.
+    /// Throws <see cref="FormatException"/> saying what is wrong with anything else: a bad progress fails the whole
+    /// report, as a bad pull request does.
     /// </summary>
-    public static PullRequestStatus? Parse(string output, DateTime now)
+    public static Report Parse(string output, DateTime now)
     {
         if (output.Length > MaxOutputChars) throw new FormatException($"the output is longer than {MaxOutputChars} characters");
 
@@ -60,22 +70,49 @@ public static class PullRequestScript
         {
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object) throw new FormatException($"the output is a JSON {root.ValueKind}, not an object");
-            if (Unknown(root, ["pullRequest"]) is { } unknown)
+            if (Unknown(root, ["pullRequest", "progress"]) is { } unknown)
                 throw new FormatException($"unknown property '{Cut(unknown)}'");
-            if (!root.TryGetProperty("pullRequest", out var pr) || pr.ValueKind == JsonValueKind.Null) return null;
-            if (pr.ValueKind != JsonValueKind.Object) throw new FormatException($"pullRequest is a JSON {pr.ValueKind}, not an object");
-            if (Unknown(pr, Fields) is { } unknownField)
-                throw new FormatException($"unknown property 'pullRequest.{Cut(unknownField)}'");
-
-            return new PullRequestStatus(
-                Url(Required(pr, "url", JsonValueKind.String).GetString()!),
-                Required(pr, "number", JsonValueKind.Number).TryGetInt32(out var number) && number > 0
-                    ? number
-                    : throw new FormatException("pullRequest.number is not a positive whole number"),
-                OneOf(States, Required(pr, "state", JsonValueKind.String).GetString()!, "state"),
-                OneOf(Reviews, Required(pr, "review", JsonValueKind.String).GetString()!, "review"),
-                now);
+            return new Report(PullRequest(root, now), Progress(root));
         }
+    }
+
+    private static PullRequestStatus? PullRequest(JsonElement root, DateTime now)
+    {
+        if (Member(root, "pullRequest", Fields) is not { } pr) return null;
+        return new PullRequestStatus(
+            Url(Required(pr, "pullRequest", "url", JsonValueKind.String).GetString()!),
+            Required(pr, "pullRequest", "number", JsonValueKind.Number).TryGetInt32(out var number) && number > 0
+                ? number
+                : throw new FormatException("pullRequest.number is not a positive whole number"),
+            OneOf(States, Required(pr, "pullRequest", "state", JsonValueKind.String).GetString()!, "state"),
+            OneOf(Reviews, Required(pr, "pullRequest", "review", JsonValueKind.String).GetString()!, "review"),
+            now);
+    }
+
+    private static WorkProgress? Progress(JsonElement root)
+    {
+        if (Member(root, "progress", ProgressFields) is not { } progress) return null;
+        var resolved = Count(progress, "resolved");
+        var total = Count(progress, "total");
+        return resolved <= total
+            ? new WorkProgress(resolved, total)
+            : throw new FormatException($"progress.resolved {resolved} is more than progress.total {total}");
+    }
+
+    /// <summary>A whole number of at least 0.</summary>
+    private static int Count(JsonElement progress, string name) =>
+        Required(progress, "progress", name, JsonValueKind.Number).TryGetInt32(out var count) && count >= 0
+            ? count
+            : throw new FormatException($"progress.{name} is not a whole number of at least 0");
+
+    /// <summary>The object <paramref name="name"/> of the output, or null when it is missing or null; refused when it is anything else, or has a property not in <paramref name="fields"/>.</summary>
+    private static JsonElement? Member(JsonElement root, string name, string[] fields)
+    {
+        if (!root.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null) return null;
+        if (value.ValueKind != JsonValueKind.Object) throw new FormatException($"{name} is a JSON {value.ValueKind}, not an object");
+        if (Unknown(value, fields) is { } unknownField)
+            throw new FormatException($"unknown property '{name}.{Cut(unknownField)}'");
+        return value;
     }
 
     /// <summary>
@@ -92,9 +129,9 @@ public static class PullRequestScript
     private static string? Unknown(JsonElement obj, string[] known) =>
         obj.EnumerateObject().Select(p => p.Name).FirstOrDefault(name => !known.Contains(name));
 
-    private static JsonElement Required(JsonElement pr, string name, JsonValueKind kind) =>
-        !pr.TryGetProperty(name, out var value) ? throw new FormatException($"pullRequest.{name} is missing")
-        : value.ValueKind != kind ? throw new FormatException($"pullRequest.{name} is a JSON {value.ValueKind}, not a {kind}")
+    private static JsonElement Required(JsonElement obj, string parent, string name, JsonValueKind kind) =>
+        !obj.TryGetProperty(name, out var value) ? throw new FormatException($"{parent}.{name} is missing")
+        : value.ValueKind != kind ? throw new FormatException($"{parent}.{name} is a JSON {value.ValueKind}, not a {kind}")
         : value;
 
     /// <summary>

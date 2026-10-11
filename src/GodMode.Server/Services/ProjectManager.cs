@@ -1703,10 +1703,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
     }
 
     /// <summary>
-    /// Runs the project's root's status script in its folder, and keeps the pull request it reports in
-    /// the status, pushing it when it changed. A root without one, a script that fails, times out or
+    /// Runs the project's root's status script in its folder, and keeps the pull request and progress it reports in
+    /// the status, pushing them when they changed. A root without one, a script that fails, times out or
     /// prints anything but the documented JSON (<see cref="PullRequestScript"/>) changes nothing; the
-    /// failure is logged. Says whether to poll: while the pull request it knows is open.
+    /// failure is logged. Says whether to poll: while the pull request it knows is open. A pull request
+    /// that became merged has its parent's checked too, whose progress it may have moved (issue #545).
     /// </summary>
     private async Task<PullRequestPoller.Outcome> CheckPullRequestAsync(string projectId, CancellationToken cancel)
     {
@@ -1717,7 +1718,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
         string? script = null;
         var limit = StatusScriptTimeout;
-        PullRequestStatus? reported;
+        PullRequestScript.Report reported;
         try
         {
             var snap = _snapshot;
@@ -1739,7 +1740,7 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("Project {ProjectId}: status script {Script} failed, so its pull request is left as it was: {Reason}",
+            _logger.LogWarning("Project {ProjectId}: status script {Script} failed, so its pull request and progress are left as they were: {Reason}",
                 projectId, script, ex is OperationCanceledException ? $"it took longer than {limit.TotalSeconds}s" : ex.Message);
             return unchanged;
         }
@@ -1747,14 +1748,22 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
         cancel.ThrowIfCancellationRequested();
         if (!_projects.TryGetValue(projectId, out var current) || current != project) return PullRequestPoller.Outcome.Gone;
         var before = project.Status.PullRequest;
-        var after = PullRequestScript.Apply(before, reported);
-        if (after != before)
+        var after = PullRequestScript.Apply(before, reported.PullRequest);
+        var progressBefore = project.Status.Progress;
+        if (after != before || reported.Progress != progressBefore)
         {
-            _logger.LogInformation("Project {ProjectId}: pull request {PullRequest}", projectId,
-                after is { } pr ? $"#{pr.Number} is {pr.State}, review {pr.Review}" : "none");
-            await _lifecycle.UpdateStatusAsync(project, status => status with { PullRequest = after });
+            if (after != before)
+                _logger.LogInformation("Project {ProjectId}: pull request {PullRequest}", projectId,
+                    after is { } pr ? $"#{pr.Number} is {pr.State}, review {pr.Review}" : "none");
+            if (reported.Progress != progressBefore)
+                _logger.LogInformation("Project {ProjectId}: progress {Progress}", projectId,
+                    reported.Progress is { } p ? $"{p.Resolved}/{p.Total}" : "none");
+            await _lifecycle.UpdateStatusAsync(project, status => status with { PullRequest = after, Progress = reported.Progress });
             await NotifyStatusChanged(project);
         }
+        if (after?.State == PullRequestState.Merged && before?.State != PullRequestState.Merged
+            && ServerParentOf(project) is { } parentId && _projects.ContainsKey(parentId))
+            _pullRequests.CheckNow(parentId);
         return after is { IsOpen: true } ? PullRequestPoller.Outcome.Poll : PullRequestPoller.Outcome.Wait;
     }
 
@@ -2769,6 +2778,11 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
             {
                 _logger.LogWarning("Session at {Path} had a pull request URL that is not http(s); it is dropped", statePath);
                 status = status with { PullRequest = null };
+            }
+            if (status.Progress is { IsValid: false })
+            {
+                _logger.LogWarning("Session at {Path} had a progress the status script could not have reported; it is dropped", statePath);
+                status = status with { Progress = null };
             }
 
             // Load action name from settings. One that cannot be read may be a shared session's:

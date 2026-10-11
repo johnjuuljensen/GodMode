@@ -8,7 +8,8 @@ namespace GodMode.Server.Tests.Lifecycle;
 /// <summary>
 /// A project's pull request, from its root's status script (<see cref="ProjectStatus.PullRequest"/>): run
 /// on a transition to Idle or Stopped and polled while open, and a changes-requested review in attention.
-/// The script here prints whatever <c>pr.json</c> in the root holds, and records the folder it ran in.
+/// The script here prints whatever <c>{folder}.json</c> in the root holds for the folder it runs in, else
+/// <c>pr.json</c>, and records the folder it ran in.
 /// </summary>
 public class PullRequestTests
 {
@@ -18,7 +19,8 @@ public class PullRequestTests
     private const string StatusScript = """
         $ErrorActionPreference = 'Stop'
         Add-Content -Path (Join-Path $env:GODMODE_ROOT_PATH 'status-runs.txt') -Value (Split-Path -Leaf (Get-Location).Path)
-        $report = Join-Path $env:GODMODE_ROOT_PATH 'pr.json'
+        $report = Join-Path $env:GODMODE_ROOT_PATH ((Split-Path -Leaf (Get-Location).Path) + '.json')
+        if (-not (Test-Path $report)) { $report = Join-Path $env:GODMODE_ROOT_PATH 'pr.json' }
         if (Test-Path $report) { Get-Content -Raw $report } else { '{}' }
         """;
 
@@ -54,8 +56,11 @@ public class PullRequestTests
     /// Replaces the report whole: the script may be reading it as it changes, and a report written in
     /// place can be read empty or half written.
     /// </summary>
-    private static void WriteReport(LifecycleHarness harness, string output) =>
-        GodMode.ProjectFiles.AtomicFile.WriteAllText(Path.Combine(harness.RootPath, "pr.json"), output);
+    private static void WriteReport(LifecycleHarness harness, string output) => WriteReport(harness, "pr", output);
+
+    /// <summary>The report for the project in <paramref name="folder"/> alone.</summary>
+    private static void WriteReport(LifecycleHarness harness, string folder, string output) =>
+        GodMode.ProjectFiles.AtomicFile.WriteAllText(Path.Combine(harness.RootPath, folder + ".json"), output);
 
     /// <summary>
     /// The folders the script ran in, read so that a script appending to the file is not refused
@@ -225,6 +230,74 @@ public class PullRequestTests
         var again = await WaitForPullRequestAsync(harness, created.Id, PullRequestState.Open, PullRequestReview.ChangesRequested);
         var review = Assert.Single(harness.Projects.GetAttention());
         Assert.Equal((AttentionKind.Review, again.ChangedAt), (review.Kind, review.Since));
+    }
+
+    private static string Progress(int resolved, int total, string state = "draft") =>
+        $$$"""{"pullRequest": {"url": "{{{Url}}}", "number": 7, "state": "{{{state}}}", "review": "none"}, "progress": {"resolved": {{{resolved}}}, "total": {{{total}}}}}""";
+
+    private static async Task<WorkProgress?> WaitForProgressAsync(LifecycleHarness harness, string projectId, WorkProgress? expected)
+    {
+        WorkProgress? progress = null;
+        await LifecycleHarness.WaitUntilAsync(async () => (progress = (await harness.Projects.GetStatusAsync(projectId)).Progress) == expected,
+            null, () => $"the progress did not become {expected}; it is {progress}.\n{harness.Describe(projectId)}");
+        return progress;
+    }
+
+    /// <summary>
+    /// The script's progress (issue #545) is the project's, saved and pushed beside its pull request; one the server
+    /// does not keep fails the check and leaves both as they were; a report without one clears it.
+    /// </summary>
+    [Fact]
+    public async Task Progress_TheScriptPrints_IsTheProjects_AndABadOneLeavesTheStatusAsItWas()
+    {
+        await using var harness = Harness();
+        WriteReport(harness, Progress(1, 3));
+        var created = await harness.CreateProjectAsync();
+        await WaitForProgressAsync(harness, created.Id, new WorkProgress(1, 3));
+        await LifecycleHarness.WaitUntilAsync(() => Task.FromResult(harness.ReadStatusFile(created.Id).Progress == new WorkProgress(1, 3)), null,
+            () => $"status.json has progress {harness.ReadStatusFile(created.Id).Progress}");
+        var known = await harness.Projects.GetStatusAsync(created.Id);
+        Assert.Equal(PullRequestState.Draft, known.PullRequest!.State);
+
+        // More resolved than there are, with the pull request open: neither changes
+        WriteReport(harness, Progress(4, 3, state: "open"));
+        await WaitForWarningAsync(harness, "progress.resolved 4 is more than progress.total 3");
+        var after = await harness.Projects.GetStatusAsync(created.Id);
+        Assert.Equal((known.PullRequest, known.Progress), (after.PullRequest, after.Progress));
+
+        WriteReport(harness, Progress(2, 3));
+        await WaitForProgressAsync(harness, created.Id, new WorkProgress(2, 3));
+        Report(harness, "draft", "none");
+        await WaitForProgressAsync(harness, created.Id, null);
+
+        var pushed = harness.Hub.StatusPushes(created.Id).Select(s => s.Progress).OfType<WorkProgress>().Distinct();
+        Assert.Equal([new WorkProgress(1, 3), new WorkProgress(2, 3)], pushed);
+        Assert.Equal(new WorkProgress(2, 3), harness.Hub.StatusPushes(created.Id).Select(s => s.Progress).OfType<WorkProgress>().Last());
+    }
+
+    /// <summary>
+    /// A child's pull request that becomes merged checks its parent, whose progress it may have moved (issue #545),
+    /// rather than leaving it to the parent's next poll.
+    /// </summary>
+    [Fact]
+    public async Task AChildsMerge_ChecksItsParent()
+    {
+        await using var harness = Harness(pollSeconds: 600);
+        WriteReport(harness, Progress(0, 1));
+        var parent = await harness.CreateProjectAsync("parent");
+        await WaitForProgressAsync(harness, parent.Id, new WorkProgress(0, 1));
+        await harness.WaitForStateAsync(parent.Id, ProjectState.Idle);
+        // The check Idle made is over, and the next poll is 10 minutes away
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        var parentRuns = Runs(harness).Count(run => run == Path.GetFileName(harness.ProjectPath(parent.Id)));
+
+        WriteReport(harness, Path.GetFileName(harness.ProjectPath(parent.Id)), Progress(1, 1));
+        Report(harness, "merged", "approved");
+        var child = await harness.CreateProjectAsync("child", parentId: parent.Id);
+        await WaitForPullRequestAsync(harness, child.Id, PullRequestState.Merged, PullRequestReview.Approved);
+
+        await WaitForProgressAsync(harness, parent.Id, new WorkProgress(1, 1));
+        Assert.Equal(parentRuns + 1, Runs(harness).Count(run => run == Path.GetFileName(harness.ProjectPath(parent.Id))));
     }
 
     [Fact]

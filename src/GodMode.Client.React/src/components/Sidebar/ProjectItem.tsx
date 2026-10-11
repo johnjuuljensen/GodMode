@@ -6,6 +6,7 @@ import { deleteSession } from '../../deleteSession';
 import { ImportanceMark } from '../Importance/Importance';
 import { IMPORTANCE_LABELS, IMPORTANCE_ORDER } from '../Importance/importanceTiers';
 import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
+import { ProgressMark } from '../Progress/Progress';
 import { backgroundName, inBackground } from '../BackgroundTasks/backgroundState';
 import type { ProjectState } from '../../signalr/types';
 
@@ -172,10 +173,12 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             )}
           </div>
         </div>
-        {nested?.collapsed && (
+        {/* How far its work has got (#545), folded or not; folded, how many are under it and whether any needs the user */}
+        {(nested?.collapsed || project.Progress) && (
           <span className="project-children-summary">
-            {nested.needsYou && <span className="project-children-attention" aria-label="needs you" />}
-            <span className="project-children-count" title={`${nested.count} under it`}>{nested.count}</span>
+            <ProgressMark progress={project.Progress} />
+            {nested?.collapsed && nested.needsYou && <span className="project-children-attention" aria-label="needs you" />}
+            {nested?.collapsed && <span className="project-children-count" title={`${nested.count} under it`}>{nested.count}</span>}
           </span>
         )}
         {!isMobile && (
