@@ -33,6 +33,10 @@ public sealed record ServerRegistration
 
     /// <summary>Optional display name for the server.</summary>
     public string? DisplayName { get; init; }
+
+    /// <summary>Whether a local server can be reached at <paramref name="url"/>: an absolute http or https URL.</summary>
+    public static bool IsServerUrl(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 }
 
 /// <summary>

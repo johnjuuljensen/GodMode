@@ -165,11 +165,11 @@ describe('an inbox draft', () => {
 });
 
 describe('a question opened from the inbox header (#218)', () => {
-  it('takes its keys: the header, which stays beside the project, lets go of the focus', async () => {
+  it('takes its keys: the item, gone from the inbox while its project is open (#549), keeps no focus', async () => {
     await act(async () => hub.callbacks.onAttentionChanged?.([item('p4', 'Question', { Question: asking })]));
     await pointerClick(itemEl('p4')!.querySelector<HTMLElement>('.inbox-item-header')!);
     expect(view.container.querySelector('.project-view .question-prompt')).not.toBeNull();
-    expect(itemEl('p4')).not.toBeNull();
+    expect(itemEl('p4')).toBeNull();
 
     await keyDown(document.activeElement, '2');
     expect(hub.answers).toEqual([{ projectId: 'p4', requestId: 'q4', answers: { 'Which way?': 'Right' } }]);

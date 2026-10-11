@@ -79,8 +79,21 @@ describe('on a phone', () => {
     expect(onPhone(selector)).toContain('min-height: 44px');
   });
 
-  it("a parent's toggle is 44px wide too", () => {
-    expect(onPhone('.project-children-toggle')).toContain('min-width: 44px');
+  // A parent's chevron (#506) hangs left of its row, out of its flow: a parent's dot and name stay in the column of a
+  // row with nothing under it, on a phone too, so the nesting never reads backwards
+  it("a parent's toggle hangs in the gutter, out of the row's flow, on a phone too", () => {
+    const outside = css.replace(/@media \(max-width: 768px\) \{[\s\S]*?\n\}/g, '');
+    const rule = (selector: string) => [...outside.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+      .filter(r => r[1].split(',').map(s => s.trim()).includes(selector))
+      .flatMap(r => r[2].split(';').map(d => d.trim()).filter(Boolean));
+    expect(rule('.project-children-toggle')).toEqual(expect.arrayContaining([
+      'position: absolute', 'left: calc(-1 * var(--list-gutter))', 'margin: 0',
+    ]));
+    expect(rule('.project-item-wrapper .project-item')).toContain('position: relative');
+    // The phone widens it over the state dot, its chevron still in the gutter, and never puts it back in the flow
+    const phone = onPhone('.project-children-toggle');
+    expect(phone).toEqual(expect.arrayContaining(['justify-content: flex-start']));
+    expect(phone.filter(d => /^(position|margin|min-width|flex)/.test(d))).toEqual([]);
   });
 
   it("the swipe still opens a full Delete", () => {

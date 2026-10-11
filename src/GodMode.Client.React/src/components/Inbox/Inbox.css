@@ -110,6 +110,52 @@
 .inbox-kind-Finished { border-left-color: var(--success); }
 .inbox-kind-Review { border-left-color: var(--purple); }
 
+/* The header, and the card's actions as icons at its right edge (#548) */
+.inbox-item-top {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+}
+.inbox-item-top > .inbox-item-header { flex: 1; min-width: 0; }
+.inbox-item-icons {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding: 6px 6px 0 0;
+}
+.inbox-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.inbox-icon-btn:hover:not(:disabled) { color: var(--text-primary); background: var(--glass-hover); }
+.inbox-icon-btn:focus-visible { outline: none; box-shadow: var(--shadow-focus-sm); }
+.inbox-icon-btn:disabled { opacity: 0.5; cursor: default; }
+.inbox-item-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  margin-right: 4px;
+  padding: 0 7px;
+  border: var(--border-width) var(--border-style) var(--glass-border);
+  border-radius: var(--radius-badge);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.inbox-item-chip:hover { color: var(--text-primary); background: var(--glass-hover); }
+
 .inbox-item-header {
   display: grid;
   /* The name takes what is left and ellipsizes, rather than widening the item past its pane */
@@ -157,6 +203,18 @@
   color: var(--text-primary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* A long finished reply (#548): three lines of it, read in full in its session */
+.inbox-item-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  margin-bottom: 10px;
+  padding-bottom: 0;
+  color: var(--text-secondary);
 }
 
 /* The permission card inside an item: no card of its own */
@@ -330,6 +388,10 @@
   .inbox-item-header,
   .inbox-running-item,
   .inbox-toggle { min-height: 44px; }
+  .inbox-icon-btn { min-width: 44px; min-height: 44px; }
+  /* As tall as the icons, so a link in their row, not a pill */
+  .inbox-item-chip { min-height: 44px; border-color: transparent; }
+  .inbox-item-icons { padding-top: 0; }
   .inbox-item-reply > .btn { height: 44px; }
   .inbox-reply-input { min-height: 44px; font-size: 16px; }
   .inbox-item .permission-deny-message { min-height: 44px; font-size: 16px; }
