@@ -88,7 +88,8 @@ let view: Rendered;
 
 const itemEl = (projectId: string) => [...view.container.querySelectorAll<HTMLElement>('.inbox-item')]
   .find(el => el.querySelector('.inbox-item-name')?.textContent === projectId) ?? null;
-const buttonIn = (el: HTMLElement, label: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === label);
+const buttonIn = (el: HTMLElement, label: string) => [...el.querySelectorAll<HTMLButtonElement>('button')]
+  .find(b => (b.textContent || b.getAttribute('aria-label')) === label);
 const goTo = (projectId: string) => click(buttonIn(itemEl(projectId)!, 'Go to')!);
 const shownProject = () => view.container.querySelector('.project-view .project-header-name')?.textContent ?? null;
 const inbox = () => view.container.querySelectorAll('.inbox-item').length;
@@ -115,16 +116,17 @@ beforeEach(() => {
 afterEach(() => view.unmount());
 
 describe('Go to', () => {
-  it('is on every kind, beside View PR and Mark seen', async () => {
+  it('is on every kind, an icon beside the PR chip and Mark seen (#548)', async () => {
     await start(everyKind);
     for (const { ProjectId } of everyKind) {
-      const actions = itemEl(ProjectId)!.querySelector('.inbox-item-actions');
-      expect(actions && buttonIn(actions as HTMLElement, 'Go to'), ProjectId).toBeTruthy();
+      const icons = itemEl(ProjectId)!.querySelector('.inbox-item-icons');
+      expect(icons && buttonIn(icons as HTMLElement, 'Go to'), ProjectId).toBeTruthy();
     }
-    const finished = itemEl('p-finished')!.querySelector<HTMLElement>('.inbox-item-actions')!;
-    expect([...finished.querySelectorAll('a, button')].map(e => e.textContent)).toEqual(['Go to', 'View PR #533', 'Mark seen']);
-    const review = itemEl('p-review')!.querySelector<HTMLElement>('.inbox-item-actions')!;
-    expect([...review.querySelectorAll('a')].map(e => e.textContent)).toEqual(['View PR']);
+    const finished = itemEl('p-finished')!.querySelector<HTMLElement>('.inbox-item-icons')!;
+    expect([...finished.querySelectorAll('a, button')].map(e => [e.textContent, e.getAttribute('aria-label')]))
+      .toEqual([['PR #533', 'View PR #533'], ['', 'Mark seen'], ['', 'Go to']]);
+    const review = itemEl('p-review')!.querySelector<HTMLElement>('.inbox-item-icons')!;
+    expect([...review.querySelectorAll('a')].map(e => e.getAttribute('aria-label'))).toEqual(['View PR']);
   });
 
   it("selects the item's project, and the list layout shows it beside the inbox", async () => {
