@@ -53,6 +53,7 @@ function summaryOf(status: ProjectStatus): ProjectSummary {
     PullRequest: status.PullRequest, Kind: status.Kind,
     ActionName: status.ActionName, SharedFolder: status.SharedFolder, Adopted: status.Adopted,
     ParentId: status.ParentId, Importance: status.Importance, BackgroundTasks: status.BackgroundTasks,
+    Progress: status.Progress,
   };
 }
 
@@ -856,7 +857,7 @@ export const useAppStore = create<AppState>((set, get) => {
                       ...p, State: status.State, UpdatedAt: status.UpdatedAt, CurrentQuestion: status.CurrentQuestion,
                       PendingPermission: status.PendingPermission, PendingQuestion: status.PendingQuestion,
                       PullRequest: status.PullRequest, ParentId: status.ParentId, SlashCommands: status.SlashCommands,
-                      Importance: status.Importance, BackgroundTasks: status.BackgroundTasks,
+                      Importance: status.Importance, BackgroundTasks: status.BackgroundTasks, Progress: status.Progress,
                     }
                   : p) }
               : c
@@ -928,7 +929,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
     try {
       const hubUrl = api.getHubUrl(serverId);
-      const hubOptions = api.getHubOptions(serverId);
+      const hubOptions = api.getHubOptions();
       console.info(`[store] connectServer: hub.connect(${hubUrl})...`);
       await conn.hub.connect(hubUrl, hubOptions);
       console.info(`[store] connectServer: connected, catching up...`);

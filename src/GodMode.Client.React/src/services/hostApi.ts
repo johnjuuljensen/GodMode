@@ -117,12 +117,12 @@ export function subscribeAttentionLinks(open: (serverId: string, projectId: stri
 
 // ── Hub connection helpers ─────────────────────────────────────
 
-/** The relay's address for a server's hub: it routes by serverId. */
+/** The relay's address for a server's hub: it routes by serverId, so the options are the same for every server. */
 export function getHubUrl(serverId: string): string {
   return `${relayInfo?.BaseUrl ?? ''}/?serverId=${encodeURIComponent(serverId)}`;
 }
 
-export function getHubOptions(_serverId: string): import('@microsoft/signalr').IHttpConnectionOptions {
+export function getHubOptions(): import('@microsoft/signalr').IHttpConnectionOptions {
   return {
     skipNegotiation: true,
     transport: 1, // signalR.HttpTransportType.WebSockets

@@ -49,14 +49,19 @@ public sealed class MediaPauseTests : IDisposable
         Assert.Equal(MediaHold.Speech, _media.Holds);
     }
 
-    /// <summary>The session says Speaking as speech starts, but the first audio waits until the music has paused.</summary>
+    /// <summary>
+    /// The session says Speaking as speech starts, but the first audio waits until the music has paused. On a clock
+    /// whose <see cref="MediaPause.PauseWait"/> never runs out: on the real one, a loaded machine could let it run out
+    /// before the test looks (#568). The wait's end has its own test.
+    /// </summary>
     [Fact]
     public async Task The_first_audio_waits_for_the_music_to_pause()
     {
         _playback.Has("Spotify", playing: true);
         _playback.PauseGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var speaker = new RecordingAudioSink();
-        var sink = _media.Holding(speaker);
+        using var media = new MediaPause(_playback, NullLogger.Instance, speechResumeDelay: TimeSpan.Zero, time: new StoppedClock());
+        var sink = media.Holding(speaker);
 
         var sending = sink.SendAudioAsync(new byte[] { 1, 2 }, CancellationToken.None);
         await Task.Delay(100);
@@ -316,4 +321,17 @@ internal sealed class FakePlayback : IMediaPlayback
         FullQuality is { } back ? back.Task.WaitAsync(ct) : Task.CompletedTask;
 
     public void Dispose() => Disposed = true;
+}
+
+/// <summary>A clock whose timers never fire: what waits on it with a timeout waits for what it waits on.</summary>
+internal sealed class StoppedClock : TimeProvider
+{
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) => new Stopped();
+
+    private sealed class Stopped : ITimer
+    {
+        public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+        public void Dispose() { }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
 }

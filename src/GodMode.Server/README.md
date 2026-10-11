@@ -691,18 +691,21 @@ A credential a script or a session needs that is not a file in the user's home g
 A root's `status` script tells the server what became of a project's work, without the server knowing the VCS. It runs in the project folder, with the environment above, and prints one JSON object:
 
 ```json
-{"pullRequest": {"url": "https://github.com/o/r/pull/12", "number": 12, "state": "draft|open|merged|closed", "review": "none|changes_requested|approved"}}
+{"pullRequest": {"url": "https://github.com/o/r/pull/12", "number": 12, "state": "draft|open|merged|closed", "review": "none|changes_requested|approved"},
+ "progress": {"resolved": 4, "total": 12}}
 ```
 
-or `{}` when there is no pull request. The result is `ProjectStatus.PullRequest` (in `status.json`), with `ChangedAt`, when the server first saw that state and review.
+Each is optional: `{}` when there is neither. The pull request is `ProjectStatus.PullRequest` (in `status.json`), with `ChangedAt`, when the server first saw that state and review.
 
-- **When:** on every transition to Idle or Stopped, and every `PullRequestPollSeconds` (default 600) while the pull request is draft or open; for an open one also when the server starts. One check at a time per project, at most four across the server. Deleting a project stops its checks.
-- **Failures change nothing:** a non-zero exit, more than `StatusScriptTimeoutSeconds` (default 30, then the script is killed), more than 16 KB of stdout, or output that is not exactly the object above (unknown properties, other values, extra text) leaves the pull request as it was, and is logged as a warning, on every check that fails.
+`progress` (#545) is how far the project's work has got, as `ProjectStatus.Progress` (and `ProjectSummary.Progress`): the app shows it as `resolved/total` on the session's row and in its header, with a bar there. The script decides what a unit is and when it counts as resolved; the server only holds two whole numbers with `0 <= resolved <= total`, and a report without `progress` (or with `null`) clears it.
+
+- **When:** on every transition to Idle or Stopped, and every `PullRequestPollSeconds` (default 600) while the pull request is draft or open; for an open one also when the server starts; and when the pull request of a session it started (its child, as the server recorded it) becomes merged, which may have moved its progress. One check at a time per project, at most four across the server. Deleting a project stops its checks.
+- **Failures change nothing:** a non-zero exit, more than `StatusScriptTimeoutSeconds` (default 30, then the script is killed), more than 16 KB of stdout, or output that is not exactly the object above (unknown properties, other values, extra text; a `progress` with a field missing, not a whole number, negative, or `resolved` over `total`) leaves the pull request and the progress as they were, and is logged as a warning, on every check that fails.
 - **Attention:** an open pull request with `changes_requested`, on a project that is Idle or Stopped, is a `Review` item until `MarkSeen` or a reply, and again when the review changes. `Review` and `Finished` items carry `PullRequestUrl`.
 - A root without `status` runs nothing, and its projects have no `PullRequest`.
-- **A recovered one is checked again.** `status.json` is in the project folder, which its session can write, so on recovery a `PullRequest` whose `url` is not an http(s) URL of at most 2048 characters is dropped (and logged), as the script's output would have been.
+- **A recovered one is checked again.** `status.json` is in the project folder, which its session can write, so on recovery a `PullRequest` whose `url` is not an http(s) URL of at most 2048 characters is dropped (and logged), as the script's output would have been, and so is a `Progress` outside `0 <= resolved <= total`.
 
-`godmode-dev`'s `scripts/status.ps1` is an example using `gh pr view`. It prints `{}` only when there is no pull request (none for the branch, not a repository, a detached HEAD, `git` or `gh` not installed); any other `gh` failure, such as a network error, a rate limit or an expired login, exits non-zero, so the server keeps what it knew and keeps polling.
+`godmode-dev`'s `scripts/status.ps1` is an example using `gh`. Its pull request is `gh pr view`'s, left out only when there is none (none for the branch, not a repository, a detached HEAD, `git` or `gh` not installed). Its progress is the sub-issues of the branch's issue (a branch `<kind>/<n>-<slug>`), an epic's or an issue split by hand: one closed as not planned (or a duplicate) is left out of the total, and one counts as resolved when it is closed or a pull request for it is merged into the branch (its branch `<kind>/<n>-…`, its title `IS#<n>…`, or `Fixes #<n>` in its body), since an epic's sub-issues stay open until the epic reaches the default branch. An issue with no sub-issues has no progress. Any other `gh` failure, such as a network error, a rate limit or an expired login, exits non-zero, so the server keeps what it knew and keeps polling.
 
 ### Issue Info
 

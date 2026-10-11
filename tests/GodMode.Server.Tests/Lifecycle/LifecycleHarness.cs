@@ -260,12 +260,25 @@ internal sealed class LifecycleHarness : IAsyncDisposable
         Session(projectId) is var (projectPath, sessionId) ? SessionState.PathOf(projectPath, sessionId) : throw new UnreachableException();
 
     /// <summary>
-    /// The pattern of the ID of a session created today in <paramref name="root"/> from
+    /// The pattern of an ID's date, <c>yymmdd</c>: today's, or yesterday's, for a session created just before a midnight
+    /// the test's assertion comes after (#568).
+    /// </summary>
+    public static string DatePattern
+    {
+        get
+        {
+            var today = DateTime.Now;
+            return $"(?:{today.AddDays(-1):yyMMdd}|{today:yyMMdd})";
+        }
+    }
+
+    /// <summary>
+    /// The pattern of the ID of a session created today (<see cref="DatePattern"/>) in <paramref name="root"/> from
     /// <paramref name="kind"/> (the harness's one action, <c>Create</c>, unless a script names one), named
     /// <paramref name="slug"/>: <c>{profile}/{root}/yymmdd-{kind}-{slug}-{suffix}</c>.
     /// </summary>
     public static string IdPattern(string slug, string kind = "create", string root = RootName, string profile = ProfileName) =>
-        $"^{Regex.Escape($"{profile}/{root}/{DateTime.Now:yyMMdd}-{kind}-{slug}-")}[a-z2-7]{{4}}$";
+        $"^{Regex.Escape($"{profile}/{root}/")}{DatePattern}{Regex.Escape($"-{kind}-{slug}-")}[a-z2-7]{{4}}$";
 
     /// <summary>An id as the server makes them, for a session a test writes to disk itself.</summary>
     public const string PlantedSessionId = "260101-create-planted-abcd";
