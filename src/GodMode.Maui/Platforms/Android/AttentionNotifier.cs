@@ -111,7 +111,7 @@ public sealed class AttentionNotifier(Context context, ILogger logger) : IAttent
     {
         var state = new ActivityManager.RunningAppProcessInfo();
         ActivityManager.GetMyMemoryState(state);
-        return state.Importance <= Importance.Foreground;
+        return state.Importance <= Android.App.Importance.Foreground;
     }
 
     /// <summary>Removes everything this notifier showed (the service is stopping and can no longer keep it right).</summary>
