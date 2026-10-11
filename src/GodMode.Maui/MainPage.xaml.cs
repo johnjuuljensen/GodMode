@@ -20,7 +20,7 @@ public partial class MainPage : ContentPage
         // The WebView shows only the app: a link opens outside it (WebViewNavigation)
 #if ANDROID
         // Clear of the status bar, the gesture bar and the keyboard where the WebView does not tell the page of them
-        SafeAreaEdges = SystemBars.PageEdges;
+        if (!SystemBars.WebViewPassesInsets) SafeAreaEdges = SafeAreaEdges.All;
         WebView.HandlerChanged += (_, _) =>
         {
             if (WebView.Handler is Microsoft.Maui.Handlers.HybridWebViewHandler handler)
