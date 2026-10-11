@@ -142,9 +142,8 @@ public sealed class ShellBridge : IDisposable
 
     private async Task<AddServerResult> AddServerAsync(AddServerPayload p)
     {
+        // The registry validates a local server's URLs, as it does for every caller
         var urls = p.Urls ?? [];
-        if (p.Type == ServerTypes.Local && urls.Count == 0)
-            throw new ArgumentException("A local server needs at least one URL");
         if (p.Type == ServerTypes.GitHub && (string.IsNullOrWhiteSpace(p.Username) || string.IsNullOrWhiteSpace(p.AccessToken)))
             throw new ArgumentException("A GitHub account needs a username and a token");
 
