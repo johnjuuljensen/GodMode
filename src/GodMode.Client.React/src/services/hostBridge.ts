@@ -36,6 +36,11 @@ export interface AttentionLinkPayload {
   ProjectId: string;
 }
 
+/** The session a window's main view shows (#549), or none. */
+export interface OpenSessionPayload {
+  Session: AttentionLinkPayload | null;
+}
+
 /** The window a page is in (#340): the app's main window (Profile null), or a profile's own, locked to it. */
 export interface WindowInfo {
   /** The profile the window is locked to, by name across every server; null in the main window. */
@@ -158,6 +163,11 @@ export interface BridgeRequests {
   'window.openProfile': [ProfilePayload, boolean];
   /** The item the last notification tap opened, once; null when there is none (or it was taken). */
   'attention.take': [void, AttentionLinkPayload | null];
+  /**
+   * The session this window's main view shows now, or null (#549): the shell holds back its notification while the app is in
+   * front. Sent whenever it changes.
+   */
+  'session.open': [OpenSessionPayload, boolean];
   'attention.sound.get': [void, AttentionSound];
   'attention.sound.set': [AttentionSound, AttentionSound];
   'voice.state': [void, VoiceStatus];

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore, projectKey, inProfile } from '../../store';
 import { InboxItem } from './InboxItem';
+import { useInboxAttention } from './useInboxAttention';
 import { keepFocus } from '../Project/keepFocus';
 import './Inbox.css';
 
@@ -16,7 +17,7 @@ interface Props {
 
 /** What needs the user, across every connected server, oldest first. */
 export function Inbox({ variant }: Props) {
-  const attention = useAppStore(s => s.attention);
+  const attention = useInboxAttention();
   const serverConnections = useAppStore(s => s.serverConnections);
   // A locked page's are its profile's (#340): the store keeps only its attention items, and this its running ones
   const profile = useAppStore(s => s.lockedProfile ?? 'All');
@@ -128,7 +129,7 @@ export type HomeTab = 'inbox' | 'projects';
 
 /** The phone's switch between the inbox (home) and the project list. */
 export function HomeTabBar({ tab, onChange }: { tab: HomeTab; onChange: (tab: HomeTab) => void }) {
-  const count = useAppStore(s => s.attention.length);
+  const count = useInboxAttention().length;
   return (
     <nav className="home-tabs">
       <button className={`home-tab ${tab === 'inbox' ? 'active' : ''}`} onClick={() => onChange('inbox')}>
