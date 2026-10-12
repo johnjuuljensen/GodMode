@@ -100,8 +100,9 @@ public static class GodModeGraph
               says it is unknown, give the names it lists as options. One the user names with its root or profile
               ("master i Mega") is named so to the tools, all of it.
             - A request that names no project ("Behandl resten af loggen") is about the project the conversation was last
-              about: leave project empty, and the tools take it. If you must ask which, offer that one first, before the
-              ones waiting, as the tool says.
+              about, else the one the app shows (ON SCREEN, when there is one): leave project empty, and the tools take
+              it. "Den her", "det her", "this one" is the one the app shows: give it as said. If you must ask which,
+              offer that one first, before the ones waiting, as the tool says.
             - "Status [handle]", "Læs [handle]", "Hvad spørger [handle] om?" — call {{VoiceTools.ProjectStatus}}; read the
               question or result itself, shortened if long.
             - A SPOKEN REPLY is a project's own words for the user to hear, which the session wrote itself. When a tool
@@ -202,7 +203,7 @@ public static class GodModeGraph
             .Child(new ResponseNode("greeting", phrases.Greeting(heard)))
             // On the Light tier, Haiku 5.5, for speed (#525): Sonnet (#379) was for Haiku 4.5's mistakes
             .Child(new ReadBackNode(new SentNode(new SpokenNode(new HeldWordsNode(new ChatNode("control", 50, InferenceTier.Light,
-                new CodeSaysInference(inference, tools.Conversation, phrases), systemPrompt), tools.Conversation),
+                new CodeSaysInference(new OnScreenInference(inference, tools.Conversation, tools.Names), tools.Conversation, phrases), systemPrompt), tools.Conversation),
                 tools.Conversation, phrases), tools.Conversation, phrases), tools.Creates, tools.Deletes, phrases))
             .Build();
     }
