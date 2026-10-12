@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore, transcriptKey, rootShown } from '../../store';
 import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
 import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
@@ -29,10 +29,18 @@ export function ProjectView({ serverId, projectId }: Props) {
   const answerQuestion = useAppStore(s => s.answerQuestion);
   const sendReply = useAppStore(s => s.sendReply);
   const pendingSends = useAppStore(s => s.pendingSends[transcriptKey(serverId, projectId)]);
-  const [inputText, setInputText] = useState('');
+  // The store's, so it is still there when the session is opened again (#581)
+  const inputText = useAppStore(s => s.composerDrafts[transcriptKey(serverId, projectId)] ?? '');
+  const setComposerDraft = useAppStore(s => s.setComposerDraft);
+  const setInputText = useCallback((text: string) => setComposerDraft(serverId, projectId, text), [setComposerDraft, serverId, projectId]);
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // A draft opened again has its cursor at its end
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (el) el.selectionStart = el.selectionEnd = el.value.length;
+  }, []);
   const transcriptRef = useRef<TranscriptListHandle>(null);
 
   // Loading until the server says the replay is complete, unless a transcript is already held
@@ -147,9 +155,9 @@ export function ProjectView({ serverId, projectId }: Props) {
       console.error('Failed to send input:', err);
       setRefusal({ projectId, message: hubErrorMessage(err) });
       // What was typed comes back to be changed, unless something else has been typed since
-      setInputText(current => current === '' ? text : current);
+      if (!useAppStore.getState().composerDrafts[transcriptKey(serverId, projectId)]) setInputText(text);
     }
-  }, [sendReply, serverId, projectId]);
+  }, [sendReply, serverId, projectId, setInputText]);
 
   const handleSendInput = async () => {
     if (notFound || !inputText.trim()) return;
