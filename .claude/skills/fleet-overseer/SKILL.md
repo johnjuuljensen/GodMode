@@ -81,6 +81,15 @@ user took over and resumed has lost your message but can still read GitHub. If y
 replacement reconstructs everything from `gh` — so keep GitHub true and keep nothing important only
 in your own head.
 
+**Compact yourself between dispatches.** In GodMode, the `compact` tool (`mcp__godmode__compact`)
+compacts your conversation at a break you choose, then sends you the continuation you wrote, so every
+later turn costs fewer tokens and no auto-compact lands in the middle of a review. Call it when the
+state is on GitHub and nothing is only in your head: after a dispatch round, after a merge into the
+epic branch, after a review round you have posted. Write the continuation as a brief to yourself: the
+epic, the branch, what you wait on, and that `list_sessions` and the epic's sub-issues give the rest.
+Then end your turn. A worker's report that arrives meanwhile is held, and reaches you after the
+continuation's turn; a stop drops the compaction.
+
 ## Take stock before you touch anything
 
 You arrive into work already in progress — the first time, and again after every restart. Build the

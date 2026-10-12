@@ -40,7 +40,7 @@ public class FleetEndpointTests
             ["inputs"] = new Dictionary<string, object?> { ["name"] = "p1", ["prompt"] = "Start" } })).GetProperty("Id").GetString()!;
         var launch = await run.WaitForLaunchAsync(id, l => l.Tools != null);
         var sessionTools = JsonDocument.Parse(launch.Tools!).RootElement.EnumerateArray().Select(tool => tool.GetProperty("name").GetString());
-        Assert.Equal([MessageParentTool.Name, PermissionPromptTool.Name, SpeakTool.Name], sessionTools.Order(StringComparer.Ordinal));
+        Assert.Equal([CompactTool.Name, MessageParentTool.Name, PermissionPromptTool.Name, SpeakTool.Name], sessionTools.Order(StringComparer.Ordinal));
     }
 
     /// <summary>
