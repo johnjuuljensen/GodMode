@@ -80,7 +80,7 @@ public class SessionFolderTests
         Assert.Equal("bug", harness.ReadStatusFile(created.Id).Kind);
         // Told before its result: the action's kind and the name it was given, with the suffix the id keeps
         var told = File.ReadAllText(seen).Trim();
-        Assert.Matches($"^{DateTime.Now:yyMMdd}-create-42-[a-z2-7]{{4}}$", told);
+        Assert.Matches($"^{LifecycleHarness.DatePattern}-create-42-[a-z2-7]{{4}}$", told);
         Assert.EndsWith(told[^4..], created.Id);
     }
 

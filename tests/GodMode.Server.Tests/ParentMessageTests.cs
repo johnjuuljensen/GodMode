@@ -154,7 +154,8 @@ public class ParentMessageTests
 
         await run.RestartAsync();
         await using var again = await run.ConnectFleetAsync();
-        Assert.Equal("Running", (await run.CallAsync(again, "resume", new() { ["session"] = parent })).GetProperty("State").GetString());
+        // Not its state: resumed with the message it runs a turn, which may have ended (Idle) by the time resume answers (#568)
+        await run.CallAsync(again, "resume", new() { ["session"] = parent });
 
         var resumed = await run.WaitForLaunchAsync(parent, l => l.Stdin.Count == 1, index: 1);
         Assert.Equal($"{Label(child)}\nWhile you were out", Inputs(resumed)[0]);

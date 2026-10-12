@@ -185,6 +185,21 @@ public class AttentionTests
         Assert.Same(question, item?.Question);
     }
 
+    /// <summary>A text cut to its length says so, for the app's short card (#548).</summary>
+    [Fact]
+    public void Finished_SaysWhetherItsTextWasCut()
+    {
+        var finished = StatusOf(ProjectState.Idle, null) with { LastResult = "All done.", LastResultAt = Asked };
+        var tooLong = finished with { LastResult = string.Join(" ", Enumerable.Repeat("word", 200)) };
+        var justFits = finished with { LastResult = new string('x', Attention.MaxTextLength) };
+
+        Assert.False(Attention.Of(finished)!.Truncated);
+        Assert.False(Attention.Of(justFits)!.Truncated);
+        var cut = Attention.Of(tooLong)!;
+        Assert.True(cut.Truncated);
+        Assert.EndsWith("…", cut.Text);
+    }
+
     /// <summary>An error is the user's until seen, and again when it fails again.</summary>
     [Fact]
     public void Error_IsAnError_UntilSeen()

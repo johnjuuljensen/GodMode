@@ -48,6 +48,26 @@ public sealed class VoiceConversation(TimeProvider? time = null)
     /// </summary>
     public ProjectRef? LastTalked => Volatile.Read(ref _lastTalked);
 
+    private ProjectRef? _selected;
+
+    /// <summary>
+    /// The project the app shows (#559): the one selected in the window that had focus last; null for none. A request
+    /// that names no project goes to it when no project is talked about (<see cref="Current"/>), and "den her" / "this
+    /// one" is it. Voice never changes it: the app does (#287's switch is the app's selection too).
+    /// </summary>
+    public ProjectRef? Selected => Volatile.Read(ref _selected);
+
+    /// <summary>
+    /// The app selected <paramref name="project"/> (null: it shows none). The user just turned to it: a new selection is
+    /// the project talked about from now on, as the last one voice talked about or announced alone is, and drops an
+    /// announced switch. The same one again changes nothing.
+    /// </summary>
+    public void Select(ProjectRef? project)
+    {
+        if (Interlocked.Exchange(ref _selected, project) == project || project is null) return;
+        Volatile.Write(ref _topic, new Topic(project, null));
+    }
+
     /// <summary>
     /// An announcement of <paramref name="project"/> alone (null for several) is being said: it is what the
     /// conversation is about now. When it changes the project from another one, the switch is kept: its window runs

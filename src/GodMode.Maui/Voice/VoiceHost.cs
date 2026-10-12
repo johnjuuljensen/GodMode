@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using GodMode.ClientBase;
+using GodMode.ClientBase.Attention;
 using GodMode.ClientBase.Services;
 using GodMode.Maui.Bridge;
 using GodMode.Voice;
@@ -40,7 +41,15 @@ public sealed class VoiceHost : IVoiceEvents
         _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<VoiceHost>();
         Settings = new VoiceSettingsStore(GodModePaths.AppDataDirectory, secrets, loggerFactory.CreateLogger<VoiceSettingsStore>());
+        OpenSessions.SelectionChanged += Selected;
     }
+
+    /// <summary>
+    /// The app's selection (#559): the session shown in the window that had focus last (<see cref="OpenSessions.Selected"/>),
+    /// which the running session talks about when the user names no project. Voice never changes it.
+    /// </summary>
+    private void Selected(AttentionLink? link) =>
+        _running?.Session.Select(link is null ? null : new ProjectRef(link.ServerId, link.ProjectId));
 
     public VoiceSettingsStore Settings { get; }
 
@@ -151,6 +160,7 @@ public sealed class VoiceHost : IVoiceEvents
 
                 var running = new Running(session, audio, servers, mic, media, call, buttons);
                 _running = running;
+                Selected(OpenSessions.Selected);
                 _ = WatchAsync(running);
                 _logger.LogInformation("Voice started ({Language}, echo cancellation {Echo}, mic {Mic})", settings.Language, settings.EchoCancellation,
                     mic is null ? "always open" : $"on demand, closing after {settings.MicSilenceSeconds} s of silence");

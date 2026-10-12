@@ -150,6 +150,12 @@ public sealed class VoiceSession : IAsyncDisposable
     internal VoiceConversation Conversation { get; private init; } = null!;
 
     /// <summary>
+    /// The app shows <paramref name="project"/> (#559), or none: the selection of the window that had focus last. What
+    /// voice talks about by it (<see cref="VoiceConversation.Select"/>); voice never changes it.
+    /// </summary>
+    public void Select(ProjectRef? project) => Conversation.Select(project);
+
+    /// <summary>
     /// The terms speech recognition is biased towards now (<see cref="Keyterms"/>); empty when the session's speech
     /// engine takes none.
     /// </summary>

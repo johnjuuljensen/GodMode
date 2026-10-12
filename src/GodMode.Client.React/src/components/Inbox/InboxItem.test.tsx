@@ -14,6 +14,7 @@ import { Inbox } from './Inbox';
 import { ConfirmDialog } from '../ConfirmDialog';
 import { dismissConfirm } from '../../confirmDialog';
 import { dismissToast } from '../../toast';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { classesIn, cuttingRules, longRequest, ruleOf, textsOf } from '../../test/readable';
 
@@ -38,7 +39,9 @@ let view: Rendered;
 /** The rendered item whose header names `name` and `server`. */
 const itemEl = (name: string, server: string) => [...view.container.querySelectorAll<HTMLElement>('.inbox-item')]
   .find(el => el.querySelector('.inbox-item-name')?.textContent === name && el.querySelector('.inbox-item-meta')?.textContent?.includes(server))!;
-const button = (el: HTMLElement, label: string) => [...el.querySelectorAll('button')].find(b => b.textContent === label)!;
+/** The button `label` names: by its text, or an icon button by its aria-label. */
+const button = (el: HTMLElement, label: string) => [...el.querySelectorAll('button')]
+  .find(b => (b.textContent || b.getAttribute('aria-label')) === label)!;
 
 beforeEach(async () => {
   useAppStore.setState(initialState, true);
@@ -248,6 +251,97 @@ describe('a create that failed (#448)', () => {
 
     await vi.waitFor(() => expect(hubA.deletes).toEqual([{ projectId: 'p3', force: false }]));
     expect(hubA.replies).toEqual([]);
+  });
+});
+
+describe('a long item is a short card (#548)', () => {
+  const css = join(import.meta.dirname, 'Inbox.css');
+  const cut = `${'word '.repeat(99)}word…`;
+  const show = (...items: AttentionItem[]) => act(async () => hubA.callbacks.onAttentionChanged?.(items));
+  const p = (projectId: string) => itemEl(projectId, 'Server A');
+  const iconButton = (el: HTMLElement, label: string) => {
+    const b = el.querySelector<HTMLButtonElement>(`.inbox-item-icons button[aria-label="${label}"]`)!;
+    expect(b, label).not.toBeNull();
+    expect(b.textContent, label).toBe('');
+    expect(b.title, label).not.toBe('');
+    expect(b.querySelector('svg'), label).not.toBeNull();
+    return b;
+  };
+
+  it('shows a reply its server cut as a preview, with no reply box and its actions as icons', async () => {
+    await show(item('p6', 'Finished', '2026-10-10T12:00:00Z', { Text: cut, Truncated: true }));
+    const el = p('p6');
+    expect(el.classList.contains('inbox-item-short')).toBe(true);
+    expect(el.querySelector('.inbox-item-preview')?.textContent).toBe(cut);
+    expect(el.querySelector('textarea')).toBeNull();
+    expect(button(el, 'Send')).toBeUndefined();
+    expect(el.querySelector('.inbox-item-actions')).toBeNull();
+
+    await click(iconButton(el, 'Mark seen'));
+    expect(hubA.seen).toEqual(['p6']);
+    await click(iconButton(el, 'Go to'));
+    expect(useAppStore.getState().selectedProject).toEqual({ serverId: 'A', projectId: 'p6' });
+  });
+
+  it('is short for a reply longer than a few lines, cut or not', async () => {
+    await show(item('p6', 'Finished', '2026-10-10T12:00:00Z', { Text: 'word '.repeat(60).trim() }));
+    expect(p('p6').querySelector('.inbox-item-preview')).not.toBeNull();
+    expect(p('p6').querySelector('textarea')).toBeNull();
+  });
+
+  it('keeps a short reply as it was, reply box included, with the icons', async () => {
+    await show(item('p6', 'Finished', '2026-10-10T12:00:00Z', { Text: 'Done: the tests pass.' }));
+    const el = p('p6');
+    expect(el.querySelector('.inbox-item-preview')).toBeNull();
+    expect(el.querySelector('.inbox-item-text')?.textContent).toBe('Done: the tests pass.');
+    expect(el.querySelector('textarea')).not.toBeNull();
+    iconButton(el, 'Mark seen');
+    iconButton(el, 'Go to');
+  });
+
+  it('keeps the reply box of an error and an escalation, however long', async () => {
+    await show(
+      item('p6', 'Error', '2026-10-10T12:00:00Z', { Text: cut, Truncated: true }),
+      item('p7', 'Escalation', '2026-10-10T12:00:00Z', { Text: cut, Truncated: true }),
+    );
+    for (const id of ['p6', 'p7']) {
+      expect(p(id).querySelector('.inbox-item-preview'), id).toBeNull();
+      expect(p(id).querySelector('textarea'), id).not.toBeNull();
+    }
+  });
+
+  it('leaves a question with options and a permission as they were', async () => {
+    await show(
+      item('p6', 'Question', '2026-10-10T12:00:00Z', { Text: cut, Truncated: true, Question: longRequest }),
+      item('p7', 'Permission', '2026-10-10T12:00:00Z', { Text: cut, Truncated: true,
+        Permission: { RequestId: 'r1', ToolName: 'Bash', Summary: 'Bash: git push', RequestedAt: '2026-10-10T12:00:00Z' } }),
+    );
+    expect(p('p6').querySelector('.inbox-item-preview')).toBeNull();
+    expect(p('p6').querySelectorAll('.inbox-question')).toHaveLength(3);
+    expect(p('p6').querySelector('textarea')).not.toBeNull();
+    expect(button(p('p7'), 'Allow')).toBeDefined();
+    expect(p('p7').querySelector('.inbox-item-preview')).toBeNull();
+  });
+
+  it('clamps the preview to three lines', () => {
+    expect(ruleOf(css, '.inbox-item-preview')).toMatch(/-webkit-line-clamp:\s*3/);
+  });
+
+  // jsdom lays nothing out, so this reads the stylesheet: what a phone's media rule gives the card's icons
+  describe('on a phone', () => {
+    const onPhone = (selector: string) => [...readFileSync(css, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+      .matchAll(/@media \(max-width: 768px\) \{([\s\S]*?)\n\}/g)]
+      .flatMap(m => [...m[1].matchAll(/([^{}]+)\{([^}]*)\}/g)])
+      .filter(rule => rule[1].split(',').map(s => s.trim()).includes(selector))
+      .flatMap(rule => rule[2].split(';').map(d => d.trim()).filter(Boolean));
+
+    it('an icon button keeps a 44px touch target, both ways', () => {
+      expect(onPhone('.inbox-icon-btn')).toEqual(expect.arrayContaining(['min-height: 44px', 'min-width: 44px']));
+    });
+
+    it('the PR chip keeps a 44px touch target', () => {
+      expect(onPhone('.inbox-item-chip')).toContain('min-height: 44px');
+    });
   });
 });
 

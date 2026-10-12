@@ -10,9 +10,10 @@ SignalR server for GodMode. It runs Claude Code sessions in project folders on t
 - **Script-Based Creation**: VCS-agnostic — all prepare/create/delete logic lives in scripts, not server code
 - **Cross-Platform Scripts**: Write `.ps1` scripts once; they run under `pwsh` on Windows and Linux
 - **State Persistence**: Each session's state lives in its working folder's `.godmode/sessions/<id>/` and is recovered on restart
-- **Permission prompts**: Every session asks the user for permission through the server's own MCP endpoint, `/mcp`: claude's `--permission-prompt-tool`, beside `message_parent` and `speak`
+- **Permission prompts**: Every session asks the user for permission through the server's own MCP endpoint, `/mcp`: claude's `--permission-prompt-tool`, beside `message_parent`, `speak` and `compact`
 - **Messages between sessions**: Sessions in one `CLAUDE_CONFIG_DIR` reach each other through Claude Code's own channel, by the names GodMode gives them; across config dirs, and to a stopped parent, through the server (`message_parent`, notices), held until the receiver can take them
 - **Spoken replies**: Every session is asked to give a short spoken version of each reply with `speak`, which the voice says word for word ([A session's spoken reply](#a-sessions-spoken-reply))
+- **Compacting at a clean break**: A session compacts its own conversation with `compact` at a break it can see, then carries on with a continuation it wrote ([A session compacts itself](#a-session-compacts-itself))
 - **The fleet**: An overseer lists, starts, messages, reads, stops and resumes sessions with the tools of `/mcp/fleet`: the user's own claude with the server's credential, or a GodMode session its root's config gives them
 
 ## Configuration
@@ -284,7 +285,7 @@ GodMode gives a session one MCP server, its own: `godmode`, this server's `/mcp`
 
 A root or action config that still has `mcpServers`, or a profile with an `mcp/` folder, launches normally: the server logs a warning once for each, and ignores it.
 
-GodMode pre-approves only its own session tools, `message_parent` and `speak` on `/mcp`: every launch passes `--allowedTools mcp__godmode__message_parent mcp__godmode__speak`, in any root and permission mode (#384). A root's own `--allowedTools` in `claudeArgs` (`--allowedTools a b`, `--allowed-tools`, or `--allowedTools=a`) gets the two added to its list, the first one it has, so claude is given one list; with none, the server adds the flag after the root's args. Any other tool call that needs approval, an MCP tool's included (the fleet's too), reaches the permission prompt (`WaitingPermission`), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's `permissionMode` lets it through, or the project runs with skip-permissions (see [Permissions](#permissions)).
+GodMode pre-approves only its own session tools, `message_parent`, `speak` and `compact` on `/mcp`: every launch passes `--allowedTools mcp__godmode__message_parent mcp__godmode__speak mcp__godmode__compact`, in any root and permission mode (#384, #579). A root's own `--allowedTools` in `claudeArgs` (`--allowedTools a b`, `--allowed-tools`, or `--allowedTools=a`) gets the three added to its list, the first one it has, so claude is given one list; with none, the server adds the flag after the root's args. Any other tool call that needs approval, an MCP tool's included (the fleet's too), reaches the permission prompt (`WaitingPermission`), unless Claude Code's own settings allow it (`permissions.allow` in the profile's `CLAUDE_CONFIG_DIR`, or the repo's `.claude/settings.json`), the root's `permissionMode` lets it through, or the project runs with skip-permissions (see [Permissions](#permissions)).
 
 ### Permissions
 
@@ -312,7 +313,7 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 
 ### The MCP endpoint
 
-`/mcp` serves MCP over streamable HTTP, statelessly, with three tools: `permission_prompt`, which claude calls by itself, `message_parent`, which the model calls to message its parent ([Messages between sessions](#messages-between-sessions)), and `speak`, which the model calls on every turn with the spoken version of its reply ([A session's spoken reply](#a-sessions-spoken-reply)). Its `initialize` gives the server's instructions, which ask for `speak`; `/mcp/fleet` gives none. claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode__permission_prompt` and an MCP config whose entry, its only one unless the session has the fleet's tools ([Overseer sessions](#overseer-sessions)), is:
+`/mcp` serves MCP over streamable HTTP, statelessly, with four tools: `permission_prompt`, which claude calls by itself, `message_parent`, which the model calls to message its parent ([Messages between sessions](#messages-between-sessions)), `speak`, which the model calls on every turn with the spoken version of its reply ([A session's spoken reply](#a-sessions-spoken-reply)), and `compact`, which the model calls at a clean break to compact its own conversation ([A session compacts itself](#a-session-compacts-itself)). Its `initialize` gives the server's instructions, which ask for `speak`; `/mcp/fleet` gives none. claude is launched with `--permission-prompts host --permission-prompt-tool mcp__godmode__permission_prompt` and an MCP config whose entry, its only one unless the session has the fleet's tools ([Overseer sessions](#overseer-sessions)), is:
 
 ```json
 { "mcpServers": { "godmode": {
@@ -337,7 +338,7 @@ A root decides how its sessions are permitted, with two keys in `config.json` or
 `/mcp/fleet` serves MCP over streamable HTTP, statelessly, for an overseer, which lists, starts, messages, reads, stops and resumes the server's sessions, and deletes the ones it started once it is done with them: a `claude` the user runs themselves, in a terminal, outside GodMode, or a GodMode session with the fleet's tools ([Overseer sessions](#overseer-sessions)). The sessions it starts are GodMode sessions like any other: in the app's list, notifying, and asking the user for their permissions.
 
 - **The server's own credential opens it**, as it opens the hub: the API key (`Authorization: Bearer <key>`), or in codespace mode a GitHub token of `GITHUB_USER`. So does the project token of a session that has the fleet's tools, with its project named, checked on every request. A session's token with its own project named, when the session has no fleet tools, gets 403; a project token with no project named, or with another project named, opens nothing (401). The API key does not open `/mcp`. `/mcp/fleet/`, with a trailing slash, is the same endpoint, as routing has it. A request with an `Origin` gets 403, as everywhere.
-- **Each endpoint lists its own tools.** `/mcp` has `permission_prompt`, `message_parent` and `speak`, `/mcp/fleet` the tools below, whoever calls. One MCP server serves both; each tool's `[Authorize]` policy is its endpoint's, by the request's path too, so a granted session's token gets no permission prompt on `/mcp/fleet` and no fleet tool on `/mcp`.
+- **Each endpoint lists its own tools.** `/mcp` has `permission_prompt`, `message_parent`, `speak` and `compact`, `/mcp/fleet` the tools below, whoever calls. One MCP server serves both; each tool's `[Authorize]` policy is its endpoint's, by the request's path too, so a granted session's token gets no permission prompt on `/mcp/fleet` and no fleet tool on `/mcp`.
 - **The overseer's `.mcp.json`** (in the folder it runs in, or `claude mcp add --transport http godmode-fleet <url> --header "Authorization: Bearer <key>"`):
 
   ```json
@@ -527,6 +528,20 @@ A session writes for a screen: headings, tables, code, the question last. The vo
 - **A turn without one** is as before: the voice summarises from the full question or result (#377).
 - **It never asks the user**: every launch allows it, as it allows `message_parent`, with `--allowedTools` ([MCP Servers](#mcp-servers)), in any root and permission mode.
 
+### A session compacts itself
+
+claude compacts a conversation when the user sends `/compact`, or when it reaches its auto-compact limit, wherever in a task that is. A session can see its own clean breaks, so it compacts itself there, and every later turn costs fewer tokens (#579).
+
+- **`compact(continuation, instructions?)`** is on `/mcp`, beside `message_parent` and `speak`. `instructions`, optional, is what the summary must keep, sent as `/compact <instructions>`. `continuation`, required, is what the session does next, in its own words, sent as its next input once the compaction is done, since the compacted session has only the summary. Each is at most 8000 characters. The tool's description names the clean breaks: after opening or updating a pull request, after a merge, between dispatches, before an unrelated piece of work; never in the middle of a task whose details are written down nowhere.
+- **It only schedules**: a session cannot compact in the middle of its own turn. It answers `Compaction scheduled: end your turn now…`, and the session ends its turn. That turn's `result` sends `/compact <instructions>`; the compaction's result, `num_turns` 0 with no text, sends the continuation, as `[Continuation, after a compaction the session asked for]` on a line of its own, then the text. Both are sent on the session's output consumer under its state lock, as the result is handled, so no input comes between. The session stays `Running` throughout: the turn it asked after is a quiet one ([Quiet turns and escalation](#quiet-turns-and-escalation)), the compaction's result raises nothing, and no `Finished`, attention item or parent's notice comes until the continuation's own turn ends, which is a turn like any other.
+- **What the output shows**: the `compact` tool call with its arguments, the `/compact <instructions>` claude echoes, its `compact_boundary` marker ("Conversation compacted" in the app), then the labelled continuation, as claude echoes any input.
+- **What arrives meanwhile waits**: a child's `message_parent`, the server's notices and the fleet's `send` are held ([Messages between sessions](#messages-between-sessions)) and delivered, in order, once the continuation's turn has ended.
+- **The user's input cancels it**: input the user sends (the hub's `SendInput`, `ReplyAndResume`, `AnswerQuestion`, a voice reply) means the user has taken over. Before the turn has ended, it cancels the compaction and the continuation, and the input reaches the turn as any does; once the `/compact` is sent, it cancels the continuation, and the input follows the compaction.
+- **A failed compaction** (an error result) still sends the continuation, with a line saying the compaction failed and why; the session is not in error for it.
+- **What drops it**: a stop, the process's exit, and a turn that ends other than as asked (an error, or waiting on the user: a question, `needs-you` or `blocked`). It is in memory only, so a restart or a resume never replays it.
+- **What it refuses**, with why: a second call while one is pending, a call while the session is in a `/compact` it did not ask for (from `/compact` written to claude until its `compact_boundary`, a result with no turn, or an error result), a call outside a turn, and an empty or too long continuation or instructions.
+- **It never asks the user**: every launch allows it, as it allows `message_parent` and `speak`, with `--allowedTools` ([MCP Servers](#mcp-servers)).
+
 ### Input Schema (Convention-Based)
 
 Place a `schema.json` file in the action's folder: `{actionName}/schema.json`. If no schema file exists, the default schema (name + prompt + skip permissions) is used.
@@ -691,18 +706,21 @@ A credential a script or a session needs that is not a file in the user's home g
 A root's `status` script tells the server what became of a project's work, without the server knowing the VCS. It runs in the project folder, with the environment above, and prints one JSON object:
 
 ```json
-{"pullRequest": {"url": "https://github.com/o/r/pull/12", "number": 12, "state": "draft|open|merged|closed", "review": "none|changes_requested|approved"}}
+{"pullRequest": {"url": "https://github.com/o/r/pull/12", "number": 12, "state": "draft|open|merged|closed", "review": "none|changes_requested|approved"},
+ "progress": {"resolved": 4, "total": 12}}
 ```
 
-or `{}` when there is no pull request. The result is `ProjectStatus.PullRequest` (in `status.json`), with `ChangedAt`, when the server first saw that state and review.
+Each is optional: `{}` when there is neither. The pull request is `ProjectStatus.PullRequest` (in `status.json`), with `ChangedAt`, when the server first saw that state and review.
 
-- **When:** on every transition to Idle or Stopped, and every `PullRequestPollSeconds` (default 600) while the pull request is draft or open; for an open one also when the server starts. One check at a time per project, at most four across the server. Deleting a project stops its checks.
-- **Failures change nothing:** a non-zero exit, more than `StatusScriptTimeoutSeconds` (default 30, then the script is killed), more than 16 KB of stdout, or output that is not exactly the object above (unknown properties, other values, extra text) leaves the pull request as it was, and is logged as a warning, on every check that fails.
+`progress` (#545) is how far the project's work has got, as `ProjectStatus.Progress` (and `ProjectSummary.Progress`): the app shows it as `resolved/total` on the session's row and in its header, with a bar there. The script decides what a unit is and when it counts as resolved; the server only holds two whole numbers with `0 <= resolved <= total`, and a report without `progress` (or with `null`) clears it.
+
+- **When:** on every transition to Idle or Stopped, and every `PullRequestPollSeconds` (default 600) while the pull request is draft or open; for an open one also when the server starts; and when the pull request of a session it started (its child, as the server recorded it) becomes merged, which may have moved its progress. One check at a time per project, at most four across the server. Deleting a project stops its checks.
+- **Failures change nothing:** a non-zero exit, more than `StatusScriptTimeoutSeconds` (default 30, then the script is killed), more than 16 KB of stdout, or output that is not exactly the object above (unknown properties, other values, extra text; a `progress` with a field missing, not a whole number, negative, or `resolved` over `total`) leaves the pull request and the progress as they were, and is logged as a warning, on every check that fails.
 - **Attention:** an open pull request with `changes_requested`, on a project that is Idle or Stopped, is a `Review` item until `MarkSeen` or a reply, and again when the review changes. `Review` and `Finished` items carry `PullRequestUrl`.
 - A root without `status` runs nothing, and its projects have no `PullRequest`.
-- **A recovered one is checked again.** `status.json` is in the project folder, which its session can write, so on recovery a `PullRequest` whose `url` is not an http(s) URL of at most 2048 characters is dropped (and logged), as the script's output would have been.
+- **A recovered one is checked again.** `status.json` is in the project folder, which its session can write, so on recovery a `PullRequest` whose `url` is not an http(s) URL of at most 2048 characters is dropped (and logged), as the script's output would have been, and so is a `Progress` outside `0 <= resolved <= total`.
 
-`godmode-dev`'s `scripts/status.ps1` is an example using `gh pr view`. It prints `{}` only when there is no pull request (none for the branch, not a repository, a detached HEAD, `git` or `gh` not installed); any other `gh` failure, such as a network error, a rate limit or an expired login, exits non-zero, so the server keeps what it knew and keeps polling.
+`godmode-dev`'s `scripts/status.ps1` is an example using `gh`. Its pull request is `gh pr view`'s, left out only when there is none (none for the branch, not a repository, a detached HEAD, `git` or `gh` not installed). Its progress is the sub-issues of the branch's issue (a branch `<kind>/<n>-<slug>`), an epic's or an issue split by hand: one closed as not planned (or a duplicate) is left out of the total, and one counts as resolved when it is closed or a pull request for it is merged into the branch (its branch `<kind>/<n>-…`, its title `IS#<n>…`, or `Fixes #<n>` in its body), since an epic's sub-issues stay open until the epic reaches the default branch. An issue with no sub-issues has no progress. Any other `gh` failure, such as a network error, a rate limit or an expired login, exits non-zero, so the server keeps what it knew and keeps polling.
 
 ### Issue Info
 

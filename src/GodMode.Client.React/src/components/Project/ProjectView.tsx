@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAppStore, transcriptKey, rootShown } from '../../store';
 import { TranscriptList, type TranscriptListHandle } from './TranscriptList';
 import { createTranscriptBuilder, type TranscriptItem } from '../../signalr/parseMessage';
@@ -10,9 +10,11 @@ import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import { deleteSession } from '../../deleteSession';
 import { useClickToCompose } from './clickToCompose';
+import { focusOnOpen } from './focusOnOpen';
 import './ProjectView.css';
 import { ImportancePicker } from '../Importance/Importance';
 import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
+import { ProgressMark } from '../Progress/Progress';
 import { backgroundTitle, inBackground } from '../BackgroundTasks/backgroundState';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
@@ -29,10 +31,18 @@ export function ProjectView({ serverId, projectId }: Props) {
   const answerQuestion = useAppStore(s => s.answerQuestion);
   const sendReply = useAppStore(s => s.sendReply);
   const pendingSends = useAppStore(s => s.pendingSends[transcriptKey(serverId, projectId)]);
-  const [inputText, setInputText] = useState('');
+  // The store's, so it is still there when the session is opened again (#581)
+  const inputText = useAppStore(s => s.composerDrafts[transcriptKey(serverId, projectId)] ?? '');
+  const setComposerDraft = useAppStore(s => s.setComposerDraft);
+  const setInputText = useCallback((text: string) => setComposerDraft(serverId, projectId, text), [setComposerDraft, serverId, projectId]);
   const [projectName, setProjectName] = useState('');
   const [simpleView, setSimpleView] = useState(() => localStorage.getItem(SIMPLE_VIEW_KEY) !== 'false');
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // A draft opened again has its cursor at its end
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (el) el.selectionStart = el.selectionEnd = el.value.length;
+  }, []);
   const transcriptRef = useRef<TranscriptListHandle>(null);
 
   // Loading until the server says the replay is complete, unless a transcript is already held
@@ -59,9 +69,8 @@ export function ProjectView({ serverId, projectId }: Props) {
     };
   }, [hub, serverId, projectId, subscribeOutput, unsubscribeOutput]);
 
-  useEffect(() => {
-    if (project) setProjectName(project.Name);
-  }, [project]);
+  // Set while rendering, not in an effect: the name shown stays the last one known once the project is gone
+  if (project && project.Name !== projectName) setProjectName(project.Name);
 
   const toggleSimpleView = useCallback(() => {
     setSimpleView(v => {
@@ -91,8 +100,10 @@ export function ProjectView({ serverId, projectId }: Props) {
   const awaitsFirstMessage = !notFound && state === 'Idle' && phase === 'ready' && outputMessages.length === 0;
   // Idle, with claude still at work in the background (#432): shown as working, and its stop ends that work
   const background = !notFound && !!project && inBackground(project);
-  const canResume = !notFound && !background && (state === 'Stopped' || state === 'Idle' && !awaitsFirstMessage);
-  const canStop = !notFound && (background || state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission');
+  // Idle stops too (#580), its first message awaited or not: a session is stopped so its next launch reads the
+  // root's config again, and a message relaunches it. One Idle with no process (the server restarted) just says Stopped
+  const canResume = !notFound && state === 'Stopped';
+  const canStop = !notFound && (background || state === 'Idle' || state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission');
 
   // What claude is blocked on: a tool call to allow or deny, or AskUserQuestion's questions, asked one at a time
   const pendingPermission = project?.PendingPermission ?? null;
@@ -111,7 +122,11 @@ export function ProjectView({ serverId, projectId }: Props) {
   const [refusal, setRefusal] = useState<{ projectId: string; message: string } | null>(null);
   const sendError = refusal?.projectId === projectId ? refusal.message : null;
   // A click in the output focuses the composer, unless a question's options take the keys (#435, #240)
-  const clickToCompose = useClickToCompose(inputRef, !pendingPermission && (openQuestion?.Options.length ?? 0) > 0);
+  const keysTaken = !pendingPermission && (openQuestion?.Options.length ?? 0) > 0;
+  const clickToCompose = useClickToCompose(inputRef, keysTaken);
+  // Opened, the composer takes the keys (#559): the view is keyed by project, so this is each selection's
+  const keysTakenOnOpen = useRef(keysTaken);
+  useEffect(() => focusOnOpen(inputRef.current, keysTakenOnOpen.current), []);
 
   // A failure (another client answered first, claude stopped waiting) is the card's to show
   const handlePermission = useCallback(async (allow: boolean) => {
@@ -147,9 +162,9 @@ export function ProjectView({ serverId, projectId }: Props) {
       console.error('Failed to send input:', err);
       setRefusal({ projectId, message: hubErrorMessage(err) });
       // What was typed comes back to be changed, unless something else has been typed since
-      setInputText(current => current === '' ? text : current);
+      if (!useAppStore.getState().composerDrafts[transcriptKey(serverId, projectId)]) setInputText(text);
     }
-  }, [sendReply, serverId, projectId]);
+  }, [sendReply, serverId, projectId, setInputText]);
 
   const handleSendInput = async () => {
     if (notFound || !inputText.trim()) return;
@@ -163,7 +178,10 @@ export function ProjectView({ serverId, projectId }: Props) {
 
   const handleStop = async () => {
     // A stray tap on the status pill must never end a session
-    if (!hub || !await confirmAction(`Stop "${projectName}"?`, 'Stop', { message: 'Claude stops mid-turn. Sending a message resumes it.', tone: 'danger' })) return;
+    if (!hub || !await confirmAction(`Stop "${projectName}"?`, 'Stop', {
+      message: state === 'Idle' && !background ? 'Sending a message resumes it.' : 'Claude stops mid-turn. Sending a message resumes it.',
+      tone: 'danger',
+    })) return;
     try { await hub.stopProject(projectId); } catch (err) { console.error(err); }
   };
 
@@ -184,6 +202,7 @@ export function ProjectView({ serverId, projectId }: Props) {
           <span className="project-header-name">{projectName}</span>
           {/* Background work while a turn runs or waits on the user; idle, the status button says it */}
           {!background && <BackgroundBadge tasks={project?.BackgroundTasks} />}
+          <ProgressMark progress={project?.Progress} bar />
           {(project?.ProfileName || project?.RootName) && (
             <span className="project-header-root" title={project?.RootName ?? undefined}>
               {project?.ProfileName && project.ProfileName !== 'Default' ? project.ProfileName : ''}
@@ -263,7 +282,7 @@ Click to stop` : canStop ? 'Click to stop' : canResume ? 'Click to resume' : sta
           // Every state takes a reply: ReplyAndResume resumes a claude that is not running, one that failed
           // too, as the inbox answers an Error item (#240)
           placeholder={awaitsFirstMessage ? 'Type the first message...'
-            : canResume || state === 'Error' ? 'Type to resume...' : 'Type your response...'}
+            : canResume || state === 'Error' || state === 'Idle' && !background ? 'Type to resume...' : 'Type your response...'}
           disabled={notFound}
           commands={project?.SlashCommands}
         />

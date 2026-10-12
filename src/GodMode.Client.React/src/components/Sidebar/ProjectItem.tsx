@@ -6,6 +6,7 @@ import { deleteSession } from '../../deleteSession';
 import { ImportanceMark } from '../Importance/Importance';
 import { IMPORTANCE_LABELS, IMPORTANCE_ORDER } from '../Importance/importanceTiers';
 import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
+import { ProgressMark } from '../Progress/Progress';
 import { backgroundName, inBackground } from '../BackgroundTasks/backgroundState';
 import type { ProjectState } from '../../signalr/types';
 
@@ -17,7 +18,7 @@ interface Props {
   nested?: NestedToggle;
 }
 
-/** A parent's toggle: collapsed, it shows how many sessions are under it, and a dot when any of them needs the user. */
+/** A parent's toggle, on the left of its row: collapsed, the row's right end shows how many sessions are under it, and a dot when any of them needs the user. */
 export interface NestedToggle {
   collapsed: boolean;
   count: number;
@@ -138,6 +139,19 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
       >
+        {/* The fold, left of the row as a profile's or a root's is on its header (#506): hung in the gutter by Sidebar.css, out of the row's flow */}
+        {nested && (
+          <button
+            className={`project-children-toggle ${nested.collapsed ? 'collapsed' : ''}`}
+            aria-expanded={!nested.collapsed}
+            aria-label={`${nested.collapsed ? 'Show' : 'Hide'} the ${nested.count} under ${project.Name}`}
+            title={nested.collapsed ? `Show the ${nested.count} under it` : 'Hide the sessions under it'}
+            // Its own tap, not the row's (opening the session); on an opened row it closes it, as anywhere on the row does (#397)
+            onClick={e => { e.stopPropagation(); if (revealed) close(); else nested.onToggle(); }}
+          >
+            <span className="project-children-chevron" aria-hidden="true">{nested.collapsed ? '▸' : '▾'}</span>
+          </button>
+        )}
         <span className={`project-state-dot ${background ? 'Background' : state}`} role="img" aria-label={stateName} title={stateName} />
         <div className="project-info">
           <div className="project-name-row">
@@ -159,19 +173,13 @@ export function ProjectItem({ item, isSelected, onSelect, nested }: Props) {
             )}
           </div>
         </div>
-        {nested && (
-          <button
-            className={`project-children-toggle ${nested.collapsed ? 'collapsed' : ''}`}
-            aria-expanded={!nested.collapsed}
-            aria-label={`${nested.collapsed ? 'Show' : 'Hide'} the ${nested.count} under ${project.Name}`}
-            title={nested.collapsed ? `Show the ${nested.count} under it` : 'Hide the sessions under it'}
-            // A tap on an opened row closes it, as anywhere on the row does, rather than collapsing it (#397)
-            onClick={e => { e.stopPropagation(); if (revealed) close(); else nested.onToggle(); }}
-          >
-            {nested.collapsed && <span className="project-children-count">{nested.count}</span>}
-            {nested.needsYou && <span className="project-children-attention" aria-label="needs you" />}
-            <span className="project-children-chevron" aria-hidden="true">{nested.collapsed ? '▸' : '▾'}</span>
-          </button>
+        {/* How far its work has got (#545), folded or not; folded, how many are under it and whether any needs the user */}
+        {(nested?.collapsed || project.Progress) && (
+          <span className="project-children-summary">
+            <ProgressMark progress={project.Progress} />
+            {nested?.collapsed && nested.needsYou && <span className="project-children-attention" aria-label="needs you" />}
+            {nested?.collapsed && <span className="project-children-count" title={`${nested.count} under it`}>{nested.count}</span>}
+          </span>
         )}
         {!isMobile && (
           <button

@@ -34,6 +34,23 @@ public sealed class AttentionNotificationTextTests
             AttentionNotificationText.Body(item));
     }
 
+    /// <summary>A Windows toast (#491) shows the line, then this: the options it chooses from, the question itself on the line.</summary>
+    [Fact]
+    public void After_its_line_a_single_question_details_its_options()
+    {
+        Assert.Equal("• Yes, repair now — Deletes the stale worktree folder and makes it again\n• No, leave it",
+            AttentionNotificationText.Details(Asking(Repair)));
+    }
+
+    [Fact]
+    public void After_its_line_several_questions_detail_the_whole_text_and_anything_else_nothing()
+    {
+        var several = Asking(Repair, Issues);
+
+        Assert.Equal(AttentionNotificationText.Body(several), AttentionNotificationText.Details(several));
+        Assert.Null(AttentionNotificationText.Details(several with { Kind = AttentionKind.Finished, Question = null, Text = "Done." }));
+    }
+
     [Fact]
     public void Several_questions_show_every_one_with_its_header_options_and_descriptions()
     {

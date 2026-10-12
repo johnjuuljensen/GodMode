@@ -53,6 +53,10 @@ namespace GodMode.Shared.Models;
 /// Finished is done only with <see cref="TurnOutcome.Done"/>, and with none the session is idle, not done; a Question is
 /// <see cref="TurnOutcome.NeedsYou"/> or <see cref="TurnOutcome.Blocked"/> when the session said so. Null otherwise.
 /// </param>
+/// <param name="Truncated">
+/// Whether <paramref name="Text"/> was cut (it ends in "…"): the app shows such an item as a short card, read and
+/// answered in its session (issue #548). Left out of the JSON when false.
+/// </param>
 public record AttentionItem(
     string ProjectId,
     string ProjectName,
@@ -69,4 +73,5 @@ public record AttentionItem(
     string? RecordedParentId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] Importance Importance = Importance.Normal,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] AttentionAlert Alert = AttentionAlert.Notify,
-    TurnOutcome? Outcome = null);
+    TurnOutcome? Outcome = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Truncated = false);

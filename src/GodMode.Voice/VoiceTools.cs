@@ -89,7 +89,8 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
     private static readonly ToolParameter ProjectReference = new(ProjectParameter,
         "The project as the user said it, or as a tool named it (\"issue 283\", \"branch master\", \"283\"), with the root or " +
         "profile they said it with (\"branch master i GodMode, profil Mega\"), or its root or kind when the user names it so " +
-        "(\"Assistant\", \"chat\"). Leave it empty for the project last announced or talked about.", Required: false);
+        "(\"Assistant\", \"chat\"). \"Den her\" / \"this one\" as said, for the project the app shows. Leave it empty for " +
+        "the project last announced or talked about, or else the one the app shows.", Required: false);
 
     private static readonly ToolParameter InRoot = new(RootParameter,
         "Only those of one root or profile, as the user named it (\"i GodMode\", \"i Mega\"), when they asked about one. " +
@@ -1348,13 +1349,26 @@ public sealed class VoiceTools(IGodModeServers servers, AttentionBoard board, Pr
             board.ItemOf(project) is not null);
 
     /// <summary>
-    /// The project named, or the one the conversation is about when none is named, while it is still there. Every
-    /// project the servers have has a handle already (<see cref="ProjectBoard"/>), whether it has needed the user or not.
+    /// The project named, or the one the conversation is about when none is named, else the one the app shows (#559),
+    /// while it is still there. "Den her" / "this one" (<see cref="ThisOneWords"/>) is the one the app shows, else as no
+    /// name. Every project the servers have has a handle already (<see cref="ProjectBoard"/>), whether it has needed the
+    /// user or not.
     /// </summary>
     private ProjectRef? Target(string? reference) =>
         string.IsNullOrWhiteSpace(reference)
-            ? conversation.Current is { } current && handles.Of(current) is not null ? current : null
+            ? There(conversation.Current) ?? There(conversation.Selected)
+            : IsThisOne(reference) ? There(conversation.Selected) ?? There(conversation.Current)
             : handles.Resolve(reference);
+
+    /// <summary>The project, while it is still there.</summary>
+    private ProjectRef? There(ProjectRef? project) => project is not null && handles.Of(project) is not null ? project : null;
+
+    /// <summary>What names the project on screen (#559): "den her", "this one", "the open one".</summary>
+    public static readonly IReadOnlySet<string> ThisOneWords = new HashSet<string>(
+        ["den her", "denne", "det her", "dette", "den åbne", "den på skærmen", "det her projekt", "dette projekt", "den valgte",
+         "this one", "this", "this project", "the open one", "the one on screen", "the selected one"], StringComparer.OrdinalIgnoreCase);
+
+    private static bool IsThisOne(string reference) => ThisOneWords.Contains(reference.Trim().TrimEnd('.', '!', '?'));
 
     private async Task<string> UnknownAsync(string? reference, CancellationToken ct)
     {

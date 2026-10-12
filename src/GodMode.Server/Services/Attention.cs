@@ -62,7 +62,7 @@ public static partial class Attention
         };
         if (found is not ({ } kind, var since, { } text, var spoken, var outcome)) return null;
 
-        return new AttentionItem(status.Id, status.Name, status.ProfileName, status.RootName, kind, since, PlainText(text),
+        return new AttentionItem(status.Id, status.Name, status.ProfileName, status.RootName, kind, since, PlainText(text, out var truncated),
             kind == AttentionKind.Permission ? status.PendingPermission : null,
             kind == AttentionKind.Question ? status.PendingQuestion : null,
             kind switch
@@ -76,7 +76,8 @@ public static partial class Attention
             recordedParentId,
             status.Importance,
             AlertOf(status.Importance, kind),
-            outcome);
+            outcome,
+            truncated);
     }
 
     /// <summary>
@@ -126,11 +127,17 @@ public static partial class Attention
     /// Text to show on a phone or read aloud: code blocks become "(code)", markdown's backticks go,
     /// whitespace runs collapse to one space, and it is cut at a word to about <see cref="MaxTextLength"/>.
     /// </summary>
-    public static string PlainText(string text)
+    public static string PlainText(string text) => PlainText(text, out _);
+
+    /// <inheritdoc cref="PlainText(string)"/>
+    /// <param name="text">The text.</param>
+    /// <param name="truncated">Whether it was cut (<see cref="AttentionItem.Truncated"/>).</param>
+    public static string PlainText(string text, out bool truncated)
     {
         var plain = CodeFence().Replace(text, " (code) ");
         plain = Whitespace().Replace(plain.Replace("`", ""), " ").Trim();
-        if (plain.Length <= MaxTextLength) return plain;
+        truncated = plain.Length > MaxTextLength;
+        if (!truncated) return plain;
 
         var cut = plain.LastIndexOf(' ', MaxTextLength - 1);
         var length = cut > MaxTextLength / 2 ? cut : TextCut.SafeLength(plain, MaxTextLength - 1);

@@ -69,4 +69,30 @@ public class UntrustedProjectStateTests
         if (kept) Assert.Equal(url, recovered?.Url);
         else Assert.Null(recovered);
     }
+
+    /// <summary>
+    /// A progress in a recovered status.json (issue #545) is kept only if the status script's output could have set it:
+    /// <c>0 &lt;= resolved &lt;= total</c>. One that is not is dropped.
+    /// </summary>
+    [Theory]
+    [InlineData(5, 4, false)]
+    [InlineData(-1, 4, false)]
+    [InlineData(0, -1, false)]
+    [InlineData(4, 12, true)]
+    public async Task RecoveredProgress_IsKeptOnlyIfTheScriptCouldHaveReportedIt(int resolved, int total, bool kept)
+    {
+        await using var harness = new LifecycleHarness(new FakeScript().EmitInit().AwaitStdin());
+        var created = await harness.CreateProjectAsync();
+        await harness.WaitForStdinAsync(created.Id);
+        await harness.Projects.StopProjectAsync(created.Id);
+        await harness.WaitForStateAsync(created.Id, ProjectState.Stopped);
+        harness.StopHost();
+        var statusFile = Path.Combine(harness.StatePath(created.Id), "status.json");
+        File.WriteAllText(statusFile, JsonSerializer.Serialize(harness.ReadStatusFile(created.Id) with { Progress = new WorkProgress(resolved, total) }, JsonDefaults.Options));
+
+        await harness.RestartAsync(resume: false);
+
+        var recovered = (await harness.Projects.GetStatusAsync(created.Id)).Progress;
+        Assert.Equal(kept ? new WorkProgress(resolved, total) : null, recovered);
+    }
 }

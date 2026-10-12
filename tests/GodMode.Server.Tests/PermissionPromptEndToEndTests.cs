@@ -125,7 +125,7 @@ public class PermissionPromptEndToEndTests
 
             // The permission prompt, beside message_parent and speak, with the flat arguments claude calls it with
             using var tools = JsonDocument.Parse(launch.Tools ?? throw new InvalidOperationException("the fake listed no tools"));
-            Assert.Equal(["message_parent", "permission_prompt", "speak"], tools.RootElement.EnumerateArray().Select(t => t.GetProperty("name").GetString()).Order(StringComparer.Ordinal));
+            Assert.Equal(["compact", "message_parent", "permission_prompt", "speak"], tools.RootElement.EnumerateArray().Select(t => t.GetProperty("name").GetString()).Order(StringComparer.Ordinal));
             var tool = tools.RootElement.EnumerateArray().Single(t => t.GetProperty("name").GetString() == "permission_prompt");
             var schema = tool.GetProperty("inputSchema");
             Assert.Equal("object", schema.GetProperty("type").GetString());

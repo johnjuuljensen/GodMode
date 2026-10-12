@@ -20,7 +20,7 @@ public class PullRequestScriptTests
     [InlineData("closed", "none", PullRequestState.Closed, PullRequestReview.None)]
     public void EachState_IsRead(string state, string review, PullRequestState expectedState, PullRequestReview expectedReview)
     {
-        var pr = PullRequestScript.Parse(Report(state, review) + "\r\n", Now);
+        var pr = PullRequestScript.Parse(Report(state, review) + "\r\n", Now).PullRequest;
 
         Assert.Equal(new PullRequestStatus("https://github.com/o/r/pull/12", 12, expectedState, expectedReview, Now), pr);
     }
@@ -29,7 +29,7 @@ public class PullRequestScriptTests
     [InlineData("{}")]
     [InlineData(" {}\n")]
     [InlineData("""{"pullRequest": null}""")]
-    public void NoPullRequest_IsNull(string output) => Assert.Null(PullRequestScript.Parse(output, Now));
+    public void NoPullRequest_IsNull(string output) => Assert.Equal(new PullRequestScript.Report(null, null), PullRequestScript.Parse(output, Now));
 
     [Theory]
     [InlineData("", "not one JSON object")]
@@ -66,6 +66,44 @@ public class PullRequestScriptTests
     [InlineData("javascript:alert(1)")]
     public void Url_MustBeHttp(string url) =>
         Assert.Contains("is not an http(s) URL", Assert.Throws<FormatException>(() => PullRequestScript.Parse(Report(url: url), Now)).Message);
+
+    [Theory]
+    [InlineData("""{"progress": {"resolved": 4, "total": 12}}""", 4, 12)]
+    [InlineData("""{"progress": {"resolved": 0, "total": 0}}""", 0, 0)]
+    [InlineData("""{"progress": {"resolved": 12, "total": 12}}""", 12, 12)]
+    public void Progress_IsRead(string output, int resolved, int total) =>
+        Assert.Equal(new PullRequestScript.Report(null, new WorkProgress(resolved, total)), PullRequestScript.Parse(output, Now));
+
+    [Fact]
+    public void Progress_IsRead_BesideThePullRequest_WhichIsAsBefore()
+    {
+        var both = Report()[..^1] + """, "progress": {"resolved": 1, "total": 3}}""";
+
+        var report = PullRequestScript.Parse(both, Now);
+
+        Assert.Equal(PullRequestScript.Parse(Report(), Now).PullRequest, report.PullRequest);
+        Assert.Equal(new WorkProgress(1, 3), report.Progress);
+        Assert.Null(PullRequestScript.Parse("""{"progress": null}""", Now).Progress);
+    }
+
+    /// <summary>A bad progress fails the whole report, its pull request with it: the status stays as it was.</summary>
+    [Theory]
+    [InlineData("""{"progress": {"resolved": 5, "total": 4}}""", "progress.resolved 5 is more than progress.total 4")]
+    [InlineData("""{"progress": {"resolved": -1, "total": 4}}""", "progress.resolved is not a whole number of at least 0")]
+    [InlineData("""{"progress": {"resolved": 0, "total": -4}}""", "progress.total is not a whole number of at least 0")]
+    [InlineData("""{"progress": {"resolved": 1.5, "total": 4}}""", "progress.resolved is not a whole number of at least 0")]
+    [InlineData("""{"progress": {"resolved": 1, "total": 99999999999}}""", "progress.total is not a whole number of at least 0")]
+    [InlineData("""{"progress": {"resolved": "1", "total": 4}}""", "progress.resolved is a JSON String")]
+    [InlineData("""{"progress": {"total": 4}}""", "progress.resolved is missing")]
+    [InlineData("""{"progress": {"resolved": 1}}""", "progress.total is missing")]
+    [InlineData("""{"progress": {"resolved": 1, "total": 4, "open": 3}}""", "unknown property 'progress.open'")]
+    [InlineData("""{"progress": [1, 4]}""", "progress is a JSON Array, not an object")]
+    [InlineData("""{"pullRequest": {"url": "https://x/1", "number": 1, "state": "open", "review": "none"}, "progress": {"resolved": 5, "total": 4}}""", "more than")]
+    public void BadProgress_IsRefused_SayingWhy(string output, string reason)
+    {
+        var ex = Assert.Throws<FormatException>(() => PullRequestScript.Parse(output, Now));
+        Assert.Contains(reason, ex.Message);
+    }
 
     [Fact]
     public void LongOutput_IsRefused_AndNotEchoed()

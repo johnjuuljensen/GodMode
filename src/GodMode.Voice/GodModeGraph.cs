@@ -112,8 +112,9 @@ public static class GodModeGraph
               says it is unknown, give the names it lists as options. One the user names with its root or profile
               ("master i Mega") is named so to the tools, all of it.
             - A request that names no project ("Behandl resten af loggen") is about the project the conversation was last
-              about: leave project empty, and the tools take it. If you must ask which, offer that one first, before the
-              ones waiting, as the tool says.
+              about, else the one the app shows (ON SCREEN, when there is one): leave project empty, and the tools take
+              it. "Den her", "det her", "this one" is the one the app shows: give it as said. If you must ask which,
+              offer that one first, before the ones waiting, as the tool says.
             - "Status [handle]", "Læs [handle]", "Hvad spørger [handle] om?" — call {{VoiceTools.ProjectStatus}}; read the
               question or result itself, shortened if long.
             - A SPOKEN REPLY is a project's own words for the user to hear, which the session wrote itself. When a tool
@@ -222,7 +223,7 @@ public static class GodModeGraph
             """;
 
         var graph = new CompositeBuilder(Id).WithTools(t => AddTools(t, tools));
-        var codeSays = new CodeSaysInference(inference, tools.Conversation, phrases);
+        var codeSays = new CodeSaysInference(new OnScreenInference(inference, tools.Conversation, tools.Names), tools.Conversation, phrases);
         // Above Done and help: while dictating, "færdig" and "hjælp" are words of the dictation (#459)
         graph = graph.Node(new DictationNode("dictation", 95, tools.Dictation, phrases));
         if (done is not null) graph = graph.Node(new DoneNode("done", 90, done));

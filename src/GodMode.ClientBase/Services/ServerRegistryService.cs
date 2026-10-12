@@ -52,6 +52,15 @@ public class ServerRegistryService : IServerRegistryService
             Urls = server.Urls.Select(u => u.Trim().TrimEnd('/')).Where(u => u.Length > 0).ToList(),
         };
 
+        // A local server the app cannot reach would be saved, never listed, and so never removed (#259)
+        if (added.Type == ServerTypes.Local)
+        {
+            if (added.Urls.Count == 0)
+                throw new ArgumentException("A local server needs at least one URL.");
+            if (added.Urls.FirstOrDefault(u => !ServerRegistration.IsServerUrl(u)) is { } bad)
+                throw new ArgumentException($"Not a server URL: {bad}. A server's URL is an absolute http:// or https:// URL, e.g. http://localhost:31337.");
+        }
+
         await _lock.WaitAsync();
         try
         {

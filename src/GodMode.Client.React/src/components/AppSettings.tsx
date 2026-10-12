@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
-import { attentionSound, setAttentionSound } from '../services/hostApi';
+import { attentionSound, attentionToasts, setAttentionSound, setAttentionToasts } from '../services/hostApi';
 import { Toggle } from './settings-shared';
 import { VoiceSettings } from './Voice/VoiceSettings';
 import { ThemePicker } from './ThemePicker';
@@ -17,7 +17,8 @@ export function AppSettings() {
 
   const values: Record<string, boolean> = { featureProfiles };
   const voice = useVoice();
-  const sound = useDeviceSound();
+  const sound = useDeviceSwitch(attentionSound, setAttentionSound, 'whether this device makes a sound');
+  const toasts = useDeviceSwitch(attentionToasts, setAttentionToasts, 'whether this device toasts what notifies');
 
   return (
     <>
@@ -44,6 +45,15 @@ export function AppSettings() {
             </div>
             <Toggle checked={sound.enabled} onChange={sound.set} />
           </div>
+          {toasts.enabled !== null && (
+            <div className="settings-item">
+              <div className="settings-item-info">
+                <div className="settings-item-name">Toasts for every session</div>
+                <div className="settings-item-desc">On this device: what needs you from a session that is not important goes silently into Windows' notification centre. Important ones always toast</div>
+              </div>
+              <Toggle checked={toasts.enabled} onChange={toasts.set} />
+            </div>
+          )}
         </div>
       )}
       <div className="settings-header settings-section-header">
@@ -55,19 +65,22 @@ export function AppSettings() {
   );
 }
 
-/** This device's sound switch (#438), the app's to keep: null until the app has said, and while it cannot. */
-function useDeviceSound() {
+/**
+ * One of this device's switches the app keeps: its sound for what interrupts (#438), its toasts for what notifies (#491).
+ * Null until the app has said, while it cannot, and where the app has no such switch.
+ */
+function useDeviceSwitch(get: () => Promise<boolean | null>, put: (on: boolean) => Promise<boolean | null>, what: string) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   useEffect(() => {
     let live = true;
-    attentionSound().then(on => { if (live) setEnabled(on); })
-      .catch(err => console.warn('[settings] The app did not say whether this device makes a sound:', err));
+    get().then(on => { if (live) setEnabled(on); })
+      .catch(err => console.warn(`[settings] The app did not say ${what}:`, err));
     return () => { live = false; };
-  }, []);
+  }, [get, what]);
   const set = (on: boolean) => {
     setEnabled(on);
-    setAttentionSound(on).then(setEnabled).catch(err => {
-      console.error('Failed to set the sound:', err);
+    put(on).then(setEnabled).catch(err => {
+      console.error(`Failed to set ${what}:`, err);
       setEnabled(!on);
     });
   };

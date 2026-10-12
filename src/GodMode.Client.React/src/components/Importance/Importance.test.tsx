@@ -16,7 +16,11 @@ import { AppSettings } from '../AppSettings';
 import { ImportancePicker } from './Importance';
 
 /** What the app keeps as this device's sound switch, and every set it was asked for. */
-const host = vi.hoisted(() => ({ sound: true, sets: [] as boolean[], answers: true }));
+const host = vi.hoisted(() => ({
+  sound: true, sets: [] as boolean[], answers: true,
+  /** This device's toasts for what notifies (#491): null where the app has none (Android). */
+  toasts: false as boolean | null, toastSets: [] as boolean[],
+}));
 
 vi.mock('../../signalr/hub', () => ({ GodModeHub: class {} }));
 vi.mock('../../services/hostApi', () => ({
@@ -28,6 +32,8 @@ vi.mock('../../services/hostApi', () => ({
   getHubOptions: () => ({}),
   attentionSound: async () => { if (!host.answers) throw new Error('no app'); return host.sound; },
   setAttentionSound: async (enabled: boolean) => { host.sets.push(enabled); host.sound = enabled; return enabled; },
+  attentionToasts: async () => { if (!host.answers) throw new Error('no app'); return host.toasts; },
+  setAttentionToasts: async (notify: boolean) => { host.toastSets.push(notify); host.toasts = notify; return notify; },
 }));
 vi.mock('../../services/voice', () => ({ useVoice: () => null, subscribeVoiceShow: () => () => {} }));
 
@@ -56,7 +62,7 @@ beforeEach(() => {
   useAppStore.setState(initialState, true);
   history.replaceState(null, '', '#/');
   sessionStorage.clear();
-  Object.assign(host, { sound: true, sets: [], answers: true });
+  Object.assign(host, { sound: true, sets: [], answers: true, toasts: false, toastSets: [] });
 });
 
 afterEach(() => {
@@ -155,5 +161,28 @@ describe('the settings', () => {
     await act(async () => {});
 
     expect(soundToggle()).toBeUndefined();
+    expect(toastsToggle()).toBeUndefined();
+  });
+
+  const toastsToggle = () => q('.settings-item').find(i => i.textContent?.includes('Toasts for every session'));
+
+  it('show this device\'s toasts for what notifies, off as the app keeps them, and turn them on there', async () => {
+    view = await render(<AppSettings />);
+    await vi.waitFor(() => expect(toastsToggle()).toBeDefined());
+    const toggle = toastsToggle()!.querySelector<HTMLButtonElement>('.settings-toggle')!;
+    expect(toggle.classList.contains('off')).toBe(true);
+
+    await click(toggle);
+
+    await vi.waitFor(() => expect(host.toastSets).toEqual([true]));
+    expect(host.sets).toEqual([]);
+  });
+
+  it('leave the toasts out where the app has none (Android), and keep the sound switch', async () => {
+    host.toasts = null;
+    view = await render(<AppSettings />);
+    await vi.waitFor(() => expect(soundToggle()).toBeDefined());
+
+    expect(toastsToggle()).toBeUndefined();
   });
 });

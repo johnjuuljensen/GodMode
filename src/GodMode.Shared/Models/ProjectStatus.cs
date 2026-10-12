@@ -104,6 +104,10 @@ namespace GodMode.Shared.Models;
 /// Kept in memory as each line comes, as <paramref name="OutputOffset"/> is: status.json carries it when something else
 /// changes, at the latest as the turn ends. Null until the session has written a line since it was recorded.
 /// </param>
+/// <param name="Progress">
+/// How far the session's work has got (issue #545), as its root's <c>status</c> script last reported it beside
+/// <paramref name="PullRequest"/>: an epic's sub-issues resolved, out of all of them. Null when the script reports none.
+/// </param>
 /// <param name="BackgroundTasks">
 /// What the session's claude runs in the background (issue #432): its subagents, shells, monitors and workflows that run
 /// on while its turn has ended, as claude's last <c>system/background_tasks_changed</c> listed them, each with its last
@@ -152,7 +156,8 @@ public record ProjectStatus(
     DateTime? RecapAt = null,
     TurnOutcome? Outcome = null,
     DateTime? LastOutputAt = null,
-    IReadOnlyList<BackgroundTask>? BackgroundTasks = null
+    IReadOnlyList<BackgroundTask>? BackgroundTasks = null,
+    WorkProgress? Progress = null
 )
 {
     /// <summary>

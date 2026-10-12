@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * What is typed stays with what it was typed for (#240): the chat input is one project's, and an inbox
+ * What is typed stays with what it was typed for (#240): the chat input is one project's, kept while another is open (#581), and an inbox
  * draft outlives a layout change across the phone breakpoint (768 px), but not its permission request
  * (#218). The phone's layouts (#218): its home is the inbox, tile mode or not, and a wide screen has no
  * list screen. Renders the Shell on the real store.
@@ -80,7 +80,7 @@ beforeEach(async () => {
 afterEach(() => view.unmount());
 
 describe('switching projects', () => {
-  it("clears the input, and B's Send does not carry A's text", async () => {
+  it("keeps each one's text: B's Send does not carry A's, and A's is there again with the cursor at its end (#581)", async () => {
     await open('alpha');
     await typeInto(chatInput(), 'meant for alpha');
 
@@ -89,10 +89,36 @@ describe('switching projects', () => {
     expect(sendButton().disabled).toBe(true);
     await keyDown(chatInput(), 'Enter');
     expect(hub.replies).toEqual([]);
+    await typeInto(chatInput(), 'beta, unsent');
 
-    await typeInto(chatInput(), 'meant for beta');
+    await open('alpha');
+    expect(chatInput().value).toBe('meant for alpha');
+    expect(chatInput().selectionStart).toBe('meant for alpha'.length);
+    await open('beta');
+    expect(chatInput().value).toBe('beta, unsent');
+  });
+
+  it('a sent draft is gone when the project is opened again (#581)', async () => {
+    await open('alpha');
+    await typeInto(chatInput(), 'meant for alpha');
     await click(sendButton());
-    expect(hub.replies).toEqual([{ projectId: 'p2', text: 'meant for beta' }]);
+    expect(hub.replies).toEqual([{ projectId: 'p1', text: 'meant for alpha' }]);
+
+    await open('beta');
+    await open('alpha');
+    expect(chatInput().value).toBe('');
+    expect(useAppStore.getState().composerDrafts).toEqual({});
+  });
+
+  it("drops a deleted or forgotten project's draft, and keeps the others' (#581)", async () => {
+    await open('alpha');
+    await typeInto(chatInput(), 'meant for alpha');
+    await open('beta');
+    await typeInto(chatInput(), 'meant for beta');
+
+    // A delete and a forget both take the session out of its server's list
+    await act(async () => hub.callbacks.onProjectDeleted?.('p1'));
+    expect(Object.values(useAppStore.getState().composerDrafts)).toEqual(['meant for beta']);
   });
 });
 
@@ -165,11 +191,11 @@ describe('an inbox draft', () => {
 });
 
 describe('a question opened from the inbox header (#218)', () => {
-  it('takes its keys: the header, which stays beside the project, lets go of the focus', async () => {
+  it('takes its keys: the item, gone from the inbox while its project is open (#549), keeps no focus', async () => {
     await act(async () => hub.callbacks.onAttentionChanged?.([item('p4', 'Question', { Question: asking })]));
     await pointerClick(itemEl('p4')!.querySelector<HTMLElement>('.inbox-item-header')!);
     expect(view.container.querySelector('.project-view .question-prompt')).not.toBeNull();
-    expect(itemEl('p4')).not.toBeNull();
+    expect(itemEl('p4')).toBeNull();
 
     await keyDown(document.activeElement, '2');
     expect(hub.answers).toEqual([{ projectId: 'p4', requestId: 'q4', answers: { 'Which way?': 'Right' } }]);

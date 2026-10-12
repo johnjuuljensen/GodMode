@@ -56,8 +56,9 @@ public partial class ProjectManager
             // The user may have answered since the check: then it takes it now
             return await DeliverHeldAsync(project) is { Delivered: true } delivered ? delivered : new Delivery(false, waiting);
         }
-        // Messages held before it go first: it does not overtake them
-        if (SessionInbox.Any(project.RootPath, project.SessionId))
+        // Messages held before it go first: it does not overtake them. Nor does it overtake a compaction the session
+        // asked for (issue #579): it follows the continuation
+        if (SessionInbox.Any(project.RootPath, project.SessionId) || project.Process.Compaction != null)
         {
             await HoldAsync(project, held);
             if (_lifecycle.IsRunning(project)) return await DeliverHeldAsync(project);
@@ -75,6 +76,40 @@ public partial class ProjectManager
             await HoldAsync(project, held);
             return new Delivery(false, waitingNow);
         }
+    }
+
+    public void ScheduleCompaction(string projectId, string continuation, string? instructions)
+    {
+        if (!_projects.TryGetValue(projectId, out var project))
+            throw new KeyNotFoundException($"Project {projectId} not found");
+        if (string.IsNullOrWhiteSpace(continuation))
+            throw new ArgumentException("The continuation is empty: say what you do next, since after the compaction you have only its summary.");
+        if (continuation.Length > SessionInbox.MaxTextLength)
+            throw new ArgumentException($"The continuation has {continuation.Length} characters; at most {SessionInbox.MaxTextLength} are sent. Shorten it, or point to where the rest is.");
+        if (instructions?.Length > SessionInbox.MaxTextLength)
+            throw new ArgumentException($"The instructions have {instructions.Length} characters; at most {SessionInbox.MaxTextLength} are sent.");
+
+        var process = project.Process;
+        if (process.Compaction != null)
+            throw new InvalidOperationException("A compaction is already pending: end your turn, and it runs. Nothing more was scheduled.");
+        if (process.CompactWritten)
+            throw new InvalidOperationException("The session is in a /compact it did not ask for: nothing was scheduled.");
+        if (process.Stopping || !_lifecycle.IsRunning(project) || project.Status.State is not (ProjectState.Running or ProjectState.WaitingPermission))
+            throw new InvalidOperationException("The session is not in a turn that can end in a compaction: nothing was scheduled.");
+        if (!process.TrySchedule(new Compaction(string.IsNullOrWhiteSpace(instructions) ? null : instructions.Trim(), continuation)))
+            throw new InvalidOperationException("A compaction is already pending: end your turn, and it runs. Nothing more was scheduled.");
+        _logger.LogInformation("Project {ProjectId} schedules a compaction ({Length} characters of continuation)", projectId, continuation.Length);
+    }
+
+    /// <summary>
+    /// The user has taken over from a compaction the session asked for (issue #579): their input cancels its continuation,
+    /// and, before the turn has ended, the compaction too. A <c>/compact</c> already sent runs, and the user's input follows it.
+    /// </summary>
+    private void CancelCompaction(ProjectInfo project)
+    {
+        if (project.Process.DropCompaction() is { } dropped)
+            _logger.LogInformation("Project {ProjectId}: the user's input cancels the {What} the session asked for",
+                project.Status.Id, dropped.Compacting ? "continuation of the compaction" : "compaction and continuation");
     }
 
     private static void CheckText(string text)
@@ -104,6 +139,7 @@ public partial class ProjectManager
         : !_lifecycle.IsRunning(project) || project.Process.Stopping
             ? project.Process.Launching ? "it is starting, and gets it once it has started" : "it is stopped, and gets it when it is resumed"
         : project.Status.State == ProjectState.Error ? "it is in error, waiting on the user, and gets it after its next turn"
+        : project.Process.Compaction != null ? "it is compacting its conversation, as it asked to, and gets it after its continuation's turn"
         : "it is working on a turn, and gets it when the turn ends";
 
     private async Task HoldAsync(ProjectInfo project, SessionInbox.HeldMessage message)
@@ -243,13 +279,11 @@ public partial class ProjectManager
         };
 
     /// <summary>
-    /// After every status push: the session's parent hears of a change it should (<see cref="NoticeParent"/>), and
-    /// what is held for the session is delivered if it can take it now. Neither is waited for: a delivery waits for
-    /// the receiver's resume lock, which whoever pushed this may hold.
+    /// After every status push: what is held for the session is delivered if it can take it now. Not waited for: a
+    /// delivery waits for the receiver's resume lock, which whoever pushed this may hold.
     /// </summary>
     private void DeliverOnStatusChange(ProjectInfo project)
     {
-        NoticeParent(project);
         if (!_lifecycle.IsRunning(project)) project.Process.HeldNotices.Clear();
         if (_lifecycle.CanTakeInput(project) && (!project.Process.HeldNotices.IsEmpty || SessionInbox.Any(project.RootPath, project.SessionId)))
             DeliverInBackground(project);
@@ -267,7 +301,9 @@ public partial class ProjectManager
     /// the session's root or one a link lets it oversee. A parent in the session's <c>CLAUDE_CONFIG_DIR</c> hears of the
     /// turn's end through <c>notify_when_idle</c>, so it gets no notice of Idle, and gets the rest. Two sessions are in
     /// the same dir when their last launches on this server were, or when neither has launched since the server started.
-    /// A notice held for the parent about this session is replaced by the newer one.
+    /// A notice held for the parent about this session is replaced by the newer one. Decided before clients have the
+    /// status (<see cref="ProjectLifecycle.StatusNotifying"/>): a parent stopped when its child's state changed gets no
+    /// notice of it, even when it is resumed by a client that saw the change before the notice was decided.
     /// </summary>
     private void NoticeParent(ProjectInfo child)
     {

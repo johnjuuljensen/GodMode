@@ -118,11 +118,8 @@ public class ServerDirectory(
     {
         ServerTypes.GitHub when !string.IsNullOrEmpty(token) =>
             new GitHubCodespaceProvider(token, loggerFactory),
-        ServerTypes.Local when registration.Urls.Count > 0 && registration.Urls.All(IsHttpUrl) =>
+        ServerTypes.Local when registration.Urls.Count > 0 && registration.Urls.All(ServerRegistration.IsServerUrl) =>
             new LocalFolderProvider(registration, token, urlSelector),
         _ => null,
     };
-
-    private static bool IsHttpUrl(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https";
 }

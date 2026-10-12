@@ -44,7 +44,7 @@ public class AuthTests
                 using var status = await first.Http.GetAsync("/");
                 Assert.Equal(HttpStatusCode.Unauthorized, status.StatusCode);
                 await using var hub = BuildHub(first.BaseUrl, key);
-                await hub.StartAsync();
+                await ServerHubClient.StartAsync(hub);
                 Assert.Equal(JsonValueKind.Array, (await hub.InvokeAsync<JsonElement>("ListProfiles")).ValueKind);
             }
 
@@ -184,7 +184,7 @@ public class AuthTests
 
         // As the relay connects: a hub method answers
         await using var hub = BuildHub(run.BaseUrl, ApiKey);
-        await hub.StartAsync();
+        await ServerHubClient.StartAsync(hub);
         Assert.Equal(JsonValueKind.Array, (await hub.InvokeAsync<JsonElement>("ListProfiles")).ValueKind);
     }
 
@@ -210,7 +210,7 @@ public class AuthTests
 
         // With the key as a bearer token (the React client's accessTokenFactory), the same call succeeds.
         await using var authed = BuildHub(run.BaseUrl, ApiKey);
-        await authed.StartAsync();
+        await ServerHubClient.StartAsync(authed);
         var profiles = await authed.InvokeAsync<JsonElement>("ListProfiles");
         Assert.Equal(JsonValueKind.Array, profiles.ValueKind);
     }
@@ -247,7 +247,7 @@ public class AuthTests
             })
             .Build())
         {
-            await hub.StartAsync();
+            await ServerHubClient.StartAsync(hub);
             await hub.InvokeAsync<JsonElement>("ListProfiles");
         }
 
@@ -462,6 +462,7 @@ public class AuthTests
             {
                 if (token != null) options.AccessTokenProvider = () => Task.FromResult<string?>(token);
             })
+            .WithServerTimeout(TestTimeouts.Request)
             .Build();
 
     private const string SpaMarker = "<!-- godmode-test-spa -->";

@@ -256,6 +256,11 @@ export interface AttentionItem {
    * TurnOutcome.Blocked when the session said so. Null otherwise.
    */
   Outcome?: TurnOutcome | null;
+  /**
+   * Whether Text was cut (it ends in "…"): the app shows such an item as a short card, read and answered in
+   * its session (issue #548). Left out of the JSON when false.
+   */
+  Truncated?: boolean;
 }
 
 /**
@@ -652,6 +657,11 @@ export interface ProjectStatus {
    * outlive. The app shows an idle session with them as working in the background.
    */
   BackgroundTasks?: BackgroundTask[] | null;
+  /**
+   * How far the session's work has got (issue #545), as its root's `status` script last reported it beside
+   * PullRequest: an epic's sub-issues resolved, out of all of them. Null when the script reports none.
+   */
+  Progress?: WorkProgress | null;
 }
 
 /** Summary information about a project. */
@@ -715,6 +725,8 @@ export interface ProjectSummary {
    * What it runs in the background, or null for nothing, as in ProjectStatus.BackgroundTasks (issue #432).
    */
   BackgroundTasks?: BackgroundTask[] | null;
+  /** How far its work has got, as in ProjectStatus.Progress (issue #545). */
+  Progress?: WorkProgress | null;
 }
 
 /**
@@ -815,6 +827,18 @@ export interface UnmanagedFolder {
    * none.
    */
   Inputs?: Record<string, unknown> | null;
+}
+
+/**
+ * How far a project's work has got, as its root's `status` script last reported it (ProjectStatus.Progress,
+ * issue #545): an epic's sub-issues resolved, out of all of them. The script decides what a unit is and when
+ * it counts as resolved; the server only holds `0 <= Resolved <= Total`.
+ */
+export interface WorkProgress {
+  /** How many are resolved. */
+  Resolved: number;
+  /** How many there are. */
+  Total: number;
 }
 
 /** Interface for SignalR hub methods that clients can invoke on the server. */
