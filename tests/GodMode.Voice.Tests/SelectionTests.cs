@@ -44,6 +44,20 @@ public sealed class SelectionTests
         Assert.Equal(P283, Assert.Single(voice.Servers.Replies).Project);
     }
 
+    /// <summary>An announcement of several leaves no project talked about: the one on screen is still there, ahead of the waiting ones.</summary>
+    [Fact]
+    public async Task With_no_project_talked_about_an_unnamed_answer_goes_to_the_selected_project()
+    {
+        var voice = Start();
+        voice.Conversation.Select(P283);
+        voice.Conversation.Announced(null);
+        Assert.Null(voice.Conversation.Current);
+
+        await voice.Tools.AnswerAsync(null, "Ja.", CancellationToken.None);
+
+        Assert.Equal(P283, Assert.Single(voice.Servers.Replies).Project);
+    }
+
     [Fact]
     public async Task With_none_selected_an_unnamed_answer_asks_which_as_before()
     {
