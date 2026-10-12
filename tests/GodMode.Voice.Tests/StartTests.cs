@@ -44,9 +44,11 @@ public sealed class StartTests
 
         // Right then
         voice.Transcriptions.SayAsRecognized("Status på 283");
-        // Its result in the code's words (#456) once its turn has ended, idle since it said no outcome (#467), else the
-        // model's line on it while it runs; never "Ukendt"
-        await Eventually.UntilAsync(() => voice.Events.Responses.Any(r => r.StartsWith("issue 283, voice, er idle: done.", StringComparison.Ordinal) || r == "283 er i gang."),
+        // Its result in the code's words (#456) once its turn has ended, idle since it said no outcome (#467), or, when the
+        // attention list pushed after its status has not come yet, as its last result (#466, #568); else the model's line
+        // on it while it runs; never "Ukendt"
+        await Eventually.UntilAsync(() => voice.Events.Responses.Any(r => r.StartsWith("issue 283, voice, er idle: done.", StringComparison.Ordinal)
+                || r.StartsWith("Sidste resultat fra issue 283, voice: done.", StringComparison.Ordinal) || r == "283 er i gang."),
             () => $"the status of 283; it said: {string.Join(" | ", voice.Events.Responses)}");
         Assert.DoesNotContain(model.ToolResults, r => r.Contains("Unknown project", StringComparison.Ordinal));
         Assert.NotNull(voice.Session.Handles.Resolve("283"));

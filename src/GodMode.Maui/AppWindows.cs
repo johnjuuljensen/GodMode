@@ -1,4 +1,5 @@
 using GodMode.ClientBase.Layout;
+using GodMode.Maui.Bridge;
 using Microsoft.Extensions.Logging;
 
 namespace GodMode.Maui;
@@ -51,12 +52,20 @@ internal static class AppWindows
         {
             if (window.Handler?.PlatformView is not Microsoft.UI.Xaml.Window platform) return;
             WindowPlaces.Opened(platform, profile, place);
+            WindowsAttention.WindowOpened(platform, profile);
+            // The selection voice takes is the one in the window that had focus last (#559)
+            platform.Activated += (_, args) =>
+            {
+                if (args.WindowActivationState != Microsoft.UI.Xaml.WindowActivationState.Deactivated) OpenSessions.Focused(profile ?? "");
+            };
             platform.Closed += (_, _) =>
             {
+                OpenSessions.Closed(profile ?? "");
                 page.Detach();
                 if (profile is null)
                 {
                     WindowPlaces.Quitting();
+                    WindowsAttention.Stop();
                     // Each by name: Quit alone has left a profile window open (on another desktop), and the app with it
                     foreach (var other in Application.Current?.Windows.Where(w => w != window).ToList() ?? [])
                         Application.Current!.CloseWindow(other);

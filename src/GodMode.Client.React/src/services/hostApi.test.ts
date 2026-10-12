@@ -18,7 +18,7 @@ it('reaches a server through the relay once the app has said where it is, with t
 
   expect(sent.map(m => m.Type)).toEqual(['relay.info']);
   expect(api.getHubUrl('a b')).toBe('http://127.0.0.1:49152/?serverId=a%20b');
-  const options = api.getHubOptions('a b');
+  const options = api.getHubOptions();
   expect(options).toMatchObject({ skipNegotiation: true, transport: 1 });
   expect(options.accessTokenFactory?.()).toBe('relay-secret');
 });

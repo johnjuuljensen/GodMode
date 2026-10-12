@@ -37,6 +37,12 @@ public sealed class ProjectLifecycle
     /// <summary>Raised, on the project's consumer, when output takes a project to Idle. A handler must not wait for a Stop.</summary>
     public event Func<string, Task>? OnProjectCompleted;
 
+    /// <summary>
+    /// Raised in every <see cref="NotifyStatusChangedAsync"/>, with its project, before clients have the status: what
+    /// depends on the state of other sessions at the change (a parent's notice) is decided before a client can act on it.
+    /// </summary>
+    public event Action<ProjectInfo>? StatusNotifying;
+
     /// <summary>Raised after every <see cref="NotifyStatusChangedAsync"/>, with its project, once clients have the status.</summary>
     public event Func<ProjectInfo, Task>? StatusNotified;
 
@@ -395,12 +401,14 @@ public sealed class ProjectLifecycle
     }
 
     /// <summary>
-    /// Pushes the project's current status to every client, then raises <see cref="StatusNotified"/>.
-    /// The push is started, not waited for (<see cref="ProjectProcess.Sends"/>).
+    /// Raises <see cref="StatusNotifying"/>, pushes the project's current status to every client, then raises
+    /// <see cref="StatusNotified"/>. The push is started, not waited for (<see cref="ProjectProcess.Sends"/>).
     /// </summary>
     public async Task NotifyStatusChangedAsync(ProjectInfo project)
     {
         var (id, status) = (project.Status.Id, project.Status);
+        try { StatusNotifying?.Invoke(project); }
+        catch (Exception ex) { _logger.LogError(ex, "Error in StatusNotifying handler for project {ProjectId}", id); }
         await project.Process.Sends.SendAsync(() => _hubContext.Clients.All.StatusChanged(id, status),
             ex => _logger.LogError(ex, "Error broadcasting the status of project {ProjectId}", id));
 

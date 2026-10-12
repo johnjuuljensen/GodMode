@@ -55,7 +55,8 @@ public class GracefulStopTests
         var stopped = harness.Launches(created.Id)[0];
         Assert.Equal([StopInterrupt], stopped.Interrupts);
         Assert.True(stopped.ExitCode == 0, $"the fake did not exit by itself (a killed fake records no exit).\n{harness.Describe(created.Id)}");
-        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(15), $"the stop took {elapsed.Elapsed}, as long as a kill after the 30 s grace period");
+        // A kill comes only after the grace period: anything shorter is the interrupt, however loaded the machine (#568)
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(30), $"the stop took {elapsed.Elapsed}, as long as a kill after the 30 s grace period");
         Assert.False(LifecycleHarness.IsProcessAlive(launch.Pid));
         Assert.Contains("[Request interrupted by user]", harness.ReadOutputFile(created.Id));
         Assert.Equal(ProjectState.Stopped, (await harness.Projects.GetStatusAsync(created.Id)).State);

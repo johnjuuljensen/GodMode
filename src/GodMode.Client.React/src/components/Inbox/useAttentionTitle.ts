@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useAppStore } from '../../store';
+import { useInboxAttention } from './useInboxAttention';
 
 /**
  * The page's title (#355): "GodMode", or "Work - GodMode" in a window locked to the Work profile (#340), the profile
@@ -17,7 +18,7 @@ export const windowTitle = (lockedProfile: string | null, count = 0) => {
  * store keeps no other). The app shows the title in the window's title bar.
  */
 export function useAttentionTitle() {
-  const count = useAppStore(s => s.attention.length);
+  const count = useInboxAttention().length;
   const lockedProfile = useAppStore(s => s.lockedProfile);
   useEffect(() => {
     document.title = windowTitle(lockedProfile, count);

@@ -99,7 +99,7 @@ describe('outside a text field', () => {
 
 describe('beside a dialog and the inbox (#240)', () => {
   const button = (label: string, within: ParentNode = view.container) =>
-    [...within.querySelectorAll('button')].find(b => b.textContent === label)!;
+    [...within.querySelectorAll('button')].find(b => (b.textContent || b.getAttribute('aria-label')) === label)!;
   /** The question was dismissed: what Escape on the prompt does, which takes the focus to the composer. */
   const dismissed = () => document.activeElement === input;
 

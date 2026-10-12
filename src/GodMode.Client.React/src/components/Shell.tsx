@@ -16,6 +16,7 @@ import { SIDEBAR_WIDTH, sidebarWidthKey, useStoredWidth } from './Splitter/useSt
 import { useAttentionTitle } from './Inbox/useAttentionTitle';
 import { formatRoute, goBack, useHashRoute } from '../routing';
 import { subscribeAttentionLinks } from '../services/hostApi';
+import { useReportOpenSession } from '../services/openSession';
 import './Shell.css';
 
 function PageContent({ page }: { page: ActivePage }) {
@@ -74,6 +75,8 @@ export function Shell() {
   useAttentionTitle();
   // A tapped notification opens the inbox on its item
   useEffect(() => subscribeAttentionLinks(useAppStore.getState().openInboxItem), []);
+  // The app holds back the open session's notification (#549), so it is told which that is
+  useReportOpenSession();
 
   // Mobile detection. A wide screen shows the list beside the inbox, so it has no list screen for the URL to name (#218)
   useEffect(() => {

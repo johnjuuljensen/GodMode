@@ -95,6 +95,45 @@ public sealed class ServerRegistryTests : IDisposable
         Assert.Empty(_secrets.Values);
     }
 
+    /// <summary>
+    /// A local server is reached at absolute http(s) URLs, and none other: the app lists only a registration it can use (#259),
+    /// so one with another URL is not added, and servers.json and secure storage are as they were.
+    /// </summary>
+    [Theory]
+    [InlineData("ftp://x")]
+    [InlineData("servers/main")]
+    [InlineData("/servers/main")]
+    [InlineData("localhost:31337")]
+    [InlineData("127.0.0.1:31337")]
+    [InlineData("file:///C:/servers")]
+    [InlineData("http://")]
+    public async Task Local_server_with_a_url_that_is_not_http_is_not_added(string url)
+    {
+        var registry = new ServerRegistryService(_dataDir, _secrets);
+        var kept = await registry.AddServerAsync(new ServerRegistration { Urls = ["http://kept:31337"] }, "key");
+        var before = await File.ReadAllTextAsync(ServersFile);
+
+        var error = await Record.ExceptionAsync(() => registry.AddServerAsync(
+            new ServerRegistration { Urls = ["https://good:31337", url] }, "other-key"));
+
+        Assert.Equal(before, await File.ReadAllTextAsync(ServersFile));
+        Assert.Contains(url, Assert.IsType<ArgumentException>(error).Message);
+        Assert.Equal([kept.Id], (await new ServerRegistryService(_dataDir, _secrets).GetServersAsync()).Select(s => s.Id));
+        Assert.DoesNotContain("other-key", _secrets.Values.Values);
+    }
+
+    [Fact]
+    public async Task Local_server_with_no_url_is_not_added()
+    {
+        var registry = new ServerRegistryService(_dataDir, _secrets);
+
+        var error = await Record.ExceptionAsync(() => registry.AddServerAsync(new ServerRegistration { Urls = [" "] }, "key"));
+
+        Assert.IsType<ArgumentException>(error);
+        Assert.False(File.Exists(ServersFile));
+        Assert.Empty(_secrets.Values);
+    }
+
     private sealed class FailingSecretStore : ISecretStore
     {
         public Task<string?> GetAsync(string key) => Task.FromResult<string?>(null);

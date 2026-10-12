@@ -10,9 +10,11 @@ import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import { deleteSession } from '../../deleteSession';
 import { useClickToCompose } from './clickToCompose';
+import { focusOnOpen } from './focusOnOpen';
 import './ProjectView.css';
 import { ImportancePicker } from '../Importance/Importance';
 import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
+import { ProgressMark } from '../Progress/Progress';
 import { backgroundTitle, inBackground } from '../BackgroundTasks/backgroundState';
 
 const SIMPLE_VIEW_KEY = 'godmode-simple-view';
@@ -67,9 +69,8 @@ export function ProjectView({ serverId, projectId }: Props) {
     };
   }, [hub, serverId, projectId, subscribeOutput, unsubscribeOutput]);
 
-  useEffect(() => {
-    if (project) setProjectName(project.Name);
-  }, [project]);
+  // Set while rendering, not in an effect: the name shown stays the last one known once the project is gone
+  if (project && project.Name !== projectName) setProjectName(project.Name);
 
   const toggleSimpleView = useCallback(() => {
     setSimpleView(v => {
@@ -121,7 +122,11 @@ export function ProjectView({ serverId, projectId }: Props) {
   const [refusal, setRefusal] = useState<{ projectId: string; message: string } | null>(null);
   const sendError = refusal?.projectId === projectId ? refusal.message : null;
   // A click in the output focuses the composer, unless a question's options take the keys (#435, #240)
-  const clickToCompose = useClickToCompose(inputRef, !pendingPermission && (openQuestion?.Options.length ?? 0) > 0);
+  const keysTaken = !pendingPermission && (openQuestion?.Options.length ?? 0) > 0;
+  const clickToCompose = useClickToCompose(inputRef, keysTaken);
+  // Opened, the composer takes the keys (#559): the view is keyed by project, so this is each selection's
+  const keysTakenOnOpen = useRef(keysTaken);
+  useEffect(() => focusOnOpen(inputRef.current, keysTakenOnOpen.current), []);
 
   // A failure (another client answered first, claude stopped waiting) is the card's to show
   const handlePermission = useCallback(async (allow: boolean) => {
@@ -197,6 +202,7 @@ export function ProjectView({ serverId, projectId }: Props) {
           <span className="project-header-name">{projectName}</span>
           {/* Background work while a turn runs or waits on the user; idle, the status button says it */}
           {!background && <BackgroundBadge tasks={project?.BackgroundTasks} />}
+          <ProgressMark progress={project?.Progress} bar />
           {(project?.ProfileName || project?.RootName) && (
             <span className="project-header-root" title={project?.RootName ?? undefined}>
               {project?.ProfileName && project.ProfileName !== 'Default' ? project.ProfileName : ''}

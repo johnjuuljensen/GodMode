@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using GodMode.ClientBase.Attention;
 using GodMode.ClientBase.Services;
 using GodMode.ClientBase.Services.Models;
 using GodMode.Maui.Voice;
@@ -85,6 +86,8 @@ public sealed class ShellBridge : IDisposable
     public void Dispose()
     {
         Attached.TryRemove(new KeyValuePair<string, ShellBridge>(Profile ?? "", this));
+        // A page that replaced this one says what it shows itself
+        if (!Attached.ContainsKey(Profile ?? "")) OpenSessions.Set(Profile ?? "", null);
         _voicePage?.Dispose();
         PendingAttentionLink.Arrived -= OnAttentionArrived;
         Connectivity.Current.ConnectivityChanged -= OnNetworkChanged;
@@ -110,12 +113,29 @@ public sealed class ShellBridge : IDisposable
             await _directory.StopServerAsync(p.ServerId) ? Polling(p.ServerId) : throw NotFound(p));
         _bridge.Handle(ShellMessageTypes.AttentionTake, () => Task.FromResult(
             PendingAttentionLink.Take() is { } link ? new AttentionLinkPayload(link.ServerId, link.ProjectId) : null));
+        _bridge.Handle<OpenSessionPayload, bool>(ShellMessageTypes.SessionOpen, p =>
+        {
+            OpenSessions.Set(Profile ?? "", p.Session is { } open ? new AttentionLink(open.ServerId, open.ProjectId) : null);
+            return Task.FromResult(true);
+        });
         _bridge.Handle(ShellMessageTypes.AttentionSoundGet, () => Task.FromResult(new AttentionSoundPayload(AttentionSound.Enabled)));
         _bridge.Handle<AttentionSoundPayload, AttentionSoundPayload>(ShellMessageTypes.AttentionSoundSet, p =>
         {
             AttentionSound.Enabled = p.Enabled;
             _logger.LogInformation("Sound for what interrupts is {State} on this device", p.Enabled ? "on" : "off");
             return Task.FromResult(new AttentionSoundPayload(AttentionSound.Enabled));
+        });
+        _bridge.Handle(ShellMessageTypes.AttentionToastsGet, () => Task.FromResult(ToastsPayload()));
+        _bridge.Handle<AttentionToastsPayload, AttentionToastsPayload>(ShellMessageTypes.AttentionToastsSet, p =>
+        {
+#if WINDOWS
+            if (p.Notify is { } notify)
+            {
+                WindowsAttention.ToastNotify = notify;
+                _logger.LogInformation("Toasts for what notifies are {State} on this device", notify ? "on" : "off");
+            }
+#endif
+            return Task.FromResult(ToastsPayload());
         });
         _bridge.Handle(ShellMessageTypes.OpenDevTools, () =>
         {
@@ -142,9 +162,8 @@ public sealed class ShellBridge : IDisposable
 
     private async Task<AddServerResult> AddServerAsync(AddServerPayload p)
     {
+        // The registry validates a local server's URLs, as it does for every caller
         var urls = p.Urls ?? [];
-        if (p.Type == ServerTypes.Local && urls.Count == 0)
-            throw new ArgumentException("A local server needs at least one URL");
         if (p.Type == ServerTypes.GitHub && (string.IsNullOrWhiteSpace(p.Username) || string.IsNullOrWhiteSpace(p.AccessToken)))
             throw new ArgumentException("A GitHub account needs a username and a token");
 
@@ -158,6 +177,13 @@ public sealed class ShellBridge : IDisposable
         _logger.LogInformation("Registered {Type} server {Id} ({Name})", added.Type, added.Id, added.DisplayName);
         return Changed(new AddServerResult(added.Id));
     }
+
+    private static AttentionToastsPayload ToastsPayload() =>
+#if WINDOWS
+        new(WindowsAttention.ToastNotify);
+#else
+        new(null);
+#endif
 
     private static KeyNotFoundException NotFound(ServerIdPayload p) => new($"Server not found: {p.ServerId}");
 
