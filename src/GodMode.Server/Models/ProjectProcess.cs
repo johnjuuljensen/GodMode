@@ -169,6 +169,35 @@ public sealed class ProjectProcess
     /// <summary>The ask <see cref="TryAskRecap"/> took sent nothing: a later one may.</summary>
     public void UnaskRecap() => Volatile.Write(ref _recapAsked, 0);
 
+    private Compaction? _compaction;
+
+    /// <summary>
+    /// The compaction the session asked for with <c>compact</c> (issue #579), from the call until its continuation is sent;
+    /// null when none is pending. In memory only: a stop, an exit or a launch drops it, so a resume does not replay it.
+    /// </summary>
+    public Compaction? Compaction => Volatile.Read(ref _compaction);
+
+    /// <summary>Schedules <paramref name="compaction"/>; false when one is pending already.</summary>
+    public bool TrySchedule(Compaction compaction) => Interlocked.CompareExchange(ref _compaction, compaction, null) == null;
+
+    /// <summary>The pending compaction, <paramref name="from"/>, is now <paramref name="to"/> (none when null); false when it is no longer pending.</summary>
+    public bool AdvanceCompaction(Compaction from, Compaction? to) => Interlocked.CompareExchange(ref _compaction, to, from) == from;
+
+    /// <summary>Drops the pending compaction, and returns it; null when none was.</summary>
+    public Compaction? DropCompaction() => Interlocked.Exchange(ref _compaction, null);
+
+    private int _compactWritten;
+
+    /// <summary>
+    /// A <c>/compact</c> has been written to claude, whoever sent it, and claude has not yet said it is done: its
+    /// <c>compact_boundary</c>, a result with no turn of the model's, an error result, or a launch clears it.
+    /// </summary>
+    public bool CompactWritten
+    {
+        get => Volatile.Read(ref _compactWritten) == 1;
+        set => Volatile.Write(ref _compactWritten, value ? 1 : 0);
+    }
+
     private readonly ConcurrentDictionary<string, PendingRequest> _pending = new();
 
     /// <summary>The permission prompts claude is waiting on, by request id.</summary>
@@ -338,6 +367,12 @@ public abstract record PipelineItem
 
 /// <summary>A notice held for a parent about one of its children: one line, and when it was held.</summary>
 public sealed record HeldNotice(string Text, DateTime At);
+
+/// <summary>
+/// A compaction the session asked for (issue #579): <c>/compact <paramref name="Instructions"/></c> once its turn ends, then
+/// <paramref name="Continuation"/> as its next input. <paramref name="Compacting"/> once the <c>/compact</c> is sent.
+/// </summary>
+public sealed record Compaction(string? Instructions, string Continuation, bool Compacting = false);
 
 /// <param name="ProcessId">The process that exited.</param>
 /// <param name="ExitCode">Its exit code.</param>

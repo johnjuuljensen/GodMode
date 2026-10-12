@@ -58,7 +58,7 @@ public class NoProvisioningTests
             Assert.DoesNotContain("--dangerously-skip-permissions", launch.Argv);
             var allowed = launch.Argv.Select((arg, i) => (arg, i)).Where(a => a.arg is "--allowedTools" or "--allowed-tools").Select(a => a.i).ToList();
             var at = Assert.Single(allowed);
-            Assert.Equal([SessionTools.MessageParent, SpokenReply.ToolName], launch.Argv.Skip(at + 1).TakeWhile(arg => !arg.StartsWith('-')));
+            Assert.Equal(SessionTools.Allowed, launch.Argv.Skip(at + 1).TakeWhile(arg => !arg.StartsWith('-')));
         }
         finally
         {

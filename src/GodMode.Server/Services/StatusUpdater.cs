@@ -55,6 +55,12 @@ public class StatusUpdater : IStatusUpdater
         // Every other result ends the turn the user's input started, if one did: a reply sent while the recap runs is
         // the turn after it
         var userTurn = outputEvent.Type == OutputEventType.Result && !recapTurn && process.TakeUserTurn();
+        // The compaction the session asked for (issue #579), which this result moves on: a stop's drops it (ProjectLifecycle)
+        var compaction = outputEvent.Type == OutputEventType.Result && !process.Stopping ? process.Compaction : null;
+        // claude is done with a /compact, whoever sent it: the compact tool may be called again
+        if (outputEvent.Type == OutputEventType.Result && (IsSilentCommandResult(outputEvent) || IsErrorResult(outputEvent))
+            || outputEvent.Type == OutputEventType.System && Subtype(outputEvent) == CompactBoundarySubtype)
+            process.CompactWritten = false;
 
         // Parse Claude output events to update state
         switch (outputEvent.Type)
@@ -112,6 +118,14 @@ public class StatusUpdater : IStatusUpdater
                 process.ForgetSpoken();
                 break;
 
+            // The compaction the session asked for is done, or failed (issue #579): its continuation is sent at once
+            // (ProjectLifecycle), so the session is still at work, and nobody is told a turn ended
+            case OutputEventType.Result when compaction is { Compacting: true }:
+                status = WithTokenMetrics(status with { State = ProjectState.Running, CurrentQuestion = null }, outputEvent);
+                process.LastAssistantText = null;
+                stateChanged = true;
+                break;
+
             case OutputEventType.Result when IsErrorResult(outputEvent):
                 status = status with
                 {
@@ -154,19 +168,25 @@ public class StatusUpdater : IStatusUpdater
                 // and its spoken version the one the session gave in it, or none (issue #384), and its outcome the one it
                 // said, or none (issue #467)
                 var outcome = process.Outcome;
-                status = WithTurnEnd(status, IsQuietTurnEnd(project, userTurn, outcome)) with
+                // A turn that says it needs the user, or is blocked, waits on the user as one that ended on a question does
+                var waits = QuestionDetection.IsQuestion(process.LastAssistantText) || outcome is TurnOutcome.NeedsYou or TurnOutcome.Blocked;
+                // The turn the session asked to be compacted after (issue #579) goes on in its compaction, which is sent at
+                // once (ProjectLifecycle): it is quiet, and the session still at work. One that waits on the user drops it
+                var compacts = compaction is { Compacting: false } && !waits;
+                if (compaction is { Compacting: false } && waits && process.DropCompaction() != null)
+                    _logger.LogInformation("Project {ProjectId} ended its turn waiting on the user: the compaction it asked for is dropped", project.Status.Id);
+                status = WithTurnEnd(status, compacts || IsQuietTurnEnd(project, userTurn, outcome)) with
                 {
                     LastResult = outputEvent.Content, LastResultAt = endedAt, LastError = null, SpokenSummary = process.Spoken,
                     Outcome = outcome,
                 };
-                // A turn that says it needs the user, or is blocked, waits on the user as one that ended on a question does
-                status = QuestionDetection.IsQuestion(process.LastAssistantText) || outcome is TurnOutcome.NeedsYou or TurnOutcome.Blocked
+                status = waits
                     ? status with
                     {
                         State = ProjectState.WaitingInput, QuestionAt = endedAt,
                         CurrentQuestion = process.LastAssistantText ?? (outputEvent.Content is { Length: > 0 } said ? said : WaitsText(outcome)),
                     }
-                    : status with { State = ProjectState.Idle, CurrentQuestion = null };
+                    : status with { State = compacts ? ProjectState.Running : ProjectState.Idle, CurrentQuestion = null };
                 process.LastAssistantText = null;
                 process.ForgetSpoken();
                 stateChanged = true;
@@ -306,6 +326,9 @@ public class StatusUpdater : IStatusUpdater
 
     /// <summary>The metadata key a <c>system/init</c> carries claude's skills under (its <c>skills</c>).</summary>
     public const string SkillsKey = "skills";
+
+    /// <summary>The subtype of the <c>system</c> line claude writes when it has compacted the conversation.</summary>
+    public const string CompactBoundarySubtype = "compact_boundary";
 
     /// <summary>The metadata key a <c>result</c> carries its <c>num_turns</c> under.</summary>
     public const string NumTurnsKey = "num_turns";
@@ -472,7 +495,7 @@ public class StatusUpdater : IStatusUpdater
         outputEvent.Metadata?.GetValueOrDefault("subtype") as string;
 
     /// <summary><c>is_error</c>, or for a CLI that omits it, a subtype other than <c>success</c>.</summary>
-    private static bool IsErrorResult(OutputEvent outputEvent) =>
+    public static bool IsErrorResult(OutputEvent outputEvent) =>
         outputEvent.Metadata?.GetValueOrDefault("is_error") is bool isError
             ? isError
             : Subtype(outputEvent) is { } subtype && subtype != "success";

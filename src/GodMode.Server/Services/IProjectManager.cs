@@ -65,6 +65,15 @@ public interface IProjectManager
     Task<Delivery> MessageParentAsync(string projectId, string text);
 
     /// <summary>
+    /// The MCP <c>compact</c> tool (issue #579): schedules <c>/compact <paramref name="instructions"/></c> for when the
+    /// project's turn ends, then <paramref name="continuation"/> as its next input. Refused
+    /// (<see cref="InvalidOperationException"/>) outside a turn, while one is pending, and while the session is in a
+    /// <c>/compact</c> it did not ask for; (<see cref="ArgumentException"/>) for an empty continuation, or a text over
+    /// <see cref="SessionInbox.MaxTextLength"/>.
+    /// </summary>
+    void ScheduleCompaction(string projectId, string continuation, string? instructions);
+
+    /// <summary>
     /// The fleet's <c>send</c>: a reply, as <see cref="ReplyAndResumeAsync"/> without answering what is pending, except
     /// that a session waiting on the user (a permission prompt, a question) has it held, labelled with its sender
     /// (<paramref name="senderId"/>, a session; null for the server's credential), and gets it once it can take input.

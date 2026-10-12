@@ -95,6 +95,9 @@ public sealed class ProjectLifecycle
         process.Cancellation = new CancellationTokenSource();
         process.Stopping = false;
         process.ForgetSpoken();
+        // A compaction the last launch asked for went with it: a resume does not replay it (issue #579)
+        process.DropCompaction();
+        process.CompactWritten = false;
         EnsureConsumer(project);
         return process;
     }
@@ -146,6 +149,8 @@ public sealed class ProjectLifecycle
     public async Task StopAsync(ProjectInfo project, ShutdownMarker? shutdown = null, TimeSpan? grace = null)
     {
         project.Process.Stopping = true;
+        // A compaction the session asked for, and its continuation, are not sent to a stopped session (issue #579)
+        project.Process.DropCompaction();
         project.Process.DenyAllPending(StoppedMessage);
         await _processManager.StopProcessAsync(project, grace);
         // Any it asked while it was being stopped
@@ -604,6 +609,7 @@ public sealed class ProjectLifecycle
                 : $"claude exited before it started its session: {exit.Stderr ?? $"exit code {exit.ExitCode}"}");
 
         if (exit.Stopped) return;
+        project.Process.DropCompaction();
 
         var changed = false;
         try
@@ -678,7 +684,8 @@ public sealed class ProjectLifecycle
                 if (ParseClaudeOutput(jsonLine) is not { } outputEvent) return;
                 var previous = project.Status.State;
                 statusChanged = await _statusUpdater.UpdateFromOutputEventAsync(project, outputEvent, jsonLine);
-                if (outputEvent.Type == OutputEventType.Result) statusChanged |= ClearPendingOfEndedTurn(project, line);
+                if (outputEvent.Type == OutputEventType.Result)
+                    statusChanged |= ClearPendingOfEndedTurn(project, line) | await AdvanceCompactionAsync(project, outputEvent);
                 if (statusChanged) await SaveStatusAsync(project);
                 completed = previous != ProjectState.Idle && project.Status.State == ProjectState.Idle;
                 if (StatusUpdater.IsSessionStart(outputEvent)) project.Process.SessionStarted();
@@ -730,6 +737,46 @@ public sealed class ProjectLifecycle
         _logger.LogInformation("Project {ProjectId}: its conversation was cleared; its output starts over in generation {Generation}", id, generation);
         await project.Process.Sends.SendAsync(() => _hubContext.Clients.Group(OutputGroup(id)).OutputRestarted(id, generation),
             ex => _logger.LogError(ex, "Error broadcasting the output restart of project {ProjectId}", id));
+    }
+
+    /// <summary>
+    /// A <c>result</c> moves on the compaction the session asked for (issue #579), on the consumer, under the state lock, so
+    /// no input comes between: its turn's end sends <c>/compact</c> with its instructions, and the compaction's result,
+    /// done or failed, its continuation. <see cref="StatusUpdater"/> kept the session Running for it: a turn that ended
+    /// otherwise (an error, a question, a stop) drops it. The user's input that cancelled it meanwhile is on its way to
+    /// claude, after this. True when the status changed.
+    /// </summary>
+    private async Task<bool> AdvanceCompactionAsync(ProjectInfo project, OutputEvent result)
+    {
+        var process = project.Process;
+        if (process.Compaction is not { } compaction) return false;
+        var id = project.Status.Id;
+        if (process.Stopping || project.Status.State != ProjectState.Running)
+        {
+            if (process.DropCompaction() != null)
+                _logger.LogInformation("Project {ProjectId}: its turn ended {State}; the compaction it asked for is dropped", id, project.Status.State);
+            return false;
+        }
+
+        var (next, input) = compaction.Compacting
+            ? ((Compaction?)null, CompactTool.ContinuationOf(compaction.Continuation,
+                StatusUpdater.IsErrorResult(result) ? result.Content is { Length: > 0 } error ? error : "an error result" : null))
+            : (compaction with { Compacting = true }, CompactTool.CommandOf(compaction.Instructions));
+        if (!process.AdvanceCompaction(compaction, next)) return false;
+        try
+        {
+            await _processManager.SendInputAsync(project, input);
+            _logger.LogInformation("Project {ProjectId}: {What} sent", id, compaction.Compacting ? "the continuation of its compaction" : "the compaction it asked for");
+            return false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Exited or being stopped since: its exit, or the stop, settles the state from Idle
+            process.DropCompaction();
+            _logger.LogInformation("Project {ProjectId}: its compaction could not go on ({Message}); it is dropped", id, ex.Message);
+            project.Status = project.Status with { State = ProjectState.Idle };
+            return true;
+        }
     }
 
     /// <summary>
