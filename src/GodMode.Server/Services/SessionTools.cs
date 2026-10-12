@@ -2,9 +2,9 @@ namespace GodMode.Server.Services;
 
 /// <summary>
 /// GodMode's own session tools on <c>/mcp</c> that every launch allows, in every root and permission mode, so no session
-/// asks the user for them (the user's decision on issue #384): <c>message_parent</c> and <c>speak</c>, which every session
-/// is asked to call on every turn. They reach nothing but the server: a message to the session's parent, and a spoken
-/// text it checks. Nothing else is pre-approved: the permission prompt is not (claude calls it itself), the fleet's tools
+/// asks the user for them (the user's decision on issue #384): <c>message_parent</c>, <c>speak</c>, which every session
+/// is asked to call on every turn, and <c>compact</c> (issue #579). They reach nothing but the server: a message to the
+/// session's parent, a spoken text it checks, and a compaction of the session's own conversation. Nothing else is pre-approved: the permission prompt is not (claude calls it itself), the fleet's tools
 /// are a root's to allow, and every other tool call reaches the permission prompt as before.
 /// </summary>
 public static class SessionTools
@@ -12,8 +12,11 @@ public static class SessionTools
     /// <summary>How claude names <c>message_parent</c>: <c>mcp__godmode__message_parent</c>.</summary>
     public const string MessageParent = $"mcp__{ProjectManager.McpServerName}__{MessageParentTool.Name}";
 
+    /// <summary>How claude names <c>compact</c>: <c>mcp__godmode__compact</c>.</summary>
+    public const string Compact = $"mcp__{ProjectManager.McpServerName}__{CompactTool.Name}";
+
     /// <summary>The tools every launch allows, as claude names them.</summary>
-    public static readonly IReadOnlyList<string> Allowed = [MessageParent, SpokenReply.ToolName];
+    public static readonly IReadOnlyList<string> Allowed = [MessageParent, SpokenReply.ToolName, Compact];
 
     private const string Flag = "--allowedTools";
     private const string KebabFlag = "--allowed-tools";

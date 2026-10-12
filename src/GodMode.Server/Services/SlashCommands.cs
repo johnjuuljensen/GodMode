@@ -87,6 +87,12 @@ public static partial class SlashCommands
     /// <summary>claude's command that gives the session's recap (issue #513).</summary>
     public const string Recap = "recap";
 
+    /// <summary>Whether <paramref name="input"/> is <c>/compact</c>, with or without instructions.</summary>
+    public static bool IsCompact(string? input) => string.Equals(CommandOf(input), Compact, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>claude's command that summarises the conversation, which the <c>compact</c> tool sends too (issue #579).</summary>
+    public const string Compact = "compact";
+
     /// <summary>Refuses <paramref name="input"/> (<see cref="InvalidOperationException"/>) when <see cref="WhyRefused"/> says why.</summary>
     public static void Check(string? input, ProjectStatus? status)
     {

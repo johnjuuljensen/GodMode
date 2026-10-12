@@ -5,7 +5,7 @@ namespace GodMode.Server.Services;
 
 /// <summary>
 /// GodMode's two MCP endpoints, one MCP server behind both. <see cref="McpEndpointUrl.Path"/> is its sessions'
-/// claude's, with their project token, and serves the permission prompt, <see cref="MessageParentTool"/> and <see cref="SpeakTool"/>,
+/// claude's, with their project token, and serves the permission prompt, <see cref="MessageParentTool"/>, <see cref="SpeakTool"/> and <see cref="CompactTool"/>,
 /// with <see cref="SpeakTool.Instructions"/> as the server's instructions there alone. <see cref="FleetPath"/> is the
 /// fleet's, and serves <see cref="FleetTools"/>: to the server's own credential (as the hub), and to the project
 /// token of a session that has the fleet's tools, which its MCP config then lists. Each tool type's
@@ -36,6 +36,7 @@ public static class GodModeMcp
             .WithTools<PermissionPromptTool>()
             .WithTools<MessageParentTool>()
             .WithTools<SpeakTool>()
+            .WithTools<CompactTool>()
             .WithTools<FleetTools>();
         return services;
     }
