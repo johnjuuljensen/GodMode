@@ -14,7 +14,7 @@ Recipe:
 - Maintain progress.txt throughout the work.
 - Open a Pull Request as early as possible — do not wait to be asked.
     - Make the PR against base branch, which is normally "master".
-    - Always include any case id as the first item in the PR summary. Example: Issue-45: Something something
+    - Start the PR description with a closing keyword for its issue: `Closes #45`, one per issue (`Closes #45, closes #46`; `Closes #45, #46` closes #45 alone). GitHub closes an issue only on such a keyword in the description (not the title, and not `Issue-45:` or `IS#45`), and only when the PR merges into the default branch.
     - Make sure to update the PR description when work is done, and to update it after making changes from user requests or review comments.
 - Commit when major milestones are done.
 - Push before going idle, your workspace may be transient.
