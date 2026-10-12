@@ -1,13 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { offeredCommands } from './slashCommands';
-
-// A touch-first device, whose on-screen keyboard has no Shift+Enter (a narrow laptop window is not one)
-const touchKeyboardQuery = window.matchMedia('(hover: none) and (pointer: coarse)');
-const subscribeTouchKeyboard = (onChange: () => void) => {
-  touchKeyboardQuery.addEventListener('change', onChange);
-  return () => touchKeyboardQuery.removeEventListener('change', onChange);
-};
-const getTouchKeyboard = () => touchKeyboardQuery.matches;
+import { isTouchKeyboard, subscribeTouchKeyboard } from './touchKeyboard';
 
 interface Props {
   value: string;
@@ -33,7 +26,7 @@ interface Props {
 export function ReplyInput({ value, onChange, onSubmit, placeholder, disabled, className, inputRef, commands }: Props) {
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const ref = inputRef ?? ownRef;
-  const touchKeyboard = useSyncExternalStore(subscribeTouchKeyboard, getTouchKeyboard);
+  const touchKeyboard = useSyncExternalStore(subscribeTouchKeyboard, isTouchKeyboard);
   const listId = useId();
   // The offered command picked, and the text Escape closed the offer for (it opens again once the text changes)
   const [picked, setPicked] = useState(0);

@@ -10,6 +10,7 @@ import { isConversation } from './transcriptRow';
 import { confirmAction } from '../../confirmDialog';
 import { deleteSession } from '../../deleteSession';
 import { useClickToCompose } from './clickToCompose';
+import { focusOnOpen } from './focusOnOpen';
 import './ProjectView.css';
 import { ImportancePicker } from '../Importance/Importance';
 import { BackgroundBadge } from '../BackgroundTasks/BackgroundTasks';
@@ -111,7 +112,11 @@ export function ProjectView({ serverId, projectId }: Props) {
   const [refusal, setRefusal] = useState<{ projectId: string; message: string } | null>(null);
   const sendError = refusal?.projectId === projectId ? refusal.message : null;
   // A click in the output focuses the composer, unless a question's options take the keys (#435, #240)
-  const clickToCompose = useClickToCompose(inputRef, !pendingPermission && (openQuestion?.Options.length ?? 0) > 0);
+  const keysTaken = !pendingPermission && (openQuestion?.Options.length ?? 0) > 0;
+  const clickToCompose = useClickToCompose(inputRef, keysTaken);
+  // Opened, the composer takes the keys (#559): the view is keyed by project, so this is each selection's
+  const keysTakenOnOpen = useRef(keysTaken);
+  useEffect(() => focusOnOpen(inputRef.current, keysTakenOnOpen.current), []);
 
   // A failure (another client answered first, claude stopped waiting) is the card's to show
   const handlePermission = useCallback(async (allow: boolean) => {
