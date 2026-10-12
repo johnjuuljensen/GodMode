@@ -83,10 +83,11 @@ describe('the header', () => {
     expect(button().title).toBe(`${listed}\nClick to stop`);
     expect(button().querySelector('.project-status-action')!.textContent).toBe('Stop');
 
-    // The list empties: Idle again, and Resume
+    // The list empties: Idle again, which stops too (#580)
     await act(async () => hub.callbacks.onStatusChanged?.('p1', { ...status('p1', 'Idle'), Name: 'worker', BackgroundTasks: null }));
     expect(button().querySelector('.project-status-label')!.textContent).toBe('Idle');
-    expect(button().querySelector('.project-status-action')!.textContent).toBe('Resume');
+    expect(button().title).toBe('Click to stop');
+    expect(button().querySelector('.project-status-action')!.textContent).toBe('Stop');
   });
 
   it('of a running session keeps Running, with the badge by its name', async () => {

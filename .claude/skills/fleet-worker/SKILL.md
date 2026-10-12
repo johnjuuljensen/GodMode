@@ -48,6 +48,13 @@ the GodMode app, nested under it. Everything below holds, with these differences
   finished turn and its pull request's review; your permission prompts, questions and errors still
   reach it. So a result nobody reports is a result nobody sees: report it, as above. You have no
   `escalate`: a decision for the user is parked on the issue, and your overseer escalates it.
+- **Compact yourself at a clean break** with the `compact` tool (`mcp__godmode__compact`): after
+  you open or update your pull request, after a review round is pushed and reported, before you
+  start an unrelated piece of work. Never in the middle of a task whose details are written down
+  nowhere: after it you have only the summary. Give `instructions` (what the summary keeps: the
+  issue, the pull request, the open threads, your progress file) and a `continuation` (what you do
+  next, in your own words), then end your turn. Your overseer's messages wait until the
+  continuation's turn has ended; the user's input cancels the continuation.
 
 ## Your pull request is your status
 

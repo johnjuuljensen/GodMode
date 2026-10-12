@@ -437,6 +437,8 @@ public class ClaudeProcessManager : IClaudeProcessManager
         {
             // Whoever sends it, /recap's result is the session's recap (issue #513): marked before claude can answer it
             if (SlashCommands.IsRecap(input)) project.Process.ExpectRecap();
+            // Whoever sends it, a /compact under way refuses the compact tool until claude is done with it (issue #579)
+            if (SlashCommands.IsCompact(input)) project.Process.CompactWritten = true;
             await launch.Process.StandardInput.WriteLineAsync(json);
             await launch.Process.StandardInput.FlushAsync();
 

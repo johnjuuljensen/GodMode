@@ -1666,12 +1666,14 @@ public partial class ProjectManager : IProjectManager, IAsyncDisposable, IDispos
 
     /// <summary>
     /// The user writes to the project (the hub's SendInput, ReplyAndResume or AnswerQuestion): the turn that takes it is the
-    /// user's (<see cref="ProjectProcess.MarkUserTurn"/>), and the user has seen its escalation. Only this and
+    /// user's (<see cref="ProjectProcess.MarkUserTurn"/>), the user has taken over from a compaction the session asked for
+    /// (<see cref="CancelCompaction"/>), and the user has seen its escalation. Only this and
     /// <see cref="MarkSeenAsync"/> clear one: the fleet's send and a resume move <see cref="ProjectStatus.SeenAt"/> too.
     /// </summary>
     private async Task UserWritesAsync(ProjectInfo project)
     {
         project.Process.MarkUserTurn();
+        CancelCompaction(project);
         if (project.Status.Escalation != null)
             await _lifecycle.UpdateStatusAsync(project, status => status with { Escalation = null });
     }
