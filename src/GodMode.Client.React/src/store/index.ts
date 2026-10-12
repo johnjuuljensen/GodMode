@@ -323,6 +323,12 @@ interface AppState {
    */
   inboxDrafts: Record<ProjectKey, InboxDraft>;
   setInboxDraft: (serverId: string, projectId: string, draft: Partial<InboxDraft>) => void;
+  /**
+   * The project view's unsent text, by ProjectKey (#581): it outlives the view, so opening another session and
+   * coming back finds it. Only while the app runs; sending, deleting or forgetting the session clears it.
+   */
+  composerDrafts: Record<ProjectKey, string>;
+  setComposerDraft: (serverId: string, projectId: string, text: string) => void;
 
   // Tile view
   isTileView: boolean;
@@ -366,6 +372,7 @@ function forgotten(state: AppState, keys: ReadonlySet<ProjectKey>): Partial<AppS
   const sel = state.selectedProject;
   return {
     transcripts, collapsedSessions, inboxDrafts: without(state.inboxDrafts, keys),
+    composerDrafts: without(state.composerDrafts, keys),
     pendingSends: without(state.pendingSends, keys),
     tiles: without(state.tiles, keys), tileMessages: without(state.tileMessages, keys), tileLoading: without(state.tileLoading, keys),
     ...(sel && keys.has(projectKey(sel.serverId, sel.projectId)) ? { outputMessages: [] } : {}),
@@ -378,7 +385,7 @@ function goneKeys(state: AppState, serverId: string, projects: ProjectSummary[])
   const kept = new Set(projects.map(p => projectKey(serverId, p.Id)));
   const sel = state.selectedProject;
   const held = [
-    state.transcripts, state.inboxDrafts, state.tiles, state.collapsedSessions,
+    state.transcripts, state.inboxDrafts, state.composerDrafts, state.tiles, state.collapsedSessions,
   ].flatMap(map => Object.keys(map) as ProjectKey[]);
   if (sel) held.push(projectKey(sel.serverId, sel.projectId));
   return new Set(held.filter(k => k.startsWith(prefix) && !kept.has(k)));
@@ -1105,6 +1112,14 @@ export const useAppStore = create<AppState>((set, get) => {
     if (draft.reply || draft.deny?.message) inboxDrafts[key] = draft;
     else delete inboxDrafts[key];
     return { inboxDrafts };
+  }),
+  composerDrafts: {},
+  setComposerDraft: (serverId, projectId, text) => set(state => {
+    const key = projectKey(serverId, projectId);
+    const composerDrafts = { ...state.composerDrafts };
+    if (text) composerDrafts[key] = text;
+    else delete composerDrafts[key];
+    return { composerDrafts };
   }),
 
   // ── Tile view ─────────────────────────────────────────────
