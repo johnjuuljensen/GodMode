@@ -61,6 +61,8 @@ const open = async (pending?: PendingQuestion) => {
     hub.lastReplay('p1').batch(0, output);
     hub.lastReplay('p1').complete(20);
   });
+  // Opening it focused the composer (#559): these start from a page whose focus is elsewhere
+  act(() => input().blur());
 };
 
 const input = () => view.container.querySelector<HTMLTextAreaElement>('textarea.project-input')!;
