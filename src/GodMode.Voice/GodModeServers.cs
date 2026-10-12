@@ -81,6 +81,12 @@ public interface IGodModeServers
 
     Task MarkSeenAsync(ProjectRef project, CancellationToken ct);
 
+    /// <summary><see cref="IProjectHub.StopProject"/>, as the app's Stop calls it (#287).</summary>
+    Task StopAsync(ProjectRef project, CancellationToken ct);
+
+    /// <summary><see cref="IProjectHub.ResumeProject"/>, as the app's Resume calls it (#287): the session resumed with its conversation.</summary>
+    Task ResumeAsync(ProjectRef project, CancellationToken ct);
+
     /// <summary><see cref="IProjectHub.SetImportance"/>: how much the project may interrupt the user.</summary>
     Task SetImportanceAsync(ProjectRef project, Importance importance, CancellationToken ct);
 
@@ -210,6 +216,12 @@ public sealed class HubServers : IGodModeServers, IServerConnectionHandler, IAsy
 
     public Task MarkSeenAsync(ProjectRef project, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.MarkSeen), project.ProjectId, ct);
+
+    public Task StopAsync(ProjectRef project, CancellationToken ct) =>
+        Hub(project).InvokeAsync(nameof(IProjectHub.StopProject), project.ProjectId, ct);
+
+    public Task ResumeAsync(ProjectRef project, CancellationToken ct) =>
+        Hub(project).InvokeAsync(nameof(IProjectHub.ResumeProject), project.ProjectId, ct);
 
     public Task SetImportanceAsync(ProjectRef project, Importance importance, CancellationToken ct) =>
         Hub(project).InvokeAsync(nameof(IProjectHub.SetImportance), project.ProjectId, importance, ct);

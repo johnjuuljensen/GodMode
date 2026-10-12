@@ -21,10 +21,10 @@ public sealed record VoiceSettings
     public const string DefaultLanguage = "da-DK+en";
 
     /// <summary>
-    /// GodMode's ElevenLabs voice (the user's choice). A saved voice.json that names a voice keeps it; Settings → Voice
-    /// changes it.
+    /// GodMode's ElevenLabs voice, godmode-2 (#502). A saved voice.json that names a voice keeps it, the old default
+    /// included (no migration); Settings → Voice changes it.
     /// </summary>
-    public const string DefaultVoiceId = "OyYu1oFho6PvCH2wRY3S";
+    public const string DefaultVoiceId = "aDMeK4SvMKPrfK2biNvZ";
 
     /// <summary>The session's languages, in VoiceBot's form: the primary, then each mixed-in one after a '+'.</summary>
     public string Language { get; init; } = DefaultLanguage;

@@ -211,6 +211,24 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
         return Task.CompletedTask;
     }
 
+    /// <summary>Each project stopped (<c>StopProject</c>, #287), in order.</summary>
+    public ConcurrentQueue<ProjectRef> Stops { get; } = new();
+
+    /// <summary>Each project resumed (<c>ResumeProject</c>, #287), in order.</summary>
+    public ConcurrentQueue<ProjectRef> Resumes { get; } = new();
+
+    public Task StopAsync(ProjectRef project, CancellationToken ct)
+    {
+        Stops.Enqueue(project);
+        return Task.CompletedTask;
+    }
+
+    public Task ResumeAsync(ProjectRef project, CancellationToken ct)
+    {
+        Resumes.Enqueue(project);
+        return Task.CompletedTask;
+    }
+
     /// <summary>Each delete, in order: the project, and whether it was only forgotten (#532).</summary>
     public ConcurrentQueue<(ProjectRef Project, bool Forgot)> Deletes { get; } = new();
 
@@ -301,10 +319,19 @@ internal sealed class FakeServers(params string[] serverIds) : IGodModeServers
     public static AttentionItem CreateFailed(string projectId, string name, string reason, int minutesAgo = 5) =>
         new(projectId, name, "Default", "root", AttentionKind.Error, DateTime.UtcNow.AddMinutes(-minutesAgo), reason, CreateFailed: true);
 
+    private readonly ConcurrentDictionary<string, string> _names = new();
+
+    /// <summary>The server's name, as the app shows it, for the projects pushed from now on: its id when unset.</summary>
+    public FakeServers Named(string serverId, string name)
+    {
+        _names[serverId] = name;
+        return this;
+    }
+
     private void PushProjects(string serverId)
     {
         _servers.TryAdd(serverId, 0);
-        ProjectsChanged?.Invoke(serverId, serverId, [.. _statuses.Where(s => s.Key.ServerId == serverId)
+        ProjectsChanged?.Invoke(serverId, _names.GetValueOrDefault(serverId, serverId), [.. _statuses.Where(s => s.Key.ServerId == serverId)
             .Select(s => Summary(s.Value) with { RecordedParentId = _parents.GetValueOrDefault(s.Key) })]);
     }
 

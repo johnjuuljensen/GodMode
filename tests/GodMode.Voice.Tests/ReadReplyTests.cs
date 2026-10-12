@@ -224,6 +224,25 @@ public sealed class ReadReplyTests
         Assert.Empty(servers.RepliesRead);
     }
 
+    /// <summary>
+    /// #523: each part read on names the project as a line said now does (<see cref="ProjectNames.Of"/>), not as the
+    /// first part did: right after a part of it, its label alone; after a line about another project, its topic again.
+    /// </summary>
+    [Fact]
+    public async Task Each_part_read_on_is_anchored_as_it_is_said()
+    {
+        var (servers, tools) = Tools();
+        servers.AddProject(ServerA, "p/r/283", "283-voice", kind: "issue");
+        servers.AddProject(ServerA, "p/r/101", "101-cleanup", kind: "issue");
+        servers.SetReplies(ServerA, "p/r/283", new AssistantReply(Long, true));
+
+        Assert.StartsWith("issue 283, voice (", await tools.ReadReplyAsync("283", null, CancellationToken.None));
+        Assert.StartsWith("issue 283's reply, part 2 of ", await tools.ReadMoreAsync(CancellationToken.None));
+        // A line about 101 between them, which leaves the reading as it was
+        tools.Names.Of(new ProjectRef(ServerA, "p/r/101"));
+        Assert.StartsWith("issue 283, voice's reply, part 3 of ", await tools.ReadMoreAsync(CancellationToken.None));
+    }
+
     private static string Between(string text, string start, string end)
     {
         var from = text.IndexOf(start, StringComparison.Ordinal) + start.Length;

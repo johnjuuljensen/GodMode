@@ -16,6 +16,7 @@ import { SIDEBAR_WIDTH, sidebarWidthKey, useStoredWidth } from './Splitter/useSt
 import { useAttentionTitle } from './Inbox/useAttentionTitle';
 import { formatRoute, goBack, useHashRoute } from '../routing';
 import { subscribeAttentionLinks } from '../services/hostApi';
+import { subscribeVoiceShow } from '../services/voice';
 import { useReportOpenSession } from '../services/openSession';
 import './Shell.css';
 
@@ -75,6 +76,8 @@ export function Shell() {
   useAttentionTitle();
   // A tapped notification opens the inbox on its item
   useEffect(() => subscribeAttentionLinks(useAppStore.getState().openInboxItem), []);
+  // A project switched to by voice is shown (#287)
+  useEffect(() => subscribeVoiceShow(useAppStore.getState().selectProject), []);
   // The app holds back the open session's notification (#549), so it is told which that is
   useReportOpenSession();
 

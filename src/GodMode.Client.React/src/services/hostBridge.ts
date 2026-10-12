@@ -36,6 +36,12 @@ export interface AttentionLinkPayload {
   ProjectId: string;
 }
 
+/** A project the user switched to by voice (#287): a project on a server, both IDs as the server gave them. */
+export interface VoiceShowPayload {
+  ServerId: string;
+  ProjectId: string;
+}
+
 /** The session a window's main view shows (#549), or none. */
 export interface OpenSessionPayload {
   Session: AttentionLinkPayload | null;
@@ -207,6 +213,8 @@ export interface BridgeEvents {
   /** A service that failed works again. */
   'voice.recovered': { Service: VoiceService };
   'voice.stateChanged': VoiceStatus;
+  /** The user switched to a project by voice (#287): to this window's page when it holds the project's profile, else the main window's. */
+  'voice.show': VoiceShowPayload;
 }
 
 export type BridgeEvent = keyof BridgeEvents;

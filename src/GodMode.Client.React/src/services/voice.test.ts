@@ -2,7 +2,7 @@
 import { expect, it, vi } from 'vitest';
 import * as bridge from './hostBridge';
 import type { VoiceStatus } from './hostBridge';
-import { describeVoiceError, getVoiceStatus, withLine } from './voice';
+import { describeVoiceError, getVoiceStatus, subscribeVoiceShow, withLine } from './voice';
 
 vi.mock('./hostBridge', () => ({ request: vi.fn(), on: vi.fn() }));
 
@@ -12,6 +12,16 @@ it('asks the shell whether the app has voice', async () => {
 
   expect(await getVoiceStatus()).toEqual(none);
   expect(bridge.request).toHaveBeenCalledWith('voice.state');
+});
+
+it('shows each project the user switches to by voice', () => {
+  const show = vi.fn();
+  subscribeVoiceShow(show);
+
+  const [type, handler] = vi.mocked(bridge.on).mock.calls.at(-1)!;
+  expect(type).toBe('voice.show');
+  (handler as (p: { ServerId: string; ProjectId: string }) => void)({ ServerId: 'A', ProjectId: 'p1' });
+  expect(show).toHaveBeenCalledWith('A', 'p1');
 });
 
 it('says what failed and what to do', () => {

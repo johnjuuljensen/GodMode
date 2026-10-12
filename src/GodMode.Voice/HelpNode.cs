@@ -17,7 +17,8 @@ namespace GodMode.Voice;
 /// "hvad kan du fortælle om 283?" would be help, and the claim takes whatever starts with the words it fired on, so
 /// "Hjælp. Kan du høre mig?" would never reach the chat node (johnjuuljensen/VoiceBot#71).
 /// </summary>
-public sealed class HelpNode(string id, int priority) : INode
+/// <param name="commands">What the graph takes by code, not as a tool, that help says too (<see cref="ReplayNode.Commands"/>).</param>
+public sealed class HelpNode(string id, int priority, IReadOnlyCollection<string>? commands = null) : INode
 {
     /// <summary>
     /// What asks for help: the whole utterance, as recognized, is one or more of these, and nothing else ("Hjælp.
@@ -31,7 +32,10 @@ public sealed class HelpNode(string id, int priority) : INode
         ("what can i do", false), ("what can i", false),
     ];
 
-    /// <summary>What the user says to use each tool, in Danish and English, in the order help says them.</summary>
+    /// <summary>
+    /// What the user says to use each tool, in Danish and English, in the order help says them; and each command the graph
+    /// takes by code rather than as a tool (<see cref="ReplayNode.Commands"/>), said when the graph has it.
+    /// </summary>
     public static readonly IReadOnlyList<(string Tool, string Danish, string English)> Hints =
     [
         (VoiceTools.WhatNeedsMe, "hvad venter", "what needs me"),
@@ -45,8 +49,18 @@ public sealed class HelpNode(string id, int priority) : INode
         (VoiceTools.SetImportance, "marker som vigtig", "mark as important"),
         (VoiceTools.StartSession, "start issue og et nummer", "start issue and a number"),
         (VoiceTools.DeleteSession, "slet og et projekt", "delete and a project"),
+        (VoiceTools.SwitchFocus, "skift til et projekt eller en profil", "switch to a project or a profile"),
+        (VoiceTools.GoBack, "tilbage", "back"),
+        (VoiceTools.PeekProject, "kig på et projekt", "peek at a project"),
+        (VoiceTools.StopProject, "stop et projekt", "stop a project"),
+        (VoiceTools.ResumeProject, "genoptag et projekt", "resume a project"),
         (AnnouncementTools.Mute.Name, "stille", "quiet"),
         (AnnouncementTools.Unmute.Name, "sig til igen", "you can talk again"),
+        (ReplayNode.ReplayCommand, "gentag", "repeat that"),
+        (ReplayNode.ReplayCommand, "spol tilbage", "back up"),
+        (ReplayNode.ReplayCommand, "fra starten", "from the start"),
+        (ReplayNode.PlaybackCommand, "pause", "pause"),
+        (ReplayNode.PlaybackCommand, "langsommere", "slower"),
     ];
 
     private static readonly IReadOnlyList<string[]> PhraseTokens = [.. Phrases.Select(p => CommandResolver.Tokenize(p.Phrase))];
@@ -80,7 +94,7 @@ public sealed class HelpNode(string id, int priority) : INode
         if (transcription.IsPartial)
             context.GraphState.Set(context.StateKey, true);
 
-        var help = Say(context.Tools?.ResolveAll().Keys ?? [], danish);
+        var help = Say([.. context.Tools?.ResolveAll().Keys ?? [], .. commands ?? []], danish);
         context.Log?.Log("HELP", $"'{text}' → \"{help}\"");
         context.AddUserMessage(text);
         context.AddAssistantMessage(help);

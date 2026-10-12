@@ -16,14 +16,15 @@ namespace GodMode.Voice;
 /// </remarks>
 public static partial class SpokenLanguage
 {
-    // Words of one language that are not words of the other ("i", "to", "at", "for", "men", "her" are both)
+    // Words of one language that are not words of the other ("i", "to", "at", "for", "men", "her" are both). Nor "er"
+    // and "min" (#523): English says them too, a filler ("er, status 283") and minutes ("30 min")
     private static readonly FrozenSet<string> DanishWords = FrozenSet.ToFrozenSet(
     [
-        "hvad", "hvilke", "hvilken", "hvorfor", "hvordan", "hvor", "venter", "svar", "svarede", "sig", "og", "er", "det", "der",
+        "hvad", "hvilke", "hvilken", "hvorfor", "hvordan", "hvor", "venter", "svar", "svarede", "sig", "og", "det", "der",
         "jeg", "du", "dig", "mig", "den", "til", "ikke", "mere", "med", "skal", "kan", "har", "om", "af", "en", "et", "nyt",
         "siden", "sidst", "sidste", "spurgte", "spørger", "alle", "gamle", "stille", "marker", "som", "vigtig", "hjælp", "nej",
         "ja", "tak", "godt", "lige", "nu", "så", "eller", "også", "hele", "igen", "projekter", "projekt", "kører", "noget",
-        "videre", "læst", "læs", "opret", "diktér", "dikter", "hvem", "være", "var", "blev", "min", "din", "sin", "fra",
+        "videre", "læst", "læs", "opret", "diktér", "dikter", "hvem", "være", "var", "blev", "din", "sin", "fra",
     ], StringComparer.OrdinalIgnoreCase);
 
     private static readonly FrozenSet<string> EnglishWords = FrozenSet.ToFrozenSet(

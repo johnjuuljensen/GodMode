@@ -1,7 +1,9 @@
+using System.Runtime.CompilerServices;
 using GodMode.Shared.Enums;
 using GodMode.Shared.Models;
 using Microsoft.Extensions.Logging;
 using VoiceBot.Core.Audio;
+using VoiceBot.Core.Pipeline;
 
 namespace GodMode.Voice;
 
@@ -43,6 +45,9 @@ public static class Earcons
         AttentionKind.Finished when item.Outcome == TurnOutcome.Done => Earcon.Done,
         _ => null,
     };
+
+    /// <summary>The earcon a create's outcome is said after (#523): <see cref="Earcon.Done"/> when it was made, <see cref="Earcon.Failed"/> when not.</summary>
+    public static Earcon For(CreateOutcome outcome) => outcome.Error is null ? Earcon.Done : Earcon.Failed;
 
     /// <summary>The notes of each earcon: frequency in Hz, and length.</summary>
     private static IReadOnlyList<(double Hz, int Ms)> Notes(Earcon earcon) => earcon switch
@@ -88,11 +93,33 @@ public static class Earcons
 }
 
 /// <summary>
+/// The earcons of announcements that are of no attention item (#523): a create's outcome, which has its earcon all the
+/// same (<see cref="Earcons.For(CreateOutcome)"/>). Kept by the announcement itself, as the board keeps its own
+/// (<see cref="AttentionBoard.AnnouncementOf"/>): two of the same words are two announcements.
+/// </summary>
+public sealed class AnnouncementEarcons
+{
+    private readonly ConditionalWeakTable<Announcement, object> _earcons = new();
+
+    /// <summary><paramref name="announcement"/>, said after <paramref name="earcon"/>.</summary>
+    public Announcement Cued(Announcement announcement, Earcon earcon)
+    {
+        _earcons.AddOrUpdate(announcement, earcon);
+        return announcement;
+    }
+
+    /// <summary>The earcon <paramref name="announcement"/> was given (<see cref="Cued"/>); null for none.</summary>
+    public Earcon? Of(Announcement announcement) => _earcons.TryGetValue(announcement, out var earcon) ? (Earcon)earcon : null;
+}
+
+/// <summary>
 /// The session's speaker, which plays a cue before the next speech (#455): <see cref="Cue"/> sets it, and the first audio
 /// sent after is preceded by it, once. The announcement formatter cues an earcon as VoiceBot is about to say the
 /// announcement: it formats under the session's graph lock, when nothing is speaking, and starts the speech at once, so
-/// the next audio is the announcement's. An interrupt drops a cue not yet played. A cue is any sound in the speaker's
-/// format (<see cref="Earcons.Pcm"/>, or another's to play before a line).
+/// the next audio is the announcement's. An interrupt drops a cue not yet played, and so does the start of the speech
+/// after the one it was for (<see cref="SpeechStarted"/>, #523): that speech made no audio (its synthesis failed), and
+/// the cue is not the next one's. A cue is any sound in the speaker's format (<see cref="Earcons.Pcm"/>, or another's to
+/// play before a line).
 /// <para>
 /// It also plays a sound now, between lines (<see cref="Heard"/>, #458): only when the speaker is quiet, so it never
 /// plays over speech, nor speech over it. Quiet is reckoned here, from what was sent: each send plays from when it is
@@ -106,6 +133,7 @@ public sealed class CueingSink(IAudioSink speaker, ILogger? logger = null, TimeP
     private readonly SemaphoreSlim _sending = new(1, 1);
     private readonly Lock _lock = new();
     private byte[]? _cue;
+    private bool _cueSpeechStarted;
     private long _playsUntil;
 
     public AudioFormat Format => speaker.Format;
@@ -114,7 +142,33 @@ public sealed class CueingSink(IAudioSink speaker, ILogger? logger = null, TimeP
     public void Cue(Earcon earcon) => Cue(Earcons.Pcm(earcon, speaker.Format));
 
     /// <summary>Plays <paramref name="pcm"/>, in <see cref="Format"/>, before the next speech; it replaces a cue not played yet.</summary>
-    public void Cue(byte[] pcm) => Volatile.Write(ref _cue, pcm);
+    public void Cue(byte[] pcm)
+    {
+        lock (_lock)
+        {
+            _cue = pcm;
+            _cueSpeechStarted = false;
+        }
+    }
+
+    /// <summary>
+    /// A speech starts (VoiceBot's response, before its first audio): the first after a cue is the one it is for. Any
+    /// later one drops a cue still not played (#523): the speech it was for made no audio, and it is not this one's.
+    /// </summary>
+    public void SpeechStarted()
+    {
+        lock (_lock)
+        {
+            if (_cue is null)
+                return;
+            if (_cueSpeechStarted)
+            {
+                _cue = null;
+                logger?.LogInformation("Voice: a cue was dropped: the speech it was for made no audio");
+            }
+            _cueSpeechStarted = true;
+        }
+    }
 
     /// <summary>
     /// The "heard you" tone (<see cref="Earcons.Heard"/>) now, when the speaker is quiet: nothing playing, nothing being

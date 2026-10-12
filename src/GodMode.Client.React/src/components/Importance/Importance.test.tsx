@@ -35,7 +35,7 @@ vi.mock('../../services/hostApi', () => ({
   attentionToasts: async () => { if (!host.answers) throw new Error('no app'); return host.toasts; },
   setAttentionToasts: async (notify: boolean) => { host.toastSets.push(notify); host.toasts = notify; return notify; },
 }));
-vi.mock('../../services/voice', () => ({ useVoice: () => null }));
+vi.mock('../../services/voice', () => ({ useVoice: () => null, subscribeVoiceShow: () => () => {} }));
 
 const work: ProjectRootInfo = { Name: 'work', ProfileName: 'Default', Actions: [{ Name: 'chat', AllowSkipPermissions: false, Session: true, Transient: false }] };
 const ID = 'Default/work/261003-chat-notes-abcd';

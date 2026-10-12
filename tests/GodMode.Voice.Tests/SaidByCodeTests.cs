@@ -80,6 +80,25 @@ public sealed class SaidByCodeTests
     }
 
     /// <summary>
+    /// #523: the code's words for a first part are said even when the model never ends the turn: it calls tool after tool
+    /// until VoiceBot's round limit, and gives no reply. What was held is not lost with it.
+    /// </summary>
+    [Fact]
+    public async Task Held_words_are_said_when_the_model_hits_the_round_limit()
+    {
+        var model = new ScriptedChatClient().CallTool(VoiceTools.WhatNeedsMe, new() { [VoiceTools.ThenParameter] = "status 999" });
+        for (var i = 0; i < 9; i++)
+            model.CallTool(VoiceTools.ProjectStatus, new() { [VoiceTools.ProjectParameter] = "999" });
+        await using var voice = await OfflineVoice.StartAsync(new FakeServers(), model);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Transcriptions.SayAsRecognized("Hvad venter, og status 999");
+        await voice.Events.SaidAsync("Intet venter.");
+
+        Assert.Equal(10, model.Calls);
+    }
+
+    /// <summary>
     /// #375 behind held words (#507): the model claims a send after a held part, and no answer went out. Its "Sendt"
     /// no longer starts the reply, but it is still not said: the user hears that nothing was sent.
     /// </summary>
@@ -384,6 +403,28 @@ public sealed class SaidByCodeTests
         Assert.True(english.Danish);
         english.Heard("More");
         Assert.False(english.Danish);
+    }
+
+    /// <summary>
+    /// #523: an English filler "er", or "min" for minutes, is no Danish word: after a switch to English, a final with one
+    /// of them keeps the code's words in English. A Danish sentence is still told by its other words.
+    /// </summary>
+    [Theory]
+    [InlineData("Er, status 283")]
+    [InlineData("Er")]
+    [InlineData("283, 30 min")]
+    [InlineData("Er… 283, min")]
+    public void A_filler_er_or_min_does_not_switch_back_to_danish(string final)
+    {
+        var phrases = new VoicePhrases(new SessionLanguages("da-DK"));
+        phrases.Heard("What needs me?");
+        Assert.False(phrases.Danish);
+
+        phrases.Heard(final);
+
+        Assert.False(phrases.Danish);
+        phrases.Heard("Hvad er status?");
+        Assert.True(phrases.Danish);
     }
 
     [Fact]

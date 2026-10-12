@@ -146,6 +146,33 @@ public sealed class EarconTests
         Assert.Equal(failed, calls.Skip(greeting).First(c => c.Kind == SinkCallKind.Audio).AudioBytes);
     }
 
+    /// <summary>
+    /// #523: an announcement whose speech made no audio (the synthesizer failed) leaves its earcon unplayed, and it is
+    /// dropped: it never plays before the next reply, which it is not the earcon of.
+    /// </summary>
+    [Fact]
+    public async Task A_cue_whose_line_made_no_audio_does_not_play_before_the_next_reply()
+    {
+        var servers = new FakeServers();
+        var speaker = new RecordingAudioSink();
+        await using var voice = await OfflineVoice.StartAsync(servers, new ScriptedChatClient().Respond("Javel."), speaker: speaker);
+        await voice.Events.SaidAsync("Klar.");
+
+        voice.Synthesizer.FailWith = new InvalidOperationException("no audio");
+        servers.Set(Server, Error("p/r/283", "283-voice", "Build failed."));
+        await voice.Events.SaidAsync("issue 283, voice, fejlede.");
+        await voice.ListeningAsync();
+        voice.Synthesizer.FailWith = null;
+
+        voice.Transcriptions.SayAsRecognized("Hvad så nu");
+        await voice.Events.SaidAsync("Javel.");
+        await Eventually.UntilAsync(() => voice.Synthesizer.Texts.Contains("Javel."), () => "the reply's speech");
+        await voice.ListeningAsync();
+
+        var failed = Earcons.Pcm(Earcon.Failed, speaker.Format).Length;
+        Assert.DoesNotContain(speaker.Calls, c => c.AudioBytes == failed);
+    }
+
     private static AttentionItem Error(string projectId, string name, string text) =>
         new(projectId, name, "Default", "root", AttentionKind.Error, DateTime.UtcNow.AddMinutes(-5), text);
 }

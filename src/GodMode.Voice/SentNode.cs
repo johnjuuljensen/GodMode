@@ -9,7 +9,9 @@ namespace GodMode.Voice;
 /// in place of the model's reply. A reply that claims a send when none went out in it (no tool call, or one that did
 /// nothing) is not said: the user hears that nothing was sent (<see cref="VoicePhrases.NothingSent"/>). Unless it repeats
 /// a project's own words a tool read out in this evaluation (#411): a reply read word for word that starts "Sendt til
-/// review." is the project's, said as it is.
+/// review." is the project's, said as it is. A reply that says every send in the code's words already is kept whole
+/// (#523): the code said it after the part of a compound ask before it ("hvad venter, og svar 283 ja",
+/// <see cref="CodeSaysInference"/>), which is not to be lost.
 /// </summary>
 public sealed partial class SentNode(INode chat, VoiceConversation conversation, VoicePhrases phrases) : INode
 {
@@ -22,7 +24,10 @@ public sealed partial class SentNode(INode chat, VoiceConversation conversation,
         _ = conversation.TakeReadOut();
         var result = await chat.EvaluateAsync(context, ct);
         var readOut = conversation.TakeReadOut();
-        var said = conversation.TakeSent() is { Count: > 0 } sent ? phrases.Sent(sent)
+        var sent = conversation.TakeSent();
+        if (sent.Count > 0 && result?.ResponseText is { } codes && sent.All(name => codes.Contains(phrases.Sent([name]), StringComparison.Ordinal)))
+            return result;
+        var said = sent.Count > 0 ? phrases.Sent(sent)
             : result?.ResponseText is { } reply && ClaimsSend(reply) && !readOut.Any(text => Repeats(reply, text)) ? phrases.NothingSent
             : null;
         if (said is null)

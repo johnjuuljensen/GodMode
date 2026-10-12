@@ -25,6 +25,12 @@ public sealed class CodeSaysInference(IInferenceProvider model, VoiceConversatio
 
     public IChatClient GetClient(InferenceTier tier) => model.GetClient(tier);
 
+    /// <summary>
+    /// The code's words held for the turn that no response said, and none from now on (<see cref="UnsaidNode"/>, #523):
+    /// the turn ended with a tool call, at VoiceBot's round limit.
+    /// </summary>
+    public string? TakeHeld() => Interlocked.Exchange(ref _held, null);
+
     public async Task<ChatResponse> CompleteAsync(InferenceTier tier, IList<ChatMessage> messages, ChatOptions? options = null, CancellationToken ct = default)
     {
         // A turn's first round: nothing of an earlier one is held

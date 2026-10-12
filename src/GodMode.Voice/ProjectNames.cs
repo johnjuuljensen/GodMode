@@ -30,7 +30,8 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
     /// <summary>
     /// A profile and root on one server, and their projects, the one changed last first. <paramref name="Server"/> is the
     /// server's name when another server has a profile and root said as these are (#507), which it tells them apart by;
-    /// null otherwise.
+    /// null otherwise. Two servers of one name are told apart by a number after it, in the order of their ids (#523):
+    /// "pc 1", "pc 2".
     /// </summary>
     public sealed record Group(string Profile, string? Root, IReadOnlyList<ServerProject> Projects, string? Server = null)
     {
@@ -102,17 +103,25 @@ public sealed class ProjectNames(ProjectBoard projects, ProjectHandles handles, 
     {
         var grouped = projects.Projects
             .GroupBy(p => (p.ServerId, Profile: ProfileOf(p.Project), Root: p.Project.RootName ?? ""), OnServer)
-            .Select(g => new Group(g.Key.Profile, projects.RootShown(g.First()), [.. g], g.First().ServerName))
+            .Select(g => new Group(g.Key.Profile, projects.RootShown(g.First()), [.. g], ServerSaid(g.First())))
             .ToList();
         var groups = grouped
             .Select(g => g with { Server = grouped.Where(o => Same(o.Profile, g.Profile) && Same(o.Root, g.Root))
                 .Select(o => o.Projects[0].ServerId).Distinct().Skip(1).Any() ? g.Server : null })
             .OrderBy(g => g.Profile, StringComparer.OrdinalIgnoreCase).ThenBy(g => g.Root ?? "", StringComparer.OrdinalIgnoreCase)
-            .ThenBy(g => g.Projects[0].ServerName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(g => ServerSaid(g.Projects[0]), StringComparer.OrdinalIgnoreCase)
             .ToList();
         conversation.LastProfile = groups.Select(g => g.Profile).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 1 ? groups[0].Profile : null;
         conversation.LastRoot = groups is [var one] ? one.Root : null;
         return groups;
+    }
+
+    /// <summary>The project's server as a list says it: its name, and its number among the servers of that name when there are several (#523).</summary>
+    private string ServerSaid(ServerProject project)
+    {
+        var named = projects.Projects.Where(p => Same(p.ServerName, project.ServerName)).Select(p => p.ServerId)
+            .Distinct().Order(StringComparer.Ordinal).ToList();
+        return named.Count > 1 ? $"{project.ServerName} {named.IndexOf(project.ServerId) + 1}" : project.ServerName;
     }
 
     private static readonly IEqualityComparer<(string ServerId, string Profile, string Root)> OnServer = EqualityComparer<(string, string, string)>.Create(
