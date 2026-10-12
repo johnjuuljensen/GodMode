@@ -10,7 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingQuestion, ProjectStatus } from '../../signalr/types';
 import { parseClaudeMessage } from '../../signalr/parseMessage';
 import { FakeHub, project, root, connectServers, status } from '../../test/fakeHub';
-import { render, typeInto, keyDown, type Rendered } from '../../test/render';
+import { render, typeInto, keyDown, click, type Rendered } from '../../test/render';
+import { ConfirmDialog } from '../ConfirmDialog';
 import { useAppStore } from '../../store';
 import { ProjectView } from './ProjectView';
 
@@ -72,8 +73,8 @@ it("an Error project's input is enabled and sends through ReplyAndResume", async
   expect(input.value).toBe('');
 });
 
-// Created with no prompt (#352): claude waits for the first message, and Resume has nothing to do
-it('a session that has had no turn asks for its first message, and offers no Resume', async () => {
+// Created with no prompt (#352): claude waits for the first message, and Resume has nothing to do; Stop has (#580)
+it('a session that has had no turn asks for its first message, and offers Stop, not Resume', async () => {
   const freshHub = new FakeHub([project('p2', 'outbound', 'Idle', '2026-09-24T12:00:00Z')], [root]);
   await connectServers({ B: freshHub });
   useAppStore.getState().selectProject('B', 'p2');
@@ -85,8 +86,7 @@ it('a session that has had no turn asks for its first message, and offers no Res
     await act(async () => freshHub.lastReplay('p2').answer(0, []));
     expect(el.querySelector('.project-messages-empty')?.textContent).toBe('Send the first message to start.');
     expect(el.querySelector<HTMLTextAreaElement>('textarea.project-input')!.placeholder).toBe('Type the first message...');
-    expect(el.querySelector('.project-status-action')).toBeNull();
-    expect(el.querySelector<HTMLButtonElement>('.project-status-btn')!.disabled).toBe(true);
+    expect(el.querySelector('.project-status-action')!.textContent).toBe('Stop');
 
     const input = el.querySelector<HTMLTextAreaElement>('textarea.project-input')!;
     await typeInto(input, 'Draft the mail to the supplier');
@@ -94,6 +94,33 @@ it('a session that has had no turn asks for its first message, and offers no Res
     expect(freshHub.replies).toEqual([{ projectId: 'p2', text: 'Draft the mail to the supplier' }]);
   } finally {
     fresh.unmount();
+  }
+});
+
+// An idle session is stopped in one click, with no turn first (#580): a stop is how its next launch reads the root's config again
+it('an Idle session stops from its status button, and shows Stopped, with Resume', async () => {
+  const idleHub = new FakeHub([project('p5', 'chat', 'Idle', '2026-10-12T12:00:00Z')], [root]);
+  await connectServers({ E: idleHub });
+  useAppStore.getState().selectProject('E', 'p5');
+  const idle = await render(<><ProjectView serverId="E" projectId="p5" /><ConfirmDialog /></>);
+  try {
+    const button = () => idle.container.querySelector<HTMLButtonElement>('.project-status-btn')!;
+    await act(async () => idleHub.lastReplay('p5').answer(0, [10]));
+    expect(button().disabled).toBe(false);
+    expect(button().title).toBe('Click to stop');
+    expect(button().querySelector('.project-status-action')!.textContent).toBe('Stop');
+
+    await click(button());
+    const dialog = await vi.waitFor(() => document.querySelector('.confirm-dialog')!);
+    expect(dialog.querySelector('.confirm-dialog-message')?.textContent).toBe('Sending a message resumes it.');
+    await click([...dialog.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Stop')!);
+
+    expect(idleHub.stops).toEqual(['p5']);
+    expect(idleHub.replies).toEqual([]);
+    expect(button().querySelector('.project-status-label')!.textContent).toBe('Stopped');
+    expect(button().querySelector('.project-status-action')!.textContent).toBe('Resume');
+  } finally {
+    idle.unmount();
   }
 });
 

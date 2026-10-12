@@ -176,6 +176,14 @@ export class FakeHub {
     const summary = this.projects.find(p => p.Id === projectId);
     if (summary) this.callbacks.onStatusChanged?.(projectId, { ...status(projectId, summary.State), Name: summary.Name, Importance: importance });
   }
+  /** Every StopProject, in order. The server pushes the project's status, Stopped, as ProjectManager does. */
+  stops: string[] = [];
+  async stopProject(projectId: string) {
+    this.invoke();
+    this.stops.push(projectId);
+    const summary = this.projects.find(p => p.Id === projectId);
+    this.callbacks.onStatusChanged?.(projectId, { ...status(projectId, 'Stopped'), Name: summary?.Name ?? projectId });
+  }
   /** Every DeleteProject and RestoreProject, in order. A delete trashes a session that shares its folder, as the server does. */
   deletes: { projectId: string; force: boolean }[] = [];
   restores: string[] = [];
