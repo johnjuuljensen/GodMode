@@ -99,8 +99,10 @@ export function ProjectView({ serverId, projectId }: Props) {
   const awaitsFirstMessage = !notFound && state === 'Idle' && phase === 'ready' && outputMessages.length === 0;
   // Idle, with claude still at work in the background (#432): shown as working, and its stop ends that work
   const background = !notFound && !!project && inBackground(project);
-  const canResume = !notFound && !background && (state === 'Stopped' || state === 'Idle' && !awaitsFirstMessage);
-  const canStop = !notFound && (background || state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission');
+  // Idle stops too (#580), its first message awaited or not: a session is stopped so its next launch reads the
+  // root's config again, and a message relaunches it. One Idle with no process (the server restarted) just says Stopped
+  const canResume = !notFound && state === 'Stopped';
+  const canStop = !notFound && (background || state === 'Idle' || state === 'Running' || state === 'WaitingInput' || state === 'WaitingPermission');
 
   // What claude is blocked on: a tool call to allow or deny, or AskUserQuestion's questions, asked one at a time
   const pendingPermission = project?.PendingPermission ?? null;
@@ -171,7 +173,10 @@ export function ProjectView({ serverId, projectId }: Props) {
 
   const handleStop = async () => {
     // A stray tap on the status pill must never end a session
-    if (!hub || !await confirmAction(`Stop "${projectName}"?`, 'Stop', { message: 'Claude stops mid-turn. Sending a message resumes it.', tone: 'danger' })) return;
+    if (!hub || !await confirmAction(`Stop "${projectName}"?`, 'Stop', {
+      message: state === 'Idle' && !background ? 'Sending a message resumes it.' : 'Claude stops mid-turn. Sending a message resumes it.',
+      tone: 'danger',
+    })) return;
     try { await hub.stopProject(projectId); } catch (err) { console.error(err); }
   };
 
@@ -271,7 +276,7 @@ Click to stop` : canStop ? 'Click to stop' : canResume ? 'Click to resume' : sta
           // Every state takes a reply: ReplyAndResume resumes a claude that is not running, one that failed
           // too, as the inbox answers an Error item (#240)
           placeholder={awaitsFirstMessage ? 'Type the first message...'
-            : canResume || state === 'Error' ? 'Type to resume...' : 'Type your response...'}
+            : canResume || state === 'Error' || state === 'Idle' && !background ? 'Type to resume...' : 'Type your response...'}
           disabled={notFound}
           commands={project?.SlashCommands}
         />
