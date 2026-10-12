@@ -56,10 +56,18 @@ public static class AttentionNotificationText
     /// </summary>
     public static string? Details(AttentionItem item) => item switch
     {
-        { Kind: AttentionKind.Question, Question.Questions: [var only] } => string.Join('\n', only.Options.Select(Option)),
-        { Kind: AttentionKind.Question, Question.Questions.Count: > 1 } => Body(item),
+        { Kind: AttentionKind.Question, Question.Questions: [var only] } => Capped(string.Join('\n', only.Options.Select(Option))),
+        { Kind: AttentionKind.Question, Question.Questions.Count: > 1 } => Capped(Body(item)),
         _ => null,
     };
+
+    /// <summary>
+    /// The most <see cref="Details"/> holds: a Windows toast's whole payload must stay under about 5 KB, and a click opens
+    /// the full text in the app.
+    /// </summary>
+    public const int MaxDetailsLength = 2000;
+
+    private static string Capped(string text) => text.Length <= MaxDetailsLength ? text : text[..(MaxDetailsLength - 1)] + "…";
 
     private static string Option(QuestionOption option) =>
         string.IsNullOrWhiteSpace(option.Description) ? $"• {option.Label}" : $"• {option.Label} — {option.Description}";

@@ -53,7 +53,8 @@ public static class WindowsAttention
         _logger = loggerFactory.CreateLogger(typeof(WindowsAttention));
         var toasts = Toasts.Register(_logger);
         _watcher = new AttentionWatcher(services.GetRequiredService<IServerDirectory>(),
-            new ToastNotifier(toasts, loggerFactory.CreateLogger<ToastNotifier>()), loggerFactory);
+            new GuardedNotifier(new ToastNotifier(toasts, loggerFactory.CreateLogger<ToastNotifier>()), loggerFactory.CreateLogger<GuardedNotifier>()),
+            loggerFactory);
         Refresh();
     }
 
@@ -103,6 +104,13 @@ public static class WindowsAttention
     {
         public static bool Registered { get; private set; }
 
+        /// <summary>What Windows' notification settings list it as: each debug build (a worktree's) registers apart from the installed app.</summary>
+#if DEBUG
+        private const string DisplayName = "GodMode (debug)";
+#else
+        private const string DisplayName = "GodMode";
+#endif
+
         /// <summary>Registers, and opens the item whose toast Windows started this process for. False when Windows shows no toasts for the app.</summary>
         public static bool Register(ILogger logger)
         {
@@ -120,7 +128,7 @@ public static class WindowsAttention
                     if (LinkOf(args) is { } link) Open(link);
                 };
                 // Unpackaged, the app names itself; a package would take its name and icon from its manifest
-                manager.Register("GodMode", new Uri(Path.Combine(AppContext.BaseDirectory, "appiconLogo.scale-200.png")));
+                manager.Register(DisplayName, new Uri(Path.Combine(AppContext.BaseDirectory, "appiconLogo.scale-200.png")));
                 Registered = true;
                 if (AppInstance.GetCurrent().GetActivatedEventArgs() is { Kind: ExtendedActivationKind.AppNotification, Data: AppNotificationActivatedEventArgs started }
                     && LinkOf(started) is { } startedFor)
@@ -131,7 +139,7 @@ public static class WindowsAttention
                 logger.LogInformation("Toasts: registered; Windows shows them: {Setting}", manager.Setting);
                 return true;
             }
-            catch (Exception ex) when (ex is COMException or InvalidOperationException or UnauthorizedAccessException)
+            catch (Exception ex)
             {
                 logger.LogWarning("Toasts: could not register, so what interrupts makes a sound alone: {Error}", ex.Message);
                 return false;
@@ -182,23 +190,25 @@ public static class WindowsAttention
             builder.SetAttributionText(notice.ServerName)
                 .SetTimeStamp(new DateTimeOffset(DateTime.SpecifyKind(item.Since, DateTimeKind.Utc)));
             if (!toast.Sound) builder.MuteAudio();
-            var notification = builder.BuildNotification();
-            notification.Tag = Tag(key);
-            notification.Group = Group;
-            // Not a banner: straight into the notification centre
-            notification.SuppressDisplay = !toast.Banner;
-            notification.Priority = toast.Banner ? AppNotificationPriority.High : AppNotificationPriority.Default;
+            // The builder refuses a payload over about 5 KB (an ArgumentException), and Windows may refuse to show one: either
+            // costs this toast alone, never the tracker's next item or removal
             try
             {
+                var notification = builder.BuildNotification();
+                notification.Tag = Tag(key);
+                notification.Group = Group;
+                // Not a banner: straight into the notification centre
+                notification.SuppressDisplay = !toast.Banner;
+                notification.Priority = toast.Banner ? AppNotificationPriority.High : AppNotificationPriority.Default;
                 AppNotificationManager.Default.Show(notification);
                 _toasted[key] = 0;
                 _fromBefore.TryRemove(key, out _);
                 logger.LogInformation("Toast {Key}: {Kind}, {How}", key, item.Kind,
                     toast.Banner ? toast.Sound ? "a banner with sound" : "a silent banner" : "silently in the centre");
             }
-            catch (COMException ex)
+            catch (Exception ex)
             {
-                logger.LogWarning("Toast {Key}: Windows did not show it: {Error}", key, ex.Message);
+                logger.LogWarning(ex, "Toast {Key}: not shown", key);
             }
         }
 
